@@ -5,19 +5,13 @@
    ============================================= */
 
 import { ENV } from '../config/env';
+import { getAuthToken, handleUnauthorized } from './auth';
 
 /* BASE_URL: set VITE_API_URL in your .env (see env.txt for reference) */
 const BASE_URL = ENV.API_URL;
 
-/* ── Token storage helpers ── */
-export function getToken()        { return localStorage.getItem('citymo_token'); }
-export function setToken(token)   { localStorage.setItem('citymo_token', token); }
-export function clearToken()      { localStorage.removeItem('citymo_token'); localStorage.removeItem('citymo_user'); }
-export function getStoredUser()   { try { return JSON.parse(localStorage.getItem('citymo_user') || 'null'); } catch { return null; } }
-export function setStoredUser(u)  { localStorage.setItem('citymo_user', JSON.stringify(u)); }
-
 async function apiFetch(path, options = {}) {
-  const token = getToken();
+  const token = await getAuthToken();
   const headers = {
     'Content-Type': 'application/json',
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -25,9 +19,7 @@ async function apiFetch(path, options = {}) {
   };
   const res = await fetch(BASE_URL + path, { ...options, headers });
   if (res.status === 401) {
-    clearToken();
-    // Emit a custom event so App.jsx can redirect to login
-    window.dispatchEvent(new CustomEvent('citymo:unauthorized'));
+    await handleUnauthorized();
   }
   if (!res.ok) {
     let msg = `Erreur ${res.status}`;
@@ -51,16 +43,13 @@ function buildQuery(params = {}) {
   return q ? '?' + q : '';
 }
 
-/* ── Auth ── */
-export async function login(email, password) {
-  const data = await apiFetch('/auth/login', {
+/* ── Auth (Express legacy API — app login uses services/auth.js + Supabase) ── */
+export async function loginApi(email, password) {
+  return apiFetch('/auth/login', {
     method: 'POST',
     body: JSON.stringify({ email, password }),
   });
-  if (data.token) { setToken(data.token); setStoredUser(data.user); }
-  return data;
 }
-export async function logout() { clearToken(); }
 export const getMe            = () => apiFetch('/auth/me');
 export const changePassword   = (current_password, new_password) =>
   apiFetch('/auth/change-password', { method: 'PUT', body: JSON.stringify({ current_password, new_password }) });

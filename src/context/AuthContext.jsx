@@ -1,41 +1,76 @@
 import { createContext, useState, useEffect, useCallback } from 'react';
-import { loginWithCredentials, restoreSession, logout as authLogout } from '../services/auth';
+import {
+  loginWithCredentials,
+  restoreSession,
+  logout as authLogout,
+  clearLegacyAuthStorage,
+  handleUnauthorized,
+} from '../services/auth';
+import { subscribeToAuthChanges } from '../services/supabase/auth';
+import { isSupabaseConfigured } from '../lib/supabase';
+import { logEnvDiagnostics } from '../config/env';
 
-/**
- * AuthContext — CITYMO
- * Provides: { user, loading, login, logout }
- * Ready for Supabase / JWT backend drop-in.
- */
 export const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true); // true while restoring session
+  const [loading, setLoading] = useState(true);
 
-  // Restore session on mount
   useEffect(() => {
-    const restored = restoreSession();
-    setUser(restored || null);
-    setLoading(false);
-  }, []);
+    clearLegacyAuthStorage();
+    logEnvDiagnostics();
 
-  /**
-   * Login: calls auth service, sets user on success.
-   * Returns { success, error }.
-   */
-  const login = useCallback(async (email, password) => {
-    const result = await loginWithCredentials(email, password);
-    if (result.success) {
-      setUser(result.user);
+    if (!isSupabaseConfigured()) {
+      console.error('[CITYMO] Supabase requis — configurez .env puis redémarrez le serveur.');
+      setLoading(false);
+      return;
     }
-    return result;
+
+    let active = true;
+
+    (async () => {
+      try {
+        const restored = await restoreSession();
+        if (active) setUser(restored || null);
+      } catch (err) {
+        console.error('[CITYMO] restoreSession failed', err);
+        if (active) setUser(null);
+      } finally {
+        if (active) setLoading(false);
+      }
+    })();
+
+    const unsubscribe = subscribeToAuthChanges((nextUser) => {
+      if (active) setUser(nextUser);
+    });
+
+    const onUnauthorized = () => {
+      setUser(null);
+    };
+    window.addEventListener('citymo:unauthorized', onUnauthorized);
+
+    return () => {
+      active = false;
+      unsubscribe();
+      window.removeEventListener('citymo:unauthorized', onUnauthorized);
+    };
   }, []);
 
-  /**
-   * Logout: clears session, resets user.
-   */
-  const logout = useCallback(() => {
-    authLogout();
+  const login = useCallback(async (email, password) => {
+    try {
+      const result = await loginWithCredentials(email, password);
+      if (result.success) {
+        setUser(result.user);
+      }
+      return result;
+    } catch (err) {
+      console.error('[CITYMO] login exception', err);
+      return { success: false, error: err.message || 'Erreur de connexion.' };
+    }
+  }, []);
+
+  const logout = useCallback(async () => {
+    await authLogout();
     setUser(null);
   }, []);
 

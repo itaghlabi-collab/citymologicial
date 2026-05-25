@@ -3,25 +3,21 @@ import { useAuth } from './hooks/useAuth';
 import './App.css';
 
 import Dashboard from './components/Dashboard';
-import Organisation from './components/Organisation';
 import RH from './components/RH';
 import Taches from './components/Taches';
 import RendezVous from './components/RendezVous';
 import Departements from './components/Departements';
 import Conges from './components/Conges';
-import Ouvriers from './components/Ouvriers';
 import OuvriersListe from './components/OuvriersListe';
 import Presence from './components/Presence';
 import HeuresSupp from './components/HeuresSupp';
 import PaiementHebdo from './components/PaiementHebdo';
-import CRM from './components/CRM';
 import Clients from './components/crm/Clients';
 import Articles from './components/crm/Articles';
 import Categories from './components/crm/Categories';
 import Devis from './components/crm/Devis';
 import Factures from './components/crm/Factures';
 import BonLivraison from './components/crm/BonLivraison';
-import Marketing from './components/Marketing';
 import Prospects from './components/commercial/Prospects';
 import DevisAttente from './components/commercial/DevisAttente';
 import PlanningCommercial from './components/commercial/PlanningCommercial';
@@ -32,7 +28,6 @@ import PropositionsMarketing from './components/commercial/PropositionsMarketing
 import Projets from './components/Projets';
 import Logistique from './components/Logistique';
 import Achats from './components/Achats';
-import Comptabilite from './components/Comptabilite';
 import Finance from './components/Finance';
 import Inventaire from './components/Inventaire';
 import Documents from './components/Documents';
@@ -53,8 +48,8 @@ import {
   ListFilter, TrendingDown, CreditCard, PiggyBank,
   ClipboardList, ShoppingCart, UserCog, Scale, FileCheck,
   Boxes, Package, ArrowUpDown,
-  UserCog2, ShieldCheck, Database,
-  Bell, Search, Menu, ChevronRight, Settings, X as XIcon
+  ShieldCheck, Database,
+  Bell, Search, Menu, ChevronRight, X as XIcon
 } from 'lucide-react';
 
 /* =============================================
@@ -351,7 +346,7 @@ function LoginPage() {
               <label>Adresse Email</label>
               <input
                 type="email"
-                placeholder="selim.moumni@gmail.com"
+                placeholder="votre@email.com"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
                 autoComplete="email"

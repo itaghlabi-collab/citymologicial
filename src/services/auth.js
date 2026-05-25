@@ -1,119 +1,121 @@
 /**
- * auth.js — CITYMO Auth Service
- * Handles login validation, session persistence, and logout.
- * Architecture is ready for Supabase Auth / JWT / Railway backend replacement.
- *
- * To switch to a real backend:
- *   1. Replace `loginWithCredentials` body with: await supabase.auth.signInWithPassword(...)
- *   2. Replace `restoreSession` with: await supabase.auth.getSession()
- *   3. Replace `logout` with: await supabase.auth.signOut()
+ * auth.js — CITYMO Auth (Supabase Auth uniquement)
  */
+import { getSupabase, isSupabaseConfigured } from '../lib/supabase';
+import { ENV, logEnvDiagnostics } from '../config/env';
+import {
+  mapSupabaseUser,
+  ensureProfile,
+  getSupabaseSessionUser,
+} from './supabase/auth';
 
-const SESSION_KEY = 'citymo_session';
+const LEGACY_KEYS = ['citymo_session', 'citymo_token', 'citymo_user'];
 
-// ── Static credentials (replace with API call for production backend) ──────────
-const AUTHORIZED_USERS = [
-  {
-    email: 'selim.moumni@gmail.com',
-    password: 'Citymo@228',
-    profile: {
-      id: 'usr_001',
-      nom: 'Selim Moumni',
-      email: 'selim.moumni@gmail.com',
-      role: 'Super Admin',
-      initiales: 'SM',
-    },
-  },
-];
+export function clearLegacyAuthStorage() {
+  LEGACY_KEYS.forEach((k) => localStorage.removeItem(k));
+}
 
-/**
- * Attempt login with email + password.
- * Returns { success: true, user } or { success: false, error: string }
- */
+function assertSupabaseConfigured() {
+  if (!isSupabaseConfigured()) {
+    logEnvDiagnostics();
+    throw new Error(
+      'Supabase non configuré. Vérifiez .env (VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY) puis redémarrez npm run dev.',
+    );
+  }
+}
+
+function logSupabaseAuthError(context, error) {
+  console.error(`[CITYMO] Supabase Auth — ${context}`, {
+    message: error?.message,
+    status: error?.status,
+    code: error?.code,
+    name: error?.name,
+    details: error,
+    supabaseUrl: ENV.SUPABASE_URL,
+  });
+}
+
 export async function loginWithCredentials(email, password) {
-  // Simulate async network latency (replace with real fetch when backend is ready)
-  await delay(800);
+  assertSupabaseConfigured();
+  clearLegacyAuthStorage();
 
-  const match = AUTHORIZED_USERS.find(
-    u => u.email.toLowerCase() === email.toLowerCase() && u.password === password
-  );
+  const supabase = getSupabase();
+  const normalizedEmail = email.trim().toLowerCase();
 
-  if (!match) {
-    return { success: false, error: 'Email ou mot de passe incorrect.' };
+  console.info('[CITYMO] signInWithPassword →', {
+    email: normalizedEmail,
+    url: ENV.SUPABASE_URL,
+  });
+
+  const { data, error } = await supabase.auth.signInWithPassword({
+    email: normalizedEmail,
+    password,
+  });
+
+  if (error) {
+    logSupabaseAuthError('signInWithPassword failed', error);
+    return {
+      success: false,
+      error: error.message || 'Email ou mot de passe incorrect.',
+    };
   }
 
-  const token = generateToken(match.profile.id);
-  const session = {
-    token,
-    user: match.profile,
-    loggedAt: new Date().toISOString(),
-    expiresAt: new Date(Date.now() + 8 * 60 * 60 * 1000).toISOString(), // 8h
-  };
+  if (!data?.user || !data?.session) {
+    console.error('[CITYMO] signInWithPassword: session manquante', data);
+    return { success: false, error: 'Réponse Supabase invalide (session manquante).' };
+  }
 
-  persistSession(session);
-  return { success: true, user: match.profile };
+  console.info('[CITYMO] signInWithPassword OK', {
+    userId: data.user.id,
+    email: data.user.email,
+    expiresAt: data.session.expires_at,
+  });
+
+  const profile = await ensureProfile(data.user);
+  const user = mapSupabaseUser(data.user, profile);
+  return { success: true, user };
 }
 
-/**
- * Restore session from storage (call on app mount).
- * Returns user object if valid session exists, null otherwise.
- */
-export function restoreSession() {
-  try {
-    const raw = localStorage.getItem(SESSION_KEY);
-    if (!raw) return null;
-    const session = JSON.parse(raw);
-    if (!session || !session.token || !session.user) return null;
-    // Check expiry
-    if (session.expiresAt && new Date(session.expiresAt) < new Date()) {
-      clearSession();
-      return null;
-    }
-    return session.user;
-  } catch (_) {
-    clearSession();
+export async function restoreSession() {
+  if (!isSupabaseConfigured()) {
+    logEnvDiagnostics();
+    clearLegacyAuthStorage();
     return null;
   }
+
+  clearLegacyAuthStorage();
+  return getSupabaseSessionUser();
 }
 
-/**
- * Logout: clear session from storage.
- */
-export function logout() {
-  clearSession();
+export async function logout() {
+  clearLegacyAuthStorage();
+  if (!isSupabaseConfigured()) return;
+
+  const { error } = await getSupabase().auth.signOut();
+  if (error) logSupabaseAuthError('signOut failed', error);
 }
 
-/**
- * Get current auth token (for API requests).
- */
-export function getAuthToken() {
-  try {
-    const raw = localStorage.getItem(SESSION_KEY);
-    if (!raw) return null;
-    const session = JSON.parse(raw);
-    return session?.token || null;
-  } catch (_) {
+/** JWT access_token (Supabase) pour Authorization header */
+export async function getAuthToken() {
+  if (!isSupabaseConfigured()) return null;
+
+  const { data: { session }, error } = await getSupabase().auth.getSession();
+  if (error) {
+    logSupabaseAuthError('getSession failed', error);
     return null;
   }
+  return session?.access_token || null;
 }
 
-// ── Private helpers ──────────────────────────────────────────────────────────
-
-function persistSession(session) {
-  localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+export async function getCurrentSession() {
+  if (!isSupabaseConfigured()) return null;
+  const { data: { session }, error } = await getSupabase().auth.getSession();
+  if (error) return null;
+  return session;
 }
 
-function clearSession() {
-  localStorage.removeItem(SESSION_KEY);
-}
-
-function generateToken(userId) {
-  // Lightweight pseudo-token (replace with real JWT from backend)
-  const rand = Math.random().toString(36).slice(2);
-  const ts = Date.now().toString(36);
-  return `citymo_${userId}_${ts}_${rand}`;
-}
-
-function delay(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+/** Appelé quand l'API Express renvoie 401 */
+export async function handleUnauthorized() {
+  await logout();
+  window.dispatchEvent(new CustomEvent('citymo:unauthorized'));
 }

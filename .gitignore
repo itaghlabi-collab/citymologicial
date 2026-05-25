@@ -1,0 +1,30 @@
+# Dependencies
+node_modules/
+server/node_modules/
+
+# Environment & secrets
+.env
+.env.local
+.env.*.local
+
+# Build
+dist/
+dist-ssr/
+
+# Database (local API)
+server/*.db
+server/data/
+
+# Editor / OS
+.DS_Store
+*.swp
+*.swo
+*.swn
+*~
+
+# Logs
+*.log
+npm-debug.log*
+
+# Vite
+.vite/

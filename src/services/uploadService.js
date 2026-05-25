@@ -86,7 +86,7 @@ export async function uploadFile(file, options = {}) {
     formData.append('file', file);
     formData.append('folder', folder);
 
-    const token = getAuthToken();
+    const token = await getAuthToken();
     const res = await fetch(`${ENV.API_URL}/upload`, {
       method: 'POST',
       headers: token ? { Authorization: `Bearer ${token}` } : {},

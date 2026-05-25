@@ -1854,6 +1854,121 @@ tbody tr:last-child td { border-bottom: none; }
 }
 
 /* =============================================
+   RH — Modal employé (design Codia original)
+   ============================================= */
+
+.rh-emp-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.rh-emp-modal-box {
+  background: #fff;
+  border-radius: 14px;
+  padding: 32px;
+  width: 100%;
+  max-width: 540px;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.2);
+  max-height: 90vh;
+  overflow-y: auto;
+}
+
+.rh-emp-modal-header {
+  margin-bottom: 20px;
+}
+
+.rh-emp-modal-title {
+  font-family: var(--font-head);
+  font-weight: 800;
+  font-size: 1.3rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin: 0;
+}
+
+.rh-emp-modal-close {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--text-3);
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.rh-emp-modal-form {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.rh-emp-modal-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.rh-emp-modal-box .form-group label {
+  font-size: 0.7rem;
+  font-weight: 800;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.rh-emp-field-error {
+  color: var(--red);
+  font-size: 0.75rem;
+  margin-top: 2px;
+}
+
+.rh-emp-modal-footer {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.rh-emp-spinner {
+  display: inline-block;
+  width: 16px;
+  height: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  border-top-color: #fff;
+  border-radius: 50%;
+  animation: spin 0.8s linear infinite;
+}
+
+.rh-emp-field-date::-webkit-calendar-picker-indicator {
+  cursor: pointer;
+  opacity: 0.7;
+}
+
+@media (max-width: 520px) {
+  .rh-emp-modal-row {
+    grid-template-columns: 1fr;
+  }
+
+  .rh-emp-modal-box {
+    padding: 24px 20px;
+    border-radius: 14px 14px 0 0;
+    max-height: 92vh;
+  }
+
+  .rh-emp-modal-overlay {
+    align-items: flex-end;
+    padding: 0;
+  }
+}
+
+/* =============================================
    CIN SCANNER — Mon eID–style professional scan
    ============================================= */
 
