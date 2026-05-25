@@ -1,7 +1,6 @@
 import { createContext, useState, useEffect, useCallback } from 'react';
 import {
   loginWithCredentials,
-  restoreSession,
   logout as authLogout,
   clearLegacyAuthStorage,
   handleUnauthorized,
@@ -11,6 +10,11 @@ import { isSupabaseConfigured } from '../lib/supabase';
 import { logEnvDiagnostics } from '../config/env';
 
 export const AuthContext = createContext(null);
+
+function finishLoading(setLoading) {
+  setLoading(false);
+  console.info('[CITYMO] auth loading false');
+}
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
@@ -22,27 +26,21 @@ export function AuthProvider({ children }) {
 
     if (!isSupabaseConfigured()) {
       console.error('[CITYMO] Supabase requis — configurez .env puis redémarrez le serveur.');
-      setLoading(false);
+      finishLoading(setLoading);
       return;
     }
 
     let active = true;
 
-    (async () => {
-      try {
-        const restored = await restoreSession();
-        if (active) setUser(restored || null);
-      } catch (err) {
-        console.error('[CITYMO] restoreSession failed', err);
-        if (active) setUser(null);
-      } finally {
-        if (active) setLoading(false);
-      }
-    })();
-
     const unsubscribe = subscribeToAuthChanges((nextUser) => {
-      if (active) setUser(nextUser);
+      if (!active) return;
+      setUser(nextUser);
+      finishLoading(setLoading);
     });
+
+    const safetyTimer = setTimeout(() => {
+      if (active) finishLoading(setLoading);
+    }, 8000);
 
     const onUnauthorized = () => {
       setUser(null);
@@ -51,6 +49,7 @@ export function AuthProvider({ children }) {
 
     return () => {
       active = false;
+      clearTimeout(safetyTimer);
       unsubscribe();
       window.removeEventListener('citymo:unauthorized', onUnauthorized);
     };
@@ -61,10 +60,12 @@ export function AuthProvider({ children }) {
       const result = await loginWithCredentials(email, password);
       if (result.success) {
         setUser(result.user);
+        finishLoading(setLoading);
       }
       return result;
     } catch (err) {
       console.error('[CITYMO] login exception', err);
+      finishLoading(setLoading);
       return { success: false, error: err.message || 'Erreur de connexion.' };
     }
   }, []);

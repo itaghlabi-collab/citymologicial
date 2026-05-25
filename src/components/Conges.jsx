@@ -1,6 +1,7 @@
-import { CalendarOff, Plus, CheckCircle, XCircle, Clock, X, Upload, User } from 'lucide-react';
-import { useState, useEffect, useRef } from 'react';
-import { getEmployees, getLeaveRequests } from '../services/api';
+import { CalendarOff, Plus, CheckCircle, XCircle, Clock, X, Upload, User, Edit2, Trash2 } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { useLeaves } from '../hooks/useLeaves';
+import { employeeFullName } from '../services/rh/leaves';
 
 const CONGE_TYPES = [
   'Conge annuel',
@@ -15,18 +16,12 @@ const STATUS_BADGE = {
   'En attente': 'badge-orange',
   'Approuve': 'badge-green',
   'Refuse': 'badge-red',
-  'pending': 'badge-orange',
-  'approved': 'badge-green',
-  'rejected': 'badge-red',
 };
 
 const STATUS_LABEL = {
   'En attente': 'En attente',
   'Approuve': 'Approuve',
   'Refuse': 'Refuse',
-  'pending': 'En attente',
-  'approved': 'Approuve',
-  'rejected': 'Refuse',
 };
 
 const INPUT_S = (err) => ({
@@ -51,16 +46,28 @@ function Toast({ toast }) {
   );
 }
 
+function parseLocalDate(dateStr) {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  return new Date(y, m - 1, d);
+}
+
+function formatLocalDate(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 /** Count working days between two date strings (excluding Sundays only) */
 function countWorkingDays(startStr, endStr) {
   if (!startStr || !endStr) return 0;
-  const start = new Date(startStr);
-  const end = new Date(endStr);
+  const start = parseLocalDate(startStr);
+  const end = parseLocalDate(endStr);
   if (isNaN(start) || isNaN(end) || end < start) return 0;
   let count = 0;
   const cur = new Date(start);
   while (cur <= end) {
-    if (cur.getDay() !== 0) count++; // exclude Sunday (0)
+    if (cur.getDay() !== 0) count++;
     cur.setDate(cur.getDate() + 1);
   }
   return count;
@@ -69,15 +76,15 @@ function countWorkingDays(startStr, endStr) {
 /** Return the next working day after a date string */
 function nextWorkingDay(dateStr) {
   if (!dateStr) return '';
-  const d = new Date(dateStr);
+  const d = parseLocalDate(dateStr);
   if (isNaN(d)) return '';
   d.setDate(d.getDate() + 1);
   while (d.getDay() === 0) d.setDate(d.getDate() + 1);
-  return d.toISOString().slice(0, 10);
+  return formatLocalDate(d);
 }
 
 const EMPTY_FORM = {
-  employe: '',
+  employee_id: '',
   type: 'Conge annuel',
   dateDebut: '',
   dateFin: '',
@@ -86,20 +93,38 @@ const EMPTY_FORM = {
 };
 
 export default function Conges() {
-  const [employees, setEmployees] = useState([]);
-  const [requests, setRequests] = useState([]);
+  const {
+    employees,
+    myEmployee,
+    filtered,
+    counts,
+    loading,
+    saving,
+    error,
+    configured,
+    filter,
+    setFilter,
+    load,
+    create,
+    update,
+    remove,
+    approve,
+    refuse,
+    leaves,
+    permissions,
+  } = useLeaves();
+
+  const { superAdmin, canApproveRefuse, canEdit, canDelete } = permissions;
+
   const [showModal, setShowModal] = useState(false);
+  const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
+  const [existingFichierUrl, setExistingFichierUrl] = useState(null);
   const [errors, setErrors] = useState({});
+  const [formError, setFormError] = useState(null);
   const [toast, setToast] = useState(null);
-  const [filter, setFilter] = useState('all');
   const toastRef = useRef(null);
   const fileRef = useRef(null);
-
-  useEffect(() => {
-    getEmployees().then(emps => setEmployees(emps));
-    getLeaveRequests().then(reqs => setRequests(reqs));
-  }, []);
 
   function showToast(type, msg) {
     setToast({ type, msg });
@@ -110,82 +135,130 @@ export default function Conges() {
   function setF(k, v) { setForm(p => ({ ...p, [k]: v })); }
 
   function openModal() {
-    setForm(EMPTY_FORM);
+    setEditingId(null);
+    setForm({
+      ...EMPTY_FORM,
+      employee_id: superAdmin ? '' : (myEmployee?.id || ''),
+    });
+    setExistingFichierUrl(null);
     setErrors({});
+    setFormError(null);
+    setShowModal(true);
+  }
+
+  function openEdit(r) {
+    if (!canEdit(r)) return;
+    setEditingId(r.id);
+    setForm({
+      employee_id: r.employee_id || '',
+      type: r.type || 'Conge annuel',
+      dateDebut: r.date_debut || r.dateDebut || '',
+      dateFin: r.date_fin || r.dateFin || '',
+      raison: r.raison || '',
+      fichier: null,
+    });
+    setExistingFichierUrl(r.fichier_url || null);
+    setErrors({});
+    setFormError(null);
     setShowModal(true);
   }
 
   function closeModal() {
     setShowModal(false);
+    setEditingId(null);
+    setExistingFichierUrl(null);
+    setFormError(null);
+  }
+
+  function resolveSubmitForm() {
+    if (superAdmin) return form;
+    return { ...form, employee_id: myEmployee?.id || form.employee_id };
   }
 
   function validate() {
+    const submitForm = resolveSubmitForm();
     const e = {};
-    if (!form.employe) e.employe = 'Requis';
-    if (!form.dateDebut) e.dateDebut = 'Requis';
-    if (!form.dateFin) e.dateFin = 'Requis';
-    if (form.dateFin && form.dateDebut && form.dateFin < form.dateDebut) e.dateFin = 'Date fin avant debut';
+    if (superAdmin && !submitForm.employee_id) e.employee_id = 'Requis';
+    if (!superAdmin && !myEmployee) {
+      e.employee_id = 'Profil employe introuvable — contactez les RH';
+    }
+    if (!submitForm.dateDebut) e.dateDebut = 'Requis';
+    if (!submitForm.dateFin) e.dateFin = 'Requis';
+    if (submitForm.dateFin && submitForm.dateDebut && submitForm.dateFin < submitForm.dateDebut) {
+      e.dateFin = 'Date fin avant debut';
+    }
     return e;
   }
 
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     e.preventDefault();
+    setFormError(null);
+
     const errs = validate();
-    if (Object.keys(errs).length) { setErrors(errs); return; }
-    const jours = countWorkingDays(form.dateDebut, form.dateFin);
-    const retour = nextWorkingDay(form.dateFin);
-    const newReq = {
-      id: Date.now(),
-      employe: form.employe,
-      employee: form.employe,
-      type: form.type,
-      dateDebut: form.dateDebut,
-      dateFin: form.dateFin,
-      dateRetour: retour,
-      jours,
-      raison: form.raison,
-      fichier: form.fichier ? form.fichier.name : null,
-      statut: 'En attente',
-      status: 'pending',
-    };
-    setRequests(prev => [newReq, ...prev]);
-    showToast('success', 'Demande de conge soumise avec succes !');
-    closeModal();
+    if (Object.keys(errs).length) {
+      setErrors(errs);
+      showToast('error', 'Veuillez corriger les champs obligatoires.');
+      return;
+    }
+
+    const submitForm = resolveSubmitForm();
+    const jours = countWorkingDays(submitForm.dateDebut, submitForm.dateFin);
+    const dateRetour = nextWorkingDay(submitForm.dateFin);
+    const fichierUrl = submitForm.fichier
+      ? submitForm.fichier.name
+      : (editingId ? existingFichierUrl : null);
+
+    const payload = { jours, dateRetour, fichierUrl };
+
+    let result;
+    try {
+      if (editingId) {
+        const row = leaves.find((l) => l.id === editingId);
+        result = await update(editingId, submitForm, {
+          ...payload,
+          statut: row?.statut || 'En attente',
+        });
+      } else {
+        result = await create(submitForm, payload);
+      }
+    } catch (err) {
+      console.error('[CITYMO] Conges handleSubmit', err);
+      const msg = err?.message || 'Erreur inattendue.';
+      setFormError(msg);
+      showToast('error', msg);
+      return;
+    }
+
+    if (result?.success) {
+      showToast('success', editingId ? 'Demande modifiee avec succes.' : 'Demande de conge soumise avec succes !');
+      closeModal();
+    } else {
+      const msg = result?.error || 'Erreur enregistrement.';
+      setFormError(msg);
+      showToast('error', msg);
+      console.error('[CITYMO] Conges save failed', msg);
+    }
   }
 
-  function approuve(id) {
-    setRequests(prev => prev.map(r => r.id === id ? { ...r, statut: 'Approuve', status: 'approved' } : r));
-    showToast('success', 'Demande approuvee.');
+  async function handleApprove(id) {
+    const result = await approve(id);
+    showToast(result.success ? 'success' : 'error', result.success ? 'Demande approuvee.' : (result.error || 'Erreur.'));
   }
 
-  function refuse(id) {
-    setRequests(prev => prev.map(r => r.id === id ? { ...r, statut: 'Refuse', status: 'rejected' } : r));
-    showToast('error', 'Demande refusee.');
+  async function handleRefuse(id) {
+    const result = await refuse(id);
+    showToast(result.success ? 'error' : 'error', result.success ? 'Demande refusee.' : (result.error || 'Erreur.'));
+  }
+
+  async function handleDelete(id) {
+    if (!window.confirm('Supprimer cette demande de conge ?')) return;
+    const result = await remove(id);
+    showToast(result.success ? 'success' : 'error', result.success ? 'Demande supprimee.' : (result.error || 'Erreur.'));
   }
 
   const jours = countWorkingDays(form.dateDebut, form.dateFin);
   const dateRetour = nextWorkingDay(form.dateFin);
-
-  const allRequests = requests.map(r => ({
-    ...r,
-    _statut: r.statut || r.status || 'En attente',
-  }));
-
-  const filtered = filter === 'all'
-    ? allRequests
-    : allRequests.filter(r => {
-        if (filter === 'pending') return r._statut === 'En attente' || r._statut === 'pending';
-        if (filter === 'approved') return r._statut === 'Approuve' || r._statut === 'approved';
-        if (filter === 'rejected') return r._statut === 'Refuse' || r._statut === 'rejected';
-        return true;
-      });
-
-  const counts = {
-    all: allRequests.length,
-    pending: allRequests.filter(r => r._statut === 'En attente' || r._statut === 'pending').length,
-    approved: allRequests.filter(r => r._statut === 'Approuve' || r._statut === 'approved').length,
-    rejected: allRequests.filter(r => r._statut === 'Refuse' || r._statut === 'rejected').length,
-  };
+  const canOpenModal = configured && (superAdmin || myEmployee);
 
   return (
     <div className="animate-fade-in">
@@ -196,10 +269,45 @@ export default function Conges() {
           <h1 className="page-title">Demandes de conge</h1>
           <p className="page-subtitle">Gestion des absences et conges du personnel</p>
         </div>
-        <button className="btn btn-primary" onClick={openModal}>
+        <button className="btn btn-primary" onClick={openModal} disabled={!canOpenModal || saving}>
           <Plus size={15} /> Nouvelle demande
         </button>
       </div>
+
+      {!configured && (
+        <div style={{ background: '#FFF3E0', border: '1px solid #FFB74D', borderRadius: 'var(--radius)', padding: '10px 16px', marginBottom: 16, fontSize: '0.85rem', color: '#E65100' }}>
+          Supabase non configuré — ajoutez VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY dans .env
+        </div>
+      )}
+
+      {configured && !superAdmin && !myEmployee && !loading && (
+        <div style={{ background: '#FFF3E0', border: '1px solid #FFB74D', borderRadius: 'var(--radius)', padding: '10px 16px', marginBottom: 16, fontSize: '0.85rem', color: '#E65100' }}>
+          Aucun employe RH lie a votre email. Contactez les RH pour creer une demande.
+        </div>
+      )}
+
+      {error && !loading && (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 12,
+            background: '#FFEBEE',
+            border: '1px solid #EF9A9A',
+            borderRadius: 'var(--radius)',
+            padding: '10px 16px',
+            marginBottom: 16,
+            fontSize: '0.85rem',
+            color: '#C62828',
+          }}
+        >
+          <span>{error}</span>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={load}>
+            Réessayer
+          </button>
+        </div>
+      )}
 
       {/* Stats */}
       <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', marginBottom: 16 }}>
@@ -217,7 +325,7 @@ export default function Conges() {
           >
             <div className={"stat-icon " + color}><Icon size={18} /></div>
             <div className="stat-body">
-              <div className="stat-value" style={{ color: filter === key ? 'var(--red)' : 'var(--text)' }}>{counts[key]}</div>
+              <div className="stat-value" style={{ color: filter === key ? 'var(--red)' : 'var(--text)' }}>{loading ? '—' : counts[key]}</div>
               <div className="stat-label">{label}</div>
             </div>
           </div>
@@ -230,9 +338,13 @@ export default function Conges() {
           <CalendarOff size={16} /> {filter === 'all' ? 'Toutes les demandes' : filter === 'pending' ? 'En attente' : filter === 'approved' ? 'Approuvees' : 'Refusees'}
         </div>
 
-        {filtered.length === 0 ? (
+        {loading ? (
           <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-3)' }}>
-            {allRequests.length === 0 ? 'Aucune demande de conge. Soumettez la premiere.' : 'Aucune demande dans cette categorie.'}
+            Chargement...
+          </div>
+        ) : filtered.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-3)' }}>
+            {leaves.length === 0 ? 'Aucune demande de conge. Soumettez la premiere.' : 'Aucune demande dans cette categorie.'}
           </div>
         ) : (
           <div className="table-wrap">
@@ -255,7 +367,9 @@ export default function Conges() {
                 {filtered.map((r, i) => {
                   const statLabel = STATUS_LABEL[r._statut] || r._statut;
                   const statBadge = STATUS_BADGE[r._statut] || 'badge-grey';
-                  const isPending = r._statut === 'En attente' || r._statut === 'pending';
+                  const isPending = r._statut === 'En attente';
+                  const showEdit = canEdit(r);
+                  const showDelete = canDelete(r);
                   return (
                     <tr key={r.id || i}>
                       <td style={{ fontWeight: 600 }}>
@@ -263,12 +377,12 @@ export default function Conges() {
                           <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--red-light)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                             <User size={13} style={{ color: 'var(--red)' }} />
                           </div>
-                          {r.employe || r.employee || '-'}
+                          {r.employe || '-'}
                         </div>
                       </td>
                       <td><span className="badge badge-blue" style={{ fontSize: '0.72rem' }}>{r.type || '-'}</span></td>
-                      <td style={{ whiteSpace: 'nowrap' }}>{r.dateDebut || r.du || '-'}</td>
-                      <td style={{ whiteSpace: 'nowrap' }}>{r.dateFin || r.au || '-'}</td>
+                      <td style={{ whiteSpace: 'nowrap' }}>{r.dateDebut || '-'}</td>
+                      <td style={{ whiteSpace: 'nowrap' }}>{r.dateFin || '-'}</td>
                       <td style={{ whiteSpace: 'nowrap', color: 'var(--text-2)' }}>{r.dateRetour || '-'}</td>
                       <td>
                         <span style={{ fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--red)' }}>
@@ -286,24 +400,52 @@ export default function Conges() {
                       </td>
                       <td><span className={"badge " + statBadge}>{statLabel}</span></td>
                       <td>
-                        {isPending && (
-                          <div style={{ display: 'flex', gap: 4 }}>
+                        <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+                          {isPending && canApproveRefuse && (
+                            <>
+                              <button
+                                type="button"
+                                className="btn btn-sm"
+                                style={{ background: '#E8F5E9', color: '#2E7D32', border: 'none', cursor: 'pointer', borderRadius: 6, padding: '4px 10px', fontSize: '0.78rem', fontWeight: 600 }}
+                                onClick={() => handleApprove(r.id)}
+                                disabled={saving}
+                              >
+                                Approuver
+                              </button>
+                              <button
+                                type="button"
+                                className="btn btn-sm"
+                                style={{ background: '#FFEBEE', color: 'var(--red)', border: 'none', cursor: 'pointer', borderRadius: 6, padding: '4px 10px', fontSize: '0.78rem', fontWeight: 600 }}
+                                onClick={() => handleRefuse(r.id)}
+                                disabled={saving}
+                              >
+                                Refuser
+                              </button>
+                            </>
+                          )}
+                          {showEdit && (
                             <button
-                              className="btn btn-sm"
-                              style={{ background: '#E8F5E9', color: '#2E7D32', border: 'none', cursor: 'pointer', borderRadius: 6, padding: '4px 10px', fontSize: '0.78rem', fontWeight: 600 }}
-                              onClick={() => approuve(r.id)}
+                              type="button"
+                              title="Modifier"
+                              onClick={() => openEdit(r)}
+                              disabled={saving}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: 4 }}
                             >
-                              Approuver
+                              <Edit2 size={15} />
                             </button>
+                          )}
+                          {showDelete && (
                             <button
-                              className="btn btn-sm"
-                              style={{ background: '#FFEBEE', color: 'var(--red)', border: 'none', cursor: 'pointer', borderRadius: 6, padding: '4px 10px', fontSize: '0.78rem', fontWeight: 600 }}
-                              onClick={() => refuse(r.id)}
+                              type="button"
+                              title="Supprimer"
+                              onClick={() => handleDelete(r.id)}
+                              disabled={saving}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', padding: 4 }}
                             >
-                              Refuser
+                              <Trash2 size={15} />
                             </button>
-                          </div>
-                        )}
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -320,28 +462,39 @@ export default function Conges() {
           <div style={{ background: '#fff', borderRadius: 14, padding: 32, width: '100%', maxWidth: 540, boxShadow: '0 8px 40px rgba(0,0,0,0.2)', maxHeight: '90vh', overflowY: 'auto' }}>
             <div className="flex-between" style={{ marginBottom: 20 }}>
               <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.2rem', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
-                Nouvelle demande de conge
+                {editingId ? 'Modifier demande de conge' : 'Nouvelle demande de conge'}
               </h2>
-              <button onClick={closeModal} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)' }}>
+              <button type="button" onClick={closeModal} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)' }}>
                 <X size={20} />
               </button>
             </div>
+
+            {formError && (
+              <div style={{ background: '#FFEBEE', border: '1px solid #EF9A9A', borderRadius: 8, padding: '10px 14px', marginBottom: 14, fontSize: '0.85rem', color: '#C62828' }}>
+                {formError}
+              </div>
+            )}
 
             <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               {/* Employe */}
               <div className="form-group">
                 <label>Employe</label>
-                <select value={form.employe} onChange={e => setF('employe', e.target.value)} style={INPUT_S(errors.employe)}>
-                  <option value="">Selectionner un employe...</option>
-                  {employees.length > 0
-                    ? employees.map((emp, i) => {
-                        const name = [emp.prenom, emp.nom].filter(Boolean).join(' ') || emp.nom || emp.name || '';
-                        return <option key={i} value={name}>{name}</option>;
-                      })
-                    : null
-                  }
-                </select>
-                {errors.employe && <div style={{ color: 'var(--red)', fontSize: '0.75rem', marginTop: 2 }}>{errors.employe}</div>}
+                {superAdmin ? (
+                  <select value={form.employee_id} onChange={e => setF('employee_id', e.target.value)} style={INPUT_S(errors.employee_id)}>
+                    <option value="">Selectionner un employe...</option>
+                    {employees.map((emp) => (
+                      <option key={emp.id} value={emp.id}>{employeeFullName(emp)}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <input
+                    type="text"
+                    readOnly
+                    value={myEmployee ? employeeFullName(myEmployee) : '—'}
+                    style={{ ...INPUT_S(errors.employee_id), background: '#F3F4F6', color: 'var(--text-2)' }}
+                  />
+                )}
+                {errors.employee_id && <div style={{ color: 'var(--red)', fontSize: '0.75rem', marginTop: 2 }}>{errors.employee_id}</div>}
               </div>
 
               {/* Type de conge */}
@@ -413,7 +566,9 @@ export default function Conges() {
                   <Upload size={16} style={{ color: 'var(--red)', flexShrink: 0 }} />
                   {form.fichier
                     ? <span style={{ color: 'var(--text)', fontWeight: 600 }}>{form.fichier.name}</span>
-                    : <span>Cliquer pour joindre un fichier...</span>
+                    : existingFichierUrl
+                      ? <span style={{ color: 'var(--text)', fontWeight: 600 }}>{existingFichierUrl}</span>
+                      : <span>Cliquer pour joindre un fichier...</span>
                   }
                 </div>
                 <input
@@ -426,9 +581,9 @@ export default function Conges() {
               </div>
 
               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 6 }}>
-                <button type="button" className="btn btn-secondary" onClick={closeModal}>Annuler</button>
-                <button type="submit" className="btn btn-primary">
-                  <Plus size={14} /> Soumettre la demande
+                <button type="button" className="btn btn-secondary" onClick={closeModal} disabled={saving}>Annuler</button>
+                <button type="submit" className="btn btn-primary" disabled={saving}>
+                  <Plus size={14} /> {saving ? 'Enregistrement...' : editingId ? 'Enregistrer' : 'Soumettre la demande'}
                 </button>
               </div>
             </form>

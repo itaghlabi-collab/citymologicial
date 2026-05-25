@@ -71,8 +71,15 @@ export async function loginWithCredentials(email, password) {
     expiresAt: data.session.expires_at,
   });
 
-  const profile = await ensureProfile(data.user);
-  const user = mapSupabaseUser(data.user, profile);
+  const user = mapSupabaseUser(data.user, null);
+  console.info('[CITYMO] fallback profile', data.user.email);
+
+  ensureProfile(data.user).then((profile) => {
+    if (profile) console.info('[CITYMO] profile loaded', profile.email);
+  }).catch(() => {
+    console.info('[CITYMO] fallback profile', data.user.email);
+  });
+
   return { success: true, user };
 }
 

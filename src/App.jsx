@@ -495,8 +495,19 @@ export default function App() {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  // While restoring session from localStorage, show nothing (avoids flash)
-  if (loading) return null;
+  // While restoring session — même fond login Codia (spinner visible)
+  if (loading) {
+    return (
+      <div className="login-page">
+        <div className="login-bg-photo" />
+        <div className="login-bg-overlay" />
+        <div className="login-bg-grid" />
+        <div className="login-center">
+          <span className="login-spinner" />
+        </div>
+      </div>
+    );
+  }
 
   // Not authenticated → show login screen
   if (!user) {
