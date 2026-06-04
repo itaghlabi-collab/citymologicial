@@ -2906,6 +2906,333 @@ tbody tr:last-child td { border-bottom: none; }
   border-bottom-color: var(--red);
 }
 
+/* =============================================
+   CRM MODULE — Responsive (breakpoint 1024px)
+   Desktop : tableau seul | Mobile : cartes seules
+   ============================================= */
+
+.crm-table-desktop,
+.crm-table-desktop.crm-table-scroll {
+  display: block;
+  max-width: 100%;
+}
+
+.crm-mobile-only {
+  display: none !important;
+}
+
+/* Barre de filtres */
+.crm-filter-bar.card {
+  padding: 12px 16px;
+  overflow: hidden;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.crm-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 12px;
+  width: 100%;
+  min-width: 0;
+}
+
+.crm-filter-search {
+  flex: 1 1 100%;
+  min-width: 0;
+  position: relative;
+}
+
+.crm-filter-search-icon {
+  position: absolute;
+  left: 11px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-3);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.crm-filter-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 9px 12px 9px 34px;
+  border: 1.5px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.875rem;
+  font-family: var(--font-body);
+  background: #fff;
+  color: var(--text);
+  min-height: 40px;
+}
+
+.crm-filter-input:focus {
+  outline: none;
+  border-color: var(--red);
+}
+
+.crm-filter-select {
+  flex: 1 1 auto;
+  min-width: 120px;
+  max-width: 100%;
+  padding: 9px 10px;
+  border: 1.5px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.84rem;
+  font-family: var(--font-body);
+  background: #fff;
+  color: var(--text);
+  min-height: 40px;
+  box-sizing: border-box;
+}
+
+.crm-filter-select--sm {
+  min-width: 130px;
+  flex: 0 1 150px;
+}
+
+.crm-filter-select--md {
+  min-width: 160px;
+  flex: 0 1 180px;
+}
+
+.crm-filter-count {
+  flex: 0 0 auto;
+  margin-left: auto;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-3);
+  white-space: nowrap;
+  padding-left: 8px;
+}
+
+/* Listes mobiles CRM */
+.crm-compact-list,
+.crm-doc-list,
+.crm-client-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  max-width: 100%;
+  box-sizing: border-box;
+}
+
+.crm-compact-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 12px 14px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.crm-compact-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.crm-compact-title {
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: var(--text);
+  margin-bottom: 4px;
+  word-break: break-word;
+}
+
+.crm-compact-meta {
+  font-size: 0.8rem;
+  color: var(--text-3);
+  line-height: 1.4;
+}
+
+.crm-compact-actions,
+.crm-doc-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
+.crm-doc-card {
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
+
+.crm-doc-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.crm-doc-ref {
+  font-family: var(--font-head);
+  font-weight: 800;
+  font-size: 0.82rem;
+  color: var(--red);
+}
+
+.crm-doc-title {
+  font-weight: 700;
+  font-size: 0.92rem;
+  margin-bottom: 6px;
+  word-break: break-word;
+}
+
+.crm-doc-meta {
+  font-size: 0.78rem;
+  color: var(--text-3);
+  line-height: 1.45;
+  margin-bottom: 10px;
+}
+
+.crm-doc-footer {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.crm-doc-amount {
+  display: block;
+  font-family: var(--font-head);
+  font-weight: 800;
+  font-size: 1rem;
+  color: var(--text);
+}
+
+.crm-doc-amount-sub {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--text-3);
+  margin-top: 2px;
+}
+
+.crm-icon-btn {
+  min-width: 36px;
+  min-height: 36px;
+  padding: 6px 8px !important;
+}
+
+.crm-table-desktop .table-wrap {
+  overflow-x: auto;
+  max-width: 100%;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Desktop ≥ 1024px : 5+ KPI sur une ligne, filtres sur une ligne */
+@media (min-width: 1024px) {
+  .crm-filter-row {
+    flex-wrap: nowrap;
+  }
+
+  .crm-filter-search {
+    flex: 1 1 auto;
+    min-width: 220px;
+    max-width: none;
+  }
+
+  .crm-filter-select,
+  .crm-filter-select--sm,
+  .crm-filter-select--md {
+    flex: 0 0 auto;
+    width: auto;
+    max-width: 200px;
+  }
+
+  .crm-filter-count {
+    margin-left: auto;
+    flex-shrink: 0;
+  }
+
+  .page-content .stat-grid,
+  .page-content .stats-grid {
+    grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
+  }
+
+  /* Factures / BL : 6 KPI — une ligne si largeur suffisante */
+  .page-content .stats-grid:has(.stat-card:nth-child(6)) {
+    grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
+  }
+
+  /* Ne pas transformer le tableau CRM en cartes (règle globale 768px) */
+  .crm-table-desktop .table-wrap table,
+  .crm-table-desktop .table-wrap thead,
+  .crm-table-desktop .table-wrap tbody tr,
+  .crm-table-desktop .table-wrap tbody td {
+    display: revert;
+  }
+}
+
+/* Tablette < 1024px : cartes seules, KPI 2–3 colonnes */
+@media (max-width: 1023px) {
+  .crm-table-desktop,
+  .crm-table-desktop.crm-table-scroll {
+    display: none !important;
+  }
+
+  .crm-mobile-only {
+    display: block !important;
+  }
+
+  .crm-compact-list.crm-mobile-only,
+  .crm-doc-list.crm-mobile-only,
+  .crm-client-list.crm-mobile-only {
+    display: flex !important;
+    flex-direction: column;
+  }
+
+  .page-content .stat-grid,
+  .page-content .stats-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+
+  .crm-filter-count {
+    margin-left: 0;
+    width: 100%;
+    text-align: right;
+    padding-top: 4px;
+  }
+}
+
+@media (max-width: 768px) {
+  .page-content .stat-grid,
+  .page-content .stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+  }
+
+  .crm-filter-select,
+  .crm-filter-select--sm,
+  .crm-filter-select--md {
+    flex: 1 1 calc(50% - 6px);
+    min-width: 0;
+  }
+}
+
+@media (max-width: 480px) {
+  .page-content .stat-grid,
+  .page-content .stats-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .crm-filter-select,
+  .crm-filter-select--sm,
+  .crm-filter-select--md {
+    flex: 1 1 100%;
+  }
+}
+
 .log-desktop-table { display: block; }
 .log-mobile-list { display: none; }
 

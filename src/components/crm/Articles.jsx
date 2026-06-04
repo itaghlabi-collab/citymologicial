@@ -502,7 +502,7 @@ export default function Articles() {
       )}
 
       {/* KPI */}
-      <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(165px, 1fr))', marginBottom: 20 }}>
+      <div className="stat-grid" style={{ marginBottom: 20 }}>
         <div className="stat-card">
           <div className="stat-icon" style={{ background: '#FFF3E0', color: '#E65100' }}><Package size={18} /></div>
           <div className="stat-body">

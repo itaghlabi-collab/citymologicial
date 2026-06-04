@@ -182,7 +182,7 @@ function ClientDetail({ client, initialTab = 'overview', onBack, onEdit, onDevis
       </div>
 
       {/* KPI cards */}
-      <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', marginBottom: 20 }}>
+      <div className="stat-grid" style={{ marginBottom: 20 }}>
         <div className="stat-card">
           <div className="stat-icon purple"><FileText size={18} /></div>
           <div className="stat-body"><div className="stat-value">{devis.length}</div><div className="stat-label">Total devis</div></div>
@@ -745,7 +745,7 @@ export default function Clients() {
       {!loading && (
       <>
       {/* KPI */}
-      <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', marginBottom: 20 }}>
+      <div className="stat-grid" style={{ marginBottom: 20 }}>
         <div className="stat-card">
           <div className="stat-icon blue"><Users size={18} /></div>
           <div className="stat-body"><div className="stat-value">{clientStats.total}</div><div className="stat-label">Total clients</div></div>
