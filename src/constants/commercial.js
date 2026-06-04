@@ -11,15 +11,17 @@ export const TYPE_PROJET_VALUES = [
   'showroom',
   'hotel',
   'immeuble',
+  'local_industriel',
 ];
 
 export const TYPE_PROJET_LABEL = {
-  villa:          'Villa',
-  appartement:    'Appartement',
-  plateau_bureau: 'Plateau bureau',
-  showroom:       'Showroom',
-  hotel:          'Hotel',
-  immeuble:       'Immeuble',
+  villa:            'Villa',
+  appartement:      'Appartement',
+  plateau_bureau:   'Plateau bureau',
+  showroom:         'Showroom',
+  hotel:            'Hotel',
+  immeuble:         'Immeuble',
+  local_industriel: 'Local industriel',
 };
 
 /* ── SOURCE ── */

@@ -12,6 +12,11 @@ export function toEmployeeRow(form) {
     (d) => d.nom === form.department || d.code === form.department,
   );
 
+  const trimOrNull = (v) => {
+    const s = v == null ? '' : String(v).trim();
+    return s || null;
+  };
+
   return {
     firstname: form.firstname?.trim(),
     lastname: form.lastname?.trim(),
@@ -19,11 +24,66 @@ export function toEmployeeRow(form) {
     poste: form.poste?.trim(),
     department: form.department || null,
     department_id: dept?.id ?? null,
-    telephone: form.telephone?.trim() || null,
+    telephone: trimOrNull(form.telephone),
     salaire: Number(form.salaire) || 0,
     statut: form.statut || 'Actif',
     date_embauche: form.date_embauche || null,
+    adresse: trimOrNull(form.adresse),
+    numero_cin: trimOrNull(form.numero_cin)?.toUpperCase() || null,
+    cnss: trimOrNull(form.cnss),
+    rib: trimOrNull(form.rib),
+    banque: trimOrNull(form.banque),
+    situation_familiale: trimOrNull(form.situation_familiale),
   };
+}
+
+export function employeeFullName(emp) {
+  if (!emp) return '';
+  return [emp.firstname, emp.lastname].filter(Boolean).join(' ').trim();
+}
+
+function isChefChantierPoste(poste) {
+  const p = (poste || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+  return p.includes('chef') && p.includes('chantier');
+}
+
+function mapChefChantierRow(e) {
+  return {
+    id: e.id,
+    label: employeeFullName(e),
+    poste: e.poste || '',
+    statut: e.statut || '',
+    telephone: e.telephone || '',
+  };
+}
+
+/** Chefs de chantier (employés RH) pour saisie présence */
+export async function listChefsChantier() {
+  const sb = getSupabase();
+
+  const { data, error } = await sb
+    .from(TABLE)
+    .select('id, firstname, lastname, poste, statut, telephone')
+    .ilike('poste', '%chef%chantier%')
+    .order('lastname', { ascending: true });
+
+  if (error) throw error;
+
+  let rows = (data || []).filter((e) => isChefChantierPoste(e.poste));
+
+  if (rows.length === 0) {
+    const { data: all, error: allErr } = await sb
+      .from(TABLE)
+      .select('id, firstname, lastname, poste, statut, telephone')
+      .order('lastname', { ascending: true });
+    if (allErr) throw allErr;
+    rows = (all || []).filter((e) => isChefChantierPoste(e.poste));
+  }
+
+  return rows.map(mapChefChantierRow);
 }
 
 export async function listEmployees() {
@@ -86,7 +146,9 @@ export function filterEmployees(employees, { search = '', statut = '' } = {}) {
       full.includes(q) ||
       (emp.poste || '').toLowerCase().includes(q) ||
       (emp.email || '').toLowerCase().includes(q) ||
-      (emp.department || '').toLowerCase().includes(q)
+      (emp.department || '').toLowerCase().includes(q) ||
+      (emp.numero_cin || '').toLowerCase().includes(q) ||
+      (emp.telephone || '').toLowerCase().includes(q)
     );
   });
 }

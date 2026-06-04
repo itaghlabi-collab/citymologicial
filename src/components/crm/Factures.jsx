@@ -1,11 +1,14 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
   Plus, Search, Edit2, Copy, Trash2, FileText,
   CheckCircle, Clock, XCircle, AlertCircle, TrendingUp,
   ChevronLeft, ChevronRight, RefreshCw, ArrowUpDown,
-  CreditCard, Send, Ban, DollarSign, X
+  CreditCard, Send, Ban, DollarSign, X, Download
 } from 'lucide-react';
-import { getFactures, createFacture, updateFacture, deleteFacture } from '../../services/api';
+import { useCrmFactures } from '../../hooks/useCrmFactures';
+import { listClients } from '../../services/crm/clients';
+import { listCategories } from '../../services/crm/categories';
+import { generateFacturePdf } from '../../services/crm/facturePdf';
 import FactureForm from './FactureForm';
 import FactureAcompte from './FactureAcompte';
 
@@ -105,17 +108,36 @@ const PER_PAGE = 15;
    FACTURES LIST — MAIN COMPONENT
    ════════════════════════════════════════════════ */
 export default function Factures() {
-  const [view, setView]               = useState('list'); // 'list' | 'form' | 'acompte'
-  const [editingFacture, setEditing]  = useState(null);
+  const {
+    records: factures,
+    loading,
+    saving,
+    error,
+    configured,
+    load,
+    create,
+    createAcompte,
+    update,
+    remove,
+    duplicate,
+    fetchOne,
+    fetchDevisAcompteSummary,
+    filterCrmFactures,
+    computeCrmFactureStats,
+  } = useCrmFactures();
 
-  const [factures, setFactures]       = useState([]);
-  const [loading, setLoading]         = useState(false);
-  const [loadError, setLoadError]     = useState('');
+  const [view, setView]               = useState('list');
+  const [editingFacture, setEditing]  = useState(null);
+  const [pdfLoadingId, setPdfLoadingId] = useState(null);
+  const [clientsList, setClientsList] = useState([]);
 
   /* Filters */
   const [search, setSearch]           = useState('');
   const [filterStatut, setFilterStatut] = useState('');
   const [filterCommercial, setFilterCommercial] = useState('');
+  const [filterClient, setFilterClient] = useState('');
+  const [filterDate, setFilterDate]   = useState('');
+  const [filterMontantMin, setFilterMontantMin] = useState('');
   const [sortField, setSortField]     = useState('date_emission');
   const [sortDir, setSortDir]         = useState('desc');
   const [page, setPage]               = useState(1);
@@ -129,37 +151,21 @@ export default function Factures() {
     toastTimer.current = setTimeout(() => setToast(null), 3500);
   }
 
-  /* Load */
-  const load = useCallback(async () => {
-    setLoading(true);
-    setLoadError('');
-    try {
-      const data = await getFactures();
-      setFactures(Array.isArray(data) ? data : (data?.data ?? []));
-    } catch (err) {
-      setLoadError(err.message || 'Impossible de charger les factures.');
-    } finally {
-      setLoading(false);
-    }
+  useEffect(() => {
+    listClients().then(setClientsList).catch(() => {});
   }, []);
-
-  useEffect(() => { load(); }, [load]);
 
   /* Derived */
   const commerciaux = [...new Set(factures.map(f => f.commercial).filter(Boolean))];
 
   /* Filter + sort */
-  const filtered = factures.filter(f => {
-    const clientNom = f.client_nom || f.client?.nom || '';
-    const q = search.toLowerCase();
-    const matchSearch = !q
-      || (f.numero || '').toLowerCase().includes(q)
-      || (f.titre || '').toLowerCase().includes(q)
-      || clientNom.toLowerCase().includes(q)
-      || (f.commercial || '').toLowerCase().includes(q);
-    const matchStatut = !filterStatut || f.statut === filterStatut;
-    const matchCom    = !filterCommercial || f.commercial === filterCommercial;
-    return matchSearch && matchStatut && matchCom;
+  const filtered = filterCrmFactures(factures, {
+    search,
+    statut: filterStatut,
+    commercial: filterCommercial,
+    client_id: filterClient,
+    date: filterDate,
+    montant_min: filterMontantMin,
   }).sort((a, b) => {
     let va = a[sortField] ?? '';
     let vb = b[sortField] ?? '';
@@ -181,79 +187,84 @@ export default function Factures() {
   }
 
   /* KPIs */
-  const totalFacture   = factures.reduce((s, f) => s + Number(f.total_ttc || 0), 0);
-  const totalEncaisse  = factures.reduce((s, f) => s + Number(f.total_paye || 0), 0);
-  const totalReste     = factures.reduce((s, f) => s + Number(f.reste_a_payer || 0), 0);
-  const nImpayees      = factures.filter(f => f.statut === 'impayee' || f.statut === 'envoyee').length;
-  const nEnRetard      = factures.filter(f => f.statut === 'en_retard' || (f.statut !== 'payee' && f.statut !== 'annulee' && f.date_echeance && new Date(f.date_echeance) < new Date())).length;
-  const totalAcomptes  = factures.reduce((s, f) => s + Number(f.acompte_montant || 0), 0);
+  const kpi = computeCrmFactureStats(factures);
+  const totalFacture   = kpi.totalFacture;
+  const totalEncaisse  = kpi.totalEncaisse;
+  const totalReste     = kpi.totalReste;
+  const nImpayees      = kpi.nImpayees;
+  const nEnRetard      = kpi.nEnRetard;
+  const totalAcomptes  = kpi.totalAcomptes;
 
   /* Handlers */
   function openCreate()   { setEditing(null); setView('form'); }
   function openAcompte()  { setEditing(null); setView('acompte'); }
-  function openEdit(f)    { setEditing(f);    setView('form'); }
+  async function openEdit(f) {
+    try {
+      const full = await fetchOne(f.id);
+      setEditing(full);
+      setView('form');
+    } catch (err) {
+      showToast(err.message || 'Impossible de charger la facture.', 'error');
+    }
+  }
   function backToList()   { setView('list');  setEditing(null); }
 
   async function handleSaved(payload, isEdit) {
-    try {
-      if (isEdit && payload.id) {
-        await updateFacture(payload.id, payload);
-        setFactures(prev => prev.map(f => String(f.id) === String(payload.id) ? { ...f, ...payload } : f));
-      } else {
-        const created = await createFacture(payload);
-        setFactures(prev => [created?.data ?? { ...payload, id: Date.now() }, ...prev]);
-      }
-      showToast(isEdit ? 'Facture mise a jour avec succes.' : 'Facture creee avec succes.');
-    } catch {
-      setFactures(prev => isEdit
-        ? prev.map(f => String(f.id) === String(payload.id) ? { ...f, ...payload } : f)
-        : [{ ...payload, id: Date.now() }, ...prev]
-      );
-      showToast(isEdit ? 'Facture mise a jour (hors-ligne).' : 'Facture creee (hors-ligne).');
-    }
+    const result = isEdit && payload.id
+      ? await update(payload.id, payload)
+      : await create(payload);
+    if (!result.success) return result;
+    showToast(isEdit ? 'Facture mise a jour avec succes.' : 'Facture creee avec succes.');
     backToList();
+    return result;
   }
 
   async function handleDuplicate(f) {
-    const copy = {
-      ...f, id: undefined,
-      numero: 'FA-' + new Date().getFullYear() + String(new Date().getMonth() + 1).padStart(2, '0') + '-' + String(Math.floor(Math.random() * 9000) + 1000),
-      statut: 'brouillon',
-      date_emission: new Date().toISOString().slice(0, 10),
-      titre: (f.titre || '') + ' (copie)',
-      paiements: [],
-      total_paye: 0,
-      reste_a_payer: f.total_ttc || 0,
-    };
-    try {
-      const created = await createFacture(copy);
-      setFactures(prev => [created?.data ?? { ...copy, id: Date.now() }, ...prev]);
-      showToast('Facture dupliquee avec succes.');
-    } catch {
-      setFactures(prev => [{ ...copy, id: Date.now() }, ...prev]);
-      showToast('Facture dupliquee (hors-ligne).');
-    }
+    const result = await duplicate(f.id);
+    showToast(result.success ? 'Facture dupliquee avec succes.' : (result.error || 'Erreur duplication.'), result.success ? 'success' : 'error');
   }
 
   async function handleDelete(id) {
     if (!window.confirm('Supprimer cette facture ? Cette action est irreversible.')) return;
-    try { await deleteFacture(id); } catch (_) {}
-    setFactures(prev => prev.filter(f => String(f.id) !== String(id)));
-    showToast('Facture supprimee.');
+    const result = await remove(id);
+    showToast(result.success ? 'Facture supprimee.' : (result.error || 'Erreur suppression.'), result.success ? 'success' : 'error');
+  }
+
+  async function handlePdf(f) {
+    setPdfLoadingId(f.id);
+    try {
+      const full = await fetchOne(f.id);
+      const cats = await listCategories();
+      const catMap = Object.fromEntries(cats.map(c => [String(c.id), c.nom]));
+      await generateFacturePdf(full, catMap);
+    } catch (err) {
+      showToast(err.message || 'Erreur generation PDF.', 'error');
+    } finally {
+      setPdfLoadingId(null);
+    }
   }
 
   /* ── Sub-views ── */
   if (view === 'form') {
-    return <FactureForm facture={editingFacture} onBack={backToList} onSaved={handleSaved} />;
+    return <FactureForm facture={editingFacture} onBack={backToList} onSaved={handleSaved} saving={saving} />;
   }
   if (view === 'acompte') {
-    return <FactureAcompte onBack={backToList} onSaved={handleSaved} />;
+    return (
+      <FactureAcompte
+        onBack={backToList}
+        onCreated={(ok, msg) => showToast(msg, ok ? 'success' : 'error')}
+        createAcompte={createAcompte}
+        fetchDevisSummary={fetchDevisAcompteSummary}
+        configured={configured}
+        saving={saving}
+      />
+    );
   }
 
-  const hasFilters = !!(search || filterStatut || filterCommercial);
+  const hasFilters = !!(search || filterStatut || filterCommercial || filterClient || filterDate || filterMontantMin);
 
   return (
-    <div className="animate-fade-in">
+    <div className="animate-fade-in crm-module crm-module--factures">
       <Toast toast={toast} />
 
       {/* Page header */}
@@ -262,23 +273,28 @@ export default function Factures() {
           <h1 className="page-title">Factures</h1>
           <p className="page-subtitle">Gestion des factures, paiements et suivi des reglements.</p>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div className="crm-page-header-actions" style={{ display: 'flex', gap: 8 }}>
           <button className="btn btn-ghost" onClick={load} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <RefreshCw size={14} />
           </button>
           <button className="btn btn-ghost" onClick={openAcompte} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <Plus size={15} /> Facture acompte
           </button>
-          <button className="btn btn-primary" onClick={openCreate} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button className="btn btn-primary" onClick={openCreate} disabled={!configured || saving} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <Plus size={15} /> Ajouter une facture
           </button>
         </div>
       </div>
 
-      {/* Error banner */}
-      {loadError && (
+      {!configured && (
+        <div style={{ background: '#FFF3E0', border: '1px solid #FFB74D', borderRadius: 'var(--radius)', padding: '10px 16px', marginBottom: 16, fontSize: '0.85rem', color: '#E65100' }}>
+          Supabase non configuré — ajoutez VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY dans .env
+        </div>
+      )}
+
+      {error && !loading && (
         <div style={{ background: '#FFEBEE', color: 'var(--red)', border: '1px solid rgba(211,47,47,0.25)', borderRadius: 8, padding: '10px 14px', fontSize: '0.85rem', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <AlertCircle size={15} /> {loadError}
+          <AlertCircle size={15} /> {error}
           <button className="btn btn-ghost btn-sm" onClick={load} style={{ marginLeft: 'auto' }}>Reessayer</button>
         </div>
       )}
@@ -294,40 +310,56 @@ export default function Factures() {
       </div>
 
       {/* Filter bar */}
-      <div className="card" style={{ padding: '14px 16px', marginBottom: 16 }}>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-          <div style={{ position: 'relative', flex: '1 1 220px', minWidth: 180 }}>
-            <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)', pointerEvents: 'none' }} />
+      <div className="card crm-filter-bar" style={{ marginBottom: 16 }}>
+        <div className="crm-filter-row">
+          <div className="crm-filter-search">
+            <Search size={14} className="crm-filter-search-icon" />
             <input
+              className="crm-filter-input"
               value={search}
               onChange={e => { setSearch(e.target.value); setPage(1); }}
               placeholder="Rechercher numero, titre, client..."
-              style={{ padding: '8px 10px 8px 32px', border: '1.5px solid var(--border)', borderRadius: 6, fontSize: '0.85rem', width: '100%', outline: 'none', background: '#fff' }}
             />
           </div>
-
-          <select value={filterStatut} onChange={e => { setFilterStatut(e.target.value); setPage(1); }}
-            style={{ padding: '8px 10px', border: '1.5px solid var(--border)', borderRadius: 6, fontSize: '0.85rem', color: filterStatut ? 'var(--text)' : 'var(--text-3)', background: '#fff', cursor: 'pointer' }}>
+          <select className="crm-filter-select crm-filter-select--sm" value={filterStatut} onChange={e => { setFilterStatut(e.target.value); setPage(1); }}>
             <option value="">Tous statuts</option>
             {Object.entries(STATUT_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
           </select>
-
-          <select value={filterCommercial} onChange={e => { setFilterCommercial(e.target.value); setPage(1); }}
-            style={{ padding: '8px 10px', border: '1.5px solid var(--border)', borderRadius: 6, fontSize: '0.85rem', color: filterCommercial ? 'var(--text)' : 'var(--text-3)', background: '#fff', cursor: 'pointer' }}>
+          <select className="crm-filter-select" value={filterCommercial} onChange={e => { setFilterCommercial(e.target.value); setPage(1); }}>
             <option value="">Tous commerciaux</option>
             {commerciaux.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
-
+          <select className="crm-filter-select crm-filter-select--md" value={filterClient} onChange={e => { setFilterClient(e.target.value); setPage(1); }}>
+            <option value="">Tous clients</option>
+            {clientsList.map(c => {
+              const nom = [c.prenom, c.nom].filter(Boolean).join(' ') || c.nom || '';
+              return <option key={c.id} value={c.id}>{nom}</option>;
+            })}
+          </select>
+          <input
+            type="date"
+            className="crm-filter-select"
+            value={filterDate}
+            onChange={e => { setFilterDate(e.target.value); setPage(1); }}
+            title="Filtrer par date d'emission"
+          />
+          <input
+            type="number"
+            min="0"
+            className="crm-filter-select crm-filter-select--sm"
+            value={filterMontantMin}
+            onChange={e => { setFilterMontantMin(e.target.value); setPage(1); }}
+            placeholder="Montant min."
+          />
           {hasFilters && (
-            <button className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setFilterStatut(''); setFilterCommercial(''); setPage(1); }}
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setFilterStatut(''); setFilterCommercial(''); setFilterClient(''); setFilterDate(''); setFilterMontantMin(''); setPage(1); }}
               style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'var(--red)' }}>
               <X size={13} /> Effacer
             </button>
           )}
-
-          <div style={{ marginLeft: 'auto', fontSize: '0.8rem', color: 'var(--text-3)', flexShrink: 0 }}>
+          <span className="crm-filter-count">
             {filtered.length} resultat{filtered.length > 1 ? 's' : ''}
-          </div>
+          </span>
         </div>
       </div>
 
@@ -341,8 +373,10 @@ export default function Factures() {
         ) : paged.length === 0 ? (
           <EmptyState filtered={hasFilters} onAdd={openCreate} />
         ) : (
-          <div className="table-wrap">
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+          <>
+          <div className="crm-table-desktop">
+            <div className="table-wrap">
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
               <thead>
                 <tr style={{ borderBottom: '1.5px solid var(--border)', background: 'var(--bg)' }}>
                   {[
@@ -476,6 +510,10 @@ export default function Factures() {
                       {/* Actions */}
                       <td style={{ padding: '10px 10px', whiteSpace: 'nowrap' }}>
                         <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                          <button title="PDF" onClick={() => handlePdf(f)} disabled={pdfLoadingId === f.id}
+                            className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }}>
+                            <Download size={13} />
+                          </button>
                           <button title="Modifier" onClick={() => openEdit(f)}
                             className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }}>
                             <Edit2 size={13} />
@@ -494,13 +532,57 @@ export default function Factures() {
                   );
                 })}
               </tbody>
-            </table>
+              </table>
+            </div>
           </div>
+
+          <div className="crm-doc-list crm-mobile-only">
+            {paged.map((f, i) => {
+              const clientNom = f.client_nom || f.client?.nom || '—';
+              const overdue = isOverdue(f.date_echeance, f.statut);
+              const dueSoon = !overdue && isDueSoon(f.date_echeance, f.statut);
+              return (
+                <div key={f.id ?? i} className="crm-doc-card">
+                  <div className="crm-doc-head">
+                    <span className="crm-doc-ref">{f.numero || '—'}</span>
+                    <StatutBadge statut={f.statut} />
+                  </div>
+                  <div className="crm-doc-title">{f.titre || clientNom}</div>
+                  <div className="crm-doc-meta">
+                    <span>{clientNom}</span>
+                    {f.commercial && <span>· {f.commercial}</span>}
+                    <span>· {fmtDate(f.date_emission)}</span>
+                    {overdue && <span style={{ color: 'var(--red)', fontWeight: 700 }}>· En retard</span>}
+                    {dueSoon && <span style={{ color: '#E65100', fontWeight: 700 }}>· Echeance proche</span>}
+                  </div>
+                  <div className="crm-doc-footer">
+                    <div>
+                      <span className="crm-doc-amount">{fmtMAD(f.total_ttc)}</span>
+                      <span className="crm-doc-amount-sub">
+                        Reste {Number(f.reste_a_payer || 0) <= 0 ? 'soldé' : fmtMAD(f.reste_a_payer)}
+                      </span>
+                    </div>
+                    <div className="crm-doc-actions">
+                      <button type="button" title="PDF" onClick={() => handlePdf(f)} disabled={pdfLoadingId === f.id}
+                        className="btn btn-ghost btn-sm crm-icon-btn"><Download size={14} /></button>
+                      <button type="button" title="Modifier" onClick={() => openEdit(f)}
+                        className="btn btn-ghost btn-sm crm-icon-btn"><Edit2 size={14} /></button>
+                      <button type="button" title="Dupliquer" onClick={() => handleDuplicate(f)}
+                        className="btn btn-ghost btn-sm crm-icon-btn"><Copy size={14} /></button>
+                      <button type="button" title="Supprimer" onClick={() => handleDelete(f.id)}
+                        className="btn btn-ghost btn-sm crm-icon-btn"><Trash2 size={14} style={{ color: 'var(--red)' }} /></button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          </>
         )}
 
         {/* Pagination */}
         {!loading && totalPages > 1 && (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 18px', borderTop: '1px solid var(--border)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 18px', borderTop: '1px solid var(--border)', flexWrap: 'wrap', gap: 8 }}>
             <span style={{ fontSize: '0.82rem', color: 'var(--text-3)' }}>
               Page {safePage} / {totalPages} — {filtered.length} factures
             </span>

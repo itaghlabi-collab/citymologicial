@@ -3,7 +3,7 @@
  * Expose 3 sous-modules : Projets / SAV / Comptes rendus SAV
  */
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import ProjetsList from './projets/ProjetsList';
 import SAVModule from './projets/SAVModule';
 import ComptesRendusSAV from './projets/ComptesRendusSAV';
@@ -13,34 +13,50 @@ import ComptesRendusSAV from './projets/ComptesRendusSAV';
  * selon l'ID de navigation actif : 'projets' | 'sav-projets' | 'cr-sav'
  */
 export default function Projets({ activeTab }) {
-  // État croisé entre sous-modules (workflow SAV → CR)
+  const resolvedTab = activeTab || 'projets';
+
+  // Navigation interne (ex. bouton SAV depuis un projet) — ne doit pas bloquer la sidebar
+  const [internalTab, setInternalTab] = useState(null);
   const [prefillSAVProjet, setPrefillSAVProjet] = useState(null);
   const [prefillCRSAV, setPrefillCRSAV] = useState(null);
-  const [forceTab, setForceTab] = useState(null);
 
-  const tab = forceTab || activeTab || 'projets';
+  // Sidebar = source de vérité : réinitialiser l'override interne au changement d'onglet
+  useEffect(() => {
+    setInternalTab(null);
+    setPrefillSAVProjet(null);
+    setPrefillCRSAV(null);
+  }, [resolvedTab]);
+
+  const tab = internalTab || resolvedTab;
 
   function handleGoSAV(projet) {
     setPrefillSAVProjet(projet);
-    setForceTab('sav-projets');
+    setInternalTab('sav-projets');
   }
 
   function handleGoCompteRendu(sav) {
     setPrefillCRSAV(sav);
-    setForceTab('cr-sav');
-  }
-
-  function handleTabChange(t) {
-    setForceTab(t);
-    if (t !== 'sav-projets') setPrefillSAVProjet(null);
-    if (t !== 'cr-sav') setPrefillCRSAV(null);
+    setInternalTab('cr-sav');
   }
 
   return (
     <div>
-      {tab === 'projets'     && <ProjetsList       onGoSAV={handleGoSAV} />}
-      {tab === 'sav-projets' && <SAVModule         prefillProjet={prefillSAVProjet} onGoCompteRendu={handleGoCompteRendu} />}
-      {tab === 'cr-sav'      && <ComptesRendusSAV  prefillSAV={prefillCRSAV} />}
+      {tab === 'projets' && (
+        <ProjetsList key="projets-list" onCreateSAV={handleGoSAV} />
+      )}
+      {tab === 'sav-projets' && (
+        <SAVModule
+          key={prefillSAVProjet?.id ? `sav-prefill-${prefillSAVProjet.id}` : 'sav-list'}
+          prefillProjet={prefillSAVProjet}
+          onGoCompteRendu={handleGoCompteRendu}
+        />
+      )}
+      {tab === 'cr-sav' && (
+        <ComptesRendusSAV
+          key={prefillCRSAV?.id ? `cr-prefill-${prefillCRSAV.id}` : 'cr-list'}
+          prefillSAV={prefillCRSAV}
+        />
+      )}
     </div>
   );
 }

@@ -1,10 +1,42 @@
 /**
- * ocr.js — OCR frontend local (Tesseract.js via CDN dynamique, zero import)
- * Aucun import npm. Aucun backend. Fonctionne dans le navigateur.
+ * ocr.js — Scan CIN marocaine : Mindee (prioritaire) → Tesseract fallback
  */
+import { resolveApiBaseUrl } from '../config/env';
+import {
+  emptyCINExtract,
+  extractMindeeFields,
+  mapMindeeFields,
+  mapTesseractText,
+  mergeCINRectoVerso,
+  mergeSideExtracts,
+  mapToWorkerForm,
+  buildOcrWarning,
+  identityFieldsComplete,
+  resolveCINIdentity,
+} from './cinOcr';
 
-// ── Chargement Tesseract.js (script tag dynamique, une seule fois) ───────────
+import { CIN_FRAME_MASK as CIN_CROP } from './cinCapture';
+
+/** Zone cadre scanner CIN (alignée sur SVG mask + .cin-vf-frame) */
+export { CIN_CROP };
+/** Bande MRZ (bas verso CNIE — prénom/nom latins) */
+export const MRZ_CROP = { x: 0.03, y: 0.55, w: 0.94, h: 0.40 };
+/** Zone noms recto (partie droite, sous l'en-tête) */
+export const NAMES_CROP = { x: 0.32, y: 0.12, w: 0.63, h: 0.42 };
+/** Zone date de naissance recto CNIE (sous nom/prénom). */
+export const BIRTH_CROP = { x: 0.04, y: 0.38, w: 0.58, h: 0.28 };
+
 var _tesseractPromise = null;
+var _tesseractWorkerPromise = null;
+var _tesseractWorker = null;
+
+function tessMaxWidth() {
+  return isMobileDevice() ? 1400 : 1800;
+}
+
+export function getOcrApiUrl() {
+  return resolveApiBaseUrl();
+}
 
 function loadTesseract() {
   if (_tesseractPromise) return _tesseractPromise;
@@ -12,8 +44,8 @@ function loadTesseract() {
     if (window.Tesseract) { resolve(window.Tesseract); return; }
     var s = document.createElement('script');
     s.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
-    s.onload  = function() { window.Tesseract ? resolve(window.Tesseract) : reject(new Error('Tesseract init failed')); };
-    s.onerror = function() { reject(new Error('Tesseract script load failed')); };
+    s.onload = function() { window.Tesseract ? resolve(window.Tesseract) : reject(new Error('Tesseract init failed')); };
+    s.onerror = function() { reject(new Error('Impossible de charger Tesseract.')); };
     document.head.appendChild(s);
   }).catch(function(err) {
     _tesseractPromise = null;
@@ -22,239 +54,132 @@ function loadTesseract() {
   return _tesseractPromise;
 }
 
-// ── Worker singleton ──────────────────────────────────────────────────────────
-var _workerPromise = null;
-
-function getWorker() {
-  if (_workerPromise) return _workerPromise;
-  _workerPromise = loadTesseract().then(function(T) {
-    return T.createWorker('fra+eng', 1, { logger: function() {} });
-  }).catch(function(err) {
-    _workerPromise = null;
-    throw err;
-  });
-  return _workerPromise;
+/** Précharge Tesseract dès l’ouverture du scanner (mobile). */
+export function preloadOcrEngine() {
+  loadTesseract().catch(function() {});
+  getOcrWorker().catch(function() {});
 }
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// PRÉTRAITEMENT IMAGE
-// ═══════════════════════════════════════════════════════════════════════════════
+async function getOcrWorker() {
+  if (_tesseractWorker) return _tesseractWorker;
+  if (!_tesseractWorkerPromise) {
+    _tesseractWorkerPromise = loadTesseract().then(async function(T) {
+      var worker = await T.createWorker('fra+eng', 1, { logger: function() {} });
+      _tesseractWorker = worker;
+      return worker;
+    }).catch(function(err) {
+      _tesseractWorkerPromise = null;
+      _tesseractWorker = null;
+      throw err;
+    });
+  }
+  return _tesseractWorkerPromise;
+}
 
-function loadImg(dataUrl) {
+async function prepareOcrImage(dataUrl, crop) {
+  var img = crop ? await cropRegion(dataUrl, crop) : dataUrl;
+  return compressImage(img, tessMaxWidth(), 0.88);
+}
+
+/** Recadre une zone de l'image (ratios 0–1). */
+export function cropRegion(dataUrl, crop) {
   return new Promise(function(resolve, reject) {
     var img = new Image();
     img.onload = function() {
-      var c = document.createElement('canvas');
-      c.width = img.width; c.height = img.height;
-      c.getContext('2d').drawImage(img, 0, 0);
-      resolve(c);
+      try {
+        var W = img.width;
+        var H = img.height;
+        var x = Math.max(0, Math.round(W * crop.x));
+        var y = Math.max(0, Math.round(H * crop.y));
+        var w = Math.min(W - x, Math.round(W * crop.w));
+        var h = Math.min(H - y, Math.round(H * crop.h));
+        var c = document.createElement('canvas');
+        c.width = Math.max(1, w);
+        c.height = Math.max(1, h);
+        var ctx = c.getContext('2d');
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, w, h);
+        ctx.drawImage(img, x, y, w, h, 0, 0, w, h);
+        resolve(c.toDataURL('image/jpeg', 0.94));
+      } catch (e) { reject(e); }
     };
-    img.onerror = reject;
+    img.onerror = function() { reject(new Error('Recadrage impossible.')); };
     img.src = dataUrl;
   });
 }
 
-function upscale(canvas, target) {
-  target = target || 2600;
-  var scale = Math.max(1, target / canvas.width);
-  if (scale <= 1.05) return canvas;
-  var c = document.createElement('canvas');
-  c.width  = Math.round(canvas.width  * scale);
-  c.height = Math.round(canvas.height * scale);
-  var ctx = c.getContext('2d');
-  ctx.imageSmoothingEnabled = true;
-  ctx.imageSmoothingQuality = 'high';
-  ctx.drawImage(canvas, 0, 0, c.width, c.height);
-  return c;
+/** Recadre l'image sur la zone CIN (meilleure lecture OCR). */
+export function cropCINRegion(dataUrl) {
+  return cropRegion(dataUrl, CIN_CROP);
 }
 
-function toGray(canvas) {
-  var ctx = canvas.getContext('2d');
-  var id  = ctx.getImageData(0, 0, canvas.width, canvas.height);
-  var d   = id.data;
-  for (var i = 0; i < d.length; i += 4) {
-    var g = 0.299 * d[i] + 0.587 * d[i+1] + 0.114 * d[i+2];
-    d[i] = d[i+1] = d[i+2] = g;
-  }
-  ctx.putImageData(id, 0, 0);
-  return canvas;
-}
-
-function adaptiveBinarize(canvas) {
-  var W = canvas.width, H = canvas.height;
-  var ctx = canvas.getContext('2d');
-  var id  = ctx.getImageData(0, 0, W, H);
-  var d   = id.data;
-  var R   = 16;
-  var gray = new Float32Array(W * H);
-  for (var i = 0; i < W * H; i++) gray[i] = d[i * 4];
-  var S = new Float64Array((W+1) * (H+1));
-  for (var y = 1; y <= H; y++) {
-    for (var x = 1; x <= W; x++) {
-      S[y*(W+1)+x] = gray[(y-1)*W+(x-1)] + S[(y-1)*(W+1)+x] + S[y*(W+1)+(x-1)] - S[(y-1)*(W+1)+(x-1)];
-    }
-  }
-  for (var py = 0; py < H; py++) {
-    for (var px = 0; px < W; px++) {
-      var x1=Math.max(0,px-R), y1=Math.max(0,py-R);
-      var x2=Math.min(W,px+R+1), y2=Math.min(H,py+R+1);
-      var n = (x2-x1)*(y2-y1);
-      var s = S[y2*(W+1)+x2]-S[y1*(W+1)+x2]-S[y2*(W+1)+x1]+S[y1*(W+1)+x1];
-      var val = gray[py*W+px] < (s/n)*0.88 ? 0 : 255;
-      var idx = (py*W+px)*4;
-      d[idx]=d[idx+1]=d[idx+2]=val; d[idx+3]=255;
-    }
-  }
-  ctx.putImageData(id, 0, 0);
-  return canvas;
-}
-
-function sharpenCanvas(canvas) {
-  var W = canvas.width, H = canvas.height;
-  var ctx = canvas.getContext('2d');
-  var src = ctx.getImageData(0,0,W,H);
-  var dst = ctx.createImageData(W,H);
-  var s=src.data, t=dst.data;
-  var k=[0,-1,0,-1,5,-1,0,-1,0];
-  for (var y=1;y<H-1;y++) {
-    for (var x=1;x<W-1;x++) {
-      var v=0;
-      for (var ky=-1;ky<=1;ky++) {
-        for (var kx=-1;kx<=1;kx++) {
-          v += s[((y+ky)*W+(x+kx))*4] * k[(ky+1)*3+(kx+1)];
+/** Contraste léger pour Tesseract */
+export function enhanceForOcr(dataUrl) {
+  return new Promise(function(resolve) {
+    var img = new Image();
+    img.onload = function() {
+      try {
+        var c = document.createElement('canvas');
+        c.width = img.width;
+        c.height = img.height;
+        var ctx = c.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        var id = ctx.getImageData(0, 0, c.width, c.height);
+        var d = id.data;
+        for (var i = 0; i < d.length; i += 4) {
+          var gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+          var v = Math.min(255, Math.max(0, (gray - 128) * 1.35 + 128));
+          d[i] = d[i + 1] = d[i + 2] = v;
         }
-      }
-      var o=(y*W+x)*4;
-      t[o]=t[o+1]=t[o+2]=Math.min(255,Math.max(0,v)); t[o+3]=255;
+        ctx.putImageData(id, 0, 0);
+        resolve(c.toDataURL('image/jpeg', 0.92));
+      } catch (e) { resolve(dataUrl); }
+    };
+    img.onerror = function() { resolve(dataUrl); };
+    img.src = dataUrl;
+  });
+}
+
+function measureImageAspect(dataUrl) {
+  return new Promise(function(resolve) {
+    var img = new Image();
+    img.onload = function() {
+      resolve(img.width / Math.max(img.height, 1));
+    };
+    img.onerror = function() { resolve(0); };
+    img.src = dataUrl;
+  });
+}
+
+export async function preprocessForOcr(dataUrl, side = 'recto') {
+  try {
+    var ratio = await measureImageAspect(dataUrl);
+    var isCardShape = ratio > 1.42 && ratio < 1.75;
+    var base = dataUrl;
+    if (!isCardShape) {
+      try { base = await cropCINRegion(dataUrl); } catch (_) { /* déjà recadré */ }
+    } else if (side === 'verso') {
+      // Verso : garder la carte entière (MRZ en bas, hors cadre central)
+      base = dataUrl;
+    }
+    var compressed = await compressImage(base, isMobileDevice() ? 2200 : 2800, 0.92);
+    return await enhanceForOcr(compressed);
+  } catch (_) {
+    try {
+      return await compressImage(dataUrl, 2000, 0.90);
+    } catch (e2) {
+      return dataUrl;
     }
   }
-  ctx.putImageData(dst,0,0);
-  return canvas;
 }
 
-function autoCrop(canvas) {
-  var W=canvas.width, H=canvas.height;
-  var ctx=canvas.getContext('2d');
-  var d=ctx.getImageData(0,0,W,H).data;
-  var rB=new Float32Array(H), cB=new Float32Array(W);
-  for (var y=0;y<H;y++){var rs=0;for(var x=0;x<W;x++){var ri=(y*W+x)*4;rs+=0.299*d[ri]+0.587*d[ri+1]+0.114*d[ri+2];}rB[y]=rs/W;}
-  for (var cx=0;cx<W;cx++){var cs=0;for(var cy=0;cy<H;cy++){var ci=(cy*W+cx)*4;cs+=0.299*d[ci]+0.587*d[ci+1]+0.114*d[ci+2];}cB[cx]=cs/H;}
-  var T=245, top=0, bot=H-1, left=0, right=W-1;
-  for(var ty=0;ty<H;ty++){if(rB[ty]<T){top=Math.max(0,ty-4);break;}}
-  for(var by=H-1;by>=0;by--){if(rB[by]<T){bot=Math.min(H-1,by+4);break;}}
-  for(var lx=0;lx<W;lx++){if(cB[lx]<T){left=Math.max(0,lx-4);break;}}
-  for(var rx=W-1;rx>=0;rx--){if(cB[rx]<T){right=Math.min(W-1,rx+4);break;}}
-  var cw=right-left, ch=bot-top;
-  if(cw<W*0.3||ch<H*0.3) return canvas;
-  var c=document.createElement('canvas');
-  c.width=cw; c.height=ch;
-  c.getContext('2d').drawImage(canvas,left,top,cw,ch,0,0,cw,ch);
-  return c;
+export function isImageDataUrl(value) {
+  return typeof value === 'string' && value.startsWith('data:image/');
 }
-
-function preprocessForOCR(dataUrl) {
-  return loadImg(dataUrl).then(function(raw) {
-    var crop = autoCrop(raw);
-    var big  = upscale(crop, 2600);
-    var gray = toGray(big);
-    var bin  = adaptiveBinarize(gray);
-    var shp  = sharpenCanvas(bin);
-    return shp.toDataURL('image/png');
-  }).catch(function() {
-    return dataUrl;
-  });
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// OCR
-// ═══════════════════════════════════════════════════════════════════════════════
-
-function runOCR(dataUrl) {
-  return getWorker().then(function(worker) {
-    return worker.setParameters({ tessedit_pageseg_mode: '6' }).then(function() {
-      return worker.recognize(dataUrl);
-    }).then(function(r1) {
-      var text = (r1.data && r1.data.text) || '';
-      if (text.replace(/\s/g, '').length >= 20) return text;
-      return worker.setParameters({ tessedit_pageseg_mode: '3' }).then(function() {
-        return worker.recognize(dataUrl);
-      }).then(function(r2) {
-        var t2 = (r2.data && r2.data.text) || '';
-        return t2.length > text.length ? t2 : text;
-      });
-    });
-  });
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// PARSER CIN MAROCAINE
-// ═══════════════════════════════════════════════════════════════════════════════
-
-function parseMarocainCIN(raw) {
-  var text  = raw.replace(/[|\\]/g, 'I').replace(/\r/g, '');
-  var lines = text.split('\n').map(function(l){return l.trim();}).filter(Boolean);
-  var full  = text.toUpperCase();
-
-  var out = { cin:'', prenom:'', nom:'', date_naissance:'', ville_naissance:'', sexe:'', nationalite:'MAR' };
-
-  // 1. CIN : 1-2 lettres + 5-8 chiffres
-  var cinM = text.match(/\b([A-Z]{1,2}\d{5,8})\b/i);
-  if (cinM) out.cin = cinM[1].toUpperCase();
-
-  // 2. Date DD/MM/YYYY ou YYYY-MM-DD
-  var dm1 = text.match(/(?:n[eé]e?\s*le\s*)?(\d{1,2})[\/\.\-](\d{1,2})[\/\.\-](\d{4})/i);
-  var dm2 = text.match(/(\d{4})[\/\.\-](\d{1,2})[\/\.\-](\d{1,2})/);
-  if (dm1) {
-    out.date_naissance = dm1[3] + '-' + dm1[2].padStart(2,'0') + '-' + dm1[1].padStart(2,'0');
-  } else if (dm2) {
-    out.date_naissance = dm2[1] + '-' + dm2[2].padStart(2,'0') + '-' + dm2[3].padStart(2,'0');
-  }
-
-  // 3. Sexe
-  if      (/\bMASCULIN\b|MALE|\bSEXE\s*:?\s*M\b/i.test(full))  out.sexe = 'M';
-  else if (/\bFEMININ\b|FEMALE|\bSEXE\s*:?\s*F\b/i.test(full)) out.sexe = 'F';
-  else if (text.indexOf('\u2642') !== -1) out.sexe = 'M';
-  else if (text.indexOf('\u2640') !== -1) out.sexe = 'F';
-
-  // 4. Labels ligne par ligne
-  var NOM_RE    = /^(?:NOM|NAM|NDM)\s*[:=]?\s*/i;
-  var PRENOM_RE = /^(?:PR[EÉ]NOM|PRENOM|FIRSTNAME|GIVEN\s*NAME)\s*[:=]?\s*/i;
-  var LIEU_RE   = /^(?:N[EÉ]\(?E?\)?\s*(?:[AÀ]|LE)?|LIEU\s*(?:DE\s*)?NAISSANCE|PLACE\s*OF\s*BIRTH)\s*[:=]?\s*/i;
-
-  for (var i = 0; i < lines.length; i++) {
-    var u = lines[i].toUpperCase();
-    if (!out.nom    && NOM_RE.test(u))    { var vn=lines[i].replace(NOM_RE,'').trim();    out.nom    = vn.length>1?vn:((lines[i+1]||'').trim()); }
-    if (!out.prenom && PRENOM_RE.test(u)) { var vp=lines[i].replace(PRENOM_RE,'').trim(); out.prenom = vp.length>1?vp:((lines[i+1]||'').trim()); }
-    if (!out.ville_naissance && LIEU_RE.test(u)) { var vl=lines[i].replace(LIEU_RE,'').trim(); out.ville_naissance = vl.length>1?vl:((lines[i+1]||'').trim()); }
-  }
-
-  // 5. Fallback : lignes de texte pur en majuscules
-  if (!out.nom || !out.prenom) {
-    var STOP = /ROYAUME|MAROC|NATIONALE|IDENTIT|CARTE|REPUBLIC|KINGDOM|NATIONAL|MAROCAINE|VALABLE|VALID|DATE|EXPIRE|NAISSANCE|SEXE|CIVIL|ADRESSE|CODE|\d{4}/i;
-    var nls = lines
-      .map(function(l){return l.replace(/[^A-Za-z\u00C0-\u00FF\s\-]/g,'').trim();})
-      .filter(function(l){return l.length>=3&&l.length<=40&&/^[A-Z\u00C0-\u00DE]/.test(l)&&!STOP.test(l);});
-    if (!out.nom    && nls[0]) out.nom    = nls[0];
-    if (!out.prenom && nls[1]) out.prenom = nls[1];
-  }
-
-  // 6. Nettoyage
-  out.nom             = out.nom.replace(/[^A-Za-z\u00C0-\u00FF\s\-]/g,'').trim().toUpperCase();
-  out.prenom          = out.prenom.replace(/[^A-Za-z\u00C0-\u00FF\s\-]/g,'').trim();
-  out.ville_naissance = out.ville_naissance.replace(/[^A-Za-z\u00C0-\u00FF\s\-]/g,'').trim();
-  if (out.nom.length    < 2) out.nom    = '';
-  if (out.prenom.length < 2) out.prenom = '';
-
-  return out;
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// EXPORTS
-// ═══════════════════════════════════════════════════════════════════════════════
 
 export function compressImage(dataUrl, maxWidth, quality) {
-  maxWidth = maxWidth || 2000;
-  quality  = quality  || 0.92;
+  maxWidth = maxWidth || 2400;
+  quality = quality || 0.92;
   return new Promise(function(resolve, reject) {
     var img = new Image();
     img.onload = function() {
@@ -269,44 +194,499 @@ export function compressImage(dataUrl, maxWidth, quality) {
         ctx.fillRect(0, 0, w, h);
         ctx.drawImage(img, 0, 0, w, h);
         resolve(c.toDataURL('image/jpeg', quality));
-      } catch(e) { reject(e); }
+      } catch (e) { reject(e); }
     };
-    img.onerror = function() { reject(new Error('Image non chargeable')); };
+    img.onerror = function() { reject(new Error('Image non chargeable.')); };
     img.src = dataUrl;
   });
 }
 
-export function scanCIN(rectoDataUrl, versoDataUrl) {
-  if (!rectoDataUrl || rectoDataUrl.indexOf('data:image') !== 0) {
-    return Promise.reject(new Error('Image recto invalide. Veuillez rescanner.'));
-  }
-
-  return preprocessForOCR(rectoDataUrl).then(function(processed) {
-    return runOCR(processed);
-  }).then(function(rawText) {
-    console.log('[OCR] texte brut:\n', rawText);
-    if (!rawText || rawText.replace(/\s/g, '').length < 5) {
-      throw new Error('Texte non detecte. Reprendre une photo plus nette.');
-    }
-    var data = parseMarocainCIN(rawText);
-    return {
-      cin:             data.cin,
-      prenom:          data.prenom,
-      nom:             data.nom,
-      date_naissance:  data.date_naissance,
-      ville_naissance: data.ville_naissance,
-      sexe:            data.sexe,
-      nationalite:     data.nationalite,
-      cin_recto:       rectoDataUrl,
-      cin_verso:       versoDataUrl || '',
-      _ocr_raw:        rawText,
-    };
-  }).catch(function(err) {
-    var msg = (err && err.message) || '';
-    throw new Error(
-      (msg.length > 0 && msg.length < 140)
-        ? msg
-        : 'Texte non detecte. Reprendre une photo plus nette.'
-    );
+function readFileAsDataUrl(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error('Lecture fichier impossible.'));
+    reader.readAsDataURL(file);
   });
 }
+
+async function prepareSide(source, file, sideLabel) {
+  if (file instanceof File && file.size > 0) {
+    console.info('[OCR CIN] mobile capture file', {
+      side: sideLabel,
+      name: file.name,
+      type: file.type || '(vide)',
+      size: file.size,
+    });
+    const ocrDataUrl = await readFileAsDataUrl(file);
+    const preview = isImageDataUrl(source) ? source : ocrDataUrl;
+    console.info('[OCR CIN] using original/cropped file', {
+      side: sideLabel,
+      ocrBytes: file.size,
+      previewCropped: preview !== ocrDataUrl,
+      ocrSource: 'original-file',
+      displaySource: 'cropped-preview',
+    });
+    console.info('[OCR CIN] image reçue', sideLabel, {
+      from: 'file',
+      bytes: file.size,
+      previewSeparate: preview !== ocrDataUrl,
+    });
+    return { file, dataUrl: ocrDataUrl, preview };
+  }
+
+  if (!source) throw new Error(`${sideLabel === 'recto' ? 'Image recto' : 'Image'} requise.`);
+  const kind = isImageDataUrl(String(source)) ? 'dataUrl' : String(source).startsWith('http') ? 'url' : 'unknown';
+  console.info('[OCR CIN] image reçue', sideLabel, { from: kind, len: String(source).length });
+  const dataUrl = await normalizeImageInput(source);
+  return { file: null, dataUrl, preview: isImageDataUrl(source) ? source : dataUrl };
+}
+
+function sideHasExtractedData(mapped, side) {
+  if (!mapped) return false;
+  if (side === 'verso') {
+    return Boolean(
+      (mapped.adresse && String(mapped.adresse).trim())
+      || (mapped.ville_adresse && String(mapped.ville_adresse).trim())
+      || (mapped.nom && String(mapped.nom).trim())
+      || (mapped.prenom && String(mapped.prenom).trim())
+      || (mapped.numero_cin && String(mapped.numero_cin).trim()),
+    );
+  }
+  return Boolean(
+    (mapped.numero_cin && String(mapped.numero_cin).trim())
+    || (mapped.prenom && String(mapped.prenom).trim())
+    || (mapped.nom && String(mapped.nom).trim())
+    || (mapped.date_naissance && String(mapped.date_naissance).trim()),
+  );
+}
+
+async function normalizeImageInput(source) {
+  if (!source) throw new Error('Image recto requise.');
+  let dataUrl = source;
+  if (source.startsWith('http://') || source.startsWith('https://')) {
+    const res = await fetch(source);
+    const blob = await res.blob();
+    dataUrl = await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+  if (!isImageDataUrl(String(dataUrl))) throw new Error('Format invalide.');
+  try {
+    return await compressImage(dataUrl, 2400, 0.90);
+  } catch (_) {
+    return dataUrl;
+  }
+}
+
+function dataUrlToBlob(dataUrl) {
+  const [header, base64] = dataUrl.split(',');
+  const mime = header.match(/:(.*?);/)?.[1] || 'image/jpeg';
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i);
+  return new Blob([bytes], { type: mime });
+}
+
+async function ocrImageText(dataUrl, psm) {
+  var timeoutMs = isMobileDevice() ? 45000 : 60000;
+  var opts = { logger: function() {} };
+  if (psm != null) opts.tessedit_pageseg_mode = String(psm);
+
+  try {
+    var worker = await getOcrWorker();
+    if (psm != null) {
+      await worker.setParameters({ tessedit_pageseg_mode: String(psm) });
+    }
+    var job = worker.recognize(dataUrl);
+    var timer = new Promise(function(_, reject) {
+      setTimeout(function() { reject(new Error('OCR Tesseract timeout')); }, timeoutMs);
+    });
+    var result = await Promise.race([job, timer]);
+    return (result.data && result.data.text) || '';
+  } catch (workerErr) {
+    _tesseractWorkerPromise = null;
+    _tesseractWorker = null;
+    var T = await loadTesseract();
+    var job = T.recognize(dataUrl, 'fra+eng', opts);
+    var timer = new Promise(function(_, reject) {
+      setTimeout(function() { reject(new Error('OCR Tesseract timeout')); }, timeoutMs);
+    });
+    var result = await Promise.race([job, timer]);
+    return (result.data && result.data.text) || '';
+  }
+}
+
+async function fetchMindeeSides(rectoSide, versoSide) {
+  const apiUrl = getOcrApiUrl();
+  const form = new FormData();
+
+  const appendSide = (name, side) => {
+    if (!side) return;
+    // Mindee : fichier original (meilleure qualité) ou dataUrl non prétraitée
+    if (side.file instanceof File && side.file.size > 0) {
+      form.append(name, side.file, side.file.name || `${name}.jpg`);
+      return;
+    }
+    const src = side.dataUrl;
+    if (src) {
+      form.append(name, new File([dataUrlToBlob(src)], `${name}.jpg`, { type: 'image/jpeg' }));
+    }
+  };
+
+  appendSide('recto', rectoSide);
+  appendSide('verso', versoSide);
+
+  console.info('[OCR CIN] POST /api/ocr/moroccan-cin', {
+    recto: rectoSide?.file ? 'file' : 'dataUrl',
+    verso: versoSide ? (versoSide.file ? 'file' : 'dataUrl') : 'none',
+    rectoBytes: rectoSide?.file?.size,
+    versoBytes: versoSide?.file?.size,
+  });
+
+  const controller = new AbortController();
+  const timer = setTimeout(function() { controller.abort(); }, isMobileDevice() ? 50000 : 55000);
+
+  try {
+    const res = await fetch(`${apiUrl}/ocr/moroccan-cin`, {
+      method: 'POST',
+      body: form,
+      signal: controller.signal,
+    });
+    const text = await res.text();
+    let json = {};
+    try { json = JSON.parse(text); } catch { json = {}; }
+    if (!res.ok || !json.success) {
+      const code = json.code || 'OCR_BACKEND_ERROR';
+      console.warn('[OCR CIN] Mindee failed, fallback Tesseract', {
+        code,
+        error: json.error || text.slice(0, 120),
+        status: res.status,
+      });
+      return null;
+    }
+    console.info('[OCR CIN] Mindee response OK', { recto: !!json.recto, verso: !!json.verso });
+    if (json.recto?.fields) console.info('[OCR CIN] mindee raw', { side: 'recto', fields: json.recto.fields });
+    if (json.verso?.fields) console.info('[OCR CIN] mindee raw', { side: 'verso', fields: json.verso.fields });
+    return json;
+  } catch (err) {
+    if (err?.name === 'AbortError') {
+      console.warn('[OCR CIN] Mindee timeout, fallback Tesseract');
+      return null;
+    }
+    console.warn('[OCR CIN] backend indisponible, fallback Tesseract', err?.message || err);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** Résout le payload Mindee d'un côté (fields prioritaire, sinon raw extrait). */
+function resolveMindeeSidePayload(sideData) {
+  if (!sideData) return null;
+  const fields = sideData.fields;
+  if (fields && typeof fields === 'object' && !Array.isArray(fields) && Object.keys(fields).length > 0) {
+    return fields;
+  }
+  const raw = sideData.raw || sideData;
+  const extracted = extractMindeeFields(raw);
+  if (extracted && Object.keys(extracted).length > 0) return extracted;
+  return null;
+}
+
+function parseMindeeSide(payload, side) {
+  const fields = extractMindeeFields(payload);
+  const mapped = mapMindeeFields(fields, side);
+  return { mapped, fields, source: 'mindee' };
+}
+
+function getMissingTargets(mapped, side) {
+  var m = { ...emptyCINExtract(), ...(mapped || {}) };
+  return {
+    prenom: !String(m.prenom || '').trim(),
+    nom: !String(m.nom || '').trim(),
+    cin: !String(m.numero_cin || '').trim(),
+    dateNaissance: !String(m.date_naissance || '').trim(),
+    adresse: side === 'verso' && !String(m.adresse || '').trim(),
+  };
+}
+
+function targetsNeedOcr(targets) {
+  return targets.prenom || targets.nom || targets.cin || targets.dateNaissance || targets.adresse;
+}
+
+function needsOcrFallback(mapped, side) {
+  var m = { ...emptyCINExtract(), ...(mapped || {}) };
+  if (side === 'recto') {
+    return !identityFieldsComplete(m) || !String(m.date_naissance || '').trim();
+  }
+  return targetsNeedOcr(getMissingTargets(m, side));
+}
+
+function buildTesseractPlan(side, targets) {
+  var plans = [];
+  if (side === 'recto') {
+    if (targets.nom || targets.prenom) plans.push({ crop: NAMES_CROP, label: 'names' });
+    if (targets.dateNaissance) plans.push({ crop: BIRTH_CROP, label: 'birth' });
+    if (targets.cin || targets.nom || targets.prenom || targets.dateNaissance) {
+      plans.push({ crop: CIN_CROP, label: 'card' });
+    }
+    if (!plans.length) plans.push({ crop: CIN_CROP, label: 'card' });
+  } else {
+    if (targets.prenom || targets.nom || targets.cin || targets.dateNaissance) {
+      plans.push({ crop: MRZ_CROP, label: 'mrz' });
+    }
+    if (targets.adresse || targets.prenom || targets.nom || targets.cin || targets.dateNaissance) {
+      plans.push({ crop: null, label: 'full' });
+    }
+    if (!plans.length) plans.push({ crop: MRZ_CROP, label: 'mrz' });
+  }
+  return plans;
+}
+
+async function parseTesseractSide(imageDataUrl, side, seedMapped) {
+  var bestMapped = { ...emptyCINExtract(), ...(seedMapped || {}) };
+  var targets = getMissingTargets(bestMapped, side);
+  if (!targetsNeedOcr(targets)) {
+    return { mapped: bestMapped, fields: null, source: 'none', rawText: '' };
+  }
+
+  var plans = buildTesseractPlan(side, targets);
+  var textParts = [];
+  var bestText = '';
+
+  for (var pi = 0; pi < plans.length; pi++) {
+    targets = getMissingTargets(bestMapped, side);
+    if (!targetsNeedOcr(targets)) break;
+
+    var img;
+    try {
+      img = await prepareOcrImage(imageDataUrl, plans[pi].crop);
+    } catch (_) { continue; }
+
+    var psms = plans[pi].label === 'mrz' ? [6, 11] : [6];
+    for (var psi = 0; psi < psms.length; psi++) {
+      try {
+        var text = await ocrImageText(img, psms[psi]);
+        if (!text || text.length < 4) continue;
+        textParts.push(text);
+        bestText = textParts.join('\n');
+        var passMapped = mapTesseractText(bestText, side);
+        bestMapped = mergeSideExtracts(bestMapped, passMapped, side);
+        targets = getMissingTargets(bestMapped, side);
+        if (!targetsNeedOcr(targets)) break;
+        if (psi === 0 && (targets.prenom || targets.nom) && plans[pi].label === 'mrz') {
+          continue;
+        }
+      } catch (err) {
+        console.warn('[OCR CIN] Tesseract', side, plans[pi].label, psms[psi], err?.message || err);
+      }
+    }
+  }
+
+  if (textParts.length > 1) {
+    var combinedMapped = mapTesseractText(textParts.join('\n'), side);
+    bestMapped = mergeSideExtracts(bestMapped, combinedMapped, side);
+    bestText = textParts.join('\n');
+  }
+
+  return {
+    mapped: bestMapped,
+    fields: null,
+    source: textParts.length ? 'tesseract' : 'none',
+    rawText: bestText,
+  };
+}
+
+async function analyzeSide(imageDataUrl, mindeeSideData, side) {
+  var mindeeMapped = emptyCINExtract();
+  var hasMindee = false;
+
+  const payload = resolveMindeeSidePayload(mindeeSideData);
+  if (payload) {
+    const result = parseMindeeSide(payload, side);
+    console.info('[OCR CIN] mindee raw', { side, fields: result.fields });
+    mindeeMapped = result.mapped;
+    hasMindee = sideHasExtractedData(mindeeMapped, side);
+    if (hasMindee) {
+      console.info('[OCR CIN] mapped result', { side, source: 'mindee', mapped: mindeeMapped });
+    }
+  }
+
+  var tessResult = { mapped: emptyCINExtract(), rawText: '', source: 'none' };
+  // Tesseract uniquement si Mindee n'a rien extrait sur ce côté
+  var runTess = !hasMindee;
+
+  if (runTess) {
+    console.info('[OCR CIN] provider=tesseract', side, '(fallback Mindee indisponible ou vide)');
+    try {
+      var tessInput = imageDataUrl;
+      try { tessInput = await preprocessForOcr(imageDataUrl, side); } catch (_) { /* full frame */ }
+      tessResult = await parseTesseractSide(tessInput, side, emptyCINExtract());
+      if (tessResult.rawText) {
+        console.info('[OCR CIN] raw result', { side, source: 'tesseract', text: tessResult.rawText.slice(0, 300) });
+      }
+    } catch (err) {
+      console.error('[OCR CIN] Tesseract échec', side, err);
+    }
+  } else {
+    console.info('[OCR CIN] Tesseract ignoré', side, '(Mindee suffisant)');
+    tessResult.mapped = mindeeMapped;
+  }
+
+  var merged = hasMindee
+    ? mergeSideExtracts(mindeeMapped, tessResult.mapped, side)
+    : tessResult.mapped;
+
+  var source = 'none';
+  if (hasMindee && tessResult.source === 'tesseract') source = 'mindee+tesseract';
+  else if (hasMindee) source = 'mindee';
+  else if (tessResult.source === 'tesseract') source = 'tesseract';
+
+  console.info('[OCR CIN] mapped result', { side, source, mapped: merged });
+  return { mapped: merged, mindeeMapped, tessMapped: tessResult.mapped, source, rawText: tessResult.rawText || '' };
+}
+
+/**
+ * Analyse CIN recto (+ verso optionnel) → champs formulaire Ouvrier.
+ * @param {string} rectoSource — preview dataUrl ou URL (affichage)
+ * @param {string|null} versoSource
+ * @param {{ rectoFile?: File, versoFile?: File }} [options] — fichiers originaux pour OCR
+ */
+export async function scanCIN(rectoSource, versoSource, options = {}) {
+  const { rectoFile, versoFile, onProgress } = options;
+  const progress = typeof onProgress === 'function' ? onProgress : function() {};
+
+  progress('Préparation des images…');
+  preloadOcrEngine();
+
+  const rectoSide = await prepareSide(rectoSource, rectoFile, 'recto');
+  let versoSide = null;
+  if (versoSource || versoFile) {
+    try {
+      versoSide = await prepareSide(versoSource, versoFile, 'verso');
+    } catch (err) {
+      console.warn('[OCR CIN] verso ignoré', err.message);
+      versoSide = null;
+    }
+  }
+
+  progress('Analyse Mindee…');
+  const mindeePromise = fetchMindeeSides(rectoSide, versoSide);
+  const workerWarmup = getOcrWorker().catch(function() { return null; });
+  const [mindee] = await Promise.all([mindeePromise, workerWarmup]);
+  const hasMindee = Boolean(mindee?.recto || mindee?.verso);
+  console.info('[OCR CIN] provider', hasMindee ? 'mindee' : 'tesseract');
+
+  progress(hasMindee ? 'Extraction Mindee…' : 'Lecture Tesseract (local)…');
+
+  // OCR sur images originales (dataUrl) — pas la version prétraitée seule
+  const rectoOcrSrc = rectoSide.dataUrl;
+  const versoOcrSrc = versoSide?.dataUrl || null;
+
+  const rectoPromise = analyzeSide(rectoOcrSrc, mindee?.recto || null, 'recto');
+  const versoPromise = versoOcrSrc
+    ? analyzeSide(versoOcrSrc, mindee?.verso || null, 'verso')
+    : Promise.resolve({ mapped: emptyCINExtract(), mindeeMapped: emptyCINExtract(), tessMapped: emptyCINExtract(), source: 'none', rawText: '' });
+
+  const [rectoResult, versoResult] = await Promise.all([rectoPromise, versoPromise]);
+
+  progress('Finalisation identité…');
+
+  const rawTexts = [];
+  if (rectoResult.rawText) rawTexts.push(rectoResult.rawText);
+  if (versoResult.rawText) rawTexts.push(versoResult.rawText);
+
+  let baseMerged = mergeCINRectoVerso(rectoResult.mapped, versoResult.mapped);
+
+  const combinedText = rawTexts.join('\n');
+  let merged = resolveCINIdentity({
+    base: baseMerged,
+    extracts: [
+      rectoResult.mindeeMapped,
+      versoResult.mindeeMapped,
+      rectoResult.tessMapped,
+      versoResult.tessMapped,
+      rectoResult.mapped,
+      versoResult.mapped,
+    ],
+    combinedText: rawTexts.join('\n'),
+  });
+
+  console.info('[OCR CIN] identity resolved', { nom: merged.nom, prenom: merged.prenom, cin: merged.numero_cin });
+
+  const provider = hasMindee && (
+    rectoResult.source === 'mindee' || versoResult.source === 'mindee'
+  ) ? 'mindee' : 'tesseract';
+  const formData = mapToWorkerForm({ ...merged, provider });
+
+  console.info('[OCR CIN] final form data', formData);
+
+  const warning = buildOcrWarning(
+    formData,
+    Boolean(rectoResult.mapped?.numero_cin || rectoResult.mapped?.prenom || rectoResult.source),
+    Boolean(versoResult.mapped?.adresse || versoSide),
+  );
+
+  return {
+    ...formData,
+    cin_recto: rectoSide.preview || rectoSide.dataUrl,
+    cin_verso: versoSide ? (versoSide.preview || versoSide.dataUrl) : '',
+    _ocr_source: provider,
+    _ocr_warning: warning,
+    _ocr_partial: Boolean(warning),
+  };
+}
+
+export function isMobileDevice() {
+  if (typeof navigator === 'undefined') return false;
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
+    || (typeof window !== 'undefined' && window.innerWidth <= 768);
+}
+
+export function canUseCamera() {
+  if (typeof navigator === 'undefined') return false;
+  if (typeof window !== 'undefined' && !window.isSecureContext) return false;
+  return !!(navigator.mediaDevices && typeof navigator.mediaDevices.getUserMedia === 'function');
+}
+
+/** Flux caméra arrière HD — à appeler depuis un clic utilisateur (requis iOS Safari). */
+export async function getCINCameraStream() {
+  if (!canUseCamera()) {
+    throw new Error(getCameraBlockedReason());
+  }
+  try {
+    return await navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        facingMode: { exact: 'environment' },
+        width: { ideal: 1920, min: 1280 },
+        height: { ideal: 1080 },
+      },
+    });
+  } catch {
+    return navigator.mediaDevices.getUserMedia({
+      audio: false,
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+      },
+    });
+  }
+}
+
+/** Message si caméra bloquée (HTTP sur iPhone, permissions, etc.) */
+export function getCameraBlockedReason() {
+  if (typeof window === 'undefined') return 'Caméra indisponible.';
+  if (!window.isSecureContext) {
+    return 'Sur iPhone, la caméra custom requiert HTTPS (pas HTTP). Ouvrez l’URL https:// affichée au démarrage du serveur, ou importez depuis la galerie.';
+  }
+  if (!navigator.mediaDevices?.getUserMedia) return 'Caméra non supportée par ce navigateur.';
+  return 'Accès caméra refusé. Autorisez la caméra ou importez depuis la galerie.';
+}
+
+export { mapMindeeFields, mergeCINRectoVerso, mapToWorkerForm, resolveCINIdentity } from './cinOcr';

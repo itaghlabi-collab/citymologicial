@@ -10,7 +10,10 @@ import {
   User, Calendar, MapPin, Clock, AlertTriangle, Archive,
   Phone, Wrench, ClipboardList, ChevronDown
 } from 'lucide-react';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
+import { useSavRequests } from '../../hooks/useSavRequests';
+import { listProjects } from '../../services/projects/projects';
+import { listSavReportsBySavRequestId } from '../../services/projects/savReports';
 
 // ── Shared primitives ───────────────────────────────────────────────────────
 
@@ -141,28 +144,40 @@ const CATEGORIES_SAV = [
 ];
 
 const EMPTY_FORM = {
-  client: '', projet_lie: '', ref_projet: '', contact_client: '',
-  type_sav: '', categorie: '', priorite: 'normale',
+  project_id: '', client_id: '', client: '', projet_lie: '', ref_projet: '', contact_client: '',
+  titre: '', type_sav: '', categorie: '', priorite: 'normale',
   description: '', date_demande: new Date().toISOString().slice(0, 10),
-  localisation: '', technicien: '', departement: '', date_intervention: '',
+  localisation: '', technicien: '', responsable: '', departement: '', date_intervention: '',
   statut: 'nouvelle', observations: '', actions_prevues: '',
 };
 
-function genRefSAV() {
-  return 'SAV-' + new Date().getFullYear() + '-' + String(Math.floor(Math.random() * 900) + 100);
-}
-
 // ── Formulaire SAV ───────────────────────────────────────────────────────────
 
-function FormulaireSAV({ initial, onSave, onCancel }) {
-  const [form, setForm] = useState(initial || EMPTY_FORM);
+function FormulaireSAV({ initial, onSave, onCancel, saving, projects = [] }) {
+  const [form, setForm] = useState(() => ({ ...EMPTY_FORM, ...(initial || {}) }));
   const [errors, setErrors] = useState({});
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
+  function onProjectChange(projectId) {
+    const pr = projects.find(p => String(p.id) === String(projectId));
+    if (!pr) {
+      setForm(p => ({ ...p, project_id: '', ref_projet: '', projet_lie: '' }));
+      return;
+    }
+    setForm(p => ({
+      ...p,
+      project_id: projectId,
+      ref_projet: pr.ref || '',
+      projet_lie: pr.nom || '',
+      client: pr.client || pr.client_nom || p.client,
+      client_id: pr.client_id || p.client_id,
+    }));
+  }
+
   function validate() {
     const e = {};
-    if (!form.client.trim()) e.client = 'Requis';
-    if (!form.description.trim()) e.description = 'Requis';
+    if (!form.client?.trim() && !form.project_id) e.client = 'Client ou projet requis';
+    if (!form.description?.trim()) e.description = 'Requis';
     return e;
   }
 
@@ -184,10 +199,21 @@ function FormulaireSAV({ initial, onSave, onCancel }) {
   return (
     <form onSubmit={handleSubmit}>
       <SectionTitle icon={<User size={12} />}>Informations client</SectionTitle>
-      <FRow>{inp('client', 'text', 'Client', true)}{inp('projet_lie', 'text', 'Projet lié')}</FRow>
+      <FRow>
+        <FField label="Projet lié">
+          <select value={form.project_id} onChange={e => onProjectChange(e.target.value)} style={SELECT_STYLE}>
+            <option value="">— Aucun projet —</option>
+            {projects.map(p => (
+              <option key={p.id} value={p.id}>{p.ref} — {p.nom}</option>
+            ))}
+          </select>
+        </FField>
+        {inp('client', 'text', 'Client', true)}
+      </FRow>
       <FRow>{inp('ref_projet', 'text', 'Référence projet')}{inp('contact_client', 'text', 'Contact client')}</FRow>
 
       <SectionTitle icon={<ClipboardList size={12} />}>Demande SAV</SectionTitle>
+      <FRow>{inp('titre', 'text', 'Titre / Objet')}{inp('responsable', 'text', 'Responsable')}</FRow>
       <FRow>
         <FField label="Type SAV">
           <select value={form.type_sav} onChange={e => set('type_sav', e.target.value)} style={SELECT_STYLE}>
@@ -255,8 +281,8 @@ function FormulaireSAV({ initial, onSave, onCancel }) {
 
       <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
         <button type="button" className="btn btn-secondary" onClick={onCancel}>Annuler</button>
-        <button type="submit" className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Plus size={14} /> {initial ? 'Enregistrer' : 'Créer la demande SAV'}
+        <button type="submit" className="btn btn-primary" disabled={saving} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Plus size={14} /> {saving ? 'Enregistrement...' : (initial?.id ? 'Enregistrer' : 'Créer la demande SAV')}
         </button>
       </div>
     </form>
@@ -267,6 +293,17 @@ function FormulaireSAV({ initial, onSave, onCancel }) {
 
 function DetailSAV({ sav, onBack, onEdit, onAddCR }) {
   const [tab, setTab] = useState('infos');
+  const [crList, setCrList] = useState([]);
+  const [crLoading, setCrLoading] = useState(false);
+
+  useEffect(() => {
+    if (!sav?.id) return;
+    setCrLoading(true);
+    listSavReportsBySavRequestId(sav.id)
+      .then(setCrList)
+      .catch(() => setCrList([]))
+      .finally(() => setCrLoading(false));
+  }, [sav?.id]);
   const tabs = [
     { k: 'infos',       label: 'Informations'     },
     { k: 'interventions', label: 'Interventions'  },
@@ -288,7 +325,7 @@ function DetailSAV({ sav, onBack, onEdit, onAddCR }) {
               <Badge type={sav.statut} />
               <Badge type={sav.priorite} />
             </div>
-            <h1 className="page-title" style={{ marginBottom: 4 }}>{sav.type_sav || 'Demande SAV'}</h1>
+            <h1 className="page-title" style={{ marginBottom: 4 }}>{sav.titre || sav.type_sav || 'Demande SAV'}</h1>
             <p className="page-subtitle">{sav.client}{sav.projet_lie ? ` — ${sav.projet_lie}` : ''}</p>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
@@ -331,7 +368,8 @@ function DetailSAV({ sav, onBack, onEdit, onAddCR }) {
               ['Catégorie', sav.categorie || '—'],
               ['Date demande', sav.date_demande || '—'],
               ['Localisation', sav.localisation || '—'],
-              ['Technicien', sav.technicien || '—'],
+              ['Responsable', sav.responsable || sav.technicien || '—'],
+              ['Titre', sav.titre || '—'],
               ['Département', sav.departement || '—'],
               ['Date intervention', sav.date_intervention || '—'],
             ].map(([lbl, val]) => (
@@ -345,6 +383,12 @@ function DetailSAV({ sav, onBack, onEdit, onAddCR }) {
             <div style={{ marginBottom: 14 }}>
               <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Description du problème</div>
               <p style={{ fontSize: '0.875rem', color: 'var(--text-2)', lineHeight: 1.6, background: 'var(--surface-2)', padding: 12, borderRadius: 8 }}>{sav.description}</p>
+            </div>
+          )}
+          {sav.observations && (
+            <div style={{ marginBottom: 14 }}>
+              <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Observations</div>
+              <p style={{ fontSize: '0.875rem', color: 'var(--text-2)', lineHeight: 1.6 }}>{sav.observations}</p>
             </div>
           )}
           {sav.actions_prevues && (
@@ -385,17 +429,40 @@ function DetailSAV({ sav, onBack, onEdit, onAddCR }) {
               <Plus size={14} /> Nouveau CR
             </button>
           </div>
-          <EmptyState icon={<FileText size={22} />} title="Aucun compte rendu" sub="Créez un compte rendu d'intervention pour ce SAV" />
+          {crLoading ? (
+            <p style={{ fontSize: '0.84rem', color: 'var(--text-3)' }}>Chargement...</p>
+          ) : crList.length === 0 ? (
+            <EmptyState icon={<FileText size={22} />} title="Aucun compte rendu" sub="Créez un compte rendu d'intervention pour ce SAV" />
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {crList.map(c => (
+                <div key={c.id} style={{ padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 8, fontSize: '0.84rem' }}>
+                  <strong style={{ color: 'var(--red)' }}>{c.ref}</strong> — {fmtDateCr(c.date_compte_rendu)} — {c.intervenant || '—'}
+                  {c.resume_intervention && <p style={{ margin: '6px 0 0', color: 'var(--text-2)' }}>{c.resume_intervention}</p>}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </div>
   );
 }
 
+function fmtDateCr(d) {
+  if (!d) return '—';
+  try { return new Date(d).toLocaleDateString('fr-FR'); } catch { return d; }
+}
+
 // ── Module principal SAVModule ───────────────────────────────────────────────
 
 export default function SAVModule({ prefillProjet, onGoCompteRendu }) {
-  const [savList, setSavList] = useState([]);
+  const {
+    records: savList, loading, saving, error, configured, load,
+    create, update, remove, fetchOne, filterSavRequests, generateSavRef,
+  } = useSavRequests();
+
+  const [projects, setProjects] = useState([]);
   const [search, setSearch] = useState('');
   const [filterStatut, setFilterStatut] = useState('');
   const [filterPriorite, setFilterPriorite] = useState('');
@@ -404,40 +471,70 @@ export default function SAVModule({ prefillProjet, onGoCompteRendu }) {
   const [detailSAV, setDetailSAV] = useState(null);
   const [showFilters, setShowFilters] = useState(false);
 
-  // Si on arrive avec un projet pré-rempli, ouvrir le formulaire
-  const [usedPrefill, setUsedPrefill] = useState(false);
-  if (prefillProjet && !usedPrefill) {
-    setUsedPrefill(true);
-    setEditSAV({ ...EMPTY_FORM, projet_lie: prefillProjet.nom, ref_projet: prefillProjet.ref || '', client: prefillProjet.client || '' });
-    setShowModal(true);
-  }
+  useEffect(() => {
+    if (!configured) return;
+    listProjects().then(setProjects).catch(() => {});
+  }, [configured]);
 
-  const handleSave = useCallback((data) => {
-    if (editSAV && editSAV.id) {
-      setSavList(prev => prev.map(s => s.id === editSAV.id ? { ...s, ...data } : s));
-    } else {
-      setSavList(prev => [...prev, { ...data, id: Date.now(), ref: genRefSAV() }]);
+  useEffect(() => {
+    if (!prefillProjet) return;
+    setEditSAV({
+      ...EMPTY_FORM,
+      project_id: prefillProjet.id || '',
+      projet_lie: prefillProjet.nom || '',
+      ref_projet: prefillProjet.ref || '',
+      client: prefillProjet.client || prefillProjet.client_nom || '',
+      client_id: prefillProjet.client_id || '',
+    });
+    setShowModal(true);
+  }, [prefillProjet]);
+
+  const handleSave = useCallback(async (data) => {
+    const payload = editSAV?.id
+      ? { ...data, id: editSAV.id, ref: editSAV.ref }
+      : { ...data, ref: data.ref || await generateSavRef().catch(() => '') };
+    const result = editSAV?.id ? await update(editSAV.id, payload) : await create(payload);
+    if (!result.success) {
+      alert(result.error || 'Erreur enregistrement.');
+      return;
     }
     setShowModal(false);
     setEditSAV(null);
-  }, [editSAV]);
+  }, [editSAV, create, update, generateSavRef]);
 
-  const handleDelete = useCallback((id) => {
-    if (window.confirm('Confirmer la suppression de cette demande SAV ?')) {
-      setSavList(prev => prev.filter(s => s.id !== id));
+  const handleDelete = useCallback(async (id) => {
+    if (!window.confirm('Confirmer la suppression de cette demande SAV ?')) return;
+    const result = await remove(id);
+    if (!result.success) alert(result.error || 'Erreur suppression.');
+  }, [remove]);
+
+  const openDetail = useCallback(async (s) => {
+    try {
+      const full = await fetchOne(s.id);
+      setDetailSAV(full);
+    } catch (err) {
+      alert(err.message || 'Impossible de charger le SAV.');
     }
-  }, []);
+  }, [fetchOne]);
 
-  const filtered = savList.filter(s => {
-    const q = search.toLowerCase();
-    const matchQ = !q || s.client.toLowerCase().includes(q) || s.ref.toLowerCase().includes(q) || (s.projet_lie || '').toLowerCase().includes(q);
-    const matchS = !filterStatut || s.statut === filterStatut;
-    const matchP = !filterPriorite || s.priorite === filterPriorite;
-    return matchQ && matchS && matchP;
+  const openEdit = useCallback(async (s) => {
+    try {
+      const full = await fetchOne(s.id);
+      setEditSAV(full);
+      setShowModal(true);
+    } catch (err) {
+      alert(err.message || 'Impossible de charger le SAV.');
+    }
+  }, [fetchOne]);
+
+  const filtered = filterSavRequests(savList, {
+    search,
+    statut: filterStatut,
+    priorite: filterPriorite,
   });
 
   // KPIs
-  const ouvertes  = savList.filter(s => ['nouvelle', 'en_attente', 'planifiee', 'en_cours'].includes(s.statut)).length;
+  const ouvertes = savList.filter(s => ['nouvelle', 'en_attente', 'planifiee', 'en_cours'].includes(s.statut)).length;
   const urgentes  = savList.filter(s => ['urgente', 'critique'].includes(s.priorite)).length;
   const terminees = savList.filter(s => s.statut === 'terminee').length;
   const attente   = savList.filter(s => s.statut === 'en_attente').length;
@@ -445,13 +542,11 @@ export default function SAVModule({ prefillProjet, onGoCompteRendu }) {
 
   // Détail SAV
   if (detailSAV) {
-    const s = savList.find(x => x.id === detailSAV);
-    if (!s) { setDetailSAV(null); return null; }
     return (
       <DetailSAV
-        sav={s}
+        sav={detailSAV}
         onBack={() => setDetailSAV(null)}
-        onEdit={() => { setEditSAV(s); setShowModal(true); setDetailSAV(null); }}
+        onEdit={() => { openEdit(detailSAV); setDetailSAV(null); }}
         onAddCR={onGoCompteRendu}
       />
     );
@@ -459,6 +554,17 @@ export default function SAVModule({ prefillProjet, onGoCompteRendu }) {
 
   return (
     <div className="animate-fade-in">
+      {!configured && (
+        <div style={{ background: '#FFF8E1', color: '#E65100', borderRadius: 8, padding: '10px 14px', fontSize: '0.85rem', marginBottom: 16 }}>
+          Supabase non configuré — exécutez le SQL SAV puis rechargez.
+        </div>
+      )}
+      {error && (
+        <div style={{ background: '#FFEBEE', color: 'var(--red)', borderRadius: 8, padding: '10px 14px', fontSize: '0.85rem', marginBottom: 16, display: 'flex', gap: 8, alignItems: 'center' }}>
+          <AlertCircle size={15} /> {error}
+          <button type="button" className="btn btn-ghost btn-sm" onClick={load} style={{ marginLeft: 'auto' }}>Réessayer</button>
+        </div>
+      )}
       {/* Header */}
       <div className="page-header flex-between" style={{ flexWrap: 'wrap', gap: 10 }}>
         <div>
@@ -466,7 +572,10 @@ export default function SAVModule({ prefillProjet, onGoCompteRendu }) {
           <p className="page-subtitle">Gestion des demandes SAV clients et interventions.</p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button className="btn btn-ghost btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => setShowFilters(f => !f)}>
+          <button type="button" className="btn btn-ghost btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={load} title="Actualiser">
+            <RefreshCw size={14} />
+          </button>
+          <button type="button" className="btn btn-ghost btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => setShowFilters(f => !f)}>
             <Filter size={14} /> Filtres
           </button>
           <button className="btn btn-secondary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -520,7 +629,9 @@ export default function SAVModule({ prefillProjet, onGoCompteRendu }) {
 
       {/* Tableau */}
       <div className="card" style={{ padding: 0 }}>
-        {filtered.length === 0 ? (
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: 48, color: 'var(--text-3)' }}>Chargement SAV...</div>
+        ) : filtered.length === 0 ? (
           <EmptyState icon={<MessageSquare size={24} />} title="Aucune demande SAV" sub="Créez votre première demande de service après-vente" action="Nouvelle demande SAV" onAction={() => { setEditSAV(null); setShowModal(true); }} />
         ) : (
           <div className="table-wrap">
@@ -530,10 +641,11 @@ export default function SAVModule({ prefillProjet, onGoCompteRendu }) {
                   <th>Réf. SAV</th>
                   <th>Client</th>
                   <th>Projet</th>
+                  <th>Titre</th>
                   <th>Type</th>
                   <th>Priorité</th>
                   <th>Date demande</th>
-                  <th>Intervenant</th>
+                  <th>Responsable</th>
                   <th>Statut</th>
                   <th>Actions</th>
                 </tr>
@@ -544,15 +656,16 @@ export default function SAVModule({ prefillProjet, onGoCompteRendu }) {
                     <td style={{ fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--red)', whiteSpace: 'nowrap' }}>{s.ref}</td>
                     <td style={{ fontWeight: 600 }}>{s.client}</td>
                     <td>{s.projet_lie || '—'}</td>
+                    <td>{s.titre || '—'}</td>
                     <td>{s.type_sav || '—'}</td>
                     <td><Badge type={s.priorite} /></td>
                     <td style={{ whiteSpace: 'nowrap' }}>{s.date_demande || '—'}</td>
-                    <td>{s.technicien || '—'}</td>
+                    <td>{s.responsable || s.technicien || '—'}</td>
                     <td><Badge type={s.statut} /></td>
                     <td>
                       <div style={{ display: 'flex', gap: 4 }}>
-                        <button className="btn btn-secondary btn-sm" title="Voir" onClick={() => setDetailSAV(s.id)}><Eye size={13} /></button>
-                        <button className="btn btn-ghost btn-sm" title="Modifier" onClick={() => { setEditSAV(s); setShowModal(true); }}><Edit2 size={13} /></button>
+                        <button type="button" className="btn btn-secondary btn-sm" title="Voir" onClick={() => openDetail(s)}><Eye size={13} /></button>
+                        <button type="button" className="btn btn-ghost btn-sm" title="Modifier" onClick={() => openEdit(s)}><Edit2 size={13} /></button>
                         <button className="btn btn-ghost btn-sm" title="Compte rendu" onClick={() => onGoCompteRendu && onGoCompteRendu(s)} style={{ color: 'var(--text-3)' }}><FileText size={13} /></button>
                         <button className="btn btn-ghost btn-sm" title="Supprimer" onClick={() => handleDelete(s.id)} style={{ color: 'var(--red)' }}><Trash2 size={13} /></button>
                       </div>
@@ -567,7 +680,7 @@ export default function SAVModule({ prefillProjet, onGoCompteRendu }) {
 
       {/* Modal formulaire */}
       <Modal open={showModal} onClose={() => { setShowModal(false); setEditSAV(null); }} title={editSAV && editSAV.id ? 'Modifier la demande SAV' : 'Nouvelle demande SAV'} width={760}>
-        <FormulaireSAV initial={editSAV} onSave={handleSave} onCancel={() => { setShowModal(false); setEditSAV(null); }} />
+        <FormulaireSAV initial={editSAV} onSave={handleSave} onCancel={() => { setShowModal(false); setEditSAV(null); }} saving={saving} projects={projects} />
       </Modal>
     </div>
   );

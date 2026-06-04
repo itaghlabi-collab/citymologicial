@@ -84,8 +84,8 @@ app.use('/api/propositions',       requireAuth, propositionsRouter);
 app.use('/api/notifications',      requireAuth, notificationsRouter);
 app.use('/api/dashboard',          requireAuth, dashboardRouter);
 
-// ── OCR module (JWT protected) ────────────────────────────────────────────────
-app.use('/api/ocr', requireAuth, ocrRouter);
+// ── OCR module (CORS — clé Mindee côté serveur uniquement) ───────────────────
+app.use('/api/ocr', ocrRouter);
 
 // ── Legacy / existing module endpoints (HR, Finance, Stock, etc.) ─────────────
 // Must be mounted AFTER specific routes to avoid prefix conflicts

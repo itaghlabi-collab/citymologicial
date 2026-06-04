@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef } from 'react';
-import { Megaphone, Plus, Edit2, Trash2, XCircle, TrendingUp, DollarSign, CheckCircle, Clock } from 'lucide-react';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { Megaphone, Plus, Edit2, Trash2, XCircle, TrendingUp, DollarSign, CheckCircle, Clock, Loader2 } from 'lucide-react';
 
 function EmptyState({ icon, title, sub }) {
   return (
@@ -12,7 +12,7 @@ function EmptyState({ icon, title, sub }) {
     </div>
   );
 }
-import { getActionsMarketing, createActionMarketing, updateActionMarketing, deleteActionMarketing } from '../../services/api';
+import { useActionsMarketing } from '../../hooks/useActionsMarketing';
 
 const TYPES = ['Publicite', 'SEA', 'SEO', 'Evenementiel', 'Email', 'Print', 'Reseaux sociaux', 'Autre'];
 const PRIORITES = ['haute', 'normale', 'basse'];
@@ -46,22 +46,30 @@ function fmtBudget(v) {
 }
 
 export default function ActionsMarketing() {
-  const [actions, setActions] = useState([]);
+  const {
+    records: actions,
+    loading,
+    saving,
+    error,
+    configured,
+    load,
+    create,
+    update,
+    remove,
+    filterActionsMarketing,
+    computeActionsMarketingStats,
+  } = useActionsMarketing();
+
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(EMPTY);
   const [errors, setErrors] = useState({});
-  const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState('');
   const [filterStatut, setFilterStatut] = useState('');
   const [filterType, setFilterType] = useState('');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const PER_PAGE = 8;
-
-  useEffect(() => {
-    getActionsMarketing().then(d => { if (d && d.length) setActions(d); }).catch(() => {});
-  }, []);
 
   function openCreate() {
     setEditing(null);
@@ -86,44 +94,37 @@ export default function ActionsMarketing() {
   async function handleSave() {
     const e = validate();
     if (Object.keys(e).length) { setErrors(e); return; }
-    setSaving(true);
     const payload = { ...form, budget: Number(form.budget) || 0 };
-    try {
-      if (editing) {
-        await updateActionMarketing(editing.id, payload).catch(() => null);
-        setActions(prev => prev.map(a => a.id === editing.id ? { ...a, ...payload } : a));
-        setToast('Action mise a jour.');
-      } else {
-        const created = await createActionMarketing(payload).catch(() => null);
-        setActions(prev => [...prev, { id: created?.id || Date.now(), ...payload }]);
-        setToast('Action creee avec succes.');
-      }
-    } catch (_) {}
-    setSaving(false);
+    const result = editing
+      ? await update(editing.id, payload)
+      : await create(payload);
+    if (!result.success) {
+      setToast(result.error || 'Erreur enregistrement.');
+      return;
+    }
+    setToast(editing ? 'Action mise a jour.' : 'Action creee avec succes.');
     setShowModal(false);
   }
 
   async function handleDelete(a) {
     if (!window.confirm('Supprimer cette action marketing ?')) return;
-    try { await deleteActionMarketing(a.id); } catch (_) {}
-    setActions(prev => prev.filter(x => x.id !== a.id));
-    setToast('Action supprimee.');
+    const result = await remove(a.id);
+    setToast(result.success ? 'Action supprimee.' : (result.error || 'Erreur suppression.'));
   }
 
-  const filtered = actions.filter(a => {
-    if (filterStatut && a.statut !== filterStatut) return false;
-    if (filterType && a.type !== filterType) return false;
-    if (search && !`${a.titre} ${a.canal}`.toLowerCase().includes(search.toLowerCase())) return false;
-    return true;
-  });
+  const filtered = useMemo(
+    () => filterActionsMarketing(actions, {
+      search,
+      statut: filterStatut,
+      type: filterType,
+    }),
+    [actions, search, filterStatut, filterType, filterActionsMarketing],
+  );
 
   const totalPages = Math.ceil(filtered.length / PER_PAGE);
   const paged = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
 
-  const totalBudget = actions.reduce((s, a) => s + (Number(a.budget) || 0), 0);
-  const nbEnCours = actions.filter(a => a.statut === 'en_cours').length;
-  const nbValide = actions.filter(a => a.statut === 'valide').length;
-  const nbTermine = actions.filter(a => a.statut === 'termine').length;
+  const stats = useMemo(() => computeActionsMarketingStats(actions), [actions, computeActionsMarketingStats]);
 
   return (
     <div className="animate-fade-in">
@@ -132,15 +133,36 @@ export default function ActionsMarketing() {
           <h1 className="page-title">Actions Marketing</h1>
           <p className="page-subtitle">Campagnes, budget et suivi des actions marketing</p>
         </div>
-        <button className="btn btn-primary" onClick={openCreate}><Plus size={15} /> Nouvelle action</button>
+        <button className="btn btn-primary" onClick={openCreate} disabled={loading || saving || !configured}><Plus size={15} /> Nouvelle action</button>
       </div>
 
+      {!configured && (
+        <div style={{ background: '#FFF3E0', border: '1px solid #FFB74D', borderRadius: 'var(--radius)', padding: '10px 16px', marginBottom: 16, fontSize: '0.85rem', color: '#E65100' }}>
+          Supabase non configuré — ajoutez VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY dans .env
+        </div>
+      )}
+
+      {error && !loading && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, background: '#FFEBEE', border: '1px solid #EF9A9A', borderRadius: 'var(--radius)', padding: '10px 16px', marginBottom: 16, fontSize: '0.85rem', color: '#C62828' }}>
+          <span>{error}</span>
+          <button className="btn btn-ghost btn-sm" onClick={load}>Réessayer</button>
+        </div>
+      )}
+
+      {loading && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '24px 0', color: 'var(--text-3)', fontSize: '0.875rem' }}>
+          <Loader2 size={18} className="spin" /> Chargement des actions marketing...
+        </div>
+      )}
+
+      {!loading && (
+      <>
       {/* Stats */}
       <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }}>
-        <div className="stat-card"><div className="stat-icon"><Megaphone size={18} /></div><div className="stat-body"><div className="stat-value">{actions.length}</div><div className="stat-label">Total actions</div></div></div>
-        <div className="stat-card"><div className="stat-icon blue"><Clock size={18} /></div><div className="stat-body"><div className="stat-value">{nbEnCours}</div><div className="stat-label">En cours</div></div></div>
-        <div className="stat-card"><div className="stat-icon green"><CheckCircle size={18} /></div><div className="stat-body"><div className="stat-value">{nbValide + nbTermine}</div><div className="stat-label">Valides / Termines</div></div></div>
-        <div className="stat-card"><div className="stat-icon orange"><DollarSign size={18} /></div><div className="stat-body"><div className="stat-value">{(totalBudget / 1000).toFixed(0)}K</div><div className="stat-label">Budget total (MAD)</div></div></div>
+        <div className="stat-card"><div className="stat-icon"><Megaphone size={18} /></div><div className="stat-body"><div className="stat-value">{stats.total}</div><div className="stat-label">Total actions</div></div></div>
+        <div className="stat-card"><div className="stat-icon blue"><Clock size={18} /></div><div className="stat-body"><div className="stat-value">{stats.enCours}</div><div className="stat-label">En cours</div></div></div>
+        <div className="stat-card"><div className="stat-icon green"><CheckCircle size={18} /></div><div className="stat-body"><div className="stat-value">{stats.validesTermines}</div><div className="stat-label">Valides / Termines</div></div></div>
+        <div className="stat-card"><div className="stat-icon orange"><DollarSign size={18} /></div><div className="stat-body"><div className="stat-value">{(stats.totalBudget / 1000).toFixed(0)}K</div><div className="stat-label">Budget total (MAD)</div></div></div>
       </div>
 
       {/* Filters */}
@@ -215,6 +237,8 @@ export default function ActionsMarketing() {
           </div>
         )}
       </div>
+      </>
+      )}
 
       {/* Modal */}
       {showModal && (

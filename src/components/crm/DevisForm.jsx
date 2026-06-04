@@ -1,9 +1,13 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect } from 'react';
 import {
   ChevronLeft, Plus, Trash2, Copy, AlertCircle,
-  User, FileText, Package, ChevronDown, ChevronUp, GripVertical, X
+  FileText, Package, ChevronDown, ChevronUp, GripVertical, X, Download
 } from 'lucide-react';
-import { getClients, getArticles, getCategories } from '../../services/api';
+import { listClients } from '../../services/crm/clients';
+import { listArticles } from '../../services/crm/articles';
+import { listCategories } from '../../services/crm/categories';
+import { generateCrmDevisReference } from '../../services/crm/crmDevis';
+import { generateDevisPdf } from '../../services/crm/devisPdf';
 import { TYPE_PROJET_VALUES, TYPE_PROJET_LABEL } from '../../constants/commercial';
 
 /* ── Helpers ── */
@@ -51,7 +55,6 @@ const UNITES = ['unite', 'm2', 'ml', 'm3', 'm', 'forfait', 'heure', 'jour', 'pac
 const TVA_TAUX = [0, 7, 10, 14, 20];
 const STATUTS = ['brouillon', 'envoye', 'valide', 'refuse', 'expire', 'en_attente'];
 const STATUT_LABEL = { brouillon: 'Brouillon', envoye: 'Envoye', valide: 'Valide', refuse: 'Refuse', expire: 'Expire', en_attente: 'En attente' };
-const COMMERCIAUX = ['Ahmed Bennani', 'Sara Idrissi', 'Youssef Alami', 'Nadia Tazi', 'Karim Fassi'];
 const MODALITES = ['30 jours net', '60 jours net', 'Comptant', 'A la commande', '50% avance / 50% livraison', 'Sur devis'];
 
 function genRef() {
@@ -219,7 +222,7 @@ function LigneRow({ ligne, idx, categories, articles, onChange, onDelete, onDupl
 /* ════════════════════════════════════════════════
    DEVIS FORM — MAIN COMPONENT
    ════════════════════════════════════════════════ */
-export default function DevisForm({ devis, onBack, onSaved }) {
+export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
   const isEdit = !!devis;
   const [form, setForm] = useState(() => devis ? {
     ...EMPTY_DEVIS, ...devis,
@@ -230,17 +233,23 @@ export default function DevisForm({ devis, onBack, onSaved }) {
   const [articles, setArticles] = useState([]);
   const [categories, setCategories] = useState([]);
   const [errors, setErrors] = useState({});
-  const [saving, setSaving] = useState(false);
+  const [savingLocal, setSavingLocal] = useState(false);
   const [apiError, setApiError] = useState('');
+  const isSaving = saving || savingLocal;
 
   /* Load reference data */
   useEffect(() => {
-    Promise.all([getClients(), getArticles(), getCategories()]).then(([cl, ar, ca]) => {
-      setClients(Array.isArray(cl) ? cl : []);
-      setArticles(Array.isArray(ar) ? ar : (ar?.data ?? []));
-      setCategories(Array.isArray(ca) ? ca : (ca?.data ?? []));
+    Promise.all([listClients(), listArticles(), listCategories()]).then(([cl, ar, ca]) => {
+      setClients(cl || []);
+      setArticles(ar || []);
+      setCategories(ca || []);
     }).catch(() => {});
-  }, []);
+    if (!isEdit) {
+      generateCrmDevisReference()
+        .then((ref) => setForm(p => ({ ...p, reference: ref })))
+        .catch(() => {});
+    }
+  }, [isEdit]);
 
   function setField(k, v) { setForm(p => ({ ...p, [k]: v })); }
 
@@ -289,21 +298,41 @@ export default function DevisForm({ devis, onBack, onSaved }) {
     setApiError('');
     const errs = validate();
     if (Object.keys(errs).length) { setErrors(errs); return; }
-    setSaving(true);
+    setSavingLocal(true);
     try {
       const payload = {
         ...form,
         total_ht: totalHT,
         total_tva: totalTVA,
         total_ttc: totalTTC,
-        updated_at: new Date().toISOString(),
+        lignes: form.lignes,
       };
-      /* Try API — fall back to local */
-      onSaved(payload, isEdit);
+      const result = await onSaved(payload, isEdit);
+      if (result && result.success === false) {
+        setApiError(result.error || "Erreur lors de l'enregistrement.");
+      }
     } catch (err) {
       setApiError(err.message || "Erreur lors de l'enregistrement.");
     } finally {
-      setSaving(false);
+      setSavingLocal(false);
+    }
+  }
+
+  async function handlePdf() {
+    if (!isEdit || !devis?.id) return;
+    try {
+      const catMap = Object.fromEntries(categories.map(c => [String(c.id), c.nom]));
+      await generateDevisPdf({
+        ...form,
+        id: devis.id,
+        client: selectedClient,
+        client_nom: selectedClient ? [selectedClient.prenom, selectedClient.nom].filter(Boolean).join(' ') || selectedClient.nom : '',
+        total_ht: totalHT,
+        total_tva: totalTVA,
+        total_ttc: totalTTC,
+      }, catMap);
+    } catch (err) {
+      setApiError(err.message || 'Erreur generation PDF.');
     }
   }
 
@@ -325,8 +354,8 @@ export default function DevisForm({ devis, onBack, onSaved }) {
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button type="button" className="btn btn-ghost" onClick={onBack}>Annuler</button>
-            <button type="submit" className="btn btn-primary" disabled={saving} style={{ minWidth: 130 }}>
-              {saving ? <Spinner /> : <><FileText size={14} /> {isEdit ? 'Enregistrer' : 'Creer devis'}</>}
+            <button type="submit" className="btn btn-primary" disabled={isSaving} style={{ minWidth: 130 }}>
+              {isSaving ? <Spinner /> : <><FileText size={14} /> {isEdit ? 'Enregistrer' : 'Creer devis'}</>}
             </button>
           </div>
         </div>
@@ -372,10 +401,7 @@ export default function DevisForm({ devis, onBack, onSaved }) {
                 </div>
                 <div className="form-group">
                   <Label>Commercial</Label>
-                  <select value={form.commercial} onChange={e => setField('commercial', e.target.value)} style={IS(false)}>
-                    <option value="">Choisir...</option>
-                    {COMMERCIAUX.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
+                  <input type="text" value={form.commercial} onChange={e => setField('commercial', e.target.value)} placeholder="Nom du commercial" style={IS(false)} />
                 </div>
                 <div className="form-group">
                   <Label>Type de projet</Label>
@@ -548,9 +574,14 @@ export default function DevisForm({ devis, onBack, onSaved }) {
             <div className="card" style={{ padding: '16px 18px' }}>
               <SectionTitle>Actions</SectionTitle>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <button type="submit" className="btn btn-primary" disabled={saving} style={{ justifyContent: 'center' }}>
-                  {saving ? <Spinner /> : <><FileText size={14} /> {isEdit ? 'Enregistrer' : 'Creer le devis'}</>}
+                <button type="submit" className="btn btn-primary" disabled={isSaving} style={{ justifyContent: 'center' }}>
+                  {isSaving ? <Spinner /> : <><FileText size={14} /> {isEdit ? 'Enregistrer' : 'Creer le devis'}</>}
                 </button>
+                {isEdit && (
+                  <button type="button" className="btn btn-ghost" onClick={handlePdf} style={{ justifyContent: 'center', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Download size={14} /> Telecharger PDF
+                  </button>
+                )}
                 <button type="button" className="btn btn-ghost" onClick={onBack} style={{ justifyContent: 'center' }}>
                   Annuler
                 </button>

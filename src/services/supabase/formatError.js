@@ -8,13 +8,90 @@ export function formatSupabaseError(error, fallback = 'Une erreur est survenue.'
   const code = error.code;
   const message = error.message || fallback;
 
-  if (code === '23505') return 'Cet enregistrement existe déjà (contrainte unique).';
+  if (code === '23505') {
+    if (message.includes('clients')) return 'Ce client existe déjà (nom ou ICE en doublon).';
+    if (message.includes('articles')) return 'Un article avec ce nom existe déjà.';
+    if (message.includes('categories')) return 'Une catégorie avec ce nom ou slug existe déjà.';
+    if (message.includes('crm_devis')) return 'Ce numéro de devis existe déjà.';
+    if (message.includes('crm_factures')) return 'Ce numéro de facture existe déjà.';
+    return 'Cet enregistrement existe déjà (contrainte unique).';
+  }
   if (code === '42501') return 'Accès refusé. Connectez-vous avec un compte Supabase valide.';
   if (code === '42703' || message.includes('created_by')) {
     return 'Schéma congés incomplet — exécutez supabase/migrations/20260525200000_leaves_rls_super_admin.sql';
   }
+  if (code === '42P01' || message.includes('attendance')) {
+    return 'Table présence absente — exécutez supabase/RUN_PRESENCE_COMPLET.sql dans Supabase (SQL Editor).';
+  }
+  if (code === '42P01' || message.includes('workers')) {
+    return 'Table ouvriers absente — exécutez supabase/migrations/20260525300000_workers_schema.sql';
+  }
+  if (message.includes('attendance_statut_check') || message.includes('demi_journee')) {
+    return 'Statuts présence incomplets — exécutez supabase/RUN_ATTENDANCE_NOW.sql dans Supabase (SQL Editor).';
+  }
+  if (message.includes('chef_chantier') || message.includes('attendance_chef_chantier')) {
+    return 'Colonne chef de chantier absente — exécutez supabase/RUN_ATTENDANCE_NOW.sql dans Supabase (SQL Editor).';
+  }
+  if (code === '42P01' || message.includes('overtime')) {
+    return 'Table heures sup. absente — exécutez supabase/migrations/20260525500000_overtime_workers.sql';
+  }
+  if (code === '42P01' || message.includes('payroll')) {
+    return 'Table paiement absente — exécutez supabase/migrations/20260525000000_rh_schema.sql puis 20260525600000_payroll_workers_extend.sql';
+  }
+  if (message.includes('payroll_statut_check') || message.includes('jours_travailles')) {
+    return 'Schéma paiement ouvriers incomplet — exécutez supabase/migrations/20260525600000_payroll_workers_extend.sql';
+  }
+  if (code === '42P01' || message.includes('prospects')) {
+    return 'Table prospects absente — exécutez supabase/migrations/20260525700000_prospects.sql';
+  }
+  if (code === '42P01' || message.includes('devis')) {
+    return 'Table devis absente — exécutez supabase/migrations/20260525800000_devis.sql';
+  }
+  if (code === '42P01' || message.includes('planning_commercial')) {
+    return 'Table planning absente — exécutez supabase/migrations/20260525900000_planning_commercial.sql';
+  }
+  if (code === '42P01' || message.includes('actions_marketing')) {
+    return 'Table actions marketing absente — exécutez supabase/migrations/20260525910000_actions_marketing.sql';
+  }
+  if (code === '42P01' || message.includes('comptes_rendus')) {
+    return 'Table comptes rendus absente — exécutez supabase/migrations/20260525920000_comptes_rendus.sql';
+  }
+  if (code === '42P01' || (message.includes('depenses') && !message.includes('expenses'))) {
+    return 'Table depenses absente — exécutez supabase/migrations/20260525930000_depenses.sql';
+  }
+  if (code === '42P01' || message.includes('propositions_marketing')) {
+    return 'Table propositions absente — exécutez supabase/migrations/20260525940000_propositions_marketing.sql puis 20260525940100_propositions_marketing_fields.sql';
+  }
+  if (code === '42P01' || (message.includes('clients') && !message.includes('prospects'))) {
+    return 'Table clients absente — exécutez supabase/migrations/20260526000000_clients.sql';
+  }
+  if (code === '42P01' || message.includes('articles')) {
+    return 'Table articles absente — exécutez supabase/migrations/20260526020000_articles.sql';
+  }
+  if (code === '42P01' || message.includes('categories')) {
+    return 'Table categories absente — exécutez supabase/migrations/20260526010000_categories.sql';
+  }
+  if (code === '42P01' || message.includes('crm_devis')) {
+    return 'Tables devis CRM absentes — exécutez supabase/migrations/20260526030000_crm_devis.sql';
+  }
+  if (code === '42P01' || message.includes('crm_factures')) {
+    return 'Tables factures CRM absentes — exécutez supabase/migrations/20260526040000_factures.sql';
+  }
   if (code === 'PGRST301' || message.includes('JWT')) {
     return 'Session expirée. Veuillez vous reconnecter.';
+  }
+  if (code === 'AUTH' || message.includes('Session requise')) {
+    return 'Session requise. Veuillez vous connecter.';
+  }
+  if (code === '42P01' || message.includes('internal_tasks')) {
+    return 'Table taches absente — exécutez supabase/migrations/20260526100000_internal_tasks.sql';
+  }
+  if (code === '42P01' || message.includes('internal_appointments')) {
+    return 'Table rendez-vous absente — exécutez supabase/migrations/20260526110000_internal_appointments.sql';
+  }
+  if (code === 'VALIDATION') return message;
+  if (message.includes('"type"') && message.includes('crm_factures')) {
+    return 'Colonnes acompte absentes — exécutez supabase/migrations/20260526041000_crm_factures_acompte.sql';
   }
 
   return message;

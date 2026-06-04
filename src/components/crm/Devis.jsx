@@ -1,11 +1,13 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useRef } from 'react';
 import {
   Plus, Search, Filter, Eye, Edit2, Copy, Trash2,
   FileText, Send, CheckCircle, TrendingUp, Clock,
   XCircle, AlertCircle, ChevronLeft, ChevronRight,
   RefreshCw, ArrowUpDown, MoreHorizontal, Download
 } from 'lucide-react';
-import { getDevis, deleteDevis, createDevis, updateDevis } from '../../services/api';
+import { useCrmDevis } from '../../hooks/useCrmDevis';
+import { listCategories } from '../../services/crm/categories';
+import { generateDevisPdf } from '../../services/crm/devisPdf';
 import DevisForm from './DevisForm';
 
 /* ── Helpers ── */
@@ -101,12 +103,25 @@ const PER_PAGE = 15;
    DEVIS LIST — MAIN COMPONENT
    ════════════════════════════════════════════════ */
 export default function Devis() {
-  const [view, setView] = useState('list'); // 'list' | 'form'
-  const [editingDevis, setEditingDevis] = useState(null);
+  const {
+    records: devis,
+    loading,
+    saving,
+    error,
+    configured,
+    load,
+    create,
+    update,
+    remove,
+    duplicate,
+    fetchOne,
+    filterCrmDevis,
+    computeCrmDevisStats,
+  } = useCrmDevis();
 
-  const [devis, setDevis] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [loadError, setLoadError] = useState('');
+  const [view, setView] = useState('list');
+  const [editingDevis, setEditingDevis] = useState(null);
+  const [pdfLoadingId, setPdfLoadingId] = useState(null);
 
   /* Filters */
   const [search, setSearch] = useState('');
@@ -125,38 +140,13 @@ export default function Devis() {
     toastTimer.current = setTimeout(() => setToast(null), 3500);
   }
 
-  /* Load */
-  const load = useCallback(async () => {
-    setLoading(true);
-    setLoadError('');
-    try {
-      const data = await getDevis();
-      setDevis(Array.isArray(data) ? data : (data?.data ?? []));
-    } catch (err) {
-      setLoadError(err.message || 'Impossible de charger les devis.');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
+  /* Load handled by hook */
 
   /* Derived lists */
   const commerciaux = [...new Set(devis.map(d => d.commercial).filter(Boolean))];
 
   /* Filter + sort */
-  const filtered = devis.filter(d => {
-    const clientNom = d.client_nom || d.client?.nom || '';
-    const q = search.toLowerCase();
-    const matchSearch = !q
-      || (d.reference || '').toLowerCase().includes(q)
-      || (d.titre || '').toLowerCase().includes(q)
-      || clientNom.toLowerCase().includes(q)
-      || (d.commercial || '').toLowerCase().includes(q);
-    const matchStatut = !filterStatut || d.statut === filterStatut;
-    const matchCom = !filterCommercial || d.commercial === filterCommercial;
-    return matchSearch && matchStatut && matchCom;
-  }).sort((a, b) => {
+  const filtered = filterCrmDevis(devis, { search, statut: filterStatut, commercial: filterCommercial }).sort((a, b) => {
     let va = a[sortField] ?? '';
     let vb = b[sortField] ?? '';
     if (sortField === 'total_ttc' || sortField === 'total_ht') { va = Number(va); vb = Number(vb); }
@@ -176,64 +166,60 @@ export default function Devis() {
   }
 
   /* KPIs */
-  const totalMontant   = devis.reduce((s, d) => s + Number(d.total_ttc || 0), 0);
-  const nValides       = devis.filter(d => d.statut === 'valide').length;
-  const nEnAttente     = devis.filter(d => d.statut === 'en_attente' || d.statut === 'envoye').length;
-  const nRefuses       = devis.filter(d => d.statut === 'refuse' || d.statut === 'expire').length;
-  const montantValides = devis.filter(d => d.statut === 'valide').reduce((s, d) => s + Number(d.total_ttc || 0), 0);
-  const montantAttente = devis.filter(d => d.statut === 'en_attente' || d.statut === 'envoye').reduce((s, d) => s + Number(d.total_ttc || 0), 0);
+  const kpi = computeCrmDevisStats(devis);
+  const totalMontant   = kpi.montantTotal;
+  const nValides       = kpi.valides;
+  const nEnAttente     = kpi.enAttente;
+  const nRefuses       = kpi.refuses;
+  const montantValides = kpi.montantValides;
+  const montantAttente = kpi.montantAttente;
 
   /* Handlers */
   function openCreate() { setEditingDevis(null); setView('form'); }
-  function openEdit(d)   { setEditingDevis(d);   setView('form'); }
+  async function openEdit(d) {
+    try {
+      const full = await fetchOne(d.id);
+      setEditingDevis(full);
+      setView('form');
+    } catch (err) {
+      showToast(err.message || 'Impossible de charger le devis.', 'error');
+    }
+  }
   function backToList()  { setView('list'); setEditingDevis(null); }
 
   async function handleSaved(payload, isEdit) {
-    try {
-      if (isEdit && payload.id) {
-        await updateDevis(payload.id, payload);
-        setDevis(prev => prev.map(d => String(d.id) === String(payload.id) ? { ...d, ...payload } : d));
-      } else {
-        const created = await createDevis(payload);
-        setDevis(prev => [created?.data ?? { ...payload, id: Date.now() }, ...prev]);
-      }
-      showToast(isEdit ? 'Devis mis a jour avec succes.' : 'Devis cree avec succes.');
-    } catch {
-      setDevis(prev => isEdit
-        ? prev.map(d => String(d.id) === String(payload.id) ? { ...d, ...payload } : d)
-        : [{ ...payload, id: Date.now() }, ...prev]
-      );
-      showToast(isEdit ? 'Devis mis a jour (hors-ligne).' : 'Devis cree (hors-ligne).');
-    }
+    const result = isEdit && payload.id
+      ? await update(payload.id, payload)
+      : await create(payload);
+    if (!result.success) return result;
+    showToast(isEdit ? 'Devis mis a jour avec succes.' : 'Devis cree avec succes.');
     backToList();
+    return result;
   }
 
   async function handleDuplicate(d) {
-    const copy = {
-      ...d,
-      id: undefined,
-      reference: 'DV-' + new Date().getFullYear() + String(new Date().getMonth() + 1).padStart(2, '0') + '-' + String(Math.floor(Math.random() * 9000) + 1000),
-      statut: 'brouillon',
-      date_creation: new Date().toISOString().slice(0, 10),
-      titre: (d.titre || '') + ' (copie)',
-    };
-    try {
-      const created = await createDevis(copy);
-      setDevis(prev => [created?.data ?? { ...copy, id: Date.now() }, ...prev]);
-      showToast('Devis duplique avec succes.');
-    } catch {
-      setDevis(prev => [{ ...copy, id: Date.now() }, ...prev]);
-      showToast('Devis duplique (hors-ligne).');
-    }
+    const result = await duplicate(d.id);
+    showToast(result.success ? 'Devis duplique avec succes.' : (result.error || 'Erreur duplication.'), result.success ? 'success' : 'error');
   }
 
   async function handleDelete(id) {
     if (!window.confirm('Supprimer ce devis ? Cette action est irreversible.')) return;
+    const result = await remove(id);
+    showToast(result.success ? 'Devis supprime.' : (result.error || 'Erreur suppression.'), result.success ? 'success' : 'error');
+  }
+
+  async function handlePdf(d) {
+    setPdfLoadingId(d.id);
     try {
-      await deleteDevis(id);
-    } catch (_) {}
-    setDevis(prev => prev.filter(d => String(d.id) !== String(id)));
-    showToast('Devis supprime.');
+      const full = await fetchOne(d.id);
+      const cats = await listCategories();
+      const catMap = Object.fromEntries(cats.map(c => [String(c.id), c.nom]));
+      await generateDevisPdf(full, catMap);
+    } catch (err) {
+      showToast(err.message || 'Erreur generation PDF.', 'error');
+    } finally {
+      setPdfLoadingId(null);
+    }
   }
 
   /* ── Form view ── */
@@ -243,6 +229,7 @@ export default function Devis() {
         devis={editingDevis}
         onBack={backToList}
         onSaved={handleSaved}
+        saving={saving}
       />
     );
   }
@@ -251,7 +238,7 @@ export default function Devis() {
   const hasFilters = !!(search || filterStatut || filterCommercial);
 
   return (
-    <div className="animate-fade-in">
+    <div className="animate-fade-in crm-module crm-module--devis">
       <Toast toast={toast} />
 
       {/* Page header */}
@@ -262,20 +249,25 @@ export default function Devis() {
             {loading ? 'Chargement...' : `${devis.length} devis${devis.length !== 1 ? '' : ''} au total`}
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div className="crm-page-header-actions" style={{ display: 'flex', gap: 8 }}>
           <button className="btn btn-ghost" onClick={load} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <RefreshCw size={14} />
           </button>
-          <button className="btn btn-primary" onClick={openCreate} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <button className="btn btn-primary" onClick={openCreate} disabled={!configured || saving} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <Plus size={15} /> Nouveau devis
           </button>
         </div>
       </div>
 
-      {/* Error banner */}
-      {loadError && (
+      {!configured && (
+        <div style={{ background: '#FFF3E0', border: '1px solid #FFB74D', borderRadius: 'var(--radius)', padding: '10px 16px', marginBottom: 16, fontSize: '0.85rem', color: '#E65100' }}>
+          Supabase non configuré — ajoutez VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY dans .env
+        </div>
+      )}
+
+      {error && !loading && (
         <div style={{ background: '#FFEBEE', color: 'var(--red)', border: '1px solid rgba(211,47,47,0.25)', borderRadius: 8, padding: '10px 14px', fontSize: '0.85rem', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <AlertCircle size={15} /> {loadError}
+          <AlertCircle size={15} /> {error}
           <button className="btn btn-ghost btn-sm" onClick={load} style={{ marginLeft: 'auto' }}>Reessayer</button>
         </div>
       )}
@@ -290,42 +282,36 @@ export default function Devis() {
       </div>
 
       {/* Filter bar */}
-      <div className="card" style={{ padding: '14px 16px', marginBottom: 16 }}>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-          <div style={{ position: 'relative', flex: '1 1 220px', minWidth: 180 }}>
-            <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)', pointerEvents: 'none' }} />
+      <div className="card crm-filter-bar" style={{ marginBottom: 16 }}>
+        <div className="crm-filter-row">
+          <div className="crm-filter-search">
+            <Search size={14} className="crm-filter-search-icon" />
             <input
+              className="crm-filter-input"
               value={search}
               onChange={e => { setSearch(e.target.value); setPage(1); }}
               placeholder="Rechercher reference, titre, client..."
-              style={{ padding: '8px 10px 8px 32px', border: '1.5px solid var(--border)', borderRadius: 6, fontSize: '0.85rem', width: '100%', outline: 'none', background: '#fff' }}
             />
           </div>
-
-          <select value={filterStatut} onChange={e => { setFilterStatut(e.target.value); setPage(1); }}
-            style={{ padding: '8px 10px', border: '1.5px solid var(--border)', borderRadius: 6, fontSize: '0.85rem', color: filterStatut ? 'var(--text)' : 'var(--text-3)', background: '#fff', cursor: 'pointer' }}>
+          <select className="crm-filter-select crm-filter-select--sm" value={filterStatut} onChange={e => { setFilterStatut(e.target.value); setPage(1); }}>
             <option value="">Tous statuts</option>
             {Object.entries(STATUT_CONFIG).map(([k, v]) => (
               <option key={k} value={k}>{v.label}</option>
             ))}
           </select>
-
-          <select value={filterCommercial} onChange={e => { setFilterCommercial(e.target.value); setPage(1); }}
-            style={{ padding: '8px 10px', border: '1.5px solid var(--border)', borderRadius: 6, fontSize: '0.85rem', color: filterCommercial ? 'var(--text)' : 'var(--text-3)', background: '#fff', cursor: 'pointer' }}>
+          <select className="crm-filter-select" value={filterCommercial} onChange={e => { setFilterCommercial(e.target.value); setPage(1); }}>
             <option value="">Tous commerciaux</option>
             {commerciaux.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
-
           {hasFilters && (
-            <button className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setFilterStatut(''); setFilterCommercial(''); setPage(1); }}
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setFilterStatut(''); setFilterCommercial(''); setPage(1); }}
               style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'var(--red)' }}>
               <XCircle size={13} /> Effacer
             </button>
           )}
-
-          <div style={{ marginLeft: 'auto', fontSize: '0.8rem', color: 'var(--text-3)', flexShrink: 0 }}>
+          <span className="crm-filter-count">
             {filtered.length} resultat{filtered.length > 1 ? 's' : ''}
-          </div>
+          </span>
         </div>
       </div>
 
@@ -339,8 +325,10 @@ export default function Devis() {
         ) : paged.length === 0 ? (
           <EmptyState filtered={hasFilters} onAdd={openCreate} />
         ) : (
-          <div className="table-wrap">
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+          <>
+          <div className="crm-table-desktop">
+            <div className="table-wrap">
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
               <thead>
                 <tr style={{ borderBottom: '1.5px solid var(--border)', background: 'var(--bg)' }}>
                   {[
@@ -438,6 +426,10 @@ export default function Devis() {
                       {/* Actions */}
                       <td style={{ padding: '10px 10px', whiteSpace: 'nowrap' }}>
                         <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                          <button title="PDF" onClick={() => handlePdf(d)} disabled={pdfLoadingId === d.id}
+                            className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }}>
+                            <Download size={13} />
+                          </button>
                           <button title="Modifier" onClick={() => openEdit(d)}
                             className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }}>
                             <Edit2 size={13} />
@@ -456,13 +448,53 @@ export default function Devis() {
                   );
                 })}
               </tbody>
-            </table>
+              </table>
+            </div>
           </div>
+
+          <div className="crm-doc-list crm-mobile-only">
+            {paged.map((d, i) => {
+              const clientNom = d.client_nom || d.client?.nom || '—';
+              const expSoon = isExpiringSoon(d.date_validite);
+              return (
+                <div key={d.id ?? i} className="crm-doc-card">
+                  <div className="crm-doc-head">
+                    <span className="crm-doc-ref">{d.reference || '—'}</span>
+                    <StatutBadge statut={d.statut} />
+                  </div>
+                  <div className="crm-doc-title">{d.titre || '—'}</div>
+                  <div className="crm-doc-meta">
+                    <span>{clientNom}</span>
+                    {d.commercial && <span>· {d.commercial}</span>}
+                    <span>· {fmtDate(d.date_creation)}</span>
+                    {expSoon && <span style={{ color: '#E65100', fontWeight: 700 }}>· Expire bientot</span>}
+                  </div>
+                  <div className="crm-doc-footer">
+                    <div>
+                      <span className="crm-doc-amount">{fmtMAD(d.total_ttc)}</span>
+                      <span className="crm-doc-amount-sub">TTC · HT {fmtMAD(d.total_ht)}</span>
+                    </div>
+                    <div className="crm-doc-actions">
+                      <button type="button" title="PDF" onClick={() => handlePdf(d)} disabled={pdfLoadingId === d.id}
+                        className="btn btn-ghost btn-sm crm-icon-btn"><Download size={14} /></button>
+                      <button type="button" title="Modifier" onClick={() => openEdit(d)}
+                        className="btn btn-ghost btn-sm crm-icon-btn"><Edit2 size={14} /></button>
+                      <button type="button" title="Dupliquer" onClick={() => handleDuplicate(d)}
+                        className="btn btn-ghost btn-sm crm-icon-btn"><Copy size={14} /></button>
+                      <button type="button" title="Supprimer" onClick={() => handleDelete(d.id)}
+                        className="btn btn-ghost btn-sm crm-icon-btn"><Trash2 size={14} style={{ color: 'var(--red)' }} /></button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          </>
         )}
 
         {/* Pagination */}
         {!loading && totalPages > 1 && (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 18px', borderTop: '1px solid var(--border)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 18px', borderTop: '1px solid var(--border)', flexWrap: 'wrap', gap: 8 }}>
             <span style={{ fontSize: '0.82rem', color: 'var(--text-3)' }}>
               Page {safePage} / {totalPages} — {filtered.length} devis
             </span>

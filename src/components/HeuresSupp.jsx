@@ -1,6 +1,6 @@
-import { BarChart3, Plus, X, TrendingUp } from 'lucide-react';
-import { useState, useRef } from 'react';
-const SEED_PROJECTS = [];
+import { BarChart3, Plus, X, TrendingUp, Filter, Pencil, Loader2 } from 'lucide-react';
+import { useState, useRef, useMemo } from 'react';
+import { useOvertime } from '../hooks/useOvertime';
 
 function fmtMAD(n) {
   return Number(n).toLocaleString('fr-MA') + ' MAD';
@@ -25,12 +25,41 @@ const INPUT_S = (err) => ({
 
 function today() { return new Date().toISOString().slice(0, 10); }
 
-const EMPTY_FORM = { ouvrier: '', projet: '', date: today(), heures: '', tarif: '' };
+const STATUS_OPTS = ['Brouillon', 'Valide', 'Paye'];
 
-export default function HeuresSupp({ workers: extWorkers }) {
-  const workers = extWorkers && extWorkers.length > 0 ? extWorkers : [];
-  const [records, setRecords] = useState([]);
+const EMPTY_FORM = {
+  workerId: '',
+  projet: '',
+  date: today(),
+  heures: '',
+  tarif: '',
+  statut: 'Valide',
+};
+
+export default function HeuresSupp() {
+  const {
+    records,
+    workers,
+    workerOptions,
+    chantiers,
+    loading,
+    saving,
+    error,
+    configured,
+    load,
+    create,
+    update,
+    remove,
+    filterOvertimeRecords,
+    computeOvertimeStats,
+  } = useOvertime();
+
+  const [filterOuvrier, setFilterOuvrier] = useState('');
+  const [filterProjet, setFilterProjet] = useState('');
+  const [filterDate, setFilterDate] = useState('');
+  const [filterStatut, setFilterStatut] = useState('');
   const [showModal, setShowModal] = useState(false);
+  const [editId, setEditId] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [errors, setErrors] = useState({});
   const [toast, setToast] = useState(null);
@@ -42,41 +71,85 @@ export default function HeuresSupp({ workers: extWorkers }) {
     toastRef.current = setTimeout(() => setToast(null), 3000);
   }
 
-  function setF(k, v) { setForm(p => ({ ...p, [k]: v })); }
+  function setF(k, v) { setForm((p) => ({ ...p, [k]: v })); }
 
-  /* Auto-fill tarif from worker's daily rate */
-  function handleOuvrierChange(name) {
-    const w = workers.find(x => (x.prenom + ' ' + x.nom) === name);
+  function handleOuvrierChange(workerId) {
+    const w = workers.find((x) => x.id === workerId);
     const tarifSup = w ? Math.round(w.tarif * 1.25) : '';
-    setForm(p => ({ ...p, ouvrier: name, tarif: tarifSup ? String(tarifSup) : p.tarif }));
+    setForm((p) => ({
+      ...p,
+      workerId,
+      projet: p.projet || w?.chantier || '',
+      tarif: tarifSup ? String(tarifSup) : p.tarif,
+    }));
+  }
+
+  function openCreate() {
+    setEditId(null);
+    setForm(EMPTY_FORM);
+    setErrors({});
+    setShowModal(true);
+  }
+
+  function openEdit(record) {
+    setEditId(record.id);
+    setForm({
+      workerId: record.workerId || '',
+      projet: record.projet || '',
+      date: record.date || today(),
+      heures: String(record.heures ?? ''),
+      tarif: String(record.tarif ?? ''),
+      statut: record.statut || 'Valide',
+    });
+    setErrors({});
+    setShowModal(true);
   }
 
   function validate() {
     const e = {};
-    if (!form.ouvrier) e.ouvrier = 'Requis';
+    if (!form.workerId) e.workerId = 'Requis';
     if (!form.projet) e.projet = 'Requis';
     if (!form.date) e.date = 'Requis';
-    if (!form.heures || isNaN(Number(form.heures)) || Number(form.heures) <= 0) e.heures = 'Valeur valide requise';
-    if (!form.tarif || isNaN(Number(form.tarif)) || Number(form.tarif) <= 0) e.tarif = 'Tarif valide requis';
+    if (!form.heures || Number.isNaN(Number(form.heures)) || Number(form.heures) <= 0) e.heures = 'Valeur valide requise';
+    if (!form.tarif || Number.isNaN(Number(form.tarif)) || Number(form.tarif) <= 0) e.tarif = 'Tarif valide requis';
     return e;
   }
 
-  function handleSubmit(ev) {
+  async function handleSubmit(ev) {
     ev.preventDefault();
     const errs = validate();
     if (Object.keys(errs).length) { setErrors(errs); return; }
-    setRecords(prev => [{ id: Date.now(), ...form, heures: Number(form.heures), tarif: Number(form.tarif) }, ...prev]);
-    notify('success', 'Heures supplementaires enregistrees.');
+
+    const result = editId ? await update(editId, form) : await create(form);
+    if (!result.success) {
+      notify('error', result.error || 'Erreur enregistrement.');
+      return;
+    }
+
+    notify('success', editId ? 'Heures supplementaires modifiees.' : 'Heures supplementaires enregistrees.');
     setShowModal(false);
+    setEditId(null);
   }
 
-  const totalHeures = records.reduce((s, r) => s + Number(r.heures), 0);
-  const totalMontant = records.reduce((s, r) => s + Number(r.heures) * Number(r.tarif), 0);
+  async function handleDelete(id) {
+    const result = await remove(id);
+    notify(result.success ? 'success' : 'error', result.success ? 'Supprime.' : (result.error || 'Erreur.'));
+  }
 
-  const workerNames = workers.map(w => w.prenom + ' ' + w.nom);
+  const filtered = useMemo(
+    () => filterOvertimeRecords(records, {
+      ouvrier: filterOuvrier,
+      projet: filterProjet,
+      date: filterDate,
+      statut: filterStatut,
+    }),
+    [records, filterOuvrier, filterProjet, filterDate, filterStatut, filterOvertimeRecords],
+  );
 
-  /* preview montant while typing */
+  const stats = useMemo(() => computeOvertimeStats(filtered), [filtered, computeOvertimeStats]);
+
   const previewMontant = (Number(form.heures) || 0) * (Number(form.tarif) || 0);
+  const hasFilters = filterOuvrier || filterProjet || filterDate || filterStatut;
 
   return (
     <div className="animate-fade-in">
@@ -87,34 +160,81 @@ export default function HeuresSupp({ workers: extWorkers }) {
           <h1 className="page-title">Heures supplementaires</h1>
           <p className="page-subtitle">Saisie et calcul automatique du montant du au tarif x heures</p>
         </div>
-        <button className="btn btn-primary" onClick={() => { setForm(EMPTY_FORM); setErrors({}); setShowModal(true); }}>
+        <button className="btn btn-primary" onClick={openCreate} disabled={loading || saving}>
           <Plus size={15} /> Ajouter heures sup
         </button>
       </div>
+
+      {!configured && (
+        <div style={{ background: '#FFF3E0', border: '1px solid #FFB74D', borderRadius: 'var(--radius)', padding: '10px 16px', marginBottom: 16, fontSize: '0.85rem', color: '#E65100' }}>
+          Supabase non configuré — ajoutez VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY dans .env
+        </div>
+      )}
+
+      {error && !loading && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, background: '#FFEBEE', border: '1px solid #EF9A9A', borderRadius: 'var(--radius)', padding: '10px 16px', marginBottom: 16, fontSize: '0.85rem', color: '#C62828' }}>
+          <span>{error}</span>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={load}>Réessayer</button>
+        </div>
+      )}
 
       {/* KPIs */}
       <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(170px,1fr))', marginBottom: 16 }}>
         <div className="stat-card">
           <div className="stat-icon orange"><BarChart3 size={18} /></div>
-          <div className="stat-body"><div className="stat-value">{totalHeures}h</div><div className="stat-label">Total heures sup</div></div>
+          <div className="stat-body"><div className="stat-value">{loading ? '—' : `${stats.totalHeures}h`}</div><div className="stat-label">Total heures sup</div></div>
         </div>
         <div className="stat-card">
           <div className="stat-icon"><TrendingUp size={18} /></div>
-          <div className="stat-body"><div className="stat-value">{records.length}</div><div className="stat-label">Enregistrements</div></div>
+          <div className="stat-body"><div className="stat-value">{loading ? '—' : stats.count}</div><div className="stat-label">Enregistrements</div></div>
         </div>
         <div className="stat-card">
           <div className="stat-icon blue"><BarChart3 size={18} /></div>
           <div className="stat-body">
-            <div className="stat-value" style={{ fontSize: '1rem' }}>{fmtMAD(totalMontant)}</div>
+            <div className="stat-value" style={{ fontSize: '1rem' }}>{loading ? '—' : fmtMAD(stats.totalMontant)}</div>
             <div className="stat-label">Montant total a payer</div>
           </div>
         </div>
       </div>
 
+      {/* Filters */}
+      <div className="card" style={{ marginBottom: 12, padding: '14px 20px' }}>
+        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-3)', fontSize: '0.85rem' }}>
+            <Filter size={14} /> Filtres
+          </div>
+          <select value={filterOuvrier} onChange={e => setFilterOuvrier(e.target.value)} style={{ padding: '7px 12px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius)', fontSize: '0.85rem', fontFamily: 'var(--font-body)', outline: 'none', background: '#fff' }}>
+            <option value="">Tous les ouvriers</option>
+            {workerOptions.map(w => <option key={w.id} value={w.label}>{w.label}</option>)}
+          </select>
+          <select value={filterProjet} onChange={e => setFilterProjet(e.target.value)} style={{ padding: '7px 12px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius)', fontSize: '0.85rem', fontFamily: 'var(--font-body)', outline: 'none', background: '#fff' }}>
+            <option value="">Tous les projets</option>
+            {chantiers.map(p => <option key={p} value={p}>{p}</option>)}
+          </select>
+          <select value={filterStatut} onChange={e => setFilterStatut(e.target.value)} style={{ padding: '7px 12px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius)', fontSize: '0.85rem', fontFamily: 'var(--font-body)', outline: 'none', background: '#fff' }}>
+            <option value="">Tous les statuts</option>
+            {STATUS_OPTS.map(s => <option key={s} value={s}>{s}</option>)}
+          </select>
+          <input type="date" value={filterDate} onChange={e => setFilterDate(e.target.value)} style={{ padding: '7px 12px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius)', fontSize: '0.85rem', fontFamily: 'var(--font-body)', outline: 'none' }} />
+          {hasFilters && (
+            <button onClick={() => { setFilterOuvrier(''); setFilterProjet(''); setFilterDate(''); setFilterStatut(''); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', fontSize: '0.82rem', fontWeight: 600 }}>
+              Effacer filtres
+            </button>
+          )}
+        </div>
+      </div>
+
       <div className="card">
         <div className="card-title" style={{ marginBottom: 16 }}><BarChart3 size={16} /> Liste des heures supplementaires</div>
-        {records.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-3)' }}>Aucune heure supplementaire enregistree.</div>
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: '40px 24px', color: 'var(--text-3)' }}>
+            <Loader2 size={28} style={{ animation: 'spin 1s linear infinite', margin: '0 auto 12px' }} />
+            <div style={{ fontSize: '0.88rem' }}>Chargement…</div>
+          </div>
+        ) : filtered.length === 0 ? (
+          <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-3)' }}>
+            {records.length === 0 ? 'Aucune heure supplementaire enregistree.' : 'Aucun resultat pour ces filtres.'}
+          </div>
         ) : (
           <div className="table-wrap">
             <table>
@@ -122,51 +242,50 @@ export default function HeuresSupp({ workers: extWorkers }) {
                 <tr><th>#</th><th>Ouvrier</th><th>Projet</th><th>Date</th><th>Heures sup</th><th>Tarif/h (MAD)</th><th>Montant (MAD)</th><th>Actions</th></tr>
               </thead>
               <tbody>
-                {records.map((r, i) => {
-                  const montant = Number(r.heures) * Number(r.tarif);
-                  return (
-                    <tr key={r.id}>
-                      <td style={{ color: 'var(--text-3)', fontSize: '0.78rem' }}>{String(i + 1).padStart(3, '0')}</td>
-                      <td style={{ fontWeight: 600 }}>{r.ouvrier}</td>
-                      <td style={{ color: 'var(--text-2)' }}>{r.projet}</td>
-                      <td style={{ whiteSpace: 'nowrap' }}>{r.date}</td>
-                      <td>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontFamily: 'var(--font-head)', fontWeight: 700, color: '#E65100' }}>
-                          {r.heures}h
-                        </span>
-                      </td>
-                      <td style={{ fontFamily: 'var(--font-head)', fontWeight: 600 }}>{fmtMAD(r.tarif)}</td>
-                      <td>
-                        <span style={{ fontFamily: 'var(--font-head)', fontWeight: 800, color: 'var(--red)', fontSize: '0.95rem' }}>
-                          {fmtMAD(montant)}
-                        </span>
-                      </td>
-                      <td>
-                        <button className="btn btn-ghost btn-sm" style={{ padding: '4px 8px' }} onClick={() => {
-                          setRecords(prev => prev.filter(x => x.id !== r.id));
-                          notify('success', 'Supprime.');
-                        }}>
+                {filtered.map((r, i) => (
+                  <tr key={r.id}>
+                    <td style={{ color: 'var(--text-3)', fontSize: '0.78rem' }}>{String(i + 1).padStart(3, '0')}</td>
+                    <td style={{ fontWeight: 600 }}>{r.ouvrier}</td>
+                    <td style={{ color: 'var(--text-2)' }}>{r.projet}</td>
+                    <td style={{ whiteSpace: 'nowrap' }}>{r.date}</td>
+                    <td>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontFamily: 'var(--font-head)', fontWeight: 700, color: '#E65100' }}>
+                        {r.heures}h
+                      </span>
+                    </td>
+                    <td style={{ fontFamily: 'var(--font-head)', fontWeight: 600 }}>{fmtMAD(r.tarif)}</td>
+                    <td>
+                      <span style={{ fontFamily: 'var(--font-head)', fontWeight: 800, color: 'var(--red)', fontSize: '0.95rem' }}>
+                        {fmtMAD(r.montant)}
+                      </span>
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', gap: 4 }}>
+                        <button className="btn btn-ghost btn-sm" style={{ padding: '4px 8px' }} onClick={() => openEdit(r)} title="Modifier">
+                          <Pencil size={13} style={{ color: 'var(--text-2)' }} />
+                        </button>
+                        <button className="btn btn-ghost btn-sm" style={{ padding: '4px 8px' }} onClick={() => handleDelete(r.id)} title="Supprimer">
                           <X size={13} style={{ color: 'var(--red)' }} />
                         </button>
-                      </td>
-                    </tr>
-                  );
-                })}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
         )}
 
         {/* Total row */}
-        {records.length > 0 && (
+        {filtered.length > 0 && (
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12, padding: '10px 16px', background: '#FFF5F5', borderRadius: 8, gap: 32 }}>
             <div>
               <div style={{ fontSize: '0.75rem', color: 'var(--text-3)' }}>Total heures</div>
-              <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, color: '#E65100' }}>{totalHeures}h</div>
+              <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, color: '#E65100' }}>{stats.totalHeures}h</div>
             </div>
             <div>
               <div style={{ fontSize: '0.75rem', color: 'var(--text-3)' }}>Montant total</div>
-              <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, color: 'var(--red)', fontSize: '1.1rem' }}>{fmtMAD(totalMontant)}</div>
+              <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, color: 'var(--red)', fontSize: '1.1rem' }}>{fmtMAD(stats.totalMontant)}</div>
             </div>
           </div>
         )}
@@ -177,29 +296,32 @@ export default function HeuresSupp({ workers: extWorkers }) {
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
           <div style={{ background: '#fff', borderRadius: 14, padding: 32, width: '100%', maxWidth: 480, boxShadow: '0 8px 40px rgba(0,0,0,0.2)', maxHeight: '90vh', overflowY: 'auto' }}>
             <div className="flex-between" style={{ marginBottom: 20 }}>
-              <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.2rem', textTransform: 'uppercase' }}>Heures supplementaires</h2>
-              <button onClick={() => setShowModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={20} /></button>
+              <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.2rem', textTransform: 'uppercase' }}>
+                {editId ? 'Modifier heures sup' : 'Heures supplementaires'}
+              </h2>
+              <button onClick={() => { setShowModal(false); setEditId(null); }} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={20} /></button>
             </div>
             <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div className="form-group">
                 <label>Ouvrier</label>
-                <select value={form.ouvrier} onChange={e => handleOuvrierChange(e.target.value)} style={INPUT_S(errors.ouvrier)}>
+                <select value={form.workerId} onChange={e => handleOuvrierChange(e.target.value)} style={INPUT_S(errors.workerId)}>
                   <option value="">Choisir un ouvrier...</option>
-                  {workerNames.map(n => <option key={n} value={n}>{n}</option>)}
+                  {workerOptions.map(w => <option key={w.id} value={w.id}>{w.label}</option>)}
                 </select>
-                {errors.ouvrier && <div style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.ouvrier}</div>}
+                {errors.workerId && <div style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.workerId}</div>}
               </div>
               <div className="form-group">
                 <label>Projet</label>
                 <select value={form.projet} onChange={e => setF('projet', e.target.value)} style={INPUT_S(errors.projet)}>
                   <option value="">Choisir un projet...</option>
-                  {SEED_PROJECTS.map(p => <option key={p} value={p}>{p}</option>)}
+                  {chantiers.map(p => <option key={p} value={p}>{p}</option>)}
                 </select>
                 {errors.projet && <div style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.projet}</div>}
               </div>
               <div className="form-group">
                 <label>Date</label>
                 <input type="date" value={form.date} onChange={e => setF('date', e.target.value)} style={INPUT_S(errors.date)} />
+                {errors.date && <div style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.date}</div>}
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div className="form-group">
@@ -213,7 +335,6 @@ export default function HeuresSupp({ workers: extWorkers }) {
                   {errors.tarif && <div style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.tarif}</div>}
                 </div>
               </div>
-              {/* Auto-calculated preview */}
               {previewMontant > 0 && (
                 <div style={{ background: '#FFF5F5', borderRadius: 8, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ color: 'var(--text-2)', fontSize: '0.85rem' }}>Montant calcule automatiquement</span>
@@ -221,8 +342,11 @@ export default function HeuresSupp({ workers: extWorkers }) {
                 </div>
               )}
               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 6 }}>
-                <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>Annuler</button>
-                <button type="submit" className="btn btn-primary"><Plus size={14} /> Enregistrer</button>
+                <button type="button" className="btn btn-secondary" onClick={() => { setShowModal(false); setEditId(null); }} disabled={saving}>Annuler</button>
+                <button type="submit" className="btn btn-primary" disabled={saving}>
+                  {saving ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Plus size={14} />}
+                  {editId ? 'Mettre à jour' : 'Enregistrer'}
+                </button>
               </div>
             </form>
           </div>

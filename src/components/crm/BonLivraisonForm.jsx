@@ -3,7 +3,12 @@ import {
   ChevronLeft, Plus, Trash2, Copy, AlertCircle,
   FileText, X, Check, Package, ChevronDown, ChevronUp
 } from 'lucide-react';
-import { getClients, getArticles, getCategories, getDevis } from '../../services/api';
+import { listClients } from '../../services/crm/clients';
+import { listArticles } from '../../services/crm/articles';
+import { listCategories } from '../../services/crm/categories';
+import { listCrmDevis, getCrmDevisById } from '../../services/crm/crmDevis';
+import { generateDeliveryNoteNumero } from '../../services/crm/deliveryNotes';
+import { clientDisplayName } from '../../services/crm/clients';
 
 /* ── Helpers ── */
 function IS(err, extra = {}) {
@@ -32,10 +37,6 @@ function SectionTitle({ children }) {
 }
 function today() { return new Date().toISOString().slice(0, 10); }
 function addDays(n) { const d = new Date(); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); }
-function genNumeroBL() {
-  const d = new Date();
-  return 'BL-' + d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(Math.floor(Math.random() * 9000) + 1000);
-}
 function Spinner() {
   return <div style={{ display: 'inline-block', width: 16, height: 16, border: '2px solid rgba(255,255,255,0.35)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />;
 }
@@ -51,7 +52,6 @@ const STATUT_LABEL = {
   facture:               'Facture',
   annule:                'Annule',
 };
-const COMMERCIAUX = ['Ahmed Bennani', 'Sara Idrissi', 'Youssef Alami', 'Nadia Tazi', 'Karim Fassi'];
 const STATUT_LIGNE = ['a_livrer', 'livre', 'non_livre', 'en_attente'];
 const STATUT_LIGNE_LABEL = { a_livrer: 'A livrer', livre: 'Livre', non_livre: 'Non livre', en_attente: 'En attente' };
 
@@ -176,7 +176,7 @@ function LigneBLRow({ ligne, categories, articles, onChange, onDelete, onDuplica
 /* ════════════════════════════════════════════════
    BON LIVRAISON FORM — MAIN
    ════════════════════════════════════════════════ */
-export default function BonLivraisonForm({ bl, onBack, onSaved }) {
+export default function BonLivraisonForm({ bl, onBack, onSaved, saving: savingProp = false, configured = true }) {
   const isEdit = !!bl;
 
   const [form, setForm] = useState(() => bl ? {
@@ -184,55 +184,85 @@ export default function BonLivraisonForm({ bl, onBack, onSaved }) {
     lignes: bl.lignes?.length
       ? bl.lignes.map(l => ({ ...EMPTY_LIGNE_BL(), ...l, _id: l._id || Date.now() + Math.random() }))
       : [EMPTY_LIGNE_BL()],
-  } : { ...EMPTY_BL, numero: genNumeroBL() });
+  } : { ...EMPTY_BL, numero: '' });
 
   const [clients, setClients]       = useState([]);
   const [articles, setArticles]     = useState([]);
   const [categories, setCategories] = useState([]);
   const [devisList, setDevisList]   = useState([]);
   const [errors, setErrors]         = useState({});
-  const [saving, setSaving]         = useState(false);
+  const [savingLocal, setSavingLocal] = useState(false);
   const [apiError, setApiError]     = useState('');
+  const saving = savingProp || savingLocal;
 
   useEffect(() => {
-    Promise.all([getClients(), getArticles(), getCategories(), getDevis()]).then(([cl, ar, ca, dv]) => {
-      setClients(Array.isArray(cl) ? cl : []);
-      setArticles(Array.isArray(ar) ? ar : (ar?.data ?? []));
-      setCategories(Array.isArray(ca) ? ca : (ca?.data ?? []));
-      setDevisList(Array.isArray(dv) ? dv : (dv?.data ?? []));
-    }).catch(() => {});
-  }, []);
+    if (!configured) return;
+    Promise.all([listClients(), listArticles(), listCategories(), listCrmDevis()])
+      .then(([cl, ar, ca, dv]) => {
+        setClients(cl || []);
+        setArticles(ar || []);
+        setCategories(ca || []);
+        setDevisList(dv || []);
+      })
+      .catch(() => {});
+  }, [configured]);
+
+  useEffect(() => {
+    if (!isEdit && configured && !form.numero) {
+      generateDeliveryNoteNumero()
+        .then((num) => setForm((p) => ({ ...p, numero: num })))
+        .catch(() => {});
+    }
+  }, [isEdit, configured, form.numero]);
 
   function setField(k, v) { setForm(p => ({ ...p, [k]: v })); }
 
   /* Auto-fill from devis */
-  function loadFromDevis(devisId) {
-    const dv = devisList.find(d => String(d.id) === String(devisId));
-    if (!dv) return;
-    const lignes = dv.lignes
-      ?.filter(l => l.type === 'article')
-      .map(l => ({
-        ...EMPTY_LIGNE_BL(),
-        _id: Date.now() + Math.random(),
-        article_id:         l.article_id || '',
-        categorie_id:       l.categorie_id || '',
-        designation:        l.designation || '',
-        description:        l.description || '',
-        quantite_commandee: Number(l.quantite) || 1,
-        quantite_livree:    0,
-        quantite_restante:  Number(l.quantite) || 1,
-        unite:              l.unite || 'unite',
-      })) || [EMPTY_LIGNE_BL()];
-
-    setForm(p => ({
-      ...p,
-      devis_id:          devisId,
-      client_id:         dv.client_id || p.client_id,
-      commercial:        dv.commercial || p.commercial,
-      projet:            dv.type_projet || p.projet,
-      adresse_livraison: p.adresse_livraison,
-      lignes,
-    }));
+  async function loadFromDevis(devisId) {
+    if (!devisId) {
+      setForm(p => ({ ...p, devis_id: '', devis_reference: '' }));
+      return;
+    }
+    try {
+      const dv = await getCrmDevisById(devisId);
+      const lignes = (dv.lignes || [])
+        .filter(l => l.type === 'article')
+        .map(l => ({
+          ...EMPTY_LIGNE_BL(),
+          _id: Date.now() + Math.random(),
+          article_id: l.article_id || '',
+          categorie_id: l.categorie_id || '',
+          designation: l.designation || '',
+          description: l.description || '',
+          quantite_commandee: Number(l.quantite) || 1,
+          quantite_livree: 0,
+          quantite_restante: Number(l.quantite) || 1,
+          unite: l.unite || 'unite',
+        }));
+      const cl = clients.find(c => String(c.id) === String(dv.client_id));
+      setForm(p => ({
+        ...p,
+        devis_id: devisId,
+        devis_reference: dv.reference || '',
+        client_id: dv.client_id || p.client_id,
+        client_nom: dv.client_nom || clientDisplayName(cl) || '',
+        commercial: dv.commercial || p.commercial,
+        prepare_par: dv.commercial || p.prepare_par,
+        projet: dv.type_projet || p.projet,
+        lignes: lignes.length ? lignes : [EMPTY_LIGNE_BL()],
+      }));
+    } catch {
+      const dv = devisList.find(d => String(d.id) === String(devisId));
+      if (!dv) return;
+      setForm(p => ({
+        ...p,
+        devis_id: devisId,
+        devis_reference: dv.reference || '',
+        client_id: dv.client_id || p.client_id,
+        commercial: dv.commercial || p.commercial,
+        projet: dv.titre || p.projet,
+      }));
+    }
   }
 
   const selectedClient = clients.find(c => String(c.id) === String(form.client_id));
@@ -268,22 +298,27 @@ export default function BonLivraisonForm({ bl, onBack, onSaved }) {
     setApiError('');
     const errs = validate();
     if (Object.keys(errs).length) { setErrors(errs); return; }
-    setSaving(true);
+    setSavingLocal(true);
     try {
+      const cl = clients.find(c => String(c.id) === String(form.client_id));
       const payload = {
         ...form,
-        total_articles:   totalArticles,
+        client_nom: clientDisplayName(cl) || form.client_nom || '',
+        prepare_par: form.prepare_par || form.commercial || '',
+        total_articles: totalArticles,
         total_commandees: totalCommandees,
-        total_livrees:    totalLivrees,
-        total_restantes:  totalRestantes,
-        pct_livre:        pctGlobal,
-        updated_at:       new Date().toISOString(),
+        total_livrees: totalLivrees,
+        total_restantes: totalRestantes,
+        pct_livre: pctGlobal,
       };
-      onSaved(payload, isEdit);
+      const result = await onSaved(payload, isEdit);
+      if (result && !result.success) {
+        setApiError(result.error || "Erreur lors de l'enregistrement.");
+      }
     } catch (err) {
       setApiError(err.message || "Erreur lors de l'enregistrement.");
     } finally {
-      setSaving(false);
+      setSavingLocal(false);
     }
   }
 
@@ -343,10 +378,13 @@ export default function BonLivraisonForm({ bl, onBack, onSaved }) {
                 </div>
                 <div className="form-group">
                   <Label>Commercial</Label>
-                  <select value={form.commercial} onChange={e => setField('commercial', e.target.value)} style={IS(false)}>
-                    <option value="">Choisir...</option>
-                    {COMMERCIAUX.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
+                  <input
+                    type="text"
+                    value={form.commercial}
+                    onChange={e => setField('commercial', e.target.value)}
+                    placeholder="Nom du commercial..."
+                    style={IS(false)}
+                  />
                 </div>
                 <div className="form-group">
                   <Label>Projet</Label>
@@ -354,7 +392,7 @@ export default function BonLivraisonForm({ bl, onBack, onSaved }) {
                 </div>
                 <div className="form-group" style={{ gridColumn: '1 / -1' }}>
                   <Label>Creer depuis un devis valide</Label>
-                  <select value={form.devis_id} onChange={e => loadFromDevis(e.target.value)} style={IS(false)}>
+                  <select value={form.devis_id} onChange={e => { setField('devis_id', e.target.value); loadFromDevis(e.target.value); }} style={IS(false)}>
                     <option value="">Aucun devis lie...</option>
                     {devisList.filter(d => d.statut === 'valide' || d.statut === 'envoye').map(d => (
                       <option key={d.id} value={d.id}>{d.reference} — {d.titre}</option>

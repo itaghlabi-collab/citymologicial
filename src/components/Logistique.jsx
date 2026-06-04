@@ -11,7 +11,9 @@ import {
   Shield, Settings, Package, AlertTriangle, BarChart3,
   ClipboardList, Archive, Loader, ChevronDown, ExternalLink
 } from 'lucide-react';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
+import { useVehicles } from '../hooks/useVehicles';
+import { useInterventions } from '../hooks/useInterventions';
 
 // ── Design tokens (cohérents avec App.css) ──────────────────────────────────
 
@@ -127,7 +129,7 @@ const TYPES_INT       = ['Vidange', 'Révision générale', 'Remplacement pneus'
 const CARBURANTS      = ['Diesel', 'Essence', 'Hybride', 'Électrique', 'GPL'];
 
 const EMPTY_VEH = {
-  matricule: '', type: '', marque: '', modele: '', annee: '', couleur: '',
+  vehicule: '', matricule_ww: '', matricule: '', type: '', marque: '', modele: '', annee: '', couleur: '',
   chauffeur: '', departement: '', responsable: '', statut: 'disponible',
   assurance: '', date_exp_assurance: '', visite_technique: '', date_exp_visite: '',
   carte_grise: '', km_actuel: '', carburant: '', consommation: '', observations: ''
@@ -141,7 +143,7 @@ const EMPTY_INT = {
 
 // ── Composants de formulaires ────────────────────────────────────────────────
 
-function FormulaireVehicule({ initial, onSave, onClose }) {
+function FormulaireVehicule({ initial, onSave, onClose, saving }) {
   const [form, setForm] = useState(initial || EMPTY_VEH);
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
@@ -157,6 +159,9 @@ function FormulaireVehicule({ initial, onSave, onClose }) {
       <FRow>
         <FField label="Matricule" required>
           <input style={INPUT_STYLE} value={form.matricule} onChange={e => set('matricule', e.target.value)} placeholder="Ex : 12345-A-23" required />
+        </FField>
+        <FField label="Matricule WW">
+          <input style={INPUT_STYLE} value={form.matricule_ww} onChange={e => set('matricule_ww', e.target.value)} placeholder="Ex : WW583662" />
         </FField>
         <FField label="Type de véhicule" required>
           <select style={SELECT_STYLE} value={form.type} onChange={e => set('type', e.target.value)} required>
@@ -236,20 +241,28 @@ function FormulaireVehicule({ initial, onSave, onClose }) {
 
       <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 24, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
         <button type="button" className="btn btn-ghost" onClick={onClose}>Annuler</button>
-        <button type="submit" className="btn btn-primary"><CheckCircle size={14} /> Enregistrer</button>
+        <button type="submit" className="btn btn-primary" disabled={saving}><CheckCircle size={14} /> {saving ? 'Enregistrement…' : 'Enregistrer'}</button>
       </div>
     </form>
   );
 }
 
-function FormulaireIntervention({ vehicules, initial, onSave, onClose }) {
+function FormulaireIntervention({ vehicules, initial, onSave, onClose, saving }) {
   const [form, setForm] = useState(initial || EMPTY_INT);
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
   function handleVehiculeChange(e) {
     const v = vehicules.find(veh => veh.id === e.target.value);
-    set('vehicule_id', e.target.value);
-    if (v) set('matricule', v.matricule);
+    if (!v) {
+      set('vehicule_id', e.target.value);
+      return;
+    }
+    setForm((p) => ({
+      ...p,
+      vehicule_id: e.target.value,
+      matricule: v.matricule,
+      chauffeur: p.chauffeur || v.chauffeur || '',
+    }));
   }
 
   function handleSubmit(e) {
@@ -320,7 +333,7 @@ function FormulaireIntervention({ vehicules, initial, onSave, onClose }) {
 
       <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 24, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
         <button type="button" className="btn btn-ghost" onClick={onClose}>Annuler</button>
-        <button type="submit" className="btn btn-primary"><CheckCircle size={14} /> Enregistrer</button>
+        <button type="submit" className="btn btn-primary" disabled={saving}><CheckCircle size={14} /> {saving ? 'Enregistrement…' : 'Enregistrer'}</button>
       </div>
     </form>
   );
@@ -328,7 +341,10 @@ function FormulaireIntervention({ vehicules, initial, onSave, onClose }) {
 
 // ── Sous-module Véhicules ─────────────────────────────────────────────────────
 
-function SousModuleVehicules({ vehicules, onAdd, onEdit, onDelete, onViewDetail }) {
+function SousModuleVehicules({
+  vehicules, onAdd, onEdit, onDelete, onViewDetail,
+  loading, saving, error, onImportSeed, configured,
+}) {
   const [search, setSearch] = useState('');
   const [filterStatut, setFilterStatut] = useState('');
   const [filterType, setFilterType] = useState('');
@@ -337,7 +353,14 @@ function SousModuleVehicules({ vehicules, onAdd, onEdit, onDelete, onViewDetail 
 
   const filtered = vehicules.filter(v => {
     const q = search.toLowerCase();
-    const matchSearch = !q || v.matricule.toLowerCase().includes(q) || (v.marque + ' ' + v.modele).toLowerCase().includes(q) || (v.chauffeur || '').toLowerCase().includes(q);
+    const matchSearch = !q || [
+      v.matricule,
+      v.matricule_ww,
+      v.vehicule,
+      v.marque,
+      v.modele,
+      v.chauffeur,
+    ].filter(Boolean).join(' ').toLowerCase().includes(q);
     const matchStatut = !filterStatut || v.statut === filterStatut;
     const matchType   = !filterType   || v.type === filterType;
     return matchSearch && matchStatut && matchType;
@@ -351,17 +374,31 @@ function SousModuleVehicules({ vehicules, onAdd, onEdit, onDelete, onViewDetail 
   const affectes     = vehicules.filter(v => v.statut === 'affecte').length;
   const maintenance  = vehicules.filter(v => v.statut === 'maintenance').length;
 
-  function handleSave(data) {
-    if (editTarget) onEdit({ ...editTarget, ...data });
-    else onAdd(data);
-    setShowForm(false);
-    setEditTarget(null);
+  async function handleSave(data) {
+    const ok = editTarget
+      ? await onEdit({ ...editTarget, ...data })
+      : await onAdd(data);
+    if (ok !== false) {
+      setShowForm(false);
+      setEditTarget(null);
+    }
+  }
+
+  async function handleImportSeed() {
+    if (!onImportSeed) return;
+    if (!window.confirm('Importer les 18 véhicules de la liste CITYMO ? Les doublons (matricule / WW) seront mis à jour.')) return;
+    await onImportSeed();
   }
 
   function openEdit(v) { setEditTarget(v); setShowForm(true); }
 
   return (
     <div>
+      {error && (
+        <div style={{ marginBottom: 12, padding: '10px 14px', borderRadius: 8, background: 'var(--red-light)', color: 'var(--red)', fontSize: '0.85rem' }}>
+          {error}
+        </div>
+      )}
       {/* KPIs */}
       <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', marginBottom: 20 }}>
         <KpiCard icon={<Truck size={17} />}     label="Total véhicules"       value={total}           color="blue"   />
@@ -391,7 +428,17 @@ function SousModuleVehicules({ vehicules, onAdd, onEdit, onDelete, onViewDetail 
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn btn-ghost btn-sm"><Download size={14} /> Export</button>
-            <button className="btn btn-primary btn-sm" onClick={() => { setEditTarget(null); setShowForm(true); }}>
+            {onImportSeed && (
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                disabled={!configured || saving}
+                onClick={handleImportSeed}
+              >
+                <Package size={14} /> Importer liste
+              </button>
+            )}
+            <button className="btn btn-primary btn-sm" disabled={!configured || saving} onClick={() => { setEditTarget(null); setShowForm(true); }}>
               <Plus size={14} /> Ajouter véhicule
             </button>
           </div>
@@ -404,76 +451,109 @@ function SousModuleVehicules({ vehicules, onAdd, onEdit, onDelete, onViewDetail 
           <div className="card-title" style={{ marginBottom: 0 }}><Truck size={16} /> Flotte — {filtered.length} véhicule{filtered.length !== 1 ? 's' : ''}</div>
         </div>
 
-        {filtered.length === 0 ? (
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-3)' }}>
+            <Loader size={22} style={{ animation: 'spin 0.8s linear infinite', marginBottom: 8 }} />
+            <div>Chargement de la flotte...</div>
+          </div>
+        ) : filtered.length === 0 ? (
           <EmptyState
             icon={<Truck size={26} style={{ color: 'var(--text-3)' }} />}
             title={vehicules.length === 0 ? "Aucun véhicule enregistré" : "Aucun résultat"}
-            sub={vehicules.length === 0 ? "Commencez par ajouter les véhicules de la flotte." : "Modifiez vos critères de recherche."}
+            sub={vehicules.length === 0 ? "Commencez par ajouter les véhicules de la flotte ou importez la liste CITYMO." : "Modifiez vos critères de recherche."}
             action={vehicules.length === 0 ? "Ajouter un véhicule" : null}
             onAction={() => setShowForm(true)}
           />
         ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Matricule</th>
-                  <th>Type</th>
-                  <th>Marque / Modèle</th>
-                  <th>Chauffeur</th>
-                  <th>Département</th>
-                  <th>Statut</th>
-                  <th>Kilométrage</th>
-                  <th>Exp. Assurance</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map(v => (
-                  <tr key={v.id}>
-                    <td>
-                      <span style={{ fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--red)', fontSize: '0.92rem', letterSpacing: '0.04em' }}>{v.matricule}</span>
-                    </td>
-                    <td>
-                      <span style={{ fontSize: '0.82rem', color: 'var(--text-2)', background: 'var(--surface-2)', padding: '2px 8px', borderRadius: 4 }}>{v.type}</span>
-                    </td>
-                    <td style={{ fontWeight: 600 }}>{v.marque}{v.modele ? ` ${v.modele}` : ''}</td>
-                    <td style={{ color: v.chauffeur ? 'var(--text)' : 'var(--text-3)', fontSize: '0.875rem' }}>{v.chauffeur || '—'}</td>
-                    <td style={{ color: 'var(--text-2)', fontSize: '0.875rem' }}>{v.departement || '—'}</td>
-                    <td><Badge type={v.statut} /></td>
-                    <td style={{ fontFamily: 'var(--font-head)', fontWeight: 600 }}>{v.km_actuel ? Number(v.km_actuel).toLocaleString('fr-MA') + ' km' : '—'}</td>
-                    <td>
-                      {v.date_exp_assurance ? (
-                        <span style={{ fontSize: '0.82rem', color: isExpiringSoon(v.date_exp_assurance) ? '#E65100' : 'var(--text-2)' }}>
-                          {isExpiringSoon(v.date_exp_assurance) && <AlertTriangle size={12} style={{ marginRight: 4, verticalAlign: 'middle' }} />}
-                          {v.date_exp_assurance}
-                        </span>
-                      ) : '—'}
-                    </td>
-                    <td>
-                      <div style={{ display: 'flex', gap: 3 }}>
-                        <button className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} title="Voir fiche" onClick={() => onViewDetail(v)}>
-                          <Eye size={13} />
-                        </button>
-                        <button className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} title="Modifier" onClick={() => openEdit(v)}>
-                          <Edit2 size={13} />
-                        </button>
-                        <button className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} title="Supprimer" onClick={() => onDelete(v.id)}>
-                          <Trash2 size={13} style={{ color: 'var(--red)' }} />
-                        </button>
-                      </div>
-                    </td>
+          <>
+            <div className="log-desktop-table table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Matricule</th>
+                    <th>Matricule WW</th>
+                    <th>Type</th>
+                    <th>Marque / Modèle</th>
+                    <th>Chauffeur</th>
+                    <th>Département</th>
+                    <th>Statut</th>
+                    <th>Kilométrage</th>
+                    <th>Exp. Assurance</th>
+                    <th>Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {filtered.map(v => (
+                    <tr key={v.id}>
+                      <td>
+                        <span style={{ fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--red)', fontSize: '0.92rem', letterSpacing: '0.04em' }}>{v.matricule}</span>
+                      </td>
+                      <td style={{ fontFamily: 'var(--font-head)', fontSize: '0.85rem' }}>{v.matricule_ww || '—'}</td>
+                      <td>
+                        <span style={{ fontSize: '0.82rem', color: 'var(--text-2)', background: 'var(--surface-2)', padding: '2px 8px', borderRadius: 4 }}>{v.type || '—'}</span>
+                      </td>
+                      <td style={{ fontWeight: 600 }}>{v.marque}{v.modele ? ` ${v.modele}` : ''}</td>
+                      <td style={{ color: v.chauffeur ? 'var(--text)' : 'var(--text-3)', fontSize: '0.875rem' }}>{v.chauffeur || '—'}</td>
+                      <td style={{ color: 'var(--text-2)', fontSize: '0.875rem' }}>{v.departement || '—'}</td>
+                      <td><Badge type={v.statut} /></td>
+                      <td style={{ fontFamily: 'var(--font-head)', fontWeight: 600 }}>{v.km_actuel ? Number(v.km_actuel).toLocaleString('fr-MA') + ' km' : '—'}</td>
+                      <td>
+                        {v.date_exp_assurance ? (
+                          <span style={{ fontSize: '0.82rem', color: isExpiringSoon(v.date_exp_assurance) ? '#E65100' : 'var(--text-2)' }}>
+                            {isExpiringSoon(v.date_exp_assurance) && <AlertTriangle size={12} style={{ marginRight: 4, verticalAlign: 'middle' }} />}
+                            {v.date_exp_assurance}
+                          </span>
+                        ) : '—'}
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', gap: 3 }}>
+                          <button className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} title="Voir fiche" onClick={() => onViewDetail(v)}>
+                            <Eye size={13} />
+                          </button>
+                          <button className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} title="Modifier" onClick={() => openEdit(v)}>
+                            <Edit2 size={13} />
+                          </button>
+                          <button className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} title="Supprimer" disabled={saving} onClick={() => onDelete(v.id)}>
+                            <Trash2 size={13} style={{ color: 'var(--red)' }} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="log-mobile-list">
+              {filtered.map((v) => (
+                <LogistiqueMobileCard
+                  key={v.id}
+                  title={v.matricule}
+                  subtitle={[v.marque, v.modele].filter(Boolean).join(' ') || v.type}
+                  badges={<Badge type={v.statut} />}
+                  meta={[
+                    ['Type', v.type],
+                    ['Chauffeur', v.chauffeur],
+                    ['Département', v.departement],
+                    ['Kilométrage', v.km_actuel ? `${Number(v.km_actuel).toLocaleString('fr-MA')} km` : '—'],
+                    ['WW', v.matricule_ww],
+                  ]}
+                  actions={(
+                    <>
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => onViewDetail(v)}><Eye size={13} /> Voir</button>
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => openEdit(v)}><Edit2 size={13} /> Modifier</button>
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => onDelete(v.id)} disabled={saving}><Trash2 size={13} /> Supprimer</button>
+                    </>
+                  )}
+                />
+              ))}
+            </div>
+          </>
         )}
       </div>
 
       {/* Modal formulaire */}
       <Modal open={showForm} onClose={() => { setShowForm(false); setEditTarget(null); }} title={editTarget ? "Modifier le véhicule" : "Ajouter un véhicule"} width={780}>
-        <FormulaireVehicule initial={editTarget} onSave={handleSave} onClose={() => { setShowForm(false); setEditTarget(null); }} />
+        <FormulaireVehicule initial={editTarget} onSave={handleSave} saving={saving} onClose={() => { setShowForm(false); setEditTarget(null); }} />
       </Modal>
     </div>
   );
@@ -481,19 +561,29 @@ function SousModuleVehicules({ vehicules, onAdd, onEdit, onDelete, onViewDetail 
 
 // ── Sous-module Demandes d'intervention ──────────────────────────────────────
 
-function SousModuleInterventions({ interventions, vehicules, onAdd, onEdit, onDelete }) {
+function SousModuleInterventions({
+  interventions, vehicules, onAdd, onEdit, onDelete,
+  loading, saving, error, configured, filterFn,
+}) {
   const [search, setSearch] = useState('');
   const [filterStatut, setFilterStatut] = useState('');
   const [filterPriorite, setFilterPriorite] = useState('');
+  const [filterMatricule, setFilterMatricule] = useState('');
+  const [filterChauffeur, setFilterChauffeur] = useState('');
+  const [filterDateFrom, setFilterDateFrom] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
 
-  const filtered = interventions.filter(i => {
-    const q = search.toLowerCase();
-    const ms = !q || (i.ref || '').toLowerCase().includes(q) || (i.matricule || '').toLowerCase().includes(q) || (i.type_intervention || '').toLowerCase().includes(q) || (i.chauffeur || '').toLowerCase().includes(q);
-    const mst = !filterStatut   || i.statut    === filterStatut;
-    const mpr = !filterPriorite || i.priorite  === filterPriorite;
-    return ms && mst && mpr;
+  const matricules = [...new Set(vehicules.map((v) => v.matricule).filter(Boolean))];
+  const chauffeurs = [...new Set(interventions.map((i) => i.chauffeur).filter(Boolean))];
+
+  const filtered = filterFn(interventions, {
+    search,
+    statut: filterStatut,
+    priorite: filterPriorite,
+    matricule: filterMatricule,
+    chauffeur: filterChauffeur,
+    dateFrom: filterDateFrom,
   });
 
   const ouvertes    = interventions.filter(i => ['en_attente','diagnostic','en_cours'].includes(i.statut)).length;
@@ -501,16 +591,23 @@ function SousModuleInterventions({ interventions, vehicules, onAdd, onEdit, onDe
   const terminees   = interventions.filter(i => i.statut === 'termine').length;
   const immobilises = interventions.filter(i => i.statut === 'en_cours' || i.statut === 'diagnostic').length;
 
-  function handleSave(data) {
-    const ref = editTarget ? editTarget.ref : 'INT-' + String(interventions.length + 1).padStart(3, '0');
-    if (editTarget) onEdit({ ...editTarget, ...data });
-    else onAdd({ ...data, ref, id: Date.now().toString() });
-    setShowForm(false);
-    setEditTarget(null);
+  async function handleSave(data) {
+    const ok = editTarget
+      ? await onEdit({ ...editTarget, ...data })
+      : await onAdd(data);
+    if (ok !== false) {
+      setShowForm(false);
+      setEditTarget(null);
+    }
   }
 
   return (
     <div>
+      {error && (
+        <div style={{ marginBottom: 12, padding: '10px 14px', borderRadius: 8, background: 'var(--red-light)', color: 'var(--red)', fontSize: '0.85rem' }}>
+          {error}
+        </div>
+      )}
       <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', marginBottom: 20 }}>
         <KpiCard icon={<ClipboardList size={17} />} label="Interventions ouvertes"   value={ouvertes}    color="blue"   />
         <KpiCard icon={<AlertTriangle size={17} />} label="Urgentes / Critiques"     value={urgentes}    color="red"    />
@@ -533,10 +630,19 @@ function SousModuleInterventions({ interventions, vehicules, onAdd, onEdit, onDe
               <option value="">Toutes priorités</option>
               {PRIORITES.map(p => <option key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)}</option>)}
             </select>
+            <select style={{ ...SELECT_STYLE, width: 130 }} value={filterMatricule} onChange={e => setFilterMatricule(e.target.value)}>
+              <option value="">Tous véhicules</option>
+              {matricules.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+            <select style={{ ...SELECT_STYLE, width: 150 }} value={filterChauffeur} onChange={e => setFilterChauffeur(e.target.value)}>
+              <option value="">Tous conducteurs</option>
+              {chauffeurs.map((c) => <option key={c} value={c}>{c}</option>)}
+            </select>
+            <input type="date" style={{ ...SELECT_STYLE, width: 150 }} value={filterDateFrom} onChange={e => setFilterDateFrom(e.target.value)} title="Date demande à partir de" />
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button className="btn btn-ghost btn-sm"><Download size={14} /> Export</button>
-            <button className="btn btn-primary btn-sm" onClick={() => { setEditTarget(null); setShowForm(true); }}>
+            <button className="btn btn-primary btn-sm" disabled={!configured || saving} onClick={() => { setEditTarget(null); setShowForm(true); }}>
               <Plus size={14} /> Nouvelle demande
             </button>
           </div>
@@ -547,7 +653,12 @@ function SousModuleInterventions({ interventions, vehicules, onAdd, onEdit, onDe
         <div className="flex-between mb-4">
           <div className="card-title" style={{ marginBottom: 0 }}><Wrench size={16} /> Demandes d'intervention — {filtered.length}</div>
         </div>
-        {filtered.length === 0 ? (
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-3)' }}>
+            <Loader size={22} style={{ animation: 'spin 0.8s linear infinite', marginBottom: 8 }} />
+            <div>Chargement des demandes...</div>
+          </div>
+        ) : filtered.length === 0 ? (
           <EmptyState
             icon={<Wrench size={26} style={{ color: 'var(--text-3)' }} />}
             title={interventions.length === 0 ? "Aucune demande enregistrée" : "Aucun résultat"}
@@ -556,58 +667,88 @@ function SousModuleInterventions({ interventions, vehicules, onAdd, onEdit, onDe
             onAction={() => setShowForm(true)}
           />
         ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Référence</th>
-                  <th>Véhicule</th>
-                  <th>Type</th>
-                  <th>Priorité</th>
-                  <th>Demandeur</th>
-                  <th>Date</th>
-                  <th>Statut</th>
-                  <th>Coût estimé</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map(i => (
-                  <tr key={i.id || i.ref}>
-                    <td>
-                      <span style={{ fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--red)', fontSize: '0.9rem' }}>{i.ref}</span>
-                    </td>
-                    <td>
-                      <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{i.matricule || '—'}</div>
-                    </td>
-                    <td style={{ fontSize: '0.875rem' }}>{i.type_intervention || '—'}</td>
-                    <td><Badge type={i.priorite} /></td>
-                    <td style={{ fontSize: '0.875rem', color: 'var(--text-2)' }}>{i.chauffeur || '—'}</td>
-                    <td style={{ fontSize: '0.82rem', color: 'var(--text-3)' }}>{i.date_demande || '—'}</td>
-                    <td><Badge type={i.statut} /></td>
-                    <td style={{ fontFamily: 'var(--font-head)', fontWeight: 600, fontSize: '0.9rem' }}>
-                      {i.cout_estime ? Number(i.cout_estime).toLocaleString('fr-MA') + ' MAD' : '—'}
-                    </td>
-                    <td>
-                      <div style={{ display: 'flex', gap: 3 }}>
-                        <button className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} title="Modifier" onClick={() => { setEditTarget(i); setShowForm(true); }}>
-                          <Edit2 size={13} />
-                        </button>
-                        <button className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} title="Supprimer" onClick={() => onDelete(i.id || i.ref)}>
-                          <Trash2 size={13} style={{ color: 'var(--red)' }} />
-                        </button>
-                      </div>
-                    </td>
+          <>
+            <div className="log-desktop-table table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Référence</th>
+                    <th>Véhicule</th>
+                    <th>Type</th>
+                    <th>Priorité</th>
+                    <th>Demandeur</th>
+                    <th>Date</th>
+                    <th>Statut</th>
+                    <th>Coût estimé</th>
+                    <th>Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {filtered.map(i => (
+                    <tr key={i.id || i.ref}>
+                      <td>
+                        <span style={{ fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--red)', fontSize: '0.9rem' }}>{i.ref}</span>
+                      </td>
+                      <td>
+                        <div style={{ fontWeight: 600, fontSize: '0.875rem' }}>{i.matricule || '—'}</div>
+                      </td>
+                      <td style={{ fontSize: '0.875rem' }}>{i.type_intervention || '—'}</td>
+                      <td><Badge type={i.priorite} /></td>
+                      <td style={{ fontSize: '0.875rem', color: 'var(--text-2)' }}>{i.chauffeur || '—'}</td>
+                      <td style={{ fontSize: '0.82rem', color: 'var(--text-3)' }}>{i.date_demande || '—'}</td>
+                      <td><Badge type={i.statut} /></td>
+                      <td style={{ fontFamily: 'var(--font-head)', fontWeight: 600, fontSize: '0.9rem' }}>
+                        {i.cout_estime ? Number(i.cout_estime).toLocaleString('fr-MA') + ' MAD' : '—'}
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', gap: 3 }}>
+                          <button className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} title="Modifier" onClick={() => { setEditTarget(i); setShowForm(true); }}>
+                            <Edit2 size={13} />
+                          </button>
+                          <button className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} title="Supprimer" disabled={saving} onClick={() => onDelete(i.id)}>
+                            <Trash2 size={13} style={{ color: 'var(--red)' }} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="log-mobile-list">
+              {filtered.map((i) => (
+                <LogistiqueMobileCard
+                  key={i.id || i.ref}
+                  title={i.matricule || 'Véhicule'}
+                  subtitle={i.ref}
+                  badges={(
+                    <>
+                      <Badge type={i.priorite} />
+                      <Badge type={i.statut} />
+                    </>
+                  )}
+                  meta={[
+                    ['Conducteur', i.chauffeur],
+                    ['Intervention', i.type_intervention],
+                    ['Date', i.date_demande],
+                    ['Coût est.', i.cout_estime ? `${Number(i.cout_estime).toLocaleString('fr-MA')} MAD` : '—'],
+                  ]}
+                  actions={(
+                    <>
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setEditTarget(i); setShowForm(true); }}><Eye size={13} /> Voir</button>
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setEditTarget(i); setShowForm(true); }}><Edit2 size={13} /> Modifier</button>
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => onDelete(i.id)} disabled={saving}><Trash2 size={13} /> Supprimer</button>
+                    </>
+                  )}
+                />
+              ))}
+            </div>
+          </>
         )}
       </div>
 
       <Modal open={showForm} onClose={() => { setShowForm(false); setEditTarget(null); }} title={editTarget ? "Modifier la demande" : "Nouvelle demande d'intervention"} width={720}>
-        <FormulaireIntervention vehicules={vehicules} initial={editTarget} onSave={handleSave} onClose={() => { setShowForm(false); setEditTarget(null); }} />
+        <FormulaireIntervention vehicules={vehicules} initial={editTarget} onSave={handleSave} saving={saving} onClose={() => { setShowForm(false); setEditTarget(null); }} />
       </Modal>
     </div>
   );
@@ -615,30 +756,46 @@ function SousModuleInterventions({ interventions, vehicules, onAdd, onEdit, onDe
 
 // ── Sous-module Historique ────────────────────────────────────────────────────
 
-function SousModuleHistorique({ interventions }) {
+function SousModuleHistorique({ historique, loading, error, filterFn }) {
   const [search, setSearch] = useState('');
   const [filterStatut, setFilterStatut] = useState('');
   const [filterPriorite, setFilterPriorite] = useState('');
+  const [filterMatricule, setFilterMatricule] = useState('');
+  const [filterChauffeur, setFilterChauffeur] = useState('');
+  const [filterType, setFilterType] = useState('');
+  const [filterDateFrom, setFilterDateFrom] = useState('');
+  const [filterDateTo, setFilterDateTo] = useState('');
+  const [detail, setDetail] = useState(null);
 
-  const terminees = interventions.filter(i => i.statut === 'termine' || i.statut === 'annule');
+  const matricules = [...new Set(historique.map((i) => i.matricule).filter(Boolean))];
+  const chauffeurs = [...new Set(historique.map((i) => i.chauffeur).filter(Boolean))];
+  const types = [...new Set(historique.map((i) => i.type_intervention).filter(Boolean))];
 
-  const filtered = terminees.filter(i => {
-    const q = search.toLowerCase();
-    const ms = !q || (i.ref || '').toLowerCase().includes(q) || (i.matricule || '').toLowerCase().includes(q) || (i.type_intervention || '').toLowerCase().includes(q);
-    const mst = !filterStatut   || i.statut    === filterStatut;
-    const mpr = !filterPriorite || i.priorite  === filterPriorite;
-    return ms && mst && mpr;
+  const filtered = filterFn(historique, {
+    search,
+    statut: filterStatut,
+    priorite: filterPriorite,
+    matricule: filterMatricule,
+    chauffeur: filterChauffeur,
+    typeIntervention: filterType,
+    dateFrom: filterDateFrom,
+    dateTo: filterDateTo,
   });
 
-  const totalCout = terminees.reduce((s, i) => s + (Number(i.cout_estime) || 0), 0);
+  const totalCout = historique.reduce((s, i) => s + (Number(i.cout_final || i.cout_estime) || 0), 0);
 
   return (
     <div>
+      {error && (
+        <div style={{ marginBottom: 12, padding: '10px 14px', borderRadius: 8, background: 'var(--red-light)', color: 'var(--red)', fontSize: '0.85rem' }}>
+          {error}
+        </div>
+      )}
       <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', marginBottom: 20 }}>
-        <KpiCard icon={<Clock size={17} />}     label="Total interventions"      value={terminees.length}                             color="blue"  />
+        <KpiCard icon={<Clock size={17} />}     label="Total interventions"      value={historique.length}                             color="blue"  />
         <KpiCard icon={<BarChart3 size={17} />} label="Coût total maintenance"   value={totalCout.toLocaleString('fr-MA') + ' MAD'}   color="red"   sub="Interventions clôturées" />
-        <KpiCard icon={<CheckCircle size={17} />} label="Terminées"              value={terminees.filter(i => i.statut === 'termine').length} color="green" />
-        <KpiCard icon={<X size={17} />}         label="Annulées"                 value={terminees.filter(i => i.statut === 'annule').length}  color="grey"  />
+        <KpiCard icon={<CheckCircle size={17} />} label="Terminées"              value={historique.filter(i => i.statut === 'termine').length} color="green" />
+        <KpiCard icon={<X size={17} />}         label="Annulées"                 value={historique.filter(i => i.statut === 'annule').length}  color="grey"  />
       </div>
 
       <div className="card" style={{ marginBottom: 16, padding: '14px 20px' }}>
@@ -656,6 +813,20 @@ function SousModuleHistorique({ interventions }) {
             <option value="">Toutes priorités</option>
             {PRIORITES.map(p => <option key={p} value={p}>{p.charAt(0).toUpperCase() + p.slice(1)}</option>)}
           </select>
+          <select style={{ ...SELECT_STYLE, width: 130 }} value={filterMatricule} onChange={e => setFilterMatricule(e.target.value)}>
+            <option value="">Tous véhicules</option>
+            {matricules.map((m) => <option key={m} value={m}>{m}</option>)}
+          </select>
+          <select style={{ ...SELECT_STYLE, width: 140 }} value={filterChauffeur} onChange={e => setFilterChauffeur(e.target.value)}>
+            <option value="">Tous conducteurs</option>
+            {chauffeurs.map((c) => <option key={c} value={c}>{c}</option>)}
+          </select>
+          <select style={{ ...SELECT_STYLE, width: 150 }} value={filterType} onChange={e => setFilterType(e.target.value)}>
+            <option value="">Tous types</option>
+            {types.map((t) => <option key={t} value={t}>{t}</option>)}
+          </select>
+          <input type="date" style={{ ...SELECT_STYLE, width: 140 }} value={filterDateFrom} onChange={e => setFilterDateFrom(e.target.value)} title="Du" />
+          <input type="date" style={{ ...SELECT_STYLE, width: 140 }} value={filterDateTo} onChange={e => setFilterDateTo(e.target.value)} title="Au" />
           <button className="btn btn-ghost btn-sm"><Download size={14} /> Exporter</button>
         </div>
       </div>
@@ -664,58 +835,124 @@ function SousModuleHistorique({ interventions }) {
         <div className="flex-between mb-4">
           <div className="card-title" style={{ marginBottom: 0 }}><Clock size={16} /> Historique — {filtered.length} intervention{filtered.length !== 1 ? 's' : ''}</div>
         </div>
-        {filtered.length === 0 ? (
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-3)' }}>
+            <Loader size={22} style={{ animation: 'spin 0.8s linear infinite', marginBottom: 8 }} />
+            <div>Chargement de l'historique...</div>
+          </div>
+        ) : filtered.length === 0 ? (
           <EmptyState
             icon={<Clock size={26} style={{ color: 'var(--text-3)' }} />}
             title="Aucun historique disponible"
-            sub="Les interventions clôturées apparaîtront ici."
+            sub="Les interventions clôturées (statut Terminé ou Annulé) apparaîtront ici."
           />
         ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Référence</th>
-                  <th>Date</th>
-                  <th>Véhicule</th>
-                  <th>Intervention</th>
-                  <th>Garage</th>
-                  <th>Priorité</th>
-                  <th>Coût (MAD)</th>
-                  <th>Statut final</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map(i => (
-                  <tr key={i.id || i.ref}>
-                    <td style={{ fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--red)', fontSize: '0.9rem' }}>{i.ref}</td>
-                    <td style={{ fontSize: '0.82rem', color: 'var(--text-3)' }}>{i.date_demande || '—'}</td>
-                    <td style={{ fontWeight: 600, fontSize: '0.875rem' }}>{i.matricule || '—'}</td>
-                    <td style={{ fontSize: '0.875rem' }}>{i.type_intervention || '—'}</td>
-                    <td style={{ fontSize: '0.875rem', color: 'var(--text-2)' }}>{i.garage || '—'}</td>
-                    <td><Badge type={i.priorite} /></td>
-                    <td style={{ fontFamily: 'var(--font-head)', fontWeight: 700 }}>
-                      {i.cout_estime ? Number(i.cout_estime).toLocaleString('fr-MA') : '—'}
-                    </td>
-                    <td><Badge type={i.statut} /></td>
-                    <td>
-                      <div style={{ display: 'flex', gap: 3 }}>
-                        <button className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} title="Voir détail">
-                          <Eye size={13} />
-                        </button>
-                        <button className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} title="Télécharger rapport">
-                          <Download size={13} />
-                        </button>
-                      </div>
-                    </td>
+          <>
+            <div className="log-desktop-table table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Référence</th>
+                    <th>Date</th>
+                    <th>Véhicule</th>
+                    <th>Intervention</th>
+                    <th>Garage</th>
+                    <th>Priorité</th>
+                    <th>Coût (MAD)</th>
+                    <th>Statut final</th>
+                    <th>Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {filtered.map(i => (
+                    <tr key={i.id || i.ref}>
+                      <td style={{ fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--red)', fontSize: '0.9rem' }}>{i.ref}</td>
+                      <td style={{ fontSize: '0.82rem', color: 'var(--text-3)' }}>{i.date_fin || i.date_demande || '—'}</td>
+                      <td style={{ fontWeight: 600, fontSize: '0.875rem' }}>{i.matricule || '—'}</td>
+                      <td style={{ fontSize: '0.875rem' }}>{i.type_intervention || '—'}</td>
+                      <td style={{ fontSize: '0.875rem', color: 'var(--text-2)' }}>{i.prestataire || i.garage || '—'}</td>
+                      <td><Badge type={i.priorite} /></td>
+                      <td style={{ fontFamily: 'var(--font-head)', fontWeight: 700 }}>
+                        {(i.cout_final || i.cout_estime) ? Number(i.cout_final || i.cout_estime).toLocaleString('fr-MA') : '—'}
+                      </td>
+                      <td><Badge type={i.statut} /></td>
+                      <td>
+                        <div style={{ display: 'flex', gap: 3 }}>
+                          <button className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} title="Voir détail" onClick={() => setDetail(i)}>
+                            <Eye size={13} />
+                          </button>
+                          <button className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} title="Télécharger rapport">
+                            <Download size={13} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="log-mobile-list">
+              {filtered.map((i) => (
+                <LogistiqueMobileCard
+                  key={i.id || i.ref}
+                  title={i.matricule || 'Véhicule'}
+                  subtitle={i.ref}
+                  badges={(
+                    <>
+                      <Badge type={i.priorite} />
+                      <Badge type={i.statut} />
+                    </>
+                  )}
+                  meta={[
+                    ['Intervention', i.type_intervention],
+                    ['Date', i.date_fin || i.date_demande],
+                    ['Garage', i.prestataire || i.garage],
+                    ['Coût', (i.cout_final || i.cout_estime) ? `${Number(i.cout_final || i.cout_estime).toLocaleString('fr-MA')} MAD` : '—'],
+                  ]}
+                  actions={(
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => setDetail(i)}><Eye size={13} /> Voir détail</button>
+                  )}
+                />
+              ))}
+            </div>
+          </>
         )}
       </div>
+
+      <Modal open={!!detail} onClose={() => setDetail(null)} title={`Intervention ${detail?.ref || ''}`} width={640}>
+        {detail && (
+          <div style={{ fontSize: '0.875rem' }}>
+            {[
+              ['Véhicule', detail.matricule],
+              ['Conducteur', detail.chauffeur],
+              ['Type', detail.type_intervention],
+              ['Date demande', detail.date_demande],
+              ['Date intervention', detail.date_intervention],
+              ['Date fin', detail.date_fin],
+              ['Prestataire', detail.prestataire || detail.garage],
+              ['Coût final', (detail.cout_final || detail.cout_estime) ? `${Number(detail.cout_final || detail.cout_estime).toLocaleString('fr-MA')} MAD` : '—'],
+              ['Statut', detail.statut],
+            ].map(([k, v]) => (
+              <div key={k} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
+                <span style={{ color: 'var(--text-3)' }}>{k}</span>
+                <span style={{ fontWeight: 600 }}>{v || '—'}</span>
+              </div>
+            ))}
+            {detail.description && (
+              <div style={{ marginTop: 12 }}>
+                <div style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 6 }}>Description</div>
+                <p style={{ color: 'var(--text-2)', lineHeight: 1.5 }}>{detail.description}</p>
+              </div>
+            )}
+            {detail.observation_finale && (
+              <div style={{ marginTop: 12 }}>
+                <div style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 6 }}>Observation finale</div>
+                <p style={{ color: 'var(--text-2)', lineHeight: 1.5 }}>{detail.observation_finale}</p>
+              </div>
+            )}
+          </div>
+        )}
+      </Modal>
     </div>
   );
 }
@@ -743,6 +980,7 @@ function DetailVehicule({ vehicule, interventions, onBack, onEdit }) {
           <SectionTitle icon={<Truck size={13} />}>Informations générales</SectionTitle>
           {[
             ['Matricule',    vehicule.matricule],
+            ['Matricule WW', vehicule.matricule_ww],
             ['Type',         vehicule.type],
             ['Marque',       vehicule.marque],
             ['Modèle',       vehicule.modele],
@@ -838,41 +1076,168 @@ function isExpiringSoon(dateStr) {
   return diff >= 0 && diff < 60;
 }
 
+const LOGISTIQUE_TAB_FROM_NAV = {
+  vehicules: 'vehicules',
+  interventions: 'interventions',
+  'historique-interv': 'historique',
+};
+
+function resolveLogistiqueTab(activeTabProp) {
+  return LOGISTIQUE_TAB_FROM_NAV[activeTabProp] || activeTabProp || 'vehicules';
+}
+
+function LogistiqueMobileCard({ title, subtitle, badges, meta = [], actions }) {
+  return (
+    <div className="log-mobile-card">
+      <div className="log-mobile-card-head">
+        <div className="log-mobile-card-identity">
+          <div className="log-mobile-card-title">{title}</div>
+          {subtitle && <div className="log-mobile-card-sub">{subtitle}</div>}
+        </div>
+        {badges && <div className="log-mobile-card-badges">{badges}</div>}
+      </div>
+      {meta.length > 0 && (
+        <div className="log-mobile-card-meta">
+          {meta.map(([k, v]) => (
+            <div key={k} className="log-mobile-meta-row">
+              <span>{k}</span>
+              <span>{v ?? '—'}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {actions && <div className="log-mobile-card-actions">{actions}</div>}
+    </div>
+  );
+}
+
 // ── Composant principal ───────────────────────────────────────────────────────
 
-export default function Logistique() {
-  const [tab, setTab]                   = useState('vehicules');
-  const [vehicules, setVehicules]       = useState([]);
-  const [interventions, setInterventions] = useState([]);
+export default function Logistique({ activeTab: activeTabProp }) {
+  const resolvedTab = resolveLogistiqueTab(activeTabProp);
+  const [tab, setTab] = useState(resolvedTab);
   const [detailVehicule, setDetailVehicule] = useState(null);
   const [editVehicule, setEditVehicule] = useState(null);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [vehToast, setVehToast] = useState(null);
+  const [intToast, setIntToast] = useState(null);
 
-  // CRUD Véhicules
-  const addVehicule = useCallback((data) => {
-    setVehicules(prev => [...prev, { ...data, id: Date.now().toString() }]);
-  }, []);
-  const editVehiculeHandler = useCallback((data) => {
-    setVehicules(prev => prev.map(v => v.id === data.id ? data : v));
-    setDetailVehicule(prev => prev && prev.id === data.id ? data : prev);
-    setShowEditModal(false);
-    setEditVehicule(null);
-  }, []);
-  const deleteVehicule = useCallback((id) => {
-    setVehicules(prev => prev.filter(v => v.id !== id));
-    if (detailVehicule && detailVehicule.id === id) setDetailVehicule(null);
-  }, [detailVehicule]);
+  useEffect(() => {
+    setTab(resolvedTab);
+    if (resolvedTab !== 'vehicules') setDetailVehicule(null);
+  }, [resolvedTab]);
 
-  // CRUD Interventions
-  const addIntervention = useCallback((data) => {
-    setInterventions(prev => [...prev, data]);
-  }, []);
-  const editIntervention = useCallback((data) => {
-    setInterventions(prev => prev.map(i => (i.id || i.ref) === (data.id || data.ref) ? data : i));
-  }, []);
-  const deleteIntervention = useCallback((idOrRef) => {
-    setInterventions(prev => prev.filter(i => (i.id || i.ref) !== idOrRef));
-  }, []);
+  const logistiqueTabActive = ['vehicules', 'interventions', 'historique'].includes(tab);
+  const intDataEnabled = tab === 'interventions' || tab === 'historique' || !!detailVehicule;
+
+  const {
+    vehicles: vehicules,
+    loading: vehiculesLoading,
+    saving: vehiculesSaving,
+    error: vehiculesError,
+    configured: vehiculesConfigured,
+    create: createVehicule,
+    update: updateVehicule,
+    remove: removeVehicule,
+    importSeed: importVehiculesSeed,
+  } = useVehicles({ enabled: logistiqueTabActive });
+
+  const {
+    openRequests: demandesInterventions,
+    history: historiqueInterventions,
+    allForVehicleDetail: interventionsVehicule,
+    loading: intLoading,
+    saving: intSaving,
+    error: intError,
+    configured: intConfigured,
+    create: createIntervention,
+    update: updateIntervention,
+    remove: removeIntervention,
+    filterInterventionRequests,
+    filterInterventionHistory,
+  } = useInterventions({ enabled: intDataEnabled });
+
+  function showVehToast(type, msg) {
+    setVehToast({ type, msg });
+    setTimeout(() => setVehToast(null), 3500);
+  }
+
+  function showIntToast(type, msg) {
+    setIntToast({ type, msg });
+    setTimeout(() => setIntToast(null), 3500);
+  }
+
+  const addVehicule = useCallback(async (data) => {
+    const result = await createVehicule(data);
+    if (result.success) {
+      showVehToast('success', 'Véhicule ajouté.');
+      return true;
+    }
+    showVehToast('error', result.error || 'Erreur enregistrement.');
+    return false;
+  }, [createVehicule]);
+
+  const editVehiculeHandler = useCallback(async (data) => {
+    const result = await updateVehicule(data.id, data);
+    if (result.success) {
+      setDetailVehicule((prev) => (prev && prev.id === data.id ? (result.data || data) : prev));
+      setShowEditModal(false);
+      setEditVehicule(null);
+      showVehToast('success', 'Véhicule modifié.');
+      return true;
+    }
+    showVehToast('error', result.error || 'Erreur enregistrement.');
+    return false;
+  }, [updateVehicule]);
+
+  const deleteVehicule = useCallback(async (id) => {
+    if (!window.confirm('Supprimer ce véhicule ?')) return;
+    const result = await removeVehicule(id);
+    if (result.success) {
+      if (detailVehicule && detailVehicule.id === id) setDetailVehicule(null);
+      showVehToast('success', 'Véhicule supprimé.');
+    } else {
+      showVehToast('error', result.error || 'Erreur suppression.');
+    }
+  }, [removeVehicule, detailVehicule]);
+
+  const handleImportVehicules = useCallback(async () => {
+    const result = await importVehiculesSeed();
+    if (result.success) {
+      const errPart = result.errors?.length ? ` (${result.errors.length} erreur(s))` : '';
+      showVehToast('success', `Import : ${result.imported} ajouté(s), ${result.updated} mis à jour${errPart}.`);
+    } else {
+      showVehToast('error', result.error || 'Erreur import.');
+    }
+  }, [importVehiculesSeed]);
+
+  const addIntervention = useCallback(async (data) => {
+    const result = await createIntervention(data, vehicules);
+    if (result.success) {
+      showIntToast('success', 'Demande enregistrée.');
+      return true;
+    }
+    showIntToast('error', result.error || 'Erreur enregistrement.');
+    return false;
+  }, [createIntervention, vehicules]);
+
+  const editInterventionHandler = useCallback(async (data) => {
+    const result = await updateIntervention(data.id, data, vehicules);
+    if (result.success) {
+      const closed = data.statut === 'termine' || data.statut === 'annule';
+      showIntToast('success', closed ? 'Demande clôturée — visible dans Historique.' : 'Demande modifiée.');
+      return true;
+    }
+    showIntToast('error', result.error || 'Erreur enregistrement.');
+    return false;
+  }, [updateIntervention, vehicules]);
+
+  const deleteInterventionHandler = useCallback(async (id) => {
+    if (!window.confirm('Supprimer cette demande ?')) return;
+    const result = await removeIntervention(id);
+    if (result.success) showIntToast('success', 'Demande supprimée.');
+    else showIntToast('error', result.error || 'Erreur suppression.');
+  }, [removeIntervention]);
 
   // Afficher le détail d'un véhicule
   if (detailVehicule) {
@@ -880,7 +1245,7 @@ export default function Logistique() {
       <div className="animate-fade-in">
         <DetailVehicule
           vehicule={detailVehicule}
-          interventions={interventions}
+          interventions={interventionsVehicule}
           onBack={() => setDetailVehicule(null)}
           onEdit={(v) => { setEditVehicule(v); setShowEditModal(true); }}
         />
@@ -888,6 +1253,7 @@ export default function Logistique() {
           <FormulaireVehicule
             initial={editVehicule}
             onSave={editVehiculeHandler}
+            saving={vehiculesSaving}
             onClose={() => { setShowEditModal(false); setEditVehicule(null); }}
           />
         </Modal>
@@ -896,7 +1262,7 @@ export default function Logistique() {
   }
 
   return (
-    <div className="animate-fade-in">
+    <div className="logistique-module animate-fade-in">
       {/* Header */}
       <div className="page-header flex-between">
         <div>
@@ -908,28 +1274,50 @@ export default function Logistique() {
         </div>
       </div>
 
-      {/* Onglets */}
-      <div style={{ display: 'flex', gap: 0, marginBottom: 20, borderBottom: '2px solid var(--border)' }}>
+      {/* Onglets internes (sync sidebar via activeTab) */}
+      <div className="logistique-tabs" role="tablist">
         {[
           ['vehicules',     <Truck size={14} />,         'Véhicules'],
           ['interventions', <Wrench size={14} />,        "Demandes d'intervention"],
           ['historique',    <Clock size={14} />,         'Historique'],
-        ].map(([k, icon, label]) => (
-          <button key={k} onClick={() => setTab(k)} style={{
-            display: 'flex', alignItems: 'center', gap: 6,
-            padding: '10px 18px', border: 'none', cursor: 'pointer',
-            fontFamily: 'var(--font-body)', fontWeight: 600, fontSize: '0.875rem',
-            background: 'none',
-            color: tab === k ? 'var(--red)' : 'var(--text-2)',
-            borderBottom: tab === k ? '2px solid var(--red)' : '2px solid transparent',
-            marginBottom: -2, transition: 'all 0.15s'
-          }}>
-            {icon}{label}
-          </button>
-        ))}
+        ].map(([k, icon, label]) => {
+          const isActive = tab === k;
+          return (
+            <button
+              key={k}
+              type="button"
+              role="tab"
+              aria-selected={isActive}
+              onClick={() => setTab(k)}
+              className={`logistique-tab${isActive ? ' logistique-tab--active' : ''}`}
+            >
+              {icon}{label}
+            </button>
+          );
+        })}
       </div>
 
       {/* Contenu */}
+      {vehToast && tab === 'vehicules' && (
+        <div style={{
+          marginBottom: 12, padding: '10px 14px', borderRadius: 8, fontSize: '0.85rem',
+          background: vehToast.type === 'success' ? '#E8F5E9' : 'var(--red-light)',
+          color: vehToast.type === 'success' ? '#2E7D32' : 'var(--red)',
+        }}>
+          {vehToast.msg}
+        </div>
+      )}
+
+      {intToast && (tab === 'interventions' || tab === 'historique') && (
+        <div style={{
+          marginBottom: 12, padding: '10px 14px', borderRadius: 8, fontSize: '0.85rem',
+          background: intToast.type === 'success' ? '#E8F5E9' : 'var(--red-light)',
+          color: intToast.type === 'success' ? '#2E7D32' : 'var(--red)',
+        }}>
+          {intToast.msg}
+        </div>
+      )}
+
       {tab === 'vehicules' && (
         <SousModuleVehicules
           vehicules={vehicules}
@@ -937,20 +1325,33 @@ export default function Logistique() {
           onEdit={editVehiculeHandler}
           onDelete={deleteVehicule}
           onViewDetail={setDetailVehicule}
+          loading={vehiculesLoading}
+          saving={vehiculesSaving}
+          error={vehiculesError}
+          configured={vehiculesConfigured}
+          onImportSeed={handleImportVehicules}
         />
       )}
       {tab === 'interventions' && (
         <SousModuleInterventions
-          interventions={interventions}
+          interventions={demandesInterventions}
           vehicules={vehicules}
           onAdd={addIntervention}
-          onEdit={editIntervention}
-          onDelete={deleteIntervention}
+          onEdit={editInterventionHandler}
+          onDelete={deleteInterventionHandler}
+          loading={intLoading}
+          saving={intSaving}
+          error={intError}
+          configured={intConfigured}
+          filterFn={filterInterventionRequests}
         />
       )}
       {tab === 'historique' && (
         <SousModuleHistorique
-          interventions={interventions}
+          historique={historiqueInterventions}
+          loading={intLoading}
+          error={intError}
+          filterFn={filterInterventionHistory}
         />
       )}
     </div>

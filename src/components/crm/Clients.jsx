@@ -1,11 +1,12 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Users, Plus, Search, Edit2, Trash2, Eye, FileText, Receipt,
   X, ChevronLeft, Building2, Phone, Mail, MapPin, User,
   TrendingUp, DollarSign, FolderOpen, Clock, CheckCircle,
-  AlertCircle, Zap, CreditCard, Activity
+  AlertCircle, Zap, CreditCard, Activity, Loader2
 } from 'lucide-react';
 import { TYPE_PROJET_VALUES, TYPE_PROJET_LABEL } from '../../constants/commercial';
+import { useClients } from '../../hooks/useClients';
 
 /* ── Helpers ── */
 function fmtMAD(v) {
@@ -76,7 +77,7 @@ function Modal({ title, onClose, children, maxWidth = 560 }) {
       <div style={{ background: '#fff', borderRadius: 14, padding: 28, width: '100%', maxWidth, boxShadow: '0 8px 40px rgba(0,0,0,0.2)', maxHeight: '92vh', overflowY: 'auto' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 20 }}>
           <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.25rem', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{title}</h2>
-          <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: 4 }}><X size={20} /></button>
+          <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: 4 }}><X size={20} /></button>
         </div>
         {children}
       </div>
@@ -84,11 +85,30 @@ function Modal({ title, onClose, children, maxWidth = 560 }) {
   );
 }
 
+function ActionInfoModal({ title, message, onClose }) {
+  return (
+    <Modal title={title} onClose={onClose} maxWidth={440}>
+      <p style={{ fontSize: '0.9rem', color: 'var(--text-2)', lineHeight: 1.6, margin: 0 }}>{message}</p>
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 20 }}>
+        <button type="button" className="btn btn-primary btn-sm" onClick={onClose}>Fermer</button>
+      </div>
+    </Modal>
+  );
+}
+
+function clientDisplayName(c) {
+  return [c?.prenom, c?.nom].filter(Boolean).join(' ') || c?.nom || 'Client';
+}
+
 /* ═══════════════════════════════════════════════
    DETAIL CLIENT
    ═══════════════════════════════════════════════ */
-function ClientDetail({ client, clients, setClients, onBack }) {
-  const [tab, setTab] = useState('overview');
+function ClientDetail({ client, initialTab = 'overview', onBack, onEdit, onDevisEmpty, onFactureEmpty, onProjetEmpty }) {
+  const [tab, setTab] = useState(initialTab);
+
+  useEffect(() => {
+    setTab(initialTab);
+  }, [client.id, initialTab]);
   const [projets] = useState(SEED_PROJETS.filter(p => p.client_id === client.id));
   const [devis] = useState(SEED_DEVIS.filter(d => d.client_id === client.id));
   const [factures] = useState(SEED_FACTURES.filter(f => f.client_id === client.id));
@@ -121,7 +141,7 @@ function ClientDetail({ client, clients, setClients, onBack }) {
   const nomComplet = [client.prenom, client.nom].filter(Boolean).join(' ') || client.nom;
 
   return (
-    <div className="animate-fade-in">
+    <div className="animate-fade-in crm-module crm-module--clients">
       {/* Back button */}
       <button
         onClick={onBack}
@@ -153,10 +173,10 @@ function ClientDetail({ client, clients, setClients, onBack }) {
           </div>
           {/* Actions rapides */}
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <button className="btn btn-ghost btn-sm" style={{ display: 'flex', alignItems: 'center', gap: 5 }}><Edit2 size={13} /> Modifier</button>
-            <button className="btn btn-primary btn-sm" style={{ display: 'flex', alignItems: 'center', gap: 5 }}><Plus size={13} /> Devis</button>
-            <button className="btn btn-primary btn-sm" style={{ background: '#1976D2', borderColor: '#1976D2', display: 'flex', alignItems: 'center', gap: 5 }}><Receipt size={13} /> Facture</button>
-            <button className="btn btn-primary btn-sm" style={{ background: '#2E7D32', borderColor: '#2E7D32', display: 'flex', alignItems: 'center', gap: 5 }}><FolderOpen size={13} /> Projet</button>
+            <button type="button" className="btn btn-ghost btn-sm" style={{ display: 'flex', alignItems: 'center', gap: 5 }} onClick={onEdit}><Edit2 size={13} /> Modifier</button>
+            <button type="button" className="btn btn-primary btn-sm" style={{ display: 'flex', alignItems: 'center', gap: 5 }} onClick={() => (devis.length ? setTab('devis') : onDevisEmpty?.())}><Plus size={13} /> Devis</button>
+            <button type="button" className="btn btn-primary btn-sm" style={{ background: '#1976D2', borderColor: '#1976D2', display: 'flex', alignItems: 'center', gap: 5 }} onClick={() => (factures.length ? setTab('factures') : onFactureEmpty?.())}><Receipt size={13} /> Facture</button>
+            <button type="button" className="btn btn-primary btn-sm" style={{ background: '#2E7D32', borderColor: '#2E7D32', display: 'flex', alignItems: 'center', gap: 5 }} onClick={() => (projets.length ? setTab('projets') : onProjetEmpty?.())}><FolderOpen size={13} /> Projet</button>
           </div>
         </div>
       </div>
@@ -251,9 +271,10 @@ function ClientDetail({ client, clients, setClients, onBack }) {
           {projets.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-3)' }}>Aucun projet lie a ce client.</div>
           ) : (
-            <div className="table-wrap">
-              <table>
-                <thead><tr><th>Projet</th><th>Type projet</th><th>Statut</th><th>Budget (MAD)</th><th>Date debut</th><th>Responsable</th></tr></thead>
+            <div className="crm-table-scroll">
+              <div className="table-wrap">
+                <table>
+                  <thead><tr><th>Projet</th><th>Type projet</th><th>Statut</th><th>Budget (MAD)</th><th>Date debut</th><th>Responsable</th></tr></thead>
                 <tbody>
                   {projets.map(p => (
                     <tr key={p.id}>
@@ -266,7 +287,8 @@ function ClientDetail({ client, clients, setClients, onBack }) {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+                </table>
+              </div>
             </div>
           )}
         </div>
@@ -282,9 +304,10 @@ function ClientDetail({ client, clients, setClients, onBack }) {
           {devis.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-3)' }}>Aucun devis pour ce client.</div>
           ) : (
-            <div className="table-wrap">
-              <table>
-                <thead><tr><th>Reference</th><th>Type projet</th><th>Date</th><th>Montant (MAD)</th><th>Statut</th><th>Responsable</th><th>Actions</th></tr></thead>
+            <div className="crm-table-scroll">
+              <div className="table-wrap">
+                <table>
+                  <thead><tr><th>Reference</th><th>Type projet</th><th>Date</th><th>Montant (MAD)</th><th>Statut</th><th>Responsable</th><th>Actions</th></tr></thead>
                 <tbody>
                   {devis.map(d => (
                     <tr key={d.id}>
@@ -303,7 +326,8 @@ function ClientDetail({ client, clients, setClients, onBack }) {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+                </table>
+              </div>
             </div>
           )}
         </div>
@@ -319,9 +343,10 @@ function ClientDetail({ client, clients, setClients, onBack }) {
           {factures.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-3)' }}>Aucune facture pour ce client.</div>
           ) : (
-            <div className="table-wrap">
-              <table>
-                <thead><tr><th>Reference</th><th>Montant total</th><th>Montant paye</th><th>Reste a payer</th><th>Echeance</th><th>Statut</th></tr></thead>
+            <div className="crm-table-scroll">
+              <div className="table-wrap">
+                <table>
+                  <thead><tr><th>Reference</th><th>Montant total</th><th>Montant paye</th><th>Reste a payer</th><th>Echeance</th><th>Statut</th></tr></thead>
                 <tbody>
                   {factures.map(f => (
                     <tr key={f.id}>
@@ -334,7 +359,8 @@ function ClientDetail({ client, clients, setClients, onBack }) {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+                </table>
+              </div>
             </div>
           )}
         </div>
@@ -353,9 +379,10 @@ function ClientDetail({ client, clients, setClients, onBack }) {
           {paiements.length === 0 ? (
             <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-3)' }}>Aucun paiement enregistre.</div>
           ) : (
-            <div className="table-wrap">
-              <table>
-                <thead><tr><th>Date</th><th>Ref. facture</th><th>Montant paye</th><th>Moyen</th><th>Validateur</th></tr></thead>
+            <div className="crm-table-scroll">
+              <div className="table-wrap">
+                <table>
+                  <thead><tr><th>Date</th><th>Ref. facture</th><th>Montant paye</th><th>Moyen</th><th>Validateur</th></tr></thead>
                 <tbody>
                   {paiements.map(p => (
                     <tr key={p.id}>
@@ -367,7 +394,8 @@ function ClientDetail({ client, clients, setClients, onBack }) {
                     </tr>
                   ))}
                 </tbody>
-              </table>
+                </table>
+              </div>
             </div>
           )}
         </div>
@@ -408,10 +436,9 @@ function ClientDetail({ client, clients, setClients, onBack }) {
    ═══════════════════════════════════════════════ */
 const EMPTY_CLIENT = { nom: '', prenom: '', telephone: '', email: '', ice: '', responsable: '', adresse: '', ville: '', secteur: '', notes: '' };
 
-function ClientModal({ client, onClose, onSave }) {
+function ClientModal({ client, onClose, onSave, saving }) {
   const [form, setForm] = useState(client ? { ...client } : { ...EMPTY_CLIENT });
   const [errors, setErrors] = useState({});
-  const [saving, setSaving] = useState(false);
 
   function setField(k, v) { setForm(p => ({ ...p, [k]: v })); }
 
@@ -422,15 +449,12 @@ function ClientModal({ client, onClose, onSave }) {
     return e;
   }
 
-  function handleSubmit(ev) {
+  async function handleSubmit(ev) {
     ev.preventDefault();
     const e = validate();
     if (Object.keys(e).length) { setErrors(e); return; }
-    setSaving(true);
-    setTimeout(() => {
-      setSaving(false);
-      onSave({ ...form, id: client?.id || Date.now(), statut: form.statut || 'actif', created_at: client?.created_at || new Date().toISOString().slice(0, 10) });
-    }, 500);
+    const result = await onSave({ ...form, statut: form.statut || 'actif' });
+    if (result && result.success === false) return;
   }
 
   return (
@@ -464,11 +488,8 @@ function ClientModal({ client, onClose, onSave }) {
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <div className="form-group">
-            <label>Responsable assigne</label>
-            <select value={form.responsable} onChange={e => setField('responsable', e.target.value)} style={IS(false)}>
-              <option value="">Choisir...</option>
-              {RESPONSABLES.map(r => <option key={r} value={r}>{r}</option>)}
-            </select>
+            <label>Responsable</label>
+            <input value={form.responsable || ''} onChange={e => setField('responsable', e.target.value)} placeholder="Nom du responsable" style={IS(false)} />
           </div>
           <div className="form-group">
             <label>Secteur activite</label>
@@ -521,8 +542,23 @@ function ClientModal({ client, onClose, onSave }) {
    PAGE PRINCIPALE CLIENTS
    ═══════════════════════════════════════════════ */
 export default function Clients() {
-  const [clients, setClients] = useState([]);
+  const {
+    records: clients,
+    responsables,
+    loading,
+    saving,
+    error,
+    configured,
+    load,
+    create,
+    update,
+    remove,
+    filterClients,
+    computeClientsStats,
+  } = useClients();
+
   const [selectedClient, setSelectedClient] = useState(null);
+  const [detailInitialTab, setDetailInitialTab] = useState('overview');
   const [showModal, setShowModal] = useState(false);
   const [editingClient, setEditingClient] = useState(null);
   const [search, setSearch] = useState('');
@@ -530,23 +566,13 @@ export default function Clients() {
   const [filterResponsable, setFilterResponsable] = useState('');
   const [page, setPage] = useState(1);
   const [toast, setToast] = useState('');
+  const [infoModal, setInfoModal] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
 
   const PER_PAGE = 10;
 
   function showToast(msg) { setToast(msg); }
   function hideToast() { setToast(''); }
-
-  /* If viewing a client detail */
-  if (selectedClient) {
-    return (
-      <ClientDetail
-        client={selectedClient}
-        clients={clients}
-        setClients={setClients}
-        onBack={() => setSelectedClient(null)}
-      />
-    );
-  }
 
   /* KPI */
   const allDevis = SEED_DEVIS;
@@ -555,15 +581,18 @@ export default function Clients() {
   const totalRestant = allFactures.reduce((s, f) => s + (f.montant_total - f.montant_paye), 0);
 
   /* Filters */
-  const filtered = clients.filter(c => {
-    const nom = [c.prenom, c.nom].filter(Boolean).join(' ').toLowerCase();
-    const matchSearch = !search || nom.includes(search.toLowerCase()) || (c.telephone || '').includes(search) || (c.email || '').toLowerCase().includes(search.toLowerCase()) || (c.ice || '').includes(search);
-    const matchStatut = !filterStatut || c.statut === filterStatut;
-    const matchResp = !filterResponsable || c.responsable === filterResponsable;
-    return matchSearch && matchStatut && matchResp;
-  });
+  const filtered = useMemo(
+    () => filterClients(clients, { search, statut: filterStatut, responsable: filterResponsable }),
+    [clients, search, filterStatut, filterResponsable, filterClients],
+  );
   const totalPages = Math.ceil(filtered.length / PER_PAGE);
   const paginated = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
+
+  const clientStats = useMemo(() => computeClientsStats(clients), [clients, computeClientsStats]);
+  const responsableFilterOptions = useMemo(
+    () => [...new Set([...RESPONSABLES, ...responsables])].sort((a, b) => a.localeCompare(b, 'fr')),
+    [responsables],
+  );
 
   function getClientStats(clientId) {
     const d = SEED_DEVIS.filter(x => x.client_id === clientId);
@@ -574,27 +603,113 @@ export default function Clients() {
     return { nDevis: d.length, nFactures: f.length, nProjets: p.length, totalFacture: totalFact, restant: totalFact - totalPaye };
   }
 
-  function handleSave(data) {
-    if (editingClient) {
-      setClients(prev => prev.map(c => c.id === data.id ? data : c));
-      showToast('Client modifie avec succes !');
-    } else {
-      setClients(prev => [...prev, data]);
-      showToast('Client cree avec succes !');
+  async function handleSave(data) {
+    const result = editingClient
+      ? await update(editingClient.id, data)
+      : await create(data);
+    if (!result.success) {
+      showToast(result.error || 'Erreur enregistrement.');
+      return result;
     }
+    showToast(editingClient ? 'Client modifie avec succes !' : 'Client cree avec succes !');
     setShowModal(false);
     setEditingClient(null);
+    return { success: true };
   }
 
-  function handleDelete(id) {
-    setClients(prev => prev.filter(c => c.id !== id));
-    showToast('Client supprime.');
+  async function handleDelete(id) {
+    if (!window.confirm('Supprimer ce client ?')) return;
+    setDeletingId(id);
+    const result = await remove(id);
+    setDeletingId(null);
+    showToast(result.success ? 'Client supprime.' : (result.error || 'Erreur suppression.'));
+    if (result.success && selectedClient && String(selectedClient.id) === String(id)) {
+      setSelectedClient(null);
+      setDetailInitialTab('overview');
+    }
   }
 
   function openEdit(c) { setEditingClient(c); setShowModal(true); }
 
+  function openView(c, tab = 'overview') {
+    setDetailInitialTab(tab);
+    setSelectedClient(c);
+  }
+
+  function openClientDevis(c) {
+    const stats = getClientStats(c.id);
+    if (stats.nDevis > 0) {
+      openView(c, 'devis');
+    } else {
+      setInfoModal({
+        title: 'Devis client',
+        message: `Aucun devis disponible pour ${clientDisplayName(c)}. Fonction en preparation — le module Devis CRM sera bientot connecte.`,
+      });
+    }
+  }
+
+  function openClientFactures(c) {
+    const stats = getClientStats(c.id);
+    if (stats.nFactures > 0 || stats.totalFacture > 0) {
+      openView(c, 'factures');
+    } else {
+      setInfoModal({
+        title: 'Factures client',
+        message: `Aucune facture disponible pour ${clientDisplayName(c)}. Fonction en preparation — le module Facturation sera bientot connecte.`,
+      });
+    }
+  }
+
+  function openClientProjets(c) {
+    const stats = getClientStats(c.id);
+    if (stats.nProjets > 0) {
+      openView(c, 'projets');
+    } else {
+      setInfoModal({
+        title: 'Projets client',
+        message: `Aucun projet disponible pour ${clientDisplayName(c)}. Fonction en preparation.`,
+      });
+    }
+  }
+
+  const freshSelectedClient = selectedClient
+    ? clients.find(c => String(c.id) === String(selectedClient.id)) || selectedClient
+    : null;
+
+  if (freshSelectedClient) {
   return (
-    <div className="animate-fade-in">
+    <div className="animate-fade-in crm-module crm-module--clients">
+      <Toast msg={toast} onClose={hideToast} />
+      <ClientDetail
+          client={freshSelectedClient}
+          initialTab={detailInitialTab}
+          onBack={() => { setSelectedClient(null); setDetailInitialTab('overview'); }}
+          onEdit={() => openEdit(freshSelectedClient)}
+          onDevisEmpty={() => openClientDevis(freshSelectedClient)}
+          onFactureEmpty={() => openClientFactures(freshSelectedClient)}
+          onProjetEmpty={() => openClientProjets(freshSelectedClient)}
+        />
+        {infoModal && (
+          <ActionInfoModal
+            title={infoModal.title}
+            message={infoModal.message}
+            onClose={() => setInfoModal(null)}
+          />
+        )}
+        {showModal && (
+          <ClientModal
+            client={editingClient}
+            onClose={() => { setShowModal(false); setEditingClient(null); }}
+            onSave={handleSave}
+            saving={saving}
+          />
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="animate-fade-in crm-module crm-module--clients">
       <Toast msg={toast} onClose={hideToast} />
 
       {/* Header */}
@@ -603,16 +718,37 @@ export default function Clients() {
           <h1 className="page-title">Clients</h1>
           <p className="page-subtitle">Gestion des clients, projets, devis et facturation</p>
         </div>
-        <button className="btn btn-primary" onClick={() => { setEditingClient(null); setShowModal(true); }}>
+        <button className="btn btn-primary" onClick={() => { setEditingClient(null); setShowModal(true); }} disabled={loading || saving || !configured}>
           <Plus size={15} /> Nouveau client
         </button>
       </div>
 
+      {!configured && (
+        <div style={{ background: '#FFF3E0', border: '1px solid #FFB74D', borderRadius: 'var(--radius)', padding: '10px 16px', marginBottom: 16, fontSize: '0.85rem', color: '#E65100' }}>
+          Supabase non configuré — ajoutez VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY dans .env
+        </div>
+      )}
+
+      {error && !loading && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, background: '#FFEBEE', border: '1px solid #EF9A9A', borderRadius: 'var(--radius)', padding: '10px 16px', marginBottom: 16, fontSize: '0.85rem', color: '#C62828' }}>
+          <span>{error}</span>
+          <button className="btn btn-ghost btn-sm" onClick={load}>Réessayer</button>
+        </div>
+      )}
+
+      {loading && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '24px 0', color: 'var(--text-3)', fontSize: '0.875rem' }}>
+          <Loader2 size={18} className="spin" /> Chargement des clients...
+        </div>
+      )}
+
+      {!loading && (
+      <>
       {/* KPI */}
       <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', marginBottom: 20 }}>
         <div className="stat-card">
           <div className="stat-icon blue"><Users size={18} /></div>
-          <div className="stat-body"><div className="stat-value">{clients.length}</div><div className="stat-label">Total clients</div></div>
+          <div className="stat-body"><div className="stat-value">{clientStats.total}</div><div className="stat-label">Total clients</div></div>
         </div>
         <div className="stat-card">
           <div className="stat-icon purple"><FileText size={18} /></div>
@@ -633,102 +769,144 @@ export default function Clients() {
       </div>
 
       {/* Filtres */}
-      <div className="card" style={{ marginBottom: 16, padding: '14px 18px' }}>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-          <div style={{ position: 'relative', flex: '1 1 220px', minWidth: 200 }}>
-            <Search size={15} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
+      <div className="card crm-filter-bar" style={{ marginBottom: 16 }}>
+        <div className="crm-filter-row">
+          <div className="crm-filter-search">
+            <Search size={15} className="crm-filter-search-icon" />
             <input
+              className="crm-filter-input"
               value={search}
               onChange={e => { setSearch(e.target.value); setPage(1); }}
               placeholder="Rechercher nom, email, telephone, ICE..."
-              style={{ ...IS(false), paddingLeft: 34 }}
             />
           </div>
-          <select value={filterStatut} onChange={e => { setFilterStatut(e.target.value); setPage(1); }} style={{ ...IS(false), width: 160, flex: '0 0 160px' }}>
+          <select className="crm-filter-select crm-filter-select--md" value={filterStatut} onChange={e => { setFilterStatut(e.target.value); setPage(1); }}>
             <option value="">Tous les statuts</option>
             {STATUT_CLIENT_VALUES.map(s => <option key={s} value={s}>{STATUT_CLIENT_LABEL[s]}</option>)}
           </select>
-          <select value={filterResponsable} onChange={e => { setFilterResponsable(e.target.value); setPage(1); }} style={{ ...IS(false), width: 180, flex: '0 0 180px' }}>
+          <select className="crm-filter-select" value={filterResponsable} onChange={e => { setFilterResponsable(e.target.value); setPage(1); }}>
             <option value="">Tous responsables</option>
-            {RESPONSABLES.map(r => <option key={r} value={r}>{r}</option>)}
+            {responsableFilterOptions.map(r => <option key={r} value={r}>{r}</option>)}
           </select>
           {(search || filterStatut || filterResponsable) && (
-            <button className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setFilterStatut(''); setFilterResponsable(''); setPage(1); }}>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setFilterStatut(''); setFilterResponsable(''); setPage(1); }}>
               <X size={13} /> Effacer
             </button>
           )}
-          <span style={{ color: 'var(--text-3)', fontSize: '0.8rem', marginLeft: 'auto' }}>{filtered.length} client{filtered.length !== 1 ? 's' : ''}</span>
+          <span className="crm-filter-count">{filtered.length} client{filtered.length !== 1 ? 's' : ''}</span>
         </div>
       </div>
 
       {/* Tableau */}
       <div className="card">
-        <div className="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>ID</th>
-                <th>Nom</th>
-                <th>Telephone</th>
-                <th>Email</th>
-                <th>ICE</th>
-                <th>Responsable</th>
-                <th>Projets</th>
-                <th>Devis</th>
-                <th>Total facture (MAD)</th>
-                <th>Reste (MAD)</th>
-                <th>Statut</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {paginated.length === 0 ? (
-                <tr><td colSpan={12} style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-3)' }}>Aucun client trouve.</td></tr>
-              ) : paginated.map(c => {
-                const stats = getClientStats(c.id);
-                const nomComplet = [c.prenom, c.nom].filter(Boolean).join(' ') || c.nom;
-                return (
-                  <tr key={c.id}>
-                    <td style={{ fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--text-3)', fontSize: '0.8rem' }}>#{c.id}</td>
-                    <td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--red)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.85rem', flexShrink: 0 }}>
-                          {nomComplet.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase()}
+        <div className="crm-table-desktop">
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>ID</th>
+                  <th>Nom</th>
+                  <th>Telephone</th>
+                  <th>Email</th>
+                  <th>ICE</th>
+                  <th>Responsable</th>
+                  <th>Projets</th>
+                  <th>Devis</th>
+                  <th>Total facture (MAD)</th>
+                  <th>Reste (MAD)</th>
+                  <th>Statut</th>
+                  <th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {paginated.length === 0 ? (
+                  <tr><td colSpan={12} style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-3)' }}>Aucun client trouve.</td></tr>
+                ) : paginated.map(c => {
+                  const stats = getClientStats(c.id);
+                  const nomComplet = [c.prenom, c.nom].filter(Boolean).join(' ') || c.nom;
+                  return (
+                    <tr key={c.id}>
+                      <td style={{ fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--text-3)', fontSize: '0.8rem' }}>#{String(c.id).slice(0, 8)}</td>
+                      <td>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                          <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--red)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.85rem', flexShrink: 0 }}>
+                            {nomComplet.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase()}
+                          </div>
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>{nomComplet}</div>
+                            {c.secteur && <div style={{ fontSize: '0.75rem', color: 'var(--text-3)' }}>{c.secteur}</div>}
+                          </div>
                         </div>
-                        <div>
-                          <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>{nomComplet}</div>
-                          {c.secteur && <div style={{ fontSize: '0.75rem', color: 'var(--text-3)' }}>{c.secteur}</div>}
+                      </td>
+                      <td style={{ fontSize: '0.85rem' }}>{c.telephone || '-'}</td>
+                      <td style={{ fontSize: '0.82rem', color: 'var(--text-2)' }}>{c.email || '-'}</td>
+                      <td style={{ fontSize: '0.8rem', color: 'var(--text-3)', fontFamily: 'monospace' }}>{c.ice || '-'}</td>
+                      <td style={{ fontSize: '0.85rem' }}>{c.responsable || '-'}</td>
+                      <td style={{ textAlign: 'center' }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, borderRadius: '50%', background: stats.nProjets > 0 ? '#E3F2FD' : 'var(--bg)', color: stats.nProjets > 0 ? '#1976D2' : 'var(--text-3)', fontWeight: 700, fontSize: '0.8rem' }}>{stats.nProjets}</span>
+                      </td>
+                      <td style={{ textAlign: 'center' }}>
+                        <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, borderRadius: '50%', background: stats.nDevis > 0 ? '#F3E5F5' : 'var(--bg)', color: stats.nDevis > 0 ? '#7B1FA2' : 'var(--text-3)', fontWeight: 700, fontSize: '0.8rem' }}>{stats.nDevis}</span>
+                      </td>
+                      <td style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.9rem' }}>{stats.totalFacture > 0 ? fmtMAD(stats.totalFacture) : '-'}</td>
+                      <td style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.9rem', color: stats.restant > 0 ? 'var(--red)' : '#2E7D32' }}>{stats.totalFacture > 0 ? fmtMAD(stats.restant) : '-'}</td>
+                      <td><span className={'badge ' + STATUT_CLIENT_BADGE[c.statut]}>{STATUT_CLIENT_LABEL[c.statut]}</span></td>
+                      <td>
+                        <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+                          <button type="button" className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} title="Voir fiche" onClick={(e) => { e.stopPropagation(); openView(c, 'overview'); }}><Eye size={13} /></button>
+                          <button type="button" className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} title="Modifier" onClick={(e) => { e.stopPropagation(); openEdit(c); }}><Edit2 size={13} /></button>
+                          <button type="button" className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} title="Devis" onClick={(e) => { e.stopPropagation(); openClientDevis(c); }}><FileText size={13} /></button>
+                          <button type="button" className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} title="Factures" onClick={(e) => { e.stopPropagation(); openClientFactures(c); }}><Receipt size={13} /></button>
+                          <button type="button" className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} title="Supprimer" disabled={deletingId === c.id || saving} onClick={(e) => { e.stopPropagation(); handleDelete(c.id); }}>
+                            {deletingId === c.id ? <Loader2 size={13} className="spin" style={{ color: 'var(--red)' }} /> : <Trash2 size={13} style={{ color: 'var(--red)' }} />}
+                          </button>
                         </div>
-                      </div>
-                    </td>
-                    <td style={{ fontSize: '0.85rem' }}>{c.telephone || '-'}</td>
-                    <td style={{ fontSize: '0.82rem', color: 'var(--text-2)' }}>{c.email || '-'}</td>
-                    <td style={{ fontSize: '0.8rem', color: 'var(--text-3)', fontFamily: 'monospace' }}>{c.ice || '-'}</td>
-                    <td style={{ fontSize: '0.85rem' }}>{c.responsable || '-'}</td>
-                    <td style={{ textAlign: 'center' }}>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, borderRadius: '50%', background: stats.nProjets > 0 ? '#E3F2FD' : 'var(--bg)', color: stats.nProjets > 0 ? '#1976D2' : 'var(--text-3)', fontWeight: 700, fontSize: '0.8rem' }}>{stats.nProjets}</span>
-                    </td>
-                    <td style={{ textAlign: 'center' }}>
-                      <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, borderRadius: '50%', background: stats.nDevis > 0 ? '#F3E5F5' : 'var(--bg)', color: stats.nDevis > 0 ? '#7B1FA2' : 'var(--text-3)', fontWeight: 700, fontSize: '0.8rem' }}>{stats.nDevis}</span>
-                    </td>
-                    <td style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.9rem' }}>{stats.totalFacture > 0 ? fmtMAD(stats.totalFacture) : '-'}</td>
-                    <td style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.9rem', color: stats.restant > 0 ? 'var(--red)' : '#2E7D32' }}>{stats.totalFacture > 0 ? fmtMAD(stats.restant) : '-'}</td>
-                    <td><span className={'badge ' + STATUT_CLIENT_BADGE[c.statut]}>{STATUT_CLIENT_LABEL[c.statut]}</span></td>
-                    <td>
-                      <div style={{ display: 'flex', gap: 3 }}>
-                        <button className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} title="Voir fiche" onClick={() => setSelectedClient(c)}><Eye size={13} /></button>
-                        <button className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} title="Modifier" onClick={() => openEdit(c)}><Edit2 size={13} /></button>
-                        <button className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} title="Devis"><FileText size={13} /></button>
-                        <button className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} title="Factures"><Receipt size={13} /></button>
-                        <button className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} title="Supprimer" onClick={() => handleDelete(c.id)}><Trash2 size={13} style={{ color: 'var(--red)' }} /></button>
-                      </div>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
+
+        {paginated.length === 0 ? (
+          <div className="crm-mobile-only" style={{ textAlign: 'center', padding: '32px 16px', color: 'var(--text-3)' }}>Aucun client trouve.</div>
+        ) : (
+          <div className="crm-client-list crm-mobile-only" style={{ padding: '12px' }}>
+            {paginated.map(c => {
+              const stats = getClientStats(c.id);
+              const nomComplet = [c.prenom, c.nom].filter(Boolean).join(' ') || c.nom;
+              const initials = nomComplet.split(' ').map(w => w[0]).slice(0, 2).join('').toUpperCase();
+              return (
+                <div key={c.id} className="crm-client-card">
+                  <div className="crm-client-top">
+                    <div className="crm-client-avatar">{initials}</div>
+                    <div className="crm-client-info">
+                      <div className="crm-client-name">{nomComplet}</div>
+                      <div className="crm-client-sub">{[c.telephone, c.email].filter(Boolean).join(' · ') || c.secteur || '—'}</div>
+                    </div>
+                    <span className={'badge ' + STATUT_CLIENT_BADGE[c.statut]}>{STATUT_CLIENT_LABEL[c.statut]}</span>
+                  </div>
+                  <div className="crm-client-stats">
+                    <span>Devis <strong>{stats.nDevis}</strong></span>
+                    <span>Facture <strong>{stats.totalFacture > 0 ? fmtMAD(stats.totalFacture) : '—'}</strong></span>
+                    <span>Reste <strong style={{ color: stats.restant > 0 ? 'var(--red)' : '#2E7D32' }}>{stats.totalFacture > 0 ? fmtMAD(stats.restant) : '—'}</strong></span>
+                  </div>
+                  <div className="crm-client-actions">
+                    <button type="button" className="btn btn-ghost btn-sm crm-icon-btn" title="Voir" onClick={() => openView(c, 'overview')}><Eye size={14} /></button>
+                    <button type="button" className="btn btn-ghost btn-sm crm-icon-btn" title="Modifier" onClick={() => openEdit(c)}><Edit2 size={14} /></button>
+                    <button type="button" className="btn btn-ghost btn-sm crm-icon-btn" title="Devis" onClick={() => openClientDevis(c)}><FileText size={14} /></button>
+                    <button type="button" className="btn btn-ghost btn-sm crm-icon-btn" title="Factures" onClick={() => openClientFactures(c)}><Receipt size={14} /></button>
+                    <button type="button" className="btn btn-ghost btn-sm crm-icon-btn" title="Supprimer" disabled={deletingId === c.id || saving} onClick={() => handleDelete(c.id)}>
+                      {deletingId === c.id ? <Loader2 size={14} className="spin" style={{ color: 'var(--red)' }} /> : <Trash2 size={14} style={{ color: 'var(--red)' }} />}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
 
         {/* Pagination */}
         {totalPages > 1 && (
@@ -741,6 +919,16 @@ export default function Clients() {
           </div>
         )}
       </div>
+      </>
+      )}
+
+      {infoModal && (
+        <ActionInfoModal
+          title={infoModal.title}
+          message={infoModal.message}
+          onClose={() => setInfoModal(null)}
+        />
+      )}
 
       {/* Modal */}
       {showModal && (
@@ -748,6 +936,7 @@ export default function Clients() {
           client={editingClient}
           onClose={() => { setShowModal(false); setEditingClient(null); }}
           onSave={handleSave}
+          saving={saving}
         />
       )}
     </div>

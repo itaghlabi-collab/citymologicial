@@ -256,9 +256,9 @@ function PageContent({ module }) {
     case 'factures':            return <Factures />;
     case 'bon-livraison':       return <BonLivraison />;
     /* Logistique */
-    case 'vehicules':           return <Logistique />;
-    case 'interventions':       return <Logistique />;
-    case 'historique-interv':   return <Logistique />;
+    case 'vehicules':           return <Logistique activeTab="vehicules" />;
+    case 'interventions':       return <Logistique activeTab="interventions" />;
+    case 'historique-interv':   return <Logistique activeTab="historique-interv" />;
     /* Projets */
     case 'projets':             return <Projets activeTab="projets" />;
     case 'sav-projets':         return <Projets activeTab="sav-projets" />;

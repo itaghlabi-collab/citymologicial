@@ -4,11 +4,24 @@
    Falls back to localhost:3000/api in dev
    ============================================= */
 
-import { ENV } from '../config/env';
+import { resolveApiBaseUrl } from '../config/env';
 import { getAuthToken, handleUnauthorized } from './auth';
 
-/* BASE_URL: set VITE_API_URL in your .env (see env.txt for reference) */
-const BASE_URL = ENV.API_URL;
+const API_TIMEOUT_MS = 8000;
+
+function getBaseUrl() {
+  return resolveApiBaseUrl();
+}
+
+async function fetchWithTimeout(url, options = {}) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), API_TIMEOUT_MS);
+  try {
+    return await fetch(url, { ...options, signal: ctrl.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 async function apiFetch(path, options = {}) {
   const token = await getAuthToken();
@@ -17,7 +30,7 @@ async function apiFetch(path, options = {}) {
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
     ...(options.headers || {}),
   };
-  const res = await fetch(BASE_URL + path, { ...options, headers });
+  const res = await fetchWithTimeout(getBaseUrl() + path, { ...options, headers });
   if (res.status === 401) {
     await handleUnauthorized();
   }

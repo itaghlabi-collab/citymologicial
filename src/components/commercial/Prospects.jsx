@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
-import { UserSquare, Plus, Edit2, Trash2, X, Search, Filter } from 'lucide-react';
-import { getProspects, createProspect, updateProspect, deleteProspect } from '../../services/api';
+import { useState, useRef, useMemo } from 'react';
+import { UserSquare, Plus, Edit2, Trash2, X, Search, Filter, Loader2 } from 'lucide-react';
+import { useProspects } from '../../hooks/useProspects';
 import { TYPE_PROJET_VALUES, TYPE_PROJET_LABEL, SOURCE_VALUES, SOURCE_LABEL, ACTION_VALUES, NIVEAU_VALUES } from '../../constants/commercial';
 
 /* ── helpers ── */
@@ -11,20 +11,51 @@ function Toast({ t }) {
   return <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 9999, background: t.type === 'success' ? '#2E7D32' : '#D32F2F', color: '#fff', padding: '12px 20px', borderRadius: 10, boxShadow: '0 4px 20px rgba(0,0,0,0.22)', fontSize: '0.88rem', fontWeight: 600, maxWidth: 340 }}>{t.msg}</div>;
 }
 
-const EMPTY_PART = { type: 'particulier', nom: '', prenom: '', telephone: '', source: '', type_projet: '', action: '', commentaire: '' };
-const EMPTY_BTOB = { type: 'btob', nom_interlocuteur: '', prenom_interlocuteur: '', email: '', telephone: '', fonction: '', secteur: '', source: '', type_projet: '', niveau_decisionnel: '', action: '', commentaire: '' };
+function today() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+const EMPTY_PART = {
+  type: 'particulier', nom: '', prenom: '', email: '', telephone: '',
+  source: '', type_projet: '', action: '', commentaire: '',
+  statut: 'nouveau', budget: '', ville: '', date_contact: today(), prochain_suivi: '',
+};
+const EMPTY_BTOB = {
+  type: 'btob', nom: '', nom_interlocuteur: '', prenom_interlocuteur: '', email: '', telephone: '',
+  fonction: '', secteur: '', source: '', type_projet: '', niveau_decisionnel: '', action: '', commentaire: '',
+  statut: 'nouveau', budget: '', ville: '', date_contact: today(), prochain_suivi: '',
+};
 
 export default function Prospects() {
-  const [rows, setRows] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const {
+    records,
+    loading,
+    saving,
+    error,
+    configured,
+    load,
+    create,
+    update,
+    remove,
+    villes,
+    filterProspects,
+    computeProspectStats,
+    STATUT_VALUES,
+    STATUT_LABEL,
+  } = useProspects();
+
   const [modal, setModal] = useState(false);
   const [editRow, setEditRow] = useState(null);
   const [form, setForm] = useState(EMPTY_PART);
   const [errors, setErrors] = useState({});
-  const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState('');
+  const [filterStatut, setFilterStatut] = useState('');
+  const [filterSource, setFilterSource] = useState('');
+  const [filterVille, setFilterVille] = useState('');
+  const [filterTypeProjet, setFilterTypeProjet] = useState('');
+  const [filterDate, setFilterDate] = useState('');
   const [deleting, setDeleting] = useState(null);
   const toastRef = useRef(null);
 
@@ -33,17 +64,6 @@ export default function Prospects() {
     clearTimeout(toastRef.current);
     toastRef.current = setTimeout(() => setToast(null), 3000);
   }
-
-  async function load() {
-    setLoading(true);
-    try {
-      const data = await getProspects();
-      if (Array.isArray(data) && data.length > 0) setRows(data);
-    } catch (_) {}
-    setLoading(false);
-  }
-
-  useEffect(() => { load(); }, []);
 
   function openAdd() {
     setEditRow(null);
@@ -54,7 +74,12 @@ export default function Prospects() {
 
   function openEdit(row) {
     setEditRow(row);
-    setForm({ ...row });
+    setForm({
+      ...row,
+      budget: row.budget != null ? String(row.budget) : '',
+      date_contact: row.date_contact || today(),
+      prochain_suivi: row.prochain_suivi || '',
+    });
     setErrors({});
     setModal(true);
   }
@@ -86,51 +111,40 @@ export default function Prospects() {
     e.preventDefault();
     const errs = validate();
     if (Object.keys(errs).length) { setErrors(errs); return; }
-    setSaving(true);
-    try {
-      if (editRow) {
-        await updateProspect(editRow.id, form);
-        setRows(prev => prev.map(r => r.id === editRow.id ? { ...r, ...form } : r));
-        toast2('success', 'Prospect mis a jour.');
-      } else {
-        const created = await createProspect(form);
-        setRows(prev => [created || { ...form, id: Date.now(), created_at: new Date().toISOString().slice(0, 10) }, ...prev]);
-        toast2('success', 'Prospect ajoute.');
-      }
-      setModal(false);
-    } catch (_) {
-      // offline fallback
-      if (editRow) {
-        setRows(prev => prev.map(r => r.id === editRow.id ? { ...r, ...form } : r));
-        toast2('success', 'Prospect mis a jour (hors ligne).');
-      } else {
-        setRows(prev => [{ ...form, id: Date.now(), created_at: new Date().toISOString().slice(0, 10) }, ...prev]);
-        toast2('success', 'Prospect ajoute (hors ligne).');
-      }
-      setModal(false);
-    } finally {
-      setSaving(false);
+
+    const result = editRow ? await update(editRow.id, form) : await create(form);
+    if (!result.success) {
+      toast2('error', result.error || 'Erreur enregistrement.');
+      return;
     }
+
+    toast2('success', editRow ? 'Prospect mis a jour.' : 'Prospect ajoute.');
+    setModal(false);
   }
 
   async function handleDelete(row) {
     if (!window.confirm('Supprimer ce prospect ?')) return;
     setDeleting(row.id);
-    try { await deleteProspect(row.id); } catch (_) {}
-    setRows(prev => prev.filter(r => r.id !== row.id));
-    toast2('success', 'Prospect supprime.');
+    const result = await remove(row.id);
+    toast2(result.success ? 'success' : 'error', result.success ? 'Prospect supprime.' : (result.error || 'Erreur.'));
     setDeleting(null);
   }
 
-  const filtered = rows.filter(r => {
-    const name = r.type === 'btob' ? (r.nom || '') : ((r.prenom || '') + ' ' + (r.nom || ''));
-    const matchSearch = !search || name.toLowerCase().includes(search.toLowerCase()) || (r.telephone || '').includes(search) || (r.email || '').includes(search);
-    const matchType = !filterType || r.type === filterType;
-    return matchSearch && matchType;
-  });
+  const filtered = useMemo(
+    () => filterProspects(records, {
+      search,
+      type: filterType,
+      statut: filterStatut,
+      source: filterSource,
+      ville: filterVille,
+      typeProjet: filterTypeProjet,
+      date: filterDate,
+    }),
+    [records, search, filterType, filterStatut, filterSource, filterVille, filterTypeProjet, filterDate, filterProspects],
+  );
 
-  const nbParticulier = rows.filter(r => r.type === 'particulier').length;
-  const nbBtob = rows.filter(r => r.type === 'btob').length;
+  const stats = useMemo(() => computeProspectStats(records), [records, computeProspectStats]);
+  const hasFilters = filterType || filterStatut || filterSource || filterVille || filterTypeProjet || filterDate;
 
   return (
     <div className="animate-fade-in">
@@ -142,30 +156,50 @@ export default function Prospects() {
           <h1 className="page-title">Prospects</h1>
           <p className="page-subtitle">Gestion des leads entrants — particuliers et entreprises</p>
         </div>
-        <button className="btn btn-primary prospects-add-btn" onClick={openAdd}><Plus size={15} /> Nouveau prospect</button>
+        <button className="btn btn-primary prospects-add-btn" onClick={openAdd} disabled={loading || saving || !configured}><Plus size={15} /> Nouveau prospect</button>
       </div>
 
-      {/* KPI stats — 3 cols desktop, 2 cols mobile */}
-      <div className="prospects-kpi-grid">
+      {!configured && (
+        <div style={{ background: '#FFF3E0', border: '1px solid #FFB74D', borderRadius: 'var(--radius)', padding: '10px 16px', marginBottom: 16, fontSize: '0.85rem', color: '#E65100' }}>
+          Supabase non configuré — ajoutez VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY dans .env
+        </div>
+      )}
+
+      {error && !loading && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, background: '#FFEBEE', border: '1px solid #EF9A9A', borderRadius: 'var(--radius)', padding: '10px 16px', marginBottom: 16, fontSize: '0.85rem', color: '#C62828' }}>
+          <span>{error}</span>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={load}>Réessayer</button>
+        </div>
+      )}
+
+      {/* KPI stats */}
+      <div className="prospects-kpi-grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(190px,1fr))' }}>
         <div className="prospects-kpi-card">
           <div className="stat-icon"><UserSquare size={16} /></div>
           <div className="stat-body">
-            <div className="stat-value">{rows.length}</div>
+            <div className="stat-value">{loading ? '—' : stats.total}</div>
             <div className="stat-label">Total prospects</div>
           </div>
         </div>
         <div className="prospects-kpi-card">
           <div className="stat-icon orange"><UserSquare size={16} /></div>
           <div className="stat-body">
-            <div className="stat-value">{nbParticulier}</div>
-            <div className="stat-label">Particuliers</div>
+            <div className="stat-value">{loading ? '—' : stats.nouveaux}</div>
+            <div className="stat-label">Nouveaux</div>
           </div>
         </div>
         <div className="prospects-kpi-card">
           <div className="stat-icon blue"><UserSquare size={16} /></div>
           <div className="stat-body">
-            <div className="stat-value">{nbBtob}</div>
-            <div className="stat-label">BtoB</div>
+            <div className="stat-value">{loading ? '—' : stats.enCours}</div>
+            <div className="stat-label">En cours</div>
+          </div>
+        </div>
+        <div className="prospects-kpi-card">
+          <div className="stat-icon green"><UserSquare size={16} /></div>
+          <div className="stat-body">
+            <div className="stat-value">{loading ? '—' : stats.convertis}</div>
+            <div className="stat-label">Convertis</div>
           </div>
         </div>
       </div>
@@ -194,6 +228,43 @@ export default function Prospects() {
               <option value="btob">BtoB</option>
             </select>
           </div>
+          <div className="prospects-filter-wrap">
+            <select className="prospects-filter-select" value={filterStatut} onChange={e => setFilterStatut(e.target.value)}>
+              <option value="">Tous les statuts</option>
+              {STATUT_VALUES.map(s => <option key={s} value={s}>{STATUT_LABEL[s]}</option>)}
+            </select>
+          </div>
+          <div className="prospects-filter-wrap">
+            <select className="prospects-filter-select" value={filterSource} onChange={e => setFilterSource(e.target.value)}>
+              <option value="">Toutes les sources</option>
+              {SOURCE_VALUES.map(v => <option key={v} value={v}>{SOURCE_LABEL[v]}</option>)}
+            </select>
+          </div>
+          <div className="prospects-filter-wrap">
+            <select className="prospects-filter-select" value={filterTypeProjet} onChange={e => setFilterTypeProjet(e.target.value)}>
+              <option value="">Tous les projets</option>
+              {TYPE_PROJET_VALUES.map(v => <option key={v} value={v}>{TYPE_PROJET_LABEL[v]}</option>)}
+            </select>
+          </div>
+          {villes.length > 0 && (
+            <div className="prospects-filter-wrap">
+              <select className="prospects-filter-select" value={filterVille} onChange={e => setFilterVille(e.target.value)}>
+                <option value="">Toutes les villes</option>
+                {villes.map(v => <option key={v} value={v}>{v}</option>)}
+              </select>
+            </div>
+          )}
+          <div className="prospects-filter-wrap">
+            <input type="date" className="prospects-filter-select" value={filterDate} onChange={e => setFilterDate(e.target.value)} />
+          </div>
+          {hasFilters && (
+            <button
+              onClick={() => { setFilterType(''); setFilterStatut(''); setFilterSource(''); setFilterVille(''); setFilterTypeProjet(''); setFilterDate(''); }}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', fontSize: '0.82rem', fontWeight: 600, alignSelf: 'center' }}
+            >
+              Effacer filtres
+            </button>
+          )}
         </div>
       </div>
 
@@ -206,9 +277,14 @@ export default function Prospects() {
         </div>
 
         {loading ? (
-          <div style={{ textAlign: 'center', padding: 32, color: 'var(--text-3)' }}>Chargement...</div>
+          <div style={{ textAlign: 'center', padding: 32, color: 'var(--text-3)' }}>
+            <Loader2 size={28} style={{ animation: 'spin 1s linear infinite', margin: '0 auto 12px' }} />
+            <div style={{ fontSize: '0.88rem' }}>Chargement...</div>
+          </div>
         ) : filtered.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: 32, color: 'var(--text-3)' }}>Aucun prospect trouve.</div>
+          <div style={{ textAlign: 'center', padding: 32, color: 'var(--text-3)' }}>
+            {records.length === 0 ? 'Aucun prospect enregistre.' : 'Aucun prospect trouve.'}
+          </div>
         ) : (
           <>
             {/* Desktop table */}
@@ -243,7 +319,7 @@ export default function Prospects() {
                         <td data-label="Contact" style={{ color: 'var(--text-2)', fontSize: '0.875rem' }}>{contact}</td>
                         <td data-label="Projet"><span className="badge badge-grey">{TYPE_PROJET_LABEL[r.type_projet] || r.type_projet || '-'}</span></td>
                         <td data-label="Action" style={{ fontSize: '0.875rem', color: 'var(--text-2)' }}>{r.action || '-'}</td>
-                        <td data-label="Date" style={{ fontSize: '0.8rem', color: 'var(--text-3)' }}>{r.created_at ? r.created_at.slice(0, 10) : '-'}</td>
+                        <td data-label="Date" style={{ fontSize: '0.8rem', color: 'var(--text-3)' }}>{r.created_at ? String(r.created_at).slice(0, 10) : '-'}</td>
                         <td>
                           <div style={{ display: 'flex', gap: 4 }}>
                             <button className="btn btn-ghost btn-sm" style={{ padding: '4px 8px' }} onClick={() => openEdit(r)}><Edit2 size={13} /></button>
@@ -292,7 +368,7 @@ export default function Prospects() {
                       {contactLine && <span className="pmc-meta-item">{contactLine}</span>}
                       {r.type_projet && <span className="pmc-meta-item badge badge-grey">{TYPE_PROJET_LABEL[r.type_projet] || r.type_projet}</span>}
                       {r.action && <span className="pmc-meta-item pmc-action">{r.action}</span>}
-                      {r.created_at && <span className="pmc-meta-item pmc-date">{r.created_at.slice(0, 10)}</span>}
+                      {r.created_at && <span className="pmc-meta-item pmc-date">{String(r.created_at).slice(0, 10)}</span>}
                     </div>
                   </div>
                 );
@@ -341,9 +417,17 @@ export default function Prospects() {
                   <input style={IS(errors.telephone)} value={form.telephone || ''} onChange={e => setField('telephone', e.target.value)} placeholder="+213 600 000 000" />
                   {errors.telephone && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.telephone}</span>}
                 </div>
+                <div className="form-group">
+                  <label>Email</label>
+                  <input type="email" style={IS(false)} value={form.email || ''} onChange={e => setField('email', e.target.value)} placeholder="youssef@email.dz" />
+                </div>
               </>)}
 
               {form.type === 'btob' && (<>
+                <div className="form-group">
+                  <label>Societe / Entreprise</label>
+                  <input style={IS(false)} value={form.nom || ''} onChange={e => setField('nom', e.target.value)} placeholder="Citymo SARL" />
+                </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   <div className="form-group">
                     <label>Prenom interlocuteur *</label>
@@ -403,15 +487,43 @@ export default function Prospects() {
                   </select>
                 </div>
               </div>
-              <div className="form-group">
-                <label>Action</label>
-                <select style={IS(false)} value={form.action || ''} onChange={e => setField('action', e.target.value)}>
-                  <option value="">Choisir...</option>
-                  {ACTION_VALUES.map(a => <option key={a}>{a}</option>)}
-                </select>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div className="form-group">
+                  <label>Statut</label>
+                  <select style={IS(false)} value={form.statut || 'nouveau'} onChange={e => setField('statut', e.target.value)}>
+                    {STATUT_VALUES.map(s => <option key={s} value={s}>{STATUT_LABEL[s]}</option>)}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Budget (MAD)</label>
+                  <input type="number" min="0" style={IS(false)} value={form.budget || ''} onChange={e => setField('budget', e.target.value)} placeholder="500000" />
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div className="form-group">
+                  <label>Ville</label>
+                  <input style={IS(false)} value={form.ville || ''} onChange={e => setField('ville', e.target.value)} placeholder="Casablanca" />
+                </div>
+                <div className="form-group">
+                  <label>Action</label>
+                  <select style={IS(false)} value={form.action || ''} onChange={e => setField('action', e.target.value)}>
+                    <option value="">Choisir...</option>
+                    {ACTION_VALUES.map(a => <option key={a}>{a}</option>)}
+                  </select>
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div className="form-group">
+                  <label>Date de contact</label>
+                  <input type="date" style={IS(false)} value={form.date_contact || ''} onChange={e => setField('date_contact', e.target.value)} />
+                </div>
+                <div className="form-group">
+                  <label>Prochain suivi</label>
+                  <input type="date" style={IS(false)} value={form.prochain_suivi || ''} onChange={e => setField('prochain_suivi', e.target.value)} />
+                </div>
               </div>
               <div className="form-group">
-                <label>Commentaire</label>
+                <label>Commentaire / besoin</label>
                 <textarea rows={3} style={{ ...IS(false), resize: 'vertical' }} value={form.commentaire || ''} onChange={e => setField('commentaire', e.target.value)} placeholder="Details, notes, contexte..." />
               </div>
 

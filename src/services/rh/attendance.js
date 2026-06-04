@@ -1,0 +1,359 @@
+/**
+ * attendance.js — Présence ouvriers CRUD (Supabase public.attendance)
+ */
+import { getSupabase } from '../../lib/supabase';
+
+const TABLE = 'attendance';
+
+export const UI_STATUTS = ['Present', 'Absent', 'Retard', 'Demi-journee'];
+
+const UI_TO_DB = {
+  Present: 'present',
+  Absent: 'absent',
+  Retard: 'retard',
+  'Demi-journee': 'demi_journee',
+};
+
+const DB_TO_UI = {
+  present: 'Present',
+  absent: 'Absent',
+  retard: 'Retard',
+  demi_journee: 'Demi-journee',
+  conge: 'Absent',
+};
+
+export function workerFullName(w) {
+  if (!w) return '';
+  return [w.prenom, w.nom].filter(Boolean).join(' ').trim();
+}
+
+function fmtTime(raw) {
+  if (!raw) return '';
+  const s = String(raw);
+  return s.length >= 5 ? s.slice(0, 5) : s;
+}
+
+/** DB row → shape Presence.jsx */
+export function normalizeAttendance(row) {
+  if (!row) return null;
+  const w = row.workers;
+  const proj = row.projects || w?.projects;
+  const projetNom = proj?.nom || row.chantier || w?.chantier || '';
+  return {
+    id: row.id,
+    workerId: row.worker_id || '',
+    ouvrier: workerFullName(w) || row.ouvrier_label || '—',
+    projectId: row.project_id ? String(row.project_id) : (w?.project_id ? String(w.project_id) : ''),
+    workerProjectId: w?.project_id ? String(w.project_id) : '',
+    projet: projetNom,
+    date: row.date || '',
+    heureEntree: fmtTime(row.heure_entree),
+    heureSortie: fmtTime(row.heure_sortie),
+    statut: DB_TO_UI[row.statut] || 'Present',
+    notes: row.notes || '',
+    chefChantierId: row.chef_chantier_id ? String(row.chef_chantier_id) : '',
+    chefChantier: row.chef_chantier_nom
+      || [row.chef_employee?.firstname, row.chef_employee?.lastname].filter(Boolean).join(' ')
+      || '',
+    created_at: row.created_at,
+    updated_at: row.updated_at,
+  };
+}
+
+/** Form UI → DB row */
+export function toAttendanceRow(form) {
+  const projetLabel = (form.projetNom || form.projet || '').trim();
+  return {
+    worker_id: form.workerId || null,
+    project_id: form.projectId || null,
+    date: form.date,
+    statut: UI_TO_DB[form.statut] || 'present',
+    heure_entree: form.heureEntree || null,
+    heure_sortie: form.heureSortie || null,
+    chantier: projetLabel || null,
+    notes: form.notes?.trim() || null,
+    chef_chantier_id: form.chefChantierId || null,
+    chef_chantier_nom: (form.chefChantierNom || form.chefChantier || '').trim() || null,
+  };
+}
+
+const ATTENDANCE_SELECT = `
+  *,
+  workers ( id, prenom, nom, chantier, project_id, projects ( id, nom, ref ) ),
+  projects ( id, nom, ref ),
+  chef_employee:employees!attendance_chef_chantier_id_fkey ( id, firstname, lastname, poste )
+`;
+
+const ATTENDANCE_SELECT_FALLBACK = `
+  *,
+  workers ( id, prenom, nom, chantier, project_id ),
+  projects ( id, nom, ref )
+`;
+
+const ATTENDANCE_SELECT_MINIMAL = '*';
+
+async function fetchAttendanceRows(select) {
+  return getSupabase()
+    .from(TABLE)
+    .select(select)
+    .order('date', { ascending: false })
+    .order('created_at', { ascending: false });
+}
+
+async function getAuthUserId() {
+  const { data: { user }, error } = await getSupabase().auth.getUser();
+  if (error || !user) {
+    const err = new Error('Session requise.');
+    err.code = 'AUTH';
+    throw err;
+  }
+  return user.id;
+}
+
+export async function listAttendance() {
+  let { data, error } = await fetchAttendanceRows(ATTENDANCE_SELECT);
+
+  if (error) {
+    console.warn('[CITYMO] attendance list (full join)', error.message);
+    ({ data, error } = await fetchAttendanceRows(ATTENDANCE_SELECT_FALLBACK));
+  }
+  if (error) {
+    console.warn('[CITYMO] attendance list (fallback)', error.message);
+    ({ data, error } = await fetchAttendanceRows(ATTENDANCE_SELECT_MINIMAL));
+  }
+
+  if (error) {
+    console.error('[CITYMO] attendance list', error);
+    throw error;
+  }
+  return (data || []).map(normalizeAttendance);
+}
+
+export async function createAttendance(form) {
+  await getAuthUserId();
+  const row = toAttendanceRow(form);
+
+  if (!row.worker_id) {
+    const err = new Error('Ouvrier requis.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  if (!row.date) {
+    const err = new Error('Date requise.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  if (!row.chantier && !row.project_id) {
+    const err = new Error('Projet requis.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  if (!row.chef_chantier_id) {
+    const err = new Error('Chef de chantier requis.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .insert([row])
+    .select(ATTENDANCE_SELECT)
+    .single();
+
+  if (error) {
+    console.error('[CITYMO] attendance insert', error, row);
+    throw error;
+  }
+  return normalizeAttendance(data);
+}
+
+export async function updateAttendance(id, form) {
+  await getAuthUserId();
+  const row = toAttendanceRow(form);
+
+  if (!row.worker_id || !row.date || (!row.chantier && !row.project_id) || !row.chef_chantier_id) {
+    const err = new Error('Ouvrier, date, projet et chef de chantier requis.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .update(row)
+    .eq('id', id)
+    .select(ATTENDANCE_SELECT)
+    .single();
+
+  if (error) {
+    console.error('[CITYMO] attendance update', error, { id, row });
+    throw error;
+  }
+  return normalizeAttendance(data);
+}
+
+export async function deleteAttendance(id) {
+  await getAuthUserId();
+
+  const { error } = await getSupabase().from(TABLE).delete().eq('id', id);
+  if (error) {
+    console.error('[CITYMO] attendance delete', error, { id });
+    throw error;
+  }
+}
+
+export function filterAttendanceRecords(records, filters = {}) {
+  const {
+    ouvrier = '',
+    projet = '',
+    projectId = '',
+    chefChantierId = '',
+    date = '',
+    statut = '',
+  } = filters;
+
+  return (records || []).filter((r) => {
+    if (ouvrier && r.ouvrier !== ouvrier) return false;
+    if (chefChantierId && String(r.chefChantierId) !== String(chefChantierId)) return false;
+    if (projectId) {
+      const pid = String(projectId);
+      const match = String(r.projectId) === pid || String(r.workerProjectId) === pid;
+      if (!match) return false;
+    } else if (projet && r.projet !== projet) return false;
+    if (date && r.date !== date) return false;
+    if (statut && r.statut !== statut) return false;
+    return true;
+  });
+}
+
+export function filterWorkersForProject(workers, projectId) {
+  if (!projectId) return workers || [];
+  const pid = String(projectId);
+  return (workers || []).filter((w) => String(w.project_id) === pid);
+}
+
+export function collectProjectFilterOptions(projects = [], workers = [], records = []) {
+  const map = new Map();
+  (projects || []).forEach((p) => {
+    if (p?.id) map.set(String(p.id), { id: String(p.id), label: p.ref ? `${p.ref} — ${p.nom}` : (p.nom || 'Projet') });
+  });
+  (workers || []).forEach((w) => {
+    if (w.project_id && !map.has(String(w.project_id))) {
+      map.set(String(w.project_id), { id: String(w.project_id), label: w.projet_nom || w.chantier || 'Projet' });
+    }
+  });
+  (records || []).forEach((r) => {
+    if (r.projectId && !map.has(String(r.projectId))) {
+      map.set(String(r.projectId), { id: String(r.projectId), label: r.projet || 'Projet' });
+    }
+  });
+  return [...map.values()].sort((a, b) => a.label.localeCompare(b.label, 'fr'));
+}
+
+export function computeAttendanceStats(records) {
+  const list = records || [];
+  return {
+    present: list.filter((r) => r.statut === 'Present').length,
+    absent: list.filter((r) => r.statut === 'Absent').length,
+    total: list.length,
+  };
+}
+
+/** Regroupe les présences par projet + jour (export PDF) */
+export function buildAttendanceSheetGroups(records) {
+  const map = new Map();
+  for (const r of records || []) {
+    const date = (r.date || '').toString().slice(0, 10);
+    if (!date) continue;
+    const projectId = r.projectId ? String(r.projectId) : '';
+    const projet = (r.projet || '').trim() || 'Sans projet';
+    const key = `${projectId}|${projet}|${date}`;
+    if (!map.has(key)) {
+      map.set(key, { key, projectId, projet, date, records: [] });
+    }
+    map.get(key).records.push(r);
+  }
+  return Array.from(map.values()).sort((a, b) => {
+    const d = b.date.localeCompare(a.date);
+    return d !== 0 ? d : a.projet.localeCompare(b.projet, 'fr');
+  });
+}
+
+export function sheetGroupLabel(group) {
+  const n = group.records?.length || 0;
+  let dateFr = group.date || '';
+  try {
+    if (/^\d{4}-\d{2}-\d{2}$/.test(dateFr)) {
+      dateFr = new Date(`${dateFr}T12:00:00`).toLocaleDateString('fr-FR', {
+        day: '2-digit', month: '2-digit', year: 'numeric',
+      });
+    }
+  } catch { /* keep iso */ }
+  return `${group.projet} — ${dateFr} (${n} ouvrier${n > 1 ? 's' : ''})`;
+}
+
+function groupsMatchingFilters(groups, { projectId, date }) {
+  let list = groups;
+  if (projectId) {
+    const pid = String(projectId);
+    list = list.filter((g) => String(g.projectId) === pid);
+  }
+  if (date) list = list.filter((g) => g.date === date);
+  return list;
+}
+
+/**
+ * Choisit la fiche projet+jour à exporter.
+ * @returns {{ group: object|null, ambiguous: boolean, candidates: object[] }}
+ */
+export function pickSheetGroupForExport(groups, { projectId = '', date = '' } = {}) {
+  if (!groups?.length) {
+    return { group: null, ambiguous: false, candidates: [] };
+  }
+
+  const scoped = groupsMatchingFilters(groups, { projectId, date });
+
+  if (scoped.length === 1) {
+    return { group: scoped[0], ambiguous: false, candidates: scoped };
+  }
+
+  if (!projectId && !date) {
+    if (groups.length === 1) {
+      return { group: groups[0], ambiguous: false, candidates: groups };
+    }
+    return { group: null, ambiguous: true, candidates: groups };
+  }
+
+  if (projectId && !date && scoped.length > 0) {
+    return {
+      group: scoped[0],
+      ambiguous: scoped.length > 1,
+      candidates: scoped,
+    };
+  }
+
+  if (date && !projectId) {
+    if (scoped.length === 1) {
+      return { group: scoped[0], ambiguous: false, candidates: scoped };
+    }
+    return { group: null, ambiguous: true, candidates: scoped };
+  }
+
+  return { group: null, ambiguous: scoped.length > 1, candidates: scoped };
+}
+
+export function findSheetGroupForRecord(groups, record) {
+  const date = (record?.date || '').toString().slice(0, 10);
+  const projectId = record?.projectId ? String(record.projectId) : '';
+  const projet = (record?.projet || '').trim();
+  return groups.find((g) => g.date === date && (
+    (projectId && String(g.projectId) === projectId)
+    || g.projet === projet
+  ));
+}
+
+export function collectChantierOptions(workers, records) {
+  const set = new Set();
+  (workers || []).forEach((w) => { if (w.chantier?.trim()) set.add(w.chantier.trim()); });
+  (records || []).forEach((r) => { if (r.projet?.trim()) set.add(r.projet.trim()); });
+  return [...set].sort((a, b) => a.localeCompare(b, 'fr'));
+}

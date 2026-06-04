@@ -1,11 +1,12 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useRef } from 'react';
 import {
   Plus, Search, Edit2, Copy, Trash2, Package,
   CheckCircle, Clock, XCircle, AlertCircle,
   ChevronLeft, ChevronRight, RefreshCw, ArrowUpDown,
-  FileText, Send, Ban, TruckIcon, History, X
+  FileText, Ban, TruckIcon, History, X, Eye, Download
 } from 'lucide-react';
-import { getBonLivraisons, createBonLivraison, updateBonLivraison, deleteBonLivraison } from '../../services/api';
+import { useDeliveryNotes } from '../../hooks/useDeliveryNotes';
+import { generateDeliveryNotePdf } from '../../services/crm/deliveryNotePdf';
 import BonLivraisonForm from './BonLivraisonForm';
 
 /* ── Helpers ── */
@@ -23,11 +24,6 @@ function isDueSoon(dateStr, statut) {
   const diff = (new Date(dateStr) - new Date()) / (1000 * 60 * 60 * 24);
   return diff >= 0 && diff <= 3;
 }
-function genNumeroBL() {
-  const d = new Date();
-  return 'BL-' + d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(Math.floor(Math.random() * 9000) + 1000);
-}
-
 /* ── Statut config ── */
 const STATUT_CFG = {
   brouillon:           { label: 'Brouillon',       cls: 'badge-grey',   icon: FileText },
@@ -128,6 +124,88 @@ function EmptyState({ filtered, onAdd }) {
 }
 
 const PER_PAGE = 15;
+
+function BonLivraisonDetail({ bl, onBack, onEdit, onPdf, pdfLoading }) {
+  const clientNom = bl.client_nom || bl.client?.nom || '—';
+  const lignes = bl.lignes || [];
+  return (
+    <div className="animate-fade-in crm-module crm-module--bl">
+      <button type="button" onClick={onBack} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-2)', fontSize: '0.875rem', fontWeight: 600, marginBottom: 16, padding: 0 }}>
+        <ChevronLeft size={16} /> Retour aux bons de livraison
+      </button>
+      <div className="page-header" style={{ marginBottom: 20 }}>
+        <div>
+          <h1 className="page-title">{bl.numero || 'Bon de livraison'}</h1>
+          <p className="page-subtitle">{clientNom} — {fmtDate(bl.date_livraison)}</p>
+        </div>
+        <div className="crm-page-header-actions" style={{ display: 'flex', gap: 8 }}>
+          <button type="button" className="btn btn-ghost" onClick={() => onPdf(bl)} disabled={pdfLoading} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Download size={14} /> {pdfLoading ? 'PDF...' : 'PDF'}
+          </button>
+          <button type="button" className="btn btn-primary" onClick={() => onEdit(bl)} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Edit2 size={14} /> Modifier
+          </button>
+        </div>
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+        <div className="card" style={{ padding: '18px 20px' }}>
+          <div style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 12 }}>Informations</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: '0.85rem' }}>
+            {[['Statut', <StatutBadge key="s" statut={bl.statut} />], ['Client', clientNom], ['Adresse', bl.adresse_livraison || '—'], ['Commercial', bl.commercial || '—'], ['Préparé par', bl.prepare_par || '—'], ['Projet', bl.projet || '—'], ['Devis', bl.devis_reference || '—'], ['Facture', bl.facture_reference || '—']].map(([k, v]) => (
+              <div key={k} style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                <span style={{ color: 'var(--text-3)', fontWeight: 600 }}>{k}</span>
+                <span style={{ fontWeight: 500, textAlign: 'right' }}>{v}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        <div className="card" style={{ padding: '18px 20px' }}>
+          <div style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 12 }}>Livraison</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: '0.85rem' }}>
+            {[['Date livraison', fmtDate(bl.date_livraison)], ['Échéance', fmtDate(bl.date_echeance)], ['Avancement', `${bl.pct_livre || 0}%`], ['Contact', bl.contact_reception || '—'], ['Tél', bl.tel_reception || '—'], ['Signature', bl.signature_client || '—']].map(([k, v]) => (
+              <div key={k} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: 'var(--text-3)', fontWeight: 600 }}>{k}</span>
+                <span style={{ fontWeight: 500 }}>{v}</span>
+              </div>
+            ))}
+          </div>
+          {bl.remarques && (
+            <div style={{ marginTop: 12, fontSize: '0.82rem', color: 'var(--text-2)' }}>
+              <strong>Observations :</strong> {bl.remarques}
+            </div>
+          )}
+        </div>
+      </div>
+      <div className="card" style={{ padding: 0 }}>
+        <div className="table-wrap">
+          <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+            <thead>
+              <tr style={{ borderBottom: '1.5px solid var(--border)', background: 'var(--bg)' }}>
+                {['Désignation', 'Unité', 'Qté cmd.', 'Qté livrée', 'Remarque'].map(h => (
+                  <th key={h} style={{ padding: '10px 12px', textAlign: 'left', fontWeight: 700, fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--text-3)' }}>{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {lignes.length ? lignes.map((l, i) => (
+                <tr key={l.id || i} style={{ borderBottom: '1px solid var(--border)' }}>
+                  <td style={{ padding: '10px 12px' }}>{l.designation || '—'}</td>
+                  <td style={{ padding: '10px 12px' }}>{l.unite || '—'}</td>
+                  <td style={{ padding: '10px 12px' }}>{l.quantite_commandee}</td>
+                  <td style={{ padding: '10px 12px' }}>{l.quantite_livree}</td>
+                  <td style={{ padding: '10px 12px', color: 'var(--text-3)' }}>{l.observation || l.remarque || '—'}</td>
+                </tr>
+              )) : (
+                <tr><td colSpan={5} style={{ padding: 24, textAlign: 'center', color: 'var(--text-3)' }}>Aucune ligne</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const TABS = [
   { id: 'all',         label: 'Tous les bons' },
   { id: 'en_attente',  label: 'En attente' },
@@ -139,18 +217,34 @@ const TABS = [
    BON LIVRAISON LIST — MAIN
    ════════════════════════════════════════════════ */
 export default function BonLivraison() {
+  const {
+    records: bls,
+    loading,
+    saving,
+    error: loadError,
+    configured,
+    load,
+    create,
+    update,
+    remove,
+    duplicate,
+    fetchOne,
+    filterDeliveryNotes,
+    computeDeliveryNoteStats,
+  } = useDeliveryNotes();
+
   const [view, setView]           = useState('list');
   const [editingBL, setEditingBL] = useState(null);
+  const [viewingBL, setViewingBL] = useState(null);
   const [activeTab, setActiveTab] = useState('all');
-
-  const [bls, setBls]           = useState([]);
-  const [loading, setLoading]   = useState(false);
-  const [loadError, setLoadError] = useState('');
+  const [pdfLoadingId, setPdfLoadingId] = useState(null);
 
   /* Filters */
   const [search, setSearch]               = useState('');
   const [filterStatut, setFilterStatut]   = useState('');
   const [filterCommercial, setFilterCommercial] = useState('');
+  const [filterClient, setFilterClient]   = useState('');
+  const [filterDate, setFilterDate]       = useState('');
   const [sortField, setSortField]         = useState('date_livraison');
   const [sortDir, setSortDir]             = useState('desc');
   const [page, setPage]                   = useState(1);
@@ -164,24 +258,11 @@ export default function BonLivraison() {
     toastTimer.current = setTimeout(() => setToast(null), 3500);
   }
 
-  /* Load */
-  const load = useCallback(async () => {
-    setLoading(true);
-    setLoadError('');
-    try {
-      const data = await getBonLivraisons();
-      setBls(Array.isArray(data) ? data : (data?.data ?? []));
-    } catch (err) {
-      setLoadError(err.message || 'Impossible de charger les bons de livraison.');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
-
   /* Derived */
   const commerciaux = [...new Set(bls.map(b => b.commercial).filter(Boolean))];
+  const clientOptions = [...new Map(
+    bls.filter(b => b.client_id).map(b => [String(b.client_id), b.client_nom || b.client?.nom || 'Client'])
+  ).entries()];
 
   /* Tab filter */
   function applyTabFilter(list) {
@@ -193,17 +274,12 @@ export default function BonLivraison() {
   }
 
   /* Filter + sort */
-  const baseFiltered = bls.filter(b => {
-    const clientNom = b.client_nom || b.client?.nom || '';
-    const q = search.toLowerCase();
-    const matchSearch = !q
-      || (b.numero || '').toLowerCase().includes(q)
-      || clientNom.toLowerCase().includes(q)
-      || (b.projet || '').toLowerCase().includes(q)
-      || (b.commercial || '').toLowerCase().includes(q);
-    const matchStatut = !filterStatut || b.statut === filterStatut;
-    const matchCom    = !filterCommercial || b.commercial === filterCommercial;
-    return matchSearch && matchStatut && matchCom;
+  const baseFiltered = filterDeliveryNotes(bls, {
+    search,
+    statut: filterStatut,
+    commercial: filterCommercial,
+    client_id: filterClient,
+    date: filterDate,
   });
 
   const filtered = applyTabFilter(baseFiltered).sort((a, b) => {
@@ -225,12 +301,13 @@ export default function BonLivraison() {
   }
 
   /* KPIs */
-  const nTotal              = bls.length;
-  const nEnAttente          = bls.filter(b => b.statut === 'en_attente' || b.statut === 'preparation').length;
-  const nLivres             = bls.filter(b => b.statut === 'livre').length;
-  const nLiesDevis          = bls.filter(b => b.devis_id).length;
-  const nFactures           = bls.filter(b => b.statut === 'facture' || b.est_facture).length;
-  const nEnRetard           = bls.filter(b => isOverdue(b.date_echeance, b.statut)).length;
+  const kpi = computeDeliveryNoteStats(bls);
+  const nTotal = kpi.total;
+  const nEnAttente = kpi.enAttente;
+  const nLivres = kpi.livres;
+  const nLiesDevis = kpi.liesDevis;
+  const nFactures = kpi.factures;
+  const nEnRetard = kpi.enRetard;
 
   /* Tab counts */
   const tabCounts = {
@@ -241,74 +318,95 @@ export default function BonLivraison() {
   };
 
   /* Handlers */
-  function openCreate()  { setEditingBL(null); setView('form'); }
-  function openEdit(b)   { setEditingBL(b);    setView('form'); }
-  function backToList()  { setView('list');     setEditingBL(null); }
+  function openCreate()  { setEditingBL(null); setViewingBL(null); setView('form'); }
+  async function openEdit(b) {
+    try {
+      const full = await fetchOne(b.id);
+      setEditingBL(full);
+      setViewingBL(null);
+      setView('form');
+    } catch (err) {
+      showToast(err.message || 'Impossible de charger le bon.', 'error');
+    }
+  }
+  async function openDetail(b) {
+    try {
+      const full = await fetchOne(b.id);
+      setViewingBL(full);
+      setView('detail');
+    } catch (err) {
+      showToast(err.message || 'Impossible de charger le bon.', 'error');
+    }
+  }
+  function backToList()  { setView('list'); setEditingBL(null); setViewingBL(null); }
 
   async function handleSaved(payload, isEdit) {
-    try {
-      if (isEdit && payload.id) {
-        await updateBonLivraison(payload.id, payload);
-        setBls(prev => prev.map(b => String(b.id) === String(payload.id) ? { ...b, ...payload } : b));
-      } else {
-        const created = await createBonLivraison(payload);
-        setBls(prev => [created?.data ?? { ...payload, id: Date.now() }, ...prev]);
-      }
-      showToast(isEdit ? 'Bon de livraison mis a jour.' : 'Bon de livraison cree avec succes.');
-    } catch {
-      setBls(prev => isEdit
-        ? prev.map(b => String(b.id) === String(payload.id) ? { ...b, ...payload } : b)
-        : [{ ...payload, id: Date.now() }, ...prev]
-      );
-      showToast(isEdit ? 'BL mis a jour (hors-ligne).' : 'BL cree (hors-ligne).');
+    const result = isEdit && payload.id
+      ? await update(payload.id, payload)
+      : await create(payload);
+    if (!result.success) {
+      showToast(result.error || 'Erreur enregistrement.', 'error');
+      return result;
     }
+    showToast(isEdit ? 'Bon de livraison mis a jour.' : 'Bon de livraison cree avec succes.');
     backToList();
+    return result;
   }
 
   async function handleMarquerLivre(b) {
-    const updated = { ...b, statut: 'livre', date_validation: new Date().toISOString().slice(0, 10) };
-    try { await updateBonLivraison(b.id, updated); } catch (_) {}
-    setBls(prev => prev.map(x => String(x.id) === String(b.id) ? updated : x));
-    showToast('Bon marque comme livre.');
+    const full = await fetchOne(b.id).catch(() => b);
+    const updated = {
+      ...full,
+      statut: 'livre',
+      date_validation: new Date().toISOString().slice(0, 10),
+    };
+    const result = await update(b.id, updated);
+    showToast(result.success ? 'Bon marque comme livre.' : (result.error || 'Erreur.'), result.success ? 'success' : 'error');
   }
 
   async function handleDuplicate(b) {
-    const copy = {
-      ...b, id: undefined,
-      numero: genNumeroBL(),
-      statut: 'brouillon',
-      date_livraison: new Date().toISOString().slice(0, 10),
-      date_validation: '',
-      signature_client: '',
-      est_facture: false,
-      lignes: (b.lignes || []).map(l => ({ ...l, _id: Date.now() + Math.random(), quantite_livree: 0, quantite_restante: l.quantite_commandee, statut_ligne: 'a_livrer' })),
-    };
-    try {
-      const created = await createBonLivraison(copy);
-      setBls(prev => [created?.data ?? { ...copy, id: Date.now() }, ...prev]);
-      showToast('Bon de livraison duplique.');
-    } catch {
-      setBls(prev => [{ ...copy, id: Date.now() }, ...prev]);
-      showToast('BL duplique (hors-ligne).');
-    }
+    const result = await duplicate(b.id);
+    showToast(result.success ? 'Bon de livraison duplique.' : (result.error || 'Erreur duplication.'), result.success ? 'success' : 'error');
   }
 
   async function handleDelete(id) {
     if (!window.confirm('Supprimer ce bon de livraison ? Cette action est irreversible.')) return;
-    try { await deleteBonLivraison(id); } catch (_) {}
-    setBls(prev => prev.filter(b => String(b.id) !== String(id)));
-    showToast('Bon de livraison supprime.');
+    const result = await remove(id);
+    showToast(result.success ? 'Bon de livraison supprime.' : (result.error || 'Erreur suppression.'), result.success ? 'success' : 'error');
   }
 
-  /* ── Form view ── */
+  async function handlePdf(b) {
+    setPdfLoadingId(b.id);
+    try {
+      const full = await fetchOne(b.id);
+      await generateDeliveryNotePdf(full);
+    } catch (err) {
+      showToast(err.message || 'Erreur generation PDF.', 'error');
+    } finally {
+      setPdfLoadingId(null);
+    }
+  }
+
+  /* ── Sub-views ── */
   if (view === 'form') {
-    return <BonLivraisonForm bl={editingBL} onBack={backToList} onSaved={handleSaved} />;
+    return <BonLivraisonForm bl={editingBL} onBack={backToList} onSaved={handleSaved} saving={saving} configured={configured} />;
+  }
+  if (view === 'detail' && viewingBL) {
+    return (
+      <BonLivraisonDetail
+        bl={viewingBL}
+        onBack={backToList}
+        onEdit={openEdit}
+        onPdf={handlePdf}
+        pdfLoading={pdfLoadingId === viewingBL.id}
+      />
+    );
   }
 
-  const hasFilters = !!(search || filterStatut || filterCommercial);
+  const hasFilters = !!(search || filterStatut || filterCommercial || filterClient || filterDate);
 
   return (
-    <div className="animate-fade-in">
+    <div className="animate-fade-in crm-module crm-module--bl">
       <Toast toast={toast} />
 
       {/* Page header */}
@@ -317,7 +415,7 @@ export default function BonLivraison() {
           <h1 className="page-title">Bons de livraison</h1>
           <p className="page-subtitle">Gestion des livraisons clients et suivi des commandes.</p>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div className="crm-page-header-actions" style={{ display: 'flex', gap: 8 }}>
           <button className="btn btn-ghost" onClick={load} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <RefreshCw size={14} />
           </button>
@@ -330,7 +428,11 @@ export default function BonLivraison() {
         </div>
       </div>
 
-      {/* Error banner */}
+      {!configured && (
+        <div style={{ background: '#FFF8E1', color: '#E65100', border: '1px solid rgba(230,81,0,0.25)', borderRadius: 8, padding: '10px 14px', fontSize: '0.85rem', marginBottom: 16 }}>
+          Supabase non configuré — configurez VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY dans .env
+        </div>
+      )}
       {loadError && (
         <div style={{ background: '#FFEBEE', color: 'var(--red)', border: '1px solid rgba(211,47,47,0.25)', borderRadius: 8, padding: '10px 14px', fontSize: '0.85rem', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
           <AlertCircle size={15} /> {loadError}
@@ -356,40 +458,39 @@ export default function BonLivraison() {
       </div>
 
       {/* Filter bar */}
-      <div className="card" style={{ padding: '14px 16px', marginBottom: 16 }}>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-          <div style={{ position: 'relative', flex: '1 1 220px', minWidth: 180 }}>
-            <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)', pointerEvents: 'none' }} />
+      <div className="card crm-filter-bar" style={{ marginBottom: 16 }}>
+        <div className="crm-filter-row">
+          <div className="crm-filter-search">
+            <Search size={14} className="crm-filter-search-icon" />
             <input
+              className="crm-filter-input"
               value={search}
               onChange={e => { setSearch(e.target.value); setPage(1); }}
               placeholder="Rechercher numero, client, projet..."
-              style={{ padding: '8px 10px 8px 32px', border: '1.5px solid var(--border)', borderRadius: 6, fontSize: '0.85rem', width: '100%', outline: 'none', background: '#fff' }}
             />
           </div>
-
-          <select value={filterStatut} onChange={e => { setFilterStatut(e.target.value); setPage(1); }}
-            style={{ padding: '8px 10px', border: '1.5px solid var(--border)', borderRadius: 6, fontSize: '0.85rem', color: filterStatut ? 'var(--text)' : 'var(--text-3)', background: '#fff', cursor: 'pointer' }}>
+          <select className="crm-filter-select crm-filter-select--sm" value={filterStatut} onChange={e => { setFilterStatut(e.target.value); setPage(1); }}>
             <option value="">Tous statuts</option>
             {Object.entries(STATUT_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
           </select>
-
-          <select value={filterCommercial} onChange={e => { setFilterCommercial(e.target.value); setPage(1); }}
-            style={{ padding: '8px 10px', border: '1.5px solid var(--border)', borderRadius: 6, fontSize: '0.85rem', color: filterCommercial ? 'var(--text)' : 'var(--text-3)', background: '#fff', cursor: 'pointer' }}>
+          <select className="crm-filter-select" value={filterCommercial} onChange={e => { setFilterCommercial(e.target.value); setPage(1); }}>
             <option value="">Tous commerciaux</option>
             {commerciaux.map(c => <option key={c} value={c}>{c}</option>)}
           </select>
-
+          <select className="crm-filter-select" value={filterClient} onChange={e => { setFilterClient(e.target.value); setPage(1); }}>
+            <option value="">Tous clients</option>
+            {clientOptions.map(([id, nom]) => <option key={id} value={id}>{nom}</option>)}
+          </select>
+          <input type="date" className="crm-filter-select crm-filter-select--sm" value={filterDate} onChange={e => { setFilterDate(e.target.value); setPage(1); }} title="Date livraison" />
           {hasFilters && (
-            <button className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setFilterStatut(''); setFilterCommercial(''); setPage(1); }}
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setFilterStatut(''); setFilterCommercial(''); setFilterClient(''); setFilterDate(''); setPage(1); }}
               style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'var(--red)' }}>
               <X size={13} /> Effacer
             </button>
           )}
-
-          <div style={{ marginLeft: 'auto', fontSize: '0.8rem', color: 'var(--text-3)', flexShrink: 0 }}>
+          <span className="crm-filter-count">
             {filtered.length} resultat{filtered.length > 1 ? 's' : ''}
-          </div>
+          </span>
         </div>
       </div>
 
@@ -403,8 +504,10 @@ export default function BonLivraison() {
         ) : paged.length === 0 ? (
           <EmptyState filtered={hasFilters} onAdd={openCreate} />
         ) : (
-          <div className="table-wrap">
-            <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+          <>
+          <div className="crm-table-desktop crm-table-scroll">
+            <div className="table-wrap">
+              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
               <thead>
                 <tr style={{ borderBottom: '1.5px solid var(--border)', background: 'var(--bg)' }}>
                   {[
@@ -524,6 +627,14 @@ export default function BonLivraison() {
                       {/* Actions */}
                       <td style={{ padding: '10px 10px', whiteSpace: 'nowrap' }}>
                         <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                          <button title="Voir" onClick={() => openDetail(b)}
+                            className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }}>
+                            <Eye size={13} />
+                          </button>
+                          <button title="PDF" onClick={() => handlePdf(b)} disabled={pdfLoadingId === b.id}
+                            className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }}>
+                            <Download size={13} />
+                          </button>
                           <button title="Modifier" onClick={() => openEdit(b)}
                             className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }}>
                             <Edit2 size={13} />
@@ -548,13 +659,64 @@ export default function BonLivraison() {
                   );
                 })}
               </tbody>
-            </table>
+              </table>
+            </div>
           </div>
+
+          <div className="crm-doc-list crm-mobile-only">
+            {paged.map((b, i) => {
+              const clientNom = b.client_nom || b.client?.nom || '—';
+              const overdue = isOverdue(b.date_echeance, b.statut);
+              const dueSoon = !overdue && isDueSoon(b.date_echeance, b.statut);
+              const pct = Number(b.pct_livre || 0);
+              return (
+                <div key={b.id ?? i} className="crm-doc-card">
+                  <div className="crm-doc-head">
+                    <span className="crm-doc-ref">{b.numero || '—'}</span>
+                    <StatutBadge statut={b.statut} />
+                  </div>
+                  <div className="crm-doc-title">{clientNom}{b.projet ? ` — ${b.projet}` : ''}</div>
+                  <div className="crm-doc-meta">
+                    <span>Livraison {fmtDate(b.date_livraison)}</span>
+                    {b.commercial && <span>· {b.commercial}</span>}
+                    <span>· Avancement {pct}%</span>
+                    {overdue && <span style={{ color: 'var(--red)', fontWeight: 700 }}>· Retard</span>}
+                    {dueSoon && <span style={{ color: '#E65100', fontWeight: 700 }}>· Bientot</span>}
+                  </div>
+                  <div className="crm-doc-footer">
+                    <div>
+                      <span className="crm-doc-amount" style={{ fontSize: '0.88rem', color: 'var(--text)' }}>
+                        {b.est_facture || b.statut === 'facture' ? 'Facturé' : 'Non facturé'}
+                      </span>
+                      <span className="crm-doc-amount-sub">{b.adresse_livraison || '—'}</span>
+                    </div>
+                    <div className="crm-doc-actions">
+                      <button type="button" title="Voir" onClick={() => openDetail(b)}
+                        className="btn btn-ghost btn-sm crm-icon-btn"><Eye size={14} /></button>
+                      <button type="button" title="PDF" onClick={() => handlePdf(b)} disabled={pdfLoadingId === b.id}
+                        className="btn btn-ghost btn-sm crm-icon-btn"><Download size={14} /></button>
+                      <button type="button" title="Modifier" onClick={() => openEdit(b)}
+                        className="btn btn-ghost btn-sm crm-icon-btn"><Edit2 size={14} /></button>
+                      {b.statut !== 'livre' && b.statut !== 'facture' && b.statut !== 'annule' && (
+                        <button type="button" title="Marquer livre" onClick={() => handleMarquerLivre(b)}
+                          className="btn btn-ghost btn-sm crm-icon-btn" style={{ color: '#388E3C' }}><CheckCircle size={14} /></button>
+                      )}
+                      <button type="button" title="Dupliquer" onClick={() => handleDuplicate(b)}
+                        className="btn btn-ghost btn-sm crm-icon-btn"><Copy size={14} /></button>
+                      <button type="button" title="Supprimer" onClick={() => handleDelete(b.id)}
+                        className="btn btn-ghost btn-sm crm-icon-btn"><Trash2 size={14} style={{ color: 'var(--red)' }} /></button>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          </>
         )}
 
         {/* Pagination */}
         {!loading && totalPages > 1 && (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 18px', borderTop: '1px solid var(--border)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '12px 18px', borderTop: '1px solid var(--border)', flexWrap: 'wrap', gap: 8 }}>
             <span style={{ fontSize: '0.82rem', color: 'var(--text-3)' }}>
               Page {safePage} / {totalPages} — {filtered.length} bons
             </span>

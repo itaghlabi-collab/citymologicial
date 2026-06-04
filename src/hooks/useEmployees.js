@@ -12,6 +12,7 @@ import {
   computeEmployeeStats,
   filterEmployees,
 } from '../services/rh/employees';
+import { importEmployeesFromSeed } from '../services/rh/importEmployees';
 
 export function useEmployees() {
   const [employees, setEmployees] = useState([]);
@@ -97,6 +98,22 @@ export function useEmployees() {
     }
   }, [load]);
 
+  const importSeed = useCallback(async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const result = await importEmployeesFromSeed();
+      await load();
+      return { success: true, ...result };
+    } catch (err) {
+      const msg = formatSupabaseError(err, 'Erreur import employés.');
+      setError(msg);
+      return { success: false, error: msg, imported: 0, skipped: 0, errors: [msg] };
+    } finally {
+      setSaving(false);
+    }
+  }, [load]);
+
   return {
     employees,
     filtered,
@@ -113,5 +130,6 @@ export function useEmployees() {
     create,
     update,
     remove,
+    importSeed,
   };
 }

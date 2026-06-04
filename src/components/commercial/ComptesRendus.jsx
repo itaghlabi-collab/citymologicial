@@ -1,5 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
-import { NotebookPen, Plus, Edit2, Trash2, XCircle, CheckSquare, Calendar } from 'lucide-react';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { NotebookPen, Plus, Edit2, Trash2, XCircle, CheckSquare, Calendar, Loader2 } from 'lucide-react';
+import { useComptesRendus } from '../../hooks/useComptesRendus';
 
 function EmptyState({ icon, title, sub }) {
   return (
@@ -12,7 +13,6 @@ function EmptyState({ icon, title, sub }) {
     </div>
   );
 }
-import { getComptesRendus, createCompteRendu, updateCompteRendu, deleteCompteRendu, getRDV, getProspects } from '../../services/api';
 
 const EMPTY = { rdv_id: '', prospect_id: '', resume: '', decision: '', prochaine_action: '', date: new Date().toISOString().slice(0, 10) };
 
@@ -31,34 +31,40 @@ function IS(err) {
 }
 
 export default function ComptesRendus() {
-  const [crs, setCrs] = useState([]);
-  const [rdvs, setRdvs] = useState([]);
-  const [prospects, setProspects] = useState([]);
+  const {
+    records: crs,
+    prospects,
+    rdvs,
+    loading,
+    saving,
+    error,
+    configured,
+    load,
+    create,
+    update,
+    remove,
+    filterComptesRendus,
+    computeComptesRendusStats,
+  } = useComptesRendus();
+
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(EMPTY);
   const [errors, setErrors] = useState({});
-  const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState('');
   const [search, setSearch] = useState('');
   const [expandedId, setExpandedId] = useState(null);
   const [page, setPage] = useState(1);
   const PER_PAGE = 8;
 
-  useEffect(() => {
-    getComptesRendus().then(d => { if (d && d.length) setCrs(d); }).catch(() => {});
-    getRDV().then(d => { if (d && d.length) setRdvs(d); }).catch(() => {});
-    getProspects().then(d => { if (d && d.length) setProspects(d); }).catch(() => {});
-  }, []);
-
   function prospectLabel(id) {
-    const p = prospects.find(x => x.id === Number(id));
+    const p = prospects.find(x => String(x.id) === String(id));
     if (!p) return '-';
-    return p.type === 'btob' ? p.nom : `${p.prenom} ${p.nom}`;
+    return p.label || (p.type === 'btob' ? p.nom : `${p.prenom} ${p.nom}`);
   }
 
   function rdvLabel(id) {
-    const r = rdvs.find(x => x.id === Number(id));
+    const r = rdvs.find(x => String(x.id) === String(id));
     return r ? r.titre : '-';
   }
 
@@ -85,37 +91,33 @@ export default function ComptesRendus() {
   async function handleSave() {
     const e = validate();
     if (Object.keys(e).length) { setErrors(e); return; }
-    setSaving(true);
-    const payload = { ...form, rdv_id: form.rdv_id ? Number(form.rdv_id) : null, prospect_id: form.prospect_id ? Number(form.prospect_id) : null };
-    try {
-      if (editing) {
-        await updateCompteRendu(editing.id, payload).catch(() => null);
-        setCrs(prev => prev.map(c => c.id === editing.id ? { ...c, ...payload } : c));
-        setToast('Compte rendu mis a jour.');
-      } else {
-        const created = await createCompteRendu(payload).catch(() => null);
-        setCrs(prev => [...prev, { id: created?.id || Date.now(), ...payload, created_at: new Date().toISOString() }]);
-        setToast('Compte rendu cree.');
-      }
-    } catch (_) {}
-    setSaving(false);
+    const payload = { ...form, rdv_id: form.rdv_id || null, prospect_id: form.prospect_id || null };
+    const result = editing
+      ? await update(editing.id, payload)
+      : await create(payload);
+    if (!result.success) {
+      setToast(result.error || 'Erreur enregistrement.');
+      return;
+    }
+    setToast(editing ? 'Compte rendu mis a jour.' : 'Compte rendu cree.');
     setShowModal(false);
   }
 
   async function handleDelete(cr) {
     if (!window.confirm('Supprimer ce compte rendu ?')) return;
-    try { await deleteCompteRendu(cr.id); } catch (_) {}
-    setCrs(prev => prev.filter(c => c.id !== cr.id));
-    setToast('Compte rendu supprime.');
+    const result = await remove(cr.id);
+    setToast(result.success ? 'Compte rendu supprime.' : (result.error || 'Erreur suppression.'));
   }
 
-  const filtered = crs.filter(c => {
-    if (!search) return true;
-    return `${c.resume} ${prospectLabel(c.prospect_id)} ${rdvLabel(c.rdv_id)}`.toLowerCase().includes(search.toLowerCase());
-  });
+  const filtered = useMemo(
+    () => filterComptesRendus(crs, { search }),
+    [crs, search, filterComptesRendus],
+  );
 
   const totalPages = Math.ceil(filtered.length / PER_PAGE);
   const paged = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
+
+  const stats = useMemo(() => computeComptesRendusStats(crs), [crs, computeComptesRendusStats]);
 
   return (
     <div className="animate-fade-in">
@@ -124,14 +126,35 @@ export default function ComptesRendus() {
           <h1 className="page-title">Comptes Rendus</h1>
           <p className="page-subtitle">Rapports de visites et suivi des rendez-vous commerciaux</p>
         </div>
-        <button className="btn btn-primary" onClick={openCreate}><Plus size={15} /> Nouveau CR</button>
+        <button className="btn btn-primary" onClick={openCreate} disabled={loading || saving || !configured}><Plus size={15} /> Nouveau CR</button>
       </div>
 
+      {!configured && (
+        <div style={{ background: '#FFF3E0', border: '1px solid #FFB74D', borderRadius: 'var(--radius)', padding: '10px 16px', marginBottom: 16, fontSize: '0.85rem', color: '#E65100' }}>
+          Supabase non configuré — ajoutez VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY dans .env
+        </div>
+      )}
+
+      {error && !loading && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, background: '#FFEBEE', border: '1px solid #EF9A9A', borderRadius: 'var(--radius)', padding: '10px 16px', marginBottom: 16, fontSize: '0.85rem', color: '#C62828' }}>
+          <span>{error}</span>
+          <button className="btn btn-ghost btn-sm" onClick={load}>Réessayer</button>
+        </div>
+      )}
+
+      {loading && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '24px 0', color: 'var(--text-3)', fontSize: '0.875rem' }}>
+          <Loader2 size={18} className="spin" /> Chargement des comptes rendus...
+        </div>
+      )}
+
+      {!loading && (
+      <>
       {/* Stats */}
       <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}>
-        <div className="stat-card"><div className="stat-icon"><NotebookPen size={18} /></div><div className="stat-body"><div className="stat-value">{crs.length}</div><div className="stat-label">Total comptes rendus</div></div></div>
-        <div className="stat-card"><div className="stat-icon blue"><Calendar size={18} /></div><div className="stat-body"><div className="stat-value">{crs.filter(c => c.date && c.date.startsWith(new Date().toISOString().slice(0, 7))).length}</div><div className="stat-label">Ce mois</div></div></div>
-        <div className="stat-card"><div className="stat-icon green"><CheckSquare size={18} /></div><div className="stat-body"><div className="stat-value">{crs.filter(c => c.prochaine_action && c.prochaine_action.trim()).length}</div><div className="stat-label">Avec action suivante</div></div></div>
+        <div className="stat-card"><div className="stat-icon"><NotebookPen size={18} /></div><div className="stat-body"><div className="stat-value">{stats.total}</div><div className="stat-label">Total comptes rendus</div></div></div>
+        <div className="stat-card"><div className="stat-icon blue"><Calendar size={18} /></div><div className="stat-body"><div className="stat-value">{stats.ceMois}</div><div className="stat-label">Ce mois</div></div></div>
+        <div className="stat-card"><div className="stat-icon green"><CheckSquare size={18} /></div><div className="stat-body"><div className="stat-value">{stats.avecActionSuivante}</div><div className="stat-label">Avec action suivante</div></div></div>
       </div>
 
       {/* Search */}
@@ -165,11 +188,14 @@ export default function ComptesRendus() {
                   </div>
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ fontWeight: 600, fontSize: '0.875rem', marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {rdvLabel(cr.rdv_id) !== '-' ? rdvLabel(cr.rdv_id) : `CR du ${cr.date}`}
+                      {(() => {
+                        const t = cr.rdv_titre || rdvLabel(cr.rdv_id);
+                        return t !== '-' ? t : `CR du ${cr.date}`;
+                      })()}
                     </div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-3)', display: 'flex', gap: 14 }}>
                       <span><Calendar size={11} style={{ verticalAlign: 'middle', marginRight: 3 }} />{cr.date}</span>
-                      {prospectLabel(cr.prospect_id) !== '-' && <span>{prospectLabel(cr.prospect_id)}</span>}
+                      {(cr.prospect_nom || prospectLabel(cr.prospect_id)) !== '-' && <span>{cr.prospect_nom || prospectLabel(cr.prospect_id)}</span>}
                     </div>
                   </div>
                   <div style={{ display: 'flex', gap: 4 }}>
@@ -218,6 +244,8 @@ export default function ComptesRendus() {
           </div>
         )}
       </div>
+      </>
+      )}
 
       {/* Modal */}
       {showModal && (
@@ -240,7 +268,7 @@ export default function ComptesRendus() {
                   <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-2)', display: 'block', marginBottom: 5 }}>Prospect</label>
                   <select style={IS(false)} value={form.prospect_id} onChange={e => setForm(f => ({ ...f, prospect_id: e.target.value }))}>
                     <option value="">-- Selectionner --</option>
-                    {prospects.map(p => <option key={p.id} value={p.id}>{p.type === 'btob' ? p.nom : `${p.prenom} ${p.nom}`}</option>)}
+                    {prospects.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
                   </select>
                 </div>
               </div>

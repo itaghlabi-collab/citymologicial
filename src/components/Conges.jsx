@@ -1,7 +1,8 @@
-import { CalendarOff, Plus, CheckCircle, XCircle, Clock, X, Upload, User, Edit2, Trash2 } from 'lucide-react';
+import { CalendarOff, Plus, CheckCircle, XCircle, Clock, X, Upload, User, Edit2, Trash2, FileDown } from 'lucide-react';
 import { useState, useRef } from 'react';
 import { useLeaves } from '../hooks/useLeaves';
 import { employeeFullName } from '../services/rh/leaves';
+import { generateLeaveRequestPdf } from '../services/rh/leaveRequestPdf';
 
 const CONGE_TYPES = [
   'Conge annuel',
@@ -123,6 +124,7 @@ export default function Conges() {
   const [errors, setErrors] = useState({});
   const [formError, setFormError] = useState(null);
   const [toast, setToast] = useState(null);
+  const [pdfLoadingId, setPdfLoadingId] = useState(null);
   const toastRef = useRef(null);
   const fileRef = useRef(null);
 
@@ -254,6 +256,20 @@ export default function Conges() {
     if (!window.confirm('Supprimer cette demande de conge ?')) return;
     const result = await remove(id);
     showToast(result.success ? 'success' : 'error', result.success ? 'Demande supprimee.' : (result.error || 'Erreur.'));
+  }
+
+  async function handleDownloadPdf(row) {
+    setPdfLoadingId(row.id);
+    try {
+      const emp = employees.find((e) => e.id === row.employee_id) || row.employees;
+      await generateLeaveRequestPdf(row, emp);
+      showToast('success', 'PDF telecharge.');
+    } catch (err) {
+      console.error('[CITYMO] Conges PDF', err);
+      showToast('error', err?.message || 'Erreur generation PDF.');
+    } finally {
+      setPdfLoadingId(null);
+    }
   }
 
   const jours = countWorkingDays(form.dateDebut, form.dateFin);
@@ -423,6 +439,15 @@ export default function Conges() {
                               </button>
                             </>
                           )}
+                          <button
+                            type="button"
+                            title="Telecharger PDF"
+                            onClick={() => handleDownloadPdf(r)}
+                            disabled={saving || pdfLoadingId === r.id}
+                            style={{ background: 'none', border: 'none', cursor: pdfLoadingId === r.id ? 'wait' : 'pointer', color: 'var(--red)', padding: 4, opacity: pdfLoadingId === r.id ? 0.5 : 1 }}
+                          >
+                            <FileDown size={15} />
+                          </button>
                           {showEdit && (
                             <button
                               type="button"

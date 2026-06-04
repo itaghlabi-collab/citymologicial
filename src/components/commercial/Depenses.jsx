@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from 'react';
-import { Receipt, Plus, Edit2, Trash2, XCircle, TrendingDown, DollarSign, Megaphone, Briefcase } from 'lucide-react';
-import { getDepenses, createDepense, updateDepense, deleteDepense } from '../../services/api';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { Receipt, Plus, Edit2, Trash2, XCircle, TrendingDown, DollarSign, Megaphone, Briefcase, Loader2 } from 'lucide-react';
+import { useDepenses } from '../../hooks/useDepenses';
 
 const TYPES = ['marketing', 'commercial', 'evenement', 'deplacement', 'materiel', 'autre'];
 const TYPE_LABEL = { marketing: 'Marketing', commercial: 'Commercial', evenement: 'Evenement', deplacement: 'Deplacement', materiel: 'Materiel', autre: 'Autre' };
@@ -28,12 +28,25 @@ function fmtMontant(v) {
 }
 
 export default function Depenses() {
-  const [depenses, setDepenses] = useState([]);
+  const {
+    records: depenses,
+    loading,
+    saving,
+    error,
+    configured,
+    load,
+    create,
+    update,
+    remove,
+    filterDepenses,
+    computeDepensesStats,
+    sumDepensesMontant,
+  } = useDepenses();
+
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(EMPTY);
   const [errors, setErrors] = useState({});
-  const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState('');
   const [filterType, setFilterType] = useState('');
   const [filterDateFrom, setFilterDateFrom] = useState('');
@@ -41,10 +54,6 @@ export default function Depenses() {
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(1);
   const PER_PAGE = 10;
-
-  useEffect(() => {
-    getDepenses().then(d => { if (d && d.length) setDepenses(d); }).catch(() => {});
-  }, []);
 
   function openCreate() {
     setEditing(null);
@@ -71,45 +80,39 @@ export default function Depenses() {
   async function handleSave() {
     const e = validate();
     if (Object.keys(e).length) { setErrors(e); return; }
-    setSaving(true);
     const payload = { ...form, montant: Number(form.montant) };
-    try {
-      if (editing) {
-        await updateDepense(editing.id, payload).catch(() => null);
-        setDepenses(prev => prev.map(x => x.id === editing.id ? { ...x, ...payload } : x));
-        setToast('Depense mise a jour.');
-      } else {
-        const created = await createDepense(payload).catch(() => null);
-        setDepenses(prev => [...prev, { id: created?.id || Date.now(), ...payload, created_at: new Date().toISOString() }]);
-        setToast('Depense enregistree.');
-      }
-    } catch (_) {}
-    setSaving(false);
+    const result = editing
+      ? await update(editing.id, payload)
+      : await create(payload);
+    if (!result.success) {
+      setToast(result.error || 'Erreur enregistrement.');
+      return;
+    }
+    setToast(editing ? 'Depense mise a jour.' : 'Depense enregistree.');
     setShowModal(false);
   }
 
   async function handleDelete(d) {
     if (!window.confirm('Supprimer cette depense ?')) return;
-    try { await deleteDepense(d.id); } catch (_) {}
-    setDepenses(prev => prev.filter(x => x.id !== d.id));
-    setToast('Depense supprimee.');
+    const result = await remove(d.id);
+    setToast(result.success ? 'Depense supprimee.' : (result.error || 'Erreur suppression.'));
   }
 
-  const filtered = depenses.filter(d => {
-    if (filterType && d.type !== filterType) return false;
-    if (filterDateFrom && d.date < filterDateFrom) return false;
-    if (filterDateTo && d.date > filterDateTo) return false;
-    if (search && !`${d.intitule} ${d.reference}`.toLowerCase().includes(search.toLowerCase())) return false;
-    return true;
-  });
+  const filtered = useMemo(
+    () => filterDepenses(depenses, {
+      search,
+      type: filterType,
+      dateFrom: filterDateFrom,
+      dateTo: filterDateTo,
+    }),
+    [depenses, search, filterType, filterDateFrom, filterDateTo, filterDepenses],
+  );
 
   const totalPages = Math.ceil(filtered.length / PER_PAGE);
   const paged = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
 
-  const totalAll = depenses.reduce((s, d) => s + (Number(d.montant) || 0), 0);
-  const totalMarketing = depenses.filter(d => d.type === 'marketing' || d.type === 'evenement').reduce((s, d) => s + (Number(d.montant) || 0), 0);
-  const totalCommercial = depenses.filter(d => d.type === 'commercial' || d.type === 'deplacement').reduce((s, d) => s + (Number(d.montant) || 0), 0);
-  const totalFiltered = filtered.reduce((s, d) => s + (Number(d.montant) || 0), 0);
+  const stats = useMemo(() => computeDepensesStats(depenses), [depenses, computeDepensesStats]);
+  const totalFiltered = useMemo(() => sumDepensesMontant(filtered), [filtered, sumDepensesMontant]);
 
   return (
     <div className="animate-fade-in">
@@ -118,15 +121,36 @@ export default function Depenses() {
           <h1 className="page-title">Depenses</h1>
           <p className="page-subtitle">Suivi des depenses commerciales et marketing</p>
         </div>
-        <button className="btn btn-primary" onClick={openCreate}><Plus size={15} /> Nouvelle depense</button>
+        <button className="btn btn-primary" onClick={openCreate} disabled={loading || saving || !configured}><Plus size={15} /> Nouvelle depense</button>
       </div>
 
+      {!configured && (
+        <div style={{ background: '#FFF3E0', border: '1px solid #FFB74D', borderRadius: 'var(--radius)', padding: '10px 16px', marginBottom: 16, fontSize: '0.85rem', color: '#E65100' }}>
+          Supabase non configuré — ajoutez VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY dans .env
+        </div>
+      )}
+
+      {error && !loading && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, background: '#FFEBEE', border: '1px solid #EF9A9A', borderRadius: 'var(--radius)', padding: '10px 16px', marginBottom: 16, fontSize: '0.85rem', color: '#C62828' }}>
+          <span>{error}</span>
+          <button className="btn btn-ghost btn-sm" onClick={load}>Réessayer</button>
+        </div>
+      )}
+
+      {loading && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '24px 0', color: 'var(--text-3)', fontSize: '0.875rem' }}>
+          <Loader2 size={18} className="spin" /> Chargement des depenses...
+        </div>
+      )}
+
+      {!loading && (
+      <>
       {/* Stats dashboard */}
       <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))' }}>
-        <div className="stat-card"><div className="stat-icon"><DollarSign size={18} /></div><div className="stat-body"><div className="stat-value">{(totalAll / 1000).toFixed(0)}K</div><div className="stat-label">Total depenses (MAD)</div></div></div>
-        <div className="stat-card"><div className="stat-icon blue"><Megaphone size={18} /></div><div className="stat-body"><div className="stat-value">{(totalMarketing / 1000).toFixed(0)}K</div><div className="stat-label">Marketing + Evenements</div></div></div>
-        <div className="stat-card"><div className="stat-icon green"><Briefcase size={18} /></div><div className="stat-body"><div className="stat-value">{(totalCommercial / 1000).toFixed(0)}K</div><div className="stat-label">Commercial + Deplacement</div></div></div>
-        <div className="stat-card"><div className="stat-icon orange"><Receipt size={18} /></div><div className="stat-body"><div className="stat-value">{depenses.length}</div><div className="stat-label">Nombre de lignes</div></div></div>
+        <div className="stat-card"><div className="stat-icon"><DollarSign size={18} /></div><div className="stat-body"><div className="stat-value">{(stats.totalAll / 1000).toFixed(0)}K</div><div className="stat-label">Total depenses (MAD)</div></div></div>
+        <div className="stat-card"><div className="stat-icon blue"><Megaphone size={18} /></div><div className="stat-body"><div className="stat-value">{(stats.totalMarketing / 1000).toFixed(0)}K</div><div className="stat-label">Marketing + Evenements</div></div></div>
+        <div className="stat-card"><div className="stat-icon green"><Briefcase size={18} /></div><div className="stat-body"><div className="stat-value">{(stats.totalCommercial / 1000).toFixed(0)}K</div><div className="stat-label">Commercial + Deplacement</div></div></div>
+        <div className="stat-card"><div className="stat-icon orange"><Receipt size={18} /></div><div className="stat-body"><div className="stat-value">{stats.count}</div><div className="stat-label">Nombre de lignes</div></div></div>
       </div>
 
       {/* Filters */}
@@ -193,6 +217,8 @@ export default function Depenses() {
           </div>
         )}
       </div>
+      </>
+      )}
 
       {/* Modal */}
       {showModal && (

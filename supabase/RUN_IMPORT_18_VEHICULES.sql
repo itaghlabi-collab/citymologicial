@@ -1,0 +1,4 @@
+-- Exécuter dans Supabase SQL Editor (dans l'ordre si table absente) :
+-- 1) supabase/migrations/20260527150000_logistique_vehicles.sql
+-- 2) supabase/migrations/20260527150100_seed_logistique_vehicles.sql
+-- Ou coller les deux fichiers l'un après l'autre puis Run.

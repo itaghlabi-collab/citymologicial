@@ -1,5 +1,7 @@
-import { useState, useEffect, useRef } from 'react';
-import { FileEdit, Plus, Edit2, Trash2, X, Search, Paperclip, Clock, CheckCircle, AlertTriangle } from 'lucide-react';
+import { useState, useRef, useMemo } from 'react';
+import { FileEdit, Plus, Edit2, Trash2, X, Search, Paperclip, Clock, CheckCircle, AlertTriangle, Loader2 } from 'lucide-react';
+import { useDevisAttente } from '../../hooks/useDevisAttente';
+import { TYPE_PROJET_VALUES, TYPE_PROJET_LABEL, SOURCE_VALUES, SOURCE_LABEL } from '../../constants/commercial';
 
 function EmptyState({ icon, title, sub }) {
   return (
@@ -12,8 +14,6 @@ function EmptyState({ icon, title, sub }) {
     </div>
   );
 }
-import { getDevis, createDevis, updateDevis, deleteDevis, getProspects } from '../../services/api';
-import { TYPE_PROJET_VALUES, TYPE_PROJET_LABEL, SOURCE_VALUES, SOURCE_LABEL } from '../../constants/commercial';
 
 const IS = (e) => ({ padding: '9px 12px', border: '1.5px solid ' + (e ? 'var(--red)' : 'var(--border)'), borderRadius: 'var(--radius)', fontSize: '0.9rem', fontFamily: 'var(--font-body)', outline: 'none', width: '100%', background: '#fff' });
 
@@ -22,23 +22,40 @@ function Toast({ t }) {
   return <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 9999, background: t.type === 'success' ? '#2E7D32' : '#D32F2F', color: '#fff', padding: '12px 20px', borderRadius: 10, boxShadow: '0 4px 20px rgba(0,0,0,0.22)', fontSize: '0.88rem', fontWeight: 600, maxWidth: 340 }}>{t.msg}</div>;
 }
 
-const STATUTS = ['en_attente', 'en_cours', 'realise'];
-const STATUT_LABEL = { en_attente: 'En attente', en_cours: 'En cours', realise: 'Realise' };
-const STATUT_BADGE = { en_attente: 'badge-orange', en_cours: 'badge-blue', realise: 'badge-green' };
-
-const EMPTY_FORM = { prospect_id: '', type_projet: '', source: '', statut: 'en_attente', commentaire: '', assigne_id: '' };
+const EMPTY_FORM = {
+  prospect_id: '', type_projet: '', source: '', statut: 'en_attente',
+  commentaire: '', assigne_id: '', montant_estime: '', date_relance: '',
+};
 
 export default function DevisAttente() {
-  const [rows, setRows] = useState([]);
-  const [prospects, setProspects] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const {
+    records,
+    prospectOptions,
+    loading,
+    saving,
+    error,
+    configured,
+    load,
+    create,
+    update,
+    remove,
+    filterDevisRecords,
+    computeDevisStats,
+    isDevisStale,
+    DEVIS_STATUTS,
+    DEVIS_STATUT_LABEL,
+    DEVIS_STATUT_BADGE,
+  } = useDevisAttente();
+
   const [modal, setModal] = useState(false);
   const [editRow, setEditRow] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [errors, setErrors] = useState({});
-  const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState(null);
   const [filterStatut, setFilterStatut] = useState('');
+  const [filterProspect, setFilterProspect] = useState('');
+  const [filterDate, setFilterDate] = useState('');
+  const [filterMontantMin, setFilterMontantMin] = useState('');
   const [search, setSearch] = useState('');
   const toastRef = useRef(null);
 
@@ -48,20 +65,24 @@ export default function DevisAttente() {
     toastRef.current = setTimeout(() => setToast(null), 3000);
   }
 
-  async function load() {
-    setLoading(true);
-    try {
-      const [d, p] = await Promise.all([getDevis(), getProspects()]);
-      if (Array.isArray(d) && d.length > 0) setRows(d);
-      if (Array.isArray(p)) setProspects(p);
-    } catch (_) {}
-    setLoading(false);
+  function openAdd() { setEditRow(null); setForm({ ...EMPTY_FORM }); setErrors({}); setModal(true); }
+
+  function openEdit(row) {
+    setEditRow(row);
+    setForm({
+      prospect_id: row.prospect_id || '',
+      type_projet: row.type_projet || '',
+      source: row.source || '',
+      statut: row.statut || 'en_attente',
+      commentaire: row.commentaire || '',
+      assigne_id: row.assigne_id || '',
+      montant_estime: row.montant_estime != null ? String(row.montant_estime) : '',
+      date_relance: row.date_relance || '',
+    });
+    setErrors({});
+    setModal(true);
   }
 
-  useEffect(() => { load(); }, []);
-
-  function openAdd() { setEditRow(null); setForm({ ...EMPTY_FORM }); setErrors({}); setModal(true); }
-  function openEdit(row) { setEditRow(row); setForm({ prospect_id: row.prospect_id || '', type_projet: row.type_projet || '', source: row.source || '', statut: row.statut || 'en_attente', commentaire: row.commentaire || '', assigne_id: row.assigne_id || '' }); setErrors({}); setModal(true); }
   function setField(k, v) { setForm(p => ({ ...p, [k]: v })); }
 
   function validate() {
@@ -75,59 +96,36 @@ export default function DevisAttente() {
     ev.preventDefault();
     const errs = validate();
     if (Object.keys(errs).length) { setErrors(errs); return; }
-    setSaving(true);
-    try {
-      const now = new Date().toISOString();
-      if (editRow) {
-        await updateDevis(editRow.id, form);
-        setRows(prev => prev.map(r => r.id === editRow.id ? { ...r, ...form, updated_at: now } : r));
-        showToast('success', 'Devis mis a jour.');
-      } else {
-        const prospect = prospects.find(p => String(p.id) === String(form.prospect_id));
-        const pNom = prospect ? ((prospect.prenom || '') + ' ' + prospect.nom).trim() : '';
-        const num = 'DV-' + String(rows.length + 1).padStart(3, '0');
-        const created = await createDevis({ ...form, prospect_id: Number(form.prospect_id) });
-        setRows(prev => [created || { ...form, id: Date.now(), numero: num, prospect_nom: pNom, created_at: now.slice(0,10), updated_at: now.slice(0,10) }, ...prev]);
-        showToast('success', 'Devis cree.');
-      }
-      setModal(false);
-    } catch (_) {
-      const now = new Date().toISOString().slice(0, 10);
-      if (editRow) {
-        setRows(prev => prev.map(r => r.id === editRow.id ? { ...r, ...form, updated_at: now } : r));
-      } else {
-        const num = 'DV-' + String(rows.length + 1).padStart(3, '0');
-        setRows(prev => [{ ...form, id: Date.now(), numero: num, prospect_nom: '', created_at: now, updated_at: now }, ...prev]);
-      }
-      showToast('success', editRow ? 'Mis a jour (hors ligne).' : 'Cree (hors ligne).');
-      setModal(false);
-    } finally { setSaving(false); }
+
+    const result = editRow ? await update(editRow.id, form) : await create(form);
+    if (!result.success) {
+      showToast('error', result.error || 'Erreur enregistrement.');
+      return;
+    }
+
+    showToast('success', editRow ? 'Devis mis a jour.' : 'Devis cree.');
+    setModal(false);
   }
 
   async function handleDelete(row) {
     if (!window.confirm('Supprimer ce devis ?')) return;
-    try { await deleteDevis(row.id); } catch (_) {}
-    setRows(prev => prev.filter(r => r.id !== row.id));
-    showToast('success', 'Devis supprime.');
+    const result = await remove(row.id);
+    showToast(result.success ? 'success' : 'error', result.success ? 'Devis supprime.' : (result.error || 'Erreur.'));
   }
 
-  // Check stale (48h not updated)
-  function isStale(row) {
-    if (!row.updated_at) return false;
-    const updated = new Date(row.updated_at);
-    return (Date.now() - updated.getTime()) > 48 * 60 * 60 * 1000 && row.statut === 'en_attente';
-  }
+  const filtered = useMemo(
+    () => filterDevisRecords(records, {
+      search,
+      statut: filterStatut,
+      prospectId: filterProspect,
+      date: filterDate,
+      montantMin: filterMontantMin,
+    }),
+    [records, search, filterStatut, filterProspect, filterDate, filterMontantMin, filterDevisRecords],
+  );
 
-  const filtered = rows.filter(r => {
-    const matchS = !filterStatut || r.statut === filterStatut;
-    const matchQ = !search || (r.prospect_nom || '').toLowerCase().includes(search.toLowerCase()) || (r.numero || '').toLowerCase().includes(search.toLowerCase());
-    return matchS && matchQ;
-  });
-
-  const nbEnCours  = rows.filter(r => r.statut === 'en_cours').length;
-  const nbAttente  = rows.filter(r => r.statut === 'en_attente').length;
-  const nbRealise  = rows.filter(r => r.statut === 'realise').length;
-  const nbStale    = rows.filter(isStale).length;
+  const stats = useMemo(() => computeDevisStats(records), [records, computeDevisStats]);
+  const hasFilters = filterStatut || filterProspect || filterDate || filterMontantMin;
 
   return (
     <div className="animate-fade-in">
@@ -138,33 +136,50 @@ export default function DevisAttente() {
           <h1 className="page-title">Devis en attente</h1>
           <p className="page-subtitle">Suivi et gestion des devis commerciaux</p>
         </div>
-        <button className="btn btn-primary" onClick={openAdd}><Plus size={15} /> Nouveau devis</button>
+        <button className="btn btn-primary" onClick={openAdd} disabled={loading || saving || !configured}><Plus size={15} /> Nouveau devis</button>
       </div>
+
+      {!configured && (
+        <div style={{ background: '#FFF3E0', border: '1px solid #FFB74D', borderRadius: 'var(--radius)', padding: '10px 16px', marginBottom: 16, fontSize: '0.85rem', color: '#E65100' }}>
+          Supabase non configuré — ajoutez VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY dans .env
+        </div>
+      )}
+
+      {error && !loading && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, background: '#FFEBEE', border: '1px solid #EF9A9A', borderRadius: 'var(--radius)', padding: '10px 16px', marginBottom: 16, fontSize: '0.85rem', color: '#C62828' }}>
+          <span>{error}</span>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={load}>Réessayer</button>
+        </div>
+      )}
 
       {/* Stats */}
       <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }}>
         <div className="stat-card">
           <div className="stat-icon blue"><FileEdit size={18} /></div>
-          <div className="stat-body"><div className="stat-value">{nbEnCours}</div><div className="stat-label">En cours</div></div>
+          <div className="stat-body"><div className="stat-value">{loading ? '—' : stats.total}</div><div className="stat-label">Total devis</div></div>
         </div>
         <div className="stat-card">
           <div className="stat-icon orange"><Clock size={18} /></div>
-          <div className="stat-body"><div className="stat-value">{nbAttente}</div><div className="stat-label">En attente</div></div>
+          <div className="stat-body"><div className="stat-value">{loading ? '—' : stats.enAttente}</div><div className="stat-label">En attente</div></div>
         </div>
         <div className="stat-card">
           <div className="stat-icon green"><CheckCircle size={18} /></div>
-          <div className="stat-body"><div className="stat-value">{nbRealise}</div><div className="stat-label">Realises</div></div>
+          <div className="stat-body"><div className="stat-value">{loading ? '—' : stats.acceptes}</div><div className="stat-label">Acceptes</div></div>
         </div>
-        {nbStale > 0 && (
+        <div className="stat-card">
+          <div className="stat-icon" style={{ background: '#FFEBEE' }}><X size={18} style={{ color: 'var(--red)' }} /></div>
+          <div className="stat-body"><div className="stat-value">{loading ? '—' : stats.refuses}</div><div className="stat-label">Refuses</div></div>
+        </div>
+        {stats.stagnants > 0 && (
           <div className="stat-card" style={{ border: '1.5px solid #FF6F00' }}>
             <div className="stat-icon" style={{ background: '#FFF3E0' }}><AlertTriangle size={18} style={{ color: '#FF6F00' }} /></div>
-            <div className="stat-body"><div className="stat-value" style={{ color: '#FF6F00' }}>{nbStale}</div><div className="stat-label">Stagnants +48h</div></div>
+            <div className="stat-body"><div className="stat-value" style={{ color: '#FF6F00' }}>{stats.stagnants}</div><div className="stat-label">Stagnants +48h</div></div>
           </div>
         )}
       </div>
 
       {/* Filters */}
-      <div className="card" style={{ padding: '14px 20px' }}>
+      <div className="card" style={{ padding: '14px 20px', marginBottom: 12 }}>
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
           <div style={{ position: 'relative', flex: '1 1 220px' }}>
             <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
@@ -172,8 +187,19 @@ export default function DevisAttente() {
           </div>
           <select value={filterStatut} onChange={e => setFilterStatut(e.target.value)} style={{ ...IS(false), minWidth: 160 }}>
             <option value="">Tous les statuts</option>
-            {STATUTS.map(s => <option key={s} value={s}>{STATUT_LABEL[s]}</option>)}
+            {DEVIS_STATUTS.map(s => <option key={s} value={s}>{DEVIS_STATUT_LABEL[s]}</option>)}
           </select>
+          <select value={filterProspect} onChange={e => setFilterProspect(e.target.value)} style={{ ...IS(false), minWidth: 180 }}>
+            <option value="">Tous les prospects</option>
+            {prospectOptions.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+          </select>
+          <input type="date" value={filterDate} onChange={e => setFilterDate(e.target.value)} style={{ ...IS(false), minWidth: 150 }} />
+          <input type="number" min="0" placeholder="Montant min (MAD)" value={filterMontantMin} onChange={e => setFilterMontantMin(e.target.value)} style={{ ...IS(false), minWidth: 160 }} />
+          {hasFilters && (
+            <button onClick={() => { setFilterStatut(''); setFilterProspect(''); setFilterDate(''); setFilterMontantMin(''); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', fontSize: '0.82rem', fontWeight: 600 }}>
+              Effacer filtres
+            </button>
+          )}
         </div>
       </div>
 
@@ -183,12 +209,15 @@ export default function DevisAttente() {
           <div className="card-title" style={{ marginBottom: 0 }}><FileEdit size={16} /> Devis ({filtered.length})</div>
         </div>
         {loading ? (
-          <div style={{ textAlign: 'center', padding: 32, color: 'var(--text-3)' }}>Chargement...</div>
+          <div style={{ textAlign: 'center', padding: 32, color: 'var(--text-3)' }}>
+            <Loader2 size={28} style={{ animation: 'spin 1s linear infinite', margin: '0 auto 12px' }} />
+            <div style={{ fontSize: '0.88rem' }}>Chargement...</div>
+          </div>
         ) : filtered.length === 0 ? (
           <EmptyState
             icon={<FileEdit size={22} style={{ color: 'var(--text-3)' }} />}
-            title={rows.length === 0 ? "Aucun devis enregistre" : "Aucun resultat pour ces filtres"}
-            sub={rows.length === 0 ? "Creez votre premier devis en cliquant sur Nouveau devis" : "Modifiez vos criteres de recherche"}
+            title={records.length === 0 ? "Aucun devis enregistre" : "Aucun resultat pour ces filtres"}
+            sub={records.length === 0 ? "Creez votre premier devis en cliquant sur Nouveau devis" : "Modifiez vos criteres de recherche"}
           />
         ) : (
           <div className="table-wrap">
@@ -206,16 +235,16 @@ export default function DevisAttente() {
               </thead>
               <tbody>
                 {filtered.map(r => (
-                  <tr key={r.id} style={isStale(r) ? { background: '#FFF8E1' } : {}}>
+                  <tr key={r.id} style={isDevisStale(r) ? { background: '#FFF8E1' } : {}}>
                     <td style={{ fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--red)' }}>
-                      {r.numero || ('DV-' + String(r.id).padStart(3, '0'))}
-                      {isStale(r) && <span style={{ marginLeft: 6 }} title="Non mis a jour depuis +48h"><AlertTriangle size={12} style={{ color: '#FF6F00', verticalAlign: 'middle' }} /></span>}
+                      {r.numero || ('DV-' + String(r.id).slice(0, 8))}
+                      {isDevisStale(r) && <span style={{ marginLeft: 6 }} title="Non mis a jour depuis +48h"><AlertTriangle size={12} style={{ color: '#FF6F00', verticalAlign: 'middle' }} /></span>}
                     </td>
                     <td style={{ fontWeight: 600 }}>{r.prospect_nom || '-'}</td>
                     <td><span className="badge badge-blue">{TYPE_PROJET_LABEL[r.type_projet] || r.type_projet || '-'}</span></td>
                     <td style={{ fontSize: '0.8rem', color: 'var(--text-2)' }}>{SOURCE_LABEL[r.source] || r.source || '-'}</td>
-                    <td><span className={'badge ' + (STATUT_BADGE[r.statut] || 'badge-grey')}>{STATUT_LABEL[r.statut] || r.statut}</span></td>
-                    <td style={{ fontSize: '0.8rem', color: 'var(--text-3)' }}>{r.updated_at ? r.updated_at.slice(0, 10) : '-'}</td>
+                    <td><span className={'badge ' + (DEVIS_STATUT_BADGE[r.statut] || 'badge-grey')}>{DEVIS_STATUT_LABEL[r.statut] || r.statut}</span></td>
+                    <td style={{ fontSize: '0.8rem', color: 'var(--text-3)' }}>{r.updated_at ? String(r.updated_at).slice(0, 10) : '-'}</td>
                     <td>
                       <div style={{ display: 'flex', gap: 4 }}>
                         <button className="btn btn-ghost btn-sm" style={{ padding: '4px 8px' }} onClick={() => openEdit(r)}><Edit2 size={13} /></button>
@@ -245,7 +274,7 @@ export default function DevisAttente() {
                 <label>Prospect</label>
                 <select style={IS(false)} value={form.prospect_id} onChange={e => setField('prospect_id', e.target.value)}>
                   <option value="">Choisir un prospect...</option>
-                  {prospects.map(p => <option key={p.id} value={p.id}>{(p.prenom || '') + ' ' + (p.nom || '')}</option>)}
+                  {prospectOptions.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
                 </select>
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
@@ -266,10 +295,20 @@ export default function DevisAttente() {
                   {errors.source && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.source}</span>}
                 </div>
               </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div className="form-group">
+                  <label>Montant estime (MAD)</label>
+                  <input type="number" min="0" style={IS(false)} value={form.montant_estime || ''} onChange={e => setField('montant_estime', e.target.value)} placeholder="150000" />
+                </div>
+                <div className="form-group">
+                  <label>Date relance</label>
+                  <input type="date" style={IS(false)} value={form.date_relance || ''} onChange={e => setField('date_relance', e.target.value)} />
+                </div>
+              </div>
               <div className="form-group">
                 <label>Statut</label>
                 <select style={IS(false)} value={form.statut} onChange={e => setField('statut', e.target.value)}>
-                  {STATUTS.map(s => <option key={s} value={s}>{STATUT_LABEL[s]}</option>)}
+                  {DEVIS_STATUTS.map(s => <option key={s} value={s}>{DEVIS_STATUT_LABEL[s]}</option>)}
                 </select>
               </div>
               <div className="form-group">

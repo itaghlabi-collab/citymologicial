@@ -1,7 +1,8 @@
-import { Users, Plus, Edit2, Trash2, Search, UserCheck, X } from 'lucide-react';
+import { Users, Plus, Edit2, Trash2, Search, UserCheck, X, Upload, Download, Loader } from 'lucide-react';
 import { useState, useRef } from 'react';
 import { DEPARTMENTS } from '../data/departments';
 import { useEmployees } from '../hooks/useEmployees';
+import { generateEmployeePdf } from '../services/rh/employeePdf';
 
 const EMPTY_EMP = {
   firstname: '',
@@ -13,6 +14,12 @@ const EMPTY_EMP = {
   date_embauche: '',
   salaire: '',
   statut: 'Actif', /* conservé en base, non affiché dans le formulaire */
+  adresse: '',
+  numero_cin: '',
+  cnss: '',
+  rib: '',
+  banque: '',
+  situation_familiale: '',
 };
 
 function fieldStyle(hasError) {
@@ -87,6 +94,7 @@ export default function RH() {
     create,
     update,
     remove,
+    importSeed,
   } = useEmployees();
 
   const [showModal, setShowModal] = useState(false);
@@ -94,6 +102,7 @@ export default function RH() {
   const [editingId, setEditingId] = useState(null);
   const [errors, setErrors] = useState({});
   const [toast, setToast] = useState(null);
+  const [pdfLoadingId, setPdfLoadingId] = useState(null);
   const toastTimer = useRef(null);
 
   function showToast(type, msg) {
@@ -121,6 +130,12 @@ export default function RH() {
       date_embauche: emp.date_embauche || '',
       salaire: emp.salaire ?? '',
       statut: emp.statut || 'Actif',
+      adresse: emp.adresse || '',
+      numero_cin: emp.numero_cin || '',
+      cnss: emp.cnss || '',
+      rib: emp.rib || '',
+      banque: emp.banque || '',
+      situation_familiale: emp.situation_familiale || '',
     });
     setErrors({});
     setShowModal(true);
@@ -133,6 +148,19 @@ export default function RH() {
     setErrors({});
   }
 
+  async function handleDownloadPdf(emp) {
+    setPdfLoadingId(emp.id);
+    try {
+      await generateEmployeePdf(emp);
+      showToast('success', `Fiche PDF — ${emp.firstname} ${emp.lastname}`);
+    } catch (err) {
+      console.error('[CITYMO] PDF employé', err);
+      showToast('error', 'Erreur lors de la génération PDF.');
+    } finally {
+      setPdfLoadingId(null);
+    }
+  }
+
   async function handleDelete(id) {
     if (!window.confirm('Supprimer cet employé ?')) return;
     const result = await remove(id);
@@ -140,6 +168,23 @@ export default function RH() {
       showToast('success', 'Employé supprimé avec succès.');
     } else {
       showToast('error', result.error);
+    }
+  }
+
+  async function handleImportSeed() {
+    if (!window.confirm('Importer les 25 employés de la liste CITYMO ? Les doublons (CIN / téléphone) seront ignorés.')) {
+      return;
+    }
+    const result = await importSeed();
+    if (result.success) {
+      const errPart = result.errors?.length ? ` (${result.errors.length} erreur(s))` : '';
+      const updPart = result.updated ? `, ${result.updated} mis à jour` : '';
+      showToast(
+        'success',
+        `Import terminé : ${result.imported} importé(s)${updPart}, ${result.skipped} ignoré(s)${errPart}. Voir la console.`,
+      );
+    } else {
+      showToast('error', result.error || 'Erreur import.');
     }
   }
 
@@ -296,7 +341,17 @@ export default function RH() {
               <option value="Inactif">Inactif</option>
             </select>
 
-            <button className="btn btn-primary btn-sm" onClick={openCreate} disabled={!configured}>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={handleImportSeed}
+              disabled={!configured || saving}
+              title="Importer la liste employés (sans doublons)"
+            >
+              <Upload size={14} /> Importer liste
+            </button>
+
+            <button className="btn btn-primary btn-sm" onClick={openCreate} disabled={!configured || saving}>
               <Plus size={14} /> Ajouter
             </button>
           </div>
@@ -308,7 +363,21 @@ export default function RH() {
           </div>
         ) : filtered.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-3)' }}>
-            Aucun employé.
+            {stats.total === 0 && !search && !statutFilter ? (
+              <>
+                <p style={{ marginBottom: 16 }}>Aucun employé en base. Importer la liste CITYMO (25 personnes) ?</p>
+                <button
+                  type="button"
+                  className="btn btn-primary"
+                  onClick={handleImportSeed}
+                  disabled={!configured || saving}
+                >
+                  <Upload size={16} /> Importer les 25 employés
+                </button>
+              </>
+            ) : (
+              'Aucun employé.'
+            )}
           </div>
         ) : (
           <div className="table-wrap">
@@ -316,6 +385,8 @@ export default function RH() {
               <thead>
                 <tr>
                   <th>Nom</th>
+                  <th>Email</th>
+                  <th>CIN</th>
                   <th>Poste</th>
                   <th>Département</th>
                   <th>Salaire</th>
@@ -327,16 +398,17 @@ export default function RH() {
               <tbody>
                 {filtered.map((emp) => (
                   <tr key={emp.id}>
-                    <td>
-                      <div style={{ fontWeight: 600 }}>
-                        {emp.firstname} {emp.lastname}
-                      </div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-3)' }}>
-                        {emp.email}
-                      </div>
+                    <td style={{ fontWeight: 600 }}>
+                      {emp.firstname} {emp.lastname}
                     </td>
 
-                    <td>{emp.poste || '-'}</td>
+                    <td style={{ fontSize: '0.85rem' }}>{emp.email || '—'}</td>
+
+                    <td style={{ fontFamily: 'var(--font-head)', fontSize: '0.85rem' }}>
+                      {emp.numero_cin || '—'}
+                    </td>
+
+                    <td>{emp.poste || '—'}</td>
 
                     <td>
                       <span className="badge badge-blue">
@@ -366,16 +438,35 @@ export default function RH() {
                     <td>
                       <div style={{ display: 'flex', gap: 4 }}>
                         <button
+                          type="button"
                           className="btn btn-ghost btn-sm"
                           style={{ padding: '4px 8px' }}
+                          title="Télécharger fiche employé"
+                          disabled={pdfLoadingId === emp.id}
+                          onClick={() => handleDownloadPdf(emp)}
+                        >
+                          {pdfLoadingId === emp.id ? (
+                            <Loader size={13} style={{ animation: 'spin 0.8s linear infinite' }} />
+                          ) : (
+                            <Download size={13} />
+                          )}
+                        </button>
+
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          style={{ padding: '4px 8px' }}
+                          title="Modifier"
                           onClick={() => openEdit(emp)}
                         >
                           <Edit2 size={13} />
                         </button>
 
                         <button
+                          type="button"
                           className="btn btn-ghost btn-sm"
                           style={{ padding: '4px 8px' }}
+                          title="Supprimer"
                           onClick={() => handleDelete(emp.id)}
                         >
                           <Trash2 size={13} style={{ color: 'var(--red)' }} />
@@ -510,6 +601,79 @@ export default function RH() {
                   style={fieldStyle(errors.salaire)}
                 />
                 {errors.salaire && <div className="rh-emp-field-error">{errors.salaire}</div>}
+              </div>
+
+              <div className="form-group">
+                <label>Adresse</label>
+                <textarea
+                  className="rh-emp-field"
+                  rows={2}
+                  placeholder="Adresse complète"
+                  value={form.adresse}
+                  onChange={(e) => setForm((p) => ({ ...p, adresse: e.target.value }))}
+                  style={{ ...fieldStyle(false), resize: 'vertical' }}
+                />
+              </div>
+
+              <div className="rh-emp-modal-row">
+                <div className="form-group">
+                  <label>N° CIN</label>
+                  <input
+                    type="text"
+                    className="rh-emp-field"
+                    placeholder="BE123456"
+                    value={form.numero_cin}
+                    onChange={(e) => setForm((p) => ({ ...p, numero_cin: e.target.value.toUpperCase() }))}
+                    style={fieldStyle(false)}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Situation familiale</label>
+                  <input
+                    type="text"
+                    className="rh-emp-field"
+                    placeholder="Célibataire, Marié..."
+                    value={form.situation_familiale}
+                    onChange={(e) => setForm((p) => ({ ...p, situation_familiale: e.target.value }))}
+                    style={fieldStyle(false)}
+                  />
+                </div>
+              </div>
+
+              <div className="rh-emp-modal-row">
+                <div className="form-group">
+                  <label>CNSS</label>
+                  <input
+                    type="text"
+                    className="rh-emp-field"
+                    value={form.cnss}
+                    onChange={(e) => setForm((p) => ({ ...p, cnss: e.target.value }))}
+                    style={fieldStyle(false)}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Banque</label>
+                  <input
+                    type="text"
+                    className="rh-emp-field"
+                    placeholder="CIH, AWB..."
+                    value={form.banque}
+                    onChange={(e) => setForm((p) => ({ ...p, banque: e.target.value }))}
+                    style={fieldStyle(false)}
+                  />
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label>RIB</label>
+                <input
+                  type="text"
+                  className="rh-emp-field"
+                  placeholder="Relevé d'identité bancaire"
+                  value={form.rib}
+                  onChange={(e) => setForm((p) => ({ ...p, rib: e.target.value }))}
+                  style={fieldStyle(false)}
+                />
               </div>
 
               <div className="rh-emp-modal-footer">

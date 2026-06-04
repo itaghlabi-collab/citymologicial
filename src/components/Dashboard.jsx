@@ -8,9 +8,9 @@ import {
 import {
   getInvoices, getExpenses, getPaymentOrders,
   getProjects, getAttendance, getLeaveRequests,
-  getQuotes, getTasks, getMeetings,
-  getProducts, getPurchaseOrders, getProspects,
+  getQuotes, getProducts, getPurchaseOrders,
 } from '../services/api';
+import { loadInternalDashboardData } from '../services/internal/internalDashboard';
 
 /* ── Helpers ─────────────────────────────────────────────────────── */
 function fmt(n) {
@@ -242,38 +242,35 @@ export default function Dashboard() {
   const [dateTo, setDateTo] = useState(today);
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState({});
+  const [internal, setInternal] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [
-        invoicesRes, expensesRes, payOrdersRes,
-        projectsRes, attRes, leavesRes,
-        quotesRes, tasksRes, meetingsRes,
-        productsRes, purchaseOrdersRes, prospectsRes,
-      ] = await Promise.all([
-        getInvoices(), getExpenses(), getPaymentOrders(),
-        getProjects(), getAttendance(), getLeaveRequests(),
-        getQuotes(), getTasks(), getMeetings(),
-        getProducts(), getPurchaseOrders(), getProspects(),
+      const [legacyResults, internalData] = await Promise.all([
+        Promise.allSettled([
+          getInvoices(), getExpenses(), getPaymentOrders(),
+          getProjects(), getAttendance(), getLeaveRequests(),
+          getQuotes(), getProducts(), getPurchaseOrders(),
+        ]),
+        loadInternalDashboardData(),
       ]);
+      const val = (i) => (legacyResults[i].status === 'fulfilled' ? legacyResults[i].value : []);
       setData({
-        '/invoices':         invoicesRes,
-        '/expenses':         expensesRes,
-        '/payment-orders':   payOrdersRes,
-        '/projects':         projectsRes,
-        '/workers/attendance': attRes,
-        '/leave-requests':   leavesRes,
-        '/quotes':           quotesRes,
-        '/tasks':            tasksRes,
-        '/meetings':         meetingsRes,
-        '/products':         productsRes,
-        '/purchase-orders':  purchaseOrdersRes,
-        '/prospects':        prospectsRes,
+        '/invoices':         val(0),
+        '/expenses':         val(1),
+        '/payment-orders':   val(2),
+        '/projects':         val(3),
+        '/workers/attendance': val(4),
+        '/leave-requests':   val(5),
+        '/quotes':           val(6),
+        '/products':         val(7),
+        '/purchase-orders':  val(8),
       });
+      setInternal(internalData);
     } catch (_) {
-      // API unavailable — keep empty state
       setData({});
+      setInternal(null);
     }
     setLoading(false);
   }, []);
@@ -281,21 +278,23 @@ export default function Dashboard() {
   useEffect(() => { load(); }, [load]);
 
   /* ── Derived KPIs ─────────────────────────────────────────────── */
-  const invoices = data['/invoices'] || [];
   const expenses = data['/expenses'] || [];
   const payOrders = data['/payment-orders'] || [];
   const projects = data['/projects'] || [];
   const att = data['/workers/attendance']?.[0] || { present: 0, absent: 0, total: 0, hoursPerDay: [] };
   const leaves = data['/leave-requests'] || [];
   const quotes = data['/quotes'] || [];
-  const tasks = data['/tasks'] || [];
-  const meetings = data['/meetings'] || [];
   const products = data['/products'] || [];
   const purchaseOrders = data['/purchase-orders'] || [];
-  const prospects = data['/prospects'] || [];
 
-  const totalInvoices = invoices.reduce((s, i) => s + i.amount, 0);
-  const unpaidInvoices = invoices.filter(i => i.status !== 'paid').reduce((s, i) => s + i.amount, 0);
+  const useInternal = internal?.configured;
+  const tasks = useInternal ? (internal.tasks || []) : [];
+  const meetings = useInternal ? (internal.meetings || []) : [];
+  const prospects = useInternal ? (internal.prospects || []) : [];
+  const legacyInvoices = data['/invoices'] || [];
+  const recentFactures = useInternal ? (internal.recentFactures || []) : legacyInvoices;
+  const totalInvoices = legacyInvoices.reduce((s, i) => s + (Number(i.amount) || 0), 0);
+  const unpaidInvoices = legacyInvoices.filter(i => i.status !== 'paid').reduce((s, i) => s + (Number(i.amount) || 0), 0);
   const totalExpenses = expenses.reduce((s, e) => s + e.amount, 0);
   const executedPayments = payOrders.filter(p => p.status === 'executed').reduce((s, p) => s + p.amount, 0);
   const tresorerie = executedPayments - totalExpenses;
@@ -309,8 +308,12 @@ export default function Dashboard() {
 
   const pendingLeaves = leaves.filter(l => l.status === 'pending').length;
   const approvedLeaves = leaves.filter(l => l.status === 'approved').length;
-  const conversionRate = quotes.length ? Math.round(quotes.filter(q => q.status === 'accepted').length / quotes.length * 100) : 0;
-  const pendingQuotes = quotes.filter(q => q.status === 'pending' || q.status === 'sent').length;
+  const conversionRate = useInternal
+    ? (internal.kpis?.conversionRate ?? 0)
+    : (quotes.length ? Math.round(quotes.filter(q => q.status === 'accepted').length / quotes.length * 100) : 0);
+  const pendingQuotes = useInternal
+    ? (internal.kpis?.pendingQuotes ?? 0)
+    : quotes.filter(q => q.status === 'pending' || q.status === 'sent').length;
 
   /* Chart series – current period only (historical data requires backend aggregation) */
   const currentMonth = new Date().toLocaleString('fr-FR', { month: 'short' });
@@ -342,18 +345,29 @@ export default function Dashboard() {
   ];
 
   /* Alerts */
-  const alerts = [
-    ...invoices.filter(i => i.status === 'overdue').map(i => ({ type: 'error', msg: `Facture en retard : ${i.ref} — ${fmtMAD(i.amount)} (${i.client})` })),
+  const internalAlerts = useInternal ? (internal.alerts || []) : [];
+  const legacyAlerts = [
+    ...(data['/invoices'] || []).filter(i => i.status === 'overdue').map(i => ({ type: 'error', msg: `Facture en retard : ${i.ref} — ${fmtMAD(i.amount)} (${i.client})` })),
     ...projects.filter(p => p.delayed).map(p => ({ type: 'warning', msg: `Projet en retard : ${p.name}` })),
-    ...tasks.filter(t => t.status === 'blocked').map(t => ({ type: 'warning', msg: `Tache bloquee : ${t.title}` })),
     ...leaves.filter(l => l.status === 'pending').map(l => ({ type: 'info', msg: `Conge en attente : ${l.employee} (${l.type})` })),
   ];
+  const alerts = [...internalAlerts, ...legacyAlerts];
 
   const lowStock = products.filter(p => p.qty < p.threshold);
 
   const dayLabels = ['L', 'M', 'Me', 'J', 'V', 'S', 'D'];
 
-  const sortedMeetings = [...meetings].sort((a, b) => a.time.localeCompare(b.time));
+  const sortedMeetings = [...meetings].sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+
+  const activityTimeline = (internal?.activities || []).slice(0, 5).map((act) => ({
+    time: act.at ? new Date(act.at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '—',
+    title: act.label,
+    location: act.sub || 'Activite recente',
+    type: act.kind === 'rdv' ? 'call' : 'other',
+    tech: '',
+  }));
+
+  const timelineItems = sortedMeetings.length ? sortedMeetings : activityTimeline;
 
   if (loading) {
     return (
@@ -371,7 +385,14 @@ export default function Dashboard() {
       <div className="flex-between">
         <div>
           <h1 className="page-title" style={{ marginBottom: 4 }}>Tableau de Bord</h1>
-          <p className="page-subtitle">Centre de pilotage CITYMO — mise a jour en temps reel</p>
+          <p className="page-subtitle">
+            Centre de pilotage CITYMO — mise a jour en temps reel
+            {useInternal && internal.kpis ? (
+              <span style={{ marginLeft: 8, color: 'var(--text-3)' }}>
+                · {internal.kpis.pendingTasks} taches · {internal.kpis.todayMeetings} RDV aujourd&apos;hui
+              </span>
+            ) : null}
+          </p>
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '7px 12px', fontSize: '0.83rem' }}>
@@ -596,10 +617,20 @@ export default function Dashboard() {
         <div className="card">
           <div className="card-title"><Calendar size={15} /> Activites du jour</div>
           <div style={{ display: 'flex', flexDirection: 'column' }}>
-            {sortedMeetings.map((m, i) => (
-              <TimelineItem key={i} {...m} isLast={i === sortedMeetings.length - 1} />
+            {timelineItems.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '20px 0', color: 'var(--text-3)', fontSize: '0.85rem' }}>Aucune activite prevue aujourd&apos;hui.</div>
+            ) : timelineItems.map((m, i) => (
+              <TimelineItem key={i} {...m} isLast={i === timelineItems.length - 1} />
             ))}
           </div>
+          {activityTimeline.length > 0 && sortedMeetings.length > 0 && (
+            <>
+              <div style={{ fontSize: '0.68rem', fontWeight: 800, letterSpacing: '0.1em', color: 'var(--text-3)', textTransform: 'uppercase', margin: '16px 0 10px' }}>Activites recentes</div>
+              {activityTimeline.map((m, i) => (
+                <TimelineItem key={'act-' + i} {...m} isLast={i === activityTimeline.length - 1} />
+              ))}
+            </>
+          )}
         </div>
 
         {/* Tasks + Stock */}
@@ -607,7 +638,9 @@ export default function Dashboard() {
           <div className="card" style={{ flex: 1 }}>
             <div className="card-title"><CheckCircle size={15} /> Taches du jour</div>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-              {tasks.map((t, i) => (
+              {tasks.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '16px 0', color: 'var(--text-3)', fontSize: '0.85rem' }}>Aucune tache en attente.</div>
+              ) : tasks.map((t, i) => (
                 <div key={i} style={{
                   display: 'flex', alignItems: 'center', gap: 9, padding: '8px 10px',
                   background: t.status === 'blocked' ? '#FFF0F0' : 'var(--bg)',
@@ -654,7 +687,7 @@ export default function Dashboard() {
               {[
                 { label: 'Taux conv.', value: conversionRate + '%', color: conversionRate >= 50 ? '#2E7D32' : '#D32F2F' },
                 { label: 'Devis', value: pendingQuotes, color: 'var(--text)' },
-                { label: 'Prospects', value: prospects.length, color: 'var(--text)' },
+                { label: 'Prospects', value: useInternal ? (internal.kpis?.prospectsCount ?? prospects.length) : prospects.length, color: 'var(--text)' },
               ].map((k, i) => (
                 <div key={i} style={{ flex: 1, background: 'var(--bg)', borderRadius: 8, padding: '8px 10px', textAlign: 'center' }}>
                   <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.1rem', color: k.color }}>{k.value}</div>
@@ -662,17 +695,30 @@ export default function Dashboard() {
                 </div>
               ))}
             </div>
-            {prospects.filter(p => p.status === 'Chaud').map((p, i) => (
+            {(useInternal ? (internal.hotProspects || []) : prospects.filter(p => p.status === 'Chaud')).map((p, i) => (
               <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderTop: '1px solid var(--border)', fontSize: '0.82rem' }}>
                 <span style={{ fontWeight: 600 }}>{p.name}</span>
                 <span style={{ color: 'var(--red)', fontFamily: 'var(--font-head)', fontWeight: 700 }}>{fmtMAD(p.value)}</span>
               </div>
             ))}
+            {useInternal && internal.recentDevis?.length > 0 && (
+              <>
+                <div style={{ fontSize: '0.68rem', fontWeight: 800, letterSpacing: '0.1em', color: 'var(--text-3)', textTransform: 'uppercase', marginTop: 12, marginBottom: 6 }}>Devis recents</div>
+                {internal.recentDevis.slice(0, 3).map((d, i) => (
+                  <div key={d.id || i} style={{ display: 'flex', justifyContent: 'space-between', padding: '5px 0', borderTop: '1px solid var(--border)', fontSize: '0.78rem' }}>
+                    <span style={{ fontWeight: 600, color: 'var(--red)' }}>{d.ref}</span>
+                    <span>{fmtMAD(d.amount)}</span>
+                  </div>
+                ))}
+              </>
+            )}
           </div>
 
           <div className="card">
             <div className="card-title"><FileText size={15} /> Dernieres factures</div>
-            {invoices.map((inv, i) => (
+            {recentFactures.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '16px 0', color: 'var(--text-3)', fontSize: '0.85rem' }}>Aucune facture recente.</div>
+            ) : recentFactures.map((inv, i) => (
               <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 0', borderTop: i > 0 ? '1px solid var(--border)' : 'none' }}>
                 <div style={{ flex: 1 }}>
                   <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, color: 'var(--red)', fontSize: '0.85rem' }}>{inv.ref}</div>

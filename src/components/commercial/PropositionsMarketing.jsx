@@ -1,14 +1,21 @@
-import { useState, useEffect, useRef } from 'react';
-import { Lightbulb, Plus, Edit2, Trash2, XCircle, Send, CheckCircle, AlertCircle, FileText, ChevronRight } from 'lucide-react';
-import { getPropositions, createProposition, updateProposition, deleteProposition, getProspects } from '../../services/api';
-import { TYPE_PROJET_VALUES, TYPE_PROJET_LABEL } from '../../constants/commercial';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { Lightbulb, Plus, Edit2, Trash2, XCircle, Send, CheckCircle, AlertCircle, FileText, ChevronRight, Loader2 } from 'lucide-react';
+import { usePropositionsMarketing } from '../../hooks/usePropositionsMarketing';
 
 const STATUTS = ['brouillon', 'envoye', 'valide', 'refuse', 'en_revision'];
 const STATUT_BADGE = { brouillon: 'badge-grey', envoye: 'badge-blue', valide: 'badge-green', refuse: 'badge-red', en_revision: 'badge-orange' };
 const STATUT_LABEL = { brouillon: 'Brouillon', envoye: 'Envoye', valide: 'Valide', refuse: 'Refuse', en_revision: 'En revision' };
-const STATUT_NEXT = { brouillon: 'envoye', envoye: 'valide', en_revision: 'valide' };
 
-const EMPTY = { titre: '', prospect_id: '', type_projet: '', objectif: '', description: '', budget_estime: '', statut: 'brouillon' };
+const EMPTY = {
+  titre: '',
+  marque_compte: '',
+  type_proposition: '',
+  objectif: '',
+  description: '',
+  budget_estime: '',
+  statut: 'brouillon',
+  responsable: '',
+};
 
 
 function Toast({ msg, onClose }) {
@@ -30,30 +37,35 @@ function fmtBudget(v) {
 }
 
 export default function PropositionsMarketing() {
-  const [props, setProps] = useState([]);
-  const [prospects, setProspects] = useState([]);
+  const {
+    records: props,
+    loading,
+    saving,
+    error,
+    configured,
+    load,
+    create,
+    update,
+    remove,
+    advanceStatut,
+    filterPropositions,
+    computePropositionsStats,
+    PROPOSITION_STATUT_NEXT,
+    TYPE_PROPOSITION_VALUES,
+    TYPE_PROPOSITION_LABEL,
+    typePropositionLabel,
+  } = usePropositionsMarketing();
+
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(EMPTY);
   const [errors, setErrors] = useState({});
-  const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState('');
   const [filterStatut, setFilterStatut] = useState('');
   const [search, setSearch] = useState('');
   const [expandedId, setExpandedId] = useState(null);
   const [page, setPage] = useState(1);
   const PER_PAGE = 6;
-
-  useEffect(() => {
-    getPropositions().then(d => { if (d && d.length) setProps(d); }).catch(() => {});
-    getProspects().then(d => { if (d && d.length) setProspects(d); }).catch(() => {});
-  }, []);
-
-  function prospectLabel(id) {
-    const p = prospects.find(x => x.id === Number(id));
-    if (!p) return '-';
-    return p.type === 'btob' ? p.nom : `${p.prenom} ${p.nom}`;
-  }
 
   function openCreate() {
     setEditing(null);
@@ -64,7 +76,16 @@ export default function PropositionsMarketing() {
 
   function openEdit(prop) {
     setEditing(prop);
-    setForm({ titre: prop.titre, prospect_id: prop.prospect_id || '', type_projet: prop.type_projet || '', objectif: prop.objectif || '', description: prop.description || '', budget_estime: String(prop.budget_estime || ''), statut: prop.statut });
+    setForm({
+      titre: prop.titre,
+      marque_compte: prop.marque_compte || '',
+      type_proposition: prop.type_proposition || '',
+      objectif: prop.objectif || '',
+      description: prop.description || '',
+      budget_estime: String(prop.budget_estime || ''),
+      statut: prop.statut,
+      responsable: prop.responsable || '',
+    });
     setErrors({});
     setShowModal(true);
   }
@@ -78,52 +99,40 @@ export default function PropositionsMarketing() {
   async function handleSave() {
     const e = validate();
     if (Object.keys(e).length) { setErrors(e); return; }
-    setSaving(true);
-    const payload = { ...form, prospect_id: form.prospect_id ? Number(form.prospect_id) : null, budget_estime: Number(form.budget_estime) || 0 };
-    try {
-      if (editing) {
-        await updateProposition(editing.id, payload).catch(() => null);
-        setProps(prev => prev.map(p => p.id === editing.id ? { ...p, ...payload } : p));
-        setToast('Proposition mise a jour.');
-      } else {
-        const created = await createProposition(payload).catch(() => null);
-        setProps(prev => [...prev, { id: created?.id || Date.now(), ...payload, created_at: new Date().toISOString() }]);
-        setToast('Proposition creee.');
-      }
-    } catch (_) {}
-    setSaving(false);
+    const payload = { ...form, budget_estime: Number(form.budget_estime) || 0 };
+    const result = editing
+      ? await update(editing.id, payload)
+      : await create(payload);
+    if (!result.success) {
+      setToast(result.error || 'Erreur enregistrement.');
+      return;
+    }
+    setToast(editing ? 'Proposition mise a jour.' : 'Proposition creee.');
     setShowModal(false);
   }
 
   async function handleDelete(prop) {
     if (!window.confirm('Supprimer cette proposition ?')) return;
-    try { await deleteProposition(prop.id); } catch (_) {}
-    setProps(prev => prev.filter(p => p.id !== prop.id));
-    setToast('Proposition supprimee.');
+    const result = await remove(prop.id);
+    setToast(result.success ? 'Proposition supprimee.' : (result.error || 'Erreur suppression.'));
   }
 
-  async function advanceStatut(prop) {
-    const next = STATUT_NEXT[prop.statut];
+  async function handleAdvanceStatut(prop) {
+    const next = PROPOSITION_STATUT_NEXT[prop.statut];
     if (!next) return;
-    const payload = { ...prop, statut: next };
-    try { await updateProposition(prop.id, payload).catch(() => null); } catch (_) {}
-    setProps(prev => prev.map(p => p.id === prop.id ? { ...p, statut: next } : p));
-    setToast(`Statut mis a jour: ${STATUT_LABEL[next]}`);
+    const result = await advanceStatut(prop);
+    setToast(result.success ? `Statut mis a jour: ${STATUT_LABEL[next]}` : (result.error || 'Erreur.'));
   }
 
-  const filtered = props.filter(p => {
-    if (filterStatut && p.statut !== filterStatut) return false;
-    if (search && !`${p.titre} ${prospectLabel(p.prospect_id)}`.toLowerCase().includes(search.toLowerCase())) return false;
-    return true;
-  });
+  const filtered = useMemo(
+    () => filterPropositions(props, { search, statut: filterStatut }),
+    [props, search, filterStatut, filterPropositions],
+  );
 
   const totalPages = Math.ceil(filtered.length / PER_PAGE);
   const paged = filtered.slice((page - 1) * PER_PAGE, page * PER_PAGE);
 
-  const nbBrouillon = props.filter(p => p.statut === 'brouillon').length;
-  const nbEnvoye = props.filter(p => p.statut === 'envoye').length;
-  const nbValide = props.filter(p => p.statut === 'valide').length;
-  const nbRefuse = props.filter(p => p.statut === 'refuse').length;
+  const stats = useMemo(() => computePropositionsStats(props), [props, computePropositionsStats]);
 
   return (
     <div className="animate-fade-in">
@@ -132,16 +141,37 @@ export default function PropositionsMarketing() {
           <h1 className="page-title">Propositions Marketing</h1>
           <p className="page-subtitle">Gestion des propositions commerciales et marketing clients</p>
         </div>
-        <button className="btn btn-primary" onClick={openCreate}><Plus size={15} /> Nouvelle proposition</button>
+        <button className="btn btn-primary" onClick={openCreate} disabled={loading || saving || !configured}><Plus size={15} /> Nouvelle proposition</button>
       </div>
 
+      {!configured && (
+        <div style={{ background: '#FFF3E0', border: '1px solid #FFB74D', borderRadius: 'var(--radius)', padding: '10px 16px', marginBottom: 16, fontSize: '0.85rem', color: '#E65100' }}>
+          Supabase non configuré — ajoutez VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY dans .env
+        </div>
+      )}
+
+      {error && !loading && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, background: '#FFEBEE', border: '1px solid #EF9A9A', borderRadius: 'var(--radius)', padding: '10px 16px', marginBottom: 16, fontSize: '0.85rem', color: '#C62828' }}>
+          <span>{error}</span>
+          <button className="btn btn-ghost btn-sm" onClick={load}>Réessayer</button>
+        </div>
+      )}
+
+      {loading && (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '24px 0', color: 'var(--text-3)', fontSize: '0.875rem' }}>
+          <Loader2 size={18} className="spin" /> Chargement des propositions...
+        </div>
+      )}
+
+      {!loading && (
+      <>
       {/* Stats */}
       <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(175px, 1fr))' }}>
-        <div className="stat-card"><div className="stat-icon"><Lightbulb size={18} /></div><div className="stat-body"><div className="stat-value">{props.length}</div><div className="stat-label">Total propositions</div></div></div>
-        <div className="stat-card"><div className="stat-icon blue"><Send size={18} /></div><div className="stat-body"><div className="stat-value">{nbEnvoye}</div><div className="stat-label">Envoyees</div></div></div>
-        <div className="stat-card"><div className="stat-icon green"><CheckCircle size={18} /></div><div className="stat-body"><div className="stat-value">{nbValide}</div><div className="stat-label">Validees</div></div></div>
-        <div className="stat-card"><div className="stat-icon"><FileText size={18} /></div><div className="stat-body"><div className="stat-value">{nbBrouillon}</div><div className="stat-label">Brouillons</div></div></div>
-        {nbRefuse > 0 && <div className="stat-card"><div className="stat-icon orange"><AlertCircle size={18} /></div><div className="stat-body"><div className="stat-value" style={{ color: 'var(--red)' }}>{nbRefuse}</div><div className="stat-label">Refusees</div></div></div>}
+        <div className="stat-card"><div className="stat-icon"><Lightbulb size={18} /></div><div className="stat-body"><div className="stat-value">{stats.total}</div><div className="stat-label">Total propositions</div></div></div>
+        <div className="stat-card"><div className="stat-icon blue"><Send size={18} /></div><div className="stat-body"><div className="stat-value">{stats.envoye}</div><div className="stat-label">Envoyees</div></div></div>
+        <div className="stat-card"><div className="stat-icon green"><CheckCircle size={18} /></div><div className="stat-body"><div className="stat-value">{stats.valide}</div><div className="stat-label">Validees</div></div></div>
+        <div className="stat-card"><div className="stat-icon"><FileText size={18} /></div><div className="stat-body"><div className="stat-value">{stats.brouillon}</div><div className="stat-label">Brouillons</div></div></div>
+        {stats.refuse > 0 && <div className="stat-card"><div className="stat-icon orange"><AlertCircle size={18} /></div><div className="stat-body"><div className="stat-value" style={{ color: 'var(--red)' }}>{stats.refuse}</div><div className="stat-label">Refusees</div></div></div>}
       </div>
 
       {/* Workflow legend */}
@@ -159,7 +189,7 @@ export default function PropositionsMarketing() {
       {/* Filters */}
       <div className="card" style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-          <input placeholder="Rechercher (titre, prospect...)" value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} style={{ ...IS(false), width: 240 }} />
+          <input placeholder="Rechercher (titre, marque, campagne...)" value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} style={{ ...IS(false), width: 240 }} />
           <select value={filterStatut} onChange={e => { setFilterStatut(e.target.value); setPage(1); }} style={{ ...IS(false), width: 160 }}>
             <option value="">Tous les statuts</option>
             {STATUTS.map(s => <option key={s} value={s}>{STATUT_LABEL[s]}</option>)}
@@ -177,7 +207,7 @@ export default function PropositionsMarketing() {
         )}
         {paged.map(prop => {
           const expanded = expandedId === prop.id;
-          const canAdvance = !!STATUT_NEXT[prop.statut];
+          const canAdvance = !!PROPOSITION_STATUT_NEXT[prop.statut];
           return (
             <div key={prop.id} className="card" style={{ padding: 0, overflow: 'hidden' }}>
               {/* Header */}
@@ -187,16 +217,17 @@ export default function PropositionsMarketing() {
                 </div>
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <div style={{ fontWeight: 700, fontSize: '0.9rem', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginBottom: 3 }}>{prop.titre}</div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-3)', display: 'flex', gap: 14 }}>
-                    {prop.prospect_id && <span>{prospectLabel(prop.prospect_id)}</span>}
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-3)', display: 'flex', gap: 14, flexWrap: 'wrap' }}>
+                    {prop.marque_compte && <span>{prop.marque_compte}</span>}
                     {prop.budget_estime > 0 && <span style={{ fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--text-2)' }}>{fmtBudget(prop.budget_estime)}</span>}
-                    {prop.created_at && <span>{prop.created_at.slice(0, 10)}</span>}
+                    {prop.created_at && <span>Cree: {String(prop.created_at).slice(0, 10)}</span>}
+                    {prop.date_envoi && <span>Envoi: {prop.date_envoi}</span>}
                   </div>
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
                   <span className={'badge ' + STATUT_BADGE[prop.statut]}>{STATUT_LABEL[prop.statut]}</span>
                   {canAdvance && (
-                    <button className="btn btn-ghost btn-sm" style={{ fontSize: '0.75rem', padding: '3px 10px' }} onClick={e => { e.stopPropagation(); advanceStatut(prop); }} title="Avancer le statut">
+                    <button className="btn btn-ghost btn-sm" style={{ fontSize: '0.75rem', padding: '3px 10px' }} onClick={e => { e.stopPropagation(); handleAdvanceStatut(prop); }} title="Avancer le statut">
                       Avancer <ChevronRight size={12} />
                     </button>
                   )}
@@ -222,8 +253,11 @@ export default function PropositionsMarketing() {
                       </div>
                     )}
                     <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-                      {prop.type_projet && (
-                        <span className="badge badge-blue">{TYPE_PROJET_LABEL[prop.type_projet] || prop.type_projet}</span>
+                      {prop.type_proposition && (
+                        <span className="badge badge-blue">{typePropositionLabel(prop.type_proposition)}</span>
+                      )}
+                      {prop.responsable && (
+                        <span className="badge badge-grey">{prop.responsable}</span>
                       )}
                       {prop.budget_estime > 0 && (
                         <div style={{ display: 'inline-flex', padding: '6px 14px', background: 'var(--bg)', borderRadius: 6, gap: 8, alignItems: 'center' }}>
@@ -249,6 +283,8 @@ export default function PropositionsMarketing() {
           <button className="btn btn-ghost btn-sm" onClick={() => setPage(p => Math.min(totalPages, p + 1))} disabled={page === totalPages}>Suiv.</button>
         </div>
       )}
+      </>
+      )}
 
       {/* Modal */}
       {showModal && (
@@ -265,25 +301,28 @@ export default function PropositionsMarketing() {
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-2)', display: 'block', marginBottom: 5 }}>Prospect / Client</label>
-                  <select style={IS(false)} value={form.prospect_id} onChange={e => setForm(f => ({ ...f, prospect_id: e.target.value }))}>
-                    <option value="">-- Selectionner --</option>
-                    {prospects.map(p => <option key={p.id} value={p.id}>{p.type === 'btob' ? p.nom : `${p.prenom} ${p.nom}`}</option>)}
-                  </select>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-2)', display: 'block', marginBottom: 5 }}>Marque / Compte / Projet marketing</label>
+                  <input style={IS(false)} value={form.marque_compte} onChange={e => setForm(f => ({ ...f, marque_compte: e.target.value }))} placeholder="Ex: Campagne ete 2026, Client X..." />
                 </div>
                 <div>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-2)', display: 'block', marginBottom: 5 }}>Type de projet</label>
-                  <select style={IS(false)} value={form.type_projet} onChange={e => setForm(f => ({ ...f, type_projet: e.target.value }))}>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-2)', display: 'block', marginBottom: 5 }}>Type de proposition marketing</label>
+                  <select style={IS(false)} value={form.type_proposition} onChange={e => setForm(f => ({ ...f, type_proposition: e.target.value }))}>
                     <option value="">-- Selectionner --</option>
-                    {TYPE_PROJET_VALUES.map(v => <option key={v} value={v}>{TYPE_PROJET_LABEL[v]}</option>)}
+                    {TYPE_PROPOSITION_VALUES.map(v => <option key={v} value={v}>{TYPE_PROPOSITION_LABEL[v]}</option>)}
                   </select>
                 </div>
               </div>
-              <div>
-                <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-2)', display: 'block', marginBottom: 5 }}>Statut</label>
-                <select style={IS(false)} value={form.statut} onChange={e => setForm(f => ({ ...f, statut: e.target.value }))}>
-                  {STATUTS.map(s => <option key={s} value={s}>{STATUT_LABEL[s]}</option>)}
-                </select>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-2)', display: 'block', marginBottom: 5 }}>Statut</label>
+                  <select style={IS(false)} value={form.statut} onChange={e => setForm(f => ({ ...f, statut: e.target.value }))}>
+                    {STATUTS.map(s => <option key={s} value={s}>{STATUT_LABEL[s]}</option>)}
+                  </select>
+                </div>
+                <div>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-2)', display: 'block', marginBottom: 5 }}>Responsable</label>
+                  <input style={IS(false)} value={form.responsable} onChange={e => setForm(f => ({ ...f, responsable: e.target.value }))} placeholder="Nom du responsable marketing" />
+                </div>
               </div>
               <div>
                 <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-2)', display: 'block', marginBottom: 5 }}>Objectif</label>

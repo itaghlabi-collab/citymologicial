@@ -1,11 +1,8 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useMemo } from 'react';
 import {
-  Layers, Plus, Edit2, Trash2, Search, X, AlertCircle, Package
+  Layers, Plus, Edit2, Trash2, Search, X, AlertCircle, Package, Loader2
 } from 'lucide-react';
-import {
-  getCategories, createCategorie, updateCategorie, deleteCategorie,
-  getArticles
-} from '../../services/api';
+import { useCategories } from '../../hooks/useCategories';
 
 /* ── Helpers ── */
 function IS(err) {
@@ -61,7 +58,7 @@ function Toast({ msg, type, onClose }) {
 /* ═══════════════════════════════════════════════
    MODAL CATEGORIE
    ═══════════════════════════════════════════════ */
-function CategorieModal({ categorie, onClose, onSaved }) {
+function CategorieModal({ categorie, onClose, onSave, saving }) {
   const isEdit = !!categorie;
   const [form, setForm] = useState(isEdit ? {
     nom: categorie.nom || '',
@@ -70,7 +67,6 @@ function CategorieModal({ categorie, onClose, onSaved }) {
     description: categorie.description || '',
   } : { ...EMPTY_FORM });
   const [errors, setErrors] = useState({});
-  const [saving, setSaving] = useState(false);
   const [apiError, setApiError] = useState('');
 
   function setField(k, v) { setForm(p => ({ ...p, [k]: v })); if (errors[k]) setErrors(p => ({ ...p, [k]: '' })); }
@@ -86,19 +82,9 @@ function CategorieModal({ categorie, onClose, onSaved }) {
     setApiError('');
     const e = validate();
     if (Object.keys(e).length) { setErrors(e); return; }
-    setSaving(true);
-    try {
-      let saved;
-      if (isEdit) {
-        saved = await updateCategorie(categorie.id, form);
-      } else {
-        saved = await createCategorie(form);
-      }
-      onSaved(saved || { ...form, id: categorie?.id || Date.now(), created_at: new Date().toISOString() }, isEdit);
-    } catch (err) {
-      setApiError(err.message || "Erreur lors de l'enregistrement.");
-    } finally {
-      setSaving(false);
+    const result = await onSave({ nom: form.nom.trim() });
+    if (result && result.success === false) {
+      setApiError(result.error || "Erreur lors de l'enregistrement.");
     }
   }
 
@@ -173,13 +159,24 @@ function CategorieModal({ categorie, onClose, onSaved }) {
    PAGE PRINCIPALE CATEGORIES
    ═══════════════════════════════════════════════ */
 export default function Categories() {
-  const [categories, setCategories] = useState([]);
-  const [articles, setArticles] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState('');
+  const {
+    records: categories,
+    articles,
+    loading,
+    saving,
+    error,
+    configured,
+    load,
+    create,
+    update,
+    remove,
+    filterCategories,
+    computeCategoriesStats,
+  } = useCategories();
 
   const [showModal, setShowModal] = useState(false);
   const [editingCat, setEditingCat] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
 
   const [search, setSearch] = useState('');
   const [filterStatut, setFilterStatut] = useState('');
@@ -188,40 +185,34 @@ export default function Categories() {
 
   function showToast(msg, type = 'success') { setToast({ msg, type }); }
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setLoadError('');
-    try {
-      const [cats, arts] = await Promise.all([getCategories(), getArticles()]);
-      setCategories(Array.isArray(cats) ? cats : (cats?.data ?? []));
-      setArticles(Array.isArray(arts) ? arts : (arts?.data ?? []));
-    } catch (err) {
-      setLoadError(err.message || 'Impossible de charger les donnees.');
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => { load(); }, [load]);
-
-  /* Article count per category */
   function articleCount(catId) {
     return articles.filter(a => String(a.categorie_id) === String(catId)).length;
   }
 
-  /* Filter */
-  const filtered = categories.filter(c => {
-    const matchSearch = !search || (c.nom || '').toLowerCase().includes(search.toLowerCase());
-    const matchSt = !filterStatut || c.statut === filterStatut;
-    return matchSearch && matchSt;
-  });
+  const filtered = useMemo(
+    () => filterCategories(categories, { search, statut: filterStatut }),
+    [categories, search, filterStatut, filterCategories],
+  );
 
-  const totalActives = categories.filter(c => c.statut === 'actif').length;
-  const totalArticles = articles.length;
+  const stats = useMemo(
+    () => computeCategoriesStats(categories, articles.length),
+    [categories, articles.length, computeCategoriesStats],
+  );
 
-  /* CRUD */
   function openAdd() { setEditingCat(null); setShowModal(true); }
   function openEdit(c) { setEditingCat(c); setShowModal(true); }
+
+  async function handleSave(data) {
+    const isEdit = !!editingCat;
+    const result = isEdit
+      ? await update(editingCat.id, data)
+      : await create(data);
+    if (!result.success) return result;
+    setShowModal(false);
+    setEditingCat(null);
+    showToast(isEdit ? 'Categorie modifiee !' : 'Categorie creee !');
+    return result;
+  }
 
   async function handleDelete(id) {
     const count = articleCount(id);
@@ -230,29 +221,17 @@ export default function Categories() {
       return;
     }
     if (!window.confirm('Supprimer cette categorie ?')) return;
-    try {
-      await deleteCategorie(id);
-      showToast('Categorie supprimee.');
-      load();
-    } catch {
-      setCategories(prev => prev.filter(c => c.id !== id));
-      showToast('Categorie supprimee (local).');
-    }
-  }
-
-  function handleSaved(data, isEdit) {
-    if (isEdit) {
-      setCategories(prev => prev.map(c => c.id === data.id ? data : c));
-    } else {
-      setCategories(prev => [...prev, data]);
-    }
-    setShowModal(false);
-    setEditingCat(null);
-    showToast(isEdit ? 'Categorie modifiee !' : 'Categorie creee !');
+    setDeletingId(id);
+    const result = await remove(id);
+    setDeletingId(null);
+    showToast(
+      result.success ? 'Categorie supprimee.' : (result.error || 'Erreur suppression.'),
+      result.success ? 'success' : 'error',
+    );
   }
 
   return (
-    <div className="animate-fade-in">
+    <div className="animate-fade-in crm-module crm-module--categories">
       <Toast msg={toast.msg} type={toast.type} onClose={() => setToast({ msg: '', type: 'success' })} />
 
       {/* Header */}
@@ -261,15 +240,20 @@ export default function Categories() {
           <h1 className="page-title">Categories</h1>
           <p className="page-subtitle">Gestion des categories articles — utilisees dans tout le CRM</p>
         </div>
-        <button className="btn btn-primary" onClick={openAdd}>
+        <button className="btn btn-primary" onClick={openAdd} disabled={loading || saving || !configured}>
           <Plus size={15} /> Nouvelle categorie
         </button>
       </div>
 
-      {/* Error banner */}
-      {loadError && (
+      {!configured && (
+        <div style={{ background: '#FFF3E0', border: '1px solid #FFB74D', borderRadius: 'var(--radius)', padding: '10px 16px', marginBottom: 16, fontSize: '0.85rem', color: '#E65100' }}>
+          Supabase non configuré — ajoutez VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY dans .env
+        </div>
+      )}
+
+      {error && !loading && (
         <div style={{ background: '#FFEBEE', color: 'var(--red)', border: '1px solid rgba(211,47,47,0.25)', borderRadius: 8, padding: '10px 16px', fontSize: '0.875rem', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <AlertCircle size={15} /> {loadError}
+          <AlertCircle size={15} /> {error}
           <button onClick={load} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--red)', fontWeight: 700, cursor: 'pointer', fontSize: '0.82rem' }}>Reessayer</button>
         </div>
       )}
@@ -278,35 +262,40 @@ export default function Categories() {
       <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(165px, 1fr))', marginBottom: 20 }}>
         <div className="stat-card">
           <div className="stat-icon blue"><Layers size={18} /></div>
-          <div className="stat-body"><div className="stat-value">{loading ? '—' : categories.length}</div><div className="stat-label">Total categories</div></div>
+          <div className="stat-body">            <div className="stat-value">{loading ? '—' : stats.total}</div><div className="stat-label">Total categories</div></div>
         </div>
         <div className="stat-card">
           <div className="stat-icon green"><Layers size={18} /></div>
-          <div className="stat-body"><div className="stat-value">{loading ? '—' : totalActives}</div><div className="stat-label">Categories actives</div></div>
+          <div className="stat-body"><div className="stat-value">{loading ? '—' : stats.actives}</div><div className="stat-label">Categories actives</div></div>
         </div>
         <div className="stat-card">
           <div className="stat-icon orange"><Package size={18} /></div>
-          <div className="stat-body"><div className="stat-value">{loading ? '—' : totalArticles}</div><div className="stat-label">Articles total</div></div>
+          <div className="stat-body"><div className="stat-value">{loading ? '—' : stats.totalArticles}</div><div className="stat-label">Articles total</div></div>
         </div>
       </div>
 
       {/* Filtres */}
-      <div className="card" style={{ marginBottom: 16, padding: '13px 18px' }}>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-          <div style={{ position: 'relative', flex: '1 1 220px', minWidth: 180 }}>
-            <Search size={15} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)', pointerEvents: 'none' }} />
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Rechercher categorie..." style={{ ...IS(false), paddingLeft: 34 }} />
+      <div className="card crm-filter-bar" style={{ marginBottom: 16 }}>
+        <div className="crm-filter-row">
+          <div className="crm-filter-search">
+            <Search size={15} className="crm-filter-search-icon" />
+            <input
+              className="crm-filter-input"
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+              placeholder="Rechercher categorie..."
+            />
           </div>
-          <select value={filterStatut} onChange={e => setFilterStatut(e.target.value)} style={{ ...IS(false), width: 145, flex: '0 0 145px' }}>
+          <select className="crm-filter-select crm-filter-select--sm" value={filterStatut} onChange={e => setFilterStatut(e.target.value)}>
             <option value="">Tous statuts</option>
             {STATUT_VALUES.map(s => <option key={s} value={s}>{STATUT_LABEL[s]}</option>)}
           </select>
           {(search || filterStatut) && (
-            <button className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setFilterStatut(''); }}>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setFilterStatut(''); }}>
               <X size={13} /> Effacer
             </button>
           )}
-          <span style={{ color: 'var(--text-3)', fontSize: '0.8rem', marginLeft: 'auto' }}>
+          <span className="crm-filter-count">
             {loading ? '...' : `${filtered.length} categorie${filtered.length !== 1 ? 's' : ''}`}
           </span>
         </div>
@@ -315,71 +304,112 @@ export default function Categories() {
       {/* Tableau */}
       <div className="card">
         {loading ? <Spinner /> : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Couleur</th>
-                  <th>Nom</th>
-                  <th>Description</th>
-                  <th>Articles</th>
-                  <th>Statut</th>
-                  <th>Cree le</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.length === 0 ? (
+          <>
+          <div className="crm-table-desktop">
+            <div className="table-wrap">
+              <table>
+                <thead>
                   <tr>
-                    <td colSpan={7} style={{ textAlign: 'center', padding: '48px 0' }}>
-                      <Layers size={36} style={{ color: 'var(--border)', display: 'block', margin: '0 auto 12px' }} />
-                      <div style={{ fontWeight: 700, color: 'var(--text-2)', marginBottom: 6 }}>
-                        {search || filterStatut ? 'Aucune categorie ne correspond aux filtres.' : 'Aucune categorie enregistree.'}
-                      </div>
-                      {!search && !filterStatut && (
-                        <button className="btn btn-primary btn-sm" onClick={openAdd} style={{ marginTop: 12 }}>
-                          <Plus size={13} /> Creer la premiere categorie
-                        </button>
-                      )}
-                    </td>
+                    <th>Couleur</th>
+                    <th>Nom</th>
+                    <th>Description</th>
+                    <th>Articles</th>
+                    <th>Statut</th>
+                    <th>Cree le</th>
+                    <th>Actions</th>
                   </tr>
-                ) : filtered.map(c => {
-                  const count = articleCount(c.id);
-                  return (
-                    <tr key={c.id}>
-                      <td style={{ width: 48 }}>
-                        <div style={{ width: 28, height: 28, borderRadius: '50%', background: c.couleur || '#1976D2', flexShrink: 0 }} />
-                      </td>
-                      <td style={{ fontWeight: 700, fontSize: '0.92rem' }}>{c.nom}</td>
-                      <td style={{ color: 'var(--text-2)', fontSize: '0.85rem', maxWidth: 240 }}>
-                        {c.description
-                          ? <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block', maxWidth: 220 }}>{c.description}</span>
-                          : <span style={{ color: 'var(--text-3)' }}>—</span>
-                        }
-                      </td>
-                      <td>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: count > 0 ? '#E3F2FD' : 'var(--bg)', color: count > 0 ? '#1976D2' : 'var(--text-3)', borderRadius: 6, padding: '3px 9px', fontWeight: 700, fontSize: '0.82rem' }}>
-                          <Package size={12} /> {count}
-                        </span>
-                      </td>
-                      <td><span className={'badge ' + STATUT_BADGE[c.statut || 'actif']}>{STATUT_LABEL[c.statut || 'actif']}</span></td>
-                      <td style={{ color: 'var(--text-3)', fontSize: '0.82rem' }}>
-                        {c.created_at ? c.created_at.slice(0, 10) : '—'}
-                      </td>
-                      <td>
-                        <div style={{ display: 'flex', gap: 3 }}>
-                          <button className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} title="Modifier" onClick={() => openEdit(c)}><Edit2 size={13} /></button>
-                          <button className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} title="Supprimer" onClick={() => handleDelete(c.id)}>
-                            <Trash2 size={13} style={{ color: count > 0 ? 'var(--text-3)' : 'var(--red)' }} />
-                          </button>
+                </thead>
+                <tbody>
+                  {filtered.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} style={{ textAlign: 'center', padding: '48px 0' }}>
+                        <Layers size={36} style={{ color: 'var(--border)', display: 'block', margin: '0 auto 12px' }} />
+                        <div style={{ fontWeight: 700, color: 'var(--text-2)', marginBottom: 6 }}>
+                          {search || filterStatut ? 'Aucune categorie ne correspond aux filtres.' : 'Aucune categorie enregistree.'}
                         </div>
+                        {!search && !filterStatut && (
+                          <button className="btn btn-primary btn-sm" onClick={openAdd} style={{ marginTop: 12 }}>
+                            <Plus size={13} /> Creer la premiere categorie
+                          </button>
+                        )}
                       </td>
                     </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                  ) : filtered.map(c => {
+                    const count = articleCount(c.id);
+                    return (
+                      <tr key={c.id}>
+                        <td style={{ width: 48 }}>
+                          <div style={{ width: 28, height: 28, borderRadius: '50%', background: c.couleur || '#1976D2', flexShrink: 0 }} />
+                        </td>
+                        <td style={{ fontWeight: 700, fontSize: '0.92rem' }}>{c.nom}</td>
+                        <td style={{ color: 'var(--text-2)', fontSize: '0.85rem', maxWidth: 240 }}>
+                          {c.description
+                            ? <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block', maxWidth: 220 }}>{c.description}</span>
+                            : <span style={{ color: 'var(--text-3)' }}>—</span>
+                          }
+                        </td>
+                        <td>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, background: count > 0 ? '#E3F2FD' : 'var(--bg)', color: count > 0 ? '#1976D2' : 'var(--text-3)', borderRadius: 6, padding: '3px 9px', fontWeight: 700, fontSize: '0.82rem' }}>
+                            <Package size={12} /> {count}
+                          </span>
+                        </td>
+                        <td><span className={'badge ' + STATUT_BADGE[c.statut || 'actif']}>{STATUT_LABEL[c.statut || 'actif']}</span></td>
+                        <td style={{ color: 'var(--text-3)', fontSize: '0.82rem' }}>
+                          {c.created_at ? c.created_at.slice(0, 10) : '—'}
+                        </td>
+                        <td>
+                          <div style={{ display: 'flex', gap: 3 }}>
+                            <button className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} title="Modifier" onClick={() => openEdit(c)}><Edit2 size={13} /></button>
+                            <button type="button" className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} title="Supprimer" disabled={deletingId === c.id || saving} onClick={() => handleDelete(c.id)}>
+                              {deletingId === c.id ? <Loader2 size={13} className="spin" style={{ color: 'var(--red)' }} /> : <Trash2 size={13} style={{ color: count > 0 ? 'var(--text-3)' : 'var(--red)' }} />}
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
+
+          {filtered.length === 0 ? (
+            <div className="crm-mobile-only" style={{ textAlign: 'center', padding: '32px 16px', color: 'var(--text-3)' }}>
+              {search || filterStatut ? 'Aucune categorie ne correspond aux filtres.' : 'Aucune categorie enregistree.'}
+            </div>
+          ) : (
+            <div className="crm-compact-list crm-mobile-only">
+              {filtered.map(c => {
+                const count = articleCount(c.id);
+                return (
+                  <div key={c.id} className="crm-compact-row">
+                    <div className="crm-compact-main">
+                      <div className="crm-compact-title">
+                        <span className="crm-compact-dot" style={{ background: c.couleur || '#1976D2' }} />
+                        {c.nom}
+                      </div>
+                      <div className="crm-compact-meta">
+                        <Package size={11} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 3 }} />
+                        {count} article{count !== 1 ? 's' : ''}
+                        {c.description ? ` · ${c.description}` : ''}
+                        {' · '}
+                        <span className={'badge ' + STATUT_BADGE[c.statut || 'actif']} style={{ fontSize: '0.68rem', padding: '1px 6px' }}>
+                          {STATUT_LABEL[c.statut || 'actif']}
+                        </span>
+                      </div>
+                    </div>
+                    <div className="crm-compact-actions">
+                      <button type="button" className="btn btn-ghost btn-sm crm-icon-btn" title="Modifier" onClick={() => openEdit(c)}><Edit2 size={14} /></button>
+                      <button type="button" className="btn btn-ghost btn-sm crm-icon-btn" title="Supprimer" disabled={deletingId === c.id || saving} onClick={() => handleDelete(c.id)}>
+                        {deletingId === c.id ? <Loader2 size={14} className="spin" style={{ color: 'var(--red)' }} /> : <Trash2 size={14} style={{ color: count > 0 ? 'var(--text-3)' : 'var(--red)' }} />}
+                      </button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          </>
         )}
       </div>
 
@@ -388,7 +418,8 @@ export default function Categories() {
         <CategorieModal
           categorie={editingCat}
           onClose={() => { setShowModal(false); setEditingCat(null); }}
-          onSaved={handleSaved}
+          onSave={handleSave}
+          saving={saving}
         />
       )}
     </div>

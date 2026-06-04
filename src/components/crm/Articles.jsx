@@ -1,12 +1,10 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   Package, Plus, Edit2, Trash2, Eye, Copy, Search, X,
   ChevronUp, ChevronDown, AlertCircle, Loader, Tag, DollarSign, Layers
 } from 'lucide-react';
-import {
-  getArticles, createArticle, updateArticle, deleteArticle,
-  duplicateArticle, getCategories
-} from '../../services/api';
+import { listCategories } from '../../services/crm/categories';
+import { useArticles } from '../../hooks/useArticles';
 
 /* ── Helpers ── */
 function fmtMAD(v) {
@@ -90,29 +88,39 @@ function EmptyState({ filtered, onAdd }) {
 /* ═══════════════════════════════════════════════
    MODAL ARTICLE (Ajout / Modification)
    ═══════════════════════════════════════════════ */
-function ArticleModal({ article, categories, onClose, onSaved }) {
+function ArticleModal({ article, categories, onClose, onSave, saving }) {
   const isEdit = !!article;
-  const [form, setForm] = useState(isEdit ? {
-    nom: article.nom || '',
-    categorie_id: article.categorie_id || '',
-    description: article.description || '',
-    prix_ht: article.prix_ht ?? '',
-    unite: article.unite || 'unite',
-    tva: String(article.tva ?? '20'),
-    remise: String(article.remise ?? '0'),
-    statut: article.statut || 'actif',
-    reference: article.reference || '',
-  } : { ...EMPTY_FORM });
+
+  function buildForm(source) {
+    if (!source) return { ...EMPTY_FORM };
+    return {
+      nom: source.nom || '',
+      categorie_id: source.categorie_id ? String(source.categorie_id) : '',
+      description: source.description || '',
+      prix_ht: source.prix_ht ?? '',
+      unite: source.unite || 'unite',
+      tva: String(source.tva ?? '20'),
+      remise: String(source.remise ?? '0'),
+      statut: source.statut || 'actif',
+      reference: source.reference || '',
+    };
+  }
+
+  const [form, setForm] = useState(() => buildForm(article));
   const [errors, setErrors] = useState({});
-  const [saving, setSaving] = useState(false);
   const [apiError, setApiError] = useState('');
+
+  useEffect(() => {
+    setForm(buildForm(article));
+    setErrors({});
+    setApiError('');
+  }, [article?.id]);
 
   function setField(k, v) { setForm(p => ({ ...p, [k]: v })); if (errors[k]) setErrors(p => ({ ...p, [k]: '' })); }
 
   function validate() {
     const e = {};
     if (!form.nom?.trim()) e.nom = 'Le nom est requis';
-    if (!form.categorie_id) e.categorie_id = 'La categorie est requise';
     const prix = Number(form.prix_ht);
     if (form.prix_ht === '' || isNaN(prix) || prix < 0) e.prix_ht = 'Prix invalide';
     return e;
@@ -123,27 +131,19 @@ function ArticleModal({ article, categories, onClose, onSaved }) {
     setApiError('');
     const e = validate();
     if (Object.keys(e).length) { setErrors(e); return; }
-    setSaving(true);
     const payload = {
       ...form,
       prix_ht: Number(form.prix_ht),
       remise: Number(form.remise) || 0,
       tva: Number(form.tva) || 0,
-      categorie_id: Number(form.categorie_id),
+      categorie_id: form.categorie_id || null,
     };
-    try {
-      let saved;
-      if (isEdit) {
-        saved = await updateArticle(article.id, payload);
-      } else {
-        saved = await createArticle(payload);
-      }
-      onSaved(saved || { ...payload, id: article?.id || Date.now(), created_at: new Date().toISOString() }, isEdit);
-    } catch (err) {
-      setApiError(err.message || "Erreur lors de l'enregistrement.");
-    } finally {
-      setSaving(false);
+    const result = await onSave(payload);
+    if (result && result.success === false) {
+      setApiError(result.error || "Erreur lors de l'enregistrement.");
+      return;
     }
+    onClose();
   }
 
   return (
@@ -180,12 +180,11 @@ function ArticleModal({ article, categories, onClose, onSaved }) {
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div className="form-group">
-                  <label>Categorie *</label>
-                  <select value={form.categorie_id} onChange={e => setField('categorie_id', e.target.value)} style={IS(errors.categorie_id)}>
-                    <option value="">Choisir une categorie...</option>
-                    {categories.map(c => <option key={c.id} value={c.id}>{c.nom}</option>)}
+                  <label>Categorie</label>
+                  <select value={form.categorie_id} onChange={e => setField('categorie_id', e.target.value)} style={IS(false)}>
+                    <option value="">Sans categorie</option>
+                    {categories.map(c => <option key={c.id} value={String(c.id)}>{c.nom}</option>)}
                   </select>
-                  {errors.categorie_id && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.categorie_id}</span>}
                 </div>
                 <div className="form-group">
                   <label>Reference article</label>
@@ -291,7 +290,7 @@ function ArticleDetail({ article, catName, onClose, onEdit }) {
           {/* Badges */}
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             <span className={'badge ' + STATUT_BADGE[article.statut]}>{STATUT_LABEL[article.statut]}</span>
-            {catName && <span className="badge badge-blue">{catName}</span>}
+            {catName && catName !== '-' && <span className="badge badge-blue">{catName}</span>}
             {article.unite && <span className="badge badge-grey">{article.unite}</span>}
             {Number(article.tva) > 0 && <span className="badge badge-orange">TVA {article.tva}%</span>}
             {Number(article.remise) > 0 && <span className="badge badge-red">Remise {article.remise}%</span>}
@@ -348,14 +347,26 @@ function ArticleDetail({ article, catName, onClose, onEdit }) {
    PAGE PRINCIPALE ARTICLES
    ═══════════════════════════════════════════════ */
 export default function Articles() {
-  const [articles, setArticles] = useState([]);
-  const [categories, setCategories] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState('');
+  const {
+    records: articles,
+    loading,
+    saving,
+    error,
+    configured,
+    load,
+    create,
+    update,
+    remove,
+    duplicate,
+    filterArticles,
+    computeArticlesStats,
+  } = useArticles();
 
+  const [categories, setCategories] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [editingArticle, setEditingArticle] = useState(null);
   const [viewingArticle, setViewingArticle] = useState(null);
+  const [deletingId, setDeletingId] = useState(null);
 
   const [search, setSearch] = useState('');
   const [filterCat, setFilterCat] = useState('');
@@ -368,22 +379,20 @@ export default function Articles() {
 
   function showToast(msg, type = 'success') { setToast({ msg, type }); }
 
-  /* ── Load data ── */
-  const load = useCallback(async () => {
-    setLoading(true);
-    setLoadError('');
-    try {
-      const [arts, cats] = await Promise.all([getArticles(), getCategories()]);
-      setArticles(Array.isArray(arts) ? arts : (arts?.data ?? []));
-      setCategories(Array.isArray(cats) ? cats : (cats?.data ?? []));
-    } catch (err) {
-      setLoadError(err.message || 'Impossible de charger les donnees.');
-    } finally {
-      setLoading(false);
-    }
+  /* ── Load categories (Supabase) ── */
+  const loadCategories = useCallback(() => {
+    listCategories()
+      .then(setCategories)
+      .catch(() => setCategories([]));
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    loadCategories();
+  }, [loadCategories]);
+
+  useEffect(() => {
+    if (showModal) loadCategories();
+  }, [showModal, loadCategories]);
 
   /* ── Helpers ── */
   function catName(id) {
@@ -405,16 +414,10 @@ export default function Articles() {
   }
 
   /* ── Filter + sort ── */
-  let filtered = articles.filter(a => {
-    const q = search.toLowerCase();
-    const matchSearch = !search
-      || (a.nom || '').toLowerCase().includes(q)
-      || (a.reference || '').toLowerCase().includes(q)
-      || catName(a.categorie_id).toLowerCase().includes(q);
-    const matchCat = !filterCat || String(a.categorie_id) === String(filterCat);
-    const matchSt = !filterStatut || a.statut === filterStatut;
-    return matchSearch && matchCat && matchSt;
-  });
+  let filtered = useMemo(
+    () => filterArticles(articles, { search, categorie_id: filterCat, statut: filterStatut, catName }),
+    [articles, search, filterCat, filterStatut, filterArticles, categories],
+  );
   if (sortField) {
     filtered = [...filtered].sort((a, b) => {
       let va = a[sortField], vb = b[sortField];
@@ -430,54 +433,47 @@ export default function Articles() {
   const hasFilters = !!(search || filterCat || filterStatut);
 
   /* ── KPI ── */
-  const totalActifs = articles.filter(a => a.statut === 'actif').length;
-  const usedCats = new Set(articles.map(a => a.categorie_id)).size;
-  const prixMoyen = articles.length ? articles.reduce((s, a) => s + Number(a.prix_ht || 0), 0) / articles.length : 0;
-  const avecRemise = articles.filter(a => Number(a.remise) > 0).length;
+  const stats = useMemo(() => computeArticlesStats(articles), [articles, computeArticlesStats]);
+  const { total: totalArticles, actifs: totalActifs, usedCategories: usedCats, prixMoyen, avecRemise } = stats;
 
   /* ── CRUD handlers ── */
   function openAdd() { setEditingArticle(null); setShowModal(true); }
   function openEdit(a) { setEditingArticle(a); setShowModal(true); }
 
+  async function handleSave(data) {
+    const isEdit = !!editingArticle;
+    const result = isEdit
+      ? await update(editingArticle.id, data)
+      : await create(data);
+    if (!result.success) return result;
+    setShowModal(false);
+    setEditingArticle(null);
+    showToast(isEdit ? 'Article modifie avec succes !' : 'Article cree avec succes !');
+    return result;
+  }
+
   async function handleDuplicate(a) {
-    try {
-      await duplicateArticle(a.id);
-      showToast('Article duplique avec succes !');
-      load();
-    } catch {
-      /* API unavailable — local fallback */
-      const copy = { ...a, id: Date.now(), reference: '', nom: a.nom + ' (copie)', created_at: new Date().toISOString() };
-      setArticles(prev => [...prev, copy]);
-      showToast('Article duplique (local).');
-    }
+    const result = await duplicate(a.id);
+    showToast(
+      result.success ? 'Article duplique avec succes !' : (result.error || 'Erreur duplication.'),
+      result.success ? 'success' : 'error',
+    );
   }
 
   async function handleDelete(id) {
     if (!window.confirm('Supprimer cet article ?')) return;
-    try {
-      await deleteArticle(id);
-      showToast('Article supprime.');
-      load();
-    } catch {
-      setArticles(prev => prev.filter(a => a.id !== id));
-      showToast('Article supprime (local).');
-    }
-  }
-
-  function handleSaved(data, isEdit) {
-    if (isEdit) {
-      setArticles(prev => prev.map(a => a.id === data.id ? data : a));
-    } else {
-      setArticles(prev => [...prev, data]);
-    }
-    setShowModal(false);
-    setEditingArticle(null);
-    showToast(isEdit ? 'Article modifie avec succes !' : 'Article cree avec succes !');
+    setDeletingId(id);
+    const result = await remove(id);
+    setDeletingId(null);
+    showToast(
+      result.success ? 'Article supprime.' : (result.error || 'Erreur suppression.'),
+      result.success ? 'success' : 'error',
+    );
   }
 
   /* ── Render ── */
   return (
-    <div className="animate-fade-in">
+    <div className="animate-fade-in crm-module crm-module--articles">
       <Toast msg={toast.msg} type={toast.type} onClose={() => setToast({ msg: '', type: 'success' })} />
 
       {/* Header */}
@@ -486,15 +482,21 @@ export default function Articles() {
           <h1 className="page-title">Articles</h1>
           <p className="page-subtitle">Catalogue articles — tarifs, unites et descriptions</p>
         </div>
-        <button className="btn btn-primary" onClick={openAdd} style={{ background: '#E65100', borderColor: '#E65100' }}>
+        <button className="btn btn-primary" onClick={openAdd} disabled={loading || saving || !configured} style={{ background: '#E65100', borderColor: '#E65100' }}>
           <Plus size={15} /> Ajouter un article
         </button>
       </div>
 
+      {!configured && (
+        <div style={{ background: '#FFF3E0', border: '1px solid #FFB74D', borderRadius: 'var(--radius)', padding: '10px 16px', marginBottom: 16, fontSize: '0.85rem', color: '#E65100' }}>
+          Supabase non configuré — ajoutez VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY dans .env
+        </div>
+      )}
+
       {/* Error banner */}
-      {loadError && (
+      {error && !loading && (
         <div style={{ background: '#FFEBEE', color: 'var(--red)', border: '1px solid rgba(211,47,47,0.25)', borderRadius: 8, padding: '10px 16px', fontSize: '0.875rem', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
-          <AlertCircle size={15} /> {loadError}
+          <AlertCircle size={15} /> {error}
           <button onClick={load} style={{ marginLeft: 'auto', background: 'none', border: 'none', color: 'var(--red)', fontWeight: 700, cursor: 'pointer', fontSize: '0.82rem' }}>Reessayer</button>
         </div>
       )}
@@ -504,7 +506,7 @@ export default function Articles() {
         <div className="stat-card">
           <div className="stat-icon" style={{ background: '#FFF3E0', color: '#E65100' }}><Package size={18} /></div>
           <div className="stat-body">
-            <div className="stat-value">{loading ? '—' : articles.length}</div>
+            <div className="stat-value">{loading ? '—' : totalArticles}</div>
             <div className="stat-label">Total articles</div>
           </div>
         </div>
@@ -539,26 +541,32 @@ export default function Articles() {
       </div>
 
       {/* Filtres */}
-      <div className="card" style={{ marginBottom: 16, padding: '13px 18px' }}>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-          <div style={{ position: 'relative', flex: '1 1 220px', minWidth: 180 }}>
-            <Search size={15} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)', pointerEvents: 'none' }} />
-            <input value={search} onChange={e => { setSearch(e.target.value); setPage(1); }} placeholder="Rechercher nom, reference..." style={{ ...IS(false), paddingLeft: 34 }} />
+      <div className="card crm-filter-bar" style={{ marginBottom: 16 }}>
+        <div className="crm-filter-row">
+          <div className="crm-filter-search">
+            <Search size={15} className="crm-filter-search-icon" />
+            <input
+              className="crm-filter-input"
+              value={search}
+              onChange={e => { setSearch(e.target.value); setPage(1); }}
+              placeholder="Rechercher nom, reference..."
+            />
           </div>
-          <select value={filterCat} onChange={e => { setFilterCat(e.target.value); setPage(1); }} style={{ ...IS(false), width: 170, flex: '0 0 170px' }}>
+          <select className="crm-filter-select" value={filterCat} onChange={e => { setFilterCat(e.target.value); setPage(1); }}>
             <option value="">Toutes categories</option>
-            {categories.map(c => <option key={c.id} value={c.id}>{c.nom}</option>)}
+            <option value="__none__">Sans categorie</option>
+            {categories.map(c => <option key={c.id} value={String(c.id)}>{c.nom}</option>)}
           </select>
-          <select value={filterStatut} onChange={e => { setFilterStatut(e.target.value); setPage(1); }} style={{ ...IS(false), width: 145, flex: '0 0 145px' }}>
+          <select className="crm-filter-select crm-filter-select--sm" value={filterStatut} onChange={e => { setFilterStatut(e.target.value); setPage(1); }}>
             <option value="">Tous statuts</option>
             {STATUT_VALUES.map(s => <option key={s} value={s}>{STATUT_LABEL[s]}</option>)}
           </select>
           {hasFilters && (
-            <button className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setFilterCat(''); setFilterStatut(''); setPage(1); }}>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setFilterCat(''); setFilterStatut(''); setPage(1); }}>
               <X size={13} /> Effacer
             </button>
           )}
-          <span style={{ color: 'var(--text-3)', fontSize: '0.8rem', marginLeft: 'auto' }}>
+          <span className="crm-filter-count">
             {loading ? '...' : `${filtered.length} article${filtered.length !== 1 ? 's' : ''}`}
           </span>
         </div>
@@ -569,76 +577,114 @@ export default function Articles() {
         {loading ? (
           <Spinner />
         ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Reference</th>
-                  <th>Nom article</th>
-                  <th>Categorie</th>
-                  <th style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }} onClick={() => toggleSort('prix_ht')}>
-                    <span style={{ display: 'inline-flex', alignItems: 'center' }}>Prix HT<SortIcon field="prix_ht" /></span>
-                  </th>
-                  <th>Unite</th>
-                  <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('remise')}>
-                    <span style={{ display: 'inline-flex', alignItems: 'center' }}>Remise<SortIcon field="remise" /></span>
-                  </th>
-                  <th>Cree le</th>
-                  <th>Statut</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {paginated.length === 0
-                  ? <EmptyState filtered={hasFilters} onAdd={openAdd} />
-                  : paginated.map(a => (
-                    <tr key={a.id}>
-                      <td style={{ fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--red)', fontSize: '0.82rem', whiteSpace: 'nowrap' }}>
-                        {a.reference || ('ART-' + String(a.id).padStart(4, '0'))}
-                      </td>
-                      <td>
-                        <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{a.nom}</div>
-                        {a.description && (
-                          <div style={{ fontSize: '0.75rem', color: 'var(--text-3)', marginTop: 2, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {a.description}
+          <>
+          <div className="crm-table-desktop">
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Reference</th>
+                    <th>Nom article</th>
+                    <th>Categorie</th>
+                    <th style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap' }} onClick={() => toggleSort('prix_ht')}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center' }}>Prix HT<SortIcon field="prix_ht" /></span>
+                    </th>
+                    <th>Unite</th>
+                    <th style={{ cursor: 'pointer', userSelect: 'none' }} onClick={() => toggleSort('remise')}>
+                      <span style={{ display: 'inline-flex', alignItems: 'center' }}>Remise<SortIcon field="remise" /></span>
+                    </th>
+                    <th>Cree le</th>
+                    <th>Statut</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {paginated.length === 0
+                    ? <EmptyState filtered={hasFilters} onAdd={openAdd} />
+                    : paginated.map(a => (
+                      <tr key={a.id}>
+                        <td style={{ fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--red)', fontSize: '0.82rem', whiteSpace: 'nowrap' }}>
+                          {a.reference || ('ART-' + String(a.id).padStart(4, '0'))}
+                        </td>
+                        <td>
+                          <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{a.nom}</div>
+                          {a.description && (
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-3)', marginTop: 2, maxWidth: 260, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                              {a.description}
+                            </div>
+                          )}
+                        </td>
+                        <td>
+                          {a.categorie_id
+                            ? <span className="badge badge-blue">{catName(a.categorie_id)}</span>
+                            : <span style={{ color: 'var(--text-3)', fontSize: '0.8rem' }}>—</span>
+                          }
+                        </td>
+                        <td style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.92rem', whiteSpace: 'nowrap' }}>
+                          {fmtMAD(a.prix_ht)}
+                          <span style={{ fontSize: '0.72rem', color: 'var(--text-3)', fontFamily: 'var(--font-body)', marginLeft: 3 }}>/{a.unite}</span>
+                        </td>
+                        <td style={{ color: 'var(--text-2)', fontSize: '0.85rem' }}>{a.unite}</td>
+                        <td>
+                          {Number(a.remise) > 0
+                            ? <span className="badge badge-orange">{a.remise}%</span>
+                            : <span style={{ color: 'var(--text-3)', fontSize: '0.8rem' }}>—</span>
+                          }
+                        </td>
+                        <td style={{ color: 'var(--text-3)', fontSize: '0.82rem', whiteSpace: 'nowrap' }}>
+                          {a.created_at ? a.created_at.slice(0, 10) : '—'}
+                        </td>
+                        <td><span className={'badge ' + STATUT_BADGE[a.statut || 'actif']}>{STATUT_LABEL[a.statut || 'actif']}</span></td>
+                        <td>
+                          <div style={{ display: 'flex', gap: 3 }}>
+                            <button className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} title="Voir" onClick={() => setViewingArticle(a)}><Eye size={13} /></button>
+                            <button className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} title="Modifier" onClick={() => openEdit(a)}><Edit2 size={13} /></button>
+                            <button className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} title="Dupliquer" onClick={() => handleDuplicate(a)}><Copy size={13} /></button>
+                            <button type="button" className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} title="Supprimer" disabled={deletingId === a.id || saving} onClick={() => handleDelete(a.id)}>
+                              {deletingId === a.id ? <Loader size={13} className="spin" style={{ color: 'var(--red)' }} /> : <Trash2 size={13} style={{ color: 'var(--red)' }} />}
+                            </button>
                           </div>
-                        )}
-                      </td>
-                      <td>
-                        {a.categorie_id
-                          ? <span className="badge badge-blue">{catName(a.categorie_id)}</span>
-                          : <span style={{ color: 'var(--text-3)', fontSize: '0.8rem' }}>—</span>
-                        }
-                      </td>
-                      <td style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.92rem', whiteSpace: 'nowrap' }}>
-                        {fmtMAD(a.prix_ht)}
-                        <span style={{ fontSize: '0.72rem', color: 'var(--text-3)', fontFamily: 'var(--font-body)', marginLeft: 3 }}>/{a.unite}</span>
-                      </td>
-                      <td style={{ color: 'var(--text-2)', fontSize: '0.85rem' }}>{a.unite}</td>
-                      <td>
-                        {Number(a.remise) > 0
-                          ? <span className="badge badge-orange">{a.remise}%</span>
-                          : <span style={{ color: 'var(--text-3)', fontSize: '0.8rem' }}>—</span>
-                        }
-                      </td>
-                      <td style={{ color: 'var(--text-3)', fontSize: '0.82rem', whiteSpace: 'nowrap' }}>
-                        {a.created_at ? a.created_at.slice(0, 10) : '—'}
-                      </td>
-                      <td><span className={'badge ' + STATUT_BADGE[a.statut || 'actif']}>{STATUT_LABEL[a.statut || 'actif']}</span></td>
-                      <td>
-                        <div style={{ display: 'flex', gap: 3 }}>
-                          <button className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} title="Voir" onClick={() => setViewingArticle(a)}><Eye size={13} /></button>
-                          <button className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} title="Modifier" onClick={() => openEdit(a)}><Edit2 size={13} /></button>
-                          <button className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} title="Dupliquer" onClick={() => handleDuplicate(a)}><Copy size={13} /></button>
-                          <button className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} title="Supprimer" onClick={() => handleDelete(a.id)}><Trash2 size={13} style={{ color: 'var(--red)' }} /></button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))
-                }
-              </tbody>
-            </table>
+                        </td>
+                      </tr>
+                    ))
+                  }
+                </tbody>
+              </table>
+            </div>
           </div>
+
+          {paginated.length === 0 ? (
+            <div className="crm-mobile-only" style={{ textAlign: 'center', padding: '32px 16px', color: 'var(--text-3)' }}>
+              {hasFilters ? 'Aucun article ne correspond aux filtres.' : 'Aucun article enregistre.'}
+            </div>
+          ) : (
+            <div className="crm-compact-list crm-mobile-only">
+              {paginated.map(a => (
+                <div key={a.id} className="crm-compact-row">
+                  <div className="crm-compact-main">
+                    <div className="crm-compact-title">{a.nom}</div>
+                    <div className="crm-compact-meta">
+                      <strong>{fmtMAD(a.prix_ht)}</strong>
+                      {a.categorie_id ? ` · ${catName(a.categorie_id)}` : ''}
+                      {' · '}
+                      <span className={'badge ' + STATUT_BADGE[a.statut || 'actif']} style={{ fontSize: '0.68rem', padding: '1px 6px', verticalAlign: 'middle' }}>
+                        {STATUT_LABEL[a.statut || 'actif']}
+                      </span>
+                    </div>
+                  </div>
+                  <div className="crm-compact-actions">
+                    <button type="button" className="btn btn-ghost btn-sm crm-icon-btn" title="Voir" onClick={() => setViewingArticle(a)}><Eye size={14} /></button>
+                    <button type="button" className="btn btn-ghost btn-sm crm-icon-btn" title="Modifier" onClick={() => openEdit(a)}><Edit2 size={14} /></button>
+                    <button type="button" className="btn btn-ghost btn-sm crm-icon-btn" title="Dupliquer" onClick={() => handleDuplicate(a)}><Copy size={14} /></button>
+                    <button type="button" className="btn btn-ghost btn-sm crm-icon-btn" title="Supprimer" disabled={deletingId === a.id || saving} onClick={() => handleDelete(a.id)}>
+                      {deletingId === a.id ? <Loader size={14} className="spin" style={{ color: 'var(--red)' }} /> : <Trash2 size={14} style={{ color: 'var(--red)' }} />}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+          </>
         )}
 
         {/* Pagination */}
@@ -659,13 +705,14 @@ export default function Articles() {
           article={editingArticle}
           categories={categories}
           onClose={() => { setShowModal(false); setEditingArticle(null); }}
-          onSaved={handleSaved}
+          onSave={handleSave}
+          saving={saving}
         />
       )}
       {viewingArticle && (
         <ArticleDetail
           article={viewingArticle}
-          catName={catName(viewingArticle.categorie_id)}
+          catName={viewingArticle.categorie_id ? catName(viewingArticle.categorie_id) : null}
           onClose={() => setViewingArticle(null)}
           onEdit={(a) => { setViewingArticle(null); openEdit(a); }}
         />

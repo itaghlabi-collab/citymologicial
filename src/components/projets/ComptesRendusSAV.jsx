@@ -9,7 +9,16 @@ import {
   X, ChevronLeft, CheckCircle, Clock, AlertCircle, User,
   Calendar, DollarSign, Archive, Wrench, Send, Star
 } from 'lucide-react';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
+import { useSavReports } from '../../hooks/useSavReports';
+import { useSavRequests } from '../../hooks/useSavRequests';
+import { listProjects } from '../../services/projects/projects';
+import { getSavRequestById } from '../../services/projects/savRequests';
+import { generateSavReportPdf } from '../../services/projects/savReportPdf';
+import { persistSavReportMedia } from '../../services/projects/savReports';
+import { resolveProjectFileUrl } from '../../services/projects/savReportStorage';
+import { STATUT_APRES_INTERVENTION, statutApresInterventionLabel } from '../../constants/sav';
+import SavReportMediaFields, { buildSavReportMediaDraft } from './SavReportMediaFields';
 
 // ── Shared primitives ───────────────────────────────────────────────────────
 
@@ -115,24 +124,161 @@ const STATUTS_CR = [
 
 const VALIDATION_CLIENT = ['En attente', 'Validé par client', 'Refusé par client'];
 
+function SavDemandeRecap({ sav }) {
+  if (!sav) return null;
+  const rows = [
+    ['Réf. SAV', sav.ref],
+    ['Titre', sav.titre],
+    ['Type', sav.type_sav || sav.type_probleme],
+    ['Catégorie', sav.categorie],
+    ['Priorité', sav.priorite],
+    ['Statut demande', sav.statut_label || sav.statut],
+    ['Date demande', sav.date_demande],
+    ['Responsable', sav.responsable || sav.technicien],
+    ['Localisation', sav.localisation],
+    ['Contact', sav.contact_client],
+    ['Date interv. prévue', sav.date_intervention],
+  ].filter(([, v]) => v);
+
+  return (
+    <div style={{ marginBottom: 18, padding: '14px 16px', background: 'var(--surface-2)', borderRadius: 8, border: '1px solid var(--border)' }}>
+      <div style={{ fontSize: '0.68rem', fontWeight: 800, color: 'var(--red)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 12 }}>
+        Récapitulatif demande SAV
+      </div>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 12, marginBottom: sav.description ? 12 : 0 }}>
+        {rows.map(([lbl, val]) => (
+          <div key={lbl}>
+            <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 2 }}>{lbl}</div>
+            <div style={{ fontSize: '0.86rem', fontWeight: 600 }}>{val}</div>
+          </div>
+        ))}
+      </div>
+      {sav.description && (
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 4 }}>Description</div>
+          <p style={{ fontSize: '0.84rem', lineHeight: 1.55, color: 'var(--text-2)', margin: 0 }}>{sav.description}</p>
+        </div>
+      )}
+      {sav.observations && (
+        <div style={{ marginBottom: 10 }}>
+          <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 4 }}>Observations</div>
+          <p style={{ fontSize: '0.84rem', lineHeight: 1.55, color: 'var(--text-2)', margin: 0 }}>{sav.observations}</p>
+        </div>
+      )}
+      {sav.actions_prevues && (
+        <div>
+          <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 4 }}>Actions prévues</div>
+          <p style={{ fontSize: '0.84rem', lineHeight: 1.55, color: 'var(--text-2)', margin: 0 }}>{sav.actions_prevues}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 const EMPTY_FORM = {
-  sav_lie: '', projet_lie: '', client: '', intervenant: '',
+  sav_request_id: '', project_id: '', sav_lie: '', projet_lie: '', client: '', intervenant: '',
+  date_compte_rendu: new Date().toISOString().slice(0, 10),
   date_intervention: new Date().toISOString().slice(0, 10),
-  resume_intervention: '', actions_realisees: '', pieces_remplacees: '',
+  resume_intervention: '', actions_realisees: '', actions_a_prevoir: '',
+  statut_apres_intervention: '', pieces_remplacees: '',
   cout_intervention: '', recommandations: '', validation_client: 'En attente',
-  statut: 'brouillon', observations: '',
+  statut: 'brouillon', observation: '', observations: '',
 };
 
-function genRefCR() {
-  return 'CR-' + new Date().getFullYear() + '-' + String(Math.floor(Math.random() * 900) + 100);
+function CrMediaGallery({ cr }) {
+  const [avantUrls, setAvantUrls] = useState([]);
+  const [apresUrls, setApresUrls] = useState([]);
+  const [sigUrl, setSigUrl] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const avant = (cr.photos_avant || []).map((p) => resolveProjectFileUrl(p.path));
+      const apres = (cr.photos_apres || []).map((p) => resolveProjectFileUrl(p.path));
+      const urlsA = await Promise.all(avant);
+      const urlsP = await Promise.all(apres);
+      const sig = cr.signature_path ? await resolveProjectFileUrl(cr.signature_path) : '';
+      if (!cancelled) {
+        setAvantUrls(urlsA.filter(Boolean));
+        setApresUrls(urlsP.filter(Boolean));
+        setSigUrl(sig || '');
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [cr.id, cr.photos_avant, cr.photos_apres, cr.signature_path]);
+
+  const hasMedia = avantUrls.length || apresUrls.length || sigUrl || cr.signature_client_nom;
+  if (!hasMedia) {
+    return (
+      <p style={{ fontSize: '0.84rem', color: 'var(--text-3)', marginTop: 16 }}>Aucune photo ni signature enregistrée.</p>
+    );
+  }
+
+  return (
+    <div style={{ marginTop: 20 }}>
+      <SectionTitle icon={<Archive size={13} />}>Photos & signature</SectionTitle>
+      {avantUrls.length > 0 && (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 8 }}>Avant intervention</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {avantUrls.map((url) => (
+              <a key={url} href={url} target="_blank" rel="noreferrer">
+                <img src={url} alt="Avant" style={{ width: 96, height: 96, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--border)' }} />
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+      {apresUrls.length > 0 && (
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 8 }}>Après intervention</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {apresUrls.map((url) => (
+              <a key={url} href={url} target="_blank" rel="noreferrer">
+                <img src={url} alt="Après" style={{ width: 96, height: 96, objectFit: 'cover', borderRadius: 8, border: '1px solid var(--border)' }} />
+              </a>
+            ))}
+          </div>
+        </div>
+      )}
+      {(sigUrl || cr.signature_client_nom) && (
+        <div>
+          <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 8 }}>
+            Signature — {cr.signature_client_nom || cr.validation_client}
+          </div>
+          {sigUrl && <img src={sigUrl} alt="Signature" style={{ maxWidth: 280, maxHeight: 100, border: '1px solid var(--border)', borderRadius: 6, background: '#fff' }} />}
+        </div>
+      )}
+    </div>
+  );
 }
 
 // ── Formulaire Compte Rendu ──────────────────────────────────────────────────
 
-function FormulaireCompteRendu({ initial, onSave, onCancel }) {
-  const [form, setForm] = useState(initial || EMPTY_FORM);
+function FormulaireCompteRendu({ initial, onSave, onCancel, saving, savRequests = [], projects = [] }) {
+  const [form, setForm] = useState(() => ({ ...EMPTY_FORM, ...(initial || {}) }));
+  const [mediaDraft, setMediaDraft] = useState(() => buildSavReportMediaDraft(initial));
   const [errors, setErrors] = useState({});
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+
+  const selectedSav = savRequests.find(s => String(s.id) === String(form.sav_request_id)) || null;
+
+  function onSavChange(savId) {
+    const sav = savRequests.find(s => String(s.id) === String(savId));
+    if (!sav) {
+      setForm(p => ({ ...p, sav_request_id: '', sav_lie: '' }));
+      return;
+    }
+    setForm(p => ({
+      ...p,
+      sav_request_id: savId,
+      sav_lie: sav.ref,
+      project_id: sav.project_id || p.project_id,
+      projet_lie: sav.projet_lie || sav.projet_nom || p.projet_lie,
+      client: sav.client || p.client,
+      intervenant: p.intervenant?.trim() ? p.intervenant : (sav.responsable || sav.technicien || ''),
+    }));
+  }
 
   function validate() {
     const e = {};
@@ -146,7 +292,11 @@ function FormulaireCompteRendu({ initial, onSave, onCancel }) {
     ev.preventDefault();
     const e = validate();
     if (Object.keys(e).length) { setErrors(e); return; }
-    onSave({ ...form, cout_intervention: Number(form.cout_intervention) || 0 });
+    onSave({
+      ...form,
+      cout_intervention: Number(form.cout_intervention) || 0,
+      _media: mediaDraft,
+    });
   }
 
   const inp = (k, type, ph, req) => (
@@ -169,30 +319,61 @@ function FormulaireCompteRendu({ initial, onSave, onCancel }) {
     <form onSubmit={handleSubmit}>
       <SectionTitle icon={<FileText size={12} />}>Référence</SectionTitle>
       <FRow>
-        {inp('sav_lie', 'text', 'Demande SAV liée')}
-        {inp('projet_lie', 'text', 'Projet lié')}
+        <FField label="Demande SAV liée">
+          <select value={form.sav_request_id} onChange={e => onSavChange(e.target.value)} style={SELECT_STYLE}>
+            <option value="">— Choisir SAV —</option>
+            {savRequests.map(s => (
+              <option key={s.id} value={s.id}>{s.ref} — {s.titre || s.type_sav} ({s.projet_lie})</option>
+            ))}
+          </select>
+        </FField>
+        <FField label="Projet">
+          <select value={form.project_id} onChange={e => {
+            const pr = projects.find(p => String(p.id) === String(e.target.value));
+            setForm(p => ({ ...p, project_id: e.target.value, projet_lie: pr?.nom || '' }));
+          }} style={SELECT_STYLE}>
+            <option value="">—</option>
+            {projects.map(p => <option key={p.id} value={p.id}>{p.ref} — {p.nom}</option>)}
+          </select>
+        </FField>
         {inp('client', 'text', 'Client', true)}
       </FRow>
       <FRow>
         {inp('intervenant', 'text', 'Intervenant', true)}
-        {inp('date_intervention', 'date', 'Date intervention')}
+        {inp('date_compte_rendu', 'date', 'Date compte rendu')}
       </FRow>
+
+      {selectedSav && <SavDemandeRecap sav={selectedSav} />}
 
       <SectionTitle icon={<Wrench size={12} />}>Intervention</SectionTitle>
       <div style={{ marginBottom: 14 }}>
         {ta('resume_intervention', 'Résumé de l\'intervention', true)}
       </div>
       <div style={{ marginBottom: 14 }}>
-        {ta('actions_realisees', 'Actions réalisées (liste des travaux)')}
+        {ta('actions_realisees', 'Actions réalisées')}
       </div>
       <div style={{ marginBottom: 14 }}>
-        {ta('pieces_remplacees', 'Pièces remplacées / matériaux utilisés')}
+        {ta('actions_a_prevoir', 'Actions à prévoir')}
       </div>
+      <FRow>
+        <FField label="Statut après intervention">
+          <select value={form.statut_apres_intervention} onChange={e => set('statut_apres_intervention', e.target.value)} style={SELECT_STYLE}>
+            <option value="">— Choisir —</option>
+            {STATUT_APRES_INTERVENTION.map(s => (
+              <option key={s.value} value={s.value}>{s.label}</option>
+            ))}
+          </select>
+        </FField>
+        {inp('pieces_remplacees', 'text', 'Pièces / matériaux')}
+      </FRow>
       <FRow>
         {inp('cout_intervention', 'number', 'Coût intervention (MAD)')}
       </FRow>
       <div style={{ marginBottom: 14 }}>
         {ta('recommandations', 'Recommandations pour le client')}
+      </div>
+      <div style={{ marginBottom: 14 }}>
+        {ta('observation', 'Observations')}
       </div>
 
       <SectionTitle icon={<CheckCircle size={12} />}>Validation</SectionTitle>
@@ -210,21 +391,20 @@ function FormulaireCompteRendu({ initial, onSave, onCancel }) {
       </FRow>
 
       <SectionTitle icon={<Archive size={12} />}>Photos & Signature</SectionTitle>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginBottom: 20 }}>
-        <div style={{ border: '2px dashed var(--border)', borderRadius: 8, padding: 16, textAlign: 'center', color: 'var(--text-3)', fontSize: '0.83rem' }}>
-          <Archive size={18} style={{ margin: '0 auto 8px', display: 'block' }} />
-          Photos avant / après
-        </div>
-        <div style={{ border: '2px dashed var(--border)', borderRadius: 8, padding: 16, textAlign: 'center', color: 'var(--text-3)', fontSize: '0.83rem' }}>
-          <User size={18} style={{ margin: '0 auto 8px', display: 'block' }} />
-          Signature client
-        </div>
-      </div>
+      <SavReportMediaFields
+        initial={initial}
+        mediaDraft={mediaDraft}
+        onMediaChange={setMediaDraft}
+        disabled={saving}
+        onSignatureCaptured={() => {
+          if (form.validation_client === 'En attente') set('validation_client', 'Validé par client');
+        }}
+      />
 
       <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
         <button type="button" className="btn btn-secondary" onClick={onCancel}>Annuler</button>
-        <button type="submit" className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Plus size={14} /> {initial && initial.id ? 'Enregistrer' : 'Créer le compte rendu'}
+        <button type="submit" className="btn btn-primary" disabled={saving} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Plus size={14} /> {saving ? 'Enregistrement...' : (initial?.id ? 'Enregistrer' : 'Créer le compte rendu')}
         </button>
       </div>
     </form>
@@ -233,7 +413,7 @@ function FormulaireCompteRendu({ initial, onSave, onCancel }) {
 
 // ── Page Détail CR ───────────────────────────────────────────────────────────
 
-function DetailCR({ cr, onBack, onEdit }) {
+function DetailCR({ cr, sav, onBack, onEdit, onPdf, pdfLoading }) {
   return (
     <div className="animate-fade-in">
       <div style={{ marginBottom: 20 }}>
@@ -253,8 +433,8 @@ function DetailCR({ cr, onBack, onEdit }) {
             <button className="btn btn-secondary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={onEdit}>
               <Edit2 size={13} /> Modifier
             </button>
-            <button className="btn btn-ghost btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              <Download size={13} /> PDF
+            <button type="button" className="btn btn-ghost btn-sm" disabled={pdfLoading} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={onPdf}>
+              <Download size={13} /> {pdfLoading ? 'PDF...' : 'PDF'}
             </button>
             <button className="btn btn-primary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
               <Send size={13} /> Envoyer client
@@ -266,16 +446,19 @@ function DetailCR({ cr, onBack, onEdit }) {
       {/* KPI row */}
       <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', marginBottom: 20 }}>
         <KpiCard icon={<User size={17} />}        label="Intervenant"        value={cr.intervenant || '—'}                                  color="blue"   />
-        <KpiCard icon={<Calendar size={17} />}    label="Date intervention"  value={cr.date_intervention || '—'}                            color="grey"   />
+        <KpiCard icon={<Calendar size={17} />}    label="Date compte rendu"  value={cr.date_compte_rendu || cr.date_intervention || '—'}     color="grey"   />
         <KpiCard icon={<DollarSign size={17} />}  label="Coût intervention"  value={(cr.cout_intervention || 0).toLocaleString('fr-MA') + ' MAD'} color="orange" />
+        <KpiCard icon={<CheckCircle size={17} />} label="Statut après interv." value={statutApresInterventionLabel(cr.statut_apres_intervention)} color="blue" />
         <KpiCard icon={<CheckCircle size={17} />} label="Validation client"  value={cr.validation_client || '—'}                            color={cr.validation_client === 'Validé par client' ? 'green' : 'grey'} />
       </div>
+
+      {sav && <SavDemandeRecap sav={sav} />}
 
       {/* Contenu */}
       <div className="card">
         <SectionTitle icon={<FileText size={13} />}>Détail de l'intervention</SectionTitle>
 
-        {cr.sav_lie && (
+        {!sav && cr.sav_lie && (
           <div style={{ marginBottom: 14 }}>
             <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 4 }}>SAV lié</div>
             <span style={{ fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--red)' }}>{cr.sav_lie}</span>
@@ -296,6 +479,27 @@ function DetailCR({ cr, onBack, onEdit }) {
           </div>
         )}
 
+        {cr.actions_a_prevoir && (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Actions à prévoir</div>
+            <p style={{ fontSize: '0.88rem', lineHeight: 1.6, color: 'var(--text-2)' }}>{cr.actions_a_prevoir}</p>
+          </div>
+        )}
+
+        {cr.statut_apres_intervention && (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Statut après intervention</div>
+            <p style={{ fontSize: '0.88rem', lineHeight: 1.6, color: 'var(--text-2)' }}>{statutApresInterventionLabel(cr.statut_apres_intervention)}</p>
+          </div>
+        )}
+
+        {cr.observation && (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Observations</div>
+            <p style={{ fontSize: '0.88rem', lineHeight: 1.6, color: 'var(--text-2)' }}>{cr.observation}</p>
+          </div>
+        )}
+
         {cr.pieces_remplacees && (
           <div style={{ marginBottom: 16 }}>
             <div style={{ fontSize: '0.7rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 6 }}>Pièces remplacées</div>
@@ -310,16 +514,7 @@ function DetailCR({ cr, onBack, onEdit }) {
           </div>
         )}
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12, marginTop: 20 }}>
-          <div style={{ border: '2px dashed var(--border)', borderRadius: 8, padding: 24, textAlign: 'center', color: 'var(--text-3)', fontSize: '0.83rem' }}>
-            <Archive size={20} style={{ margin: '0 auto 8px', display: 'block' }} />
-            Photos avant / après
-          </div>
-          <div style={{ border: '2px dashed var(--border)', borderRadius: 8, padding: 24, textAlign: 'center', color: 'var(--text-3)', fontSize: '0.83rem' }}>
-            <User size={20} style={{ margin: '0 auto 8px', display: 'block' }} />
-            Signature client — {cr.validation_client}
-          </div>
-        </div>
+        <CrMediaGallery cr={cr} />
       </div>
     </div>
   );
@@ -328,40 +523,107 @@ function DetailCR({ cr, onBack, onEdit }) {
 // ── Module principal ComptesRendusSAV ────────────────────────────────────────
 
 export default function ComptesRendusSAV({ prefillSAV }) {
-  const [crList, setCrList] = useState([]);
+  const {
+    records: crList, loading, saving, error, configured, load,
+    create, update, remove, fetchOne, generateSavReportRef,
+  } = useSavReports();
+  const { records: savRequests } = useSavRequests();
+  const [projects, setProjects] = useState([]);
   const [search, setSearch] = useState('');
   const [filterStatut, setFilterStatut] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editCR, setEditCR] = useState(null);
   const [detailCR, setDetailCR] = useState(null);
+  const [detailSav, setDetailSav] = useState(null);
   const [showFilters, setShowFilters] = useState(false);
+  const [pdfLoadingId, setPdfLoadingId] = useState(null);
 
-  const [usedPrefill, setUsedPrefill] = useState(false);
-  if (prefillSAV && !usedPrefill) {
-    setUsedPrefill(true);
-    setEditCR({ ...EMPTY_FORM, sav_lie: prefillSAV.ref || '', client: prefillSAV.client || '', projet_lie: prefillSAV.projet_lie || '' });
+  useEffect(() => {
+    if (!configured) return;
+    listProjects().then(setProjects).catch(() => {});
+  }, [configured]);
+
+  useEffect(() => {
+    if (!prefillSAV) return;
+    setEditCR({
+      ...EMPTY_FORM,
+      sav_request_id: prefillSAV.id || '',
+      sav_lie: prefillSAV.ref || '',
+      project_id: prefillSAV.project_id || '',
+      client: prefillSAV.client || '',
+      projet_lie: prefillSAV.projet_lie || '',
+    });
     setShowModal(true);
-  }
+  }, [prefillSAV]);
 
-  const handleSave = useCallback((data) => {
-    if (editCR && editCR.id) {
-      setCrList(prev => prev.map(c => c.id === editCR.id ? { ...c, ...data } : c));
-    } else {
-      setCrList(prev => [...prev, { ...data, id: Date.now(), ref: genRefCR() }]);
+  const handleSave = useCallback(async (data) => {
+    const { _media, ...formData } = data;
+    const payload = {
+      ...formData,
+      date_compte_rendu: formData.date_compte_rendu || formData.date_intervention,
+    };
+    const result = editCR?.id
+      ? await update(editCR.id, { ...payload, id: editCR.id, ref: editCR.ref })
+      : await create({ ...payload, ref: payload.ref || await generateSavReportRef().catch(() => '') });
+    if (!result.success) {
+      alert(result.error || 'Erreur enregistrement.');
+      return;
+    }
+    const reportId = result.data?.id || editCR?.id;
+    if (reportId && _media) {
+      try {
+        await persistSavReportMedia(reportId, {
+          ..._media,
+          signature_client_nom: _media.signature_client_nom || formData.client,
+        });
+      } catch (err) {
+        alert(err.message || 'Compte rendu enregistré, mais erreur upload photos/signature.');
+      }
     }
     setShowModal(false);
     setEditCR(null);
-  }, [editCR]);
+    load();
+  }, [editCR, create, update, generateSavReportRef, load]);
 
-  const handleDelete = useCallback((id) => {
-    if (window.confirm('Confirmer la suppression de ce compte rendu ?')) {
-      setCrList(prev => prev.filter(c => c.id !== id));
+  const handlePdf = useCallback(async (cr) => {
+    setPdfLoadingId(cr.id);
+    try {
+      const full = await fetchOne(cr.id);
+      await generateSavReportPdf(full);
+    } catch (err) {
+      alert(err.message || 'Erreur génération PDF.');
+    } finally {
+      setPdfLoadingId(null);
     }
-  }, []);
+  }, [fetchOne]);
+
+  const openDetail = useCallback(async (id) => {
+    try {
+      const full = await fetchOne(id);
+      setDetailCR(full);
+      if (full.sav_request_id) {
+        const sav = await getSavRequestById(full.sav_request_id).catch(() => null);
+        setDetailSav(sav);
+      } else {
+        setDetailSav(null);
+      }
+    } catch (e) {
+      alert(e.message || 'Erreur chargement.');
+    }
+  }, [fetchOne]);
+
+  const handleDelete = useCallback(async (id) => {
+    if (!window.confirm('Confirmer la suppression de ce compte rendu ?')) return;
+    const result = await remove(id);
+    if (!result.success) alert(result.error || 'Erreur suppression.');
+  }, [remove]);
 
   const filtered = crList.filter(c => {
     const q = search.toLowerCase();
-    const matchQ = !q || c.client.toLowerCase().includes(q) || c.ref.toLowerCase().includes(q) || (c.intervenant || '').toLowerCase().includes(q);
+    const matchQ = !q
+      || (c.client || '').toLowerCase().includes(q)
+      || (c.ref || '').toLowerCase().includes(q)
+      || (c.intervenant || '').toLowerCase().includes(q);
     const matchS = !filterStatut || c.statut === filterStatut;
     return matchQ && matchS;
   });
@@ -374,19 +636,36 @@ export default function ComptesRendusSAV({ prefillSAV }) {
 
   // Détail
   if (detailCR) {
-    const c = crList.find(x => x.id === detailCR);
-    if (!c) { setDetailCR(null); return null; }
     return (
       <DetailCR
-        cr={c}
-        onBack={() => setDetailCR(null)}
-        onEdit={() => { setEditCR(c); setShowModal(true); setDetailCR(null); }}
+        cr={detailCR}
+        sav={detailSav}
+        pdfLoading={pdfLoadingId === detailCR.id}
+        onPdf={() => handlePdf(detailCR)}
+        onBack={() => { setDetailCR(null); setDetailSav(null); }}
+        onEdit={async () => {
+          try {
+            const full = await fetchOne(detailCR.id);
+            setEditCR(full);
+            setShowModal(true);
+            setDetailCR(null);
+            setDetailSav(null);
+          } catch (err) {
+            alert(err.message || 'Erreur chargement.');
+          }
+        }}
       />
     );
   }
 
   return (
     <div className="animate-fade-in">
+      {error && (
+        <div style={{ background: '#FFEBEE', color: 'var(--red)', borderRadius: 8, padding: '10px 14px', fontSize: '0.85rem', marginBottom: 16 }}>
+          {error}
+          <button type="button" className="btn btn-ghost btn-sm" onClick={load} style={{ marginLeft: 8 }}>Réessayer</button>
+        </div>
+      )}
       {/* Header */}
       <div className="page-header flex-between" style={{ flexWrap: 'wrap', gap: 10 }}>
         <div>
@@ -443,7 +722,9 @@ export default function ComptesRendusSAV({ prefillSAV }) {
 
       {/* Tableau */}
       <div className="card" style={{ padding: 0 }}>
-        {filtered.length === 0 ? (
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: 48, color: 'var(--text-3)' }}>Chargement...</div>
+        ) : filtered.length === 0 ? (
           <EmptyState icon={<FileText size={24} />} title="Aucun compte rendu" sub="Créez votre premier compte rendu d'intervention SAV" action="Nouveau compte rendu" onAction={() => { setEditCR(null); setShowModal(true); }} />
         ) : (
           <div className="table-wrap">
@@ -457,6 +738,7 @@ export default function ComptesRendusSAV({ prefillSAV }) {
                   <th>Date</th>
                   <th>Validation</th>
                   <th>Coût (MAD)</th>
+                  <th>Statut interv.</th>
                   <th>Statut</th>
                   <th>Actions</th>
                 </tr>
@@ -468,19 +750,20 @@ export default function ComptesRendusSAV({ prefillSAV }) {
                     <td style={{ fontWeight: 600 }}>{c.client}</td>
                     <td>{c.projet_lie || '—'}</td>
                     <td>{c.intervenant || '—'}</td>
-                    <td style={{ whiteSpace: 'nowrap' }}>{c.date_intervention || '—'}</td>
+                    <td style={{ whiteSpace: 'nowrap' }}>{c.date_compte_rendu || c.date_intervention || '—'}</td>
                     <td>
                       <span className={`badge ${c.validation_client === 'Validé par client' ? 'badge-green' : c.validation_client === 'Refusé par client' ? 'badge-red' : 'badge-grey'}`}>
                         {c.validation_client}
                       </span>
                     </td>
                     <td style={{ whiteSpace: 'nowrap' }}>{(c.cout_intervention || 0).toLocaleString('fr-MA')}</td>
+                    <td style={{ fontSize: '0.8rem' }}>{statutApresInterventionLabel(c.statut_apres_intervention)}</td>
                     <td><Badge type={c.statut} /></td>
                     <td>
                       <div style={{ display: 'flex', gap: 4 }}>
-                        <button className="btn btn-secondary btn-sm" title="Voir" onClick={() => setDetailCR(c.id)}><Eye size={13} /></button>
-                        <button className="btn btn-ghost btn-sm" title="Modifier" onClick={() => { setEditCR(c); setShowModal(true); }}><Edit2 size={13} /></button>
-                        <button className="btn btn-ghost btn-sm" title="PDF" style={{ color: 'var(--text-3)' }}><Download size={13} /></button>
+                        <button type="button" className="btn btn-secondary btn-sm" title="Voir" onClick={() => openDetail(c.id)}><Eye size={13} /></button>
+                        <button type="button" className="btn btn-ghost btn-sm" title="Modifier" onClick={async () => { try { setEditCR(await fetchOne(c.id)); setShowModal(true); } catch (e) { alert(e.message); } }}><Edit2 size={13} /></button>
+                        <button type="button" className="btn btn-ghost btn-sm" title="PDF" disabled={pdfLoadingId === c.id} onClick={() => handlePdf(c)} style={{ color: 'var(--text-3)' }}><Download size={13} /></button>
                         <button className="btn btn-ghost btn-sm" title="Envoyer" style={{ color: '#1565C0' }}><Send size={13} /></button>
                         <button className="btn btn-ghost btn-sm" title="Supprimer" onClick={() => handleDelete(c.id)} style={{ color: 'var(--red)' }}><Trash2 size={13} /></button>
                       </div>
@@ -495,7 +778,7 @@ export default function ComptesRendusSAV({ prefillSAV }) {
 
       {/* Modal formulaire */}
       <Modal open={showModal} onClose={() => { setShowModal(false); setEditCR(null); }} title={editCR && editCR.id ? 'Modifier le compte rendu' : 'Nouveau compte rendu SAV'} width={760}>
-        <FormulaireCompteRendu initial={editCR} onSave={handleSave} onCancel={() => { setShowModal(false); setEditCR(null); }} />
+        <FormulaireCompteRendu initial={editCR} onSave={handleSave} onCancel={() => { setShowModal(false); setEditCR(null); }} saving={saving} savRequests={savRequests} projects={projects} />
       </Modal>
     </div>
   );

@@ -6,6 +6,7 @@
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
+    "start:ocr": "node ocr-server.js",
     "dev": "nodemon index.js",
     "migrate": "node db/migrate.js",
     "seed": "node db/seed.js"

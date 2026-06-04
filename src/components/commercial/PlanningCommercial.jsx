@@ -1,5 +1,8 @@
-import { useState, useEffect, useRef } from 'react';
-import { CalendarRange, Plus, ChevronLeft, ChevronRight, Clock, MapPin, User, CheckCircle, XCircle, AlertCircle, Edit2, Trash2, FileText, Zap } from 'lucide-react';
+import { useState, useEffect, useRef, useMemo } from 'react';
+import { CalendarRange, Plus, ChevronLeft, ChevronRight, Clock, MapPin, User, CheckCircle, XCircle, AlertCircle, Edit2, Trash2, FileText, Zap, Loader2 } from 'lucide-react';
+import { createCompteRendu } from '../../services/api';
+import { usePlanningCommercial } from '../../hooks/usePlanningCommercial';
+import { TYPE_PROJET_VALUES, TYPE_PROJET_LABEL } from '../../constants/commercial';
 
 function EmptyState({ icon, title, sub }) {
   return (
@@ -12,25 +15,15 @@ function EmptyState({ icon, title, sub }) {
     </div>
   );
 }
-import { getRDV, createRDV, updateRDV, deleteRDV, getProspects, createCompteRendu } from '../../services/api';
-import { TYPE_PROJET_VALUES, TYPE_PROJET_LABEL } from '../../constants/commercial';
 
 /* ── Constants ── */
 const TYPE_RDV = ['Presentation', 'Visite chantier', 'Negociation', 'Signature', 'Suivi', 'Autre'];
-const STATUTS = ['planifie', 'confirme', 'realise', 'annule', 'reporte'];
-const STATUT_BADGE = { planifie: 'badge-blue', confirme: 'badge-green', realise: 'badge-grey', annule: 'badge-red', reporte: 'badge-orange' };
-const STATUT_LABEL = { planifie: 'Planifie', confirme: 'Confirme', realise: 'Realise', annule: 'Annule', reporte: 'Reporte' };
 
 /* rdv_type: 'prevu' | 'rapide' */
 const EMPTY_PREVU  = { rdv_type: 'prevu',  titre: '', type_rdv: 'Presentation', date: '', heure: '09:00', lieu: '', prospect_id: '', type_projet: '', statut: 'planifie', notes: '', actions_suivantes: '' };
 const EMPTY_RAPIDE = { rdv_type: 'rapide', secteur: '', societe: '', date: '', heure: '09:00', lieu: '', notes: '', actions_suivantes: '' };
 
 const SECTEURS = ['Immobilier', 'BTP', 'Promotion immobiliere', 'Architecture', 'Travaux publics', 'Autre'];
-
-function isStale(rdv) {
-  if (!rdv.updated_at) return false;
-  return (Date.now() - new Date(rdv.updated_at).getTime()) > 48 * 60 * 60 * 1000 && rdv.statut === 'planifie';
-}
 
 /* Calendar pill color by rdv_type */
 function rdvPillStyle(r) {
@@ -68,12 +61,29 @@ function getCalendarDays(year, month) {
 }
 
 export default function PlanningCommercial() {
+  const {
+    records: rdvList,
+    prospectOptions,
+    loading,
+    saving,
+    error,
+    configured,
+    load,
+    create,
+    update,
+    remove,
+    filterPlanningRecords,
+    computePlanningStats,
+    isPlanningStale,
+    PLANNING_STATUTS,
+    PLANNING_STATUT_LABEL,
+    PLANNING_STATUT_BADGE,
+  } = usePlanningCommercial();
+
   const today = new Date();
   const [year, setYear] = useState(today.getFullYear());
   const [month, setMonth] = useState(today.getMonth());
   const [view, setView] = useState('month');
-  const [rdvList, setRdvList] = useState([]);
-  const [prospects, setProspects] = useState([]);
 
   /* Modal state: null | 'prevu' | 'rapide' */
   const [modalType, setModalType] = useState(null);
@@ -81,24 +91,18 @@ export default function PlanningCommercial() {
   const [formPrevu, setFormPrevu] = useState(EMPTY_PREVU);
   const [formRapide, setFormRapide] = useState(EMPTY_RAPIDE);
   const [errors, setErrors] = useState({});
-  const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState('');
   const [filterStatut, setFilterStatut] = useState('');
   const [filterRdvType, setFilterRdvType] = useState('');
+  const [filterDate, setFilterDate] = useState('');
   const [search, setSearch] = useState('');
   const [selectedDay, setSelectedDay] = useState(null);
   const [crModalRdv, setCrModalRdv] = useState(null);
   const [crForm, setCrForm] = useState({ resume: '', decision: '', prochaine_action: '' });
 
-  useEffect(() => {
-    getRDV().then(d => { if (d && d.length) setRdvList(d); }).catch(() => {});
-    getProspects().then(d => { if (d && d.length) setProspects(d); }).catch(() => {});
-  }, []);
-
   function prospectLabel(id) {
-    const p = prospects.find(x => x.id === Number(id));
-    if (!p) return '-';
-    return p.type === 'btob' ? p.nom : `${p.prenom} ${p.nom}`;
+    const p = prospectOptions.find(x => String(x.id) === String(id));
+    return p?.label || '-';
   }
 
   function rdvDisplayTitle(r) {
@@ -153,55 +157,38 @@ export default function PlanningCommercial() {
   async function handleSavePrevu() {
     const e = validatePrevu();
     if (Object.keys(e).length) { setErrors(e); return; }
-    setSaving(true);
-    const payload = { ...formPrevu, rdv_type: 'prevu', prospect_id: formPrevu.prospect_id ? Number(formPrevu.prospect_id) : null };
-    const now = new Date().toISOString();
-    try {
-      if (editing) {
-        await updateRDV(editing.id, payload).catch(() => null);
-        setRdvList(prev => prev.map(r => r.id === editing.id ? { ...r, ...payload, updated_at: now } : r));
-        setToast('RDV prevu mis a jour.');
-        if (payload.statut === 'realise' && editing.statut !== 'realise') {
-          setCrModalRdv({ ...editing, ...payload });
-          setCrForm({ resume: '', decision: '', prochaine_action: payload.actions_suivantes || '' });
-        }
-      } else {
-        const created = await createRDV(payload).catch(() => null);
-        setRdvList(prev => [...prev, { id: created?.id || Date.now(), ...payload, updated_at: now }]);
-        setToast('RDV prevu cree.');
-      }
-    } catch (_) {}
-    setSaving(false);
+    const payload = { ...formPrevu, rdv_type: 'prevu', prospect_id: formPrevu.prospect_id || null };
+    const result = editing ? await update(editing.id, payload) : await create(payload);
+    if (!result.success) {
+      setToast(result.error || 'Erreur enregistrement.');
+      return;
+    }
+    setToast(editing ? 'RDV prevu mis a jour.' : 'RDV prevu cree.');
+    if (payload.statut === 'realise' && editing?.statut !== 'realise') {
+      setCrModalRdv({ ...editing, ...payload, id: editing?.id || result.data?.id });
+      setCrForm({ resume: '', decision: '', prochaine_action: payload.actions_suivantes || '' });
+    }
     closeModal();
   }
 
   async function handleSaveRapide() {
     const e = validateRapide();
     if (Object.keys(e).length) { setErrors(e); return; }
-    setSaving(true);
     const titre = formRapide.societe ? `Terrain - ${formRapide.societe}` : 'Nouveau RDV terrain';
-    const payload = { ...formRapide, rdv_type: 'rapide', titre, statut: 'planifie' };
-    const now = new Date().toISOString();
-    try {
-      if (editing) {
-        await updateRDV(editing.id, payload).catch(() => null);
-        setRdvList(prev => prev.map(r => r.id === editing.id ? { ...r, ...payload, updated_at: now } : r));
-        setToast('RDV terrain mis a jour.');
-      } else {
-        const created = await createRDV(payload).catch(() => null);
-        setRdvList(prev => [...prev, { id: created?.id || Date.now(), ...payload, updated_at: now }]);
-        setToast('RDV terrain cree.');
-      }
-    } catch (_) {}
-    setSaving(false);
+    const payload = { ...formRapide, rdv_type: 'rapide', titre, statut: editing?.statut || 'planifie' };
+    const result = editing ? await update(editing.id, payload) : await create(payload);
+    if (!result.success) {
+      setToast(result.error || 'Erreur enregistrement.');
+      return;
+    }
+    setToast(editing ? 'RDV terrain mis a jour.' : 'RDV terrain cree.');
     closeModal();
   }
 
   async function handleDelete(rdv) {
     if (!window.confirm('Supprimer ce RDV ?')) return;
-    try { await deleteRDV(rdv.id); } catch (_) {}
-    setRdvList(prev => prev.filter(r => r.id !== rdv.id));
-    setToast('RDV supprime.');
+    const result = await remove(rdv.id);
+    setToast(result.success ? 'RDV supprime.' : (result.error || 'Erreur.'));
   }
 
   async function saveCR() {
@@ -213,16 +200,19 @@ export default function PlanningCommercial() {
   }
 
   /* ── Filtering ── */
-  const filtered = rdvList.filter(r => {
-    if (filterStatut && r.statut !== filterStatut) return false;
-    if (filterRdvType && r.rdv_type !== filterRdvType) return false;
-    const q = search.toLowerCase();
-    if (q && !rdvDisplayTitle(r).toLowerCase().includes(q) && !prospectLabel(r.prospect_id).toLowerCase().includes(q)) return false;
-    return true;
-  });
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+
+  const filtered = useMemo(
+    () => filterPlanningRecords(rdvList, {
+      search,
+      statut: filterStatut,
+      rdvType: filterRdvType,
+      date: filterDate,
+    }),
+    [rdvList, search, filterStatut, filterRdvType, filterDate, filterPlanningRecords],
+  );
 
   const calDays = getCalendarDays(year, month);
-  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
 
   function rdvsForDay(d) {
     const dateStr = `${year}-${String(month + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
@@ -237,11 +227,12 @@ export default function PlanningCommercial() {
   }
 
   /* ── Stats ── */
-  const nbPlanifie = rdvList.filter(r => r.statut === 'planifie' || r.statut === 'confirme').length;
-  const nbRealise  = rdvList.filter(r => r.statut === 'realise').length;
-  const nbAujourdhui = rdvList.filter(r => r.date === todayStr && r.statut !== 'annule').length;
-  const nbStale    = rdvList.filter(isStale).length;
-  const nbTerrain  = rdvList.filter(r => r.rdv_type === 'rapide').length;
+  const stats = useMemo(() => computePlanningStats(rdvList, todayStr), [rdvList, todayStr, computePlanningStats]);
+  const nbPlanifie = stats.enAttente;
+  const nbRealise = stats.realises;
+  const nbAujourdhui = stats.aujourdhui;
+  const nbStale = stats.stagnants;
+  const nbTerrain = stats.terrain;
 
   return (
     <div className="animate-fade-in">
@@ -251,21 +242,34 @@ export default function PlanningCommercial() {
           <p className="page-subtitle">Rendez-vous structures et visites terrain</p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn btn-ghost btn-sm" style={{ border: '1.5px solid #455A64', color: '#455A64', display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700 }} onClick={() => openCreateRapide('')}>
+          <button className="btn btn-ghost btn-sm" style={{ border: '1.5px solid #455A64', color: '#455A64', display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700 }} onClick={() => openCreateRapide('')} disabled={loading || saving || !configured}>
             <Zap size={14} /> Nouveau RDV
           </button>
-          <button className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: 6 }} onClick={() => openCreatePrevu('')}>
+          <button className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: 6 }} onClick={() => openCreatePrevu('')} disabled={loading || saving || !configured}>
             <Plus size={14} /> RDV prevu
           </button>
         </div>
       </div>
 
+      {!configured && (
+        <div style={{ background: '#FFF3E0', border: '1px solid #FFB74D', borderRadius: 'var(--radius)', padding: '10px 16px', marginBottom: 16, fontSize: '0.85rem', color: '#E65100' }}>
+          Supabase non configuré — ajoutez VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY dans .env
+        </div>
+      )}
+
+      {error && !loading && (
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, background: '#FFEBEE', border: '1px solid #EF9A9A', borderRadius: 'var(--radius)', padding: '10px 16px', marginBottom: 16, fontSize: '0.85rem', color: '#C62828' }}>
+          <span>{error}</span>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={load}>Réessayer</button>
+        </div>
+      )}
+
       {/* Stats */}
       <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(165px, 1fr))' }}>
-        <div className="stat-card"><div className="stat-icon blue"><CalendarRange size={18} /></div><div className="stat-body"><div className="stat-value">{nbPlanifie}</div><div className="stat-label">A venir</div></div></div>
-        <div className="stat-card"><div className="stat-icon green"><CheckCircle size={18} /></div><div className="stat-body"><div className="stat-value">{nbRealise}</div><div className="stat-label">Realises</div></div></div>
-        <div className="stat-card"><div className="stat-icon"><Clock size={18} /></div><div className="stat-body"><div className="stat-value">{nbAujourdhui}</div><div className="stat-label">Aujourd'hui</div></div></div>
-        <div className="stat-card"><div className="stat-icon" style={{ background: '#ECEFF1' }}><Zap size={18} style={{ color: '#455A64' }} /></div><div className="stat-body"><div className="stat-value">{nbTerrain}</div><div className="stat-label">Terrain</div></div></div>
+        <div className="stat-card"><div className="stat-icon blue"><CalendarRange size={18} /></div><div className="stat-body"><div className="stat-value">{loading ? '—' : nbPlanifie}</div><div className="stat-label">A venir</div></div></div>
+        <div className="stat-card"><div className="stat-icon green"><CheckCircle size={18} /></div><div className="stat-body"><div className="stat-value">{loading ? '—' : nbRealise}</div><div className="stat-label">Realises</div></div></div>
+        <div className="stat-card"><div className="stat-icon"><Clock size={18} /></div><div className="stat-body"><div className="stat-value">{loading ? '—' : nbAujourdhui}</div><div className="stat-label">Aujourd'hui</div></div></div>
+        <div className="stat-card"><div className="stat-icon" style={{ background: '#ECEFF1' }}><Zap size={18} style={{ color: '#455A64' }} /></div><div className="stat-body"><div className="stat-value">{loading ? '—' : nbTerrain}</div><div className="stat-label">Terrain</div></div></div>
         {nbStale > 0 && <div className="stat-card"><div className="stat-icon orange"><AlertCircle size={18} /></div><div className="stat-body"><div className="stat-value" style={{ color: '#E65100' }}>{nbStale}</div><div className="stat-label">En retard</div></div></div>}
       </div>
 
@@ -286,13 +290,14 @@ export default function PlanningCommercial() {
           <input placeholder="Rechercher..." value={search} onChange={e => setSearch(e.target.value)} style={{ ...IS(false), width: 200 }} />
           <select value={filterStatut} onChange={e => setFilterStatut(e.target.value)} style={{ ...IS(false), width: 150 }}>
             <option value="">Tous les statuts</option>
-            {STATUTS.map(s => <option key={s} value={s}>{STATUT_LABEL[s]}</option>)}
+            {PLANNING_STATUTS.map(s => <option key={s} value={s}>{PLANNING_STATUT_LABEL[s]}</option>)}
           </select>
           <select value={filterRdvType} onChange={e => setFilterRdvType(e.target.value)} style={{ ...IS(false), width: 150 }}>
             <option value="">Tous types RDV</option>
             <option value="prevu">Prevu</option>
             <option value="rapide">Terrain</option>
           </select>
+          <input type="date" value={filterDate} onChange={e => setFilterDate(e.target.value)} style={{ ...IS(false), width: 150 }} />
           <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
             {['month', 'list'].map(v => (
               <button key={v} onClick={() => setView(v)} className={'btn ' + (view === v ? 'btn-primary' : 'btn-ghost btn-sm')} style={{ fontSize: '0.8rem' }}>
@@ -305,6 +310,13 @@ export default function PlanningCommercial() {
 
       {view === 'month' ? (
         <div className="card">
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: 32, color: 'var(--text-3)' }}>
+              <Loader2 size={28} style={{ animation: 'spin 1s linear infinite', margin: '0 auto 12px' }} />
+              <div style={{ fontSize: '0.88rem' }}>Chargement...</div>
+            </div>
+          ) : (
+          <>
           {/* Month nav */}
           <div className="flex-between mb-4">
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
@@ -364,7 +376,7 @@ export default function PlanningCommercial() {
                 <div style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.95rem', marginBottom: 10 }}>RDV du {selectedDay} {MONTHS_FR[month]}</div>
                 {dayRdvs.map((r, ri) => (
                   <div key={ri} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '8px 0', borderBottom: ri < dayRdvs.length - 1 ? '1px solid var(--border)' : 'none' }}>
-                    <span className={'badge ' + (STATUT_BADGE[r.statut] || 'badge-grey')}>{STATUT_LABEL[r.statut] || r.statut}</span>
+                    <span className={'badge ' + (PLANNING_STATUT_BADGE[r.statut] || 'badge-grey')}>{PLANNING_STATUT_LABEL[r.statut] || r.statut}</span>
                     <span className={'badge ' + (r.rdv_type === 'rapide' ? 'badge-grey' : 'badge-red')} style={{ background: r.rdv_type === 'rapide' ? '#455A64' : undefined, color: '#fff' }}>
                       {r.rdv_type === 'rapide' ? 'Terrain' : 'Prevu'}
                     </span>
@@ -383,11 +395,18 @@ export default function PlanningCommercial() {
               </div>
             );
           })()}
+          </>
+          )}
         </div>
       ) : (
         <div className="card">
           <div className="card-title"><CalendarRange size={16} /> Tous les RDV ({filtered.length})</div>
-          {filtered.length === 0 ? (
+          {loading ? (
+            <div style={{ textAlign: 'center', padding: 32, color: 'var(--text-3)' }}>
+              <Loader2 size={28} style={{ animation: 'spin 1s linear infinite', margin: '0 auto 12px' }} />
+              <div style={{ fontSize: '0.88rem' }}>Chargement...</div>
+            </div>
+          ) : filtered.length === 0 ? (
             <EmptyState
               icon={<CalendarRange size={22} style={{ color: 'var(--text-3)' }} />}
               title={rdvList.length === 0 ? "Aucun rendez-vous planifie" : "Aucun RDV pour ces filtres"}
@@ -401,9 +420,9 @@ export default function PlanningCommercial() {
               </thead>
               <tbody>
                 {filtered.map(r => (
-                  <tr key={r.id} style={{ background: isStale(r) ? 'rgba(230,81,0,0.04)' : undefined }}>
+                  <tr key={r.id} style={{ background: isPlanningStale(r) ? 'rgba(230,81,0,0.04)' : undefined }}>
                     <td style={{ fontWeight: 600 }}>
-                      {isStale(r) && <AlertCircle size={13} style={{ color: '#E65100', marginRight: 5, verticalAlign: 'middle' }} />}
+                      {isPlanningStale(r) && <AlertCircle size={13} style={{ color: '#E65100', marginRight: 5, verticalAlign: 'middle' }} />}
                       {rdvDisplayTitle(r)}
                       {r.rdv_type === 'prevu' && r.prospect_id && <div style={{ fontSize: '0.75rem', color: 'var(--text-3)', fontWeight: 400 }}>{prospectLabel(r.prospect_id)}</div>}
                     </td>
@@ -415,7 +434,7 @@ export default function PlanningCommercial() {
                     <td style={{ fontFamily: 'var(--font-head)', fontWeight: 700 }}>{r.date}</td>
                     <td>{r.heure || '-'}</td>
                     <td style={{ fontSize: '0.8rem', color: 'var(--text-2)' }}>{r.lieu || '-'}</td>
-                    <td><span className={'badge ' + (STATUT_BADGE[r.statut] || 'badge-grey')}>{STATUT_LABEL[r.statut] || r.statut}</span></td>
+                    <td><span className={'badge ' + (PLANNING_STATUT_BADGE[r.statut] || 'badge-grey')}>{PLANNING_STATUT_LABEL[r.statut] || r.statut}</span></td>
                     <td>
                       <div style={{ display: 'flex', gap: 4 }}>
                         <button className="btn btn-ghost btn-sm" onClick={() => openEdit(r)}><Edit2 size={13} /></button>
@@ -457,7 +476,7 @@ export default function PlanningCommercial() {
                 <div>
                   <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-2)', display: 'block', marginBottom: 5 }}>Statut</label>
                   <select style={IS(false)} value={formPrevu.statut} onChange={e => setFormPrevu(f => ({ ...f, statut: e.target.value }))}>
-                    {STATUTS.map(s => <option key={s} value={s}>{STATUT_LABEL[s]}</option>)}
+                    {PLANNING_STATUTS.map(s => <option key={s} value={s}>{PLANNING_STATUT_LABEL[s]}</option>)}
                   </select>
                 </div>
               </div>
@@ -480,7 +499,7 @@ export default function PlanningCommercial() {
                   <label style={{ fontSize: '0.8rem', fontWeight: 600, color: 'var(--text-2)', display: 'block', marginBottom: 5 }}>Prospect</label>
                   <select style={IS(false)} value={formPrevu.prospect_id} onChange={e => setFormPrevu(f => ({ ...f, prospect_id: e.target.value }))}>
                     <option value="">-- Selectionner --</option>
-                    {prospects.map(p => <option key={p.id} value={p.id}>{p.type === 'btob' ? p.nom : `${p.prenom} ${p.nom}`}</option>)}
+                    {prospectOptions.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
                   </select>
                 </div>
                 <div>

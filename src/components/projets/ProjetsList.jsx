@@ -9,9 +9,15 @@ import {
   X, ChevronLeft, RefreshCw, AlertCircle, CheckCircle, FileText,
   User, Calendar, MapPin, TrendingUp, BarChart3, Clock,
   AlertTriangle, Settings, Archive, ChevronDown, DollarSign,
-  HardHat, Users, ClipboardList, Layers, Gauge
+  HardHat, Users, ClipboardList, Layers, Gauge, Wrench
 } from 'lucide-react';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
+import { useProjects } from '../../hooks/useProjects';
+import { listClients, clientDisplayName } from '../../services/crm/clients';
+import { TYPE_PROJET_VALUES, TYPE_PROJET_LABEL } from '../../constants/commercial';
+import { isProjectLate } from '../../services/projects/projects';
+import { generateProjectRecapPdf } from '../../services/projects/projectPdf';
+import ProjectDocuments from './ProjectDocuments';
 
 // ── Shared primitives ───────────────────────────────────────────────────────
 
@@ -26,10 +32,12 @@ const TEXTAREA_STYLE = { ...INPUT_STYLE, minHeight: 80, resize: 'vertical' };
 function Badge({ type, children }) {
   const map = {
     brouillon:  { cls: 'badge-grey',   label: 'Brouillon'  },
-    planifie:   { cls: 'badge-blue',   label: 'Planifié'   },
     en_cours:   { cls: 'badge-orange', label: 'En cours'   },
-    suspendu:   { cls: 'badge-red',    label: 'Suspendu'   },
+    en_pause:   { cls: 'badge-blue',   label: 'En pause'   },
     termine:    { cls: 'badge-green',  label: 'Terminé'    },
+    annule:     { cls: 'badge-red',    label: 'Annulé'     },
+    planifie:   { cls: 'badge-blue',   label: 'Planifié'   },
+    suspendu:   { cls: 'badge-red',    label: 'Suspendu'   },
     en_retard:  { cls: 'badge-red',    label: 'En retard'  },
     haute:      { cls: 'badge-orange', label: 'Haute'      },
     normale:    { cls: 'badge-blue',   label: 'Normale'    },
@@ -129,11 +137,10 @@ function ProgressBar({ value }) {
 
 const STATUTS_PROJET = [
   { value: 'brouillon', label: 'Brouillon' },
-  { value: 'planifie',  label: 'Planifié'  },
   { value: 'en_cours',  label: 'En cours'  },
-  { value: 'suspendu',  label: 'Suspendu'  },
+  { value: 'en_pause',  label: 'En pause'  },
   { value: 'termine',   label: 'Terminé'   },
-  { value: 'en_retard', label: 'En retard' },
+  { value: 'annule',    label: 'Annulé'    },
 ];
 
 const PRIORITES = [
@@ -144,27 +151,41 @@ const PRIORITES = [
 ];
 
 const EMPTY_FORM = {
-  nom: '', client: '', chef_projet: '', chef_chantier: '', devis_lie: '',
+  nom: '', client_id: '', client: '', type_projet: '',
+  chef_projet: '', chef_chantier: '', devis_lie: '',
   budget_approuve: '', date_debut: '', date_fin_prevue: '', description: '',
-  ville: '', adresse_chantier: '', statut: 'planifie', priorite: 'normale',
+  ville: '', adresse_chantier: '', statut: 'brouillon', priorite: 'normale',
   avancement: 0, observations: '',
 };
 
-function genRef() {
-  return 'PRJ-' + new Date().getFullYear() + '-' + String(Math.floor(Math.random() * 900) + 100);
-}
-
 // ── Formulaire Projet ────────────────────────────────────────────────────────
 
-function FormulaireProjet({ initial, onSave, onCancel }) {
-  const [form, setForm] = useState(initial || EMPTY_FORM);
+function FormulaireProjet({ initial, onSave, onCancel, saving, clients = [] }) {
+  const [form, setForm] = useState(() => {
+    if (!initial) return { ...EMPTY_FORM };
+    return {
+      ...EMPTY_FORM,
+      ...initial,
+      client_id: initial.client_id || '',
+      client: initial.client || initial.client_nom || '',
+    };
+  });
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
   const [errors, setErrors] = useState({});
+
+  function onClientChange(clientId) {
+    const cl = clients.find(c => String(c.id) === String(clientId));
+    setForm(p => ({
+      ...p,
+      client_id: clientId,
+      client: cl ? clientDisplayName(cl) : '',
+    }));
+  }
 
   function validate() {
     const e = {};
     if (!form.nom.trim()) e.nom = 'Requis';
-    if (!form.client.trim()) e.client = 'Requis';
+    if (!form.client_id && !form.client?.trim()) e.client_id = 'Requis';
     return e;
   }
 
@@ -172,7 +193,13 @@ function FormulaireProjet({ initial, onSave, onCancel }) {
     ev.preventDefault();
     const e = validate();
     if (Object.keys(e).length) { setErrors(e); return; }
-    onSave({ ...form, avancement: Number(form.avancement) || 0, budget_approuve: Number(form.budget_approuve) || 0 });
+    const cl = clients.find(c => String(c.id) === String(form.client_id));
+    onSave({
+      ...form,
+      client_nom: cl ? clientDisplayName(cl) : (form.client || '').trim(),
+      avancement: Number(form.avancement) || 0,
+      budget_approuve: Number(form.budget_approuve) || 0,
+    });
   }
 
   const inp = (k, type, ph, req) => (
@@ -186,8 +213,34 @@ function FormulaireProjet({ initial, onSave, onCancel }) {
   return (
     <form onSubmit={handleSubmit}>
       <SectionTitle icon={<FileText size={12} />}>Informations générales</SectionTitle>
-      <FRow>{inp('nom', 'text', 'Nom du projet', true)}{inp('client', 'text', 'Client (lié CRM)', true)}</FRow>
-      <FRow>{inp('chef_projet', 'text', 'Chef de projet')}{inp('chef_chantier', 'text', 'Chef de chantier')}</FRow>
+      <FRow>
+        {inp('nom', 'text', 'Nom du projet', true)}
+        <FField label="Client (CRM)" required>
+          <select
+            value={form.client_id}
+            onChange={e => onClientChange(e.target.value)}
+            style={{ ...SELECT_STYLE, borderColor: errors.client_id ? 'var(--red)' : 'var(--border)' }}
+          >
+            <option value="">Choisir un client...</option>
+            {clients.map(c => (
+              <option key={c.id} value={c.id}>{clientDisplayName(c) || c.nom}</option>
+            ))}
+          </select>
+          {errors.client_id && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.client_id}</div>}
+        </FField>
+      </FRow>
+      <FRow>
+        <FField label="Type de projet">
+          <select value={form.type_projet} onChange={e => set('type_projet', e.target.value)} style={SELECT_STYLE}>
+            <option value="">—</option>
+            {TYPE_PROJET_VALUES.map(t => (
+              <option key={t} value={t}>{TYPE_PROJET_LABEL[t] || t}</option>
+            ))}
+          </select>
+        </FField>
+        {inp('chef_projet', 'text', 'Responsable')}
+        {inp('chef_chantier', 'text', 'Chef de chantier')}
+      </FRow>
       <FRow>{inp('devis_lie', 'text', 'Référence devis lié')}{inp('budget_approuve', 'number', 'Budget approuvé (MAD)')}</FRow>
       <FRow>{inp('date_debut', 'date', 'Date début')}{inp('date_fin_prevue', 'date', 'Date fin prévue')}</FRow>
       <div style={{ marginBottom: 14 }}>
@@ -222,15 +275,14 @@ function FormulaireProjet({ initial, onSave, onCancel }) {
       </div>
 
       <SectionTitle icon={<Archive size={12} />}>Documents</SectionTitle>
-      <div style={{ background: 'var(--surface-2)', border: '2px dashed var(--border)', borderRadius: 8, padding: '18px 20px', marginBottom: 20, color: 'var(--text-3)', fontSize: '0.84rem', textAlign: 'center' }}>
-        <Archive size={18} style={{ margin: '0 auto 8px', display: 'block' }} />
-        Plans, devis, photos, documents chantier — Liaison avec le module Documents à connecter
+      <div style={{ marginBottom: 20 }}>
+        <ProjectDocuments projectId={initial?.id} compact />
       </div>
 
       <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
         <button type="button" className="btn btn-secondary" onClick={onCancel}>Annuler</button>
-        <button type="submit" className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Plus size={14} /> {initial ? 'Enregistrer' : 'Créer le projet'}
+        <button type="submit" className="btn btn-primary" disabled={saving} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Plus size={14} /> {saving ? 'Enregistrement...' : (initial?.id ? 'Enregistrer' : 'Créer le projet')}
         </button>
       </div>
     </form>
@@ -239,7 +291,7 @@ function FormulaireProjet({ initial, onSave, onCancel }) {
 
 // ── Page Détail Projet ───────────────────────────────────────────────────────
 
-function DetailProjet({ projet, onBack, onEdit, onAddSAV }) {
+function DetailProjet({ projet, onBack, onEdit, onCreateSAV }) {
   const [activeTab, setActiveTab] = useState('general');
 
   const tabs = [
@@ -278,12 +330,14 @@ function DetailProjet({ projet, onBack, onEdit, onAddSAV }) {
             <button className="btn btn-secondary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={onEdit}>
               <Edit2 size={13} /> Modifier
             </button>
-            <button className="btn btn-primary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => onAddSAV(projet)}>
-              <AlertCircle size={13} /> Nouveau SAV
+            <button className="btn btn-ghost btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => generateProjectRecapPdf(projet).catch((e) => alert(e.message || 'Erreur PDF'))}>
+              <Download size={13} /> PDF récap
             </button>
-            <button className="btn btn-ghost btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              <Download size={13} /> Fiche projet
-            </button>
+            {onCreateSAV && (
+              <button type="button" className="btn btn-primary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => onCreateSAV(projet)}>
+                <Wrench size={13} /> Demande SAV
+              </button>
+            )}
           </div>
         </div>
       </div>
@@ -316,7 +370,8 @@ function DetailProjet({ projet, onBack, onEdit, onAddSAV }) {
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 16, marginBottom: 20 }}>
             {[
               ['Client', projet.client],
-              ['Chef de projet', projet.chef_projet || '—'],
+              ['Type', projet.type_projet ? (TYPE_PROJET_LABEL[projet.type_projet] || projet.type_projet) : '—'],
+              ['Responsable', projet.chef_projet || projet.responsable || '—'],
               ['Chef de chantier', projet.chef_chantier || '—'],
               ['Devis lié', projet.devis_lie || '—'],
               ['Ville', projet.ville || '—'],
@@ -395,17 +450,7 @@ function DetailProjet({ projet, onBack, onEdit, onAddSAV }) {
       {activeTab === 'documents' && (
         <div className="card">
           <SectionTitle icon={<Archive size={13} />}>Documents & Photos</SectionTitle>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12 }}>
-            {['Plans', 'Devis', 'Photos chantier', 'Documents contractuels'].map(cat => (
-              <div key={cat} style={{ border: '2px dashed var(--border)', borderRadius: 8, padding: 16, textAlign: 'center', cursor: 'pointer' }}
-                onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--red)'}
-                onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}>
-                <FileText size={20} style={{ color: 'var(--text-3)', margin: '0 auto 8px', display: 'block' }} />
-                <div style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--text-2)' }}>{cat}</div>
-                <div style={{ fontSize: '0.7rem', color: 'var(--text-3)', marginTop: 4 }}>0 fichier</div>
-              </div>
-            ))}
-          </div>
+          <ProjectDocuments projectId={projet.id} />
         </div>
       )}
 
@@ -430,62 +475,133 @@ function DetailProjet({ projet, onBack, onEdit, onAddSAV }) {
 
 // ── Module principal ProjetsList ─────────────────────────────────────────────
 
-export default function ProjetsList({ onGoSAV }) {
-  const [projets, setProjets] = useState([]);
+export default function ProjetsList({ onCreateSAV }) {
+  const {
+    records: projets,
+    loading,
+    saving,
+    error,
+    configured,
+    load,
+    create,
+    update,
+    remove,
+    fetchOne,
+    filterProjects,
+    computeProjectStats,
+    generateProjectRef,
+  } = useProjects();
+
+  const [clients, setClients] = useState([]);
   const [search, setSearch] = useState('');
   const [filterStatut, setFilterStatut] = useState('');
+  const [filterClient, setFilterClient] = useState('');
+  const [filterType, setFilterType] = useState('');
+  const [filterDate, setFilterDate] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editProjet, setEditProjet] = useState(null);
   const [detailProjet, setDetailProjet] = useState(null);
   const [showFilters, setShowFilters] = useState(false);
+  const [pdfLoadingId, setPdfLoadingId] = useState(null);
 
-  const handleSave = useCallback((data) => {
-    if (editProjet) {
-      setProjets(prev => prev.map(p => p.id === editProjet.id ? { ...p, ...data } : p));
-    } else {
-      setProjets(prev => [...prev, { ...data, id: Date.now(), ref: genRef(), budget_consomme: 0 }]);
+  useEffect(() => {
+    if (!configured) return;
+    listClients().then(setClients).catch(() => {});
+  }, [configured]);
+
+  const handleSave = useCallback(async (data) => {
+    const payload = editProjet?.id
+      ? { ...data, id: editProjet.id, ref: editProjet.ref || data.ref }
+      : { ...data, ref: data.ref || await generateProjectRef().catch(() => '') };
+    const result = editProjet?.id
+      ? await update(editProjet.id, payload)
+      : await create(payload);
+    if (!result.success) {
+      alert(result.error || 'Erreur enregistrement.');
+      return;
     }
     setShowModal(false);
     setEditProjet(null);
-  }, [editProjet]);
+  }, [editProjet, create, update, generateProjectRef]);
 
-  const handleDelete = useCallback((id) => {
-    if (window.confirm('Confirmer la suppression de ce projet ?')) {
-      setProjets(prev => prev.filter(p => p.id !== id));
+  const handleDelete = useCallback(async (id) => {
+    if (!window.confirm('Confirmer la suppression de ce projet ?')) return;
+    const result = await remove(id);
+    if (!result.success) alert(result.error || 'Erreur suppression.');
+  }, [remove]);
+
+  const openDetail = useCallback(async (p) => {
+    try {
+      const full = await fetchOne(p.id);
+      setDetailProjet(full);
+    } catch (err) {
+      alert(err.message || 'Impossible de charger le projet.');
     }
-  }, []);
+  }, [fetchOne]);
 
-  const filtered = projets.filter(p => {
-    const q = search.toLowerCase();
-    const matchQ = !q || p.nom.toLowerCase().includes(q) || (p.client || '').toLowerCase().includes(q) || p.ref.toLowerCase().includes(q);
-    const matchS = !filterStatut || p.statut === filterStatut;
-    return matchQ && matchS;
+  const handlePdf = useCallback(async (p) => {
+    setPdfLoadingId(p.id);
+    try {
+      const full = await fetchOne(p.id);
+      await generateProjectRecapPdf(full);
+    } catch (err) {
+      alert(err.message || 'Erreur génération PDF.');
+    } finally {
+      setPdfLoadingId(null);
+    }
+  }, [fetchOne]);
+
+  const openEdit = useCallback(async (p) => {
+    try {
+      const full = await fetchOne(p.id);
+      setEditProjet(full);
+      setShowModal(true);
+    } catch (err) {
+      alert(err.message || 'Impossible de charger le projet.');
+    }
+  }, [fetchOne]);
+
+  const filtered = filterProjects(projets, {
+    search,
+    statut: filterStatut,
+    client_id: filterClient,
+    type_projet: filterType,
+    date: filterDate,
   });
 
-  // KPIs
-  const total     = projets.length;
-  const enCours   = projets.filter(p => p.statut === 'en_cours').length;
-  const termines  = projets.filter(p => p.statut === 'termine').length;
-  const enRetard  = projets.filter(p => p.statut === 'en_retard').length;
-  const budgetTotal = projets.reduce((s, p) => s + (p.budget_approuve || 0), 0);
-  const budgetConso = projets.reduce((s, p) => s + (p.budget_consomme || 0), 0);
+  const kpi = computeProjectStats(projets);
+  const total = kpi.total;
+  const enCours = kpi.enCours;
+  const termines = kpi.termines;
+  const enRetard = kpi.enRetard;
+  const budgetTotal = kpi.budgetTotal;
+  const budgetConso = kpi.budgetConso;
 
-  // Détail projet
   if (detailProjet) {
-    const p = projets.find(x => x.id === detailProjet);
-    if (!p) { setDetailProjet(null); return null; }
     return (
       <DetailProjet
-        projet={p}
+        projet={detailProjet}
         onBack={() => setDetailProjet(null)}
-        onEdit={() => { setEditProjet(p); setShowModal(true); setDetailProjet(null); }}
-        onAddSAV={onGoSAV}
+        onEdit={() => { openEdit(detailProjet); setDetailProjet(null); }}
+        onCreateSAV={onCreateSAV}
       />
     );
   }
 
   return (
-    <div className="animate-fade-in">
+    <div className="projets-module animate-fade-in">
+      {!configured && (
+        <div style={{ background: '#FFF8E1', color: '#E65100', border: '1px solid rgba(230,81,0,0.25)', borderRadius: 8, padding: '10px 14px', fontSize: '0.85rem', marginBottom: 16 }}>
+          Supabase non configuré — configurez VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY dans .env
+        </div>
+      )}
+      {error && (
+        <div style={{ background: '#FFEBEE', color: 'var(--red)', border: '1px solid rgba(211,47,47,0.25)', borderRadius: 8, padding: '10px 14px', fontSize: '0.85rem', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
+          <AlertCircle size={15} /> {error}
+          <button type="button" className="btn btn-ghost btn-sm" onClick={load} style={{ marginLeft: 'auto' }}>Réessayer</button>
+        </div>
+      )}
+
       {/* Header */}
       <div className="page-header flex-between" style={{ flexWrap: 'wrap', gap: 10 }}>
         <div>
@@ -493,6 +609,9 @@ export default function ProjetsList({ onGoSAV }) {
           <p className="page-subtitle">Gestion des projets, budgets et suivi chantier.</p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <button className="btn btn-ghost btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={load} title="Actualiser">
+            <RefreshCw size={14} />
+          </button>
           <button className="btn btn-ghost btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => setShowFilters(f => !f)}>
             <Filter size={14} /> Filtres
           </button>
@@ -530,7 +649,20 @@ export default function ProjetsList({ onGoSAV }) {
               <option value="">Tous les statuts</option>
               {STATUTS_PROJET.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
             </select>
-            <button className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setFilterStatut(''); }}>Réinitialiser</button>
+            <select value={filterClient} onChange={e => setFilterClient(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 200 }}>
+              <option value="">Tous les clients</option>
+              {clients.map(c => (
+                <option key={c.id} value={c.id}>{clientDisplayName(c) || c.nom}</option>
+              ))}
+            </select>
+            <select value={filterType} onChange={e => setFilterType(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 180 }}>
+              <option value="">Tous les types</option>
+              {TYPE_PROJET_VALUES.map(t => (
+                <option key={t} value={t}>{TYPE_PROJET_LABEL[t] || t}</option>
+              ))}
+            </select>
+            <input type="date" value={filterDate} onChange={e => setFilterDate(e.target.value)} style={{ ...INPUT_STYLE, maxWidth: 160 }} title="Date début" />
+            <button className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setFilterStatut(''); setFilterClient(''); setFilterType(''); setFilterDate(''); }}>Réinitialiser</button>
           </div>
         </div>
       )}
@@ -547,56 +679,92 @@ export default function ProjetsList({ onGoSAV }) {
 
       {/* Tableau */}
       <div className="card" style={{ padding: 0 }}>
-        {filtered.length === 0 ? (
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: '48px 20px', color: 'var(--text-3)' }}>Chargement des projets...</div>
+        ) : filtered.length === 0 ? (
           <EmptyState icon={<FolderOpen size={24} />} title="Aucun projet" sub="Créez votre premier projet chantier" action="Ajouter un projet" onAction={() => { setEditProjet(null); setShowModal(true); }} />
         ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Réf.</th>
-                  <th>Nom projet</th>
-                  <th>Client</th>
-                  <th>Chef projet</th>
-                  <th>Budget</th>
-                  <th>Avancement</th>
-                  <th>Début</th>
-                  <th>Fin prévue</th>
-                  <th>Statut</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map(p => (
-                  <tr key={p.id}>
-                    <td style={{ fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--red)', whiteSpace: 'nowrap' }}>{p.ref}</td>
-                    <td style={{ fontWeight: 600 }}>{p.nom}</td>
-                    <td>{p.client || '—'}</td>
-                    <td>{p.chef_projet || '—'}</td>
-                    <td style={{ whiteSpace: 'nowrap' }}>{(p.budget_approuve || 0).toLocaleString('fr-MA')} MAD</td>
-                    <td style={{ minWidth: 130 }}><ProgressBar value={p.avancement} /></td>
-                    <td style={{ whiteSpace: 'nowrap' }}>{p.date_debut || '—'}</td>
-                    <td style={{ whiteSpace: 'nowrap' }}>{p.date_fin_prevue || '—'}</td>
-                    <td><Badge type={p.statut} /></td>
-                    <td>
-                      <div style={{ display: 'flex', gap: 4, flexWrap: 'nowrap' }}>
-                        <button className="btn btn-secondary btn-sm" title="Voir" onClick={() => setDetailProjet(p.id)}><Eye size={13} /></button>
-                        <button className="btn btn-ghost btn-sm" title="Modifier" onClick={() => { setEditProjet(p); setShowModal(true); }}><Edit2 size={13} /></button>
-                        <button className="btn btn-ghost btn-sm" title="SAV" onClick={() => onGoSAV && onGoSAV(p)} style={{ color: 'var(--text-3)' }}><AlertCircle size={13} /></button>
-                        <button className="btn btn-ghost btn-sm" title="Supprimer" onClick={() => handleDelete(p.id)} style={{ color: 'var(--red)' }}><Trash2 size={13} /></button>
-                      </div>
-                    </td>
+          <>
+            <div className="projets-table-desktop table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Réf.</th>
+                    <th>Nom projet</th>
+                    <th>Client</th>
+                    <th>Chef projet</th>
+                    <th>Budget</th>
+                    <th>Avancement</th>
+                    <th>Début</th>
+                    <th>Fin prévue</th>
+                    <th>Statut</th>
+                    <th>Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {filtered.map(p => (
+                    <tr key={p.id}>
+                      <td style={{ fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--red)', whiteSpace: 'nowrap' }}>{p.ref}</td>
+                      <td style={{ fontWeight: 600 }}>{p.nom}</td>
+                      <td>{p.client || '—'}</td>
+                      <td>{p.chef_projet || '—'}</td>
+                      <td style={{ whiteSpace: 'nowrap' }}>{(p.budget_approuve || 0).toLocaleString('fr-MA')} MAD</td>
+                      <td style={{ minWidth: 130 }}><ProgressBar value={p.avancement} /></td>
+                      <td style={{ whiteSpace: 'nowrap' }}>{p.date_debut || '—'}</td>
+                      <td style={{ whiteSpace: 'nowrap' }}>{p.date_fin_prevue || '—'}</td>
+                      <td>
+                        <Badge type={p.statut} />
+                        {isProjectLate(p) && <span style={{ marginLeft: 6, fontSize: '0.68rem', color: 'var(--red)', fontWeight: 700 }}>Retard</span>}
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', gap: 4, flexWrap: 'nowrap' }}>
+                          <button className="btn btn-secondary btn-sm" title="Voir" onClick={() => openDetail(p)}><Eye size={13} /></button>
+                          <button className="btn btn-ghost btn-sm" title="Modifier" onClick={() => openEdit(p)}><Edit2 size={13} /></button>
+                          <button className="btn btn-ghost btn-sm" title="PDF récap" disabled={pdfLoadingId === p.id} onClick={() => handlePdf(p)} style={{ color: 'var(--text-3)' }}><Download size={13} /></button>
+                          <button className="btn btn-ghost btn-sm" title="Supprimer" onClick={() => handleDelete(p.id)} style={{ color: 'var(--red)' }}><Trash2 size={13} /></button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="projets-mobile-list">
+              {filtered.map((p) => (
+                <div key={p.id} className="projet-mobile-card">
+                  <div className="projet-mobile-card-head">
+                    <div>
+                      <div className="projet-mobile-ref">{p.ref}</div>
+                      <div className="projet-mobile-nom">{p.nom}</div>
+                      <div className="projet-mobile-client">{p.client || '—'}</div>
+                    </div>
+                    <div className="projet-mobile-badges">
+                      <Badge type={p.statut} />
+                      {isProjectLate(p) && <span className="projet-mobile-retard">Retard</span>}
+                    </div>
+                  </div>
+                  <div className="projet-mobile-meta">
+                    <div><span>Avancement</span><ProgressBar value={p.avancement} /></div>
+                    <div><span>Budget</span><strong>{(p.budget_approuve || 0).toLocaleString('fr-MA')} MAD</strong></div>
+                    <div><span>Début</span><span>{p.date_debut || '—'}</span></div>
+                    <div><span>Fin prévue</span><span>{p.date_fin_prevue || '—'}</span></div>
+                  </div>
+                  <div className="projet-mobile-actions">
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => openDetail(p)}><Eye size={13} /> Voir</button>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => openEdit(p)}><Edit2 size={13} /> Modifier</button>
+                    <button type="button" className="btn btn-ghost btn-sm" disabled={pdfLoadingId === p.id} onClick={() => handlePdf(p)}><Download size={13} /> PDF</button>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleDelete(p.id)} style={{ color: 'var(--red)' }}><Trash2 size={13} /></button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </>
         )}
       </div>
 
       {/* Modal formulaire */}
       <Modal open={showModal} onClose={() => { setShowModal(false); setEditProjet(null); }} title={editProjet ? 'Modifier le projet' : 'Nouveau projet'} width={760}>
-        <FormulaireProjet initial={editProjet} onSave={handleSave} onCancel={() => { setShowModal(false); setEditProjet(null); }} />
+        <FormulaireProjet initial={editProjet} onSave={handleSave} onCancel={() => { setShowModal(false); setEditProjet(null); }} saving={saving} clients={clients} />
       </Modal>
     </div>
   );

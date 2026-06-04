@@ -2,9 +2,14 @@ import { useState, useEffect } from 'react';
 import {
   ChevronLeft, Plus, Trash2, Copy, AlertCircle,
   FileText, ChevronDown, ChevronUp, GripVertical, X,
-  CreditCard, Check
+  CreditCard, Check, Download
 } from 'lucide-react';
-import { getClients, getArticles, getCategories, getDevis } from '../../services/api';
+import { listClients } from '../../services/crm/clients';
+import { listArticles } from '../../services/crm/articles';
+import { listCategories } from '../../services/crm/categories';
+import { listCrmDevis, getCrmDevisById } from '../../services/crm/crmDevis';
+import { generateCrmFactureNumero } from '../../services/crm/crmFactures';
+import { generateFacturePdf } from '../../services/crm/facturePdf';
 
 /* ── Helpers ── */
 function fmtMAD(v) {
@@ -56,7 +61,6 @@ const STATUT_LABEL = {
   en_retard:            'En retard',
   annulee:              'Annulee',
 };
-const COMMERCIAUX  = ['Ahmed Bennani', 'Sara Idrissi', 'Youssef Alami', 'Nadia Tazi', 'Karim Fassi'];
 const MODALITES    = ['30 jours net', '60 jours net', 'Comptant', 'A la commande', '50% avance / 50% livraison', 'Sur devis'];
 const MODES_PAIEMENT = ['virement', 'cheque', 'especes', 'carte', 'autre'];
 
@@ -210,7 +214,7 @@ function PaiementRow({ p, onDelete }) {
 /* ════════════════════════════════════════════════
    FACTURE FORM — MAIN COMPONENT
    ════════════════════════════════════════════════ */
-export default function FactureForm({ facture, onBack, onSaved }) {
+export default function FactureForm({ facture, onBack, onSaved, saving = false }) {
   const isEdit = !!facture;
   const [form, setForm] = useState(() => facture ? {
     ...EMPTY_FACTURE, ...facture,
@@ -223,39 +227,61 @@ export default function FactureForm({ facture, onBack, onSaved }) {
   const [categories, setCategories] = useState([]);
   const [devisList, setDevisList]   = useState([]);
   const [errors, setErrors]         = useState({});
-  const [saving, setSaving]         = useState(false);
+  const [savingLocal, setSavingLocal] = useState(false);
   const [apiError, setApiError]     = useState('');
+  const isSaving = saving || savingLocal;
 
   /* Paiement form */
   const [showPaiementForm, setShowPaiementForm] = useState(false);
   const [newPaiement, setNewPaiement] = useState({ montant: '', date: today(), mode: 'virement', reference: '' });
 
   useEffect(() => {
-    Promise.all([getClients(), getArticles(), getCategories(), getDevis()]).then(([cl, ar, ca, dv]) => {
-      setClients(Array.isArray(cl) ? cl : []);
-      setArticles(Array.isArray(ar) ? ar : (ar?.data ?? []));
-      setCategories(Array.isArray(ca) ? ca : (ca?.data ?? []));
-      setDevisList(Array.isArray(dv) ? dv : (dv?.data ?? []));
+    Promise.all([listClients(), listArticles(), listCategories(), listCrmDevis()]).then(([cl, ar, ca, dv]) => {
+      setClients(cl || []);
+      setArticles(ar || []);
+      setCategories(ca || []);
+      setDevisList(dv || []);
     }).catch(() => {});
-  }, []);
+    if (!isEdit) {
+      generateCrmFactureNumero()
+        .then((num) => setForm(p => ({ ...p, numero: num })))
+        .catch(() => {});
+    }
+  }, [isEdit]);
 
   function setField(k, v) { setForm(p => ({ ...p, [k]: v })); }
 
   /* Auto-fill from devis */
-  function loadFromDevis(devisId) {
-    const dv = devisList.find(d => String(d.id) === String(devisId));
-    if (!dv) return;
-    setForm(p => ({
-      ...p,
-      devis_id: devisId,
-      client_id: dv.client_id || p.client_id,
-      commercial: dv.commercial || p.commercial,
-      type_projet: dv.type_projet || p.type_projet,
-      modalites_paiement: dv.modalites_paiement || p.modalites_paiement,
-      conditions: dv.conditions || p.conditions,
-      lignes: dv.lignes?.length ? dv.lignes.map(l => ({ ...EMPTY_LIGNE(), ...l, _id: Date.now() + Math.random() })) : p.lignes,
-      titre: dv.titre ? 'Facture — ' + dv.titre : p.titre,
-    }));
+  async function loadFromDevis(devisId) {
+    if (!devisId) {
+      setField('devis_id', '');
+      return;
+    }
+    try {
+      const dv = await getCrmDevisById(devisId);
+      setForm(p => ({
+        ...p,
+        devis_id: devisId,
+        client_id: dv.client_id || p.client_id,
+        commercial: dv.commercial || p.commercial,
+        type_projet: dv.type_projet || p.type_projet,
+        modalites_paiement: dv.modalites_paiement || p.modalites_paiement,
+        conditions: dv.conditions || p.conditions,
+        lignes: dv.lignes?.length ? dv.lignes.map(l => ({ ...EMPTY_LIGNE(), ...l, _id: Date.now() + Math.random() })) : p.lignes,
+        titre: dv.titre ? 'Facture — ' + dv.titre : p.titre,
+      }));
+    } catch {
+      const dv = devisList.find(d => String(d.id) === String(devisId));
+      if (dv) {
+        setForm(p => ({
+          ...p,
+          devis_id: devisId,
+          client_id: dv.client_id || p.client_id,
+          commercial: dv.commercial || p.commercial,
+          titre: dv.titre ? 'Facture — ' + dv.titre : p.titre,
+        }));
+      }
+    }
   }
 
   const selectedClient = clients.find(c => String(c.id) === String(form.client_id));
@@ -326,7 +352,7 @@ export default function FactureForm({ facture, onBack, onSaved }) {
     setApiError('');
     const errs = validate();
     if (Object.keys(errs).length) { setErrors(errs); return; }
-    setSaving(true);
+    setSavingLocal(true);
     try {
       const autoStatut = computeStatut();
       const payload = {
@@ -337,13 +363,38 @@ export default function FactureForm({ facture, onBack, onSaved }) {
         total_ttc: totalTTC,
         total_paye: totalPaye + acompteMontant,
         reste_a_payer: resteAPayer,
-        updated_at: new Date().toISOString(),
+        lignes: form.lignes,
+        paiements: form.paiements,
       };
-      onSaved(payload, isEdit);
+      const result = await onSaved(payload, isEdit);
+      if (result && result.success === false) {
+        setApiError(result.error || "Erreur lors de l'enregistrement.");
+      }
     } catch (err) {
       setApiError(err.message || "Erreur lors de l'enregistrement.");
     } finally {
-      setSaving(false);
+      setSavingLocal(false);
+    }
+  }
+
+  async function handlePdf() {
+    if (!isEdit || !facture?.id) return;
+    try {
+      const catMap = Object.fromEntries(categories.map(c => [String(c.id), c.nom]));
+      await generateFacturePdf({
+        ...form,
+        id: facture.id,
+        client: selectedClient,
+        client_nom: selectedClient ? [selectedClient.prenom, selectedClient.nom].filter(Boolean).join(' ') || selectedClient.nom : '',
+        devis_reference: devisList.find(d => String(d.id) === String(form.devis_id))?.reference || '',
+        total_ht: totalHT,
+        total_tva: totalTVA,
+        total_ttc: totalTTC,
+        total_paye: totalPaye + acompteMontant,
+        reste_a_payer: resteAPayer,
+      }, catMap);
+    } catch (err) {
+      setApiError(err.message || 'Erreur generation PDF.');
     }
   }
 
@@ -362,8 +413,8 @@ export default function FactureForm({ facture, onBack, onSaved }) {
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button type="button" className="btn btn-ghost" onClick={onBack}>Annuler</button>
-            <button type="submit" className="btn btn-primary" disabled={saving} style={{ minWidth: 130 }}>
-              {saving ? <Spinner /> : <><FileText size={14} /> {isEdit ? 'Enregistrer' : 'Creer facture'}</>}
+            <button type="submit" className="btn btn-primary" disabled={isSaving} style={{ minWidth: 130 }}>
+              {isSaving ? <Spinner /> : <><FileText size={14} /> {isEdit ? 'Enregistrer' : 'Creer facture'}</>}
             </button>
           </div>
         </div>
@@ -412,10 +463,7 @@ export default function FactureForm({ facture, onBack, onSaved }) {
 
                 <div className="form-group">
                   <Label>Commercial</Label>
-                  <select value={form.commercial} onChange={e => setField('commercial', e.target.value)} style={IS(false)}>
-                    <option value="">Choisir...</option>
-                    {COMMERCIAUX.map(c => <option key={c} value={c}>{c}</option>)}
-                  </select>
+                  <input type="text" value={form.commercial} onChange={e => setField('commercial', e.target.value)} placeholder="Nom du commercial" style={IS(false)} />
                 </div>
                 <div className="form-group">
                   <Label>Modalites de paiement</Label>
@@ -674,9 +722,14 @@ export default function FactureForm({ facture, onBack, onSaved }) {
             <div className="card" style={{ padding: '16px 18px' }}>
               <SectionTitle>Actions</SectionTitle>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <button type="submit" className="btn btn-primary" disabled={saving} style={{ justifyContent: 'center' }}>
-                  {saving ? <Spinner /> : <><FileText size={14} /> {isEdit ? 'Enregistrer' : 'Creer la facture'}</>}
+                <button type="submit" className="btn btn-primary" disabled={isSaving} style={{ justifyContent: 'center' }}>
+                  {isSaving ? <Spinner /> : <><FileText size={14} /> {isEdit ? 'Enregistrer' : 'Creer la facture'}</>}
                 </button>
+                {isEdit && (
+                  <button type="button" className="btn btn-ghost" onClick={handlePdf} style={{ justifyContent: 'center', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Download size={14} /> Telecharger PDF
+                  </button>
+                )}
                 <button type="button" className="btn btn-ghost" onClick={onBack} style={{ justifyContent: 'center' }}>Annuler</button>
               </div>
             </div>

@@ -4,7 +4,9 @@ import {
   User, Hash, Calendar, DollarSign, Percent,
   ChevronRight, RefreshCw
 } from 'lucide-react';
-import { getDevis, createFacture } from '../../services/api';
+import { listCrmDevis } from '../../services/crm/crmDevis';
+import { generateCrmAcompteNumero } from '../../services/crm/crmFactures';
+import { clientDisplayName } from '../../services/crm/clients';
 
 /* ── Helpers ── */
 function fmtMAD(v) {
@@ -19,8 +21,7 @@ function addDays(n) {
   return d.toISOString().slice(0, 10);
 }
 function genNumAcompte() {
-  const d = new Date();
-  return 'AC-' + d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(Math.floor(Math.random() * 9000) + 1000);
+  return '';
 }
 
 /* ── Input style helper ── */
@@ -112,33 +113,34 @@ function ModeBtn({ active, onClick, children }) {
 /* ════════════════════════════════════════════════
    FACTURE ACOMPTE — MAIN COMPONENT
    ════════════════════════════════════════════════ */
-export default function FactureAcompte({ onBack, onSaved }) {
+export default function FactureAcompte({ onBack, onCreated, createAcompte, fetchDevisSummary, configured = true, saving: savingProp = false }) {
   const [devisList, setDevisList] = useState([]);
   const [loadingDevis, setLoadingDevis] = useState(false);
+  const [devisSummary, setDevisSummary] = useState(null);
+  const [loadingSummary, setLoadingSummary] = useState(false);
 
   /* Form state */
   const [devisId, setDevisId]             = useState('');
-  const [numero, setNumero]               = useState(genNumAcompte());
+  const [numero, setNumero]               = useState('');
   const [dateEmission, setDateEmission]   = useState(today());
   const [dateEcheance, setDateEcheance]   = useState(addDays(15));
   const [devise, setDevise]               = useState('MAD');
-  const [mode, setMode]                   = useState('pct'); // 'pct' | 'ttc'
+  const [mode, setMode]                   = useState('pct');
   const [valeur, setValeur]               = useState('');
   const [errors, setErrors]               = useState({});
-  const [saving, setSaving]               = useState(false);
+  const [savingLocal, setSavingLocal]       = useState(false);
   const [apiError, setApiError]           = useState('');
+  const isSaving = savingProp || savingLocal;
 
-  /* Selected devis data */
-  const selectedDevis = devisList.find(d => String(d.id) === String(devisId));
+  const selectedDevis = devisSummary?.devis || devisList.find(d => String(d.id) === String(devisId));
   const devisTTC      = Number(selectedDevis?.total_ttc || 0);
   const devisHT       = Number(selectedDevis?.total_ht  || 0);
   const devisTVA      = Number(selectedDevis?.total_tva || 0);
   const devisTVAPct   = devisHT > 0 ? (devisTVA / devisHT) * 100 : 20;
 
-  /* Previous acomptes on selected devis (if stored in devis) */
-  const acomptesExistants = selectedDevis?.acomptes || [];
-  const totalAcomptesExist = acomptesExistants.reduce((s, a) => s + Number(a.montant || 0), 0);
-  const resteAvantCet     = Math.max(0, devisTTC - totalAcomptesExist);
+  const acomptesExistants = devisSummary?.acomptes || [];
+  const totalAcomptesExist = devisSummary?.dejaFacture ?? 0;
+  const resteAvantCet     = devisSummary?.resteAFacturer ?? Math.max(0, devisTTC - totalAcomptesExist);
 
   /* Computed acompte amounts */
   const valeurNum = Number(valeur) || 0;
@@ -155,12 +157,33 @@ export default function FactureAcompte({ onBack, onSaved }) {
 
   /* Load devis list */
   useEffect(() => {
+    if (!configured) return;
     setLoadingDevis(true);
-    getDevis()
-      .then(data => setDevisList(Array.isArray(data) ? data : (data?.data ?? [])))
-      .catch(() => {})
+    listCrmDevis()
+      .then((rows) => setDevisList(rows.filter((d) => Number(d.total_ttc) > 0)))
+      .catch(() => setDevisList([]))
       .finally(() => setLoadingDevis(false));
-  }, []);
+    generateCrmAcompteNumero()
+      .then(setNumero)
+      .catch(() => setNumero(genNumAcompte()));
+  }, [configured]);
+
+  useEffect(() => {
+    if (!devisId || !fetchDevisSummary) {
+      setDevisSummary(null);
+      return;
+    }
+    setLoadingSummary(true);
+    fetchDevisSummary(devisId)
+      .then(setDevisSummary)
+      .catch(() => setDevisSummary(null))
+      .finally(() => setLoadingSummary(false));
+  }, [devisId, fetchDevisSummary]);
+
+  function clientLabel(d) {
+    if (!d) return '—';
+    return d.client_nom || clientDisplayName(d.client) || '—';
+  }
 
   function validate() {
     const e = {};
@@ -175,49 +198,36 @@ export default function FactureAcompte({ onBack, onSaved }) {
     setApiError('');
     const errs = validate();
     if (Object.keys(errs).length) { setErrors(errs); return; }
-    setSaving(true);
+    if (!configured || !createAcompte) {
+      setApiError('Supabase non configuré.');
+      return;
+    }
+    setSavingLocal(true);
     try {
-      const clientNom = selectedDevis
-        ? [selectedDevis.client_prenom, selectedDevis.client_nom].filter(Boolean).join(' ') || selectedDevis.client_nom || ''
-        : '';
-      const payload = {
-        type:            'acompte',
+      const result = await createAcompte({
+        devis_id: devisId,
         numero,
-        titre:           'Facture acompte — ' + (selectedDevis?.reference || ''),
-        statut:          'brouillon',
-        devis_id:        devisId,
-        devis_reference: selectedDevis?.reference || '',
-        client_id:       selectedDevis?.client_id || '',
-        client_nom:      clientNom,
-        commercial:      selectedDevis?.commercial || '',
-        date_emission:   dateEmission,
-        date_echeance:   dateEcheance,
+        date_emission: dateEmission,
+        date_echeance: dateEcheance,
         devise,
-        acompte_mode:    mode,
-        acompte_valeur:  valeurNum,
-        acompte_montant: acompteTTC,
-        acompte_pct:     mode === 'pct' ? valeurNum : (devisTTC > 0 ? (acompteTTC / devisTTC) * 100 : 0),
-        total_ht:        acompteHT,
-        total_tva:       acompteTVA,
-        total_ttc:       acompteTTC,
-        total_paye:      0,
-        reste_a_payer:   acompteTTC,
-        lignes:          [],
-        paiements:       [],
-        notes_internes:  '',
-        created_at:      new Date().toISOString(),
-      };
-      let created;
-      try {
-        created = await createFacture(payload);
-      } catch (_) {
-        created = { data: { ...payload, id: Date.now() } };
+        mode,
+        valeur: valeurNum,
+        acompte_ttc: acompteTTC,
+        statut: 'brouillon',
+      });
+      if (!result.success) {
+        setApiError(result.error || 'Erreur lors de la creation.');
+        onCreated?.(false, result.error || 'Erreur lors de la creation.');
+        return;
       }
-      onSaved(created?.data ?? { ...payload, id: Date.now() }, false);
+      onCreated?.(true, 'Facture acompte creee avec succes.');
+      onBack();
     } catch (err) {
-      setApiError(err.message || "Erreur lors de la creation.");
+      const msg = err.message || "Erreur lors de la creation.";
+      setApiError(msg);
+      onCreated?.(false, msg);
     } finally {
-      setSaving(false);
+      setSavingLocal(false);
     }
   }
 
@@ -239,14 +249,20 @@ export default function FactureAcompte({ onBack, onSaved }) {
           <button
             type="button"
             className="btn btn-primary"
-            disabled={!isValid || saving}
+            disabled={!isValid || isSaving || !configured}
             onClick={handleSubmit}
-            style={{ minWidth: 180, opacity: (!isValid || saving) ? 0.55 : 1 }}
+            style={{ minWidth: 180, opacity: (!isValid || isSaving || !configured) ? 0.55 : 1 }}
           >
-            {saving ? <Spinner /> : <><FileText size={14} /> Creer facture acompte</>}
+            {isSaving ? <Spinner /> : <><FileText size={14} /> Creer facture acompte</>}
           </button>
         </div>
       </div>
+
+      {!configured && (
+        <div style={{ background: '#FFF3E0', border: '1px solid #FFB74D', borderRadius: 8, padding: '10px 14px', fontSize: '0.85rem', marginBottom: 16, color: '#E65100' }}>
+          Supabase non configuré — ajoutez VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY dans .env
+        </div>
+      )}
 
       {apiError && (
         <div style={{ background: '#FFEBEE', color: 'var(--red)', border: '1px solid rgba(211,47,47,0.25)', borderRadius: 8, padding: '10px 14px', fontSize: '0.85rem', marginBottom: 16, display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -279,14 +295,11 @@ export default function FactureAcompte({ onBack, onSaved }) {
                     style={{ ...IS(errors.devisId), paddingRight: 32, appearance: 'auto' }}
                   >
                     <option value="">-- Choisir un devis --</option>
-                    {devisList.map(d => {
-                      const clientNom = d.client_nom || d.client?.nom || '';
-                      return (
+                    {devisList.map(d => (
                         <option key={d.id} value={d.id}>
-                          {d.reference} — {d.titre}{clientNom ? ' (' + clientNom + ')' : ''}
+                          {d.reference} — {d.titre}{clientLabel(d) !== '—' ? ' (' + clientLabel(d) + ')' : ''}
                         </option>
-                      );
-                    })}
+                      ))}
                   </select>
                 </div>
                 {errors.devisId && <span style={{ color: 'var(--red)', fontSize: '0.75rem', marginTop: 4, display: 'block' }}>{errors.devisId}</span>}
@@ -294,8 +307,11 @@ export default function FactureAcompte({ onBack, onSaved }) {
 
               {selectedDevis && (
                 <div style={{ marginTop: 14, background: 'var(--bg)', borderRadius: 8, padding: '14px 16px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px 20px', fontSize: '0.82rem' }}>
+                  {loadingSummary && (
+                    <div style={{ gridColumn: '1 / -1', fontSize: '0.78rem', color: 'var(--text-3)' }}>Chargement du recapitulatif...</div>
+                  )}
                   {[
-                    ['Client',       [selectedDevis.client_prenom, selectedDevis.client_nom].filter(Boolean).join(' ') || selectedDevis.client_nom || '—'],
+                    ['Client',       clientLabel(selectedDevis)],
                     ['Reference',    selectedDevis.reference || '—'],
                     ['Commercial',   selectedDevis.commercial || '—'],
                     ['Total HT',     fmtMAD(devisHT)],
@@ -431,11 +447,11 @@ export default function FactureAcompte({ onBack, onSaved }) {
                   <div style={{ marginBottom: 16 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
                       <div style={{ width: 32, height: 32, borderRadius: '50%', background: 'var(--red)', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '0.85rem', flexShrink: 0 }}>
-                        {([selectedDevis.client_prenom, selectedDevis.client_nom].filter(Boolean).join(' ') || selectedDevis.client_nom || '?').slice(0, 2).toUpperCase()}
+                        {clientLabel(selectedDevis).slice(0, 2).toUpperCase()}
                       </div>
                       <div>
                         <div style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--text)' }}>
-                          {[selectedDevis.client_prenom, selectedDevis.client_nom].filter(Boolean).join(' ') || selectedDevis.client_nom || '—'}
+                          {clientLabel(selectedDevis)}
                         </div>
                         <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', fontFamily: 'var(--font-head)', letterSpacing: '0.04em' }}>
                           {selectedDevis.reference}
@@ -521,13 +537,13 @@ export default function FactureAcompte({ onBack, onSaved }) {
               <button
                 type="submit"
                 className="btn btn-primary"
-                disabled={!isValid || saving}
-                style={{ width: '100%', justifyContent: 'center', opacity: (!isValid || saving) ? 0.55 : 1 }}
+                disabled={!isValid || isSaving || !configured}
+                style={{ width: '100%', justifyContent: 'center', opacity: (!isValid || isSaving || !configured) ? 0.55 : 1 }}
                 onClick={handleSubmit}
               >
-                {saving ? <Spinner /> : <><FileText size={14} /> Creer facture acompte</>}
+                {isSaving ? <Spinner /> : <><FileText size={14} /> Creer facture acompte</>}
               </button>
-              {!isValid && !saving && (
+              {!isValid && !isSaving && (
                 <p style={{ fontSize: '0.72rem', color: 'var(--text-3)', textAlign: 'center', marginTop: 8, lineHeight: 1.5 }}>
                   {!devisId ? 'Selectionnez un devis pour continuer.' : !valeur ? 'Saisissez un montant d\'acompte.' : 'Verifiez les donnees saisies.'}
                 </p>

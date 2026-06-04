@@ -6,9 +6,13 @@ import {
   Loader
 } from 'lucide-react';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { getWorkers, createWorker, updateWorker } from '../services/api';
-import { scanCIN, compressImage } from '../services/ocr';
+import { useState, useEffect, useRef, useCallback, useId } from 'react';
+import { createPortal } from 'react-dom';
+import { useWorkers } from '../hooks/useWorkers';
+import { scanCIN, canUseCamera, getCameraBlockedReason, getCINCameraStream, preloadOcrEngine } from '../services/ocr';
+import { captureCINFromVideo, prepareImportedCINImage } from '../services/cinCapture';
+import { generateWorkerPdf } from '../services/rh/workerPdf';
+import { listProjects } from '../services/projects/projects';
 
 /* Exported for compatibility — starts empty, populated from API */
 export const SEED_WORKERS = [];
@@ -29,10 +33,17 @@ const STATUT_CFG = {
   archive:      { label: 'Archive',      cls: 'badge-grey'   },
 };
 
+/** CIN marocaine ID-1 : 85.60 mm × 53.98 mm */
+const CIN_HINT = 'Cadrez la CIN dans le rectangle';
+const SCANNER_PLACE_HINT = 'Placez la CIN dans le cadre';
+/** Identifiant build — vérifier dans la console Safari mobile que cette version est chargée */
+const CIN_SCANNER_VERSION = '2026-05-25-react-unified';
+
 const EMPTY_FORM = {
   prenom: '', nom: '', telephone: '', cin: '', fonction: '', tarif: '',
-  date_naissance: '', ville_naissance: '', adresse: '', nationalite: 'Marocaine', etat_civil: '', groupe_sanguin: '',
-  specialite: '', experience: 'intermediaire', date_recrutement: '', statut: 'actif', disponibilite: 'oui', chantier: '',
+  date_naissance: '', ville_naissance: '', adresse: '', nationalite: 'Marocaine', etat_civil: '', groupe_sanguin: '', date_expiration: '',
+  specialite: '', experience: 'intermediaire', date_recrutement: '', statut: 'actif', disponibilite: 'oui',
+  project_id: '', projet_nom: '', chantier: '', chantier_legacy: '',
   contact_urgence: '', tel_urgence: '', relation_urgence: '',
   pointure: '', taille_vetement: '', taille_gants: '', casque: '', badge: '',
   photo: '', cin_recto: '', cin_verso: '',
@@ -58,6 +69,16 @@ function Label({ children, required }) {
     <label style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: 5 }}>
       {children}{required && <span style={{ color: 'var(--red)', marginLeft: 2 }}>*</span>}
     </label>
+  );
+}
+
+/** Cadre preview CIN — ratio officiel 85.60 / 53.98 mm */
+function CINFrame({ children, hasImage, hint = CIN_HINT, className = '' }) {
+  return (
+    <div className={'cin-id-frame' + (hasImage ? ' has-img' : '') + (className ? ' ' + className : '')}>
+      {children}
+      {hint && !hasImage && <div className="cin-id-frame-hint">{hint}</div>}
+    </div>
   );
 }
 function STitle({ children }) {
@@ -126,139 +147,343 @@ function PhotoUpload({ value, onChange, label }) {
   );
 }
 
-/* ── Document Upload ── */
-function DocUpload({ value, onChange, label }) {
+/* ── Zone Documents CIN — scan principal, galerie secondaire ── */
+function CINDocZone({ side, value, onChange, onScan }) {
   const inputRef = useRef(null);
+  const isRecto = side === 'recto';
+  const title = isRecto ? 'Scanner CIN recto' : 'Scanner CIN verso';
+
+  function isImageFile(file) {
+    if (!file) return false;
+    const type = (file.type || '').toLowerCase();
+    const name = (file.name || '').toLowerCase();
+    if (type === 'application/pdf') return false;
+    return type.startsWith('image/') || /\.(jpe?g|png|webp|heic|heif|gif)$/i.test(name);
+  }
 
   function handleFile(file) {
-    if (!file) return;
+    if (!file || !isImageFile(file)) return;
     const reader = new FileReader();
-    reader.onload = e => onChange(e.target.result);
+    reader.onload = (e) => onChange(e.target.result, file);
+    reader.onerror = () => console.error('[OCR CIN] lecture fichier echouee');
     reader.readAsDataURL(file);
   }
 
+  function openGallery(e) {
+    e?.stopPropagation();
+    inputRef.current?.click();
+  }
+
+  function openScanner(e) {
+    e?.stopPropagation();
+    onScan(side);
+  }
+
+  const hiddenInputStyle = {
+    position: 'absolute', width: 1, height: 1, padding: 0, margin: -1,
+    overflow: 'hidden', clip: 'rect(0,0,0,0)', whiteSpace: 'nowrap', border: 0,
+  };
+
   return (
-    <div
-      onClick={() => inputRef.current?.click()}
-      onDragOver={e => e.preventDefault()}
-      onDrop={e => { e.preventDefault(); handleFile(e.dataTransfer.files[0]); }}
-      style={{ border: '1.5px dashed ' + (value ? 'var(--red)' : 'var(--border)'), borderRadius: 8, padding: '14px', cursor: 'pointer', background: value ? '#FFEBEE' : 'var(--bg)', transition: 'all 0.15s', textAlign: 'center', minHeight: 80, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 6 }}
-    >
-      {value ? (
-        <div style={{ position: 'relative', width: '100%' }}>
-          {value.startsWith('data:image') ? (
-            <img src={value} alt={label} style={{ maxHeight: 80, maxWidth: '100%', borderRadius: 4, objectFit: 'contain' }} />
+    <div className="cin-doc-zone-wrap">
+      <div
+        className={'cin-doc-zone' + (value ? ' has-img' : '')}
+        role="button"
+        tabIndex={0}
+        onClick={openScanner}
+        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openScanner(); } }}
+      >
+        <CINFrame hasImage={Boolean(value)} hint={value ? '' : CIN_HINT} className="cin-doc-zone-frame">
+          {value ? (
+            <>
+              {(value.startsWith('data:image') || value.startsWith('http')) ? (
+                <img src={value} alt={title} className="cin-id-frame-img" />
+              ) : (
+                <div className="cin-id-frame-empty"><span>Photo chargée</span></div>
+              )}
+              <div className="cin-doc-zone-rescan">
+                <ScanLine size={14} /> Rescanner
+              </div>
+              <button type="button" className="cin-doc-zone-clear"
+                onClick={e => { e.stopPropagation(); onChange('', null); }}
+                aria-label="Supprimer">
+                <X size={10} />
+              </button>
+            </>
           ) : (
-            <div style={{ fontSize: '0.82rem', color: 'var(--red)', fontWeight: 700 }}>Fichier charge</div>
+            <div className="cin-doc-zone-empty">
+              <div className="cin-doc-zone-icon">
+                <ScanLine size={28} strokeWidth={1.75} />
+              </div>
+              <span className="cin-doc-zone-title">{title}</span>
+              <span className="cin-doc-zone-sub">ou importer depuis la galerie</span>
+            </div>
           )}
-          <button type="button" onClick={e => { e.stopPropagation(); onChange(''); }}
-            style={{ position: 'absolute', top: -8, right: -8, background: 'var(--red)', border: 'none', borderRadius: '50%', width: 20, height: 20, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: '#fff' }}>
-            <X size={10} />
-          </button>
-        </div>
-      ) : (
-        <>
-          <Upload size={18} style={{ color: 'var(--text-3)' }} />
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-3)' }}>{label}</div>
-          <div style={{ fontSize: '0.68rem', color: 'var(--text-3)' }}>JPG, PNG, PDF</div>
-        </>
-      )}
-      <input ref={inputRef} type="file" accept="image/*,.pdf" style={{ display: 'none' }} onChange={e => handleFile(e.target.files?.[0])} />
+        </CINFrame>
+      </div>
+
+      <button type="button" className="cin-doc-zone-gallery" onClick={openGallery}>
+        <Upload size={12} /> Galerie
+      </button>
+
+      <input
+        ref={inputRef}
+        type="file"
+        accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+        onChange={e => { handleFile(e.target.files?.[0]); e.target.value = ''; }}
+        style={hiddenInputStyle}
+        tabIndex={-1}
+        aria-hidden="true"
+      />
     </div>
   );
 }
 
 /* ══════════════════════════════════════════════════════
-   CIN SCANNER — Banking-style direct camera flow
-   Open camera instantly → auto-capture recto → auto-capture verso
-   → POST /api/ocr/moroccan-cin → auto-fill form
+   CIN SCANNER — Codia full-screen (capture UI only → OCR inchangé)
    ══════════════════════════════════════════════════════ */
 
-// How many consecutive stable frames before auto-capture
 const STABLE_FRAMES_REQUIRED = 22;
-// Minimum brightness (0-255 avg) to allow capture
 const MIN_BRIGHTNESS = 45;
 
-function CINScanner({ onExtracted, onClose }) {
-  // 'recto' | 'verso' | 'uploading' | 'error' | 'nocamera'
-  const [phase, setPhase]         = useState('recto');
-  const [rectoImg, setRecto]      = useState(null);
-  const [versoImg, setVerso]      = useState(null);
-  const [statusMsg, setStatus]    = useState('Placez la CIN dans le cadre');
-  const [error, setError]         = useState('');
-  const [stableCount, setStable]  = useState(0);
-  const [captured, setCaptured]   = useState(false);
-  // Indicator state: 'ok' | 'warn' | 'off'
-  const [indLight, setIndLight]   = useState('off');   // brightness
-  const [indFocus, setIndFocus]   = useState('off');   // stability/motion
-  const [indReady, setIndReady]   = useState('off');   // ready to capture
+function CINScanner({
+  onExtracted,
+  onClose,
+  onCaptureOnly,
+  mode = 'full',
+  captureSide = null,
+  initialRecto = '',
+  initialVerso = '',
+  initialStream = null,
+}) {
+  const isCaptureMode = mode === 'capture' && Boolean(captureSide);
+  const importUid = useId();
+  const galleryInputRef = useRef(null);
+  const hiddenInputStyle = {
+    position: 'absolute', width: 1, height: 1, padding: 0, margin: -1,
+    overflow: 'hidden', clip: 'rect(0,0,0,0)', whiteSpace: 'nowrap', border: 0,
+  };
+
+  const [phase, setPhase]           = useState('live');
+  const [side, setSide]             = useState(captureSide || 'recto');
+  const [cameraActive, setCamActive] = useState(false);
+  const [cameraLoading, setCamLoad] = useState(true);
+  const [cameraMsg, setCameraMsg]   = useState('');
+  const [rectoImg, setRecto]        = useState(initialRecto || null);
+  const [versoImg, setVerso]        = useState(initialVerso || null);
+  const [error, setError]           = useState('');
+  const [stableCount, setStable]    = useState(0);
+  const [captured, setCaptured]     = useState(false);
+  const [indLight, setIndLight]     = useState('off');
+  const [indFocus, setIndFocus]     = useState('off');
+  const [indReady, setIndReady]     = useState('off');
+  const [uploadStatus, setUploadStatus] = useState('');
 
   const videoRef      = useRef(null);
+  const vfFrameRef    = useRef(null);
   const streamRef     = useRef(null);
   const canvasRef     = useRef(null);
   const rafRef        = useRef(null);
   const prevFrameRef  = useRef(null);
   const stableRef     = useRef(0);
-  const phaseRef      = useRef('recto');
-  const rectoRef      = useRef(null);
-  const versoRef      = useRef(null);
-  const fileRectoRef  = useRef(null);
-  const fileVersoRef  = useRef(null);
+  const sideRef       = useRef('recto');
+  const rectoRef      = useRef(initialRecto || null);
+  const versoRef      = useRef(initialVerso || null);
+  const rectoFileRef  = useRef(null);
+  const versoFileRef  = useRef(null);
+  const analyzeLoopRef = useRef(null);
 
-  // Keep phaseRef in sync
-  useEffect(() => { phaseRef.current = phase; }, [phase]);
-
-  // Start camera on mount
   useEffect(() => {
-    startCamera();
-    return () => teardown();
+    console.info('[CIN Scanner] mounted', CIN_SCANNER_VERSION, {
+      secure: typeof window !== 'undefined' && window.isSecureContext,
+      ua: typeof navigator !== 'undefined' ? navigator.userAgent.slice(0, 80) : '',
+    });
+    preloadOcrEngine();
   }, []);
 
+  useEffect(() => {
+    const prevBody = document.body.style.overflow;
+    const prevHtml = document.documentElement.style.overflow;
+    document.body.style.overflow = 'hidden';
+    document.documentElement.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prevBody;
+      document.documentElement.style.overflow = prevHtml;
+    };
+  }, []);
+
+  useEffect(() => { sideRef.current = side; }, [side]);
+
+  useEffect(() => {
+    if (isCaptureMode && captureSide) {
+      setSide(captureSide);
+      sideRef.current = captureSide;
+    }
+  }, [isCaptureMode, captureSide]);
+
+  useEffect(() => {
+    if (phase !== 'live') return undefined;
+    if (initialStream) {
+      attachStream(initialStream);
+      return () => teardown();
+    }
+    setCamLoad(false);
+    if (!canUseCamera()) {
+      setCameraMsg(getCameraBlockedReason());
+    }
+    return () => teardown();
+  }, [phase, initialStream]);
+
+  function stopAnalyzeLoop() {
+    if (analyzeLoopRef.current) {
+      cancelAnimationFrame(analyzeLoopRef.current);
+      analyzeLoopRef.current = null;
+    }
+  }
+
   function teardown() {
+    stopAnalyzeLoop();
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
+    rafRef.current = null;
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(t => t.stop());
       streamRef.current = null;
     }
   }
 
+  async function tuneVideoTrack(stream) {
+    const track = stream.getVideoTracks()[0];
+    if (!track?.applyConstraints) return;
+    try {
+      await track.applyConstraints({
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 1920, min: 1280 },
+        height: { ideal: 1080 },
+        advanced: [{ focusMode: 'continuous' }],
+      });
+    } catch {
+      try {
+        await track.applyConstraints({ facingMode: 'environment' });
+      } catch { /* iOS ignore */ }
+    }
+  }
+
+  async function attachStream(stream) {
+    if (!stream) return;
+    stopAnalyzeLoop();
+    streamRef.current = stream;
+    setCamLoad(true);
+    setCameraMsg('');
+    setError('');
+
+    try {
+      await tuneVideoTrack(stream);
+      setCamLoad(false);
+
+      const video = videoRef.current;
+      if (!video) {
+        setCamActive(false);
+        setCameraMsg('Élément vidéo indisponible.');
+        return;
+      }
+
+      video.srcObject = stream;
+      video.setAttribute('playsinline', 'true');
+      video.setAttribute('webkit-playsinline', 'true');
+      video.playsInline = true;
+      video.muted = true;
+
+      await new Promise((resolve) => {
+        if (video.readyState >= 1) { resolve(); return; }
+        const onReady = () => { video.removeEventListener('loadedmetadata', onReady); resolve(); };
+        video.addEventListener('loadedmetadata', onReady);
+        setTimeout(resolve, 2500);
+      });
+
+      try {
+        await video.play();
+      } catch (playErr) {
+        console.warn('[CIN Scanner] video.play()', playErr);
+      }
+      setCamActive(true);
+      prevFrameRef.current = null;
+      stableRef.current = 0;
+      analyzeFrame();
+    } catch (err) {
+      console.warn('[CIN Scanner] attachStream', err);
+      setCamActive(false);
+      setCameraMsg(getCameraBlockedReason());
+      setCamLoad(false);
+    }
+  }
+
   async function startCamera() {
+    stopAnalyzeLoop();
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(t => t.stop());
+      streamRef.current = null;
+    }
+    setCamActive(false);
+    setCamLoad(true);
+    setCameraMsg('');
+    setError('');
+
+    if (!canUseCamera()) {
+      setCamActive(false);
+      setCameraMsg(getCameraBlockedReason());
+      setCamLoad(false);
+      return;
+    }
+
+    try {
+      const stream = await getCINCameraStream();
+      await attachStream(stream);
+    } catch (err) {
+      console.warn('[CIN Scanner] startCamera', err);
+      setCamActive(false);
+      setCameraMsg(getCameraBlockedReason());
+      setCamLoad(false);
+    }
+  }
+
+  async function analyzePhotos(recto, verso) {
+    if (!recto) {
+      setError('Capturez ou importez au moins le recto de la CIN.');
+      return;
+    }
+    teardown();
+    setPhase('uploading');
+    setUploadStatus('Préparation…');
     setError('');
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: { ideal: 'environment' },
-          width:  { ideal: 1920 },
-          height: { ideal: 1080 },
-          focusMode: 'continuous',
-        },
+      const result = await scanCIN(recto, verso || null, {
+        rectoFile: rectoFileRef.current,
+        versoFile: versoFileRef.current,
+        onProgress: setUploadStatus,
       });
-      streamRef.current = stream;
-      setTimeout(() => {
-        if (videoRef.current) {
-          videoRef.current.srcObject = stream;
-          videoRef.current.play().then(() => {
-            requestAnimationFrame(analyzeFrame);
-          }).catch(() => {});
-        }
-      }, 80);
-    } catch {
-      setPhase('nocamera');
+      onExtracted(result);
+      onClose();
+    } catch (err) {
+      const msg = (err?.message && err.message.length < 160)
+        ? err.message
+        : 'Erreur lecture image — saisissez les champs manuellement.';
+      setError(msg);
+      setPhase('live');
     }
   }
 
   function analyzeFrame() {
-    const video  = videoRef.current;
+    const video = videoRef.current;
     const canvas = canvasRef.current;
     if (!video || !canvas || !streamRef.current) return;
     if (video.readyState < 2) {
-      rafRef.current = requestAnimationFrame(analyzeFrame);
+      analyzeLoopRef.current = requestAnimationFrame(analyzeFrame);
       return;
     }
 
-    const W = video.videoWidth  || 640;
+    const W = video.videoWidth || 640;
     const H = video.videoHeight || 480;
-    canvas.width  = W;
+    canvas.width = W;
     canvas.height = H;
     const ctx = canvas.getContext('2d');
     ctx.drawImage(video, 0, 0, W, H);
@@ -267,384 +492,375 @@ function CINScanner({ onExtracted, onClose }) {
     const { brightness, motionScore } = analyzePixels(imageData, prevFrameRef.current);
     prevFrameRef.current = imageData;
 
-    const lightOk  = brightness > MIN_BRIGHTNESS;
+    const lightOk = brightness > MIN_BRIGHTNESS;
     const motionOk = motionScore < 14;
     const isStable = lightOk && motionOk;
 
-    if (isStable) {
-      stableRef.current += 1;
-    } else {
-      stableRef.current = Math.max(0, stableRef.current - 2);
-    }
+    if (isStable) stableRef.current += 1;
+    else stableRef.current = Math.max(0, stableRef.current - 2);
 
     const progress = Math.min(1, stableRef.current / STABLE_FRAMES_REQUIRED);
     setStable(Math.round(progress * 100));
-
-    // Update discrete indicators
     setIndLight(lightOk ? 'ok' : 'warn');
     setIndFocus(motionOk ? 'ok' : 'warn');
-    setIndReady(progress >= 0.6 ? (progress >= 1 ? 'ok' : 'warn') : 'off');
+    setIndReady(progress >= 1 ? 'ok' : progress >= 0.6 ? 'warn' : 'off');
 
-    if (!lightOk) {
-      setStatus('Eclairez mieux la carte');
-    } else if (!motionOk) {
-      setStatus('Immobilisez la carte');
-    } else if (progress < 0.5) {
-      setStatus(phaseRef.current === 'recto' ? 'Placez le recto dans le cadre' : 'Placez le verso dans le cadre');
-    } else {
-      setStatus('Maintien...');
-    }
-
-    if (stableRef.current >= STABLE_FRAMES_REQUIRED) {
-      doCapture(canvas, ctx, video, W, H);
-      return;
-    }
-
-    rafRef.current = requestAnimationFrame(analyzeFrame);
+    analyzeLoopRef.current = requestAnimationFrame(analyzeFrame);
   }
 
   function analyzePixels(current, previous) {
     const d = current.data;
     let brightnessSum = 0;
     let motionSum = 0;
-    const step = 8; // sample every 8th pixel for performance
-    const len = d.length;
+    const step = 8;
     let count = 0;
-
-    for (let i = 0; i < len; i += step * 4) {
+    for (let i = 0; i < d.length; i += step * 4) {
       const r = d[i], g = d[i + 1], b = d[i + 2];
       brightnessSum += (r + g + b) / 3;
       if (previous) {
         const pd = previous.data;
-        const diff = Math.abs(r - pd[i]) + Math.abs(g - pd[i + 1]) + Math.abs(b - pd[i + 2]);
-        motionSum += diff;
+        motionSum += Math.abs(r - pd[i]) + Math.abs(g - pd[i + 1]) + Math.abs(b - pd[i + 2]);
       }
       count++;
     }
-
     return {
-      brightness:  count > 0 ? brightnessSum / count : 128,
-      motionScore: count > 0 ? motionSum     / count : 0,
+      brightness: count > 0 ? brightnessSum / count : 128,
+      motionScore: count > 0 ? motionSum / count : 0,
     };
   }
 
-  function doCapture(canvas, ctx, video, W, H) {
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    stableRef.current = 0;
-    ctx.drawImage(video, 0, 0, W, H);
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.92);
+  async function captureCurrentSide() {
+    const video = videoRef.current;
+    const frameEl = vfFrameRef.current;
+    if (!video || !frameEl || phase !== 'live') return;
+    if (!streamRef.current || video.readyState < 2) return;
 
-    setCaptured(true);
-    setTimeout(() => setCaptured(false), 400);
-
-    if (phaseRef.current === 'recto') {
-      rectoRef.current = dataUrl;
-      setRecto(dataUrl);
-      setPhase('verso');
-      phaseRef.current = 'verso';
-      setStatus('Retournez la carte — VERSO');
-      prevFrameRef.current = null;
-      stableRef.current = 0;
-      setStable(0);
-      // Short pause before resuming analysis
-      setTimeout(() => {
-        rafRef.current = requestAnimationFrame(analyzeFrame);
-      }, 800);
-    } else {
-      versoRef.current = dataUrl;
-      setVerso(dataUrl);
-      setPhase('uploading');
-      setStatus('Analyse en cours...');
-      // Stop camera — upload now
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach(t => t.stop());
-        streamRef.current = null;
-      }
-      uploadCaptures(rectoRef.current, dataUrl);
-    }
-  }
-
-  async function uploadCaptures(recto, verso) {
     try {
-      // Compress both images (force JPEG, 2000px max, quality 0.82)
-      const cRecto = await compressImage(recto,  2000, 0.82);
-      const cVerso = verso ? await compressImage(verso, 2000, 0.82) : null;
-      // scanCIN never throws — always returns valid data (real OCR or demo fallback)
-      const result = await scanCIN(cRecto, cVerso);
-      onExtracted(result);
-      onClose();
+      const { previewDataUrl, ocrFile } = await captureCINFromVideo(video, frameEl, sideRef.current);
+      console.info('[OCR CIN] using original/cropped file', {
+        side: sideRef.current,
+        ocrBytes: ocrFile.size,
+        display: 'cropped-viewfinder',
+      });
+
+      setCaptured(true);
+      setTimeout(() => setCaptured(false), 400);
+
+      if (sideRef.current === 'recto') {
+        rectoRef.current = previewDataUrl;
+        rectoFileRef.current = ocrFile;
+        setRecto(previewDataUrl);
+        if (!isCaptureMode && !versoRef.current) setSide('verso');
+      } else {
+        versoRef.current = previewDataUrl;
+        versoFileRef.current = ocrFile;
+        setVerso(previewDataUrl);
+      }
     } catch (err) {
-      // Only reached if compressImage itself fails (corrupt image data)
-      const msg = (err && err.message && err.message.length < 120)
-        ? err.message
-        : 'Document non lisible. Reprendre une photo plus nette.';
-      setError(msg);
-      setPhase('error');
+      console.error('[SCAN CIN] capture failed', err);
+      setError('Capture impossible — cadrez la CIN dans le rectangle rouge et réessayez.');
     }
   }
 
-  // Manual capture fallback (tap anywhere on camera view)
-  function handleManualCapture() {
-    const video  = videoRef.current;
-    const canvas = canvasRef.current;
-    if (!video || !canvas || phase === 'uploading') return;
-    const W = video.videoWidth  || 1280;
-    const H = video.videoHeight || 720;
-    canvas.width  = W;
-    canvas.height = H;
-    const ctx = canvas.getContext('2d');
-    stableRef.current = STABLE_FRAMES_REQUIRED; // force capture
-    doCapture(canvas, ctx, video, W, H);
-  }
-
-  // File fallback handlers
-  function handleFileRecto(e) {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    e.target.value = '';
-    const reader = new FileReader();
-    reader.onload = ev => {
-      rectoRef.current = ev.target.result;
-      setRecto(ev.target.result);
-      setPhase('verso');
-      phaseRef.current = 'verso';
-      setStatus('Importez maintenant le VERSO de votre CIN');
-    };
-    reader.readAsDataURL(f);
-  }
-
-  function handleFileVerso(e) {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    e.target.value = '';
-    const reader = new FileReader();
-    reader.onload = async ev => {
-      versoRef.current = ev.target.result;
-      setVerso(ev.target.result);
-      setPhase('uploading');
-      uploadCaptures(rectoRef.current, ev.target.result);
-    };
-    reader.readAsDataURL(f);
-  }
-
-  function handleRetry() {
-    rectoRef.current = null;
-    versoRef.current = null;
-    setRecto(null);
-    setVerso(null);
-    setError('');
+  function retakeCurrentSide() {
+    if (side === 'recto') {
+      rectoRef.current = null;
+      rectoFileRef.current = null;
+      setRecto(null);
+    } else {
+      versoRef.current = null;
+      versoFileRef.current = null;
+      setVerso(null);
+    }
     stableRef.current = 0;
     prevFrameRef.current = null;
-    phaseRef.current = 'recto';
-    setPhase('recto');
-    setStatus('Positionnez le RECTO de votre CIN');
     setStable(0);
-    if (!streamRef.current) {
-      startCamera();
+  }
+
+  function readImageFile(file, targetSide, onDone) {
+    if (!file) return;
+    const type = (file.type || '').toLowerCase();
+    const name = (file.name || '').toLowerCase();
+    if (type === 'application/pdf') {
+      setError('PDF non supporté pour l\'OCR. Utilisez une photo JPG ou PNG.');
+      return;
+    }
+    if (!type.startsWith('image/') && !/\.(jpe?g|png|webp|heic|heif)$/i.test(name)) {
+      setError('Format non supporté. Utilisez une photo.');
+      return;
+    }
+    console.info('[OCR CIN] mobile file selected', { name: file.name, type: file.type || '(vide)', size: file.size });
+    const reader = new FileReader();
+    reader.onload = async (ev) => {
+      try {
+        const prepared = await prepareImportedCINImage(ev.target.result, file, targetSide);
+        console.info('[OCR CIN] using original/cropped file', {
+          side: targetSide,
+          ocrBytes: prepared.ocrFile.size,
+          display: 'cropped-import',
+        });
+        onDone(prepared.previewDataUrl, prepared.ocrFile);
+      } catch (err) {
+        console.error('[SCAN CIN] import crop failed', err);
+        setError('Impossible de recadrer l\'image importée.');
+      }
+    };
+    reader.onerror = () => setError('Impossible de lire le fichier image.');
+    reader.readAsDataURL(file);
+  }
+
+  function assignImportedImage(targetSide, dataUrl, file) {
+    if (targetSide === 'recto') {
+      rectoRef.current = dataUrl;
+      rectoFileRef.current = file;
+      setRecto(dataUrl);
     } else {
-      rafRef.current = requestAnimationFrame(analyzeFrame);
+      versoRef.current = dataUrl;
+      versoFileRef.current = file;
+      setVerso(dataUrl);
+    }
+    setSide(targetSide);
+    setError('');
+    if (isCaptureMode && onCaptureOnly) {
+      teardown();
+      onCaptureOnly(targetSide, dataUrl, file);
+      return;
     }
   }
 
-  // ── Render: no-camera fallback ──
-  if (phase === 'nocamera') {
-    return (
-      <div className="cin-scanner-overlay">
-        <div className="cin-scanner-box">
-          <div className="cin-scanner-header">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div className="cin-scanner-icon-wrap"><ScanLine size={18} style={{ color: 'var(--red)' }} /></div>
-              <div>
-                <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1rem' }}>Scanner CIN</div>
-                <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Camera non disponible — importez les photos</div>
-              </div>
-            </div>
-            <button className="cin-scanner-close" onClick={onClose}><X size={18} /></button>
-          </div>
-          <div className="cin-scanner-body">
-            <div className="cin-alert cin-alert--warn">
-              <AlertCircle size={14} />
-              Camera non disponible sur cet appareil. Importez les photos de votre CIN.
-            </div>
-            <div className="cin-panels">
-              <div className="cin-panel">
-                <div className="cin-panel-label">
-                  <span className="cin-panel-badge recto">RECTO</span>
-                  <span className="cin-panel-sublabel">Face principale</span>
-                </div>
-                <div className={'cin-panel-preview' + (rectoImg ? ' has-img' : '')} onClick={() => fileRectoRef.current?.click()} style={{ cursor: 'pointer' }}>
-                  {rectoImg
-                    ? <><img src={rectoImg} alt="Recto" className="cin-preview-img" /><button className="cin-preview-clear" onClick={e => { e.stopPropagation(); setRecto(null); rectoRef.current = null; }}><X size={12} /></button></>
-                    : <div className="cin-preview-placeholder"><Upload size={24} style={{ color: 'var(--border)' }} /><span>Appuyer pour importer</span></div>
-                  }
-                </div>
-                <input ref={fileRectoRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleFileRecto} />
-              </div>
-              <div className="cin-panel">
-                <div className="cin-panel-label">
-                  <span className="cin-panel-badge verso">VERSO</span>
-                  <span className="cin-panel-sublabel">Dos de la carte</span>
-                </div>
-                <div className={'cin-panel-preview' + (versoImg ? ' has-img' : '')} onClick={() => fileVersoRef.current?.click()} style={{ cursor: 'pointer' }}>
-                  {versoImg
-                    ? <><img src={versoImg} alt="Verso" className="cin-preview-img" /><button className="cin-preview-clear" onClick={e => { e.stopPropagation(); setVerso(null); versoRef.current = null; }}><X size={12} /></button></>
-                    : <div className="cin-preview-placeholder"><Upload size={24} style={{ color: 'var(--border)' }} /><span>Appuyer pour importer</span></div>
-                  }
-                </div>
-                <input ref={fileVersoRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleFileVerso} />
-              </div>
-            </div>
-          </div>
-          <div className="cin-scanner-footer">
-            <button className="btn btn-ghost" onClick={onClose}>Annuler</button>
-            <button className="btn btn-primary" disabled={!rectoImg || !versoImg} style={{ flex: 1, justifyContent: 'center' }}
-              onClick={() => { setPhase('uploading'); uploadCaptures(rectoRef.current, versoRef.current); }}>
-              <ScanLine size={14} /> Analyser les photos
-            </button>
-          </div>
-        </div>
-      </div>
-    );
+  function confirmCaptureSide() {
+    const s = isCaptureMode ? (captureSide || sideRef.current) : sideRef.current;
+    const preview = s === 'recto' ? rectoRef.current : versoRef.current;
+    const file = s === 'recto' ? rectoFileRef.current : versoFileRef.current;
+    if (!preview) {
+      setError('Capturez ou importez une photo avant de valider.');
+      return;
+    }
+    teardown();
+    if (onCaptureOnly) onCaptureOnly(s, preview, file);
   }
 
-  // ── Render: error state ──
-  if (phase === 'error') {
-    return (
-      <div className="cin-scanner-overlay">
-        <div className="cin-scanner-box">
-          <div className="cin-scanner-header">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <div className="cin-scanner-icon-wrap"><ScanLine size={18} style={{ color: 'var(--red)' }} /></div>
-              <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1rem' }}>Scanner CIN</div>
-            </div>
-            <button className="cin-scanner-close" onClick={onClose}><X size={18} /></button>
-          </div>
-          <div className="cin-scanner-body">
-            <div className="cin-alert cin-alert--error"><AlertCircle size={14} /> {error}</div>
-            <div className="cin-panels">
-              {rectoImg && <div className="cin-panel"><div className="cin-panel-label"><span className="cin-panel-badge recto">RECTO</span></div><div className="cin-panel-preview has-img"><img src={rectoImg} alt="Recto" className="cin-preview-img" /></div></div>}
-              {versoImg && <div className="cin-panel"><div className="cin-panel-label"><span className="cin-panel-badge verso">VERSO</span></div><div className="cin-panel-preview has-img"><img src={versoImg} alt="Verso" className="cin-preview-img" /></div></div>}
-            </div>
-          </div>
-          <div className="cin-scanner-footer">
-            <button className="btn btn-ghost" onClick={onClose}>Fermer</button>
-            <button className="btn btn-primary" style={{ flex: 1, justifyContent: 'center' }} onClick={handleRetry}><RefreshCw size={14} /> Rescanner</button>
-          </div>
-        </div>
-      </div>
-    );
+  const currentSideHasImage = isCaptureMode
+    ? (captureSide === 'recto' ? Boolean(rectoImg) : Boolean(versoImg))
+    : Boolean(rectoImg);
+
+  function openGalleryPicker() {
+    galleryInputRef.current?.click();
   }
 
-  // ── Render: uploading state ──
+  function handleGalleryPick(e) {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    e.target.value = '';
+    const targetSide = isCaptureMode && captureSide ? captureSide : side;
+    readImageFile(f, targetSide, (dataUrl, file) => assignImportedImage(targetSide, dataUrl, file));
+  }
+
+  const activeSide = isCaptureMode && captureSide ? captureSide : side;
+  const isRecto = activeSide === 'recto';
+  const progressPct = stableCount;
+  const frameReady = progressPct >= 100;
+  const sideFaceLabel = isRecto ? 'RECTO — FACE PRINCIPALE' : 'VERSO — DOS DE LA CARTE';
+
+  const insecureContext = typeof window !== 'undefined' && !window.isSecureContext;
+
   if (phase === 'uploading') {
-    return (
-      <div className="cin-scanner-overlay cin-scanner-overlay--dark">
+    return createPortal(
+      <div className="cin-scanner-overlay cin-scanner-overlay--dark" data-cin-scanner={CIN_SCANNER_VERSION}>
         <div className="cin-upload-box">
           <Loader size={32} className="cin-spin" style={{ color: 'var(--red)' }} />
-          <div className="cin-upload-title">Analyse OCR en cours</div>
-          <div className="cin-upload-sub">Extraction des donnees de la CIN...</div>
+          <div className="cin-upload-title">Analyse en cours...</div>
+          <div className="cin-upload-sub">{uploadStatus || 'Extraction des données CIN (Mindee ou Tesseract)'}</div>
           <div className="cin-upload-previews">
             {rectoImg && <img src={rectoImg} alt="Recto" className="cin-upload-thumb" />}
             {versoImg && <img src={versoImg} alt="Verso" className="cin-upload-thumb" />}
           </div>
         </div>
-      </div>
+      </div>,
+      document.body,
     );
   }
 
-  // ── Render: live camera (recto / verso) ──
-  const isRecto    = phase === 'recto';
-  const progressPct = stableCount; // 0-100
-  const frameReady  = progressPct >= 100;
-
-  return (
-    <div className="cin-scanner-overlay cin-scanner-overlay--dark" onClick={handleManualCapture}>
-      {/* Hidden analysis canvas */}
+  return createPortal(
+    <div
+      className="cin-scanner-overlay cin-scanner-overlay--dark cin-scanner-live"
+      data-cin-scanner={CIN_SCANNER_VERSION}
+    >
       <canvas ref={canvasRef} style={{ display: 'none' }} />
+      <video
+        ref={videoRef}
+        className={'cin-camera-feed' + (cameraActive ? '' : ' cin-camera-feed--off')}
+        autoPlay
+        playsInline
+        muted
+      />
 
-      {/* Camera feed */}
-      <video ref={videoRef} className="cin-camera-feed" autoPlay playsInline muted />
+      {!cameraActive && (
+        <div className="cin-camera-placeholder" aria-hidden="true" />
+      )}
 
-      {/* SVG mask — dark outside the card cutout */}
-      <svg className="cin-mask-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
+      {cameraLoading && (
+        <div className="cin-camera-loading">
+          <Loader size={28} className="cin-spin" style={{ color: 'var(--red)' }} />
+          <span>Activation caméra...</span>
+        </div>
+      )}
+
+      {(cameraMsg || error) && !cameraActive && !cameraLoading && (
+        <div className="cin-camera-blocked">
+          <AlertCircle size={16} />
+          <p>{cameraMsg || error}</p>
+          {canUseCamera() && (
+            <button type="button" className="cin-action-btn cin-action-btn--primary" onClick={startCamera}>
+              <Camera size={14} /> {cameraMsg ? 'Réessayer la caméra' : 'Activer la caméra'}
+            </button>
+          )}
+          <button type="button" className="cin-action-btn cin-action-btn--ghost" onClick={openGalleryPicker}>
+            <Upload size={14} /> Importer depuis galerie
+          </button>
+        </div>
+      )}
+
+      {!cameraActive && !cameraLoading && !cameraMsg && !error && canUseCamera() && (
+        <div className="cin-camera-blocked">
+          <button type="button" className="cin-action-btn cin-action-btn--primary" onClick={startCamera}>
+            <Camera size={16} /> Activer la caméra
+          </button>
+        </div>
+      )}
+
+      {insecureContext && (
+        <div className="cin-https-banner">
+          HTTPS requis sur iPhone pour la caméra custom — utilisez l’URL https:// affichée au démarrage du serveur.
+        </div>
+      )}
+
+      <svg className="cin-mask-svg" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
         <defs>
-          <mask id="cin-cutout">
+          <mask id={`cin-cutout-${importUid}`}>
             <rect width="100" height="100" fill="white" />
-            {/* cutout: centred, 82% wide, card ratio 85.6/54 ≈ 1.585 */}
-            <rect x="9" y="27.5" width="82" height="51.7" rx="2.2" ry="2.2" fill="black" />
+            <rect x="9" y="24.15" width="82" height="51.70" rx="2.2" ry="2.2" fill="black" />
           </mask>
         </defs>
-        <rect width="100" height="100" fill="rgba(0,0,0,0.60)" mask="url(#cin-cutout)" />
+        <rect width="100" height="100" fill="rgba(0,0,0,0.72)" mask={`url(#cin-cutout-${importUid})`} />
       </svg>
 
-      {/* Card frame border — animated corners */}
-      <div className={'cin-vf-frame' + (frameReady ? ' cin-vf-frame--ready' : '')}>
+      <div ref={vfFrameRef} className={'cin-vf-frame' + (frameReady ? ' cin-vf-frame--ready' : '')}>
         <span className="cin-vf-corner cin-vf-corner--tl" />
         <span className="cin-vf-corner cin-vf-corner--tr" />
         <span className="cin-vf-corner cin-vf-corner--bl" />
         <span className="cin-vf-corner cin-vf-corner--br" />
-        {/* Instruction label inside frame */}
-        <div className="cin-vf-label">
-          {isRecto ? 'Recto — Face principale' : 'Verso — Dos de la carte'}
-        </div>
-        {/* Capture flash */}
         {captured && <div className="cin-capture-flash" />}
       </div>
 
-      {/* Top bar */}
-      <div className="cin-top-bar" onClick={e => e.stopPropagation()}>
+      <div className="cin-top-bar">
         <div className="cin-side-badge-wrap">
           <span className={'cin-side-badge ' + (isRecto ? 'cin-side-badge--recto' : 'cin-side-badge--verso')}>
             {isRecto ? 'RECTO' : 'VERSO'}
           </span>
-          {/* Step 1 of 2 / 2 of 2 */}
-          <span className="cin-step-label">{isRecto ? '1 / 2' : '2 / 2'}</span>
+          <span className="cin-step-label">{rectoImg ? (versoImg ? '2/2' : '1/2') : '0/2'}</span>
         </div>
-        <button className="cin-close-btn" onClick={onClose}><X size={18} /></button>
+        <button type="button" className="cin-close-btn" onClick={onClose} aria-label="Fermer"><X size={18} /></button>
       </div>
 
-      {/* Three indicator dots: Lumiere / Stabilite / Pret */}
-      <div className="cin-indicators" onClick={e => e.stopPropagation()}>
+      <div className="cin-indicators">
         <div className={'cin-ind ' + indLight}>
           <span className="cin-ind-dot" />
-          <span className="cin-ind-label">Lumiere</span>
+          <span className="cin-ind-label">Lumière</span>
         </div>
         <div className={'cin-ind ' + indFocus}>
           <span className="cin-ind-dot" />
-          <span className="cin-ind-label">Stabilite</span>
+          <span className="cin-ind-label">Stabilité</span>
         </div>
         <div className={'cin-ind ' + indReady}>
           <span className="cin-ind-dot" />
-          <span className="cin-ind-label">Pret</span>
+          <span className="cin-ind-label">Prêt</span>
         </div>
       </div>
 
-      {/* Progress bar */}
-      <div className={'cin-progress-bar-wrap' + (frameReady ? ' ready' : '')} onClick={e => e.stopPropagation()}>
+      <div className={'cin-progress-bar-wrap' + (frameReady ? ' ready' : '')}>
         <div className="cin-progress-bar" style={{ width: progressPct + '%' }} />
       </div>
 
-      {/* Status hint */}
-      <div className="cin-hint-bar" onClick={e => e.stopPropagation()}>
-        <span className="cin-hint-text">{statusMsg}</span>
+      <div className="cin-hint-bar">
+        <span className="cin-hint-text">{SCANNER_PLACE_HINT}</span>
+        <span className="cin-hint-side">{sideFaceLabel}</span>
         <span className="cin-hint-tap">Appuyez pour capturer</span>
       </div>
 
-      {/* Recto mini preview during verso scan */}
-      {!isRecto && rectoImg && (
-        <div className="cin-recto-mini" onClick={e => e.stopPropagation()}>
-          <img src={rectoImg} alt="Recto" />
-          <span>Recto OK</span>
+      {(rectoImg || versoImg) && !isCaptureMode && (
+        <div className="cin-capture-thumbs">
+          {rectoImg && (
+            <button type="button" className={'cin-capture-thumb' + (isRecto ? ' active' : '')} onClick={() => setSide('recto')}>
+              <img src={rectoImg} alt="Recto capturé" />
+              <span>Recto</span>
+            </button>
+          )}
+          {versoImg && (
+            <button type="button" className={'cin-capture-thumb' + (!isRecto ? ' active' : '')} onClick={() => setSide('verso')}>
+              <img src={versoImg} alt="Verso capturé" />
+              <span>Verso</span>
+            </button>
+          )}
         </div>
       )}
-    </div>
+
+      {!isCaptureMode && (
+        <div className="cin-side-switch cin-side-switch--live">
+          <button type="button" className={'cin-side-switch-btn' + (isRecto ? ' active recto' : '')} onClick={() => setSide('recto')}>Recto</button>
+          <button type="button" className={'cin-side-switch-btn' + (!isRecto ? ' active verso' : '')} onClick={() => setSide('verso')}>Verso</button>
+        </div>
+      )}
+
+      <div className="cin-scanner-actions">
+        {!isCaptureMode && (
+          <button type="button" className="cin-action-btn cin-action-btn--ghost" onClick={openGalleryPicker}>
+            <Upload size={16} /> Galerie
+          </button>
+        )}
+        {/* Pas de capture= — galerie uniquement, jamais caméra native iOS */}
+        <input
+          ref={galleryInputRef}
+          type="file"
+          accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+          style={hiddenInputStyle}
+          tabIndex={-1}
+          aria-hidden="true"
+          onChange={handleGalleryPick}
+        />
+
+        <button type="button" className="cin-action-btn cin-action-btn--ghost" onClick={retakeCurrentSide}>
+          <RefreshCw size={16} /> Reprendre
+        </button>
+
+        <button type="button" className={'cin-action-btn cin-action-btn--capture' + (frameReady && cameraActive ? ' ready' : '')}
+          disabled={!cameraActive}
+          onClick={captureCurrentSide}>
+          <Camera size={18} /> Capturer
+        </button>
+
+        {isCaptureMode ? (
+          <button type="button" className="cin-action-btn cin-action-btn--primary"
+            disabled={!currentSideHasImage}
+            onClick={confirmCaptureSide}>
+            <CheckCircle size={16} /> Utiliser cette photo
+          </button>
+        ) : (
+          <button type="button" className="cin-action-btn cin-action-btn--primary" disabled={!rectoImg}
+            onClick={() => analyzePhotos(rectoRef.current, versoRef.current)}>
+            <ScanLine size={16} /> Analyser
+          </button>
+        )}
+      </div>
+    </div>,
+    document.body,
   );
 }
 
 /* ══════════════════════════════════════════════════════
    OUVRIER DETAIL PAGE
    ══════════════════════════════════════════════════════ */
-function OuvrierDetail({ worker, onBack, onEdit }) {
+function OuvrierDetail({ worker, onBack, onEdit, onDownloadPdf, pdfLoading }) {
   const [tab, setTab] = useState('infos');
   const tabs = [
     { id: 'infos',      label: 'Informations' },
@@ -688,8 +904,10 @@ function OuvrierDetail({ worker, onBack, onEdit }) {
             <button className="btn btn-ghost" onClick={() => onEdit(worker)} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
               <Edit2 size={13} /> Modifier
             </button>
-            <button className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-              <Download size={13} /> PDF Fiche
+            <button className="btn btn-primary" disabled={pdfLoading} onClick={() => onDownloadPdf(worker)}
+              style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              {pdfLoading ? <Loader size={13} style={{ animation: 'spin 0.8s linear infinite' }} /> : <Download size={13} />}
+              {pdfLoading ? 'Génération…' : 'Télécharger fiche'}
             </button>
           </div>
         </div>
@@ -714,6 +932,7 @@ function OuvrierDetail({ worker, onBack, onEdit }) {
               ['Telephone', worker.telephone],
               ['CIN', worker.cin],
               ['Date naissance', fmtDate(worker.date_naissance)],
+              ['Expiration CIN', fmtDate(worker.date_expiration)],
               ['Ville naissance', worker.ville_naissance],
               ['Adresse', worker.adresse],
               ['Nationalite', worker.nationalite],
@@ -753,7 +972,9 @@ function OuvrierDetail({ worker, onBack, onEdit }) {
           <div className="card" style={{ padding: '20px 22px' }}>
             <STitle><FileText size={14} /> CIN Recto</STitle>
             {worker.cin_recto ? (
-              <img src={worker.cin_recto} alt="CIN recto" style={{ width: '100%', borderRadius: 8, border: '1px solid var(--border)', objectFit: 'contain', maxHeight: 180 }} />
+              <CINFrame hasImage hint="">
+                <img src={worker.cin_recto} alt="CIN recto" className="cin-id-frame-img" />
+              </CINFrame>
             ) : (
               <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-3)', fontSize: '0.85rem', background: 'var(--bg)', borderRadius: 8 }}>Aucun document charge</div>
             )}
@@ -761,7 +982,9 @@ function OuvrierDetail({ worker, onBack, onEdit }) {
           <div className="card" style={{ padding: '20px 22px' }}>
             <STitle><FileText size={14} /> CIN Verso</STitle>
             {worker.cin_verso ? (
-              <img src={worker.cin_verso} alt="CIN verso" style={{ width: '100%', borderRadius: 8, border: '1px solid var(--border)', objectFit: 'contain', maxHeight: 180 }} />
+              <CINFrame hasImage hint="">
+                <img src={worker.cin_verso} alt="CIN verso" className="cin-id-frame-img" />
+              </CINFrame>
             ) : (
               <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-3)', fontSize: '0.85rem', background: 'var(--bg)', borderRadius: 8 }}>Aucun document charge</div>
             )}
@@ -819,15 +1042,19 @@ function OuvrierDetail({ worker, onBack, onEdit }) {
 /* ══════════════════════════════════════════════════════
    OUVRIER FORM MODAL
    ══════════════════════════════════════════════════════ */
-function OuvrierModal({ worker, onClose, onSaved }) {
+function OuvrierModal({ worker, onClose, onSave, saving, projects = [] }) {
   const isEdit = !!worker;
   const [form, setForm] = useState(() => worker ? { ...EMPTY_FORM, ...worker } : { ...EMPTY_FORM, badge: genBadge() });
   const [errors, setErrors] = useState({});
-  const [saving, setSaving] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
+  const [scannerStream, setScannerStream] = useState(null);
+  const [scannerMode, setScannerMode] = useState('full');
+  const [captureSide, setCaptureSide] = useState(null);
   const [formTab, setFormTab] = useState('identite');
-  const [ocrFilled, setOcrFilled]   = useState(false);   // triggers highlight flash
-  const [ocrToast,  setOcrToast]    = useState('');      // success toast text
+  const [ocrFilled, setOcrFilled]   = useState(false);
+  const [ocrToast,  setOcrToast]    = useState('');
+  const [ocrAnalyzing, setOcrAnalyzing] = useState(false);
+  const ocrFilesRef = useRef({ recto: null, verso: null });
 
   const formTabs = [
     { id: 'identite',    label: 'Identite' },
@@ -839,19 +1066,130 @@ function OuvrierModal({ worker, onClose, onSaved }) {
 
   function set(k, v) { setForm(p => ({ ...p, [k]: v })); }
 
-  function handleScanExtracted(data) {
+  async function handleCINDocImport(side, preview, file) {
+    if (!preview) {
+      set(side === 'recto' ? 'cin_recto' : 'cin_verso', '');
+      ocrFilesRef.current[side] = null;
+      return;
+    }
+    if (!file) {
+      set(side === 'recto' ? 'cin_recto' : 'cin_verso', preview);
+      return;
+    }
+    try {
+      const prepared = await prepareImportedCINImage(preview, file, side);
+      console.info('[OCR CIN] using original/cropped file', {
+        side,
+        ocrBytes: prepared.ocrFile.size,
+        display: 'cropped-doc-zone',
+      });
+      set(side === 'recto' ? 'cin_recto' : 'cin_verso', prepared.previewDataUrl);
+      ocrFilesRef.current[side] = prepared.ocrFile;
+    } catch (err) {
+      console.error('[SCAN CIN] doc zone crop failed', err);
+      set(side === 'recto' ? 'cin_recto' : 'cin_verso', preview);
+      ocrFilesRef.current[side] = file;
+    }
+  }
+
+  async function openCINScanner() {
+    let stream = null;
+    if (canUseCamera()) {
+      try {
+        stream = await getCINCameraStream();
+      } catch (err) {
+        console.warn('[CIN Scanner] open', err);
+      }
+    }
+    setScannerMode('full');
+    setCaptureSide(null);
+    setScannerStream(stream);
+    setShowScanner(true);
+  }
+
+  async function openCINScannerForSide(side) {
+    let stream = null;
+    if (canUseCamera()) {
+      try {
+        stream = await getCINCameraStream();
+      } catch (err) {
+        console.warn('[CIN Scanner] open side', err);
+      }
+    }
+    setScannerMode('capture');
+    setCaptureSide(side);
+    setScannerStream(stream);
+    setShowScanner(true);
+  }
+
+  function closeCINScanner() {
+    if (scannerStream) {
+      scannerStream.getTracks().forEach(t => t.stop());
+    }
+    setScannerStream(null);
+    setScannerMode('full');
+    setCaptureSide(null);
+    setShowScanner(false);
+  }
+
+  function handleSideCaptured(side, preview, file) {
+    if (side === 'recto') {
+      set('cin_recto', preview);
+      ocrFilesRef.current.recto = file || null;
+    } else {
+      set('cin_verso', preview);
+      ocrFilesRef.current.verso = file || null;
+    }
+    setFormTab('documents');
+    closeCINScanner();
+  }
+
+  function applyOcrResult(result) {
+    const {
+      _ocr_warning, _ocr_partial, _ocr_source,
+      provider, confidence, lieu_naissance,
+      ...fields
+    } = result;
+    handleScanExtracted(fields, _ocr_warning);
+  }
+
+  function handleScanExtracted(data, warning) {
     setForm(p => ({ ...p, ...data }));
     setFormTab('identite');
-    // Count how many useful fields were extracted
-    const filled = ['cin','prenom','nom','date_naissance','ville_naissance','sexe','nationalite']
+    const filled = ['cin','prenom','nom','date_naissance','ville_naissance','adresse','date_expiration','sexe','nationalite']
       .filter(k => data[k] && String(data[k]).trim() !== '');
     setOcrFilled(true);
-    setOcrToast(filled.length > 0
-      ? `${filled.length} champ${filled.length > 1 ? 's' : ''} rempli${filled.length > 1 ? 's' : ''} automatiquement`
-      : 'OCR termine — verifiez les champs');
-    // Remove highlight after 3 s, hide toast after 4 s
+    if (warning) {
+      setOcrToast(warning);
+    } else if (filled.length > 0) {
+      setOcrToast(`${filled.length} champ${filled.length > 1 ? 's' : ''} rempli${filled.length > 1 ? 's' : ''} automatiquement`);
+    } else {
+      setOcrToast('OCR termine — verifiez et corrigez les champs manuellement');
+    }
     setTimeout(() => setOcrFilled(false), 3000);
-    setTimeout(() => setOcrToast(''),     4000);
+    setTimeout(() => setOcrToast(''), 6000);
+  }
+
+  async function handleAnalyzeDocuments() {
+    if (!form.cin_recto) {
+      setOcrToast('Importez au moins le recto CIN avant d\'analyser.');
+      setTimeout(() => setOcrToast(''), 4000);
+      return;
+    }
+    setOcrAnalyzing(true);
+    setOcrToast('');
+    try {
+      const result = await scanCIN(form.cin_recto, form.cin_verso || null, {
+        rectoFile: ocrFilesRef.current.recto,
+        versoFile: ocrFilesRef.current.verso,
+      });
+      applyOcrResult(result);
+    } catch (err) {
+      setOcrToast(err?.message || 'Erreur lecture image — saisissez les champs manuellement.');
+      setTimeout(() => setOcrToast(''), 6000);
+    } finally {
+      setOcrAnalyzing(false);
+    }
   }
 
   function validate() {
@@ -867,18 +1205,24 @@ function OuvrierModal({ worker, onClose, onSaved }) {
     ev.preventDefault();
     const errs = validate();
     if (Object.keys(errs).length) { setErrors(errs); setFormTab('identite'); return; }
-    setSaving(true);
-    const payload = { ...form, tarif: Number(form.tarif), id: worker?.id || Date.now() };
-    try {
-      if (isEdit) { await updateWorker(worker.id, payload); } else { await createWorker(payload); }
-    } catch (_) {}
-    onSaved(payload, isEdit);
-    setSaving(false);
+    const result = await onSave({ ...form, tarif: Number(form.tarif) }, isEdit);
+    if (result?.success) onClose();
   }
 
   return (
     <>
-      {showScanner && <CINScanner onExtracted={handleScanExtracted} onClose={() => setShowScanner(false)} />}
+      {showScanner && (
+        <CINScanner
+          mode={scannerMode}
+          captureSide={captureSide}
+          onCaptureOnly={handleSideCaptured}
+          onExtracted={applyOcrResult}
+          onClose={closeCINScanner}
+          initialStream={scannerStream}
+          initialRecto={form.cin_recto}
+          initialVerso={form.cin_verso}
+        />
+      )}
 
       {/* OCR success toast */}
       {ocrToast && (
@@ -904,7 +1248,7 @@ function OuvrierModal({ worker, onClose, onSaved }) {
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowScanner(true)} style={{ display: 'flex', alignItems: 'center', gap: 5, color: 'var(--red)' }}>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={openCINScanner} style={{ display: 'flex', alignItems: 'center', gap: 5, color: 'var(--red)' }}>
                 <ScanLine size={13} /> <span className="ouv-scanner-label">Scanner CIN</span>
               </button>
               <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: 4 }}><X size={20} /></button>
@@ -952,6 +1296,10 @@ function OuvrierModal({ worker, onClose, onSaved }) {
                     <div className="form-group">
                       <Label>Date de naissance</Label>
                       <input type="date" value={form.date_naissance} onChange={e => set('date_naissance', e.target.value)} style={IS(false, ocrFilled && form.date_naissance ? { borderColor: '#43A047', background: '#F1F8E9' } : {})} />
+                    </div>
+                    <div className="form-group">
+                      <Label>Expiration CIN</Label>
+                      <input type="date" value={form.date_expiration} onChange={e => set('date_expiration', e.target.value)} style={IS(false, ocrFilled && form.date_expiration ? { borderColor: '#43A047', background: '#F1F8E9' } : {})} />
                     </div>
                     <div className="form-group">
                       <Label>Ville de naissance</Label>
@@ -1028,10 +1376,38 @@ function OuvrierModal({ worker, onClose, onSaved }) {
                       <option value="non">Non disponible</option>
                     </select>
                   </div>
-                  <div className="form-group">
-                    <Label>Chantier affecte</Label>
-                    <input value={form.chantier} onChange={e => set('chantier', e.target.value)} placeholder="Nom du chantier..." style={IS(false)} />
+                  <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                    <Label>Projet / Chantier affecte</Label>
+                    <select
+                      value={form.project_id || ''}
+                      onChange={e => {
+                        const pr = projects.find(p => String(p.id) === String(e.target.value));
+                        setForm(p => ({
+                          ...p,
+                          project_id: e.target.value,
+                          projet_nom: pr?.nom || '',
+                          chantier: pr?.nom || (e.target.value ? '' : (p.chantier_legacy || p.chantier || '')),
+                        }));
+                      }}
+                      style={IS(false)}
+                    >
+                      <option value="">— Aucun projet —</option>
+                      {projects.map(p => (
+                        <option key={p.id} value={p.id}>{p.ref ? `${p.ref} — ${p.nom}` : p.nom}</option>
+                      ))}
+                    </select>
                   </div>
+                  {!form.project_id && (
+                    <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                      <Label>Chantier (texte libre)</Label>
+                      <input
+                        value={form.chantier_legacy || form.chantier || ''}
+                        onChange={e => setForm(p => ({ ...p, chantier: e.target.value, chantier_legacy: e.target.value }))}
+                        placeholder="Ancien chantier non lie a un projet..."
+                        style={IS(false)}
+                      />
+                    </div>
+                  )}
                   <div className="form-group">
                     <Label>Badge chantier</Label>
                     <input value={form.badge} onChange={e => set('badge', e.target.value)} style={IS(false)} />
@@ -1076,16 +1452,37 @@ function OuvrierModal({ worker, onClose, onSaved }) {
                 <div className="ouv-fields-grid">
                   <div className="form-group">
                     <Label>CIN Recto</Label>
-                    <DocUpload value={form.cin_recto} onChange={v => set('cin_recto', v)} label="Deposer CIN recto" />
+                    <CINDocZone
+                      side="recto"
+                      value={form.cin_recto}
+                      onChange={(preview, file) => handleCINDocImport('recto', preview, file)}
+                      onScan={openCINScannerForSide}
+                    />
                   </div>
                   <div className="form-group">
                     <Label>CIN Verso</Label>
-                    <DocUpload value={form.cin_verso} onChange={v => set('cin_verso', v)} label="Deposer CIN verso" />
+                    <CINDocZone
+                      side="verso"
+                      value={form.cin_verso}
+                      onChange={(preview, file) => handleCINDocImport('verso', preview, file)}
+                      onScan={openCINScannerForSide}
+                    />
+                  </div>
+                  <div className="form-group" style={{ gridColumn: '1 / -1', fontSize: '0.72rem', color: 'var(--text-3)', marginTop: -4 }}>
+                    {CIN_HINT} — format carte 85,60 × 53,98 mm
                   </div>
                   <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-                    <div style={{ background: '#FFEBEE', borderRadius: 8, padding: '12px 14px', fontSize: '0.82rem', color: 'var(--red)', display: 'flex', alignItems: 'center', gap: 8 }}>
-                      <ScanLine size={14} />
-                      Utilisez le bouton "Scanner CIN" en haut pour extraire automatiquement les donnees.
+                    <div className="cin-doc-analyze-bar">
+                      <span className="cin-doc-analyze-hint">
+                        <ScanLine size={14} />
+                        Après capture recto et verso, lancez l’analyse OCR.
+                      </span>
+                      <button type="button" className="btn btn-primary btn-sm" disabled={ocrAnalyzing || !form.cin_recto}
+                        onClick={handleAnalyzeDocuments}>
+                        {ocrAnalyzing
+                          ? <><Loader size={13} className="cin-spin" /> Analyse en cours...</>
+                          : <><ScanLine size={13} /> Analyser les photos</>}
+                      </button>
                     </div>
                   </div>
                 </div>
@@ -1151,10 +1548,19 @@ function OuvrierModal({ worker, onClose, onSaved }) {
 /* ══════════════════════════════════════════════════════
    OUVRIERS LISTE — MAIN COMPONENT
    ══════════════════════════════════════════════════════ */
-export default function OuvriersListe({ workers: extWorkers, onWorkersChange }) {
+export default function OuvriersListe({ onWorkersChange }) {
+  const {
+    workers,
+    loading,
+    saving,
+    error,
+    create,
+    update,
+    remove,
+  } = useWorkers();
+
   const [view, setView]             = useState('list'); // 'list' | 'detail'
   const [detailWorker, setDetail]   = useState(null);
-  const [workers, setWorkers]       = useState(extWorkers || []);
   const [search, setSearch]         = useState('');
   const [filterStatut, setFStatut]  = useState('');
   const [filterFonction, setFFonc]  = useState('');
@@ -1163,16 +1569,12 @@ export default function OuvriersListe({ workers: extWorkers, onWorkersChange }) 
   const [showModal, setShowModal]   = useState(false);
   const [editWorker, setEditWorker] = useState(null);
   const [toast, setToast]           = useState(null);
+  const [pdfLoadingId, setPdfLoadingId] = useState(null);
   const toastRef                    = useRef(null);
+  const [projects, setProjects]       = useState([]);
 
   useEffect(() => {
-    getWorkers().then(data => {
-      if (data && data.length > 0) {
-        const mapped = data.map((w, i) => ({ ...EMPTY_FORM, id: w.id || i + 1, prenom: w.prenom || w.firstName || '', nom: w.nom || w.lastName || w.name || '', telephone: w.telephone || w.phone || '', cin: w.cin || '', fonction: w.fonction || w.position || '', tarif: Number(w.tarif || w.dailyRate || 0), statut: w.statut || 'actif', badge: w.badge || genBadge() }));
-        setWorkers(mapped);
-        if (onWorkersChange) onWorkersChange(mapped);
-      }
-    }).catch(() => {});
+    listProjects().then(setProjects).catch(() => setProjects([]));
   }, []);
 
   function notify(type, msg) {
@@ -1181,29 +1583,55 @@ export default function OuvriersListe({ workers: extWorkers, onWorkersChange }) 
     toastRef.current = setTimeout(() => setToast(null), 3500);
   }
 
+  async function handleDownloadPdf(worker) {
+    setPdfLoadingId(worker.id);
+    try {
+      await generateWorkerPdf(worker);
+      notify('success', `Fiche PDF téléchargée — ${worker.prenom} ${worker.nom}`);
+    } catch (err) {
+      console.error('[CITYMO] PDF ouvrier', err);
+      notify('error', 'Erreur lors de la génération PDF.');
+    } finally {
+      setPdfLoadingId(null);
+    }
+  }
+
+  useEffect(() => {
+    if (onWorkersChange) onWorkersChange(workers);
+  }, [workers, onWorkersChange]);
+
+  useEffect(() => {
+    if (error) notify('error', error);
+  }, [error]);
+
+  useEffect(() => {
+    if (!detailWorker) return;
+    const fresh = workers.find((w) => w.id === detailWorker.id);
+    if (fresh) setDetail(fresh);
+  }, [workers, detailWorker?.id]);
+
   function openAdd()    { setEditWorker(null); setShowModal(true); }
   function openEdit(w)  { setEditWorker(w);    setShowModal(true); }
 
-  function handleSaved(payload, isEdit) {
-    let updated;
-    if (isEdit) {
-      updated = workers.map(w => w.id === payload.id ? { ...w, ...payload } : w);
-      notify('success', 'Ouvrier modifie avec succes.');
+  async function handleSave(form, isEdit) {
+    const result = isEdit ? await update(form.id, form) : await create(form);
+    if (result.success) {
+      notify('success', isEdit ? 'Ouvrier modifie avec succes.' : 'Ouvrier ajoute avec succes.');
     } else {
-      updated = [payload, ...workers];
-      notify('success', 'Ouvrier ajoute avec succes.');
+      notify('error', result.error || 'Erreur enregistrement.');
     }
-    setWorkers(updated);
-    if (onWorkersChange) onWorkersChange(updated);
-    setShowModal(false);
+    return result;
   }
 
-  function del(id) {
+  async function del(id) {
     if (!window.confirm('Supprimer cet ouvrier ?')) return;
-    const updated = workers.filter(w => w.id !== id);
-    setWorkers(updated);
-    if (onWorkersChange) onWorkersChange(updated);
-    notify('success', 'Ouvrier supprime.');
+    const result = await remove(id);
+    if (result.success) {
+      if (detailWorker?.id === id) { setView('list'); setDetail(null); }
+      notify('success', 'Ouvrier supprime.');
+    } else {
+      notify('error', result.error || 'Erreur suppression.');
+    }
   }
 
   function toggleSort(field) {
@@ -1215,7 +1643,7 @@ export default function OuvriersListe({ workers: extWorkers, onWorkersChange }) 
 
   const filtered = workers.filter(w => {
     const q = search.toLowerCase();
-    const matchSearch = !q || (w.prenom + ' ' + w.nom).toLowerCase().includes(q) || (w.cin || '').toLowerCase().includes(q) || (w.fonction || '').toLowerCase().includes(q) || (w.chantier || '').toLowerCase().includes(q);
+    const matchSearch = !q || (w.prenom + ' ' + w.nom).toLowerCase().includes(q) || (w.cin || '').toLowerCase().includes(q) || (w.fonction || '').toLowerCase().includes(q) || (w.chantier || '').toLowerCase().includes(q) || (w.projet_nom || '').toLowerCase().includes(q);
     const matchStatut  = !filterStatut   || w.statut   === filterStatut;
     const matchFonction = !filterFonction || w.fonction === filterFonction;
     return matchSearch && matchStatut && matchFonction;
@@ -1243,12 +1671,16 @@ export default function OuvriersListe({ workers: extWorkers, onWorkersChange }) 
           worker={detailWorker}
           onBack={() => { setView('list'); setDetail(null); }}
           onEdit={w => { setEditWorker(w); setShowModal(true); }}
+          onDownloadPdf={handleDownloadPdf}
+          pdfLoading={pdfLoadingId === detailWorker.id}
         />
         {showModal && (
           <OuvrierModal
             worker={editWorker}
             onClose={() => setShowModal(false)}
-            onSaved={(payload, isEdit) => { handleSaved(payload, isEdit); if (detailWorker?.id === payload.id) setDetail(payload); setShowModal(false); }}
+            onSave={handleSave}
+            saving={saving}
+            projects={projects}
           />
         )}
       </>
@@ -1263,7 +1695,9 @@ export default function OuvriersListe({ workers: extWorkers, onWorkersChange }) 
         <OuvrierModal
           worker={editWorker}
           onClose={() => setShowModal(false)}
-          onSaved={handleSaved}
+          onSave={handleSave}
+          saving={saving}
+          projects={projects}
         />
       )}
 
@@ -1331,7 +1765,12 @@ export default function OuvriersListe({ workers: extWorkers, onWorkersChange }) 
 
       {/* Table */}
       <div className="card" style={{ padding: 0 }}>
-        {filtered.length === 0 ? (
+        {loading ? (
+          <div style={{ textAlign: 'center', padding: '48px 0', color: 'var(--text-3)' }}>
+            <Loader size={24} style={{ animation: 'spin 0.8s linear infinite', marginBottom: 8 }} />
+            <div style={{ fontSize: '0.85rem' }}>Chargement des ouvriers...</div>
+          </div>
+        ) : filtered.length === 0 ? (
           <div style={{ textAlign: 'center', padding: '50px 20px' }}>
             <HardHat size={40} style={{ color: 'var(--border)', marginBottom: 12 }} />
             <p style={{ color: 'var(--text-3)', fontSize: '0.875rem' }}>{workers.length === 0 ? 'Aucun ouvrier enregistre.' : 'Aucun resultat.'}</p>
@@ -1426,7 +1865,11 @@ export default function OuvriersListe({ workers: extWorkers, onWorkersChange }) 
                         <div style={{ display: 'flex', gap: 2 }}>
                           <button title="Voir fiche" className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} onClick={() => { setDetail(w); setView('detail'); }}><Eye size={13} /></button>
                           <button title="Modifier" className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} onClick={() => openEdit(w)}><Edit2 size={13} /></button>
-                          <button title="PDF" className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} onClick={() => notify('success', 'PDF genere pour ' + w.prenom + ' ' + w.nom)}><Download size={13} /></button>
+                          <button title="Télécharger fiche" className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }}
+                            disabled={pdfLoadingId === w.id}
+                            onClick={(e) => { e.stopPropagation(); handleDownloadPdf(w); }}>
+                            {pdfLoadingId === w.id ? <Loader size={13} style={{ animation: 'spin 0.8s linear infinite' }} /> : <Download size={13} />}
+                          </button>
                           <button title="Supprimer" className="btn btn-ghost btn-sm" style={{ padding: '4px 7px', color: 'var(--red)' }} onClick={() => del(w.id)}><Trash2 size={13} /></button>
                         </div>
                       </td>

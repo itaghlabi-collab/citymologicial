@@ -6,6 +6,8 @@ server/node_modules/
 .env
 .env.local
 .env.*.local
+server/.env
+supabase/.secrets.notify-leave-request.env
 
 # Build
 dist/
