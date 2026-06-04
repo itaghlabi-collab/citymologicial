@@ -315,72 +315,38 @@ async function mindeePredictRaw(buffer, mime, label) {
 
 router.post(
   '/moroccan-cin',
-  upload.fields([
-    { name: 'recto', maxCount: 1 },
-    { name: 'verso', maxCount: 1 },
-  ]),
+  (req, res, next) => {
+    if (req.is('application/json')) return next();
+    return upload.fields([
+      { name: 'recto', maxCount: 1 },
+      { name: 'verso', maxCount: 1 },
+    ])(req, res, next);
+  },
   async (req, res) => {
     try {
-      const rectoFile = req.files?.recto?.[0];
-      const versoFile = req.files?.verso?.[0];
+      const { processMoroccanCinBuffers, dataUrlToBuffer } = await import(
+        pathToFileURL(path.join(__dirname, '../../lib/mindeeMoroccanCin.mjs'))
+      );
 
-      if (!rectoFile && !versoFile) {
+      let rectoBuf = null;
+      let versoBuf = null;
+
+      if (req.is('application/json')) {
+        if (req.body?.recto) rectoBuf = dataUrlToBuffer(req.body.recto);
+        if (req.body?.verso) versoBuf = dataUrlToBuffer(req.body.verso);
+      } else {
+        const rectoFile = req.files?.recto?.[0];
+        const versoFile = req.files?.verso?.[0];
+        if (rectoFile?.buffer?.length) rectoBuf = rectoFile.buffer;
+        if (versoFile?.buffer?.length) versoBuf = versoFile.buffer;
+      }
+
+      if (!rectoBuf?.length && !versoBuf?.length) {
         return res.status(400).json({ success: false, error: 'Au moins recto ou verso requis.' });
       }
 
-      const provider = (process.env.OCR_PROVIDER || 'mindee').toLowerCase();
-
-      if (provider === 'mock') {
-        console.info('[OCR CIN] provider=mock');
-        await logMappedSide(MOCK_RECTO.fields, 'recto');
-        if (versoFile) await logMappedSide(MOCK_VERSO.fields, 'verso');
-        return res.json({
-          success: true,
-          provider: 'mock',
-          recto: MOCK_RECTO,
-          verso: versoFile ? MOCK_VERSO : null,
-        });
-      }
-
-      if (!process.env.MINDEE_API_KEY) {
-        return res.status(503).json({
-          success: false,
-          code: 'OCR_NOT_CONFIGURED',
-          allowFallback: true,
-          error: 'Mindee non configure — fallback Tesseract client.',
-        });
-      }
-
-      let recto = null;
-      let verso = null;
-
-      const jobs = [];
-      if (rectoFile) {
-        jobs.push(
-          mindeePredictRaw(rectoFile.buffer, rectoFile.mimetype, 'recto')
-            .then((pred) => { recto = { raw: pred.raw, fields: pred.fields }; })
-            .catch((err) => { console.warn('[OCR CIN] recto Mindee', err.message); }),
-        );
-      }
-      if (versoFile) {
-        jobs.push(
-          mindeePredictRaw(versoFile.buffer, versoFile.mimetype, 'verso')
-            .then((pred) => { verso = { raw: pred.raw, fields: pred.fields }; })
-            .catch((err) => { console.warn('[OCR CIN] verso Mindee', err.message); }),
-        );
-      }
-      await Promise.all(jobs);
-
-      if (!recto && !verso) {
-        return res.status(200).json({
-          success: false,
-          code: 'MINDEE_EMPTY_EXTRACTION',
-          allowFallback: true,
-          error: 'Mindee: aucune extraction — fallback Tesseract.',
-        });
-      }
-
-      return res.json({ success: true, provider: 'mindee', recto, verso });
+      const result = await processMoroccanCinBuffers({ rectoBuf, versoBuf });
+      return res.status(200).json(result);
     } catch (err) {
       console.error('[OCR CIN] Erreur Mindee:', err.message);
       const code = err.code || 'OCR_ERROR';

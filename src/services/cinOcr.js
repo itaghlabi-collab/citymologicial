@@ -479,6 +479,9 @@ export function toStandardOcrResult(merged, provider) {
 
 export function buildOcrWarning(form, hasRecto, hasVerso) {
   if (!hasRecto && !hasVerso) return 'Texte illisible — completez les champs manuellement.';
+  if (hasRecto && !hasVerso) {
+    return 'Importez le verso CIN (MRZ en bas) pour le prénom, l\'adresse et une extraction fiable.';
+  }
   const missing = [];
   if (!form.cin) missing.push('CIN');
   if (!form.nom) missing.push('nom');
@@ -816,18 +819,11 @@ export function resolveCINIdentity(opts) {
     return '';
   }
 
-  // MRZ = source la plus fiable pour identité latine (toutes cartes CNIE)
-  var nom = '';
-  var prenom = '';
-  if (isValidPersonName(mrz.nom, false) && isValidPersonName(mrz.prenom, true)) {
-    nom = cleanNamePart(mrz.nom, true);
-    prenom = normalizePrenomValue(mrz.prenom);
-  } else {
-    nom = pickWeighted(nomCandidates, false);
-    prenom = pickWeighted(prenomCandidates, true);
-    if (!nom && isValidPersonName(mrz.nom, false)) nom = cleanNamePart(mrz.nom, true);
-    if (!prenom && isValidPersonName(mrz.prenom, true)) prenom = normalizePrenomValue(mrz.prenom);
-  }
+  // MRZ = source la plus fiable (nom et prénom pris séparément si besoin)
+  var nom = pickWeighted(nomCandidates, false);
+  var prenom = pickWeighted(prenomCandidates, true);
+  if (isValidPersonName(mrz.nom, false)) nom = cleanNamePart(mrz.nom, true);
+  if (isValidPersonName(mrz.prenom, true)) prenom = normalizePrenomValue(mrz.prenom);
 
   var adresse = pickField('adresse');
   if (!adresse || adresse.length < 8) {

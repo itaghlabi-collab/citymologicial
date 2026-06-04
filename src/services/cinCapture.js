@@ -5,11 +5,18 @@
 
 export const CIN_ASPECT_RATIO = 85.60 / 53.98;
 
-/** Aligné sur SVG mask + .cin-vf-frame (viewBox %) */
+/** Aligné sur SVG mask + .cin-vf-frame (viewBox %) — recto (zone noms) */
 export const CIN_FRAME_MASK = { x: 0.09, y: 0.2415, w: 0.82, h: 0.517 };
+
+/** Verso : carte quasi entière (adresse haut + MRZ bas) */
+export const CIN_VERSO_MASK = { x: 0.04, y: 0.04, w: 0.92, h: 0.92 };
 
 /** @deprecated alias — même zone que le cadre rouge */
 export const CIN_CROP = CIN_FRAME_MASK;
+
+export function getCinFrameMaskForSide(side) {
+  return side === 'verso' ? CIN_VERSO_MASK : CIN_FRAME_MASK;
+}
 
 const DEFAULT_MARGIN = 0.03;
 
@@ -180,24 +187,33 @@ export async function captureCINFromVideo(video, frameEl, side, options = {}) {
 
   return {
     previewDataUrl: croppedDataUrl,
+    fullDataUrl,
     ocrFile,
     displayFile,
     crop,
   };
 }
 
-/** Galerie : crop fiche + garde fichier original pour OCR. */
+/** Galerie : aperçu recadré (par côté) + image pleine résolution pour OCR. */
 export async function prepareImportedCINImage(dataUrl, file, side) {
-  const { croppedDataUrl, crop } = await cropImageDataUrlByMask(dataUrl);
-  console.info('[SCAN CIN] crop coordinates (import)', crop);
-  console.info('[SCAN CIN] cropped file created (import)', { side, w: crop.w, h: crop.h });
+  const mask = getCinFrameMaskForSide(side);
+  const { croppedDataUrl, crop } = await cropImageDataUrlByMask(dataUrl, mask);
+  console.info('[SCAN CIN] crop coordinates (import)', { side, ...crop });
 
+  const fullDataUrl = dataUrl;
   const ocrFile = (file instanceof File && file.size > 0)
     ? file
-    : dataUrlToCaptureFile(dataUrl, side, 'ocr');
+    : dataUrlToCaptureFile(fullDataUrl, side, 'ocr-full');
+
+  console.info('[SCAN CIN] OCR uses full image', {
+    side,
+    ocrBytes: ocrFile.size,
+    previewCrop: mask === CIN_VERSO_MASK ? 'verso-full' : 'recto-frame',
+  });
 
   return {
     previewDataUrl: croppedDataUrl,
+    fullDataUrl,
     ocrFile,
     displayFile: dataUrlToCaptureFile(croppedDataUrl, side),
   };

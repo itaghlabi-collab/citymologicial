@@ -79,9 +79,50 @@ async function getOcrWorker() {
   return _tesseractWorkerPromise;
 }
 
-async function prepareOcrImage(dataUrl, crop) {
+/** Agrandit + binarise la bande MRZ pour Tesseract. */
+export function sharpenMrzForOcr(dataUrl) {
+  return new Promise(function(resolve) {
+    var img = new Image();
+    img.onload = function() {
+      try {
+        var scale = Math.min(3, Math.max(1.8, 1200 / Math.max(img.width, 1)));
+        var w = Math.max(1, Math.round(img.width * scale));
+        var h = Math.max(1, Math.round(img.height * scale));
+        var c = document.createElement('canvas');
+        c.width = w;
+        c.height = h;
+        var ctx = c.getContext('2d');
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(0, 0, w, h);
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, 0, 0, w, h);
+        var id = ctx.getImageData(0, 0, w, h);
+        var d = id.data;
+        for (var i = 0; i < d.length; i += 4) {
+          var gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+          var v = gray > 145 ? 255 : gray < 95 ? 0 : gray > 120 ? 255 : 0;
+          d[i] = d[i + 1] = d[i + 2] = v;
+        }
+        ctx.putImageData(id, 0, 0);
+        resolve(c.toDataURL('image/jpeg', 0.94));
+      } catch (e) {
+        resolve(dataUrl);
+      }
+    };
+    img.onerror = function() { resolve(dataUrl); };
+    img.src = dataUrl;
+  });
+}
+
+async function prepareOcrImage(dataUrl, crop, label) {
   var img = crop ? await cropRegion(dataUrl, crop) : dataUrl;
-  return compressImage(img, tessMaxWidth(), 0.88);
+  if (label === 'mrz') {
+    try { img = await sharpenMrzForOcr(img); } catch (_) { /* keep */ }
+  } else {
+    try { img = await enhanceForOcr(img); } catch (_) { /* keep */ }
+  }
+  return compressImage(img, tessMaxWidth(), 0.9);
 }
 
 /** Recadre une zone de l'image (ratios 0–1). */
@@ -213,7 +254,12 @@ function readFileAsDataUrl(file) {
   });
 }
 
-async function prepareSide(source, file, sideLabel) {
+async function prepareSide(source, file, sideLabel, fullDataUrl) {
+  if (fullDataUrl && isImageDataUrl(String(fullDataUrl))) {
+    const dataUrl = await normalizeImageInput(fullDataUrl);
+    const preview = isImageDataUrl(source) ? source : dataUrl;
+    return { file: null, dataUrl, preview, fullDataUrl: dataUrl };
+  }
   if (file instanceof File && file.size > 0) {
     console.info('[OCR CIN] mobile capture file', {
       side: sideLabel,
@@ -235,14 +281,14 @@ async function prepareSide(source, file, sideLabel) {
       bytes: file.size,
       previewSeparate: preview !== ocrDataUrl,
     });
-    return { file, dataUrl: ocrDataUrl, preview };
+    return { file, dataUrl: ocrDataUrl, preview, fullDataUrl: ocrDataUrl };
   }
 
   if (!source) throw new Error(`${sideLabel === 'recto' ? 'Image recto' : 'Image'} requise.`);
   const kind = isImageDataUrl(String(source)) ? 'dataUrl' : String(source).startsWith('http') ? 'url' : 'unknown';
   console.info('[OCR CIN] image reçue', sideLabel, { from: kind, len: String(source).length });
   const dataUrl = await normalizeImageInput(source);
-  return { file: null, dataUrl, preview: isImageDataUrl(source) ? source : dataUrl };
+  return { file: null, dataUrl, preview: isImageDataUrl(source) ? source : dataUrl, fullDataUrl: dataUrl };
 }
 
 function sideHasExtractedData(mapped, side) {
@@ -325,29 +371,15 @@ async function ocrImageText(dataUrl, psm) {
 
 async function fetchMindeeSides(rectoSide, versoSide) {
   const apiUrl = getOcrApiUrl();
-  const form = new FormData();
-
-  const appendSide = (name, side) => {
-    if (!side) return;
-    // Mindee : fichier original (meilleure qualité) ou dataUrl non prétraitée
-    if (side.file instanceof File && side.file.size > 0) {
-      form.append(name, side.file, side.file.name || `${name}.jpg`);
-      return;
-    }
-    const src = side.dataUrl;
-    if (src) {
-      form.append(name, new File([dataUrlToBlob(src)], `${name}.jpg`, { type: 'image/jpeg' }));
-    }
+  const payload = {
+    recto: rectoSide?.fullDataUrl || rectoSide?.dataUrl || null,
+    verso: versoSide?.fullDataUrl || versoSide?.dataUrl || null,
   };
 
-  appendSide('recto', rectoSide);
-  appendSide('verso', versoSide);
-
   console.info('[OCR CIN] POST /api/ocr/moroccan-cin', {
-    recto: rectoSide?.file ? 'file' : 'dataUrl',
-    verso: versoSide ? (versoSide.file ? 'file' : 'dataUrl') : 'none',
-    rectoBytes: rectoSide?.file?.size,
-    versoBytes: versoSide?.file?.size,
+    recto: payload.recto ? 'full-image' : 'none',
+    verso: payload.verso ? 'full-image' : 'none',
+    apiUrl,
   });
 
   const controller = new AbortController();
@@ -356,7 +388,8 @@ async function fetchMindeeSides(rectoSide, versoSide) {
   try {
     const res = await fetch(`${apiUrl}/ocr/moroccan-cin`, {
       method: 'POST',
-      body: form,
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
       signal: controller.signal,
     });
     const text = await res.text();
@@ -413,18 +446,32 @@ function getMissingTargets(mapped, side) {
     nom: !String(m.nom || '').trim(),
     cin: !String(m.numero_cin || '').trim(),
     dateNaissance: !String(m.date_naissance || '').trim(),
-    adresse: side === 'verso' && !String(m.adresse || '').trim(),
+    dateExpiration: !String(m.date_expiration || '').trim(),
+    adresse: side === 'verso' && (!String(m.adresse || '').trim() || String(m.adresse).length < 10),
   };
 }
 
+/** Verso : toujours OCR profond (MRZ + adresse). Recto : si identité incomplète. */
+function sideNeedsDeepOcr(mapped, side) {
+  if (side === 'verso') return true;
+  return needsOcrFallback(mapped, side);
+}
+
 function targetsNeedOcr(targets) {
-  return targets.prenom || targets.nom || targets.cin || targets.dateNaissance || targets.adresse;
+  return targets.prenom || targets.nom || targets.cin || targets.dateNaissance
+    || targets.dateExpiration || targets.adresse;
+}
+
+function allVersoTargets() {
+  return { prenom: true, nom: true, cin: true, dateNaissance: true, dateExpiration: true, adresse: true };
 }
 
 function needsOcrFallback(mapped, side) {
   var m = { ...emptyCINExtract(), ...(mapped || {}) };
   if (side === 'recto') {
-    return !identityFieldsComplete(m) || !String(m.date_naissance || '').trim();
+    return !identityFieldsComplete(m)
+      || !String(m.date_naissance || '').trim()
+      || !String(m.date_expiration || '').trim();
   }
   return targetsNeedOcr(getMissingTargets(m, side));
 }
@@ -459,8 +506,8 @@ function collectMindeeMrzText(sideData) {
 
 async function parseTesseractSide(imageDataUrl, side, seedMapped) {
   var bestMapped = { ...emptyCINExtract(), ...(seedMapped || {}) };
-  var targets = getMissingTargets(bestMapped, side);
-  if (!targetsNeedOcr(targets)) {
+  var targets = side === 'verso' ? allVersoTargets() : getMissingTargets(bestMapped, side);
+  if (side !== 'verso' && !targetsNeedOcr(targets)) {
     return { mapped: bestMapped, fields: null, source: 'none', rawText: '' };
   }
 
@@ -474,10 +521,10 @@ async function parseTesseractSide(imageDataUrl, side, seedMapped) {
 
     var img;
     try {
-      img = await prepareOcrImage(imageDataUrl, plans[pi].crop);
+      img = await prepareOcrImage(imageDataUrl, plans[pi].crop, plans[pi].label);
     } catch (_) { continue; }
 
-    var psms = plans[pi].label === 'mrz' ? [6, 11, 13] : [6, 3];
+    var psms = plans[pi].label === 'mrz' ? [7, 6, 11, 13] : [6, 3];
     for (var psi = 0; psi < psms.length; psi++) {
       try {
         var text = await ocrImageText(img, psms[psi]);
@@ -527,8 +574,7 @@ async function analyzeSide(imageDataUrl, mindeeSideData, side) {
   }
 
   var tessResult = { mapped: emptyCINExtract(), rawText: '', source: 'none' };
-  // Tesseract si Mindee absent OU champs identité/adresse encore manquants
-  var runTess = !hasMindee || needsOcrFallback(mindeeMapped, side);
+  var runTess = !hasMindee || sideNeedsDeepOcr(mindeeMapped, side);
 
   if (runTess) {
     console.info('[OCR CIN] provider=tesseract', side, hasMindee ? '(complément Mindee)' : '(fallback Mindee indisponible ou vide)');
@@ -566,17 +612,17 @@ async function analyzeSide(imageDataUrl, mindeeSideData, side) {
  * @param {{ rectoFile?: File, versoFile?: File }} [options] — fichiers originaux pour OCR
  */
 export async function scanCIN(rectoSource, versoSource, options = {}) {
-  const { rectoFile, versoFile, onProgress } = options;
+  const { rectoFile, versoFile, rectoFullDataUrl, versoFullDataUrl, onProgress } = options;
   const progress = typeof onProgress === 'function' ? onProgress : function() {};
 
   progress('Préparation des images…');
   preloadOcrEngine();
 
-  const rectoSide = await prepareSide(rectoSource, rectoFile, 'recto');
+  const rectoSide = await prepareSide(rectoSource, rectoFile, 'recto', rectoFullDataUrl);
   let versoSide = null;
-  if (versoSource || versoFile) {
+  if (versoSource || versoFile || versoFullDataUrl) {
     try {
-      versoSide = await prepareSide(versoSource, versoFile, 'verso');
+      versoSide = await prepareSide(versoSource, versoFile, 'verso', versoFullDataUrl);
     } catch (err) {
       console.warn('[OCR CIN] verso ignoré', err.message);
       versoSide = null;

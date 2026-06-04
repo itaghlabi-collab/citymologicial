@@ -292,6 +292,8 @@ function CINScanner({
   const versoRef      = useRef(initialVerso || null);
   const rectoFileRef  = useRef(null);
   const versoFileRef  = useRef(null);
+  const rectoFullDataUrlRef = useRef(null);
+  const versoFullDataUrlRef = useRef(null);
   const analyzeLoopRef = useRef(null);
 
   useEffect(() => {
@@ -460,6 +462,8 @@ function CINScanner({
       const result = await scanCIN(recto, verso || null, {
         rectoFile: rectoFileRef.current,
         versoFile: versoFileRef.current,
+        rectoFullDataUrl: rectoFullDataUrlRef.current,
+        versoFullDataUrl: versoFullDataUrlRef.current,
         onProgress: setUploadStatus,
       });
       onExtracted(result);
@@ -537,7 +541,7 @@ function CINScanner({
     if (!streamRef.current || video.readyState < 2) return;
 
     try {
-      const { previewDataUrl, ocrFile } = await captureCINFromVideo(video, frameEl, sideRef.current);
+      const { previewDataUrl, ocrFile, fullDataUrl } = await captureCINFromVideo(video, frameEl, sideRef.current);
       console.info('[OCR CIN] using original/cropped file', {
         side: sideRef.current,
         ocrBytes: ocrFile.size,
@@ -550,11 +554,13 @@ function CINScanner({
       if (sideRef.current === 'recto') {
         rectoRef.current = previewDataUrl;
         rectoFileRef.current = ocrFile;
+        rectoFullDataUrlRef.current = fullDataUrl || null;
         setRecto(previewDataUrl);
         if (!isCaptureMode && !versoRef.current) setSide('verso');
       } else {
         versoRef.current = previewDataUrl;
         versoFileRef.current = ocrFile;
+        versoFullDataUrlRef.current = fullDataUrl || null;
         setVerso(previewDataUrl);
       }
     } catch (err) {
@@ -567,10 +573,12 @@ function CINScanner({
     if (side === 'recto') {
       rectoRef.current = null;
       rectoFileRef.current = null;
+      rectoFullDataUrlRef.current = null;
       setRecto(null);
     } else {
       versoRef.current = null;
       versoFileRef.current = null;
+      versoFullDataUrlRef.current = null;
       setVerso(null);
     }
     stableRef.current = 0;
@@ -600,7 +608,7 @@ function CINScanner({
           ocrBytes: prepared.ocrFile.size,
           display: 'cropped-import',
         });
-        onDone(prepared.previewDataUrl, prepared.ocrFile);
+        onDone(prepared.previewDataUrl, prepared.ocrFile, prepared.fullDataUrl);
       } catch (err) {
         console.error('[SCAN CIN] import crop failed', err);
         setError('Impossible de recadrer l\'image importée.');
@@ -610,21 +618,23 @@ function CINScanner({
     reader.readAsDataURL(file);
   }
 
-  function assignImportedImage(targetSide, dataUrl, file) {
+  function assignImportedImage(targetSide, dataUrl, file, fullDataUrl) {
     if (targetSide === 'recto') {
       rectoRef.current = dataUrl;
       rectoFileRef.current = file;
+      rectoFullDataUrlRef.current = fullDataUrl || null;
       setRecto(dataUrl);
     } else {
       versoRef.current = dataUrl;
       versoFileRef.current = file;
+      versoFullDataUrlRef.current = fullDataUrl || null;
       setVerso(dataUrl);
     }
     setSide(targetSide);
     setError('');
     if (isCaptureMode && onCaptureOnly) {
       teardown();
-      onCaptureOnly(targetSide, dataUrl, file);
+      onCaptureOnly(targetSide, dataUrl, file, fullDataUrl);
       return;
     }
   }
@@ -633,12 +643,13 @@ function CINScanner({
     const s = isCaptureMode ? (captureSide || sideRef.current) : sideRef.current;
     const preview = s === 'recto' ? rectoRef.current : versoRef.current;
     const file = s === 'recto' ? rectoFileRef.current : versoFileRef.current;
+    const fullDataUrl = s === 'recto' ? rectoFullDataUrlRef.current : versoFullDataUrlRef.current;
     if (!preview) {
       setError('Capturez ou importez une photo avant de valider.');
       return;
     }
     teardown();
-    if (onCaptureOnly) onCaptureOnly(s, preview, file);
+    if (onCaptureOnly) onCaptureOnly(s, preview, file, fullDataUrl);
   }
 
   const currentSideHasImage = isCaptureMode
@@ -654,7 +665,7 @@ function CINScanner({
     if (!f) return;
     e.target.value = '';
     const targetSide = isCaptureMode && captureSide ? captureSide : side;
-    readImageFile(f, targetSide, (dataUrl, file) => assignImportedImage(targetSide, dataUrl, file));
+    readImageFile(f, targetSide, (dataUrl, file, fullDataUrl) => assignImportedImage(targetSide, dataUrl, file, fullDataUrl));
   }
 
   const activeSide = isCaptureMode && captureSide ? captureSide : side;
@@ -1069,6 +1080,7 @@ function OuvrierModal({ worker, onClose, onSave, saving, projects = [] }) {
   const [ocrToast,  setOcrToast]    = useState('');
   const [ocrAnalyzing, setOcrAnalyzing] = useState(false);
   const ocrFilesRef = useRef({ recto: null, verso: null });
+  const ocrFullDataUrlRef = useRef({ recto: null, verso: null });
 
   const formTabs = [
     { id: 'identite',    label: 'Identite' },
@@ -1084,6 +1096,7 @@ function OuvrierModal({ worker, onClose, onSave, saving, projects = [] }) {
     if (!preview) {
       set(side === 'recto' ? 'cin_recto' : 'cin_verso', '');
       ocrFilesRef.current[side] = null;
+      ocrFullDataUrlRef.current[side] = null;
       return;
     }
     if (!file) {
@@ -1099,10 +1112,12 @@ function OuvrierModal({ worker, onClose, onSave, saving, projects = [] }) {
       });
       set(side === 'recto' ? 'cin_recto' : 'cin_verso', prepared.previewDataUrl);
       ocrFilesRef.current[side] = prepared.ocrFile;
+      ocrFullDataUrlRef.current[side] = prepared.fullDataUrl || null;
     } catch (err) {
       console.error('[SCAN CIN] doc zone crop failed', err);
       set(side === 'recto' ? 'cin_recto' : 'cin_verso', preview);
       ocrFilesRef.current[side] = file;
+      ocrFullDataUrlRef.current[side] = preview;
     }
   }
 
@@ -1146,13 +1161,15 @@ function OuvrierModal({ worker, onClose, onSave, saving, projects = [] }) {
     setShowScanner(false);
   }
 
-  function handleSideCaptured(side, preview, file) {
+  function handleSideCaptured(side, preview, file, fullDataUrl) {
     if (side === 'recto') {
       set('cin_recto', preview);
       ocrFilesRef.current.recto = file || null;
+      ocrFullDataUrlRef.current.recto = fullDataUrl || null;
     } else {
       set('cin_verso', preview);
       ocrFilesRef.current.verso = file || null;
+      ocrFullDataUrlRef.current.verso = fullDataUrl || null;
     }
     setFormTab('documents');
     closeCINScanner();
@@ -1196,6 +1213,8 @@ function OuvrierModal({ worker, onClose, onSave, saving, projects = [] }) {
       const result = await scanCIN(form.cin_recto, form.cin_verso || null, {
         rectoFile: ocrFilesRef.current.recto,
         versoFile: ocrFilesRef.current.verso,
+        rectoFullDataUrl: ocrFullDataUrlRef.current.recto,
+        versoFullDataUrl: ocrFullDataUrlRef.current.verso,
       });
       applyOcrResult(result);
     } catch (err) {

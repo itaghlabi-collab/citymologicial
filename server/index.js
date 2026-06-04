@@ -62,7 +62,7 @@ app.use(cors({
 }));
 
 // ── Body parsers ──────────────────────────────────────────────────────────────
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '15mb' }));
 app.use(express.urlencoded({ extended: true }));
 
 // ── Health check ──────────────────────────────────────────────────────────────
