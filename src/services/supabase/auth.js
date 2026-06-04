@@ -2,6 +2,7 @@
  * auth.js — Helpers session Supabase (profil + abonnements).
  */
 import { getSupabase } from '../../lib/supabase';
+import { logAuth, logAuthError } from '../../utils/authLog';
 
 const PROFILE_TIMEOUT_MS = 5000;
 
@@ -33,6 +34,8 @@ export function mapSupabaseUser(user, profile = null) {
 export async function fetchProfile(userId) {
   if (!userId) return null;
 
+  logAuth('fetchProfile →', { userId });
+
   const { data, error } = await getSupabase()
     .from('profiles')
     .select('id, nom, email, role, initiales, department_id')
@@ -40,15 +43,23 @@ export async function fetchProfile(userId) {
     .maybeSingle();
 
   if (error) {
-    console.warn('[CITYMO] profiles fetch:', error.message, error.code);
+    logAuthError('fetchProfile failed', error, { userId, pgCode: error.code });
     return null;
   }
+
+  logAuth('fetchProfile OK', {
+    userId,
+    found: Boolean(data),
+    role: data?.role,
+  });
   return data;
 }
 
 async function ensureProfileInternal(authUser) {
   const existing = await fetchProfile(authUser.id);
   if (existing) return existing;
+
+  logAuth('ensureProfile upsert →', { userId: authUser.id, email: authUser.email });
 
   const meta = authUser.user_metadata || {};
   const nom = meta.nom || authUser.email?.split('@')[0] || 'Utilisateur';
@@ -67,9 +78,15 @@ async function ensureProfileInternal(authUser) {
     .single();
 
   if (error) {
-    console.warn('[CITYMO] profiles upsert:', error.message, error.code);
+    logAuthError('ensureProfile upsert failed', error, {
+      userId: authUser.id,
+      pgCode: error.code,
+      hint: error.hint,
+    });
     return null;
   }
+
+  logAuth('ensureProfile upsert OK', { userId: data.id, role: data.role });
   return data;
 }
 
@@ -79,12 +96,15 @@ export async function ensureProfile(authUser, timeoutMs = PROFILE_TIMEOUT_MS) {
     const profile = await Promise.race([
       ensureProfileInternal(authUser),
       new Promise((resolve) => {
-        setTimeout(() => resolve(null), timeoutMs);
+        setTimeout(() => {
+          logAuth('ensureProfile timeout', { userId: authUser.id, timeoutMs });
+          resolve(null);
+        }, timeoutMs);
       }),
     ]);
     return profile;
   } catch (err) {
-    console.warn('[CITYMO] ensureProfile error', err);
+    logAuthError('ensureProfile exception', err, { userId: authUser?.id });
     return null;
   }
 }
@@ -93,58 +113,92 @@ export async function ensureProfile(authUser, timeoutMs = PROFILE_TIMEOUT_MS) {
 export function loadProfileInBackground(authUser, onUpdate) {
   setTimeout(async () => {
     try {
+      logAuth('loadProfileInBackground →', { userId: authUser.id });
       const profile = await ensureProfile(authUser);
       if (profile) {
-        console.info('[CITYMO] profile loaded', profile.email || authUser.email);
+        logAuth('profile loaded (background)', {
+          email: profile.email || authUser.email,
+          role: profile.role,
+        });
         onUpdate(mapSupabaseUser(authUser, profile));
       } else {
-        console.info('[CITYMO] fallback profile', authUser.email);
+        logAuth('profile fallback (background)', { email: authUser.email });
       }
     } catch (err) {
-      console.warn('[CITYMO] fallback profile', authUser.email, err);
+      logAuthError('loadProfileInBackground failed', err, { email: authUser.email });
     }
   }, 0);
 }
 
 export async function getSupabaseSessionUser() {
+  logAuth('getSession →');
+
   const { data: { session }, error } = await getSupabase().auth.getSession();
 
   if (error) {
-    console.error('[CITYMO] getSession', error);
+    logAuthError('getSession failed', error);
     return null;
   }
-  if (!session?.user) return null;
+
+  logAuth('getSession OK', {
+    hasSession: Boolean(session),
+    userId: session?.user?.id ?? null,
+    email: session?.user?.email ?? null,
+    expiresAt: session?.expires_at ?? null,
+  });
+
+  if (!session?.user) {
+    logAuth('getSession: no active session');
+    return null;
+  }
 
   const profile = await ensureProfile(session.user);
   if (profile) {
-    console.info('[CITYMO] profile loaded', profile.email);
+    logAuth('profile loaded (session restore)', {
+      email: profile.email,
+      role: profile.role,
+    });
   } else {
-    console.info('[CITYMO] fallback profile', session.user.email);
+    logAuth('profile fallback (session restore)', { email: session.user.email });
   }
+
   return mapSupabaseUser(session.user, profile);
 }
 
 export function subscribeToAuthChanges(onUser) {
+  logAuth('subscribeToAuthChanges → onAuthStateChange');
+
   const { data: { subscription } } = getSupabase().auth.onAuthStateChange(
     (event, session) => {
-      if (import.meta.env.DEV) {
-        console.info('[CITYMO] onAuthStateChange', event, session?.user?.email || 'no user');
-      }
+      logAuth('onAuthStateChange', {
+        event,
+        hasSession: Boolean(session),
+        userId: session?.user?.id ?? null,
+        email: session?.user?.email ?? null,
+      });
 
       if (!session?.user) {
         if (event === 'SIGNED_OUT' || event === 'INITIAL_SESSION') {
+          logAuth('onAuthStateChange → user null', { event });
           onUser(null);
         }
         return;
       }
 
       const fallbackUser = mapSupabaseUser(session.user, null);
-      console.info('[CITYMO] fallback profile', session.user.email);
+      logAuth('onAuthStateChange → user (fallback, profile loading)', {
+        event,
+        userId: fallbackUser.id,
+        email: fallbackUser.email,
+      });
       onUser(fallbackUser);
 
       loadProfileInBackground(session.user, onUser);
     },
   );
 
-  return () => subscription.unsubscribe();
+  return () => {
+    logAuth('subscribeToAuthChanges unsubscribe');
+    subscription.unsubscribe();
+  };
 }

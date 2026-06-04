@@ -2,12 +2,17 @@
  * auth.js — CITYMO Auth (Supabase Auth uniquement)
  */
 import { getSupabase, isSupabaseConfigured } from '../lib/supabase';
-import { ENV, logEnvDiagnostics } from '../config/env';
+import { ENV } from '../config/env';
 import {
   mapSupabaseUser,
   ensureProfile,
   getSupabaseSessionUser,
 } from './supabase/auth';
+import {
+  authErrorPayload,
+  logAuth,
+  logAuthError,
+} from '../utils/authLog';
 
 const LEGACY_KEYS = ['citymo_session', 'citymo_token', 'citymo_user'];
 
@@ -17,22 +22,10 @@ export function clearLegacyAuthStorage() {
 
 function assertSupabaseConfigured() {
   if (!isSupabaseConfigured()) {
-    logEnvDiagnostics();
     throw new Error(
-      'Supabase non configuré. Vérifiez .env (VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY) puis redémarrez npm run dev.',
+      'Supabase non configuré. Vérifiez VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY.',
     );
   }
-}
-
-function logSupabaseAuthError(context, error) {
-  console.error(`[CITYMO] Supabase Auth — ${context}`, {
-    message: error?.message,
-    status: error?.status,
-    code: error?.code,
-    name: error?.name,
-    details: error,
-    supabaseUrl: ENV.SUPABASE_URL,
-  });
 }
 
 export async function loginWithCredentials(email, password) {
@@ -42,9 +35,15 @@ export async function loginWithCredentials(email, password) {
   const supabase = getSupabase();
   const normalizedEmail = email.trim().toLowerCase();
 
-  console.info('[CITYMO] signInWithPassword →', {
+  logAuth('signInWithPassword →', {
     email: normalizedEmail,
-    url: ENV.SUPABASE_URL,
+    urlHost: (() => {
+      try {
+        return new URL(ENV.SUPABASE_URL).host;
+      } catch {
+        return ENV.SUPABASE_URL || '—';
+      }
+    })(),
   });
 
   const { data, error } = await supabase.auth.signInWithPassword({
@@ -53,53 +52,61 @@ export async function loginWithCredentials(email, password) {
   });
 
   if (error) {
-    logSupabaseAuthError('signInWithPassword failed', error);
-    return {
-      success: false,
-      error: error.message || 'Email ou mot de passe incorrect.',
-    };
+    logAuthError('signInWithPassword failed', error);
+    return { success: false, ...authErrorPayload(error) };
   }
 
   if (!data?.user || !data?.session) {
-    console.error('[CITYMO] signInWithPassword: session manquante', data);
-    return { success: false, error: 'Réponse Supabase invalide (session manquante).' };
+    logAuthError('signInWithPassword: session manquante', { message: 'no user/session in response' });
+    return {
+      success: false,
+      error: 'Réponse Supabase invalide (session manquante).',
+      errorCode: 'session_missing',
+      errorStatus: null,
+    };
   }
 
-  console.info('[CITYMO] signInWithPassword OK', {
+  logAuth('signInWithPassword OK', {
     userId: data.user.id,
     email: data.user.email,
     expiresAt: data.session.expires_at,
   });
 
-  const user = mapSupabaseUser(data.user, null);
-  console.info('[CITYMO] fallback profile', data.user.email);
+  logAuth('ensureProfile (login) →', { userId: data.user.id });
+  const profile = await ensureProfile(data.user);
+  if (profile) {
+    logAuth('profile loaded (login)', {
+      userId: profile.id,
+      email: profile.email,
+      role: profile.role,
+    });
+  } else {
+    logAuth('profile fallback (login)', { email: data.user.email });
+  }
 
-  ensureProfile(data.user).then((profile) => {
-    if (profile) console.info('[CITYMO] profile loaded', profile.email);
-  }).catch(() => {
-    console.info('[CITYMO] fallback profile', data.user.email);
-  });
-
+  const user = mapSupabaseUser(data.user, profile);
   return { success: true, user };
 }
 
 export async function restoreSession() {
   if (!isSupabaseConfigured()) {
-    logEnvDiagnostics();
     clearLegacyAuthStorage();
     return null;
   }
 
   clearLegacyAuthStorage();
+  logAuth('restoreSession → getSupabaseSessionUser');
   return getSupabaseSessionUser();
 }
 
 export async function logout() {
+  logAuth('logout →');
   clearLegacyAuthStorage();
   if (!isSupabaseConfigured()) return;
 
   const { error } = await getSupabase().auth.signOut();
-  if (error) logSupabaseAuthError('signOut failed', error);
+  if (error) logAuthError('signOut failed', error);
+  else logAuth('signOut OK');
 }
 
 /** JWT access_token (Supabase) pour Authorization header */
@@ -108,21 +115,26 @@ export async function getAuthToken() {
 
   const { data: { session }, error } = await getSupabase().auth.getSession();
   if (error) {
-    logSupabaseAuthError('getSession failed', error);
+    logAuthError('getSession (token)', error);
     return null;
   }
+  logAuth('getSession (token)', { hasSession: Boolean(session), userId: session?.user?.id });
   return session?.access_token || null;
 }
 
 export async function getCurrentSession() {
   if (!isSupabaseConfigured()) return null;
   const { data: { session }, error } = await getSupabase().auth.getSession();
-  if (error) return null;
+  if (error) {
+    logAuthError('getSession', error);
+    return null;
+  }
   return session;
 }
 
 /** Appelé quand l'API Express renvoie 401 */
 export async function handleUnauthorized() {
+  logAuth('handleUnauthorized → signOut');
   await logout();
   window.dispatchEvent(new CustomEvent('citymo:unauthorized'));
 }

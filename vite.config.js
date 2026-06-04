@@ -55,16 +55,6 @@ export default defineConfig(async ({ mode }) => {
   const viteSupabaseUrl = trim(process.env.VITE_SUPABASE_URL || fileEnv.VITE_SUPABASE_URL)
   const viteSupabaseAnonKey = trim(process.env.VITE_SUPABASE_ANON_KEY || fileEnv.VITE_SUPABASE_ANON_KEY)
 
-  if (mode === 'production') {
-    console.info('[CITYMO build] Supabase inject:', {
-      hasUrl: Boolean(viteSupabaseUrl),
-      keyLength: viteSupabaseAnonKey.length,
-      urlHost: viteSupabaseUrl ? (() => {
-        try { return new URL(viteSupabaseUrl).host } catch { return 'invalid' }
-      })() : '—',
-    })
-  }
-
   const plugins = [react()]
   if (mode !== 'production') {
     plugins.push(...(await devPlugins()))

@@ -7,13 +7,13 @@ import {
 } from '../services/auth';
 import { subscribeToAuthChanges } from '../services/supabase/auth';
 import { isSupabaseConfigured } from '../lib/supabase';
-import { logEnvDiagnostics, logCitymoEnv } from '../config/env';
+import { logAuth, logAuthError } from '../utils/authLog';
 
 export const AuthContext = createContext(null);
 
 function finishLoading(setLoading) {
   setLoading(false);
-  console.info('[CITYMO] auth loading false');
+  logAuth('AuthContext loading → false');
 }
 
 export function AuthProvider({ children }) {
@@ -22,11 +22,12 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     clearLegacyAuthStorage();
-    logCitymoEnv();
-    logEnvDiagnostics();
+    logAuth('AuthContext mount', { supabaseConfigured: isSupabaseConfigured() });
 
     if (!isSupabaseConfigured()) {
-      console.error('[CITYMO] Supabase requis — configurez .env puis redémarrez le serveur.');
+      logAuthError('AuthContext: Supabase not configured', {
+        message: 'VITE_SUPABASE_URL / VITE_SUPABASE_ANON_KEY missing',
+      });
       finishLoading(setLoading);
       return;
     }
@@ -35,15 +36,25 @@ export function AuthProvider({ children }) {
 
     const unsubscribe = subscribeToAuthChanges((nextUser) => {
       if (!active) return;
+      logAuth('AuthContext setUser', {
+        authenticated: Boolean(nextUser),
+        userId: nextUser?.id ?? null,
+        email: nextUser?.email ?? null,
+        role: nextUser?.role ?? null,
+      });
       setUser(nextUser);
       finishLoading(setLoading);
     });
 
     const safetyTimer = setTimeout(() => {
-      if (active) finishLoading(setLoading);
+      if (active) {
+        logAuth('AuthContext safety timeout (8s) — force loading false');
+        finishLoading(setLoading);
+      }
     }, 8000);
 
     const onUnauthorized = () => {
+      logAuth('AuthContext citymo:unauthorized → clear user');
       setUser(null);
     };
     window.addEventListener('citymo:unauthorized', onUnauthorized);
@@ -57,21 +68,34 @@ export function AuthProvider({ children }) {
   }, []);
 
   const login = useCallback(async (email, password) => {
+    logAuth('AuthContext login →', { email: email?.trim().toLowerCase() });
     try {
       const result = await loginWithCredentials(email, password);
+      logAuth('AuthContext login result', {
+        success: result.success,
+        error: result.error ?? null,
+        errorCode: result.errorCode ?? null,
+        userId: result.user?.id ?? null,
+      });
       if (result.success) {
         setUser(result.user);
         finishLoading(setLoading);
       }
       return result;
     } catch (err) {
-      console.error('[CITYMO] login exception', err);
+      logAuthError('AuthContext login exception', err);
       finishLoading(setLoading);
-      return { success: false, error: err.message || 'Erreur de connexion.' };
+      return {
+        success: false,
+        error: err?.message || 'Erreur de connexion.',
+        errorCode: err?.code ?? null,
+        errorStatus: err?.status ?? null,
+      };
     }
   }, []);
 
   const logout = useCallback(async () => {
+    logAuth('AuthContext logout →');
     await authLogout();
     setUser(null);
   }, []);
