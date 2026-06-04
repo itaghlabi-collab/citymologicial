@@ -7,7 +7,7 @@ import {
 } from '../services/auth';
 import { subscribeToAuthChanges } from '../services/supabase/auth';
 import { isSupabaseConfigured } from '../lib/supabase';
-import { logEnvDiagnostics } from '../config/env';
+import { logEnvDiagnostics, logCitymoEnv } from '../config/env';
 
 export const AuthContext = createContext(null);
 
@@ -22,6 +22,7 @@ export function AuthProvider({ children }) {
 
   useEffect(() => {
     clearLegacyAuthStorage();
+    logCitymoEnv();
     logEnvDiagnostics();
 
     if (!isSupabaseConfigured()) {

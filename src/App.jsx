@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useAuth } from './hooks/useAuth';
+import { getSupabaseEnvDiagnostics } from './config/env';
 import './App.css';
 
 import Dashboard from './components/Dashboard';
@@ -294,6 +295,36 @@ function PageContent({ module }) {
   }
 }
 
+/* Diagnostic temporaire Vercel — login uniquement, sans exposer la clé */
+function LoginEnvDiagnostic() {
+  const d = getSupabaseEnvDiagnostics();
+  return (
+    <div
+      className="login-env-diag"
+      style={{
+        marginTop: 12,
+        padding: '10px 12px',
+        fontSize: '0.72rem',
+        lineHeight: 1.5,
+        fontFamily: 'monospace',
+        background: d.configured ? 'rgba(46,125,50,0.12)' : 'rgba(211,47,47,0.1)',
+        border: `1px solid ${d.configured ? '#81C784' : '#EF9A9A'}`,
+        borderRadius: 8,
+        color: d.configured ? '#2E7D32' : '#C62828',
+        textAlign: 'left',
+      }}
+    >
+      <div style={{ fontWeight: 700, marginBottom: 4 }}>[CITYMO] Diagnostic env (temporaire)</div>
+      <div>VITE_SUPABASE_URL détectée : {d.hasUrl ? 'oui' : 'non'}{d.hasUrl ? ` (${d.urlHost})` : ''}</div>
+      <div>VITE_SUPABASE_ANON_KEY longueur : {d.keyLength}</div>
+      <div>MODE (ENV) : {d.mode}</div>
+      <div>import.meta.env.PROD : {d.prod ? 'true' : 'false'}</div>
+      <div>import.meta.env.MODE : {String(d.viteMode)}</div>
+      <div>Supabase configuré : {d.configured ? 'oui' : 'non'}</div>
+    </div>
+  );
+}
+
 /* =============================================
    LOGIN PAGE
    ============================================= */
@@ -375,6 +406,7 @@ function LoginPage() {
             <p className="login-forgot">
               <a href="#forgot" onClick={e => e.preventDefault()}>Mot de passe oublie ?</a>
             </p>
+            {import.meta.env.PROD && <LoginEnvDiagnostic />}
           </form>
         </div>
 
