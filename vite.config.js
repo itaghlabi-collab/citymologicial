@@ -1,6 +1,5 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
-import basicSsl from '@vitejs/plugin-basic-ssl'
 import os from 'node:os'
 
 function lanIp() {
@@ -16,7 +15,7 @@ function lanIp() {
   return null
 }
 
-/** Affiche l’URL mobile au démarrage (localhost ne marche pas sur téléphone). */
+/** Affiche l’URL mobile au démarrage (dev local uniquement). */
 function mobileUrlPlugin() {
   return {
     name: 'citymo-mobile-url',
@@ -37,8 +36,19 @@ function mobileUrlPlugin() {
   }
 }
 
+async function devPlugins() {
+  const plugins = [mobileUrlPlugin()]
+  try {
+    const { default: basicSsl } = await import('@vitejs/plugin-basic-ssl')
+    plugins.unshift(basicSsl())
+  } catch {
+    console.warn('[CITYMO] @vitejs/plugin-basic-ssl absent — dev sans HTTPS local')
+  }
+  return plugins
+}
+
 // https://vitejs.dev/config/
-export default defineConfig(({ mode }) => {
+export default defineConfig(async ({ mode }) => {
   const fileEnv = loadEnv(mode, process.cwd(), '')
   const trim = (v) => (v == null ? '' : String(v).trim())
 
@@ -55,14 +65,19 @@ export default defineConfig(({ mode }) => {
     })
   }
 
+  const plugins = [react()]
+  if (mode !== 'production') {
+    plugins.push(...(await devPlugins()))
+  }
+
   return {
-    plugins: [react(), basicSsl(), mobileUrlPlugin()],
+    plugins,
     envPrefix: 'VITE_',
     define: {
       'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(viteSupabaseUrl),
       'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(viteSupabaseAnonKey),
     },
-    server: {
+    server: mode === 'production' ? undefined : {
       https: true,
       host: '0.0.0.0',
       port: 5173,
@@ -81,7 +96,7 @@ export default defineConfig(({ mode }) => {
         },
       },
     },
-    preview: {
+    preview: mode === 'production' ? undefined : {
       https: true,
       host: '0.0.0.0',
       port: 5173,
