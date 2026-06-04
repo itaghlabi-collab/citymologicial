@@ -125,6 +125,11 @@ function isMrzNoiseLine(line) {
  * Adresse verso CNIE — ex. « 5 RUE TANTAN APT 8 BOURGOGNE CASABLANCA »
  * (sans label ADRESSE:, souvent au-dessus de la MRZ).
  */
+/** Villes / quartiers fréquents sur CNIE marocaine (OCR partiel toléré). */
+const MOROCCO_PLACE_RE = /\b(?:CASABLANCA|CASA|RABAT|SALE|SALÉ|FES|FEZ|MEKNES|MEKNÈS|TANGER|TANGIER|MARRAKECH|AGADIR|KENITRA|MOHAMMEDIA|OUJDA|NADOR|TEMARA|BERNOUSSI|BOURGOGNE|SIDI\s*OTHMANE|AIN\s*SEBAA|AIN\s*CHOK|HAY\s*MOHAMMADI|LAAYOUNE|SAFI|BENI\s*MELLAL|TETOUAN|KHOURIBGA|EL\s*JADIDA|SETTAT|KHÉMISSET|KHEMISSET)\b/i;
+
+const STREET_HINT_RE = /\b(?:RUE|RÉS|RES|RESIDENCE|RÉSIDENCE|AV|AVE|AVENUE|BD|BOULEVARD|BLVD|QUARTIER|QT|LOT|LOTISSEMENT|IMPASSE|ANGLE|APT|APP|APPT|IMMEUBLE|IMM|BLOC|HAY|DERB|N°|NO|NUM|CITE|CITÉ)\b/i;
+
 export function extractVersoAddressFromText(raw) {
   const lines = String(raw || '')
     .split('\n')
@@ -132,14 +137,12 @@ export function extractVersoAddressFromText(raw) {
     .filter(Boolean);
 
   const parts = [];
-  const cityHints = /\b(?:CASABLANCA|CASA|RABAT|SALE|FES|FEZ|TANGER|TANGIER|MARRAKECH|BERNOUSSI|BOURGOGNE|MOHAMMEDIA|KENITRA|AGADIR|OUJDA|NADOR|TEMARA|MEKNES)\b/i;
-  const streetHints = /\b(?:RUE|RÉS|RES|RESIDENCE|AV|AVE|AVENUE|BD|BOULEVARD|BLVD|QUARTIER|QT|LOT|LOTISSEMENT|IMPASSE|ANGLE|APT|APP|APPT|IMMEUBLE|IMM|N°|NO|NUM)\b/i;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
     if (isMrzNoiseLine(line)) continue;
     const upper = line.toUpperCase();
-    if (/^(ROYAUME|MAROC|MAROCAINE|CARTE|IDENTITE|NATIONALITE|VALABLE|FILIATION|FAMILLE|KINGDOM)\b/.test(upper)) continue;
+    if (/^(ROYAUME|MAROC|MAROCAINE|CARTE|IDENTITE|NATIONALITE|VALABLE|FILIATION|FAMILLE|KINGDOM|CNIE)\b/.test(upper)) continue;
 
     const labeled = line.match(/^(?:ADRESSE|DOMICILE|ADDRESS|Domicile)\s*[:\.]?\s*(.+)$/i);
     if (labeled) {
@@ -149,12 +152,29 @@ export function extractVersoAddressFromText(raw) {
     }
 
     const hasDigit = /\d/.test(line);
-    const looksLikeStreet = streetHints.test(line) || /^\d{1,4}\s+[A-ZÀ-Ü]/.test(line);
-    const looksLikeCity = cityHints.test(line);
+    const looksLikeStreet = STREET_HINT_RE.test(line) || /^\d{1,4}\s+[A-ZÀ-Ü]/.test(line);
+    const looksLikeCity = MOROCCO_PLACE_RE.test(line);
+    const longLatin = /^[0-9A-ZÀ-Ü\s\-',°\.]{12,}$/i.test(line) && /[A-ZÀ-Ü]{4,}/i.test(line);
 
-    if ((hasDigit && looksLikeStreet) || (looksLikeStreet && line.length >= 10) || (looksLikeCity && hasDigit)) {
+    if ((hasDigit && looksLikeStreet) || (looksLikeStreet && line.length >= 10)
+      || (looksLikeCity && hasDigit) || (hasDigit && longLatin && line.length >= 14)) {
       const a = cleanAddressLine(line);
       if (a.length >= 8 && !/^(SEXE|MRZ|CNIE|CIN)\b/.test(a)) parts.push(a);
+      continue;
+    }
+
+    // Ligne rue + ville sur la ligne suivante (OCR coupe souvent en 2)
+    if (i + 1 < lines.length) {
+      const next = lines[i + 1];
+      if (!isMrzNoiseLine(next) && !next.includes('<<')) {
+        if (hasDigit && looksLikeStreet && MOROCCO_PLACE_RE.test(next)) {
+          const combo = cleanAddressLine(`${line} ${next}`);
+          if (combo.length >= 10) parts.push(combo);
+        } else if (looksLikeStreet && /^[A-ZÀ-Ü\s\-]{3,30}$/i.test(next.trim()) && MOROCCO_PLACE_RE.test(next)) {
+          const combo = cleanAddressLine(`${line} ${next}`);
+          if (combo.length >= 10) parts.push(combo);
+        }
+      }
     }
   }
 
@@ -163,9 +183,18 @@ export function extractVersoAddressFromText(raw) {
 
   const blob = cleanAddressLine(lines.filter((l) => !isMrzNoiseLine(l)).join(' '));
   const m = blob.match(
-    /\d{1,4}\s+(?:RUE|RES|RÉS|AV|BD|BOULEVARD)[\s\S]{5,80}?(?:CASABLANCA|CASA|RABAT|BERNOUSSI|BOURGOGNE|SALE|FES|TANGER|MARRAKECH|MOHAMMEDIA)/i,
+    /\d{1,4}\s+(?:RUE|RES|RÉS|AV|BD|BOULEVARD|BLOC|LOT|HAY|IMPASSE|ANGLE)[\s\S]{4,90}?(?:CASABLANCA|CASA|RABAT|BERNOUSSI|BOURGOGNE|SALE|FES|TANGER|MARRAKECH|MOHAMMEDIA|KENITRA|AGADIR|OUJDA|TEMARA|MEKNES|SIDI\s*OTHMANE)/i,
   );
-  return m ? m[0].replace(/\s+/g, ' ').trim().toUpperCase() : '';
+  if (m) return m[0].replace(/\s+/g, ' ').trim().toUpperCase();
+
+  // Dernière ligne « adresse-like » la plus longue (hors MRZ)
+  let best = '';
+  for (const line of lines) {
+    if (isMrzNoiseLine(line) || !/\d/.test(line)) continue;
+    const a = cleanAddressLine(line);
+    if (a.length > best.length && a.length >= 12 && STREET_HINT_RE.test(a)) best = a;
+  }
+  return best;
 }
 
 /** address.street + address.city → adresse (format Mindee officiel) */
@@ -649,6 +678,8 @@ function isMrzSurnameToken(raw) {
   if (/^IDMAR|^I<MAR|^IDMRC|^I<MRC/.test(v)) return false;
   if (MRZ_COUNTRY_CODE_RE.test(v)) return false;
   if (/^\d/.test(v)) return false;
+  if (STREET_HINT_RE.test(v) || MOROCCO_PLACE_RE.test(v)) return false;
+  if (/^(RUE|RES|AV|BD|BLOC|LOT|HAY|APT|APP|NUM|DOMICILE|ADRESSE)/.test(v)) return false;
   return /^[A-Z]+$/.test(v);
 }
 
@@ -762,7 +793,19 @@ export function resolveCINIdentity(opts) {
     return best;
   }
 
+  var MRZ_FIRST_KEYS = ['numero_cin', 'date_naissance', 'date_expiration', 'sexe', 'nationalite'];
+
   function pickField(key) {
+    if (MRZ_FIRST_KEYS.indexOf(key) >= 0) {
+      if (mrz[key] && String(mrz[key]).trim()) return mrz[key];
+      if (dates[key] && String(dates[key]).trim()) return dates[key];
+      if (fromText[key] && String(fromText[key]).trim()) return fromText[key];
+      if (base[key] && String(base[key]).trim()) return base[key];
+      for (var j = 0; j < extracts.length; j++) {
+        if (extracts[j][key] && String(extracts[j][key]).trim()) return extracts[j][key];
+      }
+      return '';
+    }
     if (base[key] && String(base[key]).trim()) return base[key];
     if (dates[key] && String(dates[key]).trim()) return dates[key];
     if (mrz[key] && String(mrz[key]).trim()) return mrz[key];
@@ -773,8 +816,18 @@ export function resolveCINIdentity(opts) {
     return '';
   }
 
-  var nom = pickWeighted(nomCandidates, false);
-  var prenom = pickWeighted(prenomCandidates, true);
+  // MRZ = source la plus fiable pour identité latine (toutes cartes CNIE)
+  var nom = '';
+  var prenom = '';
+  if (isValidPersonName(mrz.nom, false) && isValidPersonName(mrz.prenom, true)) {
+    nom = cleanNamePart(mrz.nom, true);
+    prenom = normalizePrenomValue(mrz.prenom);
+  } else {
+    nom = pickWeighted(nomCandidates, false);
+    prenom = pickWeighted(prenomCandidates, true);
+    if (!nom && isValidPersonName(mrz.nom, false)) nom = cleanNamePart(mrz.nom, true);
+    if (!prenom && isValidPersonName(mrz.prenom, true)) prenom = normalizePrenomValue(mrz.prenom);
+  }
 
   var adresse = pickField('adresse');
   if (!adresse || adresse.length < 8) {
@@ -843,6 +896,78 @@ function parseMrzDate(yymmdd) {
   return year + '-' + mm + '-' + dd;
 }
 
+/** Normalise le texte OCR autour de la MRZ (espaces parasites, chevrons) — conserve les lignes. */
+export function normalizeMrzOcrText(raw) {
+  return String(raw || '')
+    .replace(/\r/g, '')
+    .split('\n')
+    .map(function(line) {
+      return line
+        .replace(/[«»]/g, '<')
+        .replace(/\s*<\s*</g, '<<')
+        .replace(/([A-Za-z]{2,})<\s+([A-Za-z])/g, '$1<<$2')
+        .replace(/[^\S\n]+/g, ' ')
+        .trim();
+    })
+    .filter(Boolean)
+    .join('\n');
+}
+
+/** Extrait nom/prénom depuis une ligne contenant << (évite d'absorber l'adresse sur la même ligne). */
+function parseMrzNameOnLine(line, out) {
+  if (!line || !line.includes('<<') || MRZ_DATE_LINE_RE.test(line)) return false;
+
+  var idx = line.lastIndexOf('<<');
+  var before = line.slice(0, idx);
+  var after = line.slice(idx + 2);
+  var surMatch = before.match(/([A-Z]{2,24})$/);
+  if (!surMatch) return false;
+
+  var surname = fixMrzSurnameToken(surMatch[1]);
+  var givenRaw = fixMrzGivenToken(after);
+  if (!isMrzSurnameToken(surname) || !isMrzGivenToken(givenRaw)) return false;
+
+  if (!out.nom || !isValidPersonName(out.nom, false)) out.nom = surname;
+  if (!out.prenom || !isValidPersonName(out.prenom, true)) out.prenom = titleCaseName(givenRaw);
+  return true;
+}
+
+function fixMrzSurnameToken(raw) {
+  return fixOcrNameChars(String(raw || '')).replace(/[^A-Z]/g, '').toUpperCase();
+}
+
+function fixMrzGivenToken(raw) {
+  return fixOcrNameChars(String(raw || '').replace(/</g, ' '))
+    .replace(/[^A-Za-z\s\-']/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Parse nom<<prénom ligne par ligne (évite de fusionner adresse + MRZ). */
+function extractMrzFromBlob(raw, out) {
+  var normalized = normalizeMrzOcrText(raw);
+  var lines = normalized.split('\n').map(function(l) {
+    return l.replace(/\s/g, '').toUpperCase().replace(/[^A-Z0-9<]/g, '');
+  }).filter(function(l) { return l.length >= 8; });
+
+  for (var li = 0; li < lines.length; li++) {
+    if (parseMrzNameOnLine(lines[li], out)) break;
+  }
+
+  var compact = lines.join('\n');
+  if (!out.numero_cin) {
+    for (var i = 0; i < lines.length; i++) {
+      if (!/^IDMAR|^I<MAR/.test(lines[i])) continue;
+      var docM = lines[i].match(/IDMAR([A-Z]{1,3}\d{4,8})/) || lines[i].match(/([A-Z]{1,3}\d{4,8})/);
+      if (docM) { out.numero_cin = normCIN(docM[1] || docM[0]); break; }
+    }
+  }
+
+  if (!out.date_naissance || !out.date_expiration) {
+    parseMrzDatesLoose(compact, out);
+  }
+}
+
 function parseMrzFlexible(raw, out) {
   var lines = String(raw || '').split('\n');
   for (var li = 0; li < lines.length; li++) {
@@ -851,20 +976,15 @@ function parseMrzFlexible(raw, out) {
     if (/^IDMAR|^I<MAR|^IDMRC|^I<MRC/.test(line)) continue;
     if (MRZ_DATE_LINE_RE.test(line)) continue;
     if (!line.includes('<<')) continue;
-
-    var parts = line.split('<<').filter(Boolean);
-    var surname = (parts[0] || '').replace(/[^A-Z]/g, '');
-    var givenRaw = (parts[1] || '').replace(/</g, ' ').replace(/[^A-Za-z\s\-']/g, ' ').replace(/\s+/g, ' ').trim();
-    if (!isMrzSurnameToken(surname)) continue;
-    if (!isMrzGivenToken(givenRaw)) continue;
-    if (!out.nom || !isValidPersonName(out.nom, false)) out.nom = surname;
-    if (!out.prenom || !isValidPersonName(out.prenom, true)) out.prenom = titleCaseName(givenRaw);
+    parseMrzNameOnLine(line, out);
   }
 }
 
 function parseMrzLines(raw, out) {
-  parseMrzFlexible(raw, out);
-  var lines = (raw || '').split('\n').map(function(l) {
+  var text = normalizeMrzOcrText(raw);
+  extractMrzFromBlob(text, out);
+  parseMrzFlexible(text, out);
+  var lines = text.split('\n').map(function(l) {
     return l.replace(/\s/g, '').toUpperCase().replace(/[^A-Z0-9<]/g, '');
   }).filter(function(l) { return l.length >= 10; });
 
@@ -878,13 +998,7 @@ function parseMrzLines(raw, out) {
     }
 
     if (line.includes('<<') && !MRZ_DATE_LINE_RE.test(line)) {
-      var parts = line.split('<<').filter(Boolean);
-      var surname = (parts[0] || '').replace(/[^A-Z]/g, '');
-      var givenRaw = (parts[1] || '').replace(/</g, ' ').replace(/[^A-Za-z\s\-']/g, ' ').replace(/\s+/g, ' ').trim();
-      if (isMrzSurnameToken(surname) && isMrzGivenToken(givenRaw)) {
-        if (!out.nom || !isValidPersonName(out.nom, false)) out.nom = surname;
-        if (!out.prenom || !isValidPersonName(out.prenom, true)) out.prenom = titleCaseName(givenRaw);
-      }
+      parseMrzNameOnLine(line, out);
       continue;
     }
 
@@ -899,7 +1013,7 @@ function parseMrzLines(raw, out) {
       if (!out.nationalite && line.includes('MAR')) out.nationalite = 'MAROC';
     }
   }
-  parseMrzDatesLoose(raw, out);
+  parseMrzDatesLoose(text, out);
 }
 
 /** Extrait nom/prénom depuis labels CNIE marocaine (recto). */
@@ -1098,13 +1212,7 @@ export function mergeSideExtracts(primary, secondary, side = 'recto') {
     if (s[k] && String(s[k]).trim()) return s[k];
     return '';
   };
-  const pickName = (isPrenom) => {
-    const key = isPrenom ? 'prenom' : 'nom';
-    if (p[key] && isValidPersonName(p[key], isPrenom)) {
-      return isPrenom ? normalizePrenomValue(p[key]) : cleanNamePart(p[key], true);
-    }
-    return pickBestPersonName([p[key], s[key]], isPrenom);
-  };
+  const pickName = (isPrenom) => pickBestPersonName([p[isPrenom ? 'prenom' : 'nom'], s[isPrenom ? 'prenom' : 'nom']], isPrenom);
   const nom = pickName(false);
   const prenom = pickName(true);
   if (side === 'verso') {

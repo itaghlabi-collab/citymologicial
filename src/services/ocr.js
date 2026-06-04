@@ -13,6 +13,7 @@ import {
   buildOcrWarning,
   identityFieldsComplete,
   resolveCINIdentity,
+  pickMindeeValue,
 } from './cinOcr';
 
 import { CIN_FRAME_MASK as CIN_CROP } from './cinCapture';
@@ -21,6 +22,8 @@ import { CIN_FRAME_MASK as CIN_CROP } from './cinCapture';
 export { CIN_CROP };
 /** Bande MRZ (bas verso CNIE — prénom/nom latins) */
 export const MRZ_CROP = { x: 0.03, y: 0.55, w: 0.94, h: 0.40 };
+/** Zone adresse verso (haut / centre, au-dessus MRZ) */
+export const VERSO_ADDRESS_CROP = { x: 0.04, y: 0.08, w: 0.92, h: 0.46 };
 /** Zone noms recto (partie droite, sous l'en-tête) */
 export const NAMES_CROP = { x: 0.32, y: 0.12, w: 0.63, h: 0.42 };
 /** Zone date de naissance recto CNIE (sous nom/prénom). */
@@ -431,20 +434,27 @@ function buildTesseractPlan(side, targets) {
   if (side === 'recto') {
     if (targets.nom || targets.prenom) plans.push({ crop: NAMES_CROP, label: 'names' });
     if (targets.dateNaissance) plans.push({ crop: BIRTH_CROP, label: 'birth' });
-    if (targets.cin || targets.nom || targets.prenom || targets.dateNaissance) {
-      plans.push({ crop: CIN_CROP, label: 'card' });
-    }
-    if (!plans.length) plans.push({ crop: CIN_CROP, label: 'card' });
+    plans.push({ crop: CIN_CROP, label: 'card' });
   } else {
-    if (targets.prenom || targets.nom || targets.cin || targets.dateNaissance) {
-      plans.push({ crop: MRZ_CROP, label: 'mrz' });
-    }
-    if (targets.adresse || targets.prenom || targets.nom || targets.cin || targets.dateNaissance) {
-      plans.push({ crop: null, label: 'full' });
-    }
-    if (!plans.length) plans.push({ crop: MRZ_CROP, label: 'mrz' });
+    plans.push({ crop: MRZ_CROP, label: 'mrz' });
+    if (targets.adresse) plans.push({ crop: VERSO_ADDRESS_CROP, label: 'address' });
+    plans.push({ crop: null, label: 'full' });
   }
   return plans;
+}
+
+/** Concatène les champs MRZ Mindee pour le parseur texte. */
+function collectMindeeMrzText(sideData) {
+  const payload = resolveMindeeSidePayload(sideData);
+  if (!payload) return '';
+  const parts = [];
+  for (const [key, val] of Object.entries(payload)) {
+    if (/mrz/i.test(key)) {
+      const v = pickMindeeValue(val);
+      if (v) parts.push(v);
+    }
+  }
+  return parts.join('\n');
 }
 
 async function parseTesseractSide(imageDataUrl, side, seedMapped) {
@@ -467,7 +477,7 @@ async function parseTesseractSide(imageDataUrl, side, seedMapped) {
       img = await prepareOcrImage(imageDataUrl, plans[pi].crop);
     } catch (_) { continue; }
 
-    var psms = plans[pi].label === 'mrz' ? [6, 11] : [6];
+    var psms = plans[pi].label === 'mrz' ? [6, 11, 13] : [6, 3];
     for (var psi = 0; psi < psms.length; psi++) {
       try {
         var text = await ocrImageText(img, psms[psi]);
@@ -517,15 +527,15 @@ async function analyzeSide(imageDataUrl, mindeeSideData, side) {
   }
 
   var tessResult = { mapped: emptyCINExtract(), rawText: '', source: 'none' };
-  // Tesseract uniquement si Mindee n'a rien extrait sur ce côté
-  var runTess = !hasMindee;
+  // Tesseract si Mindee absent OU champs identité/adresse encore manquants
+  var runTess = !hasMindee || needsOcrFallback(mindeeMapped, side);
 
   if (runTess) {
-    console.info('[OCR CIN] provider=tesseract', side, '(fallback Mindee indisponible ou vide)');
+    console.info('[OCR CIN] provider=tesseract', side, hasMindee ? '(complément Mindee)' : '(fallback Mindee indisponible ou vide)');
     try {
       var tessInput = imageDataUrl;
       try { tessInput = await preprocessForOcr(imageDataUrl, side); } catch (_) { /* full frame */ }
-      tessResult = await parseTesseractSide(tessInput, side, emptyCINExtract());
+      tessResult = await parseTesseractSide(tessInput, side, hasMindee ? mindeeMapped : emptyCINExtract());
       if (tessResult.rawText) {
         console.info('[OCR CIN] raw result', { side, source: 'tesseract', text: tessResult.rawText.slice(0, 300) });
       }
@@ -533,8 +543,7 @@ async function analyzeSide(imageDataUrl, mindeeSideData, side) {
       console.error('[OCR CIN] Tesseract échec', side, err);
     }
   } else {
-    console.info('[OCR CIN] Tesseract ignoré', side, '(Mindee suffisant)');
-    tessResult.mapped = mindeeMapped;
+    console.info('[OCR CIN] Tesseract ignoré', side, '(Mindee complet)');
   }
 
   var merged = hasMindee
@@ -599,6 +608,10 @@ export async function scanCIN(rectoSource, versoSource, options = {}) {
   const rawTexts = [];
   if (rectoResult.rawText) rawTexts.push(rectoResult.rawText);
   if (versoResult.rawText) rawTexts.push(versoResult.rawText);
+  const mrzRecto = collectMindeeMrzText(mindee?.recto);
+  const mrzVerso = collectMindeeMrzText(mindee?.verso);
+  if (mrzRecto) rawTexts.push(mrzRecto);
+  if (mrzVerso) rawTexts.push(mrzVerso);
 
   let baseMerged = mergeCINRectoVerso(rectoResult.mapped, versoResult.mapped);
 
@@ -606,14 +619,14 @@ export async function scanCIN(rectoSource, versoSource, options = {}) {
   let merged = resolveCINIdentity({
     base: baseMerged,
     extracts: [
-      rectoResult.mindeeMapped,
-      versoResult.mindeeMapped,
-      rectoResult.tessMapped,
-      versoResult.tessMapped,
-      rectoResult.mapped,
       versoResult.mapped,
+      versoResult.tessMapped,
+      versoResult.mindeeMapped,
+      rectoResult.mapped,
+      rectoResult.tessMapped,
+      rectoResult.mindeeMapped,
     ],
-    combinedText: rawTexts.join('\n'),
+    combinedText,
   });
 
   console.info('[OCR CIN] identity resolved', { nom: merged.nom, prenom: merged.prenom, cin: merged.numero_cin });
