@@ -37,7 +37,7 @@ const STATUT_CFG = {
 const CIN_HINT = 'Cadrez la CIN dans le rectangle';
 const SCANNER_PLACE_HINT = 'Placez la CIN dans le cadre';
 /** Identifiant build — vérifier dans la console Safari mobile que cette version est chargée */
-const CIN_SCANNER_VERSION = '2026-05-25-react-unified';
+const CIN_SCANNER_VERSION = '2026-06-04-cin-doc-zone-css';
 
 const EMPTY_FORM = {
   prenom: '', nom: '', telephone: '', cin: '', fonction: '', tarif: '',
@@ -217,6 +217,7 @@ function CINDocZone({ side, value, onChange, onScan }) {
               </div>
               <span className="cin-doc-zone-title">{title}</span>
               <span className="cin-doc-zone-sub">ou importer depuis la galerie</span>
+              <span className="cin-doc-zone-hint">{CIN_HINT}</span>
             </div>
           )}
         </CINFrame>
