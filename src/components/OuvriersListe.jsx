@@ -1486,18 +1486,16 @@ function OuvrierModal({ worker, onClose, onSave, saving, projects = [] }) {
                     {CIN_HINT} — format carte 85,60 × 53,98 mm
                   </div>
                   <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-                    <div className="cin-doc-analyze-bar">
-                      <span className="cin-doc-analyze-hint">
-                        <ScanLine size={14} />
-                        Après capture recto et verso, lancez l’analyse OCR.
-                      </span>
-                      <button type="button" className="btn btn-primary btn-sm" disabled={ocrAnalyzing || !form.cin_recto}
-                        onClick={handleAnalyzeDocuments}>
-                        {ocrAnalyzing
-                          ? <><Loader size={13} className="cin-spin" /> Analyse en cours...</>
-                          : <><ScanLine size={13} /> Analyser les photos</>}
-                      </button>
-                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-primary cin-doc-analyze-btn"
+                      disabled={ocrAnalyzing || !form.cin_recto}
+                      onClick={handleAnalyzeDocuments}
+                    >
+                      {ocrAnalyzing
+                        ? <><Loader size={15} className="cin-spin" /> Analyse en cours...</>
+                        : <><ScanLine size={15} /> Analyser les photos</>}
+                    </button>
                   </div>
                 </div>
               )}

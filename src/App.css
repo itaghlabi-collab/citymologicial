@@ -2194,37 +2194,16 @@ tbody tr:last-child td { border-bottom: none; }
   color: var(--red);
 }
 
-.cin-doc-analyze-bar {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 12px 14px;
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
-}
-
-.cin-doc-analyze-hint {
-  display: flex;
-  align-items: center;
+.cin-doc-analyze-btn {
+  width: 100%;
+  justify-content: center;
+  min-height: 44px;
   gap: 8px;
-  font-size: 0.8rem;
-  color: var(--text-2);
-  flex: 1 1 200px;
-  min-width: 0;
 }
 
 @media (max-width: 768px) {
-  .cin-doc-analyze-bar {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .cin-doc-analyze-bar .btn {
+  .cin-doc-analyze-btn {
     width: 100%;
-    justify-content: center;
   }
 
   .cin-id-frame {

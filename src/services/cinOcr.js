@@ -101,6 +101,73 @@ function normCIN(raw) {
   return m ? m[1] : v;
 }
 
+/** Ligne d'adresse CNIE — conserve chiffres (cleanNamePart les supprime). */
+function cleanAddressLine(raw) {
+  return (raw || '')
+    .replace(/^[\s\/\-\.:]+/, '')
+    .replace(/[^0-9A-Za-z\u00C0-\u024F\s\-',°\.]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toUpperCase();
+}
+
+function isMrzNoiseLine(line) {
+  const compact = (line || '').replace(/\s/g, '').toUpperCase();
+  if (compact.length < 10) return false;
+  if (compact.includes('<<')) return true;
+  if (/^IDMAR|^I<MAR|^IDMRC|^I<MRC/.test(compact)) return true;
+  if (typeof MRZ_DATE_LINE_RE !== 'undefined' && MRZ_DATE_LINE_RE.test(compact)) return true;
+  if (/^\d{6}\d[MF]\d{6}/.test(compact)) return true;
+  return false;
+}
+
+/**
+ * Adresse verso CNIE — ex. « 5 RUE TANTAN APT 8 BOURGOGNE CASABLANCA »
+ * (sans label ADRESSE:, souvent au-dessus de la MRZ).
+ */
+export function extractVersoAddressFromText(raw) {
+  const lines = String(raw || '')
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
+
+  const parts = [];
+  const cityHints = /\b(?:CASABLANCA|CASA|RABAT|SALE|FES|FEZ|TANGER|TANGIER|MARRAKECH|BERNOUSSI|BOURGOGNE|MOHAMMEDIA|KENITRA|AGADIR|OUJDA|NADOR|TEMARA|MEKNES)\b/i;
+  const streetHints = /\b(?:RUE|RÉS|RES|RESIDENCE|AV|AVE|AVENUE|BD|BOULEVARD|BLVD|QUARTIER|QT|LOT|LOTISSEMENT|IMPASSE|ANGLE|APT|APP|APPT|IMMEUBLE|IMM|N°|NO|NUM)\b/i;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (isMrzNoiseLine(line)) continue;
+    const upper = line.toUpperCase();
+    if (/^(ROYAUME|MAROC|MAROCAINE|CARTE|IDENTITE|NATIONALITE|VALABLE|FILIATION|FAMILLE|KINGDOM)\b/.test(upper)) continue;
+
+    const labeled = line.match(/^(?:ADRESSE|DOMICILE|ADDRESS|Domicile)\s*[:\.]?\s*(.+)$/i);
+    if (labeled) {
+      const a = cleanAddressLine(labeled[1]);
+      if (a.length >= 6) parts.push(a);
+      continue;
+    }
+
+    const hasDigit = /\d/.test(line);
+    const looksLikeStreet = streetHints.test(line) || /^\d{1,4}\s+[A-ZÀ-Ü]/.test(line);
+    const looksLikeCity = cityHints.test(line);
+
+    if ((hasDigit && looksLikeStreet) || (looksLikeStreet && line.length >= 10) || (looksLikeCity && hasDigit)) {
+      const a = cleanAddressLine(line);
+      if (a.length >= 8 && !/^(SEXE|MRZ|CNIE|CIN)\b/.test(a)) parts.push(a);
+    }
+  }
+
+  const joined = [...new Set(parts)].join(' ').replace(/\s+/g, ' ').trim();
+  if (joined.length >= 8) return joined;
+
+  const blob = cleanAddressLine(lines.filter((l) => !isMrzNoiseLine(l)).join(' '));
+  const m = blob.match(
+    /\d{1,4}\s+(?:RUE|RES|RÉS|AV|BD|BOULEVARD)[\s\S]{5,80}?(?:CASABLANCA|CASA|RABAT|BERNOUSSI|BOURGOGNE|SALE|FES|TANGER|MARRAKECH|MOHAMMEDIA)/i,
+  );
+  return m ? m[0].replace(/\s+/g, ' ').trim().toUpperCase() : '';
+}
+
 /** address.street + address.city → adresse (format Mindee officiel) */
 function mapMindeeAddressFields(addressField) {
   if (!addressField) {
@@ -326,7 +393,7 @@ export function mergeCINRectoVerso(recto, verso) {
   const r = { ...emptyCINExtract(), ...(recto || {}) };
   const v = { ...emptyCINExtract(), ...(verso || {}) };
 
-  let adresse = v.adresse || r.adresse || '';
+  let adresse = (v.adresse || r.adresse || '').trim();
   const complement = v.complement_adresse || r.complement_adresse || '';
   if (complement && adresse && !adresse.includes(complement)) {
     adresse = `${adresse} ${complement}`.trim();
@@ -336,12 +403,8 @@ export function mergeCINRectoVerso(recto, verso) {
 
   return {
     numero_cin: normCIN(r.numero_cin || v.numero_cin || ''),
-    prenom: (r.prenom && isValidPersonName(r.prenom, true))
-      ? normalizePrenomValue(r.prenom)
-      : pickBestPersonName([r.prenom, v.prenom], true),
-    nom: (r.nom && isValidPersonName(r.nom, false))
-      ? cleanNamePart(r.nom, true)
-      : pickBestPersonName([r.nom, v.nom], false),
+    prenom: pickBestPersonName([v.prenom, r.prenom], true),
+    nom: pickBestPersonName([v.nom, r.nom], false),
     date_naissance: r.date_naissance || v.date_naissance || '',
     lieu_naissance: r.lieu_naissance || v.lieu_naissance || '',
     sexe: r.sexe || v.sexe || '',
@@ -713,6 +776,12 @@ export function resolveCINIdentity(opts) {
   var nom = pickWeighted(nomCandidates, false);
   var prenom = pickWeighted(prenomCandidates, true);
 
+  var adresse = pickField('adresse');
+  if (!adresse || adresse.length < 8) {
+    var fromVersoText = extractVersoAddressFromText(combinedText);
+    if (fromVersoText) adresse = fromVersoText;
+  }
+
   return {
     ...base,
     numero_cin: normCIN(pickField('numero_cin')),
@@ -723,7 +792,7 @@ export function resolveCINIdentity(opts) {
     sexe: pickField('sexe'),
     nationalite: pickField('nationalite'),
     lieu_naissance: pickField('lieu_naissance'),
-    adresse: pickField('adresse'),
+    adresse,
     ville_adresse: pickField('ville_adresse'),
     complement_adresse: pickField('complement_adresse'),
     pays: pickField('pays'),
@@ -987,21 +1056,26 @@ export function mapTesseractText(text, side = 'recto') {
 
     if (side === 'verso') {
       var addrM = line.match(/(?:ADRESSE|ADDRESS|DOMICILE)\s*[:\.]?\s*(.+)$/i);
-      if (addrM) out.adresse = cleanNamePart(addrM[1], true);
-      else if (/^\d/.test(line) || /\bRUE\b|\bAV\b|\bBD\b|\bQUARTIER\b/i.test(line)) {
-        out.adresse = (out.adresse ? out.adresse + ' ' : '') + cleanNamePart(line, true);
+      if (addrM) {
+        const a = cleanAddressLine(addrM[1]);
+        if (a) out.adresse = (out.adresse ? out.adresse + ' ' : '') + a;
+      } else if (!isMrzNoiseLine(line) && (/^\d/.test(line) || /\bRUE\b|\bRES\b|\bAV\b|\bBD\b|\bAPT\b|\bBOURGOGNE\b|\bCASABLANCA\b/i.test(line))) {
+        const a = cleanAddressLine(line);
+        if (a.length >= 6) out.adresse = (out.adresse ? out.adresse + ' ' : '') + a;
       }
       var cityM = line.match(/(?:VILLE|CITY)\s*[:\.]?\s*(.+)$/i);
-      if (cityM) out.ville_adresse = cleanNamePart(cityM[1], true);
+      if (cityM) out.ville_adresse = cleanAddressLine(cityM[1]);
     }
   }
 
   if (side === 'recto') inferNamesFromLines(lines, out);
 
   if (side === 'verso') {
+    const parsedAddr = extractVersoAddressFromText(raw);
+    const adresse = (parsedAddr || out.adresse || '').trim();
     return {
       ...emptyCINExtract(),
-      adresse: (out.adresse || '').trim(),
+      adresse,
       ville_adresse: (out.ville_adresse || '').trim(),
       complement_adresse: out.complement_adresse || '',
       numero_cin: out.numero_cin || '',
