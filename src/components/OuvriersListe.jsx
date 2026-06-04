@@ -37,7 +37,7 @@ const STATUT_CFG = {
 const CIN_HINT = 'Cadrez la CIN dans le rectangle';
 const SCANNER_PLACE_HINT = 'Placez la CIN dans le cadre';
 /** Identifiant build — vérifier dans la console Safari mobile que cette version est chargée */
-const CIN_SCANNER_VERSION = '2026-06-04-cin-doc-zone-css';
+const CIN_SCANNER_VERSION = '2026-06-04-cin-capture-btn';
 
 const EMPTY_FORM = {
   prenom: '', nom: '', telephone: '', cin: '', fonction: '', tarif: '',
@@ -746,7 +746,20 @@ function CINScanner({
         <rect width="100" height="100" fill="rgba(0,0,0,0.72)" mask={`url(#cin-cutout-${importUid})`} />
       </svg>
 
-      <div ref={vfFrameRef} className={'cin-vf-frame' + (frameReady ? ' cin-vf-frame--ready' : '')}>
+      <div
+        ref={vfFrameRef}
+        className={'cin-vf-frame' + (frameReady ? ' cin-vf-frame--ready' : '')}
+        role="button"
+        tabIndex={0}
+        aria-label="Capturer la CIN"
+        onClick={() => { if (cameraActive) captureCurrentSide(); }}
+        onKeyDown={(e) => {
+          if ((e.key === 'Enter' || e.key === ' ') && cameraActive) {
+            e.preventDefault();
+            captureCurrentSide();
+          }
+        }}
+      >
         <span className="cin-vf-corner cin-vf-corner--tl" />
         <span className="cin-vf-corner cin-vf-corner--tr" />
         <span className="cin-vf-corner cin-vf-corner--bl" />

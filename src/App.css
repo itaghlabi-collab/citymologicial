@@ -2495,6 +2495,264 @@ tbody tr:last-child td { border-bottom: none; }
   text-shadow: 0 1px 4px rgba(0,0,0,0.7);
 }
 
+.cin-hint-side {
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255,255,255,0.45);
+}
+
+/* ══ Barre d’actions (Capturer, Galerie, etc.) ══ */
+.cin-scanner-live {
+  align-items: stretch;
+  justify-content: flex-end;
+}
+
+.cin-scanner-actions {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 50;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 10px 12px;
+  padding: 14px 16px calc(14px + env(safe-area-inset-bottom, 0px));
+  background: linear-gradient(to top, rgba(0, 0, 0, 0.94) 0%, rgba(0, 0, 0, 0.75) 55%, transparent 100%);
+  pointer-events: auto;
+  box-sizing: border-box;
+}
+
+.cin-action-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 44px;
+  padding: 10px 16px;
+  border-radius: 10px;
+  border: 1.5px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  font-family: var(--font-body);
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  transition: background 0.15s, transform 0.1s, opacity 0.15s;
+  backdrop-filter: blur(8px);
+  -webkit-tap-highlight-color: transparent;
+}
+
+.cin-action-btn:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.cin-action-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.cin-action-btn--ghost {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.cin-action-btn--ghost:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.cin-action-btn--primary {
+  flex: 1 1 100%;
+  max-width: 100%;
+  min-height: 48px;
+  background: var(--red);
+  border-color: var(--red);
+  box-shadow: 0 4px 16px rgba(211, 47, 47, 0.45);
+}
+
+.cin-action-btn--primary:hover:not(:disabled) {
+  background: var(--red-dark, #c62828);
+}
+
+/* Bouton capture — déclencheur rond (comme localhost) */
+.cin-action-btn--capture {
+  width: 76px;
+  height: 76px;
+  min-height: 76px;
+  padding: 0;
+  border-radius: 50%;
+  border: 4px solid rgba(255, 255, 255, 0.95);
+  background: var(--red);
+  flex-shrink: 0;
+  box-shadow: 0 4px 28px rgba(211, 47, 47, 0.55);
+  font-size: 0;
+  order: 0;
+}
+
+.cin-action-btn--capture svg {
+  width: 32px;
+  height: 32px;
+  flex-shrink: 0;
+}
+
+.cin-action-btn--capture.ready {
+  background: #4caf50;
+  border-color: #fff;
+  box-shadow: 0 4px 28px rgba(76, 175, 80, 0.55);
+}
+
+.cin-action-btn--capture:hover:not(:disabled) {
+  background: #e53935;
+}
+
+.cin-action-btn--capture.ready:hover:not(:disabled) {
+  background: #43a047;
+}
+
+/* Cadre cliquable = capture (texte « Appuyez pour capturer ») */
+.cin-scanner-live .cin-vf-frame {
+  pointer-events: auto;
+  cursor: pointer;
+  z-index: 15;
+}
+
+.cin-scanner-live .cin-vf-frame:active {
+  transform: translateY(-50%) scale(0.995);
+}
+
+/* Hint au-dessus de la barre d’actions */
+.cin-scanner-live .cin-hint-bar {
+  bottom: calc(118px + env(safe-area-inset-bottom, 0px));
+}
+
+/* Recto / verso switch */
+.cin-side-switch {
+  position: fixed;
+  left: 50%;
+  transform: translateX(-50%);
+  bottom: calc(108px + env(safe-area-inset-bottom, 0px));
+  z-index: 45;
+  display: flex;
+  gap: 6px;
+  padding: 4px;
+  background: rgba(0, 0, 0, 0.55);
+  border-radius: 10px;
+  backdrop-filter: blur(8px);
+}
+
+.cin-side-switch-btn {
+  padding: 8px 18px;
+  border: none;
+  border-radius: 7px;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.65);
+  font-size: 0.78rem;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.cin-side-switch-btn.active.recto {
+  background: var(--red);
+  color: #fff;
+}
+
+.cin-side-switch-btn.active.verso {
+  background: #1565c0;
+  color: #fff;
+}
+
+.cin-capture-thumbs {
+  position: fixed;
+  top: 72px;
+  right: 12px;
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.cin-capture-thumb {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  padding: 6px;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  border-radius: 8px;
+  background: rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+}
+
+.cin-capture-thumb.active {
+  border-color: var(--red);
+}
+
+.cin-capture-thumb img {
+  width: 56px;
+  height: 35px;
+  object-fit: cover;
+  border-radius: 4px;
+  display: block;
+}
+
+.cin-capture-thumb span {
+  font-size: 0.62rem;
+  font-weight: 700;
+  color: #fff;
+  text-transform: uppercase;
+}
+
+.cin-camera-feed--off {
+  opacity: 0;
+}
+
+.cin-camera-placeholder {
+  position: absolute;
+  inset: 0;
+  background: #111;
+  z-index: 1;
+}
+
+.cin-camera-loading,
+.cin-camera-blocked {
+  position: absolute;
+  inset: 0;
+  z-index: 25;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 24px;
+  text-align: center;
+  color: #fff;
+  background: rgba(0, 0, 0, 0.88);
+}
+
+.cin-camera-blocked p {
+  margin: 0;
+  font-size: 0.88rem;
+  max-width: 320px;
+  line-height: 1.45;
+}
+
+.cin-https-banner {
+  position: absolute;
+  top: 56px;
+  left: 12px;
+  right: 12px;
+  z-index: 30;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: rgba(255, 152, 0, 0.92);
+  color: #1a1a1a;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-align: center;
+}
+
 /* ══ Recto mini preview ══ */
 .cin-recto-mini {
   position: absolute;
@@ -2691,9 +2949,22 @@ tbody tr:last-child td { border-bottom: none; }
   .cin-progress-bar-wrap {
     top: calc(50% + 82vw * (54 / 85.6) / 2 + 12px);
   }
-  .cin-hint-bar  { bottom: 28px; }
+  .cin-scanner-live .cin-hint-bar {
+    bottom: calc(128px + env(safe-area-inset-bottom, 0px));
+  }
   .cin-hint-text { font-size: 0.85rem; }
   .cin-recto-mini img { width: 58px; height: 36px; }
+  .cin-scanner-actions {
+    padding-bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  }
+  .cin-action-btn--capture {
+    width: 80px;
+    height: 80px;
+    min-height: 80px;
+  }
+  .cin-side-switch {
+    bottom: calc(118px + env(safe-area-inset-bottom, 0px));
+  }
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
