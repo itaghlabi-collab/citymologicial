@@ -19,12 +19,7 @@ export default function Inventaire({ activeTab }) {
 
   return (
     <div>
-      {tab === 'categories-stock' && (
-        <CategoriesStock
-          articles={articles}
-          onCategoriesChange={setCategories}
-        />
-      )}
+      {tab === 'categories-stock' && <CategoriesStock />}
       {tab === 'articles-stock' && (
         <ArticlesStock
           categories={categories}

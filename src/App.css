@@ -3123,6 +3123,9 @@ tbody tr:last-child td { border-bottom: none; }
 .mes-docs-mobile-only { display: none !important; }
 .mes-docs-desktop-only { display: block; }
 
+.inv-stock-mobile-only { display: none !important; }
+.inv-stock-desktop-only { display: block; }
+
 @media (max-width: 768px) {
   .mes-docs-mobile-only {
     display: flex !important;
@@ -3130,6 +3133,13 @@ tbody tr:last-child td { border-bottom: none; }
     gap: 10px;
   }
   .mes-docs-desktop-only { display: none !important; }
+
+  .inv-stock-mobile-only {
+    display: flex !important;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .inv-stock-desktop-only { display: none !important; }
   .mes-docs-folder-grid {
     grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
   }

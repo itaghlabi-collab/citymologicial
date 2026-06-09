@@ -11,6 +11,31 @@ export const INPUT_STYLE = {
 export const SELECT_STYLE = { ...INPUT_STYLE, cursor: 'pointer' };
 export const TEXTAREA_STYLE = { ...INPUT_STYLE, minHeight: 72, resize: 'vertical' };
 
+export const DEPARTEMENTS = [
+  'COMMERCIAL',
+  'RESSOURCES HUMAINES',
+  'ACHATS',
+  'MARKETING',
+  'EXPLOITATION',
+  'COMPTABILITÉ',
+  'ADMINISTRATION',
+  'SAV',
+  'LOGISTIQUE',
+  'PROJETS',
+  'FINANCE & TRÉSORERIE',
+  'DOCUMENTS GÉNÉRAUX',
+];
+
+export const STOCK_TYPES = [
+  'OUTILLAGE',
+  'MATÉRIEL',
+  'CONSOMMABLE',
+  'EPI',
+  'MATIÈRE PREMIÈRE',
+  'PIÈCE DÉTACHÉE',
+  'AUTRE',
+];
+
 export const TYPES_DEPOT    = ['Dépôt principal', 'Chantier', 'Magasin', 'Stockage temporaire', 'Projet'];
 export const ETATS_ARTICLE  = ['Neuf', 'Utilisé', 'Défectueux', 'En réparation'];
 export const UNITES         = ['U', 'kg', 'g', 't', 'm', 'm²', 'm³', 'ml', 'cm', 'l', 'cl', 'sac', 'rouleau', 'boîte', 'palette', 'lot', 'pièce'];
