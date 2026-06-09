@@ -1039,7 +1039,7 @@ export async function scanCIN(rectoSource, versoSource, options = {}) {
     client_api_base: getOcrApiUrl(),
     client_api_endpoint: `${getOcrApiUrl()}/ocr/moroccan-cin`,
     diagnostics: mindee.diagnostics,
-    mindee_config_blocked: mindee.diagnostics?.model_id_required && !mindee.diagnostics?.has_MINDEE_MODEL_ID,
+    mindee_config_blocked: Boolean(mindee.diagnostics?.mindee_config_blocked ?? mindee.mindee_config_blocked),
     config_error: mindee.backendErrors?.find((e) => e.includes('MINDEE_MODEL_ID')) || null,
     mindee_http_called: mindee.mindee_http_called ?? mindee.diagnostics?.mindee_http_called ?? false,
     mindee_recto_ok: mindeeRectoOk,

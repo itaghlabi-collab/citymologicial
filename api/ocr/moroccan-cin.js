@@ -3,7 +3,7 @@
  * Body JSON: { recto?: dataUrl, verso?: dataUrl }
  * Variables Vercel : MINDEE_API_KEY, MINDEE_MODEL_ID (si clé md_*)
  */
-import { dataUrlToBuffer, processMoroccanCinBuffers } from '../../lib/mindeeMoroccanCin.mjs';
+import { dataUrlToBuffer, getMindeeRoutingInfo, processMoroccanCinBuffers } from '../../lib/mindeeMoroccanCin.mjs';
 
 export const config = {
   maxDuration: 60,
@@ -40,25 +40,18 @@ export default async function handler(req, res) {
     return res.status(405).json({ success: false, error: 'Method not allowed' });
   }
 
-  const hasKey = Boolean(process.env.MINDEE_API_KEY);
-  const key = process.env.MINDEE_API_KEY || '';
-  const ocrProvider = (process.env.OCR_PROVIDER || 'mindee').toLowerCase();
-  const isMd = key.startsWith('md_');
-  const hasModelId = Boolean(
-    (process.env.MINDEE_MODEL_ID || '').trim().match(/^[0-9a-f-]{36}$/i)
-    || (process.env.MINDEE_MODEL_URL || process.env.MINDEE_LIVE_TEST_URL || '').match(/\/models\/([0-9a-f-]{36})/i),
-  );
+  const routing = getMindeeRoutingInfo();
   console.info('[OCR CIN] server request', {
-    OCR_PROVIDER: ocrProvider,
-    key_type: !hasKey ? 'missing' : (isMd ? 'md_v2' : 'legacy_v1'),
-    has_MINDEE_MODEL_ID: hasModelId,
-    mindee_api_key: hasKey ? 'present' : 'MISSING',
-    endpoint_planned: isMd && !hasModelId
-      ? null
-      : (isMd ? 'https://api-v2.mindee.net/v2/products/extraction/enqueue' : 'https://api.mindee.net/v1/products/mindee/international_id/v2/predict'),
+    OCR_PROVIDER: routing.OCR_PROVIDER,
+    key_type: routing.key_type,
+    has_MINDEE_MODEL_ID: routing.has_MINDEE_MODEL_ID,
+    model_id_source: routing.model_id_source,
+    mindee_api_key: routing.mindee_api_key,
+    endpoint_planned: routing.endpoint,
+    api_version: routing.api_version,
   });
-  if (isMd && !hasModelId) {
-    console.error('[OCR CIN] MINDEE_MODEL_ID manquant — aucun appel Mindee (clé md_*)');
+  if (routing.key_type === 'md_v2' && routing.model_id_source === 'default_citymo') {
+    console.warn('[OCR CIN] MINDEE_MODEL_ID absent — modèle Citymo par défaut (ou v1 si échec v2)');
   }
 
   try {

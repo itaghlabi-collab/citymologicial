@@ -17,7 +17,7 @@ function inferRootCause(ctx) {
   if (ctx.mindee_config_blocked) {
     return {
       category: 'config',
-      reason: ctx.config_error || 'MINDEE_MODEL_ID manquant (clé md_*) — aucun appel HTTP Mindee.',
+      reason: ctx.config_error || 'MINDEE_API_KEY manquant — aucun appel HTTP Mindee.',
     };
   }
   if (!ctx.mindee_http_called) {
@@ -165,15 +165,14 @@ export function buildOcrAuditReport(ctx) {
     },
     checklist: {
       faut_il_MINDEE_MODEL_ID: ctx.diagnostics?.key_type === 'md_v2'
-        ? 'OUI — obligatoire avec clé md_*'
+        ? 'NON bloquant — modèle Citymo par défaut ou fallback v1 International ID'
         : (ctx.diagnostics?.key_type === 'legacy_v1' ? 'NON — clé re_* utilise International ID v1' : 'N/A — clé absente'),
       actions: [],
     },
   };
 
-  if (ctx.diagnostics?.model_id_required) {
-    report.checklist.actions.push('Vercel → ajouter MINDEE_MODEL_ID (UUID modèle Mindee International ID)');
-    report.checklist.actions.push('Ou remplacer MINDEE_API_KEY par une clé re_* (v1)');
+  if (ctx.diagnostics?.key_type === 'md_v2' && ctx.diagnostics?.model_id_source === 'default_citymo') {
+    report.checklist.actions.push('Optionnel : ajouter MINDEE_MODEL_ID sur Vercel pour override le modèle par défaut');
   }
   if (!ctx.mindee_recto_ok) {
     report.checklist.actions.push('Vérifier logs Vercel Functions : [OCR CIN] Mindee config serveur');

@@ -80,6 +80,8 @@ function mindeeAuthHeader(apiKey) {
  * 1. MINDEE_MODEL_ID=uuid
  * 2. MINDEE_MODEL_URL ou MINDEE_LIVE_TEST_URL contenant /models/{uuid}/...
  */
+const CITYMO_DEFAULT_MINDEE_MODEL_ID = 'a74f083a-cbad-406c-a13e-a8446fa74eb7';
+
 function resolveMindeeModelId() {
   const direct = (process.env.MINDEE_MODEL_ID || '').trim();
   if (/^[0-9a-f-]{36}$/i.test(direct)) return direct;
@@ -88,7 +90,7 @@ function resolveMindeeModelId() {
   const match = fromUrl.match(/\/models\/([0-9a-f-]{36})/i);
   if (match) return match[1];
 
-  return null;
+  return CITYMO_DEFAULT_MINDEE_MODEL_ID;
 }
 
 function resolveMindeeRouting(apiKey) {
@@ -232,9 +234,8 @@ async function mindeeV2Predict(buffer, mime, label, endpoint) {
   const apiKey = process.env.MINDEE_API_KEY;
   const modelId = resolveMindeeModelId();
   if (!modelId) {
-    const err = new Error(modelIdHelpMessage());
-    err.code = 'MINDEE_MODEL_ID_MISSING';
-    throw err;
+    console.warn(`[OCR CIN] ${label} — clé md_* sans MINDEE_MODEL_ID, fallback International ID v1`);
+    return mindeeV1Predict(buffer, mime, label, MINDEE_V1_INTERNATIONAL_ID);
   }
 
   console.info('[OCR CIN] provider=mindee');
@@ -310,9 +311,8 @@ async function mindeePredictRaw(buffer, mime, label) {
   if (routing.version === 'v2') {
     const modelId = resolveMindeeModelId();
     if (!modelId) {
-      const err = new Error(modelIdHelpMessage());
-      err.code = 'MINDEE_MODEL_ID_MISSING';
-      throw err;
+      console.warn(`[OCR CIN] ${label} — clé md_* sans MINDEE_MODEL_ID, fallback International ID v1`);
+      return mindeeV1Predict(buffer, mime, label, MINDEE_V1_INTERNATIONAL_ID);
     }
     return mindeeV2Predict(buffer, mime, label, routing.endpoint);
   }
