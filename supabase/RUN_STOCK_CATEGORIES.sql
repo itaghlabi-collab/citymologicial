@@ -147,42 +147,45 @@ CREATE POLICY stock_categories_delete_auth ON public.stock_categories
 GRANT USAGE ON SCHEMA public TO authenticated, service_role;
 GRANT ALL ON public.stock_categories TO authenticated, service_role;
 
+-- Rétrocompat migration : nom était NOT NULL sans valeur dans l'INSERT seed
+ALTER TABLE public.stock_categories ALTER COLUMN nom DROP NOT NULL;
+
 -- ── Seed 24 catégories (UPSERT par code — doublons listés exclus) ─────────────
-INSERT INTO public.stock_categories (legacy_id, code, name, description, department, stock_type, is_active)
+INSERT INTO public.stock_categories (legacy_id, code, name, nom, description, department, stock_type, is_active, statut)
 VALUES
-  (1,  'OUTILLAGE',            'OUTILLAGE',            NULL,                    'LOGISTIQUE', 'OUTILLAGE',       TRUE),
-  (2,  'PEINTURE',             'PEINTURE',             NULL,                    'LOGISTIQUE', 'OUTILLAGE',       TRUE),
-  (3,  'SOUDURE',              'SOUDURE',              NULL,                    'LOGISTIQUE', 'OUTILLAGE',       TRUE),
-  (4,  'CLIMATISATION',        'CLIMATISATION',        NULL,                    'LOGISTIQUE', 'OUTILLAGE',       TRUE),
-  (5,  'VISSEUSE',             'VISSEUSE',             NULL,                    'LOGISTIQUE', 'OUTILLAGE',       TRUE),
-  (6,  'MEULEUSE_GM',          'MEULEUSE GM',          NULL,                    'LOGISTIQUE', 'OUTILLAGE',       TRUE),
-  (7,  'MEULEUSE_PM',          'MEULEUSE PM',          NULL,                    'LOGISTIQUE', 'OUTILLAGE',       TRUE),
-  (8,  'PERFORATEUR',          'PERFORATEUR',          NULL,                    'LOGISTIQUE', 'OUTILLAGE',       TRUE),
-  (9,  'BURINEUR',             'BURINEUR',             NULL,                    'LOGISTIQUE', 'OUTILLAGE',       TRUE),
-  (10, 'PERCEUSE',             'PERCEUSE',             NULL,                    'LOGISTIQUE', 'OUTILLAGE',       TRUE),
-  (11, 'PONCEUSE',             'PONCEUSE',             NULL,                    'LOGISTIQUE', 'OUTILLAGE',       TRUE),
-  (12, 'MELANGEUR',            'MELANGEUR',            'melangeur-malaxeur',    'LOGISTIQUE', 'OUTILLAGE',       TRUE),
-  (13, 'RAINUREUSE',           'RAINUREUSE',           NULL,                    'LOGISTIQUE', 'OUTILLAGE',       TRUE),
-  (14, 'DEGAGEUR',             'DEGAGEUR',             NULL,                    'LOGISTIQUE', 'OUTILLAGE',       TRUE),
-  (15, 'OUTILS_DE_MESURE',     'OUTILS DE MESURE',     NULL,                    'LOGISTIQUE', 'OUTILLAGE',       TRUE),
-  (16, 'MENUISERIE_ALUMINIUM', 'MENUISERIE ALUMINIUM', NULL,                    'LOGISTIQUE', 'OUTILLAGE',       TRUE),
-  (17, 'VIBREUR',              'VIBREUR',              NULL,                    'LOGISTIQUE', 'OUTILLAGE',       TRUE),
-  (18, 'MENUISERIE_BOIS',      'MENUISERIE BOIS',      NULL,                    'LOGISTIQUE', 'OUTILLAGE',       TRUE),
-  (19, 'SCIE_SAUTEUSE',        'SCIE SAUTEUSE',        NULL,                    'LOGISTIQUE', 'OUTILLAGE',       TRUE),
-  (20, 'POLISSEUSE',           'POLISSEUSE',           NULL,                    'LOGISTIQUE', 'OUTILLAGE',       TRUE),
-  (21, 'CISAILLE_ELECTRIQUE',  'CISAILLE ELECTRIQUE',  NULL,                    'LOGISTIQUE', 'OUTILLAGE',       TRUE),
-  (22, 'SOUFFLEUR',            'SOUFFLEUR',            NULL,                    'LOGISTIQUE', 'OUTILLAGE',       TRUE),
-  (23, 'LIGATUREUSE',          'LIGATUREUSE',          NULL,                    'LOGISTIQUE', 'OUTILLAGE',       TRUE),
-  (24, 'CISAILLE_MANUELLE',    'CISAILLE MANUELLE',    NULL,                    'LOGISTIQUE', 'OUTILLAGE',       TRUE)
+  (1,  'OUTILLAGE',            'OUTILLAGE',            'OUTILLAGE',            NULL, 'LOGISTIQUE', 'OUTILLAGE', TRUE, 'Active'),
+  (2,  'PEINTURE',             'PEINTURE',             'PEINTURE',             NULL, 'LOGISTIQUE', 'OUTILLAGE', TRUE, 'Active'),
+  (3,  'SOUDURE',              'SOUDURE',              'SOUDURE',              NULL, 'LOGISTIQUE', 'OUTILLAGE', TRUE, 'Active'),
+  (4,  'CLIMATISATION',        'CLIMATISATION',        'CLIMATISATION',        NULL, 'LOGISTIQUE', 'OUTILLAGE', TRUE, 'Active'),
+  (5,  'VISSEUSE',             'VISSEUSE',             'VISSEUSE',             NULL, 'LOGISTIQUE', 'OUTILLAGE', TRUE, 'Active'),
+  (6,  'MEULEUSE_GM',          'MEULEUSE GM',          'MEULEUSE GM',          NULL, 'LOGISTIQUE', 'OUTILLAGE', TRUE, 'Active'),
+  (7,  'MEULEUSE_PM',          'MEULEUSE PM',          'MEULEUSE PM',          NULL, 'LOGISTIQUE', 'OUTILLAGE', TRUE, 'Active'),
+  (8,  'PERFORATEUR',          'PERFORATEUR',          'PERFORATEUR',          NULL, 'LOGISTIQUE', 'OUTILLAGE', TRUE, 'Active'),
+  (9,  'BURINEUR',             'BURINEUR',             'BURINEUR',             NULL, 'LOGISTIQUE', 'OUTILLAGE', TRUE, 'Active'),
+  (10, 'PERCEUSE',             'PERCEUSE',             'PERCEUSE',             NULL, 'LOGISTIQUE', 'OUTILLAGE', TRUE, 'Active'),
+  (11, 'PONCEUSE',             'PONCEUSE',             'PONCEUSE',             NULL, 'LOGISTIQUE', 'OUTILLAGE', TRUE, 'Active'),
+  (12, 'MELANGEUR',            'MELANGEUR',            'MELANGEUR',            'melangeur-malaxeur', 'LOGISTIQUE', 'OUTILLAGE', TRUE, 'Active'),
+  (13, 'RAINUREUSE',           'RAINUREUSE',           'RAINUREUSE',           NULL, 'LOGISTIQUE', 'OUTILLAGE', TRUE, 'Active'),
+  (14, 'DEGAGEUR',             'DEGAGEUR',             'DEGAGEUR',             NULL, 'LOGISTIQUE', 'OUTILLAGE', TRUE, 'Active'),
+  (15, 'OUTILS_DE_MESURE',     'OUTILS DE MESURE',     'OUTILS DE MESURE',     NULL, 'LOGISTIQUE', 'OUTILLAGE', TRUE, 'Active'),
+  (16, 'MENUISERIE_ALUMINIUM', 'MENUISERIE ALUMINIUM', 'MENUISERIE ALUMINIUM', NULL, 'LOGISTIQUE', 'OUTILLAGE', TRUE, 'Active'),
+  (17, 'VIBREUR',              'VIBREUR',              'VIBREUR',              NULL, 'LOGISTIQUE', 'OUTILLAGE', TRUE, 'Active'),
+  (18, 'MENUISERIE_BOIS',      'MENUISERIE BOIS',      'MENUISERIE BOIS',      NULL, 'LOGISTIQUE', 'OUTILLAGE', TRUE, 'Active'),
+  (19, 'SCIE_SAUTEUSE',        'SCIE SAUTEUSE',        'SCIE SAUTEUSE',        NULL, 'LOGISTIQUE', 'OUTILLAGE', TRUE, 'Active'),
+  (20, 'POLISSEUSE',           'POLISSEUSE',           'POLISSEUSE',           NULL, 'LOGISTIQUE', 'OUTILLAGE', TRUE, 'Active'),
+  (21, 'CISAILLE_ELECTRIQUE',  'CISAILLE ELECTRIQUE',  'CISAILLE ELECTRIQUE',  NULL, 'LOGISTIQUE', 'OUTILLAGE', TRUE, 'Active'),
+  (22, 'SOUFFLEUR',            'SOUFFLEUR',            'SOUFFLEUR',            NULL, 'LOGISTIQUE', 'OUTILLAGE', TRUE, 'Active'),
+  (23, 'LIGATUREUSE',          'LIGATUREUSE',          'LIGATUREUSE',          NULL, 'LOGISTIQUE', 'OUTILLAGE', TRUE, 'Active'),
+  (24, 'CISAILLE_MANUELLE',    'CISAILLE MANUELLE',    'CISAILLE MANUELLE',    NULL, 'LOGISTIQUE', 'OUTILLAGE', TRUE, 'Active')
 ON CONFLICT (code) DO UPDATE SET
   legacy_id   = COALESCE(EXCLUDED.legacy_id, stock_categories.legacy_id),
   name        = EXCLUDED.name,
+  nom         = EXCLUDED.nom,
   description = COALESCE(EXCLUDED.description, stock_categories.description),
   department  = EXCLUDED.department,
   stock_type  = EXCLUDED.stock_type,
   is_active   = EXCLUDED.is_active,
-  nom         = EXCLUDED.name,
-  statut      = CASE WHEN EXCLUDED.is_active THEN 'Active' ELSE 'Inactive' END,
+  statut      = EXCLUDED.statut,
   updated_at  = NOW();
 
 -- Lier articles existants par libellé catégorie
