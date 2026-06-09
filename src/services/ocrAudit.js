@@ -27,9 +27,16 @@ function inferRootCause(ctx) {
     };
   }
   if (!ctx.mindee_recto_ok) {
+    const errText = (ctx.backend_errors || []).join(' | ');
+    if (/402|subscription period has ended|Abonnement Mindee expiré/i.test(errText)) {
+      return {
+        category: 'subscription',
+        reason: 'Abonnement Mindee expiré (HTTP 402) — renouvelez sur app.mindee.com. Extraction limitée au Tesseract navigateur.',
+      };
+    }
     return {
       category: 'api',
-      reason: ctx.backend_errors?.join(' | ') || 'Appel Mindee recto sans champs extraits.',
+      reason: errText || 'Appel Mindee recto sans champs extraits.',
     };
   }
   if (ctx.verso_required && !ctx.mindee_verso_ok) {

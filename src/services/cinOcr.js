@@ -281,11 +281,20 @@ export function sanitizeCINExtract(mapped) {
   const e = { ...emptyCINExtract(), ...(mapped || {}) };
   const out = { ...e };
 
-  out.numero_cin = isValidCINNumber(e.numero_cin) ? normCIN(e.numero_cin) : '';
+  const cinNorm = normCIN(e.numero_cin);
+  out.numero_cin = isValidCINNumber(cinNorm)
+    ? cinNorm
+    : (/^[A-Z]{1,3}\d{4,8}$/i.test(cinNorm) ? cinNorm.toUpperCase() : '');
   out.prenom = isValidPersonName(e.prenom, true) ? normalizePrenomValue(e.prenom) : '';
   out.nom = isValidPersonName(e.nom, false) ? cleanNamePart(e.nom, true) : '';
-  out.date_naissance = isValidBirthDate(normDateISO(e.date_naissance)) ? normDateISO(e.date_naissance) : '';
-  out.date_expiration = isValidExpiryDate(normDateISO(e.date_expiration)) ? normDateISO(e.date_expiration) : '';
+  const dobNorm = normDateISO(e.date_naissance);
+  out.date_naissance = isValidBirthDate(dobNorm)
+    ? dobNorm
+    : (/^\d{4}-\d{2}-\d{2}$/.test(dobNorm) ? dobNorm : '');
+  const expNorm = normDateISO(e.date_expiration);
+  out.date_expiration = isValidExpiryDate(expNorm)
+    ? expNorm
+    : (/^\d{4}-\d{2}-\d{2}$/.test(expNorm) ? expNorm : '');
   out.lieu_naissance = (e.lieu_naissance || '').trim();
   if (out.lieu_naissance && (out.lieu_naissance.length < 2 || /\d{5,}/.test(out.lieu_naissance) || isMrzNoiseLine(out.lieu_naissance))) {
     out.lieu_naissance = '';

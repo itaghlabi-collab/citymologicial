@@ -549,15 +549,40 @@ async function fetchMindeeSides(rectoSide, versoSide) {
   let rectoData = null;
   let versoData = null;
 
+  function ingestMindeeJson(json) {
+    if (!json) return;
+    const sideErrs = json.diagnostics?.side_errors
+      || json.audit?.side_errors
+      || json.audit?.vercel_runtime?.side_errors
+      || [];
+    sideErrs.forEach((e) => { if (e) backendErrors.push(String(e)); });
+    if (json.error) backendErrors.push(String(json.error));
+    if (json.code === 'MINDEE_SUBSCRIPTION_EXPIRED') {
+      backendErrors.push('Abonnement Mindee expiré (402) — renouvelez sur app.mindee.com.');
+    }
+  }
+
   function recordFail(result) {
-    if (result && !result.ok && result.error) backendErrors.push(result.error);
+    if (!result) return;
+    if (result.error) backendErrors.push(result.error);
+    ingestMindeeJson(result.json);
+  }
+
+  function absorbResponse(res) {
+    if (!res?.json) return;
+    ingestMindeeJson(res.json);
+    if (res.json.diagnostics) lastDiagnostics = res.json.diagnostics;
+    if (res.json.audit) lastDiagnostics = { ...lastDiagnostics, server_audit: res.json.audit };
+    if (res.json.mindee_http_called != null) {
+      lastDiagnostics = { ...lastDiagnostics, mindee_http_called: res.json.mindee_http_called };
+    }
   }
 
   let lastDiagnostics = null;
 
   function captureDiag(res) {
-    if (res?.ok && res.json?.diagnostics) lastDiagnostics = res.json.diagnostics;
-    if (!res?.ok && res?.report) lastDiagnostics = res.report;
+    absorbResponse(res);
+    if (!res?.ok && res?.report) lastDiagnostics = { ...lastDiagnostics, ...res.report };
   }
 
   const combinedKb = estimatePayloadBytes(rectoImg, versoImg);
@@ -567,44 +592,43 @@ async function fetchMindeeSides(rectoSide, versoSide) {
     if (res.ok) {
       rectoData = res.json.recto || null;
       versoData = res.json.verso || null;
-      if (res.json.diagnostics) lastDiagnostics = res.json.diagnostics;
-      if (res.json.audit) lastDiagnostics = { ...lastDiagnostics, server_audit: res.json.audit };
-      if (res.json.mindee_http_called != null) {
-        lastDiagnostics = { ...lastDiagnostics, mindee_http_called: res.json.mindee_http_called };
-      }
+      absorbResponse(res);
+      if (!res.json.success) recordFail(res);
     } else {
       recordFail(res);
-      if (res.json?.diagnostics) lastDiagnostics = res.json.diagnostics;
-      if (res.json?.audit) lastDiagnostics = { ...lastDiagnostics, server_audit: res.json.audit };
-      if (res.json?.mindee_http_called != null) {
-        lastDiagnostics = { ...lastDiagnostics, mindee_http_called: res.json.mindee_http_called };
-      }
+      absorbResponse(res);
     }
   }
 
   if (!rectoData && rectoImg) {
     const res = await postMindeeCin(apiUrl, { recto: rectoImg }, 'recto');
     captureDiag(res);
-    if (res.ok && res.json?.recto) rectoData = res.json.recto;
-    else {
+    if (res.ok && res.json?.recto) {
+      rectoData = res.json.recto;
+      absorbResponse(res);
+    } else {
       recordFail(res);
-      if (res.json?.diagnostics) lastDiagnostics = res.json.diagnostics;
+      absorbResponse(res);
     }
   }
   if (!versoData && versoImg) {
     const res = await postMindeeCin(apiUrl, { verso: versoImg }, 'verso');
     captureDiag(res);
-    if (res.ok && res.json?.verso) versoData = res.json.verso;
-    else {
+    if (res.ok && res.json?.verso) {
+      versoData = res.json.verso;
+      absorbResponse(res);
+    } else {
       recordFail(res);
-      if (res.json?.diagnostics) lastDiagnostics = res.json.diagnostics;
+      absorbResponse(res);
     }
   }
 
   const uniqueErrorsFinal = [...new Set(backendErrors)];
 
   const mindeeRectoOk = Boolean(rectoData?.fields && Object.keys(rectoData.fields).length);
-  const mindeeVersoOk = !versoImg || Boolean(versoData?.fields && Object.keys(versoData.fields).length);
+  const mindeeVersoOk = !versoImg
+    ? false
+    : Boolean(versoData?.fields && Object.keys(versoData.fields).length);
 
   if (!mindeeRectoOk && !mindeeVersoOk) {
     return {
@@ -1078,9 +1102,12 @@ export async function scanCIN(rectoSource, versoSource, options = {}) {
     Boolean(versoResult.mapped?.adresse || versoSide),
   );
   if (providerUsed === 'tesseract') {
-    const tessMsg = 'Mindee non utilisé — fallback Tesseract.';
+    const subExpired = /402|subscription period has ended|Abonnement Mindee expiré/i.test(backendErrorText || '');
+    const tessMsg = subExpired
+      ? 'Abonnement Mindee expiré — extraction limitée (Tesseract). Renouvelez sur app.mindee.com.'
+      : 'Mindee non utilisé — fallback Tesseract.';
     warning = warning ? tessMsg + ' ' + warning : tessMsg;
-    if (backendErrorText) warning += ' (' + backendErrorText + ')';
+    if (backendErrorText && !subExpired) warning += ' (' + backendErrorText + ')';
   } else if (providerUsed === 'mindee_partial' && !mindeeVersoOk) {
     const partialMsg = 'Identité via Mindee — adresse/MRZ verso via Tesseract (moins fiable).';
     warning = warning ? partialMsg + ' ' + warning : partialMsg;
