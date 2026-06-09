@@ -196,42 +196,39 @@ function DetailCategorie({ item, onBack, onEdit, onToggle }) {
   );
 }
 
-function MobileCard({ item, onView, onEdit, onToggle, onDelete }) {
+function MobileRow({ item, onView, onEdit, onToggle, onDelete }) {
   const active = item.is_active !== false && item.actif !== 'Non';
   return (
-    <div className="card inv-stock-cat-card" style={{ padding: 14 }}>
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, marginBottom: 10 }}>
-        <div style={{
-          width: 40, height: 40, borderRadius: 8, background: 'var(--red-light)',
-          display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-        }}>
-          <Tag size={18} style={{ color: 'var(--red)' }} />
-        </div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontWeight: 700, fontSize: '0.9rem' }}>{item.name || item.nom}</div>
-          <div style={{ fontFamily: 'var(--font-head)', fontSize: '0.75rem', color: 'var(--red)', fontWeight: 700 }}>{item.code}</div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 4 }}>
-            {item.department} · {item.stock_type}
-          </div>
-        </div>
-        <span className={`badge ${active ? 'badge-green' : 'badge-grey'}`} style={{ fontSize: '0.68rem', flexShrink: 0 }}>
-          {active ? 'Actif' : 'Inactif'}
-        </span>
+    <div className="inv-stock-mobile-row">
+      <div className="inv-stock-mobile-icon" aria-hidden>
+        <Tag size={14} />
       </div>
-      {item.description && (
-        <div style={{ fontSize: '0.78rem', color: 'var(--text-2)', marginBottom: 10 }}>
-          {item.description.length > 80 ? `${item.description.slice(0, 80)}…` : item.description}
-        </div>
-      )}
-      <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginBottom: 10 }}>
-        {item.articles_lies || 0} article(s) lié(s)
-        {item.valeur_stock > 0 ? ` · ${formatMAD(item.valeur_stock)}` : ''}
-      </div>
-      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-        <button type="button" className="btn btn-secondary btn-sm" onClick={() => onView(item)}><Eye size={13} /></button>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => onEdit(item)}><Edit2 size={13} /></button>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => onToggle(item)}><ToggleLeft size={13} /></button>
-        <button type="button" className="btn btn-ghost btn-sm" style={{ color: 'var(--red)' }} onClick={() => onDelete(item.id)}><Trash2 size={13} /></button>
+      <button
+        type="button"
+        className="inv-stock-mobile-name"
+        onClick={() => onView(item)}
+        title={item.code}
+      >
+        {item.name || item.nom}
+      </button>
+      <span
+        className={`inv-stock-mobile-status ${active ? 'is-active' : 'is-inactive'}`}
+        title={active ? 'Actif' : 'Inactif'}
+        aria-label={active ? 'Actif' : 'Inactif'}
+      />
+      <div className="inv-stock-mobile-actions">
+        <button type="button" className="btn btn-ghost btn-sm inv-stock-mobile-btn" title="Voir" onClick={() => onView(item)}>
+          <Eye size={14} />
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm inv-stock-mobile-btn" title="Modifier" onClick={() => onEdit(item)}>
+          <Edit2 size={14} />
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm inv-stock-mobile-btn" title={active ? 'Désactiver' : 'Réactiver'} onClick={() => onToggle(item)}>
+          <ToggleLeft size={14} />
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm inv-stock-mobile-btn inv-stock-mobile-btn--danger" title="Supprimer" onClick={() => onDelete(item.id)}>
+          <Trash2 size={14} />
+        </button>
       </div>
     </div>
   );
@@ -480,9 +477,9 @@ export default function CategoriesStock() {
             </div>
           </div>
 
-          <div className="inv-stock-mobile-only">
+          <div className="card inv-stock-mobile-only inv-stock-mobile-list">
             {filtered.map((x) => (
-              <MobileCard
+              <MobileRow
                 key={x.id}
                 item={x}
                 onView={() => setDetailId(x.id)}

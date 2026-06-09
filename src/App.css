@@ -3126,6 +3126,78 @@ tbody tr:last-child td { border-bottom: none; }
 .inv-stock-mobile-only { display: none !important; }
 .inv-stock-desktop-only { display: block; }
 
+/* Catégories stock — liste mobile compacte (1 ligne / catégorie) */
+.inv-stock-mobile-list {
+  padding: 0 !important;
+  overflow: hidden;
+}
+.inv-stock-mobile-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  min-height: 44px;
+  border-bottom: 1px solid var(--border);
+}
+.inv-stock-mobile-row:last-child {
+  border-bottom: none;
+}
+.inv-stock-mobile-icon {
+  width: 28px;
+  height: 28px;
+  min-width: 28px;
+  border-radius: 6px;
+  background: var(--red-light);
+  color: var(--red);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.inv-stock-mobile-name {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0;
+  text-align: left;
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 0.84rem;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: pointer;
+}
+.inv-stock-mobile-status {
+  width: 8px;
+  height: 8px;
+  min-width: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.inv-stock-mobile-status.is-active { background: #2E7D32; }
+.inv-stock-mobile-status.is-inactive { background: var(--text-3); }
+.inv-stock-mobile-actions {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex-shrink: 0;
+}
+.inv-stock-mobile-btn {
+  padding: 4px !important;
+  min-width: 30px !important;
+  min-height: 30px !important;
+  width: 30px;
+  height: 30px;
+  display: inline-flex !important;
+  align-items: center;
+  justify-content: center;
+}
+.inv-stock-mobile-btn--danger { color: var(--red) !important; }
+
 @media (max-width: 768px) {
   .mes-docs-mobile-only {
     display: flex !important;
@@ -3135,9 +3207,7 @@ tbody tr:last-child td { border-bottom: none; }
   .mes-docs-desktop-only { display: none !important; }
 
   .inv-stock-mobile-only {
-    display: flex !important;
-    flex-direction: column;
-    gap: 10px;
+    display: block !important;
   }
   .inv-stock-desktop-only { display: none !important; }
   .mes-docs-folder-grid {
