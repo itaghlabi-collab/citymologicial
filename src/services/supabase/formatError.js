@@ -100,6 +100,15 @@ export function formatSupabaseError(error, fallback = 'Une erreur est survenue.'
   if (code === '42P01' || message.includes('finance_categories')) {
     return 'Table catégories finance absente — exécutez supabase/RUN_FINANCE_TRESORERIE.sql dans Supabase (SQL Editor).';
   }
+  if (code === '42P01' || message.includes('document_public_links')) {
+    return 'Table liens publics absente — exécutez supabase/RUN_DOCUMENT_PUBLIC_LINKS.sql dans Supabase (SQL Editor).';
+  }
+  if (code === '42P01' || message.includes('document_shares')) {
+    return 'Table partages documents absente — exécutez supabase/RUN_DOCUMENT_SHARES.sql dans Supabase (SQL Editor).';
+  }
+  if (code === '42P01' || message.includes('document_folders') || message.includes('documents')) {
+    return 'Tables documents absentes — exécutez supabase/RUN_MES_DOCUMENTS.sql dans Supabase (SQL Editor).';
+  }
   if (code === 'VALIDATION') return message;
   if (message.includes('"type"') && message.includes('crm_factures')) {
     return 'Colonnes acompte absentes — exécutez supabase/migrations/20260526041000_crm_factures_acompte.sql';
