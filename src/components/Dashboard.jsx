@@ -5,12 +5,7 @@ import {
   CheckCircle, Clock, Calendar, UserCheck, BarChart2,
   RefreshCw, AlertCircle, ArrowUpRight, MapPin
 } from 'lucide-react';
-import {
-  getInvoices, getExpenses, getPaymentOrders,
-  getProjects, getAttendance, getLeaveRequests,
-  getQuotes, getProducts, getPurchaseOrders,
-} from '../services/api';
-import { loadInternalDashboardData } from '../services/internal/internalDashboard';
+import { loadMainDashboardData } from '../services/dashboard/dashboardData';
 
 /* ── Helpers ─────────────────────────────────────────────────────── */
 function fmt(n) {
@@ -26,7 +21,7 @@ function CurvedLineChart({ series, labels }) {
   const cW = W - PL - PR, cH = H - PT - PB;
   const allVals = series.flatMap(s => s.data);
   const maxV = Math.max(...allVals, 1);
-  const xs = labels.map((_, i) => PL + (i / (labels.length - 1)) * cW);
+  const xs = labels.map((_, i) => PL + (i / Math.max(labels.length - 1, 1)) * cW);
   const ys = v => PT + cH - (v / maxV) * cH;
   const colors = ['#D32F2F', '#1565C0', '#E65100'];
   const gridLines = [0, 0.25, 0.5, 0.75, 1];
@@ -241,63 +236,42 @@ export default function Dashboard() {
   const [dateFrom, setDateFrom] = useState(firstDay);
   const [dateTo, setDateTo] = useState(today);
   const [loading, setLoading] = useState(true);
-  const [data, setData] = useState({});
-  const [internal, setInternal] = useState(null);
+  const [dash, setDash] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [legacyResults, internalData] = await Promise.all([
-        Promise.allSettled([
-          getInvoices(), getExpenses(), getPaymentOrders(),
-          getProjects(), getAttendance(), getLeaveRequests(),
-          getQuotes(), getProducts(), getPurchaseOrders(),
-        ]),
-        loadInternalDashboardData(),
-      ]);
-      const val = (i) => (legacyResults[i].status === 'fulfilled' ? legacyResults[i].value : []);
-      setData({
-        '/invoices':         val(0),
-        '/expenses':         val(1),
-        '/payment-orders':   val(2),
-        '/projects':         val(3),
-        '/workers/attendance': val(4),
-        '/leave-requests':   val(5),
-        '/quotes':           val(6),
-        '/products':         val(7),
-        '/purchase-orders':  val(8),
-      });
-      setInternal(internalData);
+      const payload = await loadMainDashboardData({ dateFrom, dateTo });
+      setDash(payload);
     } catch (_) {
-      setData({});
-      setInternal(null);
+      setDash(null);
     }
     setLoading(false);
-  }, []);
+  }, [dateFrom, dateTo]);
 
   useEffect(() => { load(); }, [load]);
 
-  /* ── Derived KPIs ─────────────────────────────────────────────── */
-  const expenses = data['/expenses'] || [];
-  const payOrders = data['/payment-orders'] || [];
-  const projects = data['/projects'] || [];
-  const att = data['/workers/attendance']?.[0] || { present: 0, absent: 0, total: 0, hoursPerDay: [] };
-  const leaves = data['/leave-requests'] || [];
-  const quotes = data['/quotes'] || [];
-  const products = data['/products'] || [];
-  const purchaseOrders = data['/purchase-orders'] || [];
-
+  const internal = dash?.internal;
   const useInternal = internal?.configured;
+
+  /* ── Derived KPIs ─────────────────────────────────────────────── */
+  const expenses = dash?.expenses || [];
+  const projects = dash?.projects || [];
+  const att = dash?.attendance || { present: 0, absent: 0, total: 0, hoursPerDay: [] };
+  const leaves = dash?.leaves || [];
+  const products = dash?.products || [];
+
   const tasks = useInternal ? (internal.tasks || []) : [];
   const meetings = useInternal ? (internal.meetings || []) : [];
   const prospects = useInternal ? (internal.prospects || []) : [];
-  const legacyInvoices = data['/invoices'] || [];
-  const recentFactures = useInternal ? (internal.recentFactures || []) : legacyInvoices;
-  const totalInvoices = legacyInvoices.reduce((s, i) => s + (Number(i.amount) || 0), 0);
-  const unpaidInvoices = legacyInvoices.filter(i => i.status !== 'paid').reduce((s, i) => s + (Number(i.amount) || 0), 0);
-  const totalExpenses = expenses.reduce((s, e) => s + e.amount, 0);
-  const executedPayments = payOrders.filter(p => p.status === 'executed').reduce((s, p) => s + p.amount, 0);
-  const tresorerie = executedPayments - totalExpenses;
+  const recentFactures = useInternal ? (internal.recentFactures || []) : (dash?.legacyInvoices || []);
+  const {
+    totalInvoices = 0,
+    unpaidInvoices = 0,
+    totalExpenses = 0,
+    tresorerie = 0,
+    expensesCount = 0,
+  } = dash?.finance || {};
 
   const activeProjects = projects.filter(p => p.status !== 'Termine').length;
   const avgProgress = projects.length ? Math.round(projects.reduce((s, p) => s + p.progress, 0) / projects.length) : 0;
@@ -308,19 +282,13 @@ export default function Dashboard() {
 
   const pendingLeaves = leaves.filter(l => l.status === 'pending').length;
   const approvedLeaves = leaves.filter(l => l.status === 'approved').length;
-  const conversionRate = useInternal
-    ? (internal.kpis?.conversionRate ?? 0)
-    : (quotes.length ? Math.round(quotes.filter(q => q.status === 'accepted').length / quotes.length * 100) : 0);
-  const pendingQuotes = useInternal
-    ? (internal.kpis?.pendingQuotes ?? 0)
-    : quotes.filter(q => q.status === 'pending' || q.status === 'sent').length;
+  const conversionRate = useInternal ? (internal.kpis?.conversionRate ?? 0) : 0;
+  const pendingQuotes = useInternal ? (internal.kpis?.pendingQuotes ?? 0) : 0;
 
-  /* Chart series – current period only (historical data requires backend aggregation) */
-  const currentMonth = new Date().toLocaleString('fr-FR', { month: 'short' });
-  const months = [currentMonth];
-  const chartSeries = [
-    { name: 'Factures',   data: [totalInvoices] },
-    { name: 'Depenses',   data: [totalExpenses] },
+  const months = dash?.chart?.labels || [new Date().toLocaleString('fr-FR', { month: 'short' })];
+  const chartSeries = dash?.chart?.series?.length ? dash.chart.series : [
+    { name: 'Factures', data: [totalInvoices] },
+    { name: 'Depenses', data: [totalExpenses] },
     { name: 'Tresorerie', data: [Math.max(tresorerie, 0)] },
   ];
 
@@ -347,9 +315,10 @@ export default function Dashboard() {
   /* Alerts */
   const internalAlerts = useInternal ? (internal.alerts || []) : [];
   const legacyAlerts = [
-    ...(data['/invoices'] || []).filter(i => i.status === 'overdue').map(i => ({ type: 'error', msg: `Facture en retard : ${i.ref} — ${fmtMAD(i.amount)} (${i.client})` })),
-    ...projects.filter(p => p.delayed).map(p => ({ type: 'warning', msg: `Projet en retard : ${p.name}` })),
-    ...leaves.filter(l => l.status === 'pending').map(l => ({ type: 'info', msg: `Conge en attente : ${l.employee} (${l.type})` })),
+    ...(dash?.legacyInvoices || []).filter((i) => i.status === 'overdue').map((i) => ({ type: 'error', msg: `Facture en retard : ${i.ref} — ${fmtMAD(i.amount)} (${i.client})` })),
+    ...projects.filter((p) => p.delayed).map((p) => ({ type: 'warning', msg: `Projet en retard : ${p.name}` })),
+    ...leaves.filter((l) => l.status === 'pending').map((l) => ({ type: 'info', msg: `Conge en attente : ${l.employee} (${l.type})` })),
+    ...(dash?.purchaseAlerts || []),
   ];
   const alerts = [...internalAlerts, ...legacyAlerts];
 
@@ -408,6 +377,12 @@ export default function Dashboard() {
           </button>
         </div>
       </div>
+
+      {!dash?.configured && (
+        <div className="card" style={{ padding: '12px 16px', borderColor: 'var(--orange, #E65100)', color: '#BF360C', fontSize: '0.85rem' }}>
+          Supabase non configure — verifiez VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY sur Vercel.
+        </div>
+      )}
 
       {/* ── ALERTS (horizontal chips) ──────────────────────────────── */}
       {alerts.length > 0 && (
@@ -478,7 +453,7 @@ export default function Dashboard() {
             <div className="stat-body">
               <div className="stat-value">{fmtMAD(totalExpenses)}</div>
               <div className="stat-label">Depenses du mois</div>
-              <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 2 }}>{expenses.length} lignes de charge</div>
+              <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 2 }}>{expensesCount || expenses.length} lignes de charge</div>
             </div>
           </div>
         </div>
@@ -534,7 +509,11 @@ export default function Dashboard() {
           {/* Project progress bars */}
           <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
             <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-2)' }}>Avancement chantiers</div>
-            {projects.map((p, i) => (
+            {projects.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '24px 12px', color: 'var(--text-3)', fontSize: '0.84rem' }}>
+                Aucun projet sur la periode selectionnee.
+              </div>
+            ) : projects.map((p, i) => (
               <div key={i}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 5, fontSize: '0.82rem' }}>
                   <div>
@@ -550,7 +529,7 @@ export default function Dashboard() {
                     style={{ width: p.progress + '%' }} />
                 </div>
               </div>
-            ))}
+            )))}
           </div>
         </div>
       </div>
