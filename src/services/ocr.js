@@ -955,12 +955,10 @@ export async function scanCIN(rectoSource, versoSource, options = {}) {
   const mrzRecto = collectMindeeMrzText(mindee?.recto);
   const mrzVerso = collectMindeeMrzText(mindee?.verso);
   const identityTextParts = [];
+  if (rectoResult.rawText) identityTextParts.push(rectoResult.rawText);
+  if (versoResult.rawText) identityTextParts.push(versoResult.rawText);
   if (mrzRecto) identityTextParts.push(mrzRecto);
   if (mrzVerso) identityTextParts.push(mrzVerso);
-  if (!mindeeRectoOk) {
-    if (rectoResult.rawText) identityTextParts.push(rectoResult.rawText);
-    if (versoResult.rawText) identityTextParts.push(versoResult.rawText);
-  }
   const combinedText = identityTextParts.join('\n');
 
   let baseMerged = mergeCINRectoVerso(rectoResult.mapped, versoResult.mapped);

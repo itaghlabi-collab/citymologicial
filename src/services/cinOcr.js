@@ -1159,7 +1159,10 @@ export function resolveCINIdentity(opts) {
 
   var nomRef = surMindee || nom;
   var rectoText = opts?.rectoText || '';
+  var versoText = opts?.versoText || '';
   var rectoExtracts = opts?.rectoExtracts || extracts.slice(0, 3);
+  var versoExtracts = opts?.versoExtracts || extracts.slice(3, 6);
+  var mindeeVersoActive = opts?.mindeeVersoActive !== false;
   var prenom = '';
 
   function trySetPrenom(candidate, source) {
@@ -1200,13 +1203,20 @@ export function resolveCINIdentity(opts) {
     if (!prenomTrace.raw_mrz && versoSnap?.raw_mrz) prenomTrace.raw_mrz = versoSnap.raw_mrz;
   }
 
-  if (!prenom && !mindeeRectoActive && isValidPersonName(mrz.prenom, true)) {
+  if (!prenom && versoText) {
+    var mrzVersoTess = extractMrzIdentity(versoText);
+    if (trySetPrenom(mrzVersoTess.prenom, 'mrz_verso_tesseract')) {
+      prenomTrace.raw_mrz = prenomTrace.raw_mrz || versoText.slice(0, 120);
+    }
+  }
+
+  if (!prenom && isValidPersonName(mrz.prenom, true)) {
     if (trySetPrenom(mrz.prenom, 'mrz_combined')) {
       prenomTrace.raw_mrz = prenomTrace.raw_mrz || ('prenom=' + mrz.prenom + ';nom=' + (mrz.nom || ''));
     }
   }
 
-  if (!prenom && !mindeeRectoActive) {
+  if (!prenom) {
     var fromLabelText = extractPrenomFromRectoLabels(combinedText, nomRef);
     if (!fromLabelText && isValidPersonName(fromText.prenom, true)) {
       fromLabelText = pickPrenomAvoidingNom([stripSurnameFromGiven(fromText.prenom, nomRef)], nomRef);
@@ -1240,9 +1250,6 @@ export function resolveCINIdentity(opts) {
     return '';
   }
 
-  var versoText = opts?.versoText || '';
-  var versoExtracts = opts?.versoExtracts || extracts.slice(3, 6);
-  var mindeeVersoActive = opts?.mindeeVersoActive !== false;
   var addrResolved = resolveCINAddress({
     mindeeVersoFields: mindeeVersoActive ? mindeeVersoFields : null,
     versoText,
@@ -1280,11 +1287,11 @@ export function finalizeCINIdentity(merged, sources) {
 }
 
 export function identityFieldsComplete(extract) {
-  var e = sanitizeCINExtract(extract);
+  var e = { ...emptyCINExtract(), ...(extract || {}) };
   return Boolean(
     isValidPersonName(e.nom, false)
     && isValidPersonName(e.prenom, true)
-    && isValidCINNumber(e.numero_cin),
+    && (isValidCINNumber(e.numero_cin) || String(e.numero_cin || '').trim().length >= 4),
   );
 }
 
