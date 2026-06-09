@@ -60,6 +60,8 @@ export const ROUTES = {
   CORBEILLE:          'corbeille',
 
   // Finance
+  FINANCE_DASHBOARD:  'finance-dashboard',
+  FEUILLE_CAISSE:     'feuille-caisse',
   CATEGORIES_CHARGE:  'categories-charge',
   CHARGES:            'charges',
   ORDRES_PAIEMENT:    'ordres-paiement',

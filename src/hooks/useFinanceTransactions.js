@@ -1,0 +1,118 @@
+import { useState, useEffect, useCallback } from 'react';
+import { getSupabase, isSupabaseConfigured } from '../lib/supabase';
+import { formatSupabaseError } from '../services/supabase/formatError';
+import {
+  listFinanceTransactions,
+  createFinanceTransaction,
+  updateFinanceTransaction,
+  deleteFinanceTransaction,
+  computeCashTotals,
+} from '../services/finance/financeTransactions';
+import { getCashMonthlyBalance, upsertCashMonthlyBalance } from '../services/finance/cashMonthlyBalances';
+
+export function useFinanceTransactions(year, month) {
+  const [records, setRecords] = useState([]);
+  const [balance, setBalance] = useState(null);
+  const [totals, setTotals] = useState({
+    soldeInitial: 0, alimentation: 0, totalEntrees: 0, totalSorties: 0, soldeMois: 0,
+  });
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const configured = isSupabaseConfigured();
+
+  const load = useCallback(async () => {
+    if (!configured) {
+      setError('Supabase non configuré — vérifiez VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY dans .env');
+      setLoading(false);
+      return;
+    }
+    if (!year || !month) {
+      setLoading(false);
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      const [txResult, balResult] = await Promise.allSettled([
+        listFinanceTransactions({ year, month }),
+        getCashMonthlyBalance(year, month),
+      ]);
+      if (txResult.status === 'rejected') throw txResult.reason;
+      const txs = txResult.value;
+      const bal = balResult.status === 'fulfilled' ? balResult.value : null;
+      if (balResult.status === 'rejected') {
+        console.warn('[CITYMO] cash_monthly_balances indisponible', balResult.reason);
+      }
+      setRecords(txs);
+      setBalance(bal);
+      setTotals(computeCashTotals(txs, bal));
+    } catch (err) {
+      console.error('[CITYMO] useFinanceTransactions', err);
+      setError(formatSupabaseError(err, 'Erreur chargement journal caisse.'));
+    } finally {
+      setLoading(false);
+    }
+  }, [configured, year, month]);
+
+  useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (!configured) return undefined;
+    const { data: { subscription } } = getSupabase().auth.onAuthStateChange(() => { load(); });
+    return () => subscription.unsubscribe();
+  }, [configured, load]);
+
+  async function saveTransaction(form, id) {
+    setSaving(true);
+    setError(null);
+    try {
+      if (id) await updateFinanceTransaction(id, form);
+      else await createFinanceTransaction(form);
+      await load();
+      return { success: true };
+    } catch (err) {
+      const msg = formatSupabaseError(err, 'Erreur enregistrement.');
+      setError(msg);
+      return { success: false, error: msg };
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function removeTransaction(id) {
+    setSaving(true);
+    try {
+      await deleteFinanceTransaction(id);
+      await load();
+      return { success: true };
+    } catch (err) {
+      const msg = formatSupabaseError(err, 'Erreur suppression.');
+      setError(msg);
+      return { success: false, error: msg };
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function saveBalance(form) {
+    setSaving(true);
+    try {
+      const bal = await upsertCashMonthlyBalance({ ...form, annee: year, mois: month });
+      setBalance(bal);
+      setTotals(computeCashTotals(records, bal));
+      return { success: true };
+    } catch (err) {
+      const msg = formatSupabaseError(err, 'Erreur solde mensuel.');
+      setError(msg);
+      return { success: false, error: msg };
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return {
+    records, balance, totals, loading, saving, error, configured,
+    reload: load, saveTransaction, removeTransaction, saveBalance,
+  };
+}

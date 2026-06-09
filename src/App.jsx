@@ -45,7 +45,7 @@ import {
   FolderOpen, AlertCircle, ClipboardCheck,
   MessageSquare,
   FolderClosed, Share2, Link, Trash2,
-  ListFilter, TrendingDown, CreditCard, PiggyBank,
+  ListFilter, TrendingDown, CreditCard, PiggyBank, Wallet,
   ClipboardList, ShoppingCart, UserCog, Scale, FileCheck,
   Boxes, Package, ArrowUpDown,
   ShieldCheck, Database,
@@ -132,6 +132,8 @@ const NAV = [
   {
     section: 'Finance & Tresorerie',
     items: [
+      { id: 'finance-dashboard',  label: 'Tableau finance',      icon: PiggyBank },
+      { id: 'feuille-caisse',     label: 'Feuille de caisse',    icon: Wallet },
       { id: 'categories-charge',  label: 'Categories charge',    icon: ListFilter },
       { id: 'charges',            label: 'Charges',              icon: TrendingDown },
       { id: 'ordres-paiement',    label: 'Ordre de paiement',    icon: CreditCard },
@@ -204,6 +206,8 @@ const MODULE_LABELS = {
   'docs-partages':     'Documents partages',
   'liens-publics':     'Liens publics',
   corbeille:           'Corbeille',
+  'finance-dashboard': 'Tableau finance',
+  'feuille-caisse':    'Feuille de caisse',
   'categories-charge': 'Categories charge',
   charges:             'Charges',
   'ordres-paiement':   'Ordre de paiement',
@@ -271,6 +275,8 @@ function PageContent({ module }) {
     case 'liens-publics':       return <Documents activeTab="liens-publics" />;
     case 'corbeille':           return <Documents activeTab="corbeille" />;
     /* Finance */
+    case 'finance-dashboard':   return <Finance activeTab="finance-dashboard" />;
+    case 'feuille-caisse':      return <Finance activeTab="feuille-caisse" />;
     case 'categories-charge':   return <Finance activeTab="categories-charge" />;
     case 'charges':             return <Finance activeTab="charges" />;
     case 'ordres-paiement':     return <Finance activeTab="ordres-paiement" />;

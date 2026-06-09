@@ -3,6 +3,8 @@
  * Backend-ready / Supabase/S3-ready
  */
 import { useState, useCallback } from 'react';
+import { Loader2 } from 'lucide-react';
+import { useFinanceCharges } from '../../hooks/useFinanceCharges';
 import {
   TrendingDown, Plus, Eye, Edit2, Trash2, Archive, Download,
   CheckCircle, XCircle, Search, Filter, FileText, Paperclip,
@@ -16,11 +18,10 @@ import {
 } from './shared.jsx';
 
 const EMPTY_FORM = {
-  date: '', libelle: '', categorie: '', montant: '',
-  fournisseur: '', projet_lie: '', departement: '',
-  mode_paiement: 'Virement', ref_paiement: '',
-  statut: 'Brouillon', commentaire: '', validateur: '',
-  justificatifs: []
+  date: '', libelle: '', categorie: '', category_id: '', montant: '',
+  fournisseur: '', projet_lie: '', project_id: '', vehicle_id: '', worker_id: '', client_id: '',
+  departement: '', mode_paiement: 'Virement', ref_paiement: '',
+  statut: 'Brouillon', commentaire: '', validateur: '', justificatifs: [],
 };
 
 function ChargeForm({ initial, categories, onSave, onCancel }) {
@@ -58,9 +59,17 @@ function ChargeForm({ initial, categories, onSave, onCancel }) {
           {errors.libelle && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.libelle}</div>}
         </FField>
         <FField label="Catégorie">
-          <select value={form.categorie} onChange={e => set('categorie', e.target.value)} style={SELECT_STYLE}>
+          <select
+            value={form.category_id || ''}
+            onChange={(e) => {
+              const cat = categories.find((c) => c.id === e.target.value);
+              set('category_id', e.target.value);
+              set('categorie', cat?.nom || '');
+            }}
+            style={SELECT_STYLE}
+          >
             <option value="">Sélectionner...</option>
-            {categories.map(c => <option key={c.id} value={c.nom}>{c.nom}</option>)}
+            {categories.map((c) => <option key={c.id} value={c.id}>{c.nom}</option>)}
           </select>
         </FField>
         <FField label="Montant (MAD)" required>
@@ -127,12 +136,12 @@ function DetailCharge({ charge, onBack, onEdit, onDelete, onValider, onComptabil
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button className="btn btn-secondary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={onEdit}><Edit2 size={13} /> Modifier</button>
           {charge.statut === 'En attente validation' && (
-            <button className="btn btn-primary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => onValider(charge.id)}>
+            <button className="btn btn-primary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => onValider(charge)}>
               <CheckCircle size={13} /> Valider
             </button>
           )}
           {charge.statut === 'Validée' && (
-            <button className="btn btn-secondary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => onComptabiliser(charge.id)}>
+            <button className="btn btn-secondary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => onComptabiliser(charge)}>
               <BookOpen size={13} /> Comptabiliser
             </button>
           )}
@@ -204,7 +213,7 @@ function DetailCharge({ charge, onBack, onEdit, onDelete, onValider, onComptabil
 }
 
 export default function Charges({ categories }) {
-  const [charges, setCharges] = useState([]);
+  const { records: charges, loading, error, save, remove } = useFinanceCharges();
   const [search, setSearch] = useState('');
   const [filterStatut, setFilterStatut] = useState('');
   const [filterCat, setFilterCat] = useState('');
@@ -218,29 +227,34 @@ export default function Charges({ categories }) {
   const today = new Date().toISOString().slice(0, 10);
   const moisActuel = today.slice(0, 7);
 
-  const handleSave = useCallback((data) => {
-    if (editCharge) {
-      setCharges(prev => prev.map(c => c.id === editCharge.id ? { ...c, ...data } : c));
-    } else {
-      setCharges(prev => [...prev, { ...data, id: genId(), ref: genRef('CHG'), date_creation: today }]);
+  const handleSave = useCallback(async (data) => {
+    const cat = cats.find((c) => c.id === data.category_id);
+    const catName = cat?.nom || data.categorie || '';
+    const payload = editCharge ? data : { ...data, ref: genRef('CHG') };
+    const res = await save({ ...payload, categorie: catName }, editCharge?.id, catName);
+    if (res.success) {
+      setShowModal(false);
+      setEditCharge(null);
     }
-    setShowModal(false);
-    setEditCharge(null);
-  }, [editCharge, today]);
+  }, [editCharge, save, cats]);
 
-  function handleDelete(id) {
+  async function handleDelete(id) {
     if (window.confirm('Supprimer cette dépense ?')) {
-      setCharges(prev => prev.filter(c => c.id !== id));
+      await remove(id);
       setDetailId(null);
     }
   }
 
-  function handleValider(id) {
-    setCharges(prev => prev.map(c => c.id === id ? { ...c, statut: 'Validée' } : c));
+  async function handleValider(charge) {
+    await save({ ...charge, statut: 'Validé' }, charge.id, charge.categorie);
   }
 
-  function handleComptabiliser(id) {
-    setCharges(prev => prev.map(c => c.id === id ? { ...c, statut: 'Comptabilisée' } : c));
+  async function handleComptabiliser(charge) {
+    await save({ ...charge, statut: 'Payé' }, charge.id, charge.categorie);
+  }
+
+  async function handleRefuser(charge) {
+    await save({ ...charge, statut: 'Annulé' }, charge.id, charge.categorie);
   }
 
   const filtered = charges.filter(c => {
@@ -259,6 +273,14 @@ export default function Charges({ categories }) {
   const validees     = charges.filter(c => c.statut === 'Validée' || c.statut === 'Comptabilisée').length;
   const enAttente    = charges.filter(c => c.statut === 'En attente validation' || c.statut === 'Brouillon').length;
 
+  if (loading && !charges.length) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 48, gap: 10, color: 'var(--text-3)' }}>
+        <Loader2 size={22} className="cin-spin" /> Chargement des dépenses…
+      </div>
+    );
+  }
+
   if (detailId) {
     const charge = charges.find(c => c.id === detailId);
     if (!charge) { setDetailId(null); return null; }
@@ -276,6 +298,9 @@ export default function Charges({ categories }) {
 
   return (
     <div className="animate-fade-in">
+      {error && (
+        <div className="card" style={{ marginBottom: 12, padding: 12, color: 'var(--red)', fontSize: '0.85rem' }}>{error}</div>
+      )}
       {/* Header */}
       <div className="page-header flex-between" style={{ flexWrap: 'wrap', gap: 10 }}>
         <div>
@@ -395,10 +420,10 @@ export default function Charges({ categories }) {
                         <button className="btn btn-secondary btn-sm" title="Voir" onClick={() => setDetailId(c.id)}><Eye size={13} /></button>
                         <button className="btn btn-ghost btn-sm" title="Modifier" onClick={() => { setEditCharge(c); setShowModal(true); }}><Edit2 size={13} /></button>
                         {c.statut === 'En attente validation' && (
-                          <button className="btn btn-ghost btn-sm" title="Valider" onClick={() => handleValider(c.id)} style={{ color: '#2E7D32' }}><CheckCircle size={13} /></button>
+                          <button className="btn btn-ghost btn-sm" title="Valider" onClick={() => handleValider(c)} style={{ color: '#2E7D32' }}><CheckCircle size={13} /></button>
                         )}
                         {c.statut === 'En attente validation' && (
-                          <button className="btn btn-ghost btn-sm" title="Refuser" onClick={() => setCharges(prev => prev.map(x => x.id === c.id ? { ...x, statut: 'Refusée' } : x))} style={{ color: 'var(--red)' }}><XCircle size={13} /></button>
+                          <button className="btn btn-ghost btn-sm" title="Refuser" onClick={() => handleRefuser(c)} style={{ color: 'var(--red)' }}><XCircle size={13} /></button>
                         )}
                         <button className="btn btn-ghost btn-sm" title="Supprimer" onClick={() => handleDelete(c.id)} style={{ color: 'var(--red)' }}><Trash2 size={13} /></button>
                       </div>

@@ -31,13 +31,19 @@ export const IS_PROD = ENV.MODE === 'production';
 export const HAS_BACKEND = ENV.API_URL !== 'http://localhost:3000/api' || IS_PROD;
 export const HAS_SUPABASE = Boolean(ENV.SUPABASE_URL && ENV.SUPABASE_ANON_KEY);
 
-/** URL API joignable depuis mobile (proxy Vite /api en dev réseau). */
+/** URL API joignable depuis mobile (proxy Vite /api en dev) et Vercel (same-origin /api). */
 export function resolveApiBaseUrl() {
-  const configured = import.meta.env.VITE_API_URL;
+  const configured = trimEnv(import.meta.env.VITE_API_URL);
+  const isLocalConfigured = configured && /localhost|127\.0\.0\.1/.test(configured);
+
   if (typeof window !== 'undefined' && window.location?.origin) {
-    if (import.meta.env.DEV || !configured || /localhost|127\.0\.0\.1/.test(String(configured))) {
+    if (import.meta.env.DEV || !configured || isLocalConfigured) {
       return `${window.location.origin}/api`;
     }
+    if (/^https?:\/\//i.test(configured)) {
+      return configured.replace(/\/+$/, '');
+    }
+    return `${window.location.origin}/api`;
   }
-  return configured || '/api';
+  return configured ? configured.replace(/\/+$/, '') : '/api';
 }

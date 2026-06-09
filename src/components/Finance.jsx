@@ -1,32 +1,30 @@
 /**
  * Finance.jsx — Routeur module Finance & Trésorerie ERP CITYMO
- * Gère les 3 sous-modules: CategoriesCharge, Charges, OrdresPaiement
  */
-import { useState } from 'react';
+import { useEffect } from 'react';
+import FinanceDashboard from './finance/FinanceDashboard.jsx';
 import CategoriesCharge from './finance/CategoriesCharge.jsx';
 import Charges from './finance/Charges.jsx';
+import FeuilleCaisse from './finance/FeuilleCaisse.jsx';
 import OrdresPaiement from './finance/OrdresPaiement.jsx';
+import { useChargeCategories } from '../hooks/useChargeCategories';
 
 export default function Finance({ activeTab }) {
-  // Shared state: categories propagated to Charges module
-  const [categories, setCategories] = useState([]);
+  const { records: categories, reload: reloadCategories } = useChargeCategories();
 
-  const tab = activeTab || 'categories-charge';
+  useEffect(() => {
+    if (activeTab === 'charges' || activeTab === 'ordres-paiement') reloadCategories();
+  }, [activeTab, reloadCategories]);
+
+  const tab = activeTab || 'finance-dashboard';
 
   return (
     <div>
-      {tab === 'categories-charge' && (
-        <CategoriesCharge
-          charges={[]}
-          onCategoriesChange={setCategories}
-        />
-      )}
-      {tab === 'charges' && (
-        <Charges categories={categories} />
-      )}
-      {tab === 'ordres-paiement' && (
-        <OrdresPaiement />
-      )}
+      {tab === 'finance-dashboard' && <FinanceDashboard />}
+      {tab === 'categories-charge' && <CategoriesCharge />}
+      {tab === 'charges' && <Charges categories={categories} />}
+      {tab === 'feuille-caisse' && <FeuilleCaisse />}
+      {tab === 'ordres-paiement' && <OrdresPaiement categories={categories} />}
     </div>
   );
 }

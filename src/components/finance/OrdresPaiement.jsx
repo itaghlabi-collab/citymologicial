@@ -3,10 +3,13 @@
  * Backend-ready / Supabase/S3-ready
  */
 import { useState, useCallback } from 'react';
+import { Loader2 } from 'lucide-react';
+import { usePaymentOrders } from '../../hooks/usePaymentOrders';
+import { exportPaymentOrderPdf } from '../../services/finance/paymentOrderPdf';
 import {
   CreditCard, Plus, Eye, Edit2, Trash2, Download,
   CheckCircle, XCircle, Search, Filter, FileText,
-  Paperclip, BookOpen, Clock, PlayCircle, AlertTriangle
+  Paperclip, BookOpen, Clock, PlayCircle, AlertTriangle,
 } from 'lucide-react';
 import {
   INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE,
@@ -18,13 +21,12 @@ import {
 const EMPTY_FORM = {
   beneficiaire: '', type_benef: 'Fournisseur', fournisseur_lie: '', employe_lie: '',
   montant: '', mode_paiement: 'Virement', ref_reglement: '',
-  comptabilise: 'Non',
-  motif: '', commentaire: '', date_prevue: '',
-  statut: 'Brouillon',
-  justificatifs: []
+  comptabilise: 'Non', motif: '', commentaire: '', observation: '',
+  date: '', date_prevue: '', prepare_par: '', valide_par: '',
+  category_id: '', project_id: '', statut: 'Brouillon', justificatifs: [],
 };
 
-function OrdreForm({ initial, onSave, onCancel }) {
+function OrdreForm({ initial, categories, onSave, onCancel }) {
   const [form, setForm] = useState(initial || EMPTY_FORM);
   const [errors, setErrors] = useState({});
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
@@ -107,13 +109,22 @@ function OrdreForm({ initial, onSave, onCancel }) {
 
       <SectionTitle icon={<CheckCircle size={12} />}>Détails</SectionTitle>
       <FRow>
+        <FField label="Date ordre">
+          <input type="date" value={form.date} onChange={e => set('date', e.target.value)} style={INPUT_STYLE} />
+        </FField>
         <FField label="Motif du règlement">
           <input value={form.motif} onChange={e => set('motif', e.target.value)} placeholder="Motif du paiement..." style={INPUT_STYLE} />
         </FField>
+        <FField label="Préparé par">
+          <input value={form.prepare_par} onChange={e => set('prepare_par', e.target.value)} style={INPUT_STYLE} />
+        </FField>
+        <FField label="Validé par">
+          <input value={form.valide_par} onChange={e => set('valide_par', e.target.value)} style={INPUT_STYLE} />
+        </FField>
       </FRow>
       <div style={{ marginBottom: 20 }}>
-        <FField label="Commentaire">
-          <textarea value={form.commentaire} onChange={e => set('commentaire', e.target.value)} placeholder="Commentaire interne, note de validation..." style={TEXTAREA_STYLE} />
+        <FField label="Observation">
+          <textarea value={form.observation || form.commentaire} onChange={e => set('observation', e.target.value)} placeholder="Observation, note de validation..." style={TEXTAREA_STYLE} />
         </FField>
       </div>
 
@@ -140,18 +151,21 @@ function DetailOrdre({ ordre, onBack, onEdit, onDelete, onValider, onExecuter, o
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button className="btn btn-secondary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={onEdit}><Edit2 size={13} /> Modifier</button>
-          {ordre.statut === 'En attente' && (
-            <button className="btn btn-primary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => onValider(ordre.id)}>
+          <button className="btn btn-secondary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => exportPaymentOrderPdf(ordre)}>
+            <Download size={13} /> PDF
+          </button>
+          {(['En attente', 'Brouillon', 'Soumis'].includes(ordre.statut)) && (
+            <button className="btn btn-primary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => onValider(ordre)}>
               <CheckCircle size={13} /> Valider
             </button>
           )}
           {ordre.statut === 'Validé' && (
-            <button className="btn btn-secondary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => onExecuter(ordre.id)}>
+            <button className="btn btn-secondary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => onExecuter(ordre)}>
               <PlayCircle size={13} /> Marquer payé
             </button>
           )}
-          {ordre.statut === 'Exécuté' && ordre.comptabilise === 'Non' && (
-            <button className="btn btn-secondary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => onComptabiliser(ordre.id)}>
+          {ordre.statut === 'Payé' && ordre.comptabilise === 'Non' && (
+            <button className="btn btn-secondary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => onComptabiliser(ordre)}>
               <BookOpen size={13} /> Comptabiliser
             </button>
           )}
@@ -223,8 +237,8 @@ function DetailOrdre({ ordre, onBack, onEdit, onDelete, onValider, onExecuter, o
   );
 }
 
-export default function OrdresPaiement() {
-  const [ordres, setOrdres] = useState([]);
+export default function OrdresPaiement({ categories = [] }) {
+  const { records: ordres, loading, error, save, remove } = usePaymentOrders();
   const [search, setSearch] = useState('');
   const [filterStatut, setFilterStatut] = useState('');
   const [filterMode, setFilterMode] = useState('');
@@ -236,33 +250,32 @@ export default function OrdresPaiement() {
 
   const today = new Date().toISOString().slice(0, 10);
 
-  const handleSave = useCallback((data) => {
-    if (editOrdre) {
-      setOrdres(prev => prev.map(o => o.id === editOrdre.id ? { ...o, ...data } : o));
-    } else {
-      setOrdres(prev => [...prev, { ...data, id: genId(), ref: genRef('OP'), date_creation: today }]);
+  const handleSave = useCallback(async (data) => {
+    const payload = editOrdre ? data : { ...data, ref: genRef('OP'), date: data.date || today };
+    const res = await save(payload, editOrdre?.id);
+    if (res.success) {
+      setShowModal(false);
+      setEditOrdre(null);
     }
-    setShowModal(false);
-    setEditOrdre(null);
-  }, [editOrdre, today]);
+  }, [editOrdre, save, today]);
 
-  function handleDelete(id) {
+  async function handleDelete(id) {
     if (window.confirm('Supprimer cet ordre de paiement ?')) {
-      setOrdres(prev => prev.filter(o => o.id !== id));
+      await remove(id);
       setDetailId(null);
     }
   }
 
-  function handleValider(id) {
-    setOrdres(prev => prev.map(o => o.id === id ? { ...o, statut: 'Validé' } : o));
+  async function handleValider(ordre) {
+    await save({ ...ordre, statut: 'Validé' }, ordre.id);
   }
 
-  function handleExecuter(id) {
-    setOrdres(prev => prev.map(o => o.id === id ? { ...o, statut: 'Exécuté' } : o));
+  async function handleExecuter(ordre) {
+    await save({ ...ordre, statut: 'Payé', comptabilise: 'Oui' }, ordre.id);
   }
 
-  function handleComptabiliser(id) {
-    setOrdres(prev => prev.map(o => o.id === id ? { ...o, statut: 'Comptabilisé', comptabilise: 'Oui' } : o));
+  async function handleComptabiliser(ordre) {
+    await save({ ...ordre, statut: 'Comptabilisé', comptabilise: 'Oui' }, ordre.id);
   }
 
   const filtered = ordres.filter(o => {
@@ -274,11 +287,19 @@ export default function OrdresPaiement() {
     return matchQ && matchS && matchM && matchC;
   });
 
-  const enAttente      = ordres.filter(o => o.statut === 'En attente' || o.statut === 'Brouillon').length;
-  const valides        = ordres.filter(o => o.statut === 'Validé').length;
-  const executes       = ordres.filter(o => o.statut === 'Exécuté' || o.statut === 'Comptabilisé').length;
-  const montantAttente = ordres.filter(o => o.statut === 'En attente' || o.statut === 'Brouillon').reduce((s, o) => s + (o.montant || 0), 0);
-  const comptabilises  = ordres.filter(o => o.statut === 'Comptabilisé').length;
+  const enAttente = ordres.filter((o) => ['En attente', 'Brouillon', 'Soumis'].includes(o.statut)).length;
+  const valides = ordres.filter((o) => o.statut === 'Validé').length;
+  const executes = ordres.filter((o) => ['Payé', 'Exécuté', 'Comptabilisé'].includes(o.statut)).length;
+  const montantAttente = ordres.filter((o) => ['En attente', 'Brouillon', 'Soumis'].includes(o.statut)).reduce((s, o) => s + (o.montant || 0), 0);
+  const comptabilises = ordres.filter((o) => o.comptabilise === 'Oui' || o.statut === 'Comptabilisé').length;
+
+  if (loading && !ordres.length) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 48, gap: 10, color: 'var(--text-3)' }}>
+        <Loader2 size={22} className="cin-spin" /> Chargement des ordres de paiement…
+      </div>
+    );
+  }
 
   if (detailId) {
     const ordre = ordres.find(o => o.id === detailId);
@@ -289,15 +310,18 @@ export default function OrdresPaiement() {
         onBack={() => setDetailId(null)}
         onEdit={() => { setEditOrdre(ordre); setShowModal(true); setDetailId(null); }}
         onDelete={handleDelete}
-        onValider={handleValider}
-        onExecuter={handleExecuter}
-        onComptabiliser={handleComptabiliser}
+        onValider={() => handleValider(ordre)}
+        onExecuter={() => handleExecuter(ordre)}
+        onComptabiliser={() => handleComptabiliser(ordre)}
       />
     );
   }
 
   return (
     <div className="animate-fade-in">
+      {error && (
+        <div className="card" style={{ marginBottom: 12, padding: 12, color: 'var(--red)', fontSize: '0.85rem' }}>{error}</div>
+      )}
       {/* Header */}
       <div className="page-header flex-between" style={{ flexWrap: 'wrap', gap: 10 }}>
         <div>
@@ -415,14 +439,12 @@ export default function OrdresPaiement() {
                       <div style={{ display: 'flex', gap: 3 }}>
                         <button className="btn btn-secondary btn-sm" title="Voir" onClick={() => setDetailId(o.id)}><Eye size={13} /></button>
                         <button className="btn btn-ghost btn-sm" title="Modifier" onClick={() => { setEditOrdre(o); setShowModal(true); }}><Edit2 size={13} /></button>
-                        {(o.statut === 'En attente' || o.statut === 'Brouillon') && (
-                          <button className="btn btn-ghost btn-sm" title="Valider" onClick={() => handleValider(o.id)} style={{ color: '#2E7D32' }}><CheckCircle size={13} /></button>
-                        )}
-                        {o.statut === 'En attente' && (
-                          <button className="btn btn-ghost btn-sm" title="Refuser" onClick={() => setOrdres(prev => prev.map(x => x.id === o.id ? { ...x, statut: 'Refusé' } : x))} style={{ color: 'var(--red)' }}><XCircle size={13} /></button>
+                        <button className="btn btn-ghost btn-sm" title="PDF" onClick={() => exportPaymentOrderPdf(o)}><Download size={13} /></button>
+                        {(['En attente', 'Brouillon', 'Soumis'].includes(o.statut)) && (
+                          <button className="btn btn-ghost btn-sm" title="Valider" onClick={() => handleValider(o)} style={{ color: '#2E7D32' }}><CheckCircle size={13} /></button>
                         )}
                         {o.statut === 'Validé' && (
-                          <button className="btn btn-ghost btn-sm" title="Marquer payé" onClick={() => handleExecuter(o.id)} style={{ color: '#1565C0' }}><PlayCircle size={13} /></button>
+                          <button className="btn btn-ghost btn-sm" title="Marquer payé" onClick={() => handleExecuter(o)} style={{ color: '#1565C0' }}><PlayCircle size={13} /></button>
                         )}
                         <button className="btn btn-ghost btn-sm" title="Supprimer" onClick={() => handleDelete(o.id)} style={{ color: 'var(--red)' }}><Trash2 size={13} /></button>
                       </div>
@@ -437,7 +459,7 @@ export default function OrdresPaiement() {
 
       {/* Modal */}
       <Modal open={showModal} onClose={() => { setShowModal(false); setEditOrdre(null); }} title={editOrdre ? "Modifier l'ordre" : 'Nouvel ordre de paiement'} width={720}>
-        <OrdreForm initial={editOrdre} onSave={handleSave} onCancel={() => { setShowModal(false); setEditOrdre(null); }} />
+        <OrdreForm initial={editOrdre} categories={categories} onSave={handleSave} onCancel={() => { setShowModal(false); setEditOrdre(null); }} />
       </Modal>
     </div>
   );
