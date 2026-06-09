@@ -1,96 +1,24 @@
 /**
  * DocsPartages.jsx — Documents partagés ERP CITYMO
- * Backend-ready / Database-ready
  */
 
 import {
   Share2, Plus, Eye, Download, Trash2, Search, Filter,
-  Edit2, X, UserCheck, Clock, Users, Building2
+  Edit2, UserCheck, Clock, Building2, Loader2,
 } from 'lucide-react';
 import { useState, useCallback } from 'react';
+import { useDocumentShares } from '../../hooks/useDocumentShares';
 import {
-  INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE,
-  KpiCard, EmptyState, Modal, SectionTitle, FField, FRow,
-  TYPE_COLORS, CATEGORIES_DOC, PERMISSIONS, genId,
-  DepartmentSelect, DepartmentFilterSelect, normalizeDocumentDepartment,
+  INPUT_STYLE, SELECT_STYLE,
+  KpiCard, EmptyState, Modal,
+  PERMISSIONS,
+  DepartmentFilterSelect,
+  DocumentShareForm,
+  EMPTY_DOCUMENT_SHARE,
 } from './shared.jsx';
 
-const EMPTY_SHARE = {
-  document: '', partage_par: '', partage_avec: '', departement: '',
-  date_partage: new Date().toISOString().slice(0, 10),
-  date_expiration: '', permissions: 'Lecture seule', notes: ''
-};
-
-function ShareForm({ initial, onSave, onCancel }) {
-  const [form, setForm] = useState(initial || EMPTY_SHARE);
-  const [errors, setErrors] = useState({});
-  const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
-
-  function validate() {
-    const e = {};
-    if (!form.document.trim()) e.document = 'Requis';
-    if (!form.partage_avec.trim()) e.partage_avec = 'Requis';
-    return e;
-  }
-
-  function handleSubmit(ev) {
-    ev.preventDefault();
-    const e = validate();
-    if (Object.keys(e).length) { setErrors(e); return; }
-    onSave({ ...form, departement: normalizeDocumentDepartment(form.departement) });
-  }
-
-  return (
-    <form onSubmit={handleSubmit}>
-      <SectionTitle icon={<Share2 size={12} />}>Document à partager</SectionTitle>
-      <FRow>
-        <FField label="Document" required>
-          <input value={form.document} onChange={e => set('document', e.target.value)} placeholder="Nom du document..." style={{ ...INPUT_STYLE, borderColor: errors.document ? 'var(--red)' : 'var(--border)' }} />
-          {errors.document && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.document}</div>}
-        </FField>
-        <FField label="Partagé par">
-          <input value={form.partage_par} onChange={e => set('partage_par', e.target.value)} placeholder="Nom utilisateur..." style={INPUT_STYLE} />
-        </FField>
-      </FRow>
-      <FRow>
-        <FField label="Partagé avec" required>
-          <input value={form.partage_avec} onChange={e => set('partage_avec', e.target.value)} placeholder="Utilisateur, équipe..." style={{ ...INPUT_STYLE, borderColor: errors.partage_avec ? 'var(--red)' : 'var(--border)' }} />
-          {errors.partage_avec && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.partage_avec}</div>}
-        </FField>
-        <FField label="Département">
-          <DepartmentSelect value={form.departement} onChange={(v) => set('departement', v)} style={SELECT_STYLE} />
-        </FField>
-      </FRow>
-      <FRow>
-        <FField label="Date partage">
-          <input type="date" value={form.date_partage} onChange={e => set('date_partage', e.target.value)} style={INPUT_STYLE} />
-        </FField>
-        <FField label="Expiration">
-          <input type="date" value={form.date_expiration} onChange={e => set('date_expiration', e.target.value)} style={INPUT_STYLE} />
-        </FField>
-        <FField label="Permissions">
-          <select value={form.permissions} onChange={e => set('permissions', e.target.value)} style={SELECT_STYLE}>
-            {PERMISSIONS.map(p => <option key={p} value={p}>{p}</option>)}
-          </select>
-        </FField>
-      </FRow>
-      <div style={{ marginBottom: 20 }}>
-        <FField label="Notes">
-          <textarea value={form.notes} onChange={e => set('notes', e.target.value)} placeholder="Notes internes..." style={TEXTAREA_STYLE} />
-        </FField>
-      </div>
-      <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-        <button type="button" className="btn btn-secondary" onClick={onCancel}>Annuler</button>
-        <button type="submit" className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Plus size={14} /> {initial ? 'Enregistrer' : 'Créer le partage'}
-        </button>
-      </div>
-    </form>
-  );
-}
-
 export default function DocsPartages() {
-  const [shares, setShares] = useState([]);
+  const { shares, loading, saving, error, configured, createShare, updateShare, removeShare } = useDocumentShares();
   const [search, setSearch] = useState('');
   const [filterPerm, setFilterPerm] = useState('');
   const [filterDept, setFilterDept] = useState('');
@@ -98,19 +26,20 @@ export default function DocsPartages() {
   const [showModal, setShowModal] = useState(false);
   const [editShare, setEditShare] = useState(null);
 
-  const handleSave = useCallback((data) => {
-    if (editShare) {
-      setShares(prev => prev.map(s => s.id === editShare.id ? { ...s, ...data } : s));
-    } else {
-      setShares(prev => [...prev, { ...data, id: genId() }]);
+  const handleSave = useCallback(async (data) => {
+    const result = editShare
+      ? await updateShare(editShare.id, data)
+      : await createShare({ document: data.document, ...data });
+    if (result.success) {
+      setShowModal(false);
+      setEditShare(null);
     }
-    setShowModal(false);
-    setEditShare(null);
-  }, [editShare]);
+  }, [editShare, createShare, updateShare]);
 
-  const handleDelete = useCallback((id) => {
-    if (window.confirm('Retirer ce partage ?')) setShares(prev => prev.filter(s => s.id !== id));
-  }, []);
+  const handleDelete = useCallback(async (id) => {
+    if (!window.confirm('Retirer ce partage ?')) return;
+    await removeShare(id);
+  }, [removeShare]);
 
   const filtered = shares.filter(s => {
     const q = search.toLowerCase();
@@ -120,7 +49,6 @@ export default function DocsPartages() {
     return matchQ && matchP && matchD;
   });
 
-  const total      = shares.length;
   const recents    = shares.filter(s => s.date_partage === new Date().toISOString().slice(0, 10)).length;
   const actifs     = shares.filter(s => !s.date_expiration || s.date_expiration >= new Date().toISOString().slice(0, 10)).length;
   const deptShares = shares.filter(s => s.departement).length;
@@ -137,6 +65,17 @@ export default function DocsPartages() {
           <button className="btn btn-primary" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => { setEditShare(null); setShowModal(true); }}><Plus size={15} /> Nouveau partage</button>
         </div>
       </div>
+
+      {error && (
+        <div className="card" style={{ marginBottom: 16, padding: '12px 16px', borderColor: 'var(--red)', color: 'var(--red)', fontSize: '0.85rem' }}>
+          {error}
+          {!configured && (
+            <div style={{ marginTop: 6, fontSize: '0.78rem', color: 'var(--text-3)' }}>
+              Exécutez <code>supabase/RUN_DOCUMENT_SHARES.sql</code> dans le SQL Editor Supabase.
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', marginBottom: 20 }}>
         <KpiCard icon={<Share2 size={17} />}     label="Partages actifs"       value={actifs}     color="blue"   />
@@ -172,8 +111,12 @@ export default function DocsPartages() {
       )}
 
       <div className="card" style={{ padding: 0 }}>
-        {filtered.length === 0 ? (
-          <EmptyState icon={<Share2 size={24} />} title="Aucun document partagé" sub="Partagez un document avec vos collaborateurs" action="Nouveau partage" onAction={() => { setEditShare(null); setShowModal(true); }} />
+        {loading ? (
+          <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-3)', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}>
+            <Loader2 size={20} className="spin" /> Chargement...
+          </div>
+        ) : filtered.length === 0 ? (
+          <EmptyState icon={<Share2 size={24} />} title="Aucun document partagé" sub="Partagez un document depuis Mes documents ou créez un partage ici" action="Nouveau partage" onAction={() => { setEditShare(null); setShowModal(true); }} />
         ) : (
           <div className="table-wrap">
             <table>
@@ -211,7 +154,7 @@ export default function DocsPartages() {
                           <button className="btn btn-ghost btn-sm" title="Voir"><Eye size={13} /></button>
                           <button className="btn btn-ghost btn-sm" title="Télécharger"><Download size={13} /></button>
                           <button className="btn btn-ghost btn-sm" title="Modifier accès" onClick={() => { setEditShare(s); setShowModal(true); }}><Edit2 size={13} /></button>
-                          <button className="btn btn-ghost btn-sm" title="Retirer" onClick={() => handleDelete(s.id)} style={{ color: 'var(--red)' }}><Trash2 size={13} /></button>
+                          <button className="btn btn-ghost btn-sm" title="Retirer" onClick={() => handleDelete(s.id)} style={{ color: 'var(--red)' }} disabled={saving}><Trash2 size={13} /></button>
                         </div>
                       </td>
                     </tr>
@@ -224,7 +167,13 @@ export default function DocsPartages() {
       </div>
 
       <Modal open={showModal} onClose={() => { setShowModal(false); setEditShare(null); }} title={editShare ? 'Modifier le partage' : 'Nouveau partage'} width={640}>
-        <ShareForm initial={editShare} onSave={handleSave} onCancel={() => { setShowModal(false); setEditShare(null); }} />
+        <DocumentShareForm
+          key={editShare?.id || 'new'}
+          initial={editShare || EMPTY_DOCUMENT_SHARE}
+          saving={saving}
+          onSave={handleSave}
+          onCancel={() => { setShowModal(false); setEditShare(null); }}
+        />
       </Modal>
     </div>
   );

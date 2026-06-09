@@ -1,13 +1,14 @@
 /**
  * MesDocuments.jsx — GED Mes documents (Supabase document_folders + documents)
  */
-import { useState, useRef, useCallback } from 'react';
+import { useState, useRef, useCallback, useEffect } from 'react';
 import {
   FileText, Plus, Eye, Download, Share2, Trash2, Search, Filter,
   Folder, FolderOpen, Edit2, Upload, ChevronRight, X, Move,
   Loader2, RefreshCw, Home,
 } from 'lucide-react';
 import { useMesDocuments } from '../../hooks/useMesDocuments';
+import { useDocumentShares } from '../../hooks/useDocumentShares';
 import {
   downloadDocumentFile,
   isPreviewableMime,
@@ -17,7 +18,7 @@ import {
   INPUT_STYLE, SELECT_STYLE,
   KpiCard, EmptyState, Modal, FField,
   formatBytes, DepartmentSelect, DepartmentFilterSelect,
-  normalizeDocumentDepartment,
+  normalizeDocumentDepartment, DocumentShareForm, EMPTY_DOCUMENT_SHARE, Toast,
 } from './shared.jsx';
 
 function fileTypeLabel(mime) {
@@ -93,7 +94,7 @@ function FileActions({ doc, onPreview, onDownload, onShare, onRename, onMove, on
     <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
       <button type="button" className="btn btn-secondary btn-sm" title="Aperçu" onClick={onPreview} disabled={saving}><Eye size={13} /></button>
       <button type="button" className="btn btn-ghost btn-sm" title="Télécharger" onClick={onDownload} disabled={saving}><Download size={13} /></button>
-      <button type="button" className="btn btn-ghost btn-sm" title="Partager" onClick={onShare} disabled={saving || doc.is_shared}><Share2 size={13} /></button>
+      <button type="button" className="btn btn-ghost btn-sm" title={doc.is_shared ? 'Partager à nouveau' : 'Partager'} onClick={onShare} disabled={saving}><Share2 size={13} /></button>
       <button type="button" className="btn btn-ghost btn-sm" title="Déplacer" onClick={onMove} disabled={saving}><Move size={13} /></button>
       <button type="button" className="btn btn-ghost btn-sm" title="Renommer" onClick={onRename} disabled={saving}><Edit2 size={13} /></button>
       <button type="button" className="btn btn-ghost btn-sm" title="Corbeille" onClick={onDelete} disabled={saving} style={{ color: 'var(--red)' }}><Trash2 size={13} /></button>
@@ -108,8 +109,10 @@ export default function MesDocuments() {
     loading, saving, error, configured,
     search, setSearch, filterDept, setFilterDept,
     reload, createFolder, renameFolder, removeFolder,
-    uploadFiles, renameDoc, moveDoc, shareDoc, removeDoc,
+    uploadFiles, renameDoc, moveDoc, removeDoc,
   } = useMesDocuments();
+
+  const { createShare, saving: shareSaving, error: shareError } = useDocumentShares();
 
   const [showFilters, setShowFilters] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
@@ -124,6 +127,41 @@ export default function MesDocuments() {
   const [moveFolderId, setMoveFolderId] = useState('');
   const [previewDoc, setPreviewDoc] = useState(null);
   const [previewUrl, setPreviewUrl] = useState('');
+  const [shareTarget, setShareTarget] = useState(null);
+  const [toast, setToast] = useState(null);
+  const toastRef = useRef(null);
+
+  useEffect(() => () => clearTimeout(toastRef.current), []);
+
+  function showToast(msg, type = 'success') {
+    setToast({ msg, type });
+    clearTimeout(toastRef.current);
+    toastRef.current = setTimeout(() => setToast(null), 3500);
+  }
+
+  function openShare(doc) {
+    setShareTarget(doc);
+  }
+
+  async function handleShareSave(form) {
+    if (!shareTarget) return;
+    const result = await createShare({
+      documentId: shareTarget.id,
+      document: form.document,
+      partage_par: form.partage_par,
+      partage_avec: form.partage_avec,
+      departement: form.departement,
+      date_partage: form.date_partage,
+      date_expiration: form.date_expiration,
+      permissions: form.permissions,
+      notes: form.notes,
+    });
+    if (result.success) {
+      setShareTarget(null);
+      await reload();
+      showToast(`« ${form.document} » partagé avec ${form.partage_avec}`);
+    }
+  }
 
   const currentFolderDept = breadcrumb.length
     ? normalizeDocumentDepartment(breadcrumb[breadcrumb.length - 1].department)
@@ -219,12 +257,17 @@ export default function MesDocuments() {
         </div>
       </div>
 
-      {error && (
+      {(error || shareError) && (
         <div className="card" style={{ marginBottom: 16, padding: '12px 16px', borderColor: 'var(--red)', color: 'var(--red)', fontSize: '0.85rem' }}>
-          {error}
+          {error || shareError}
           {!configured && (
             <div style={{ marginTop: 6, fontSize: '0.78rem', color: 'var(--text-3)' }}>
               Exécutez <code>supabase/RUN_MES_DOCUMENTS.sql</code> dans le SQL Editor Supabase.
+            </div>
+          )}
+          {(shareError || '').includes('document_shares') && (
+            <div style={{ marginTop: 6, fontSize: '0.78rem', color: 'var(--text-3)' }}>
+              Exécutez aussi <code>supabase/RUN_DOCUMENT_SHARES.sql</code> dans le SQL Editor Supabase.
             </div>
           )}
         </div>
@@ -358,7 +401,7 @@ export default function MesDocuments() {
                             saving={saving}
                             onPreview={() => handlePreview(d)}
                             onDownload={() => downloadDocumentFile(d.file_path, d.name)}
-                            onShare={async () => { await shareDoc(d.id); }}
+                            onShare={() => openShare(d)}
                             onRename={() => { setRenameTarget({ type: 'file', id: d.id, name: d.name }); setRenameValue(d.name); }}
                             onMove={() => { setMoveTarget(d); setMoveFolderId(d.folder_id || ''); }}
                             onDelete={async () => {
@@ -399,7 +442,7 @@ export default function MesDocuments() {
                   saving={saving}
                   onPreview={() => handlePreview(d)}
                   onDownload={() => downloadDocumentFile(d.file_path, d.name)}
-                  onShare={async () => { await shareDoc(d.id); }}
+                  onShare={() => openShare(d)}
                   onRename={() => { setRenameTarget({ type: 'file', id: d.id, name: d.name }); setRenameValue(d.name); }}
                   onMove={() => { setMoveTarget(d); setMoveFolderId(d.folder_id || ''); }}
                   onDelete={async () => {
@@ -466,6 +509,27 @@ export default function MesDocuments() {
           </div>
         </form>
       </Modal>
+
+      {/* Modal partager */}
+      <Modal open={!!shareTarget} onClose={() => setShareTarget(null)} title="Partager le document" width={640}>
+        {shareTarget && (
+          <DocumentShareForm
+            key={shareTarget.id}
+            initial={{
+              ...EMPTY_DOCUMENT_SHARE,
+              document: shareTarget.name,
+              departement: normalizeDocumentDepartment(shareTarget.department),
+            }}
+            lockDocument
+            saving={shareSaving}
+            onSave={handleShareSave}
+            onCancel={() => setShareTarget(null)}
+            submitLabel="Partager"
+          />
+        )}
+      </Modal>
+
+      <Toast toast={toast} />
 
       {/* Modal aperçu */}
       <Modal open={!!previewDoc} onClose={() => { setPreviewDoc(null); setPreviewUrl(''); }} title={previewDoc?.name || 'Aperçu'} width={900}>
