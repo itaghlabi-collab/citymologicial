@@ -529,7 +529,7 @@ export default function Dashboard() {
                     style={{ width: p.progress + '%' }} />
                 </div>
               </div>
-            )))}
+            ))}
           </div>
         </div>
       </div>
