@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { Loader2, Plus, Download, FileSpreadsheet, Wallet, Edit2, Trash2, TrendingDown, RefreshCw } from 'lucide-react';
 import { useFinanceTransactions } from '../../hooks/useFinanceTransactions';
 import { TYPES_ENTREE, TYPES_SORTIE } from '../../services/finance/financeTransactions';
-import { exportCashSheetPdf } from '../../services/finance/cashSheetPdf';
+import { exportCashSheetPdf, CASH_SHEET_PDF_VERSION } from '../../services/finance/cashSheetPdf';
 import { exportCashSheetExcel } from '../../services/finance/cashSheetExport';
 import {
   INPUT_STYLE, SELECT_STYLE, MODES_PAIEMENT,
@@ -131,7 +131,12 @@ export default function FeuilleCaisse() {
           <button type="button" className="btn btn-secondary btn-sm" onClick={() => exportCashSheetExcel({ year, month, transactions: records, totals })}>
             <FileSpreadsheet size={14} /> Excel
           </button>
-          <button type="button" className="btn btn-secondary btn-sm" onClick={() => exportCashSheetPdf({ year, month, transactions: records, totals, balance })}>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => exportCashSheetPdf({ year, month, transactions: records, totals, balance })}
+            title={`Export PDF CITYMO v${CASH_SHEET_PDF_VERSION}`}
+          >
             <Download size={14} /> PDF
           </button>
           <button type="button" className="btn btn-secondary btn-sm" onClick={openBalanceModal}>

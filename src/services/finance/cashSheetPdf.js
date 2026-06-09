@@ -1,7 +1,11 @@
 /**
  * cashSheetPdf.js — Export PDF feuille de caisse mensuelle (rendu administratif CITYMO)
+ * Point d'entrée unique : FeuilleCaisse.jsx → exportCashSheetPdf()
  */
 import { jsPDF } from 'jspdf';
+
+/** Identifiant visible dans le pied de page pour vérifier la version déployée. */
+export const CASH_SHEET_PDF_VERSION = '2.1';
 import {
   FINANCE_COMPANY,
   formatPdfMAD,
@@ -226,7 +230,7 @@ function drawPageFooter(doc, pageNum, pageTotal, { notes, generatedAt }) {
     doc.text(noteLines, MARGIN, lineY + 5);
   }
 
-  doc.text(`Généré le ${generatedAt}`, PAGE_W - MARGIN, lineY + 5, { align: 'right' });
+  doc.text(`Généré le ${generatedAt} — CITYMO PDF v${CASH_SHEET_PDF_VERSION}`, PAGE_W - MARGIN, lineY + 5, { align: 'right' });
 
   const sigY = lineY + 14;
   doc.setDrawColor(180, 180, 180);
@@ -259,6 +263,12 @@ export async function exportCashSheetPdf({ year, month, transactions, totals, ba
   }
 
   const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+  doc.setProperties({
+    title: `Feuille de caisse ${periodLabel}`,
+    subject: 'CITYMO Finance & Trésorerie',
+    keywords: `citymo,finance,caisse,v${CASH_SHEET_PDF_VERSION}`,
+    creator: 'CITYMO ERP',
+  });
 
   drawCompanyHeader(doc, logo, logoSize);
   drawTitle(doc, title);

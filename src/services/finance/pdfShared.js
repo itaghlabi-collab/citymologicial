@@ -73,14 +73,17 @@ export function addFinanceFooter(doc, pageNum) {
   doc.text(`Page ${pageNum}`, 196, y, { align: 'right' });
 }
 
-/** Format monétaire MAD — espaces milliers classiques, virgule décimale (compatible jsPDF). */
+/** Séparateur milliers insécable — évite les retours ligne jsPDF (ex. « 35 /000,00 »). */
+const PDF_THOUSANDS_SEP = '\u00A0';
+
+/** Format monétaire MAD — virgule décimale, compatible jsPDF (pas de toLocaleString). */
 export function formatPdfMAD(n) {
   const num = Number(n) || 0;
   const sign = num < 0 ? '- ' : '';
   const abs = Math.abs(num);
   const fixed = abs.toFixed(2);
   const [intPart, decPart] = fixed.split('.');
-  const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, PDF_THOUSANDS_SEP);
   return `${sign}${grouped},${decPart} MAD`;
 }
 
