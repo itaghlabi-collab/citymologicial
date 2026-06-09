@@ -18,9 +18,9 @@ export default function Achats({ activeTab }) {
   return (
     <div>
       {tab === 'demandes-achat'    && <DemandesAchat />}
-      {tab === 'bons-commande'     && <BonsCommande fournisseurs={fournisseursList} />}
+      {tab === 'bons-commande'     && <BonsCommande />}
       {tab === 'fournisseurs'      && <Fournisseurs onFournisseursChange={setFournisseursList} />}
-      {tab === 'comparaison-devis' && <ComparaisonDevis fournisseurs={fournisseursList} />}
+      {tab === 'comparaison-devis' && <ComparaisonDevis />}
       {tab === 'ordres-achat'      && <OrdresAchat fournisseurs={fournisseursList} />}
     </div>
   );

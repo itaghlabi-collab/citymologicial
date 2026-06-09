@@ -8,7 +8,6 @@ import {
   Loader2, RefreshCw, Home,
 } from 'lucide-react';
 import { useMesDocuments } from '../../hooks/useMesDocuments';
-import { SYSTEM_DEPARTMENTS } from '../../services/documents/mesDocuments';
 import {
   downloadDocumentFile,
   isPreviewableMime,
@@ -17,7 +16,8 @@ import {
 import {
   INPUT_STYLE, SELECT_STYLE,
   KpiCard, EmptyState, Modal, FField,
-  formatBytes,
+  formatBytes, DepartmentSelect, DepartmentFilterSelect,
+  normalizeDocumentDepartment,
 } from './shared.jsx';
 
 function fileTypeLabel(mime) {
@@ -113,19 +113,44 @@ export default function MesDocuments() {
 
   const [showFilters, setShowFilters] = useState(false);
   const [showUpload, setShowUpload] = useState(false);
+  const [uploadDepartment, setUploadDepartment] = useState('');
   const [showNewFolder, setShowNewFolder] = useState(false);
   const [newFolderName, setNewFolderName] = useState('');
+  const [newFolderDepartment, setNewFolderDepartment] = useState('');
   const [renameTarget, setRenameTarget] = useState(null);
   const [renameValue, setRenameValue] = useState('');
+  const [renameDepartment, setRenameDepartment] = useState('');
   const [moveTarget, setMoveTarget] = useState(null);
   const [moveFolderId, setMoveFolderId] = useState('');
   const [previewDoc, setPreviewDoc] = useState(null);
   const [previewUrl, setPreviewUrl] = useState('');
 
+  const currentFolderDept = breadcrumb.length
+    ? normalizeDocumentDepartment(breadcrumb[breadcrumb.length - 1].department)
+    : '';
+
   const handleUpload = useCallback(async (files) => {
-    const result = await uploadFiles(files);
-    if (result.success) setShowUpload(false);
-  }, [uploadFiles]);
+    const opts = !currentFolderId && uploadDepartment
+      ? { department: uploadDepartment }
+      : {};
+    const result = await uploadFiles(files, opts);
+    if (result.success) {
+      setShowUpload(false);
+      setUploadDepartment('');
+    }
+  }, [uploadFiles, currentFolderId, uploadDepartment]);
+
+  function openNewFolderModal() {
+    setNewFolderDepartment(currentFolderDept);
+    setNewFolderName('');
+    setShowNewFolder(true);
+  }
+
+  function openRenameFolder(folder) {
+    setRenameTarget({ type: 'folder', id: folder.id, name: folder.name });
+    setRenameValue(folder.name);
+    setRenameDepartment(normalizeDocumentDepartment(folder.department));
+  }
 
   async function handlePreview(doc) {
     const url = doc.file_url || await getDocumentSignedUrl(doc.file_path);
@@ -136,9 +161,14 @@ export default function MesDocuments() {
   async function handleNewFolder(e) {
     e.preventDefault();
     if (!newFolderName.trim()) return;
-    const result = await createFolder({ name: newFolderName.trim(), parentId: currentFolderId });
+    const result = await createFolder({
+      name: newFolderName.trim(),
+      parentId: currentFolderId,
+      department: newFolderDepartment,
+    });
     if (result.success) {
       setNewFolderName('');
+      setNewFolderDepartment('');
       setShowNewFolder(false);
     }
   }
@@ -147,11 +177,12 @@ export default function MesDocuments() {
     e.preventDefault();
     if (!renameTarget || !renameValue.trim()) return;
     const result = renameTarget.type === 'folder'
-      ? await renameFolder(renameTarget.id, renameValue.trim())
+      ? await renameFolder(renameTarget.id, renameValue.trim(), renameDepartment)
       : await renameDoc(renameTarget.id, renameValue.trim());
     if (result.success) {
       setRenameTarget(null);
       setRenameValue('');
+      setRenameDepartment('');
     }
   }
 
@@ -182,7 +213,7 @@ export default function MesDocuments() {
           <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowUpload((v) => !v)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
             <Upload size={14} /> Upload
           </button>
-          <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowNewFolder(true)} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={openNewFolderModal} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
             <Folder size={14} /> Nouveau dossier
           </button>
         </div>
@@ -213,10 +244,7 @@ export default function MesDocuments() {
               <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
               <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher un fichier..." style={{ ...INPUT_STYLE, paddingLeft: 32 }} />
             </div>
-            <select value={filterDept} onChange={(e) => setFilterDept(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 220 }}>
-              <option value="">Tous départements</option>
-              {SYSTEM_DEPARTMENTS.map((d) => <option key={d} value={d}>{d}</option>)}
-            </select>
+            <DepartmentFilterSelect value={filterDept} onChange={setFilterDept} style={{ ...SELECT_STYLE, maxWidth: 240, flex: '0 1 240px' }} />
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setFilterDept(''); }}>Réinitialiser</button>
           </div>
         </div>
@@ -250,6 +278,11 @@ export default function MesDocuments() {
             <div style={{ fontWeight: 700 }}>Uploader dans {breadcrumb.length ? breadcrumb[breadcrumb.length - 1].name : 'Accueil'}</div>
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowUpload(false)}><X size={14} /></button>
           </div>
+          {!currentFolderId && (
+            <FField label="Département">
+              <DepartmentSelect value={uploadDepartment} onChange={setUploadDepartment} style={SELECT_STYLE} />
+            </FField>
+          )}
           <UploadZone onFiles={handleUpload} disabled={saving} />
           {saving && <div style={{ fontSize: '0.8rem', color: 'var(--text-3)', display: 'flex', alignItems: 'center', gap: 6 }}><Loader2 size={14} className="spin" /> Upload en cours...</div>}
         </div>
@@ -274,7 +307,7 @@ export default function MesDocuments() {
                     folder={f}
                     docCount={0}
                     onOpen={() => setCurrentFolderId(f.id)}
-                    onRename={() => { setRenameTarget({ type: 'folder', id: f.id, name: f.name }); setRenameValue(f.name); }}
+                    onRename={() => openRenameFolder(f)}
                     onDelete={async () => {
                       if (!window.confirm(`Envoyer le dossier « ${f.name} » à la corbeille ?`)) return;
                       await removeFolder(f.id);
@@ -291,7 +324,13 @@ export default function MesDocuments() {
               Fichiers ({documents.length})
             </div>
             {documents.length === 0 ? (
-              <EmptyState icon={<FileText size={24} />} title="Aucun fichier" sub="Uploadez un document dans ce dossier" action="Uploader" onAction={() => setShowUpload(true)} />
+              showUpload ? (
+                <div style={{ padding: '32px 24px', textAlign: 'center', color: 'var(--text-3)', fontSize: '0.84rem' }}>
+                  Aucun fichier dans ce dossier — utilisez la zone d'upload ci-dessus.
+                </div>
+              ) : (
+                <EmptyState icon={<FileText size={24} />} title="Aucun fichier" sub="Uploadez un document dans ce dossier" action="Uploader" onAction={() => setShowUpload(true)} />
+              )
             ) : (
               <div className="table-wrap">
                 <table>
@@ -337,9 +376,15 @@ export default function MesDocuments() {
           </div>
 
           {/* Fichiers — cartes mobile */}
-          <div className="mes-docs-mobile-only" style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <div className="mes-docs-mobile-only">
             {documents.length === 0 ? (
-              <div className="card"><EmptyState icon={<FileText size={22} />} title="Aucun fichier" sub="Uploadez un document" action="Uploader" onAction={() => setShowUpload(true)} /></div>
+              showUpload ? (
+                <div className="card" style={{ padding: '24px 16px', textAlign: 'center', color: 'var(--text-3)', fontSize: '0.84rem' }}>
+                  Aucun fichier — utilisez la zone d'upload ci-dessus.
+                </div>
+              ) : (
+                <div className="card"><EmptyState icon={<FileText size={22} />} title="Aucun fichier" sub="Uploadez un document" action="Uploader" onAction={() => setShowUpload(true)} /></div>
+              )
             ) : documents.map((d) => (
               <div key={d.id} className="card" style={{ padding: 14 }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
@@ -374,6 +419,9 @@ export default function MesDocuments() {
           <FField label="Nom du dossier" required>
             <input autoFocus value={newFolderName} onChange={(e) => setNewFolderName(e.target.value)} placeholder="Ex: Devis 2026" style={INPUT_STYLE} />
           </FField>
+          <FField label="Département">
+            <DepartmentSelect value={newFolderDepartment} onChange={setNewFolderDepartment} style={SELECT_STYLE} />
+          </FField>
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 20 }}>
             <button type="button" className="btn btn-secondary" onClick={() => setShowNewFolder(false)}>Annuler</button>
             <button type="submit" className="btn btn-primary" disabled={saving} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -384,11 +432,16 @@ export default function MesDocuments() {
       </Modal>
 
       {/* Modal renommer */}
-      <Modal open={!!renameTarget} onClose={() => setRenameTarget(null)} title="Renommer" width={400}>
+      <Modal open={!!renameTarget} onClose={() => { setRenameTarget(null); setRenameDepartment(''); }} title={renameTarget?.type === 'folder' ? 'Modifier le dossier' : 'Renommer'} width={400}>
         <form onSubmit={handleRenameSubmit}>
           <FField label="Nouveau nom" required>
             <input autoFocus value={renameValue} onChange={(e) => setRenameValue(e.target.value)} style={INPUT_STYLE} />
           </FField>
+          {renameTarget?.type === 'folder' && (
+            <FField label="Département">
+              <DepartmentSelect value={renameDepartment} onChange={setRenameDepartment} style={SELECT_STYLE} />
+            </FField>
+          )}
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 20 }}>
             <button type="button" className="btn btn-secondary" onClick={() => setRenameTarget(null)}>Annuler</button>
             <button type="submit" className="btn btn-primary" disabled={saving}>Enregistrer</button>

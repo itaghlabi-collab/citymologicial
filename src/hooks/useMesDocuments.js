@@ -96,7 +96,7 @@ export function useMesDocuments() {
     setFilterDept,
     reload: load,
     createFolder: (payload) => runAction(() => createFolder(payload)),
-    renameFolder: (id, name) => runAction(() => renameFolder(id, name)),
+    renameFolder: (id, name, department) => runAction(() => renameFolder(id, name, department)),
     removeFolder: (id) => runAction(() => softDeleteFolder(id)),
     uploadFiles: async (files, opts) => {
       setSaving(true);

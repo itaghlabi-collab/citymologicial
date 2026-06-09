@@ -308,9 +308,15 @@ async function mindeePredictRaw(buffer, mime, label) {
 
   const routing = resolveMindeeRouting(apiKey);
   if (routing.version === 'v2') {
+    const modelId = resolveMindeeModelId();
+    if (!modelId) {
+      const err = new Error(modelIdHelpMessage());
+      err.code = 'MINDEE_MODEL_ID_MISSING';
+      throw err;
+    }
     return mindeeV2Predict(buffer, mime, label, routing.endpoint);
   }
-  return mindeeV1Predict(buffer, mime, label, routing.endpoint);
+  return mindeeV1Predict(buffer, mime, label, MINDEE_V1_INTERNATIONAL_ID);
 }
 
 router.post(

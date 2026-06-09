@@ -1,5 +1,6 @@
 /**
  * ocr.js — Scan CIN marocaine : Mindee (prioritaire) → Tesseract fallback
+ * MINDEE_API_KEY : uniquement sur Vercel/server (api/ocr/moroccan-cin), jamais VITE_* côté navigateur.
  */
 import { resolveApiBaseUrl } from '../config/env';
 import {
@@ -12,11 +13,13 @@ import {
   mapToWorkerForm,
   buildOcrWarning,
   identityFieldsComplete,
+  isValidPersonName,
   resolveCINIdentity,
   pickMindeeValue,
 } from './cinOcr';
 
 import { CIN_FRAME_MASK as CIN_CROP } from './cinCapture';
+import { buildOcrAuditReport, logOcrAuditReport } from './ocrAudit';
 
 /** Zone cadre scanner CIN (alignée sur SVG mask + .cin-vf-frame) */
 export { CIN_CROP };
@@ -39,6 +42,150 @@ function tessMaxWidth() {
 
 export function getOcrApiUrl() {
   return resolveApiBaseUrl();
+}
+
+/** Limite body Vercel (~4.5 Mo) — images compressées avant POST Mindee. */
+const MINDEE_API_MAX_WIDTH = 1800;
+const MINDEE_API_MAX_BASE64_LEN = 1_450_000;
+
+async function compressForMindeeApi(dataUrl) {
+  if (!dataUrl || !isImageDataUrl(String(dataUrl))) return null;
+  let out = dataUrl;
+  try {
+    out = await compressImage(dataUrl, MINDEE_API_MAX_WIDTH, 0.86);
+  } catch (_) { /* keep original */ }
+
+  let pass = 0;
+  while (String(out).length > MINDEE_API_MAX_BASE64_LEN && pass < 4) {
+    const w = Math.max(1100, MINDEE_API_MAX_WIDTH - 220 * (pass + 1));
+    const q = Math.max(0.62, 0.86 - pass * 0.07);
+    try {
+      out = await compressImage(out, w, q);
+    } catch (_) {
+      break;
+    }
+    pass += 1;
+  }
+  return out;
+}
+
+function estimatePayloadBytes(recto, verso) {
+  return (recto ? String(recto).length : 0) + (verso ? String(verso).length : 0);
+}
+
+/** Mode debug : VITE_OCR_DEBUG=true ou localStorage citymo_ocr_debug=1 */
+export function isOcrDebugEnabled() {
+  try {
+    if (import.meta.env.VITE_OCR_DEBUG === 'true') return true;
+    if (typeof localStorage !== 'undefined' && localStorage.getItem('citymo_ocr_debug') === '1') return true;
+  } catch (_) { /* ignore */ }
+  return false;
+}
+
+function describeDataUrlStats(dataUrl, label) {
+  if (!dataUrl) return { label, present: false };
+  const len = String(dataUrl).length;
+  const approxKb = Math.round((len * 3) / 4 / 1024);
+  return new Promise(function(resolve) {
+    const img = new Image();
+    img.onload = function() {
+      resolve({
+        label,
+        present: true,
+        width: img.width,
+        height: img.height,
+        approxKb,
+        base64Len: len,
+      });
+    };
+    img.onerror = function() {
+      resolve({ label, present: true, width: 0, height: 0, approxKb, base64Len: len });
+    };
+    img.src = dataUrl;
+  });
+}
+
+function formatMindeeFailureReport(sideLabel, res, json, text, apiUrl) {
+  const diag = json?.diagnostics || {};
+  return {
+    side: sideLabel,
+    status: res?.status,
+    code: json?.code,
+    message: json?.error || text?.slice(0, 400),
+    body: text?.slice(0, 600),
+    endpoint: `${apiUrl}/ocr/moroccan-cin`,
+    mindee_api_key: diag.mindee_api_key || '(voir diagnostics serveur)',
+    mindee_model_id: diag.mindee_model_id,
+    mindee_endpoint: diag.endpoint,
+    api_version: diag.api_version,
+    side_errors: diag.side_errors,
+  };
+}
+
+function formatMindeePostError(sideLabel, code, error, status, extra) {
+  const parts = [];
+  if (sideLabel) parts.push('[' + sideLabel + ']');
+  if (code) parts.push(String(code));
+  if (error) parts.push(String(error));
+  if (status) parts.push('HTTP ' + status);
+  if (extra?.mindee_endpoint) parts.push('endpoint=' + extra.mindee_endpoint);
+  if (extra?.mindee_api_key) parts.push('MINDEE_API_KEY=' + extra.mindee_api_key);
+  if (extra?.mindee_model_id) parts.push('MINDEE_MODEL_ID=' + extra.mindee_model_id);
+  return parts.join(' — ') || 'Erreur Mindee inconnue';
+}
+
+async function postMindeeCin(apiUrl, body, sideLabel) {
+  const endpoint = `${apiUrl}/ocr/moroccan-cin`;
+  const debug = isOcrDebugEnabled();
+  const controller = new AbortController();
+  const timer = setTimeout(function() { controller.abort(); }, isMobileDevice() ? 50000 : 55000);
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...body, debug }),
+      signal: controller.signal,
+    });
+    const text = await res.text();
+    let json = {};
+    try { json = JSON.parse(text); } catch { json = {}; }
+    if (res.status === 413) {
+      const report = formatMindeeFailureReport(sideLabel, res, json, text, apiUrl);
+      const msg = formatMindeePostError(sideLabel, 'PAYLOAD_TOO_LARGE', json.error || 'Images trop lourdes', 413, json.diagnostics);
+      console.warn('[OCR CIN] Mindee échec (détail):', report);
+      return { ok: false, error: msg, code: 'PAYLOAD_TOO_LARGE', status: 413, side: sideLabel, report };
+    }
+    if (!res.ok || !json.success) {
+      const report = formatMindeeFailureReport(sideLabel, res, json, text, apiUrl);
+      const msg = formatMindeePostError(
+        sideLabel,
+        json.code || 'OCR_BACKEND_ERROR',
+        json.error || text.slice(0, 200) || 'Réponse serveur invalide',
+        res.status,
+        json.diagnostics,
+      );
+      console.warn('[OCR CIN] Mindee échec (détail):', report);
+      if (json.code === 'MINDEE_MODEL_ID_MISSING') {
+        console.error('[OCR CIN] Mindee non utilisé — fallback Tesseract (MINDEE_MODEL_ID manquant)');
+      }
+      return { ok: false, error: msg, code: json.code, status: res.status, side: sideLabel, report };
+    }
+    if (json.provider_final) {
+      console.info('[OCR CIN] provider_final serveur =', json.provider_final, json.diagnostics || {});
+    }
+    if (debug && json.diagnostics) {
+      console.info('[OCR CIN] Mindee diagnostics serveur', json.diagnostics);
+    }
+    return { ok: true, json, endpoint };
+  } catch (err) {
+    const msg = err?.name === 'AbortError'
+      ? formatMindeePostError(sideLabel, 'TIMEOUT', 'Délai dépassé (API OCR)', '')
+      : formatMindeePostError(sideLabel, 'NETWORK', err?.message || String(err), '');
+    console.warn('[OCR CIN] Mindee échec:', msg);
+    return { ok: false, error: msg, code: err?.name === 'AbortError' ? 'TIMEOUT' : 'NETWORK', side: sideLabel };
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 function loadTesseract() {
@@ -371,53 +518,132 @@ async function ocrImageText(dataUrl, psm) {
 
 async function fetchMindeeSides(rectoSide, versoSide) {
   const apiUrl = getOcrApiUrl();
-  const payload = {
-    recto: rectoSide?.fullDataUrl || rectoSide?.dataUrl || null,
-    verso: versoSide?.fullDataUrl || versoSide?.dataUrl || null,
-  };
+  const rectoRaw = rectoSide?.fullDataUrl || rectoSide?.dataUrl || null;
+  const versoRaw = versoSide?.fullDataUrl || versoSide?.dataUrl || null;
 
-  console.info('[OCR CIN] POST /api/ocr/moroccan-cin', {
-    recto: payload.recto ? 'full-image' : 'none',
-    verso: payload.verso ? 'full-image' : 'none',
+  const rectoImg = rectoRaw ? await compressForMindeeApi(rectoRaw) : null;
+  const versoImg = versoRaw ? await compressForMindeeApi(versoRaw) : null;
+  const backendErrors = [];
+
+  const payloadKb = {
+    recto: rectoImg ? Math.round(String(rectoImg).length * 3 / 4 / 1024) : 0,
+    verso: versoImg ? Math.round(String(versoImg).length * 3 / 4 / 1024) : 0,
+  };
+  console.info('[OCR CIN] POST /api/ocr/moroccan-cin (clé Mindee côté serveur uniquement)', {
     apiUrl,
+    endpoint: `${apiUrl}/ocr/moroccan-cin`,
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    recto_sent: Boolean(rectoImg),
+    verso_sent: Boolean(versoImg),
+    recto_payload_kb: payloadKb.recto,
+    verso_payload_kb: payloadKb.verso,
+    approxKb: Math.round(estimatePayloadBytes(rectoImg, versoImg) / 1024),
+    image_source: 'fullDataUrl (image pleine cadre, pas preview crop)',
   });
 
-  const controller = new AbortController();
-  const timer = setTimeout(function() { controller.abort(); }, isMobileDevice() ? 50000 : 55000);
-
-  try {
-    const res = await fetch(`${apiUrl}/ocr/moroccan-cin`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-      signal: controller.signal,
-    });
-    const text = await res.text();
-    let json = {};
-    try { json = JSON.parse(text); } catch { json = {}; }
-    if (!res.ok || !json.success) {
-      const code = json.code || 'OCR_BACKEND_ERROR';
-      console.warn('[OCR CIN] Mindee failed, fallback Tesseract', {
-        code,
-        error: json.error || text.slice(0, 120),
-        status: res.status,
-      });
-      return null;
-    }
-    console.info('[OCR CIN] Mindee response OK', { recto: !!json.recto, verso: !!json.verso });
-    if (json.recto?.fields) console.info('[OCR CIN] mindee raw', { side: 'recto', fields: json.recto.fields });
-    if (json.verso?.fields) console.info('[OCR CIN] mindee raw', { side: 'verso', fields: json.verso.fields });
-    return json;
-  } catch (err) {
-    if (err?.name === 'AbortError') {
-      console.warn('[OCR CIN] Mindee timeout, fallback Tesseract');
-      return null;
-    }
-    console.warn('[OCR CIN] backend indisponible, fallback Tesseract', err?.message || err);
-    return null;
-  } finally {
-    clearTimeout(timer);
+  if (!rectoImg && !versoImg) {
+    return { recto: null, verso: null, backendErrors: ['Aucune image à envoyer à Mindee'] };
   }
+
+  let rectoData = null;
+  let versoData = null;
+
+  function recordFail(result) {
+    if (result && !result.ok && result.error) backendErrors.push(result.error);
+  }
+
+  let lastDiagnostics = null;
+
+  function captureDiag(res) {
+    if (res?.ok && res.json?.diagnostics) lastDiagnostics = res.json.diagnostics;
+    if (!res?.ok && res?.report) lastDiagnostics = res.report;
+  }
+
+  const combinedKb = estimatePayloadBytes(rectoImg, versoImg);
+  if (combinedKb <= 3_200_000 && rectoImg && versoImg) {
+    const res = await postMindeeCin(apiUrl, { recto: rectoImg, verso: versoImg }, 'recto+verso');
+    captureDiag(res);
+    if (res.ok) {
+      rectoData = res.json.recto || null;
+      versoData = res.json.verso || null;
+      if (res.json.diagnostics) lastDiagnostics = res.json.diagnostics;
+      if (res.json.audit) lastDiagnostics = { ...lastDiagnostics, server_audit: res.json.audit };
+      if (res.json.mindee_http_called != null) {
+        lastDiagnostics = { ...lastDiagnostics, mindee_http_called: res.json.mindee_http_called };
+      }
+    } else {
+      recordFail(res);
+      if (res.json?.diagnostics) lastDiagnostics = res.json.diagnostics;
+      if (res.json?.audit) lastDiagnostics = { ...lastDiagnostics, server_audit: res.json.audit };
+      if (res.json?.mindee_http_called != null) {
+        lastDiagnostics = { ...lastDiagnostics, mindee_http_called: res.json.mindee_http_called };
+      }
+    }
+  }
+
+  if (!rectoData && rectoImg) {
+    const res = await postMindeeCin(apiUrl, { recto: rectoImg }, 'recto');
+    captureDiag(res);
+    if (res.ok && res.json?.recto) rectoData = res.json.recto;
+    else {
+      recordFail(res);
+      if (res.json?.diagnostics) lastDiagnostics = res.json.diagnostics;
+    }
+  }
+  if (!versoData && versoImg) {
+    const res = await postMindeeCin(apiUrl, { verso: versoImg }, 'verso');
+    captureDiag(res);
+    if (res.ok && res.json?.verso) versoData = res.json.verso;
+    else {
+      recordFail(res);
+      if (res.json?.diagnostics) lastDiagnostics = res.json.diagnostics;
+    }
+  }
+
+  const uniqueErrorsFinal = [...new Set(backendErrors)];
+
+  const mindeeRectoOk = Boolean(rectoData?.fields && Object.keys(rectoData.fields).length);
+  const mindeeVersoOk = !versoImg || Boolean(versoData?.fields && Object.keys(versoData.fields).length);
+
+  if (!mindeeRectoOk && !mindeeVersoOk) {
+    return {
+      recto: null,
+      verso: null,
+      backendErrors: uniqueErrorsFinal,
+      diagnostics: lastDiagnostics,
+      provider_final: 'tesseract',
+      mindee_recto_ok: false,
+      mindee_verso_ok: false,
+      mindee_http_called: lastDiagnostics?.mindee_http_called ?? false,
+      payload_kb: payloadKb,
+    };
+  }
+
+  const providerFinal = mindeeRectoOk && mindeeVersoOk ? 'mindee' : 'mindee_partial';
+  console.info('[OCR CIN] Mindee response OK', {
+    provider_final: providerFinal,
+    mindee_recto_ok: mindeeRectoOk,
+    mindee_verso_ok: mindeeVersoOk,
+    endpoint: lastDiagnostics?.endpoint_used || lastDiagnostics?.endpoint,
+    key_type: lastDiagnostics?.key_type,
+    has_MINDEE_MODEL_ID: lastDiagnostics?.has_MINDEE_MODEL_ID,
+  });
+  if (rectoData?.fields) console.info('[OCR CIN] mindee raw client', { side: 'recto', field_keys: Object.keys(rectoData.fields) });
+  if (versoData?.fields) console.info('[OCR CIN] mindee raw client', { side: 'verso', field_keys: Object.keys(versoData.fields) });
+
+  return {
+    recto: rectoData,
+    verso: versoData,
+    backendErrors: uniqueErrorsFinal,
+    diagnostics: lastDiagnostics,
+    provider_final: providerFinal,
+    mindee_recto_ok: mindeeRectoOk,
+    mindee_verso_ok: mindeeVersoOk,
+    mindee_http_called: lastDiagnostics?.mindee_http_called ?? null,
+    server_audit: null,
+    payload_kb: payloadKb,
+  };
 }
 
 /** Résout le payload Mindee d'un côté (fields prioritaire, sinon raw extrait). */
@@ -558,11 +784,12 @@ async function parseTesseractSide(imageDataUrl, side, seedMapped) {
   };
 }
 
-async function analyzeSide(imageDataUrl, mindeeSideData, side) {
+async function analyzeSide(imageDataUrl, mindeeSideData, side, opts) {
+  var mindeeActive = opts?.mindeeActive !== false;
   var mindeeMapped = emptyCINExtract();
   var hasMindee = false;
 
-  const payload = resolveMindeeSidePayload(mindeeSideData);
+  const payload = mindeeActive ? resolveMindeeSidePayload(mindeeSideData) : null;
   if (payload) {
     const result = parseMindeeSide(payload, side);
     console.info('[OCR CIN] mindee raw', { side, fields: result.fields });
@@ -574,10 +801,37 @@ async function analyzeSide(imageDataUrl, mindeeSideData, side) {
   }
 
   var tessResult = { mapped: emptyCINExtract(), rawText: '', source: 'none' };
-  var runTess = !hasMindee || sideNeedsDeepOcr(mindeeMapped, side);
+  var runTess = !payload;
+  if (!payload) {
+    console.warn('[OCR CIN] Mindee non utilisé — fallback Tesseract', { side });
+  }
+  if (payload && hasMindee) {
+    if (side === 'verso') {
+      runTess = true;
+    } else if (identityFieldsComplete(mindeeMapped)) {
+      var dateTargets = getMissingTargets(mindeeMapped, 'recto');
+      runTess = dateTargets.dateNaissance || dateTargets.dateExpiration;
+    } else {
+      var rectoTargets = getMissingTargets(mindeeMapped, 'recto');
+      var prenomUp = String(mindeeMapped.prenom || '').trim().toUpperCase();
+      var nomUp = String(mindeeMapped.nom || '').trim().toUpperCase();
+      var prenomLooksWrong = prenomUp && nomUp && prenomUp === nomUp;
+      var prenomValid = isValidPersonName(mindeeMapped.prenom, true);
+      var nomValid = isValidPersonName(mindeeMapped.nom, false);
+      runTess = (rectoTargets.prenom && !prenomValid)
+        || (rectoTargets.nom && !nomValid)
+        || prenomLooksWrong
+        || rectoTargets.cin
+        || rectoTargets.dateNaissance
+        || rectoTargets.dateExpiration;
+    }
+  }
 
   if (runTess) {
-    console.info('[OCR CIN] provider=tesseract', side, hasMindee ? '(complément Mindee)' : '(fallback Mindee indisponible ou vide)');
+    var tessReason = payload
+      ? (side === 'verso' ? 'complément verso (adresse/MRZ)' : 'complément recto (prénom/nom)')
+      : 'fallback — Mindee absent';
+    console.info('[OCR CIN] provider=tesseract', side, tessReason);
     try {
       var tessInput = imageDataUrl;
       try { tessInput = await preprocessForOcr(imageDataUrl, side); } catch (_) { /* full frame */ }
@@ -588,13 +842,12 @@ async function analyzeSide(imageDataUrl, mindeeSideData, side) {
     } catch (err) {
       console.error('[OCR CIN] Tesseract échec', side, err);
     }
-  } else {
-    console.info('[OCR CIN] Tesseract ignoré', side, '(Mindee complet)');
   }
 
-  var merged = hasMindee
-    ? mergeSideExtracts(mindeeMapped, tessResult.mapped, side)
-    : tessResult.mapped;
+  var merged = hasMindee ? mindeeMapped : tessResult.mapped;
+  if (hasMindee && tessResult.source === 'tesseract') {
+    merged = mergeSideExtracts(mindeeMapped, tessResult.mapped, side);
+  }
 
   var source = 'none';
   if (hasMindee && tessResult.source === 'tesseract') source = 'mindee+tesseract';
@@ -614,9 +867,16 @@ async function analyzeSide(imageDataUrl, mindeeSideData, side) {
 export async function scanCIN(rectoSource, versoSource, options = {}) {
   const { rectoFile, versoFile, rectoFullDataUrl, versoFullDataUrl, onProgress } = options;
   const progress = typeof onProgress === 'function' ? onProgress : function() {};
+  const debug = isOcrDebugEnabled();
 
   progress('Préparation des images…');
   preloadOcrEngine();
+
+  const [rectoStats, versoStats] = await Promise.all([
+    describeDataUrlStats(rectoFullDataUrl || rectoSource, 'recto'),
+    (versoSource || versoFullDataUrl) ? describeDataUrlStats(versoFullDataUrl || versoSource, 'verso') : Promise.resolve({ label: 'verso', present: false }),
+  ]);
+  if (debug) console.info('[OCR CIN] DEBUG images', { recto: rectoStats, verso: versoStats });
 
   const rectoSide = await prepareSide(rectoSource, rectoFile, 'recto', rectoFullDataUrl);
   let versoSide = null;
@@ -632,9 +892,50 @@ export async function scanCIN(rectoSource, versoSource, options = {}) {
   progress('Analyse Mindee…');
   const mindeePromise = fetchMindeeSides(rectoSide, versoSide);
   const workerWarmup = getOcrWorker().catch(function() { return null; });
-  const [mindee] = await Promise.all([mindeePromise, workerWarmup]);
-  const hasMindee = Boolean(mindee?.recto || mindee?.verso);
-  console.info('[OCR CIN] provider', hasMindee ? 'mindee' : 'tesseract');
+  const [mindeeResult] = await Promise.all([mindeePromise, workerWarmup]);
+  const mindee = mindeeResult || { recto: null, verso: null, backendErrors: [], diagnostics: null };
+  const mindeeRectoOk = Boolean(
+    mindee.mindee_recto_ok
+    ?? (mindee.recto?.fields && Object.keys(mindee.recto.fields).length > 0),
+  );
+  const mindeeVersoOk = !versoSide || Boolean(
+    mindee.mindee_verso_ok
+    ?? (mindee.verso?.fields && Object.keys(mindee.verso.fields).length > 0),
+  );
+  const hasMindee = mindeeRectoOk;
+  const mindeeFull = mindeeRectoOk && mindeeVersoOk;
+  let providerUsed = mindeeFull ? 'mindee' : (mindeeRectoOk ? 'mindee_partial' : 'tesseract');
+
+  if (mindee.diagnostics) {
+    console.info('[OCR CIN] Mindee diagnostics', mindee.diagnostics);
+  }
+  if (!mindeeRectoOk) {
+    console.warn('[OCR CIN] Mindee non utilisé — fallback Tesseract', {
+      provider_final: mindee.provider_final || providerUsed,
+      mindee_recto_ok: mindeeRectoOk,
+      mindee_verso_ok: mindeeVersoOk,
+      endpoint: mindee.diagnostics?.endpoint_used || mindee.diagnostics?.endpoint,
+      key_type: mindee.diagnostics?.key_type,
+      has_MINDEE_MODEL_ID: mindee.diagnostics?.has_MINDEE_MODEL_ID,
+      errors: mindee.backendErrors,
+    });
+    providerUsed = 'tesseract';
+  } else if (providerUsed === 'mindee_partial') {
+    console.info('[OCR CIN] OCR provider utilisé = mindee_partial (recto Mindee, complément Tesseract verso)', {
+      endpoint: mindee.diagnostics?.endpoint_used || mindee.diagnostics?.endpoint,
+      mindee_recto_ok: mindeeRectoOk,
+      mindee_verso_ok: mindeeVersoOk,
+    });
+  } else {
+    console.info('[OCR CIN] OCR provider utilisé = mindee', {
+      endpoint: mindee.diagnostics?.endpoint_used || mindee.diagnostics?.endpoint,
+      mindee_recto_ok: mindeeRectoOk,
+      mindee_verso_ok: mindeeVersoOk,
+    });
+  }
+  if (!mindeeRectoOk && mindee.backendErrors?.length) {
+    console.error('[OCR CIN] Mindee échec (erreur exacte):', mindee.backendErrors.join(' | '));
+  }
 
   progress(hasMindee ? 'Extraction Mindee…' : 'Lecture Tesseract (local)…');
 
@@ -642,61 +943,165 @@ export async function scanCIN(rectoSource, versoSource, options = {}) {
   const rectoOcrSrc = rectoSide.dataUrl;
   const versoOcrSrc = versoSide?.dataUrl || null;
 
-  const rectoPromise = analyzeSide(rectoOcrSrc, mindee?.recto || null, 'recto');
+  const rectoPromise = analyzeSide(rectoOcrSrc, mindeeRectoOk ? (mindee?.recto || null) : null, 'recto', { mindeeActive: mindeeRectoOk });
   const versoPromise = versoOcrSrc
-    ? analyzeSide(versoOcrSrc, mindee?.verso || null, 'verso')
+    ? analyzeSide(versoOcrSrc, mindeeVersoOk ? (mindee?.verso || null) : null, 'verso', { mindeeActive: mindeeVersoOk })
     : Promise.resolve({ mapped: emptyCINExtract(), mindeeMapped: emptyCINExtract(), tessMapped: emptyCINExtract(), source: 'none', rawText: '' });
 
   const [rectoResult, versoResult] = await Promise.all([rectoPromise, versoPromise]);
 
   progress('Finalisation identité…');
 
-  const rawTexts = [];
-  if (rectoResult.rawText) rawTexts.push(rectoResult.rawText);
-  if (versoResult.rawText) rawTexts.push(versoResult.rawText);
   const mrzRecto = collectMindeeMrzText(mindee?.recto);
   const mrzVerso = collectMindeeMrzText(mindee?.verso);
-  if (mrzRecto) rawTexts.push(mrzRecto);
-  if (mrzVerso) rawTexts.push(mrzVerso);
+  const identityTextParts = [];
+  if (mrzRecto) identityTextParts.push(mrzRecto);
+  if (mrzVerso) identityTextParts.push(mrzVerso);
+  if (!mindeeRectoOk) {
+    if (rectoResult.rawText) identityTextParts.push(rectoResult.rawText);
+    if (versoResult.rawText) identityTextParts.push(versoResult.rawText);
+  }
+  const combinedText = identityTextParts.join('\n');
 
   let baseMerged = mergeCINRectoVerso(rectoResult.mapped, versoResult.mapped);
-
-  const combinedText = rawTexts.join('\n');
   let merged = resolveCINIdentity({
     base: baseMerged,
     extracts: [
-      versoResult.mapped,
-      versoResult.tessMapped,
-      versoResult.mindeeMapped,
+      rectoResult.mindeeMapped,
       rectoResult.mapped,
       rectoResult.tessMapped,
+      versoResult.mindeeMapped,
+      versoResult.mapped,
+      versoResult.tessMapped,
+    ],
+    rectoExtracts: [
       rectoResult.mindeeMapped,
+      rectoResult.mapped,
+      rectoResult.tessMapped,
     ],
     combinedText,
+    rectoText: rectoResult.rawText || '',
+    versoText: versoResult.rawText || '',
+    versoExtracts: [
+      versoResult.mindeeMapped,
+      versoResult.mapped,
+      versoResult.tessMapped,
+    ],
+    mindeeRectoFields: mindeeRectoOk ? (mindee?.recto?.fields || null) : null,
+    mindeeVersoFields: mindeeVersoOk ? (mindee?.verso?.fields || null) : null,
+    mindeeRectoActive: mindeeRectoOk,
+    mindeeVersoActive: mindeeVersoOk,
   });
 
   console.info('[OCR CIN] identity resolved', { nom: merged.nom, prenom: merged.prenom, cin: merged.numero_cin });
 
-  const provider = hasMindee && (
-    rectoResult.source === 'mindee' || versoResult.source === 'mindee'
-  ) ? 'mindee' : 'tesseract';
-  const formData = mapToWorkerForm({ ...merged, provider });
+  const usesTesseractComplement = rectoResult.source === 'mindee+tesseract' || versoResult.source === 'mindee+tesseract';
+  if (hasMindee && usesTesseractComplement) {
+    console.info('[OCR CIN] Complément Tesseract (MRZ / adresse) — provider principal = mindee');
+  }
+
+  const formData = mapToWorkerForm({ ...merged, provider: providerUsed });
 
   console.info('[OCR CIN] final form data', formData);
+  console.info('[OCR CIN] OCR provider utilisé = ' + providerUsed);
 
-  const warning = buildOcrWarning(
+  const backendErrorText = !hasMindee && mindee.backendErrors?.length
+    ? mindee.backendErrors.join(' — ')
+    : '';
+
+  const debugReport = debug ? {
+    provider_used: providerUsed,
+    mindee_endpoint: mindee.diagnostics?.endpoint || null,
+    mindee_diagnostics: mindee.diagnostics || null,
+    images: { recto: rectoStats, verso: versoStats },
+    mindee_raw: {
+      recto: mindee.recto?.fields || mindee.recto?.raw || null,
+      verso: mindee.verso?.fields || mindee.verso?.raw || null,
+    },
+    ocr_text: {
+      recto: rectoResult.rawText || '',
+      verso: versoResult.rawText || '',
+      mrz_recto: mrzRecto,
+      mrz_verso: mrzVerso,
+    },
+    mapped: {
+      recto: rectoResult.mapped,
+      verso: versoResult.mapped,
+      merged,
+      form: formData,
+    },
+    backend_errors: mindee.backendErrors || [],
+  } : null;
+
+  if (debugReport) {
+    console.info('[OCR CIN] DEBUG rapport complet', debugReport);
+  }
+
+  const auditReport = buildOcrAuditReport({
+    client_api_base: getOcrApiUrl(),
+    client_api_endpoint: `${getOcrApiUrl()}/ocr/moroccan-cin`,
+    diagnostics: mindee.diagnostics,
+    mindee_config_blocked: mindee.diagnostics?.model_id_required && !mindee.diagnostics?.has_MINDEE_MODEL_ID,
+    config_error: mindee.backendErrors?.find((e) => e.includes('MINDEE_MODEL_ID')) || null,
+    mindee_http_called: mindee.mindee_http_called ?? mindee.diagnostics?.mindee_http_called ?? false,
+    mindee_recto_ok: mindeeRectoOk,
+    mindee_verso_ok: mindeeVersoOk,
+    verso_required: Boolean(versoSide),
+    provider_final: providerUsed,
+    backend_errors: mindee.backendErrors || [],
+    mindee_raw_recto: mindee.recto?.fields || null,
+    mindee_raw_verso: mindee.verso?.fields || null,
+    image_stats_recto: rectoStats,
+    image_stats_verso: versoStats,
+    mindee_payload_recto_kb: mindee.payload_kb?.recto,
+    mindee_payload_verso_kb: mindee.payload_kb?.verso,
+    ocr_image_source_recto: rectoFullDataUrl ? 'fullDataUrl' : (rectoFile ? 'file' : 'preview'),
+    ocr_image_source_verso: versoFullDataUrl ? 'fullDataUrl' : (versoFile ? 'file' : 'preview'),
+    preview_cropped_recto: rectoSide.preview !== rectoSide.dataUrl,
+    preview_cropped_verso: versoSide ? versoSide.preview !== versoSide.dataUrl : null,
+    tesseract_text_recto: rectoResult.rawText,
+    tesseract_text_verso: versoResult.rawText,
+    mrz_recto: mrzRecto,
+    mrz_verso: mrzVerso,
+    mapped_recto: rectoResult.mapped,
+    mapped_verso: versoResult.mapped,
+    mapped_merged: merged,
+    final_form: formData,
+    recto_side_source: rectoResult.source,
+    verso_side_source: versoResult.source,
+    prenom_resolution_source: merged._prenom_resolution_source || null,
+    adresse_resolution_source: merged._adresse_resolution_source || null,
+  });
+  logOcrAuditReport(auditReport);
+
+  let warning = buildOcrWarning(
     formData,
     Boolean(rectoResult.mapped?.numero_cin || rectoResult.mapped?.prenom || rectoResult.source),
     Boolean(versoResult.mapped?.adresse || versoSide),
   );
+  if (providerUsed === 'tesseract') {
+    const tessMsg = 'Mindee non utilisé — fallback Tesseract.';
+    warning = warning ? tessMsg + ' ' + warning : tessMsg;
+    if (backendErrorText) warning += ' (' + backendErrorText + ')';
+  } else if (providerUsed === 'mindee_partial' && !mindeeVersoOk) {
+    const partialMsg = 'Identité via Mindee — adresse/MRZ verso via Tesseract (moins fiable).';
+    warning = warning ? partialMsg + ' ' + warning : partialMsg;
+  } else if (backendErrorText) {
+    const prefix = 'Mindee : ' + backendErrorText;
+    warning = warning ? prefix + ' — ' + warning : prefix;
+  }
 
   return {
     ...formData,
     cin_recto: rectoSide.preview || rectoSide.dataUrl,
     cin_verso: versoSide ? (versoSide.preview || versoSide.dataUrl) : '',
-    _ocr_source: provider,
+    _ocr_source: providerUsed,
+    _ocr_provider_used: providerUsed,
+    _ocr_backend_error: backendErrorText || null,
     _ocr_warning: warning,
     _ocr_partial: Boolean(warning),
+    _ocr_debug: debugReport,
+    _ocr_audit: auditReport,
   };
 }
 
@@ -721,20 +1126,24 @@ export async function getCINCameraStream() {
     return await navigator.mediaDevices.getUserMedia({
       audio: false,
       video: {
-        facingMode: { exact: 'environment' },
-        width: { ideal: 1920, min: 1280 },
-        height: { ideal: 1080 },
-      },
-    });
-  } catch {
-    return navigator.mediaDevices.getUserMedia({
-      audio: false,
-      video: {
         facingMode: { ideal: 'environment' },
         width: { ideal: 1920 },
         height: { ideal: 1080 },
       },
     });
+  } catch (firstErr) {
+    try {
+      return await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: { facingMode: 'environment' },
+      });
+    } catch (secondErr) {
+      try {
+        return await navigator.mediaDevices.getUserMedia({ audio: false, video: true });
+      } catch {
+        throw firstErr;
+      }
+    }
   }
 }
 
@@ -746,6 +1155,29 @@ export function getCameraBlockedReason() {
   }
   if (!navigator.mediaDevices?.getUserMedia) return 'Caméra non supportée par ce navigateur.';
   return 'Accès caméra refusé. Autorisez la caméra ou importez depuis la galerie.';
+}
+
+/** Message précis selon l’erreur getUserMedia (NotAllowedError, etc.). */
+export function getCameraErrorMessage(err) {
+  const name = err?.name || '';
+  const msg = String(err?.message || '');
+  if (name === 'NotAllowedError' || /permission denied|not allowed/i.test(msg)) {
+    return 'Caméra refusée. Cliquez sur l’icône cadenas / « i » dans la barre d’adresse → Autoriser la caméra → « Réessayer la caméra ». Sinon : Galerie.';
+  }
+  if (name === 'NotFoundError' || /not found|no device/i.test(msg)) {
+    return 'Aucune caméra détectée. Importez une photo JPG/PNG depuis la galerie.';
+  }
+  if (name === 'NotReadableError' || /could not start|in use/i.test(msg)) {
+    return 'Caméra occupée par une autre application. Fermez l’autre app, puis réessayez.';
+  }
+  if (name === 'OverconstrainedError') {
+    return 'Réglages caméra non supportés — réessayez ou utilisez la galerie.';
+  }
+  if (name === 'AbortError') {
+    return 'Activation caméra annulée.';
+  }
+  if (msg && msg.length < 200) return msg;
+  return getCameraBlockedReason();
 }
 
 export { mapMindeeFields, mergeCINRectoVerso, mapToWorkerForm, resolveCINIdentity } from './cinOcr';

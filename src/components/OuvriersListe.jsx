@@ -9,7 +9,7 @@ import {
 import { useState, useEffect, useRef, useCallback, useId } from 'react';
 import { createPortal } from 'react-dom';
 import { useWorkers } from '../hooks/useWorkers';
-import { scanCIN, canUseCamera, getCameraBlockedReason, getCINCameraStream, preloadOcrEngine } from '../services/ocr';
+import { scanCIN, canUseCamera, getCameraBlockedReason, getCameraErrorMessage, getCINCameraStream, preloadOcrEngine } from '../services/ocr';
 import { captureCINFromVideo, prepareImportedCINImage } from '../services/cinCapture';
 import { generateWorkerPdf } from '../services/rh/workerPdf';
 import { listProjects } from '../services/projects/projects';
@@ -413,9 +413,9 @@ function CINScanner({
       stableRef.current = 0;
       analyzeFrame();
     } catch (err) {
-      console.warn('[CIN Scanner] attachStream', err);
+      console.warn('[CIN Scanner] attachStream', err?.name || err);
       setCamActive(false);
-      setCameraMsg(getCameraBlockedReason());
+      setCameraMsg(getCameraErrorMessage(err));
       setCamLoad(false);
     }
   }
@@ -442,9 +442,9 @@ function CINScanner({
       const stream = await getCINCameraStream();
       await attachStream(stream);
     } catch (err) {
-      console.warn('[CIN Scanner] startCamera', err);
+      console.warn('[CIN Scanner] startCamera', err?.name || err, err?.message || '');
       setCamActive(false);
-      setCameraMsg(getCameraBlockedReason());
+      setCameraMsg(getCameraErrorMessage(err));
       setCamLoad(false);
     }
   }
@@ -670,7 +670,7 @@ function CINScanner({
 
   const activeSide = isCaptureMode && captureSide ? captureSide : side;
   const isRecto = activeSide === 'recto';
-  const progressPct = stableCount;
+  const progressPct = Math.max(0, Math.min(100, Number(stableCount) || 0));
   const frameReady = progressPct >= 100;
   const sideFaceLabel = isRecto ? 'RECTO — FACE PRINCIPALE' : 'VERSO — DOS DE LA CARTE';
 
@@ -1121,33 +1121,17 @@ function OuvrierModal({ worker, onClose, onSave, saving, projects = [] }) {
     }
   }
 
-  async function openCINScanner() {
-    let stream = null;
-    if (canUseCamera()) {
-      try {
-        stream = await getCINCameraStream();
-      } catch (err) {
-        console.warn('[CIN Scanner] open', err);
-      }
-    }
+  function openCINScanner() {
     setScannerMode('full');
     setCaptureSide(null);
-    setScannerStream(stream);
+    setScannerStream(null);
     setShowScanner(true);
   }
 
-  async function openCINScannerForSide(side) {
-    let stream = null;
-    if (canUseCamera()) {
-      try {
-        stream = await getCINCameraStream();
-      } catch (err) {
-        console.warn('[CIN Scanner] open side', err);
-      }
-    }
+  function openCINScannerForSide(side) {
     setScannerMode('capture');
     setCaptureSide(side);
-    setScannerStream(stream);
+    setScannerStream(null);
     setShowScanner(true);
   }
 
@@ -1175,13 +1159,29 @@ function OuvrierModal({ worker, onClose, onSave, saving, projects = [] }) {
     closeCINScanner();
   }
 
+  const WORKER_OCR_FIELDS = ['cin', 'prenom', 'nom', 'date_naissance', 'ville_naissance', 'adresse', 'date_expiration', 'sexe', 'nationalite'];
+
   function applyOcrResult(result) {
     const {
-      _ocr_warning, _ocr_partial, _ocr_source,
-      provider, confidence, lieu_naissance,
-      ...fields
+      _ocr_warning, _ocr_partial, _ocr_source, _ocr_provider_used, _ocr_backend_error,
+      _ocr_audit, _ocr_debug, provider, confidence, lieu_naissance,
     } = result;
-    handleScanExtracted(fields, _ocr_warning);
+    const fields = {};
+    WORKER_OCR_FIELDS.forEach((k) => {
+      if (result[k] != null && String(result[k]).trim() !== '') fields[k] = result[k];
+    });
+    if (_ocr_provider_used) {
+      console.info('[OCR CIN] OCR provider utilisé = ' + _ocr_provider_used);
+    }
+    if (_ocr_backend_error) {
+      console.error('[OCR CIN] Mindee échec (erreur exacte):', _ocr_backend_error);
+    }
+    let warning = _ocr_warning || '';
+    if (_ocr_audit?.verdict && !_ocr_audit.verdict.mindee_really_used) {
+      const root = _ocr_audit.verdict.root_cause || 'Mindee non utilisé — vérifiez MINDEE_API_KEY et MINDEE_MODEL_ID sur Vercel.';
+      warning = root + (warning ? ' — ' + warning : '');
+    }
+    handleScanExtracted(fields, warning || undefined);
   }
 
   function handleScanExtracted(data, warning) {

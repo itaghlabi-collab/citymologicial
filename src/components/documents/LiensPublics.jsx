@@ -10,11 +10,12 @@ import {
 import { useState, useCallback } from 'react';
 import {
   INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE,
-  KpiCard, EmptyState, Modal, SectionTitle, FField, FRow, genId
+  KpiCard, EmptyState, Modal, SectionTitle, FField, FRow, genId,
+  DepartmentSelect, DepartmentFilterSelect, normalizeDocumentDepartment,
 } from './shared.jsx';
 
 const EMPTY_LINK = {
-  document: '', date_creation: new Date().toISOString().slice(0, 10),
+  document: '', departement: '', date_creation: new Date().toISOString().slice(0, 10),
   expiration: '', mot_de_passe: '', acces_unique: false, telechargement: true,
   lecture_seule: true, notes: ''
 };
@@ -38,7 +39,7 @@ function LienForm({ initial, onSave, onCancel }) {
     ev.preventDefault();
     const e = validate();
     if (Object.keys(e).length) { setErrors(e); return; }
-    onSave(form);
+    onSave({ ...form, departement: normalizeDocumentDepartment(form.departement) });
   }
 
   return (
@@ -51,6 +52,11 @@ function LienForm({ initial, onSave, onCancel }) {
             {errors.document && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.document}</div>}
           </FField>
         </div>
+      </FRow>
+      <FRow>
+        <FField label="Département">
+          <DepartmentSelect value={form.departement} onChange={(v) => set('departement', v)} style={SELECT_STYLE} />
+        </FField>
       </FRow>
       <SectionTitle icon={<Lock size={12} />}>Paramètres du lien</SectionTitle>
       <FRow>
@@ -130,7 +136,8 @@ export default function LiensPublics() {
     const isExpired = l.expiration && l.expiration < today;
     const st = l.statut === 'desactive' ? 'desactive' : isExpired ? 'expire' : 'actif';
     const matchS = !filterStatut || st === filterStatut;
-    return matchQ && matchS;
+    const matchD = !filterDept || l.departement === filterDept;
+    return matchQ && matchS && matchD;
   });
 
   const actifs   = liens.filter(l => l.statut === 'actif' && (!l.expiration || l.expiration >= today)).length;
@@ -171,7 +178,8 @@ export default function LiensPublics() {
               <option value="expire">Expiré</option>
               <option value="desactive">Désactivé</option>
             </select>
-            <button className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setFilterStatut(''); }}>Réinitialiser</button>
+            <DepartmentFilterSelect value={filterDept} onChange={setFilterDept} style={{ ...SELECT_STYLE, maxWidth: 240, flex: '0 1 240px' }} />
+            <button className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setFilterStatut(''); setFilterDept(''); }}>Réinitialiser</button>
           </div>
         </div>
       )}
@@ -194,6 +202,7 @@ export default function LiensPublics() {
               <thead>
                 <tr>
                   <th>Document</th>
+                  <th>Département</th>
                   <th>Lien / Token</th>
                   <th>Créé le</th>
                   <th>Expiration</th>
@@ -212,6 +221,7 @@ export default function LiensPublics() {
                   return (
                     <tr key={l.id}>
                       <td style={{ fontWeight: 600 }}>{l.document}</td>
+                      <td data-label="Département">{l.departement || '—'}</td>
                       <td data-label="Token">
                         <span style={{ fontFamily: 'var(--font-head)', fontSize: '0.78rem', color: 'var(--text-3)', background: 'var(--surface-2)', padding: '2px 8px', borderRadius: 4 }}>
                           citymo.share/{l.token?.slice(0, 8)}…

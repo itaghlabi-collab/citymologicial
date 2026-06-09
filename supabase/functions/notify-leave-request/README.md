@@ -1,6 +1,6 @@
 # notify-leave-request — Email Resend (Congés CITYMO)
 
-Envoie un email HTML au Super Admin (`selim.moumni@citymo.ma`) à chaque nouvelle demande de congé.
+Envoie un email HTML au Super Admin (secret `LEAVE_NOTIFY_TO`, ex. `selim.moumni@gmail.com`) à chaque nouvelle demande de congé.
 
 ## 1. Créer un compte Resend
 
@@ -34,7 +34,7 @@ Envoie un email HTML au Super Admin (`selim.moumni@citymo.ma`) à chaque nouvell
 | Secret | Valeur |
 |--------|--------|
 | `RESEND_API_KEY` | `re_xxxxxxxx` |
-| `LEAVE_NOTIFY_TO` | `selim.moumni@citymo.ma` |
+| `LEAVE_NOTIFY_TO` | `selim.moumni@gmail.com` |
 | `LEAVE_NOTIFY_FROM` | `CITYMO Congés <conges@citymo.ma>` ou `CITYMO Congés <onboarding@resend.dev>` |
 | `LEAVE_APP_URL` | (optionnel) URL de l’app pour le bouton CTA |
 
@@ -47,7 +47,7 @@ supabase link --project-ref npddbwsskaojcawaxygh
 
 supabase secrets set \
   RESEND_API_KEY=re_VOTRE_CLE \
-  LEAVE_NOTIFY_TO=selim.moumni@citymo.ma \
+  LEAVE_NOTIFY_TO=selim.moumni@gmail.com \
   LEAVE_NOTIFY_FROM="CITYMO Congés <onboarding@resend.dev>"
 ```
 

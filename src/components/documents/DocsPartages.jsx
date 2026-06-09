@@ -11,7 +11,8 @@ import { useState, useCallback } from 'react';
 import {
   INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE,
   KpiCard, EmptyState, Modal, SectionTitle, FField, FRow,
-  TYPE_COLORS, CATEGORIES_DOC, PERMISSIONS, genId
+  TYPE_COLORS, CATEGORIES_DOC, PERMISSIONS, genId,
+  DepartmentSelect, DepartmentFilterSelect, normalizeDocumentDepartment,
 } from './shared.jsx';
 
 const EMPTY_SHARE = {
@@ -36,7 +37,7 @@ function ShareForm({ initial, onSave, onCancel }) {
     ev.preventDefault();
     const e = validate();
     if (Object.keys(e).length) { setErrors(e); return; }
-    onSave(form);
+    onSave({ ...form, departement: normalizeDocumentDepartment(form.departement) });
   }
 
   return (
@@ -57,7 +58,7 @@ function ShareForm({ initial, onSave, onCancel }) {
           {errors.partage_avec && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.partage_avec}</div>}
         </FField>
         <FField label="Département">
-          <input value={form.departement} onChange={e => set('departement', e.target.value)} placeholder="Département..." style={INPUT_STYLE} />
+          <DepartmentSelect value={form.departement} onChange={(v) => set('departement', v)} style={SELECT_STYLE} />
         </FField>
       </FRow>
       <FRow>
@@ -92,6 +93,7 @@ export default function DocsPartages() {
   const [shares, setShares] = useState([]);
   const [search, setSearch] = useState('');
   const [filterPerm, setFilterPerm] = useState('');
+  const [filterDept, setFilterDept] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [editShare, setEditShare] = useState(null);
@@ -114,7 +116,8 @@ export default function DocsPartages() {
     const q = search.toLowerCase();
     const matchQ = !q || s.document.toLowerCase().includes(q) || (s.partage_avec || '').toLowerCase().includes(q) || (s.partage_par || '').toLowerCase().includes(q);
     const matchP = !filterPerm || s.permissions === filterPerm;
-    return matchQ && matchP;
+    const matchD = !filterDept || s.departement === filterDept;
+    return matchQ && matchP && matchD;
   });
 
   const total      = shares.length;
@@ -153,7 +156,8 @@ export default function DocsPartages() {
               <option value="">Toutes permissions</option>
               {PERMISSIONS.map(p => <option key={p} value={p}>{p}</option>)}
             </select>
-            <button className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setFilterPerm(''); }}>Réinitialiser</button>
+            <DepartmentFilterSelect value={filterDept} onChange={setFilterDept} style={{ ...SELECT_STYLE, maxWidth: 240, flex: '0 1 240px' }} />
+            <button className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setFilterPerm(''); setFilterDept(''); }}>Réinitialiser</button>
           </div>
         </div>
       )}

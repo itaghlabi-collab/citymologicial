@@ -2,6 +2,7 @@
  * mesDocuments.js — GED Mes documents (document_folders + documents)
  */
 import { getSupabase } from '../../lib/supabase';
+import { DOCUMENT_DEPARTMENTS, normalizeDocumentDepartment } from '../../constants/documentDepartments';
 import {
   uploadDocumentFile,
   getDocumentSignedUrl,
@@ -10,20 +11,7 @@ import {
 const FOLDERS_TABLE = 'document_folders';
 const DOCS_TABLE = 'documents';
 
-export const SYSTEM_DEPARTMENTS = [
-  'COMMERCIAL',
-  'RESSOURCES HUMAINES',
-  'ACHATS',
-  'MARKETING',
-  'EXPLOITATION',
-  'COMPTABILITÉ',
-  'ADMINISTRATION',
-  'SAV',
-  'LOGISTIQUE',
-  'PROJETS',
-  'FINANCE & TRÉSORERIE',
-  'DOCUMENTS GÉNÉRAUX',
-];
+export const SYSTEM_DEPARTMENTS = DOCUMENT_DEPARTMENTS;
 
 function normalizeFolder(row) {
   if (!row) return null;
@@ -138,17 +126,17 @@ export async function listDocuments(folderId = null, { search = '', department =
 
 export async function createFolder({ name, parentId = null, department = null }) {
   const uid = await requireUser();
-  let dept = department;
+  let dept = normalizeDocumentDepartment(department);
   if (parentId && !dept) {
     const parent = await getFolderById(parentId);
-    dept = parent?.department || null;
+    dept = normalizeDocumentDepartment(parent?.department) || null;
   }
   const { data, error } = await getSupabase()
     .from(FOLDERS_TABLE)
     .insert([{
       name: name.trim(),
       parent_id: parentId || null,
-      department: dept,
+      department: dept || null,
       created_by: uid,
       is_system: false,
     }])
@@ -158,15 +146,20 @@ export async function createFolder({ name, parentId = null, department = null })
   return normalizeFolder(data);
 }
 
-export async function renameFolder(id, name) {
+export async function renameFolder(id, name, department) {
   await requireUser();
   const folder = await getFolderById(id);
   if (!folder) throw new Error('Dossier introuvable.');
-  if (folder.is_system) throw new Error('Les dossiers système ne peuvent pas être renommés.');
+  if (folder.is_system) throw new Error('Les dossiers système ne peuvent pas être modifiés.');
+
+  const updates = { name: name.trim() };
+  if (department !== undefined) {
+    updates.department = normalizeDocumentDepartment(department) || null;
+  }
 
   const { data, error } = await getSupabase()
     .from(FOLDERS_TABLE)
-    .update({ name: name.trim() })
+    .update(updates)
     .eq('id', id)
     .select()
     .single();
@@ -204,10 +197,10 @@ export async function softDeleteFolder(id) {
 
 export async function uploadDocument(file, { folderId = null, department = null } = {}) {
   const uid = await requireUser();
-  let dept = department;
+  let dept = normalizeDocumentDepartment(department);
   if (folderId && !dept) {
     const folder = await getFolderById(folderId);
-    dept = folder?.department || null;
+    dept = normalizeDocumentDepartment(folder?.department) || null;
   }
 
   const filePath = await uploadDocumentFile(uid, folderId, file);
@@ -250,7 +243,7 @@ export async function moveDocument(id, folderId) {
   let dept = null;
   if (folderId) {
     const folder = await getFolderById(folderId);
-    dept = folder?.department || null;
+    dept = normalizeDocumentDepartment(folder?.department) || null;
   }
   const { data, error } = await getSupabase()
     .from(DOCS_TABLE)

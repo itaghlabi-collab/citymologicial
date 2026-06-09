@@ -16,7 +16,9 @@ export function formatSupabaseError(error, fallback = 'Une erreur est survenue.'
     if (message.includes('crm_factures')) return 'Ce numéro de facture existe déjà.';
     return 'Cet enregistrement existe déjà (contrainte unique).';
   }
-  if (code === '42501') return 'Accès refusé. Connectez-vous avec un compte Supabase valide.';
+  if (code === '42501') {
+    return 'Accès refusé (RLS). Exécutez supabase/RUN_FINANCE_RLS_FIX.sql dans Supabase SQL Editor.';
+  }
   if (code === '42703' || message.includes('created_by')) {
     return 'Schéma congés incomplet — exécutez supabase/migrations/20260525200000_leaves_rls_super_admin.sql';
   }
@@ -88,6 +90,15 @@ export function formatSupabaseError(error, fallback = 'Une erreur est survenue.'
   }
   if (code === '42P01' || message.includes('internal_appointments')) {
     return 'Table rendez-vous absente — exécutez supabase/migrations/20260526110000_internal_appointments.sql';
+  }
+  if (code === '42P01' || message.includes('finance_transactions')) {
+    return 'Table journal caisse absente — exécutez supabase/RUN_FINANCE_TRESORERIE.sql dans Supabase (SQL Editor).';
+  }
+  if (code === '42P01' || message.includes('cash_monthly_balances')) {
+    return 'Table soldes caisse absente — exécutez supabase/RUN_FINANCE_TRESORERIE.sql dans Supabase (SQL Editor).';
+  }
+  if (code === '42P01' || message.includes('finance_categories')) {
+    return 'Table catégories finance absente — exécutez supabase/RUN_FINANCE_TRESORERIE.sql dans Supabase (SQL Editor).';
   }
   if (code === 'VALIDATION') return message;
   if (message.includes('"type"') && message.includes('crm_factures')) {

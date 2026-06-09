@@ -3120,11 +3120,15 @@ tbody tr:last-child td { border-bottom: none; }
   gap: 2px;
 }
 
-.mes-docs-mobile-only { display: none; }
+.mes-docs-mobile-only { display: none !important; }
 .mes-docs-desktop-only { display: block; }
 
 @media (max-width: 768px) {
-  .mes-docs-mobile-only { display: flex; }
+  .mes-docs-mobile-only {
+    display: flex !important;
+    flex-direction: column;
+    gap: 10px;
+  }
   .mes-docs-desktop-only { display: none !important; }
   .mes-docs-folder-grid {
     grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));

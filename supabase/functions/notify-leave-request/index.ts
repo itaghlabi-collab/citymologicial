@@ -4,7 +4,7 @@
  *
  * Secrets Supabase (Dashboard → Edge Functions → Secrets) :
  *   RESEND_API_KEY      — obligatoire pour envoi réel
- *   LEAVE_NOTIFY_TO     — ex. imanedigitalpro@gmail.com (secret Supabase)
+ *   LEAVE_NOTIFY_TO     — destinataire unique (secret Supabase, ex. selim.moumni@gmail.com)
  *   LEAVE_NOTIFY_FROM   — défaut CITYMO Congés <onboarding@resend.dev>
  *   LEAVE_APP_URL       — lien CTA optionnel (ex. https://app.citymo.ma)
  */
@@ -136,7 +136,7 @@ serve(async (req) => {
       );
     }
 
-    const to = leaveNotifyToRaw?.trim() || '';
+    const to = (leaveNotifyToRaw ?? '').trim();
     const from = Deno.env.get('LEAVE_NOTIFY_FROM') || DEFAULT_FROM;
     const appUrl = Deno.env.get('LEAVE_APP_URL') || '';
     const resendKey = Deno.env.get('RESEND_API_KEY');

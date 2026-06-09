@@ -2,6 +2,9 @@
  * documents/shared.jsx — Composants partagés module Documents ERP CITYMO
  */
 import { X, Plus } from 'lucide-react';
+import { DOCUMENT_DEPARTMENTS, normalizeDocumentDepartment } from '../../constants/documentDepartments';
+
+export { DOCUMENT_DEPARTMENTS, normalizeDocumentDepartment };
 
 export const INPUT_STYLE = {
   width: '100%', padding: '8px 11px', border: '1.5px solid var(--border)',
@@ -92,6 +95,42 @@ export const TYPES_FICHIER = ['PDF', 'Word', 'Excel', 'Image', 'ZIP', 'Video', '
 export const CATEGORIES_DOC = ['Contrat', 'Devis', 'Facture', 'Plan', 'Rapport', 'Photo', 'Juridique', 'RH', 'Comptabilite', 'Autre'];
 export const NIVEAUX_ACCES = ['Privé', 'Équipe', 'Département', 'Entreprise'];
 export const PERMISSIONS = ['Lecture seule', 'Téléchargement', 'Modification', 'Accès complet'];
+
+export function DepartmentSelect({
+  value,
+  onChange,
+  required = false,
+  style,
+  placeholder = 'Sélectionner un département',
+  disabled = false,
+}) {
+  const normalized = normalizeDocumentDepartment(value);
+  return (
+    <select
+      value={normalized}
+      onChange={(e) => onChange(e.target.value)}
+      style={{ ...(style || SELECT_STYLE), ...(disabled ? { background: 'var(--surface-2)', cursor: 'not-allowed' } : {}) }}
+      required={required}
+      disabled={disabled}
+    >
+      <option value="">{placeholder}</option>
+      {DOCUMENT_DEPARTMENTS.map((d) => (
+        <option key={d} value={d}>{d}</option>
+      ))}
+    </select>
+  );
+}
+
+export function DepartmentFilterSelect({ value, onChange, style, allLabel = 'Tous départements' }) {
+  return (
+    <select value={value || ''} onChange={(e) => onChange(e.target.value)} style={style || SELECT_STYLE}>
+      <option value="">{allLabel}</option>
+      {DOCUMENT_DEPARTMENTS.map((d) => (
+        <option key={d} value={d}>{d}</option>
+      ))}
+    </select>
+  );
+}
 
 export function formatBytes(bytes) {
   if (!bytes) return '—';

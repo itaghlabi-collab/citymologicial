@@ -34,6 +34,9 @@ export function pickMindeeValue(field) {
     if (Array.isArray(field.values)) {
       return field.values.map(pickMindeeValue).filter(Boolean).join(' ').trim();
     }
+    if (Array.isArray(field.predictions)) {
+      return field.predictions.map(pickMindeeValue).filter(Boolean).join(' ').trim();
+    }
     if (field.content != null && field.content !== '') {
       return String(field.content).trim();
     }
@@ -99,6 +102,201 @@ function normCIN(raw) {
   const v = (raw || '').replace(/\s/g, '').toUpperCase();
   const m = v.match(/([A-Z]{1,3}\d{4,8})/);
   return m ? m[1] : v;
+}
+
+export function isValidCINNumber(raw) {
+  const v = normCIN(raw);
+  return /^[A-Z]{1,3}\d{5,8}$/.test(v);
+}
+
+function isValidBirthDate(iso) {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return false;
+  const y = parseInt(iso.slice(0, 4), 10);
+  const now = new Date().getFullYear();
+  return y >= 1920 && y <= now;
+}
+
+function isValidExpiryDate(iso) {
+  if (!iso || !/^\d{4}-\d{2}-\d{2}$/.test(iso)) return false;
+  const y = parseInt(iso.slice(0, 4), 10);
+  return y >= 2020 && y <= 2065;
+}
+
+function isValidAddress(raw) {
+  const a = cleanAddressLine(raw);
+  if (!a || a.length < 8 || a.length > 220) return false;
+  if (a.includes('<<')) return false;
+  if (isMrzNoiseLine(a)) return false;
+  if (/^(SEXE|MRZ|CNIE|CARTE|IDENTITE|NATIONALITE|ROYAUME|IDMAR)\b/.test(a)) return false;
+  if (/^[A-Z]{2,24}$/.test(a.replace(/\s/g, '')) && !STREET_HINT_RE.test(a) && !/\d/.test(a)) return false;
+  if (!/\d/.test(a) && !STREET_HINT_RE.test(a) && !MOROCCO_PLACE_RE.test(a)) return false;
+  return true;
+}
+
+function scoreAddress(raw) {
+  const a = cleanAddressLine(raw);
+  if (!isValidAddress(a)) return -1;
+  let score = a.length;
+  if (STREET_HINT_RE.test(a)) score += 20;
+  if (MOROCCO_PLACE_RE.test(a)) score += 12;
+  if (/\d{1,4}\s/.test(a)) score += 8;
+  return score;
+}
+
+function pickBestAddress(candidates) {
+  let best = '';
+  let bestScore = -1;
+  for (let i = 0; i < (candidates || []).length; i++) {
+    const c = candidates[i];
+    if (!c || !String(c).trim()) continue;
+    const s = scoreAddress(c);
+    if (s > bestScore) {
+      bestScore = s;
+      best = cleanAddressLine(c);
+    }
+  }
+  return best;
+}
+
+/** Adresse Mindee verso — nested address + champs plats. */
+function pickMindeeAddressFromFields(f) {
+  if (!f || typeof f !== 'object') return { adresse: '', ville_adresse: '', complement_adresse: '', pays: '' };
+  const nested = mapMindeeAddressFields(f.address);
+  const parts = [];
+  if (nested.adresse) parts.push(nested.adresse);
+
+  const street = pickMindeeValue(
+    f.street || f.address_line_1 || f.address_line1 || f.line1 || f.rue || f.domicile || f.residence,
+  );
+  const city = pickMindeeValue(f.city || f.town || f.ville);
+  const complement = pickMindeeValue(f.complement || f.address_line_2 || f.po_box);
+  if (street && city) {
+    parts.push(street.toUpperCase().includes(city.toUpperCase()) ? street : `${street}, ${city}`);
+  } else if (street) {
+    parts.push(street);
+  } else if (city) {
+    parts.push(city);
+  }
+
+  for (const [key, val] of Object.entries(f)) {
+    if (!/(?:adresse|address|domicile|street|rue|residence|localisation)/i.test(key)) continue;
+    if (/(?:country|pays|nationality|birth|naissance)/i.test(key)) continue;
+    const v = pickMindeeValue(val);
+    if (v && v.length >= 8) parts.push(v);
+  }
+
+  const flat = pickMindeeValue(f.address);
+  if (flat && typeof flat === 'string' && flat.length >= 8 && !flat.includes('fields')) {
+    parts.push(flat);
+  }
+
+  const adresse = pickBestAddress(parts);
+  return {
+    adresse,
+    ville_adresse: nested.ville_adresse || city || '',
+    complement_adresse: nested.complement_adresse || complement || '',
+    pays: nested.pays || pickMindeeValue(f.country || f.pays) || '',
+  };
+}
+
+function logAdresseResolution(trace) {
+  console.info('[OCR CIN] adresse résolution', {
+    raw_mindee: trace.raw_mindee,
+    raw_tesseract: trace.raw_tesseract,
+    adresse_final: trace.adresse_final,
+    source: trace.source,
+  });
+}
+
+/** Priorité adresse : Mindee verso → OCR verso → extracts verso → base. */
+function resolveCINAddress(opts) {
+  const mindeeVersoFields = opts?.mindeeVersoFields || null;
+  const versoText = opts?.versoText || '';
+  const versoExtracts = opts?.versoExtracts || [];
+  const base = opts?.base || emptyCINExtract();
+  const trace = { raw_mindee: null, raw_tesseract: null, adresse_final: '', source: 'none' };
+
+  const candidates = [];
+
+  if (mindeeVersoFields) {
+    const addr = pickMindeeAddressFromFields(normalizeMindeeFieldMap(mindeeVersoFields));
+    trace.raw_mindee = addr.adresse || null;
+    if (addr.adresse) candidates.push({ v: addr.adresse, p: 100 });
+  }
+
+  if (versoText) {
+    const fromVerso = extractVersoAddressFromText(versoText);
+    trace.raw_tesseract = fromVerso || null;
+    if (fromVerso) candidates.push({ v: fromVerso, p: 95 });
+  }
+
+  for (let i = 0; i < versoExtracts.length; i++) {
+    const ex = versoExtracts[i];
+    if (ex?.adresse) candidates.push({ v: ex.adresse, p: 90 - i });
+    if (ex?.ville_adresse && ex?.adresse) {
+      const combo = `${ex.adresse} ${ex.ville_adresse}`.trim();
+      candidates.push({ v: combo, p: 88 - i });
+    }
+  }
+
+  if (base.adresse) candidates.push({ v: base.adresse, p: 70 });
+
+  let best = '';
+  let bestP = -1;
+  let source = 'none';
+  for (let ci = 0; ci < candidates.length; ci++) {
+    const item = candidates[ci];
+    const s = scoreAddress(item.v);
+    if (s < 0) continue;
+    const total = s + (item.p || 0);
+    if (total > bestP) {
+      bestP = total;
+      best = cleanAddressLine(item.v);
+      if (item.p >= 100) source = 'mindee_verso';
+      else if (item.p >= 95) source = 'verso_ocr';
+      else if (item.p >= 80) source = 'verso_extract';
+      else source = 'base_merge';
+    }
+  }
+
+  trace.adresse_final = best || '';
+  trace.source = source;
+  logAdresseResolution(trace);
+
+  const mindeeAddr = mindeeVersoFields
+    ? pickMindeeAddressFromFields(normalizeMindeeFieldMap(mindeeVersoFields))
+    : { ville_adresse: '', complement_adresse: '', pays: '' };
+
+  return {
+    adresse: best,
+    ville_adresse: mindeeAddr.ville_adresse || base.ville_adresse || '',
+    complement_adresse: mindeeAddr.complement_adresse || base.complement_adresse || '',
+    pays: mindeeAddr.pays || base.pays || '',
+    source,
+  };
+}
+
+/** Nettoie les champs incertains / invalides — laisser vide plutôt qu’une mauvaise valeur. */
+export function sanitizeCINExtract(mapped) {
+  const e = { ...emptyCINExtract(), ...(mapped || {}) };
+  const out = { ...e };
+
+  out.numero_cin = isValidCINNumber(e.numero_cin) ? normCIN(e.numero_cin) : '';
+  out.prenom = isValidPersonName(e.prenom, true) ? normalizePrenomValue(e.prenom) : '';
+  out.nom = isValidPersonName(e.nom, false) ? cleanNamePart(e.nom, true) : '';
+  out.date_naissance = isValidBirthDate(normDateISO(e.date_naissance)) ? normDateISO(e.date_naissance) : '';
+  out.date_expiration = isValidExpiryDate(normDateISO(e.date_expiration)) ? normDateISO(e.date_expiration) : '';
+  out.lieu_naissance = (e.lieu_naissance || '').trim();
+  if (out.lieu_naissance && (out.lieu_naissance.length < 2 || /\d{5,}/.test(out.lieu_naissance) || isMrzNoiseLine(out.lieu_naissance))) {
+    out.lieu_naissance = '';
+  }
+  out.adresse = isValidAddress(e.adresse) ? cleanAddressLine(e.adresse) : '';
+  out.ville_adresse = (e.ville_adresse || '').trim();
+  if (out.ville_adresse && (out.ville_adresse.length < 2 || isMrzNoiseLine(out.ville_adresse))) out.ville_adresse = '';
+  out.complement_adresse = (e.complement_adresse || '').trim();
+  out.sexe = normSex(e.sexe);
+  out.nationalite = normNationality(e.nationalite);
+  return out;
 }
 
 /** Ligne d'adresse CNIE — conserve chiffres (cleanNamePart les supprime). */
@@ -236,7 +434,7 @@ export function normalizeMindeeFieldMap(raw) {
       if (val == null) continue;
       const lk = key.toLowerCase();
       const isIdentityKey = /^(given|surname|first|last|family|nom|prenom|mrz|document|id_|cin|date|dob|birth|expir|sex|gender|national|name|address)/i.test(key)
-        || /(?:birth|naissance|expir|expiry|valid|document|surname|given)/i.test(key);
+        || /(?:birth|naissance|expir|expiry|valid|document|surname|given|adresse|domicile|street|rue|residence)/i.test(key);
       if (isIdentityKey) {
         if (typeof val === 'string' || typeof val === 'number') {
           out[key] = { value: String(val) };
@@ -294,7 +492,7 @@ export function mapMindeeFields(fields, side = 'recto') {
   if (!fields || typeof fields !== 'object') return emptyCINExtract();
 
   const f = normalizeMindeeFieldMap(fields);
-  const addr = mapMindeeAddressFields(f.address);
+  const addr = side === 'verso' ? pickMindeeAddressFromFields(f) : mapMindeeAddressFields(f.address);
 
   const docNum = pickMindeeValue(
     f.document_number || f.id_number || f.document_id || f.cin_number || f.cnie_number,
@@ -302,12 +500,7 @@ export function mapMindeeFields(fields, side = 'recto') {
   let surnames = pickMindeeValue(
     f.surnames || f.surname || f.last_name || f.last_names || f.family_name || f.nom,
   );
-  let given = pickMindeeValue(
-    f.given_names || f.given_name || f.first_name || f.first_names || f.prenom,
-  ) || givenFromFullName(
-    pickMindeeValue(f.full_name || f.complete_name || f.name || f.full_names),
-    surnames,
-  );
+  let given = pickMindeeGivenNames(f, surnames);
   let dob = pickMindeeValue(
     f.date_of_birth || f.birth_date || f.date_naissance || f.birthdate || f.dob,
   );
@@ -330,7 +523,8 @@ export function mapMindeeFields(fields, side = 'recto') {
       }
     }
   }
-  if (!given) {
+  // Recto : pas de MRZ pour le prénom (MRZ = verso ; évite faux positifs << sur recto)
+  if (!given && side !== 'recto') {
     var mrzTemp = emptyCINExtract();
     var mrzBlob = [
       pickMindeeValue(f.mrz_line_1 || f.mrz_line1),
@@ -339,7 +533,7 @@ export function mapMindeeFields(fields, side = 'recto') {
       pickMindeeValue(f.mrz),
     ].filter(Boolean).join('\n');
     parseMrzLines(mrzBlob, mrzTemp);
-    given = mrzTemp.prenom || '';
+    given = pickPrenomAvoidingNom([mrzTemp.prenom], surnames) || '';
     if (!surnames && mrzTemp.nom) surnames = mrzTemp.nom;
   }
   if (!surnames) {
@@ -356,40 +550,36 @@ export function mapMindeeFields(fields, side = 'recto') {
   for (const [key, val] of Object.entries(f)) {
     if (!given && /given|first|prenom|forename|christian/i.test(key)) {
       const v = pickMindeeValue(val);
-      if (v && isValidPersonName(v, true)) given = v;
+      if (v && isValidPersonName(v, true) && !namesEqual(v, surnames)) given = v;
     }
-    if (/mrz/i.test(key)) {
+    if (/mrz/i.test(key) && side !== 'recto') {
       const blob = pickMindeeValue(val);
       if (!blob) continue;
       const mrzExtra = emptyCINExtract();
       parseMrzLines(blob, mrzExtra);
-      if (!given && mrzExtra.prenom) given = mrzExtra.prenom;
+      if (!given && mrzExtra.prenom) {
+        given = pickPrenomAvoidingNom([mrzExtra.prenom], surnames) || '';
+      }
       if (!surnames && mrzExtra.nom) surnames = mrzExtra.nom;
     }
   }
 
   given = normalizePrenomValue(given);
+  if (surnames && namesEqual(given, surnames)) given = '';
   surnames = cleanNamePart(surnames, true);
   const pob = pickMindeeValue(f.place_of_birth || f.birth_place || f.lieu_naissance);
   const sexRaw = pickMindeeValue(f.sex || f.gender || f.sexe);
   const natRaw = pickMindeeValue(f.nationality || f.nationalite);
 
   if (side === 'verso') {
-    return {
+    return sanitizeCINExtract({
       ...emptyCINExtract(),
       adresse: addr.adresse,
       ville_adresse: addr.ville_adresse,
       complement_adresse: addr.complement_adresse,
       pays: addr.pays,
-      prenom: given,
-      nom: surnames.toUpperCase(),
-      numero_cin: normCIN(docNum),
-      date_naissance: normDateISO(dob),
-      date_expiration: normDateISO(doe),
-      sexe: normSex(sexRaw),
-      nationalite: normNationality(natRaw),
       confidence: pickMindeeConfidence(f.address),
-    };
+    });
   }
 
   const confidences = [
@@ -398,7 +588,7 @@ export function mapMindeeFields(fields, side = 'recto') {
     pickMindeeConfidence(f.surnames || f.surname),
   ].filter(Boolean);
 
-  return {
+  return sanitizeCINExtract({
     numero_cin: normCIN(docNum),
     prenom: given,
     nom: surnames.toUpperCase(),
@@ -414,7 +604,7 @@ export function mapMindeeFields(fields, side = 'recto') {
     confidence: confidences.length
       ? confidences.reduce((a, b) => a + b, 0) / confidences.length
       : 0,
-  };
+  });
 }
 
 /** Fusion recto (identité) + verso (adresse + MRZ si identité recto incomplète). */
@@ -422,18 +612,22 @@ export function mergeCINRectoVerso(recto, verso) {
   const r = { ...emptyCINExtract(), ...(recto || {}) };
   const v = { ...emptyCINExtract(), ...(verso || {}) };
 
-  let adresse = (v.adresse || r.adresse || '').trim();
   const complement = v.complement_adresse || r.complement_adresse || '';
+  let adresse = pickBestAddress([v.adresse, r.adresse]);
   if (complement && adresse && !adresse.includes(complement)) {
     adresse = `${adresse} ${complement}`.trim();
   } else if (complement && !adresse) {
-    adresse = complement;
+    adresse = pickBestAddress([complement]) || complement;
   }
 
-  return {
-    numero_cin: normCIN(r.numero_cin || v.numero_cin || ''),
-    prenom: pickBestPersonName([v.prenom, r.prenom], true),
-    nom: pickBestPersonName([v.nom, r.nom], false),
+  const cinCand = [r.numero_cin, v.numero_cin].map(normCIN).filter(isValidCINNumber);
+
+  const mergedNom = pickBestPersonName([r.nom, v.nom], false);
+
+  return sanitizeCINExtract({
+    numero_cin: cinCand[0] || '',
+    prenom: pickPrenomAvoidingNom([r.prenom], mergedNom),
+    nom: mergedNom,
     date_naissance: r.date_naissance || v.date_naissance || '',
     lieu_naissance: r.lieu_naissance || v.lieu_naissance || '',
     sexe: r.sexe || v.sexe || '',
@@ -444,7 +638,7 @@ export function mergeCINRectoVerso(recto, verso) {
     complement_adresse: complement,
     pays: v.pays || r.pays || '',
     confidence: Math.max(r.confidence || 0, v.confidence || 0),
-  };
+  });
 }
 
 function displayNationality(code) {
@@ -455,16 +649,16 @@ function displayNationality(code) {
 
 /** Modèle fusionné → champs formulaire Ouvrier (noms exacts EMPTY_FORM) */
 export function mapToWorkerForm(cin) {
-  const c = { ...emptyCINExtract(), ...(cin || {}) };
+  const c = sanitizeCINExtract(cin);
   const lieu = (c.lieu_naissance || '').trim();
 
   return {
     cin: c.numero_cin || '',
-    prenom: normalizePrenomValue((c.prenom || '').trim()),
-    nom: (c.nom || '').trim().toUpperCase(),
+    prenom: c.prenom || '',
+    nom: c.nom || '',
     date_naissance: c.date_naissance || '',
     ville_naissance: lieu,
-    adresse: (c.adresse || '').trim(),
+    adresse: c.adresse || '',
     date_expiration: c.date_expiration || '',
     sexe: c.sexe || '',
     nationalite: displayNationality(c.nationalite),
@@ -663,7 +857,145 @@ function givenFromFullName(full, surname) {
   return normalizePrenomValue(parts[0]);
 }
 
-function isValidPersonName(raw, isPrenom) {
+function namesEqual(a, b) {
+  if (!a || !b) return false;
+  return String(a).trim().toUpperCase() === String(b).trim().toUpperCase();
+}
+
+function isPrenomDebugEnabled() {
+  try {
+    if (import.meta.env.VITE_OCR_DEBUG === 'true') return true;
+    if (typeof localStorage !== 'undefined' && localStorage.getItem('citymo_ocr_debug') === '1') return true;
+    if (typeof localStorage !== 'undefined' && localStorage.getItem('citymo_prenom_debug') === '1') return true;
+  } catch (_) { /* ignore */ }
+  return false;
+}
+
+function logPrenomResolution(trace) {
+  var payload = {
+    raw_given_names: trace.raw_given_names_recto,
+    raw_given_name: trace.raw_given_name_recto,
+    raw_first_name: trace.raw_first_name_recto,
+    raw_surname: trace.raw_surname_recto,
+    raw_names: trace.raw_names_recto,
+    raw_mrz: trace.raw_mrz,
+    prenom_final: trace.prenom_final,
+    source: trace.source,
+  };
+  console.info('[OCR CIN] prénom résolution', payload);
+  if (isPrenomDebugEnabled()) console.info('[OCR CIN] prénom résolution (debug)', trace);
+}
+
+/** Retire les tokens identiques au nom de famille dans une chaîne prénom. */
+function stripSurnameFromGiven(given, surname) {
+  var g = normalizePrenomValue(given);
+  var sur = cleanNamePart(surname, true);
+  if (!g) return '';
+  if (!sur) return g;
+  if (namesEqual(g, sur)) return '';
+  var surTokens = sur.split(/\s+/).filter(Boolean);
+  var gTokens = g.split(/\s+/).filter(Boolean);
+  var kept = gTokens.filter(function(t) {
+    return !surTokens.some(function(st) { return namesEqual(t, st); });
+  });
+  if (!kept.length) return '';
+  return normalizePrenomValue(kept.join(' '));
+}
+
+function prenomFromNamesField(namesRaw, surname) {
+  var names = (namesRaw || '').trim();
+  if (!names) return '';
+  if (names.includes('<<')) {
+    var tmp = emptyCINExtract();
+    parseMrzLines(names, tmp);
+    return pickPrenomAvoidingNom([tmp.prenom], surname) || '';
+  }
+  return stripSurnameFromGiven(names, surname);
+}
+
+/** Prénom depuis libellés CNIE recto (PRENOM / Prénom) — sans MRZ. */
+function extractPrenomFromRectoLabels(text, knownNom) {
+  if (!text || String(text).trim().length < 4) return '';
+  var out = emptyCINExtract();
+  parseMoroccanNameLabels(text, out);
+  return pickPrenomAvoidingNom([out.prenom], knownNom) || '';
+}
+
+/** Champs Mindee « prénom » uniquement — jamais surname / last_name. */
+function pickMindeeGivenNames(f, knownSurname) {
+  if (!f || typeof f !== 'object') return '';
+  var sur = cleanNamePart(
+    knownSurname || pickMindeeValue(f.surnames || f.surname || f.last_name || f.family_name),
+    true,
+  );
+
+  var sources = [
+    pickMindeeValue(f.given_names),
+    pickMindeeValue(f.given_name),
+    pickMindeeValue(f.first_name),
+    pickMindeeValue(f.first_names),
+    pickMindeeValue(f.id_first_name),
+    pickMindeeValue(f.id_given_names),
+    pickMindeeValue(f.prenom),
+    prenomFromNamesField(pickMindeeValue(f.names), sur),
+    pickMindeeValue(f.forenames),
+  ];
+
+  for (var si = 0; si < sources.length; si++) {
+    var val = sources[si];
+    if (!val) continue;
+    var g = stripSurnameFromGiven(val, sur);
+    if (!g || !isValidPersonName(g, true)) continue;
+    if (sur && namesEqual(g, sur)) continue;
+    return g;
+  }
+
+  var full = pickMindeeValue(f.full_name || f.complete_name || f.name);
+  if (full && sur) {
+    var fromFull = givenFromFullName(full, sur);
+    fromFull = stripSurnameFromGiven(fromFull, sur);
+    if (fromFull && isValidPersonName(fromFull, true) && !namesEqual(fromFull, sur)) {
+      return fromFull;
+    }
+  }
+  return '';
+}
+
+function mindeePrenomRawSnapshot(fields) {
+  if (!fields || typeof fields !== 'object') return null;
+  var f = normalizeMindeeFieldMap(fields);
+  var mrzParts = [
+    pickMindeeValue(f.mrz_line_1 || f.mrz_line1),
+    pickMindeeValue(f.mrz_line_2 || f.mrz_line2),
+    pickMindeeValue(f.mrz_line_3 || f.mrz_line3),
+    pickMindeeValue(f.mrz),
+  ].filter(Boolean);
+  return {
+    raw_given_names: pickMindeeValue(f.given_names) || null,
+    raw_given_name: pickMindeeValue(f.given_name) || null,
+    raw_first_name: pickMindeeValue(f.first_name) || null,
+    raw_surname: pickMindeeValue(f.surnames || f.surname || f.last_name) || null,
+    raw_surname_recto: pickMindeeValue(f.surnames || f.surname || f.last_name) || null,
+    raw_names: pickMindeeValue(f.names || f.name) || null,
+    raw_mrz: mrzParts.length ? mrzParts.join(' | ') : null,
+  };
+}
+
+function pickPrenomAvoidingNom(candidates, knownNom) {
+  var nomUp = (knownNom || '').trim().toUpperCase();
+  var filtered = [];
+  for (var i = 0; i < (candidates || []).length; i++) {
+    var c = candidates[i];
+    if (!c || !String(c).trim()) continue;
+    var p = normalizePrenomValue(c);
+    if (!isValidPersonName(p, true)) continue;
+    if (nomUp && namesEqual(p, nomUp)) continue;
+    filtered.push(p);
+  }
+  return pickBestPersonName(filtered, true);
+}
+
+export function isValidPersonName(raw, isPrenom) {
   var v = cleanNamePart(raw, !isPrenom);
   if (!v || v.length < 2 || v.length > 40) return false;
   if (isNameLabelLine(v)) return false;
@@ -758,43 +1090,132 @@ export function resolveCINIdentity(opts) {
   var extracts = (opts?.extracts || []).filter(Boolean);
   var base = { ...emptyCINExtract(), ...(opts?.base || {}) };
   var combinedText = opts?.combinedText || '';
+  var mindeeRectoFields = opts?.mindeeRectoFields || null;
+  var mindeeVersoFields = opts?.mindeeVersoFields || null;
+
+  var mindeeRectoActive = opts?.mindeeRectoActive !== false;
+  var rectoSnap = mindeePrenomRawSnapshot(mindeeRectoFields);
+  var surMindee = rectoSnap ? cleanNamePart(rectoSnap.raw_surname_recto || rectoSnap.raw_surname, true) : '';
 
   var mrz = extractMrzIdentity(combinedText);
   var fromText = extractIdentityFromText(combinedText);
   var dates = extractDatesFromText(combinedText);
 
   var nomCandidates = [];
-  var prenomCandidates = [];
 
-  function pushNames(e, priority) {
-    if (!e) return;
-    if (e.nom) nomCandidates.push({ v: e.nom, p: priority });
-    if (e.prenom) prenomCandidates.push({ v: e.prenom, p: priority });
+  function pushNom(e, priority) {
+    if (!e || !e.nom) return;
+    nomCandidates.push({ v: e.nom, p: priority });
   }
 
-  pushNames(mrz, 100);
-  pushNames(fromText, 90);
+  pushNom(mrz, 100);
+  pushNom(fromText, 90);
   extracts.forEach(function(e, i) {
-    var p = 80 - i;
-    pushNames(e, p);
+    pushNom(e, 90 - i);
   });
-  pushNames(base, 70);
+  pushNom(base, 85);
 
-  function pickWeighted(list, isPrenom) {
+  function pickWeightedNom(list) {
     var best = '';
     var bestScore = -1;
     for (var i = 0; i < list.length; i++) {
       var item = list[i];
-      var nameScore = scorePersonName(item.v, isPrenom);
+      var nameScore = scorePersonName(item.v, false);
       if (nameScore < 0) continue;
       var total = nameScore + (item.p || 0);
       if (total > bestScore) {
         bestScore = total;
-        best = isPrenom ? normalizePrenomValue(item.v) : cleanNamePart(item.v, true);
+        best = cleanNamePart(item.v, true);
       }
     }
     return best;
   }
+
+  var nom = pickWeightedNom(nomCandidates);
+  if (surMindee && isValidPersonName(surMindee, false)) {
+    nom = surMindee;
+  } else if (!mindeeRectoActive && isValidPersonName(mrz.nom, false)) {
+    nom = cleanNamePart(mrz.nom, true);
+  }
+
+  var prenomTrace = {
+    raw_given_names_recto: null,
+    raw_given_name_recto: null,
+    raw_first_name_recto: null,
+    raw_surname_recto: null,
+    raw_names_recto: null,
+    raw_mrz: null,
+    prenom_final: '',
+    source: 'none',
+  };
+
+  if (rectoSnap) {
+    prenomTrace.raw_given_names_recto = rectoSnap.raw_given_names;
+    prenomTrace.raw_given_name_recto = rectoSnap.raw_given_name;
+    prenomTrace.raw_first_name_recto = rectoSnap.raw_first_name;
+    prenomTrace.raw_surname_recto = rectoSnap.raw_surname_recto || rectoSnap.raw_surname;
+    prenomTrace.raw_names_recto = rectoSnap.raw_names;
+  }
+
+  var nomRef = surMindee || nom;
+  var rectoText = opts?.rectoText || '';
+  var rectoExtracts = opts?.rectoExtracts || extracts.slice(0, 3);
+  var prenom = '';
+
+  function trySetPrenom(candidate, source) {
+    var p = pickPrenomAvoidingNom([candidate], nomRef);
+    if (!p) return false;
+    prenom = p;
+    prenomTrace.source = source;
+    return true;
+  }
+
+  if (mindeeRectoActive && mindeeRectoFields) {
+    var fromRectoMindee = pickMindeeGivenNames(normalizeMindeeFieldMap(mindeeRectoFields), surMindee || nom);
+    trySetPrenom(fromRectoMindee, 'mindee_recto_explicit');
+  }
+
+  if (!prenom && rectoText) {
+    var fromLabels = extractPrenomFromRectoLabels(rectoText, nomRef);
+    trySetPrenom(fromLabels, 'recto_label');
+  }
+
+  if (!prenom && base.prenom) {
+    trySetPrenom(stripSurnameFromGiven(base.prenom, nomRef), 'base_merge_recto');
+  }
+
+  if (!prenom) {
+    for (var ri = 0; ri < rectoExtracts.length; ri++) {
+      var ex = rectoExtracts[ri];
+      if (trySetPrenom(stripSurnameFromGiven(ex?.prenom, nomRef), 'recto_extract_' + ri)) break;
+    }
+  }
+
+  if (!prenom && mindeeVersoFields) {
+    var versoSnap = mindeePrenomRawSnapshot(mindeeVersoFields);
+    if (versoSnap?.raw_mrz) prenomTrace.raw_mrz = versoSnap.raw_mrz;
+    var mrzOnly = emptyCINExtract();
+    parseMrzLines(versoSnap?.raw_mrz || '', mrzOnly);
+    trySetPrenom(mrzOnly.prenom, 'mrz_verso');
+    if (!prenomTrace.raw_mrz && versoSnap?.raw_mrz) prenomTrace.raw_mrz = versoSnap.raw_mrz;
+  }
+
+  if (!prenom && !mindeeRectoActive && isValidPersonName(mrz.prenom, true)) {
+    if (trySetPrenom(mrz.prenom, 'mrz_combined')) {
+      prenomTrace.raw_mrz = prenomTrace.raw_mrz || ('prenom=' + mrz.prenom + ';nom=' + (mrz.nom || ''));
+    }
+  }
+
+  if (!prenom && !mindeeRectoActive) {
+    var fromLabelText = extractPrenomFromRectoLabels(combinedText, nomRef);
+    if (!fromLabelText && isValidPersonName(fromText.prenom, true)) {
+      fromLabelText = pickPrenomAvoidingNom([stripSurnameFromGiven(fromText.prenom, nomRef)], nomRef);
+    }
+    trySetPrenom(fromLabelText, 'ocr_text');
+  }
+
+  prenomTrace.prenom_final = prenom || '';
+  logPrenomResolution(prenomTrace);
 
   var MRZ_FIRST_KEYS = ['numero_cin', 'date_naissance', 'date_expiration', 'sexe', 'nationalite'];
 
@@ -819,19 +1240,17 @@ export function resolveCINIdentity(opts) {
     return '';
   }
 
-  // MRZ = source la plus fiable (nom et prénom pris séparément si besoin)
-  var nom = pickWeighted(nomCandidates, false);
-  var prenom = pickWeighted(prenomCandidates, true);
-  if (isValidPersonName(mrz.nom, false)) nom = cleanNamePart(mrz.nom, true);
-  if (isValidPersonName(mrz.prenom, true)) prenom = normalizePrenomValue(mrz.prenom);
+  var versoText = opts?.versoText || '';
+  var versoExtracts = opts?.versoExtracts || extracts.slice(3, 6);
+  var mindeeVersoActive = opts?.mindeeVersoActive !== false;
+  var addrResolved = resolveCINAddress({
+    mindeeVersoFields: mindeeVersoActive ? mindeeVersoFields : null,
+    versoText,
+    versoExtracts,
+    base,
+  });
 
-  var adresse = pickField('adresse');
-  if (!adresse || adresse.length < 8) {
-    var fromVersoText = extractVersoAddressFromText(combinedText);
-    if (fromVersoText) adresse = fromVersoText;
-  }
-
-  return {
+  const resolved = sanitizeCINExtract({
     ...base,
     numero_cin: normCIN(pickField('numero_cin')),
     nom,
@@ -841,11 +1260,14 @@ export function resolveCINIdentity(opts) {
     sexe: pickField('sexe'),
     nationalite: pickField('nationalite'),
     lieu_naissance: pickField('lieu_naissance'),
-    adresse,
-    ville_adresse: pickField('ville_adresse'),
-    complement_adresse: pickField('complement_adresse'),
-    pays: pickField('pays'),
-  };
+    adresse: addrResolved.adresse,
+    ville_adresse: addrResolved.ville_adresse,
+    complement_adresse: addrResolved.complement_adresse,
+    pays: addrResolved.pays,
+  });
+  resolved._prenom_resolution_source = prenomTrace.source;
+  resolved._adresse_resolution_source = addrResolved.source || 'none';
+  return resolved;
 }
 
 /** @deprecated — utiliser resolveCINIdentity */
@@ -858,11 +1280,11 @@ export function finalizeCINIdentity(merged, sources) {
 }
 
 export function identityFieldsComplete(extract) {
-  var e = { ...emptyCINExtract(), ...(extract || {}) };
+  var e = sanitizeCINExtract(extract);
   return Boolean(
     isValidPersonName(e.nom, false)
     && isValidPersonName(e.prenom, true)
-    && e.numero_cin && String(e.numero_cin).trim(),
+    && isValidCINNumber(e.numero_cin),
   );
 }
 
@@ -1183,21 +1605,14 @@ export function mapTesseractText(text, side = 'recto') {
   if (side === 'verso') {
     const parsedAddr = extractVersoAddressFromText(raw);
     const adresse = (parsedAddr || out.adresse || '').trim();
-    return {
+    return sanitizeCINExtract({
       ...emptyCINExtract(),
       adresse,
       ville_adresse: (out.ville_adresse || '').trim(),
       complement_adresse: out.complement_adresse || '',
-      numero_cin: out.numero_cin || '',
-      prenom: out.prenom || '',
-      nom: out.nom || '',
-      date_naissance: out.date_naissance || '',
-      date_expiration: out.date_expiration || '',
-      sexe: out.sexe || '',
-      nationalite: out.nationalite || '',
-    };
+    });
   }
-  return out;
+  return sanitizeCINExtract(out);
 }
 
 export function mergeSideExtracts(primary, secondary, side = 'recto') {
@@ -1208,27 +1623,26 @@ export function mergeSideExtracts(primary, secondary, side = 'recto') {
     if (s[k] && String(s[k]).trim()) return s[k];
     return '';
   };
-  const pickName = (isPrenom) => pickBestPersonName([p[isPrenom ? 'prenom' : 'nom'], s[isPrenom ? 'prenom' : 'nom']], isPrenom);
-  const nom = pickName(false);
-  const prenom = pickName(true);
+  function pickNamePreferPrimary(isPrenom) {
+    var pVal = p[isPrenom ? 'prenom' : 'nom'];
+    if (isPrenom && isValidPersonName(pVal, true)) return normalizePrenomValue(pVal);
+    if (!isPrenom && isValidPersonName(pVal, false)) return cleanNamePart(pVal, true);
+    return pickBestPersonName([s[isPrenom ? 'prenom' : 'nom'], pVal], isPrenom);
+  }
+  const nom = pickNamePreferPrimary(false);
+  const prenom = pickNamePreferPrimary(true);
   if (side === 'verso') {
-    return {
+    const adresse = pickBestAddress([p.adresse, s.adresse]);
+    return sanitizeCINExtract({
       ...emptyCINExtract(),
-      adresse: pick('adresse'),
+      adresse,
       ville_adresse: pick('ville_adresse'),
       complement_adresse: pick('complement_adresse'),
       pays: pick('pays'),
-      numero_cin: normCIN(pick('numero_cin')),
-      prenom,
-      nom,
-      date_naissance: pick('date_naissance'),
-      date_expiration: pick('date_expiration'),
-      sexe: pick('sexe'),
-      nationalite: pick('nationalite'),
-    };
+    });
   }
-  return {
-    numero_cin: normCIN(pick('numero_cin')),
+  return sanitizeCINExtract({
+    numero_cin: pick('numero_cin'),
     prenom,
     nom,
     date_naissance: pick('date_naissance'),
@@ -1237,7 +1651,7 @@ export function mergeSideExtracts(primary, secondary, side = 'recto') {
     sexe: pick('sexe'),
     nationalite: pick('nationalite'),
     confidence: Math.max(p.confidence || 0, s.confidence || 0),
-  };
+  });
 }
 
 export function parseMRZFromText() {

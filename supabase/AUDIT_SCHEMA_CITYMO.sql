@@ -16,7 +16,11 @@ WITH expected AS (
     'crm_devis', 'crm_devis_lignes', 'crm_factures', 'crm_facture_lignes', 'crm_facture_paiements',
     'delivery_notes', 'delivery_note_items',
     'vehicles', 'vehicle_intervention_requests', 'vehicle_intervention_history',
-    'projects', 'project_documents', 'sav_requests', 'sav_reports'
+    'projects', 'project_documents', 'sav_requests', 'sav_reports',
+    'finance_categories', 'finance_charges', 'finance_transactions', 'cash_monthly_balances', 'payment_orders',
+    'achat_suppliers', 'achat_purchase_requests', 'achat_purchase_orders',
+    'stock_categories', 'stock_articles', 'stock_warehouses', 'stock_movements',
+    'ged_folders', 'ged_documents', 'ged_shares', 'ged_public_links'
   ]) AS table_name
 )
 SELECT
