@@ -40,6 +40,16 @@ export async function getCashMonthlyBalance(annee, mois) {
   return data ? normalizeBalance(data) : null;
 }
 
+export async function listCashMonthlyBalancesForYear(annee) {
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .select('*')
+    .eq('annee', annee)
+    .order('mois', { ascending: true });
+  if (error) throw error;
+  return (data || []).map(normalizeBalance);
+}
+
 export async function upsertCashMonthlyBalance(form) {
   const uid = await requireSupabaseUserId();
   const existing = await getCashMonthlyBalance(form.annee, form.mois);

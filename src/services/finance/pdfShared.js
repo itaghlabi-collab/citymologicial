@@ -14,6 +14,8 @@ export const FINANCE_COMPANY = {
   address: '228 Bd Mohammed V, Casablanca 20000',
   phone: 'Tél : +212 52 231 0043',
   email: 'contact@citymo.ma',
+  rc: null,
+  ice: null,
 };
 
 async function loadImage(url) {
@@ -37,9 +39,14 @@ function imageFit(nw, nh, maxW, maxH) {
   return { w: nw * ratio, h: nh * ratio };
 }
 
+/** Charge le logo CITYMO (PNG) pour les exports PDF. */
+export async function loadCompanyLogo() {
+  return loadImage(LOGO_URL);
+}
+
 export async function createFinancePdf(title) {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
-  const logo = await loadImage(LOGO_URL);
+  const logo = await loadCompanyLogo();
   if (logo) {
     const size = await new Promise((resolve) => {
       const img = new Image();
@@ -66,9 +73,15 @@ export function addFinanceFooter(doc, pageNum) {
   doc.text(`Page ${pageNum}`, 196, y, { align: 'right' });
 }
 
+/** Format monétaire MAD — espaces milliers classiques, virgule décimale (compatible jsPDF). */
 export function formatPdfMAD(n) {
   const num = Number(n) || 0;
-  return num.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' MAD';
+  const sign = num < 0 ? '- ' : '';
+  const abs = Math.abs(num);
+  const fixed = abs.toFixed(2);
+  const [intPart, decPart] = fixed.split('.');
+  const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  return `${sign}${grouped},${decPart} MAD`;
 }
 
 export { TEXT, MUTED, RED, BORDER };

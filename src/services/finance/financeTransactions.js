@@ -78,10 +78,18 @@ export async function listFinanceTransactions({ year, month } = {}) {
     const endYear = month === 12 ? year + 1 : year;
     const end = `${endYear}-${String(endMonth).padStart(2, '0')}-01`;
     q = q.gte('date_operation', start).lt('date_operation', end);
+  } else if (year && !month) {
+    const start = `${year}-01-01`;
+    const end = `${year + 1}-01-01`;
+    q = q.gte('date_operation', start).lt('date_operation', end);
   }
   const { data, error } = await q;
   if (error) throw error;
   return (data || []).map(normalizeTransaction);
+}
+
+export async function listFinanceTransactionsForYear(year) {
+  return listFinanceTransactions({ year });
 }
 
 export async function createFinanceTransaction(form) {
