@@ -53,5 +53,9 @@ export async function diagnoseFinanceAccess() {
     result.error = err?.message || String(err);
   }
 
+  if (import.meta.env.DEV || result.error || result.categoriesCount === 0) {
+    console.info('[CITYMO Finance] Supabase diagnostic', result);
+  }
+
   return result;
 }

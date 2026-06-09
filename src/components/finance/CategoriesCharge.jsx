@@ -2,10 +2,9 @@
  * CategoriesCharge.jsx — Gestion des catégories de charges ERP CITYMO
  * Backend-ready / database-ready
  */
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback } from 'react';
 import { Tag, Plus, Edit2, Trash2, Archive, ToggleLeft, Search, Filter, Download, Loader2, RefreshCw } from 'lucide-react';
 import { useChargeCategories } from '../../hooks/useChargeCategories';
-import { diagnoseFinanceAccess } from '../../services/finance/financeDiagnostics';
 import {
   INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE,
   STATUTS_CAT, BADGE_STATUT_CAT,
@@ -78,11 +77,6 @@ export default function CategoriesCharge() {
   const [showFilters, setShowFilters] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [editCat, setEditCat] = useState(null);
-  const [diag, setDiag] = useState(null);
-
-  useEffect(() => {
-    diagnoseFinanceAccess().then(setDiag);
-  }, [loading, cats.length, error]);
 
   const handleSave = useCallback(async (data) => {
     const res = await save(data, editCat?.id);
@@ -129,17 +123,6 @@ export default function CategoriesCharge() {
       )}
       {error && (
         <div className="card" style={{ marginBottom: 12, padding: 12, color: 'var(--red)', fontSize: '0.85rem' }}>{error}</div>
-      )}
-      {diag && (
-        <div className="card" style={{ marginBottom: 12, padding: 12, fontSize: '0.82rem', color: 'var(--text-2)', lineHeight: 1.5 }}>
-          <strong style={{ color: 'var(--red)' }}>Diagnostic Supabase</strong>
-          <div>URL : {diag.supabaseUrl}</div>
-          <div>Session : {diag.hasSession ? `OK (${diag.userEmail || 'utilisateur'})` : 'NON connecté'}</div>
-          <div>Catégories lues par l&apos;app : {diag.categoriesCount ?? '—'}</div>
-          {diag.transactionsCount != null && <div>Transactions lues : {diag.transactionsCount}</div>}
-          {diag.error && <div style={{ color: 'var(--red)' }}>Erreur : {diag.error}</div>}
-          {diag.hint && <div style={{ marginTop: 6 }}>{diag.hint}</div>}
-        </div>
       )}
       {/* Header */}
       <div className="page-header flex-between" style={{ flexWrap: 'wrap', gap: 10 }}>
