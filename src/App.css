@@ -3065,6 +3065,72 @@ tbody tr:last-child td { border-bottom: none; }
   }
 }
 
+/* Mes documents — grille dossiers + responsive fichiers */
+.mes-docs-folder-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+  gap: 12px;
+}
+
+.mes-docs-folder-card {
+  position: relative;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  padding: 14px 12px;
+  background: var(--surface);
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+  min-height: 110px;
+}
+
+.mes-docs-folder-card:hover {
+  border-color: var(--red);
+  box-shadow: var(--shadow-sm);
+}
+
+.mes-docs-folder-icon {
+  color: var(--red);
+  margin-bottom: 8px;
+}
+
+.mes-docs-folder-name {
+  font-weight: 700;
+  font-size: 0.84rem;
+  line-height: 1.3;
+  word-break: break-word;
+}
+
+.mes-docs-folder-meta {
+  font-size: 0.7rem;
+  color: var(--text-3);
+  margin-top: 4px;
+}
+
+.mes-docs-folder-count {
+  font-size: 0.68rem;
+  color: var(--text-3);
+  margin-top: 6px;
+}
+
+.mes-docs-folder-actions {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: flex;
+  gap: 2px;
+}
+
+.mes-docs-mobile-only { display: none; }
+.mes-docs-desktop-only { display: block; }
+
+@media (max-width: 768px) {
+  .mes-docs-mobile-only { display: flex; }
+  .mes-docs-desktop-only { display: none !important; }
+  .mes-docs-folder-grid {
+    grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  }
+}
+
 /* Mobile: table-wrap label widths for Documents */
 @media (max-width: 768px) {
   .table-wrap tbody td[data-label="Catégorie"]::before,
