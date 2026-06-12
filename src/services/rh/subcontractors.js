@@ -7,6 +7,7 @@ const SUB_TABLE = 'subcontractors';
 const ASSIGN_TABLE = 'subcontractor_project_assignments';
 const SERVICE_TABLE = 'subcontractor_services';
 const PAYMENT_TABLE = 'subcontractor_payments';
+const ADJ_TABLE = 'subcontractor_project_adjustments';
 const DOC_TABLE = 'subcontractor_documents';
 const BALANCE_VIEW = 'subcontractor_project_balances';
 
@@ -106,13 +107,19 @@ export function normalizePayment(row) {
   if (!row) return null;
   const qty = Number(row.quantity) || 0;
   const unitPrice = Number(row.unit_price) || 0;
-  const amount = Number(row.amount) || round2(qty * unitPrice);
+  const grossAmount = Number(row.gross_amount) || round2(qty * unitPrice) || Number(row.amount) || 0;
+  const avances = Number(row.avances) || 0;
+  const retenues = Number(row.retenues) || 0;
+  const amount = Number(row.amount) || round2(Math.max(0, grossAmount - avances - retenues));
   return {
     id: row.id,
     subcontractorId: row.subcontractor_id,
     projectId: row.project_id ? String(row.project_id) : '',
     assignmentId: row.assignment_id,
     paymentDate: row.payment_date || '',
+    grossAmount,
+    avances,
+    retenues,
     amount,
     paymentType: row.payment_type || '',
     designation: row.designation || '',
@@ -203,12 +210,15 @@ function toServiceRow(form, subcontractorId) {
 
 function toPaymentRow(form, subcontractorId) {
   const paymentType = form.paymentType || null;
-  let amount = Number(form.amount) || 0;
   const quantity = Number(form.quantity) || 0;
   const unitPrice = Number(form.unitPrice) || 0;
-  if (paymentType === 'metre') {
-    amount = round2(quantity * unitPrice);
+  let grossAmount = Number(form.grossAmount) || 0;
+  if (!grossAmount) {
+    grossAmount = paymentType === 'metre' ? round2(quantity * unitPrice) : round2(Number(form.amount) || 0);
   }
+  const avances = round2(Number(form.avances) || 0);
+  const retenues = round2(Number(form.retenues) || 0);
+  const net = round2(Math.max(0, grossAmount - avances - retenues));
   return {
     subcontractor_id: subcontractorId,
     project_id: emptyToNull(form.projectId) || null,
@@ -219,7 +229,10 @@ function toPaymentRow(form, subcontractorId) {
     quantity: paymentType === 'metre' ? quantity : 0,
     unit: paymentType === 'metre' ? emptyToNull(form.unit) : null,
     unit_price: paymentType === 'metre' ? unitPrice : 0,
-    amount,
+    gross_amount: grossAmount,
+    avances,
+    retenues,
+    amount: net,
     payment_method: emptyToNull(form.paymentMethod),
     reference: emptyToNull(form.reference?.trim()),
     description: emptyToNull(form.description?.trim()),
@@ -436,6 +449,102 @@ export async function listAssignmentsByProject(projectId) {
   }));
 }
 
+export async function createProjectAdjustment({ subcontractorId, projectId, adjustmentType, amount, description, adjustmentDate }) {
+  await getAuthUserId();
+  if (!subcontractorId || !adjustmentType || !amount) {
+    const err = new Error('Sous-traitant, type et montant requis.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  const { data, error } = await getSupabase()
+    .from(ADJ_TABLE)
+    .insert([{
+      subcontractor_id: subcontractorId,
+      project_id: emptyToNull(projectId) || null,
+      adjustment_type: adjustmentType,
+      amount: round2(amount),
+      description: emptyToNull(description?.trim()),
+      adjustment_date: adjustmentDate || new Date().toISOString().slice(0, 10),
+      status: 'pending',
+    }])
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export async function getProjectAdjustmentTotals(subcontractorId, projectId) {
+  if (!subcontractorId || !projectId) {
+    return { totalAvances: 0, totalRetenues: 0 };
+  }
+  await getAuthUserId();
+  const { data, error } = await getSupabase()
+    .from(ADJ_TABLE)
+    .select('adjustment_type, amount')
+    .eq('subcontractor_id', subcontractorId)
+    .eq('project_id', projectId)
+    .eq('status', 'pending');
+  if (error) {
+    console.error('[CITYMO] getProjectAdjustmentTotals', error);
+    return { totalAvances: 0, totalRetenues: 0 };
+  }
+  let totalAvances = 0;
+  let totalRetenues = 0;
+  (data || []).forEach((row) => {
+    const amt = Number(row.amount) || 0;
+    if (row.adjustment_type === 'avance') totalAvances += amt;
+    if (row.adjustment_type === 'retenue') totalRetenues += amt;
+  });
+  return { totalAvances: round2(totalAvances), totalRetenues: round2(totalRetenues) };
+}
+
+async function applyAdjustmentsByType(paymentId, subcontractorId, projectId, adjustmentType, amountToApply) {
+  if (!amountToApply || amountToApply <= 0) return;
+  const { data, error } = await getSupabase()
+    .from(ADJ_TABLE)
+    .select('id, amount')
+    .eq('subcontractor_id', subcontractorId)
+    .eq('project_id', projectId)
+    .eq('adjustment_type', adjustmentType)
+    .eq('status', 'pending')
+    .order('adjustment_date', { ascending: true })
+    .order('created_at', { ascending: true });
+  if (error) {
+    console.error('[CITYMO] applyAdjustmentsByType', error);
+    return;
+  }
+  let remaining = amountToApply;
+  for (const adj of data || []) {
+    if (remaining <= 0) break;
+    const adjAmount = Number(adj.amount) || 0;
+    if (adjAmount <= remaining) {
+      await getSupabase()
+        .from(ADJ_TABLE)
+        .update({ status: 'applied', applied_payment_id: paymentId })
+        .eq('id', adj.id);
+      remaining = round2(remaining - adjAmount);
+    }
+  }
+}
+
+async function applyAdjustmentsForPayment(payment) {
+  if (!payment?.id) return;
+  await applyAdjustmentsByType(
+    payment.id,
+    payment.subcontractorId,
+    payment.projectId,
+    'avance',
+    payment.avances,
+  );
+  await applyAdjustmentsByType(
+    payment.id,
+    payment.subcontractorId,
+    payment.projectId,
+    'retenue',
+    payment.retenues,
+  );
+}
+
 export async function createPayment(subcontractorId, form) {
   await getAuthUserId();
   const row = toPaymentRow(form, subcontractorId);
@@ -444,14 +553,16 @@ export async function createPayment(subcontractorId, form) {
     err.code = 'VALIDATION';
     throw err;
   }
-  if (!row.amount || row.amount <= 0) {
-    const err = new Error('Montant requis.');
+  if (!row.gross_amount || row.gross_amount <= 0) {
+    const err = new Error('Montant brut requis.');
     err.code = 'VALIDATION';
     throw err;
   }
   const { data, error } = await getSupabase().from(PAYMENT_TABLE).insert([row]).select('*').single();
   if (error) throw error;
-  return normalizePayment(data);
+  const payment = normalizePayment(data);
+  await applyAdjustmentsForPayment(payment);
+  return payment;
 }
 
 export async function createPaymentBatch(projectId, sharedForm, lines) {
@@ -470,7 +581,9 @@ export async function createPaymentBatch(projectId, sharedForm, lines) {
 
   const { data, error } = await getSupabase().from(PAYMENT_TABLE).insert(rows).select('*');
   if (error) throw error;
-  return (data || []).map(normalizePayment);
+  const payments = (data || []).map(normalizePayment);
+  await Promise.all(payments.map(applyAdjustmentsForPayment));
+  return payments;
 }
 
 export async function listDocuments(subcontractorId) {

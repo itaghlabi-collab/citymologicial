@@ -11,11 +11,24 @@ export const EMPTY_SUB_PAYMENT = {
   selected: {},
 };
 
+function round2(n) {
+  return Math.round((Number(n) || 0) * 100) / 100;
+}
+
 export function calcSubPaymentAmount(type, line) {
   if (type === 'metre') {
-    return Math.round((Number(line.quantity) || 0) * (Number(line.unitPrice) || 0) * 100) / 100;
+    return round2((Number(line.quantity) || 0) * (Number(line.unitPrice) || 0));
   }
-  return Math.round((Number(line.amount) || 0) * 100) / 100;
+  return round2(Number(line.amount) || 0);
+}
+
+/** Montant brut, avances, retenues, net pour une ligne sous-traitant */
+export function calcSubPaymentTotals(paymentType, line) {
+  const gross = calcSubPaymentAmount(paymentType, line);
+  const avances = round2(Number(line.avances) || 0);
+  const retenues = round2(Number(line.retenues) || 0);
+  const net = round2(Math.max(0, gross - avances - retenues));
+  return { gross, avances, retenues, net };
 }
 
 export function paymentTypeLabel(type) {
@@ -28,6 +41,7 @@ export function validateSubcontractorPaymentForm(form, paymentSelectedLines) {
   if (!form.paymentDate) err.paymentDate = 'Date requise';
   if (!paymentSelectedLines.length) err.selected = 'Sélectionnez au moins un sous-traitant';
   paymentSelectedLines.forEach((l) => {
+    const totals = calcSubPaymentTotals(form.paymentType, l);
     if (form.paymentType === 'metre') {
       if (!l.designation?.trim()) err[`d_${l.assignmentId}`] = 'Désignation requise';
       if (!l.quantity || Number(l.quantity) <= 0) err[`q_${l.assignmentId}`] = 'Quantité requise';
@@ -39,6 +53,7 @@ export function validateSubcontractorPaymentForm(form, paymentSelectedLines) {
       if (!l.designation?.trim()) err[`d_${l.assignmentId}`] = 'Description requise';
       if (!l.amount || Number(l.amount) <= 0) err[`a_${l.assignmentId}`] = 'Montant requis';
     }
+    if (totals.gross <= 0) err[`g_${l.assignmentId}`] = 'Montant brut requis';
   });
   return err;
 }
@@ -52,14 +67,20 @@ export function buildSubcontractorPaymentPayload(form, paymentSelectedLines, pay
     description: form.description,
     status: paymentStatusToDb(form.statusUi),
   };
-  const lines = paymentSelectedLines.map((l) => ({
-    subcontractorId: l.subcontractorId,
-    assignmentId: l.assignmentId,
-    designation: l.designation,
-    quantity: l.quantity,
-    unit: l.unit,
-    unitPrice: l.unitPrice,
-    amount: calcSubPaymentAmount(form.paymentType, l),
-  }));
+  const lines = paymentSelectedLines.map((l) => {
+    const totals = calcSubPaymentTotals(form.paymentType, l);
+    return {
+      subcontractorId: l.subcontractorId,
+      assignmentId: l.assignmentId,
+      designation: l.designation,
+      quantity: l.quantity,
+      unit: l.unit,
+      unitPrice: l.unitPrice,
+      grossAmount: totals.gross,
+      avances: totals.avances,
+      retenues: totals.retenues,
+      amount: totals.net,
+    };
+  });
   return { shared, lines };
 }

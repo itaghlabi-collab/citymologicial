@@ -128,7 +128,7 @@ export default function PaiementSousTraitantsSection({ onNotify }) {
             <thead>
               <tr>
                 <th>Date</th><th>Sous-traitant</th><th>Projet</th><th>Type</th>
-                <th>Désignation</th><th>Montant</th><th>Statut</th>
+                <th>Brut</th><th>Avances</th><th>Retenues</th><th>Net</th><th>Statut</th>
               </tr>
             </thead>
             <tbody>
@@ -138,7 +138,9 @@ export default function PaiementSousTraitantsSection({ onNotify }) {
                   <td style={{ fontWeight: 600 }}>{p.subcontractorName || '—'}</td>
                   <td>{p.projectName || '—'}</td>
                   <td>{paymentTypeLabel(p.paymentType)}</td>
-                  <td>{p.designation || p.description || '—'}</td>
+                  <td>{fmtMAD(p.grossAmount)}</td>
+                  <td style={{ color: '#E65100' }}>{fmtMAD(p.avances)}</td>
+                  <td style={{ color: '#C62828' }}>{fmtMAD(p.retenues)}</td>
                   <td style={{ fontWeight: 700, color: '#2E7D32' }}>{fmtMAD(p.amount)}</td>
                   <td>{paymentStatusFromDb(p.status)}</td>
                 </tr>

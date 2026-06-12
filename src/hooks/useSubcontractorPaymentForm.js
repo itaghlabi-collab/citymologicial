@@ -3,10 +3,10 @@
  */
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { listProjects } from '../services/projects/projects';
-import { listAssignmentsByProject } from '../services/rh/subcontractors';
+import { listAssignmentsByProject, getProjectAdjustmentTotals } from '../services/rh/subcontractors';
 import {
   EMPTY_SUB_PAYMENT,
-  calcSubPaymentAmount,
+  calcSubPaymentTotals,
 } from '../utils/rh/subcontractorPaymentFormUtils';
 
 export function useSubcontractorPaymentForm({ active = false, initialProjectId = '' } = {}) {
@@ -35,6 +35,36 @@ export function useSubcontractorPaymentForm({ active = false, initialProjectId =
       .finally(() => setAssignmentsLoading(false));
   }, [active, form.projectId]);
 
+  // Charger avances / retenues enregistrées pour chaque sous-traitant coché
+  useEffect(() => {
+    if (!active || !form.projectId) return;
+    const pending = Object.entries(form.selected || {})
+      .filter(([, v]) => v.checked && !v.adjustmentsLoaded);
+    if (!pending.length) return;
+
+    let cancelled = false;
+    (async () => {
+      const patch = {};
+      await Promise.all(pending.map(async ([assignmentId, sel]) => {
+        const totals = await getProjectAdjustmentTotals(sel.subcontractorId, form.projectId);
+        if (cancelled) return;
+        patch[assignmentId] = {
+          ...sel,
+          avances: String(totals.totalAvances || 0),
+          retenues: String(totals.totalRetenues || 0),
+          autoAvances: totals.totalAvances || 0,
+          autoRetenues: totals.totalRetenues || 0,
+          adjustmentsLoaded: true,
+        };
+      }));
+      if (!cancelled && Object.keys(patch).length) {
+        setForm((p) => ({ ...p, selected: { ...p.selected, ...patch } }));
+      }
+    })();
+
+    return () => { cancelled = true; };
+  }, [active, form.projectId, form.selected]);
+
   const paymentSelectedLines = useMemo(
     () => Object.entries(form.selected || {})
       .filter(([, v]) => v.checked)
@@ -42,9 +72,32 @@ export function useSubcontractorPaymentForm({ active = false, initialProjectId =
     [form.selected],
   );
 
-  const paymentBatchTotal = useMemo(
-    () => paymentSelectedLines.reduce((s, l) => s + calcSubPaymentAmount(form.paymentType, l), 0),
+  const paymentLineTotals = useMemo(
+    () => paymentSelectedLines.map((l) => ({
+      assignmentId: l.assignmentId,
+      ...calcSubPaymentTotals(form.paymentType, l),
+    })),
     [paymentSelectedLines, form.paymentType],
+  );
+
+  const paymentBatchGross = useMemo(
+    () => paymentLineTotals.reduce((s, t) => s + t.gross, 0),
+    [paymentLineTotals],
+  );
+
+  const paymentBatchAvances = useMemo(
+    () => paymentLineTotals.reduce((s, t) => s + t.avances, 0),
+    [paymentLineTotals],
+  );
+
+  const paymentBatchRetenues = useMemo(
+    () => paymentLineTotals.reduce((s, t) => s + t.retenues, 0),
+    [paymentLineTotals],
+  );
+
+  const paymentBatchTotal = useMemo(
+    () => paymentLineTotals.reduce((s, t) => s + t.net, 0),
+    [paymentLineTotals],
   );
 
   function resetForm(payload = {}) {
@@ -70,6 +123,9 @@ export function useSubcontractorPaymentForm({ active = false, initialProjectId =
           unit: 'm²',
           unitPrice: '',
           amount: '',
+          avances: '',
+          retenues: '',
+          adjustmentsLoaded: false,
         };
       }
       return { ...p, selected: sel };
@@ -96,6 +152,10 @@ export function useSubcontractorPaymentForm({ active = false, initialProjectId =
     projectAssignments,
     assignmentsLoading,
     paymentSelectedLines,
+    paymentLineTotals,
+    paymentBatchGross,
+    paymentBatchAvances,
+    paymentBatchRetenues,
     paymentBatchTotal,
     resetForm,
     handlePaymentProjectChange,

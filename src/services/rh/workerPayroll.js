@@ -1,5 +1,5 @@
 /**
- * workerPayroll.js — Paiement ouvriers par projet (heures × tarif horaire)
+ * workerPayroll.js — Paiement hebdomadaire ouvriers
  */
 import { getSupabase } from '../../lib/supabase';
 import { workerFullName } from './attendance';
@@ -38,17 +38,61 @@ function todayIso() {
   return new Date().toISOString().slice(0, 10);
 }
 
-export function calcWorkerLineAmount(heures, tarifHoraire) {
-  return round2((Number(heures) || 0) * (Number(tarifHoraire) || 0));
+/** Lundi de la semaine ISO pour une date YYYY-MM-DD. */
+export function weekStartMonday(isoDate) {
+  const d = new Date(`${isoDate || todayIso()}T12:00:00`);
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  return d.toISOString().slice(0, 10);
+}
+
+export function weekEndSunday(weekStart) {
+  const d = new Date(`${weekStart}T12:00:00`);
+  d.setDate(d.getDate() + 6);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Calcul complet d'une ligne ouvrier */
+export function calcWorkerPayrollTotals(line) {
+  const joursPaies = Number(line.joursPaies) || 0;
+  const tarifHoraire = Number(line.tarifHoraire) || 0;
+  const heuresNormales = round2(joursPaies * WORKER_HOURS_PER_DAY);
+  const montantNormales = round2(heuresNormales * tarifHoraire);
+  const heuresSup = Number(line.heuresSup) || 0;
+  const tarifSup = Number(line.tarifSup) || round2(tarifHoraire * 1.25);
+  const montantSup = round2(heuresSup * tarifSup);
+  const avances = Number(line.avances) || 0;
+  const retenues = Number(line.retenues) || 0;
+  const montantBrut = round2(montantNormales + montantSup);
+  const montantNet = round2(Math.max(0, montantBrut - avances - retenues));
+  return {
+    joursPaies,
+    heuresNormales,
+    tarifHoraire,
+    heuresSup,
+    tarifSup,
+    montantNormales,
+    montantSup,
+    avances,
+    retenues,
+    montantBrut,
+    montantNet,
+  };
 }
 
 /** DB row → shape PaiementHebdo.jsx */
 export function normalizeWorkerPayroll(row) {
   if (!row) return null;
   const w = row.workers;
-  const heures = Number(row.heures_normales) || round2(Number(row.jours_travailles) * WORKER_HOURS_PER_DAY);
-  const tarifH = Number(row.tarif_horaire) || round2(Number(row.tarif_journalier) / WORKER_HOURS_PER_DAY);
-  const total = Number(row.montant_net) || calcWorkerLineAmount(heures, tarifH);
+  const totals = calcWorkerPayrollTotals({
+    joursPaies: row.jours_travailles,
+    tarifHoraire: row.tarif_horaire || round2(Number(row.tarif_journalier) / WORKER_HOURS_PER_DAY),
+    heuresSup: row.heures_sup,
+    tarifSup: row.tarif_heures_sup,
+    avances: row.avances,
+    retenues: row.retenues,
+  });
   return {
     id: row.id,
     batchId: row.batch_id || '',
@@ -57,10 +101,19 @@ export function normalizeWorkerPayroll(row) {
     fonction: w?.fonction || '',
     projet: row.chantier || w?.chantier || '',
     projectId: row.project_id ? String(row.project_id) : '',
+    semaineDebut: row.semaine_debut || '',
+    semaineFin: row.semaine_fin || '',
     paymentDate: row.payment_date || row.semaine_debut || '',
-    heures,
-    tarifHoraire: tarifH,
-    total,
+    joursPaies: totals.joursPaies,
+    heuresNormales: totals.heuresNormales,
+    tarifHoraire: totals.tarifHoraire,
+    heuresSup: totals.heuresSup,
+    tarifSup: totals.tarifSup,
+    montantSup: totals.montantSup,
+    avances: totals.avances,
+    retenues: totals.retenues,
+    total: Number(row.montant_net) || totals.montantNet,
+    montantBrut: Number(row.montant_brut) || totals.montantBrut,
     statut: DB_TO_UI_STATUT[row.statut] || 'En attente',
     notes: row.notes || '',
     created_at: row.created_at,
@@ -69,29 +122,28 @@ export function normalizeWorkerPayroll(row) {
 }
 
 export function toWorkerPayrollRow(line, batchMeta) {
-  const heures = round2(line.heures);
-  const tarifH = round2(line.tarifHoraire);
-  const montant = calcWorkerLineAmount(heures, tarifH);
-  const paymentDate = batchMeta.paymentDate || todayIso();
+  const totals = calcWorkerPayrollTotals(line);
+  const semaineDebut = batchMeta.semaineDebut || weekStartMonday(todayIso());
+  const semaineFin = batchMeta.semaineFin || weekEndSunday(semaineDebut);
   return {
     worker_id: line.workerId || null,
     project_id: batchMeta.projectId || null,
     batch_id: batchMeta.batchId || null,
-    payment_date: paymentDate,
-    semaine_debut: paymentDate,
-    semaine_fin: paymentDate,
+    payment_date: semaineDebut,
+    semaine_debut: semaineDebut,
+    semaine_fin: semaineFin,
     chantier: batchMeta.projet?.trim() || null,
-    heures_normales: heures,
-    jours_travailles: round2(heures / WORKER_HOURS_PER_DAY),
-    tarif_horaire: tarifH,
-    tarif_journalier: round2(tarifH * WORKER_HOURS_PER_DAY),
-    heures_sup: 0,
-    tarif_heures_sup: 0,
-    montant_heures_sup: 0,
-    avances: 0,
-    retenues: 0,
-    montant_brut: montant,
-    montant_net: montant,
+    jours_travailles: totals.joursPaies,
+    heures_normales: totals.heuresNormales,
+    tarif_horaire: totals.tarifHoraire,
+    tarif_journalier: round2(totals.tarifHoraire * WORKER_HOURS_PER_DAY),
+    heures_sup: totals.heuresSup,
+    tarif_heures_sup: totals.tarifSup,
+    montant_heures_sup: totals.montantSup,
+    avances: totals.avances,
+    retenues: totals.retenues,
+    montant_brut: totals.montantBrut,
+    montant_net: totals.montantNet,
     statut: UI_TO_DB_STATUT[batchMeta.statut] || 'En attente',
     notes: batchMeta.notes?.trim() || null,
   };
@@ -112,7 +164,7 @@ export async function listWorkerPayroll() {
     .from(TABLE)
     .select(PAYROLL_SELECT)
     .not('worker_id', 'is', null)
-    .order('payment_date', { ascending: false, nullsFirst: false })
+    .order('semaine_debut', { ascending: false, nullsFirst: false })
     .order('created_at', { ascending: false });
 
   if (error) {
@@ -129,6 +181,11 @@ export async function createWorkerPayrollBatch(batchMeta, lines) {
     err.code = 'VALIDATION';
     throw err;
   }
+  if (!batchMeta?.semaineDebut) {
+    const err = new Error('Semaine requise.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
   if (!lines?.length) {
     const err = new Error('Sélectionnez au moins un ouvrier.');
     err.code = 'VALIDATION';
@@ -136,7 +193,8 @@ export async function createWorkerPayrollBatch(batchMeta, lines) {
   }
 
   const batchId = crypto.randomUUID();
-  const rows = lines.map((line) => toWorkerPayrollRow(line, { ...batchMeta, batchId }));
+  const semaineFin = batchMeta.semaineFin || weekEndSunday(batchMeta.semaineDebut);
+  const rows = lines.map((line) => toWorkerPayrollRow(line, { ...batchMeta, batchId, semaineFin }));
 
   const { data, error } = await getSupabase()
     .from(TABLE)
@@ -152,28 +210,27 @@ export async function createWorkerPayrollBatch(batchMeta, lines) {
 
 export async function updateWorkerPayroll(id, form) {
   await getAuthUserId();
-  const heures = round2(form.heures);
-  const tarifH = round2(form.tarifHoraire);
-  const montant = calcWorkerLineAmount(heures, tarifH);
-  const paymentDate = form.paymentDate || todayIso();
+  const totals = calcWorkerPayrollTotals(form);
+  const semaineDebut = form.semaineDebut || weekStartMonday(todayIso());
+  const semaineFin = form.semaineFin || weekEndSunday(semaineDebut);
 
   const row = {
     project_id: form.projectId || null,
-    payment_date: paymentDate,
-    semaine_debut: paymentDate,
-    semaine_fin: paymentDate,
+    payment_date: semaineDebut,
+    semaine_debut: semaineDebut,
+    semaine_fin: semaineFin,
     chantier: form.projet?.trim() || null,
-    heures_normales: heures,
-    jours_travailles: round2(heures / WORKER_HOURS_PER_DAY),
-    tarif_horaire: tarifH,
-    tarif_journalier: round2(tarifH * WORKER_HOURS_PER_DAY),
-    heures_sup: 0,
-    tarif_heures_sup: 0,
-    montant_heures_sup: 0,
-    avances: 0,
-    retenues: 0,
-    montant_brut: montant,
-    montant_net: montant,
+    jours_travailles: totals.joursPaies,
+    heures_normales: totals.heuresNormales,
+    tarif_horaire: totals.tarifHoraire,
+    tarif_journalier: round2(totals.tarifHoraire * WORKER_HOURS_PER_DAY),
+    heures_sup: totals.heuresSup,
+    tarif_heures_sup: totals.tarifSup,
+    montant_heures_sup: totals.montantSup,
+    avances: totals.avances,
+    retenues: totals.retenues,
+    montant_brut: totals.montantBrut,
+    montant_net: totals.montantNet,
     statut: UI_TO_DB_STATUT[form.statut] || 'En attente',
     notes: form.notes?.trim() || null,
   };
@@ -220,18 +277,13 @@ export async function deleteWorkerPayroll(id) {
 }
 
 export function filterWorkerPayroll(records, filters = {}) {
-  const {
-    search = '',
-    projet = '',
-    statut = '',
-    paymentDate = '',
-  } = filters;
+  const { search = '', projet = '', statut = '', semaine = '' } = filters;
 
   return (records || []).filter((p) => {
     if (search && !p.ouvrier.toLowerCase().includes(search.toLowerCase())) return false;
     if (projet && p.projet !== projet) return false;
     if (statut && p.statut !== statut) return false;
-    if (paymentDate && p.paymentDate !== paymentDate) return false;
+    if (semaine && p.semaineDebut !== semaine) return false;
     return true;
   });
 }
@@ -240,11 +292,10 @@ export function computePayrollStats(records) {
   const list = records || [];
   const totalAPayer = list.reduce((s, p) => s + Number(p.total || 0), 0);
   const totalPaye = list.filter((p) => p.statut === 'Payé').reduce((s, p) => s + Number(p.total || 0), 0);
-  const totalPartiel = list.filter((p) => p.statut === 'Partiellement payé').reduce((s, p) => s + Number(p.total || 0), 0);
   return {
     totalAPayer,
     totalPaye,
-    totalPartiel,
+    totalPartiel: list.filter((p) => p.statut === 'Partiellement payé').reduce((s, p) => s + Number(p.total || 0), 0),
     totalEnAttente: list.filter((p) => p.statut === 'En attente').reduce((s, p) => s + Number(p.total || 0), 0),
     nbEnAttente: list.filter((p) => p.statut === 'En attente').length,
     count: list.length,
@@ -258,14 +309,19 @@ export function collectPayrollChantiers(projects, records) {
   return [...set].sort((a, b) => a.localeCompare(b, 'fr'));
 }
 
-export function buildWorkerPayrollLine(worker, heures = '') {
+export function buildWorkerPayrollLine(worker) {
+  const tarifH = workerTarifHoraire(worker);
   return {
     workerId: worker.id,
-    heures: heures === '' ? '' : String(heures),
-    tarifHoraire: workerTarifHoraire(worker),
+    joursPaies: '',
+    heuresSup: '',
+    tarifHoraire: tarifH,
+    tarifSup: round2(tarifH * 1.25),
+    avances: '',
+    retenues: '',
     fonction: worker.fonction || '',
     fullName: workerFullName(worker),
   };
 }
 
-export { workerTarifHoraire };
+export { workerTarifHoraire, WORKER_HOURS_PER_DAY };

@@ -1,7 +1,7 @@
 import {
   PAYMENT_METHODS, PAYMENT_TYPES, PAYMENT_UNITS, PAYMENT_STATUS_UI,
 } from '../services/rh/subcontractorConstants';
-import { calcSubPaymentAmount } from '../utils/rh/subcontractorPaymentFormUtils';
+import { calcSubPaymentTotals } from '../utils/rh/subcontractorPaymentFormUtils';
 
 function fmtMAD(n) {
   return Number(n || 0).toLocaleString('fr-MA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' MAD';
@@ -13,6 +13,32 @@ const INPUT_S = (err) => ({
   border: '1.5px solid ' + (err ? 'var(--red)' : 'var(--border)'), background: '#fff',
 });
 
+function LineTotalsBox({ totals, loadingAdjustments }) {
+  return (
+    <div style={{ padding: '10px 12px', background: '#F8F9FA', borderRadius: 8, fontSize: '0.82rem' }}>
+      {loadingAdjustments && (
+        <div style={{ color: 'var(--text-3)', marginBottom: 6, fontSize: '0.78rem' }}>Chargement avances / retenues…</div>
+      )}
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+        <span>Montant brut</span>
+        <strong>{fmtMAD(totals.gross)}</strong>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, color: '#E65100' }}>
+        <span>Avances déduites</span>
+        <strong>{fmtMAD(totals.avances)}</strong>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, color: '#C62828' }}>
+        <span>Retenues déduites</span>
+        <strong>{fmtMAD(totals.retenues)}</strong>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 6, borderTop: '1px solid var(--border)' }}>
+        <span style={{ fontWeight: 700 }}>Montant net à payer</span>
+        <strong style={{ color: 'var(--red)', fontSize: '0.95rem' }}>{fmtMAD(totals.net)}</strong>
+      </div>
+    </div>
+  );
+}
+
 export default function SubcontractorPaymentFormBody({
   form,
   setF,
@@ -21,6 +47,9 @@ export default function SubcontractorPaymentFormBody({
   projectAssignments,
   assignmentsLoading,
   paymentSelectedLines,
+  paymentBatchGross,
+  paymentBatchAvances,
+  paymentBatchRetenues,
   paymentBatchTotal,
   handlePaymentProjectChange,
   toggleSubPayment,
@@ -59,16 +88,22 @@ export default function SubcontractorPaymentFormBody({
             Aucun sous-traitant affecté à ce projet.
           </div>
         ) : (
-          <div style={{ border: '1.5px solid var(--border)', borderRadius: 8, maxHeight: 320, overflowY: 'auto' }}>
+          <div style={{ border: '1.5px solid var(--border)', borderRadius: 8, maxHeight: 420, overflowY: 'auto' }}>
             {projectAssignments.map((a) => {
               const sel = form.selected?.[a.id];
-              const lineAmount = sel?.checked ? calcSubPaymentAmount(form.paymentType, sel) : 0;
+              const totals = sel?.checked ? calcSubPaymentTotals(form.paymentType, sel) : null;
+              const loadingAdj = sel?.checked && !sel?.adjustmentsLoaded;
+              const hasAutoAvances = (sel?.autoAvances || 0) > 0;
+              const hasAutoRetenues = (sel?.autoRetenues || 0) > 0;
               return (
                 <div key={a.id} style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', background: sel?.checked ? '#FFF5F5' : '#fff' }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginBottom: sel?.checked ? 10 : 0 }}>
                     <input type="checkbox" checked={!!sel?.checked} onChange={() => toggleSubPayment(a)} />
                     <span style={{ fontWeight: 700 }}>{a.subcontractorName}</span>
                     <span style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>{a.subcontractorFonction || '—'}</span>
+                    {totals && !loadingAdj && (
+                      <span style={{ marginLeft: 'auto', fontWeight: 800, color: 'var(--red)', fontSize: '0.88rem' }}>{fmtMAD(totals.net)}</span>
+                    )}
                   </label>
                   {sel?.checked && (
                     <div style={{ display: 'grid', gap: 8, paddingLeft: 26 }}>
@@ -87,16 +122,52 @@ export default function SubcontractorPaymentFormBody({
                       {form.paymentType === 'tache' && (
                         <>
                           <input placeholder="Désignation de la tâche *" value={sel.designation || ''} onChange={(e) => setSubPaymentField(a.id, 'designation', e.target.value)} style={INPUT_S(formErr[`d_${a.id}`])} />
-                          <input type="number" min="0" step="0.01" placeholder="Montant (MAD) *" value={sel.amount || ''} onChange={(e) => setSubPaymentField(a.id, 'amount', e.target.value)} style={INPUT_S(formErr[`a_${a.id}`])} />
+                          <input type="number" min="0" step="0.01" placeholder="Montant brut (MAD) *" value={sel.amount || ''} onChange={(e) => setSubPaymentField(a.id, 'amount', e.target.value)} style={INPUT_S(formErr[`a_${a.id}`])} />
                         </>
                       )}
                       {form.paymentType === 'service' && (
                         <>
                           <input placeholder="Description du service *" value={sel.designation || ''} onChange={(e) => setSubPaymentField(a.id, 'designation', e.target.value)} style={INPUT_S(formErr[`d_${a.id}`])} />
-                          <input type="number" min="0" step="0.01" placeholder="Montant (MAD) *" value={sel.amount || ''} onChange={(e) => setSubPaymentField(a.id, 'amount', e.target.value)} style={INPUT_S(formErr[`a_${a.id}`])} />
+                          <input type="number" min="0" step="0.01" placeholder="Montant brut (MAD) *" value={sel.amount || ''} onChange={(e) => setSubPaymentField(a.id, 'amount', e.target.value)} style={INPUT_S(formErr[`a_${a.id}`])} />
                         </>
                       )}
-                      <div style={{ textAlign: 'right', fontWeight: 700, color: 'var(--red)', fontSize: '0.88rem' }}>{fmtMAD(lineAmount)}</div>
+
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                        <div>
+                          <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Avances</label>
+                          <input
+                            type="number" min="0" step="0.01"
+                            value={sel.avances ?? ''}
+                            onChange={(e) => setSubPaymentField(a.id, 'avances', e.target.value)}
+                            style={INPUT_S(false)}
+                            disabled={loadingAdj}
+                          />
+                          {hasAutoAvances && sel.adjustmentsLoaded && (
+                            <div style={{ fontSize: '0.72rem', color: '#E65100', marginTop: 2 }}>
+                              Auto : {fmtMAD(sel.autoAvances)} enregistrée(s)
+                            </div>
+                          )}
+                        </div>
+                        <div>
+                          <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Retenues</label>
+                          <input
+                            type="number" min="0" step="0.01"
+                            value={sel.retenues ?? ''}
+                            onChange={(e) => setSubPaymentField(a.id, 'retenues', e.target.value)}
+                            style={INPUT_S(false)}
+                            disabled={loadingAdj}
+                          />
+                          {hasAutoRetenues && sel.adjustmentsLoaded && (
+                            <div style={{ fontSize: '0.72rem', color: '#C62828', marginTop: 2 }}>
+                              Auto : {fmtMAD(sel.autoRetenues)} enregistrée(s)
+                            </div>
+                          )}
+                        </div>
+                      </div>
+
+                      {totals && (
+                        <LineTotalsBox totals={totals} loadingAdjustments={loadingAdj} />
+                      )}
                     </div>
                   )}
                 </div>
@@ -131,10 +202,21 @@ export default function SubcontractorPaymentFormBody({
         <textarea rows={2} value={form.description || ''} onChange={(e) => setF('description', e.target.value)} style={{ ...INPUT_S(false), resize: 'vertical' }} />
       </div>
 
-      {paymentBatchTotal > 0 && (
-        <div style={{ padding: '12px 14px', background: '#FFF5F5', borderRadius: 8, display: 'flex', justifyContent: 'space-between' }}>
-          <span style={{ fontWeight: 600 }}>Total ({paymentSelectedLines.length} sous-traitant{paymentSelectedLines.length > 1 ? 's' : ''})</span>
-          <span style={{ fontWeight: 800, color: 'var(--red)' }}>{fmtMAD(paymentBatchTotal)}</span>
+      {paymentSelectedLines.length > 0 && (
+        <div style={{ padding: '12px 14px', background: '#FFF5F5', borderRadius: 8, fontSize: '0.85rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
+            <span>Montant brut total</span><strong>{fmtMAD(paymentBatchGross)}</strong>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, color: '#E65100' }}>
+            <span>Avances déduites</span><strong>{fmtMAD(paymentBatchAvances)}</strong>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, color: '#C62828' }}>
+            <span>Retenues déduites</span><strong>{fmtMAD(paymentBatchRetenues)}</strong>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 8, borderTop: '1px solid var(--border)' }}>
+            <span style={{ fontWeight: 700 }}>Montant net ({paymentSelectedLines.length} sous-traitant{paymentSelectedLines.length > 1 ? 's' : ''})</span>
+            <span style={{ fontWeight: 800, color: 'var(--red)', fontSize: '1.05rem' }}>{fmtMAD(paymentBatchTotal)}</span>
+          </div>
         </div>
       )}
     </div>
