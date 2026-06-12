@@ -1279,14 +1279,12 @@ tbody tr:last-child td { border-bottom: none; }
   }
 
   /* Remove inline maxWidth constraints that cause text squeeze on mobile */
-  .table-wrap tbody td[data-label="Specialite"],
   .table-wrap tbody td[data-label="Chantier"] {
     max-width: none !important;
     overflow: visible !important;
     text-overflow: clip !important;
   }
 
-  .table-wrap tbody td[data-label="Specialite"] > *,
   .table-wrap tbody td[data-label="Chantier"] > * {
     max-width: none !important;
     overflow: visible !important;

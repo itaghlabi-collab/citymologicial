@@ -42,7 +42,7 @@ const CIN_SCANNER_VERSION = '2026-06-04-cin-capture-btn';
 const EMPTY_FORM = {
   prenom: '', nom: '', telephone: '', cin: '', fonction: '', tarif: '',
   date_naissance: '', ville_naissance: '', adresse: '', nationalite: 'Marocaine', etat_civil: '', groupe_sanguin: '', date_expiration: '',
-  specialite: '', experience: 'intermediaire', date_recrutement: '', statut: 'actif', disponibilite: 'oui',
+  experience: 'intermediaire', date_recrutement: '', statut: 'actif', disponibilite: 'oui',
   project_id: '', projet_nom: '', chantier: '', chantier_legacy: '',
   contact_urgence: '', tel_urgence: '', relation_urgence: '',
   pointure: '', taille_vetement: '', taille_gants: '', casque: '', badge: '',
@@ -913,7 +913,7 @@ function OuvrierDetail({ worker, onBack, onEdit, onDownloadPdf, pdfLoading }) {
               </h1>
               <span className={'badge ' + cfg.cls}>{cfg.label}</span>
             </div>
-            <div style={{ fontSize: '0.88rem', color: 'var(--text-2)', marginBottom: 8 }}>{worker.fonction || '—'} {worker.specialite ? '— ' + worker.specialite : ''}</div>
+            <div style={{ fontSize: '0.88rem', color: 'var(--text-2)', marginBottom: 8 }}>{worker.fonction || '—'}</div>
             <div style={{ display: 'flex', gap: 16, fontSize: '0.82rem', color: 'var(--text-3)', flexWrap: 'wrap' }}>
               <span><Phone size={12} style={{ display: 'inline', marginRight: 4 }} />{worker.telephone || '—'}</span>
               <span>CIN : <strong style={{ color: 'var(--text-2)' }}>{worker.cin || '—'}</strong></span>
@@ -974,7 +974,6 @@ function OuvrierDetail({ worker, onBack, onEdit, onDownloadPdf, pdfLoading }) {
             <STitle><HardHat size={14} /> Infos chantier</STitle>
             {[
               ['Fonction', worker.fonction],
-              ['Specialite', worker.specialite],
               ['Experience', EXP_LABEL[worker.experience] || worker.experience],
               ['Date recrutement', fmtDate(worker.date_recrutement)],
               ['Statut', STATUT_CFG[worker.statut]?.label || worker.statut],
@@ -1381,10 +1380,6 @@ function OuvrierModal({ worker, onClose, onSave, saving, projects = [] }) {
                     <Label required>Tarif journalier (MAD)</Label>
                     <input type="number" min="0" value={form.tarif} onChange={e => set('tarif', e.target.value)} placeholder="350" style={IS(errors.tarif)} />
                     {errors.tarif && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.tarif}</span>}
-                  </div>
-                  <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-                    <Label>Specialite metier</Label>
-                    <input value={form.specialite} onChange={e => set('specialite', e.target.value)} placeholder="Ex : Maconnerie traditionnelle, ferraillage..." style={IS(false)} />
                   </div>
                   <div className="form-group">
                     <Label>Niveau d'experience</Label>
@@ -1816,7 +1811,6 @@ export default function OuvriersListe({ onWorkersChange }) {
                     { label: 'CIN',         field: 'cin' },
                     { label: 'Telephone',   field: 'telephone' },
                     { label: 'Fonction',    field: 'fonction' },
-                    { label: 'Specialite',  field: 'specialite' },
                     { label: 'Chantier',    field: 'chantier' },
                     { label: 'Tarif/jour',  field: 'tarif', align: 'right' },
                     { label: 'Statut',      field: 'statut' },
@@ -1865,9 +1859,6 @@ export default function OuvriersListe({ onWorkersChange }) {
 
                       {/* Fonction */}
                       <td data-label="Fonction" style={{ padding: '10px 12px' }}><span className="badge badge-blue">{w.fonction || '—'}</span></td>
-
-                      {/* Specialite */}
-                      <td data-label="Specialite" style={{ padding: '10px 12px', color: 'var(--text-3)', fontSize: '0.78rem', maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{w.specialite || '—'}</td>
 
                       {/* Chantier */}
                       <td data-label="Chantier" style={{ padding: '10px 12px', color: 'var(--text-2)', fontSize: '0.82rem', maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>

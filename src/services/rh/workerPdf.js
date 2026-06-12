@@ -92,7 +92,7 @@ function workerDisplayName(w) {
 }
 
 function posteLabel(w) {
-  return (w.fonction || w.specialite || 'OUVRIER').toUpperCase();
+  return (w.fonction || 'OUVRIER').toUpperCase();
 }
 
 async function loadImageDataUrl(url) {
@@ -445,7 +445,6 @@ export async function generateWorkerPdf(worker) {
 
   const proRows = [
     ['Poste / Fonction', w.fonction],
-    ['Spécialité', w.specialite],
     ['Chantier', w.chantier],
     ['Tarif journalier', fmtMAD(w.tarif)],
     ['Statut', STATUT_LABELS[w.statut] || w.statut],
