@@ -40,7 +40,7 @@ const SCANNER_PLACE_HINT = 'Placez la CIN dans le cadre';
 const CIN_SCANNER_VERSION = '2026-06-04-cin-capture-btn';
 
 const EMPTY_FORM = {
-  prenom: '', nom: '', telephone: '', cin: '', fonction: '', tarif: '',
+  prenom: '', nom: '', telephone: '', cin: '', fonction: '', tarif: '', tarif_unite: 'heure',
   date_naissance: '', ville_naissance: '', adresse: '', nationalite: 'Marocaine', etat_civil: '', groupe_sanguin: '', date_expiration: '',
   experience: 'intermediaire', date_recrutement: '', statut: 'actif', disponibilite: 'oui',
   project_id: '', projet_nom: '', chantier: '', chantier_legacy: '',
@@ -51,6 +51,7 @@ const EMPTY_FORM = {
 
 /* ── Helpers ── */
 function fmtMAD(n) { return Number(n).toLocaleString('fr-MA') + ' MAD'; }
+function fmtTarifHeure(n) { return Number(n).toLocaleString('fr-MA', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + ' MAD/h'; }
 function fmtDate(d) { if (!d) return '—'; try { return new Date(d).toLocaleDateString('fr-MA', { day: '2-digit', month: '2-digit', year: 'numeric' }); } catch { return d; } }
 function initials(w) { return ((w.prenom?.[0] || '') + (w.nom?.[0] || '')).toUpperCase() || '?'; }
 function genBadge() { return 'CH-' + String(Math.floor(Math.random() * 9000) + 1000); }
@@ -979,7 +980,7 @@ function OuvrierDetail({ worker, onBack, onEdit, onDownloadPdf, pdfLoading }) {
               ['Statut', STATUT_CFG[worker.statut]?.label || worker.statut],
               ['Disponibilite', worker.disponibilite === 'oui' ? 'Disponible' : 'Non disponible'],
               ['Chantier affecte', worker.chantier],
-              ['Tarif/jour', fmtMAD(worker.tarif)],
+              ['Tarif/heure', fmtTarifHeure(worker.tarif)],
               ['Badge', worker.badge],
             ].map(([k, v]) => v ? (
               <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.83rem', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
@@ -1237,7 +1238,7 @@ function OuvrierModal({ worker, onClose, onSave, saving, projects = [] }) {
     ev.preventDefault();
     const errs = validate();
     if (Object.keys(errs).length) { setErrors(errs); setFormTab('identite'); return; }
-    const result = await onSave({ ...form, tarif: Number(form.tarif) }, isEdit);
+    const result = await onSave({ ...form, tarif: Number(form.tarif), tarif_unite: 'heure' }, isEdit);
     if (result?.success) onClose();
   }
 
@@ -1377,8 +1378,8 @@ function OuvrierModal({ worker, onClose, onSave, saving, projects = [] }) {
                     </select>
                   </div>
                   <div className="form-group">
-                    <Label required>Tarif journalier (MAD)</Label>
-                    <input type="number" min="0" value={form.tarif} onChange={e => set('tarif', e.target.value)} placeholder="350" style={IS(errors.tarif)} />
+                    <Label required>Tarif horaire (MAD/h)</Label>
+                    <input type="number" min="0" step="0.01" value={form.tarif} onChange={e => set('tarif', e.target.value)} placeholder="16.25" style={IS(errors.tarif)} />
                     {errors.tarif && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.tarif}</span>}
                   </div>
                   <div className="form-group">
@@ -1760,7 +1761,7 @@ export default function OuvriersListe({ onWorkersChange }) {
         </div>
         <div className="stat-card">
           <div className="stat-icon" style={{ background: '#FFF3E0', color: '#E65100' }}><Clock size={20} /></div>
-          <div className="stat-body"><div className="stat-value">{fmtMAD(tarifMoyen)}</div><div className="stat-label">Tarif moyen/jour</div></div>
+          <div className="stat-body"><div className="stat-value">{fmtTarifHeure(tarifMoyen)}</div><div className="stat-label">Tarif moyen/h</div></div>
         </div>
       </div>
 
@@ -1812,7 +1813,7 @@ export default function OuvriersListe({ onWorkersChange }) {
                     { label: 'Telephone',   field: 'telephone' },
                     { label: 'Fonction',    field: 'fonction' },
                     { label: 'Chantier',    field: 'chantier' },
-                    { label: 'Tarif/jour',  field: 'tarif', align: 'right' },
+                    { label: 'Tarif/h',  field: 'tarif', align: 'right' },
                     { label: 'Statut',      field: 'statut' },
                     { label: 'Badge',       field: 'badge' },
                     { label: 'Actions',     field: null },
@@ -1866,8 +1867,8 @@ export default function OuvriersListe({ onWorkersChange }) {
                       </td>
 
                       {/* Tarif */}
-                      <td data-label="Tarif/j" style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'var(--font-head)', fontWeight: 800, color: 'var(--red)', whiteSpace: 'nowrap' }}>
-                        {fmtMAD(w.tarif)}
+                      <td data-label="Tarif/h" style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'var(--font-head)', fontWeight: 800, color: 'var(--red)', whiteSpace: 'nowrap' }}>
+                        {fmtTarifHeure(w.tarif)}
                       </td>
 
                       {/* Statut */}

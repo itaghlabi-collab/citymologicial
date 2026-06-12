@@ -1,6 +1,9 @@
 import { BarChart3, Plus, X, TrendingUp, Filter, Pencil, Loader2 } from 'lucide-react';
 import { useState, useRef, useMemo } from 'react';
 import { useOvertime } from '../hooks/useOvertime';
+import { workerFullName } from '../services/rh/attendance';
+import { workerTarifJournalier } from '../services/rh/workers';
+import { suggestHourlyRate } from '../services/rh/overtime';
 
 function fmtMAD(n) {
   return Number(n).toLocaleString('fr-MA') + ' MAD';
@@ -28,11 +31,14 @@ function today() { return new Date().toISOString().slice(0, 10); }
 const STATUS_OPTS = ['Brouillon', 'Valide', 'Paye'];
 
 const EMPTY_FORM = {
-  workerId: '',
+  projectId: '',
   projet: '',
+  workerIds: [],
+  workerId: '',
   date: today(),
   heures: '',
   tarif: '',
+  motif: '',
   statut: 'Valide',
 };
 
@@ -40,14 +46,16 @@ export default function HeuresSupp() {
   const {
     records,
     workers,
+    projects,
     workerOptions,
     chantiers,
+    workersByProject,
     loading,
     saving,
     error,
     configured,
     load,
-    create,
+    createBatch,
     update,
     remove,
     filterOvertimeRecords,
@@ -73,14 +81,51 @@ export default function HeuresSupp() {
 
   function setF(k, v) { setForm((p) => ({ ...p, [k]: v })); }
 
-  function handleOuvrierChange(workerId) {
-    const w = workers.find((x) => x.id === workerId);
-    const tarifSup = w ? Math.round(w.tarif * 1.25) : '';
+  const projectWorkers = useMemo(
+    () => (editId ? [] : workersByProject(form.projectId)),
+    [editId, form.projectId, workersByProject],
+  );
+
+  const allProjectWorkersSelected = projectWorkers.length > 0
+    && projectWorkers.every((w) => form.workerIds.includes(w.id));
+
+  function handleProjectChange(projectId) {
+    const pr = projects.find((p) => String(p.id) === String(projectId));
     setForm((p) => ({
       ...p,
-      workerId,
-      projet: p.projet || w?.chantier || '',
-      tarif: tarifSup ? String(tarifSup) : p.tarif,
+      projectId,
+      projet: pr?.nom || '',
+      workerIds: [],
+      tarif: '',
+    }));
+  }
+
+  function toggleWorker(workerId) {
+    setForm((p) => {
+      const ids = p.workerIds.includes(workerId)
+        ? p.workerIds.filter((id) => id !== workerId)
+        : [...p.workerIds, workerId];
+      const first = workers.find((w) => w.id === ids[0]);
+      const suggested = first ? suggestHourlyRate(first) : '';
+      return {
+        ...p,
+        workerIds: ids,
+        tarif: p.tarif || suggested || '',
+      };
+    });
+  }
+
+  function toggleAllWorkers(checked) {
+    if (!checked) {
+      setForm((p) => ({ ...p, workerIds: [] }));
+      return;
+    }
+    const ids = projectWorkers.map((w) => w.id);
+    const first = projectWorkers[0];
+    setForm((p) => ({
+      ...p,
+      workerIds: ids,
+      tarif: p.tarif || (first ? suggestHourlyRate(first) : '') || '',
     }));
   }
 
@@ -92,13 +137,17 @@ export default function HeuresSupp() {
   }
 
   function openEdit(record) {
+    const pr = projects.find((p) => p.nom === record.projet);
     setEditId(record.id);
     setForm({
-      workerId: record.workerId || '',
+      projectId: pr?.id ? String(pr.id) : '',
       projet: record.projet || '',
+      workerIds: [],
+      workerId: record.workerId || '',
       date: record.date || today(),
       heures: String(record.heures ?? ''),
       tarif: String(record.tarif ?? ''),
+      motif: record.motif || '',
       statut: record.statut || 'Valide',
     });
     setErrors({});
@@ -107,8 +156,13 @@ export default function HeuresSupp() {
 
   function validate() {
     const e = {};
-    if (!form.workerId) e.workerId = 'Requis';
-    if (!form.projet) e.projet = 'Requis';
+    if (editId) {
+      if (!form.workerId) e.workerId = 'Requis';
+      if (!form.projet) e.projet = 'Requis';
+    } else {
+      if (!form.projectId) e.projectId = 'Requis';
+      if (!form.workerIds.length) e.workerIds = 'Sélectionnez au moins un ouvrier';
+    }
     if (!form.date) e.date = 'Requis';
     if (!form.heures || Number.isNaN(Number(form.heures)) || Number(form.heures) <= 0) e.heures = 'Valeur valide requise';
     if (!form.tarif || Number.isNaN(Number(form.tarif)) || Number(form.tarif) <= 0) e.tarif = 'Tarif valide requis';
@@ -120,13 +174,40 @@ export default function HeuresSupp() {
     const errs = validate();
     if (Object.keys(errs).length) { setErrors(errs); return; }
 
-    const result = editId ? await update(editId, form) : await create(form);
-    if (!result.success) {
-      notify('error', result.error || 'Erreur enregistrement.');
-      return;
+    if (editId) {
+      const result = await update(editId, {
+        workerId: form.workerId,
+        projet: form.projet,
+        date: form.date,
+        heures: form.heures,
+        tarif: form.tarif,
+        motif: form.motif,
+        statut: form.statut,
+      });
+      if (!result.success) {
+        notify('error', result.error || 'Erreur enregistrement.');
+        return;
+      }
+      notify('success', 'Heures supplementaires modifiees.');
+    } else {
+      const result = await createBatch(
+        {
+          projet: form.projet,
+          date: form.date,
+          heures: form.heures,
+          tarif: form.tarif,
+          motif: form.motif,
+          statut: form.statut,
+        },
+        form.workerIds,
+      );
+      if (!result.success) {
+        notify('error', result.error || 'Erreur enregistrement.');
+        return;
+      }
+      notify('success', `${result.count} enregistrement${result.count > 1 ? 's' : ''} d'heures supplementaires cree${result.count > 1 ? 's' : ''}.`);
     }
 
-    notify('success', editId ? 'Heures supplementaires modifiees.' : 'Heures supplementaires enregistrees.');
     setShowModal(false);
     setEditId(null);
   }
@@ -148,7 +229,8 @@ export default function HeuresSupp() {
 
   const stats = useMemo(() => computeOvertimeStats(filtered), [filtered, computeOvertimeStats]);
 
-  const previewMontant = (Number(form.heures) || 0) * (Number(form.tarif) || 0);
+  const lineMontant = (Number(form.heures) || 0) * (Number(form.tarif) || 0);
+  const previewMontant = editId ? lineMontant : lineMontant * (form.workerIds.length || 0);
   const hasFilters = filterOuvrier || filterProjet || filterDate || filterStatut;
 
   return (
@@ -294,7 +376,7 @@ export default function HeuresSupp() {
       {/* Modal */}
       {showModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
-          <div style={{ background: '#fff', borderRadius: 14, padding: 32, width: '100%', maxWidth: 480, boxShadow: '0 8px 40px rgba(0,0,0,0.2)', maxHeight: '90vh', overflowY: 'auto' }}>
+          <div style={{ background: '#fff', borderRadius: 14, padding: 32, width: '100%', maxWidth: 560, boxShadow: '0 8px 40px rgba(0,0,0,0.2)', maxHeight: '90vh', overflowY: 'auto' }}>
             <div className="flex-between" style={{ marginBottom: 20 }}>
               <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.2rem', textTransform: 'uppercase' }}>
                 {editId ? 'Modifier heures sup' : 'Heures supplementaires'}
@@ -302,43 +384,146 @@ export default function HeuresSupp() {
               <button onClick={() => { setShowModal(false); setEditId(null); }} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={20} /></button>
             </div>
             <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              {editId ? (
+                <>
+                  <div className="form-group">
+                    <label>Ouvrier</label>
+                    <input
+                      type="text"
+                      readOnly
+                      value={workerOptions.find((w) => w.id === form.workerId)?.label || records.find((r) => r.id === editId)?.ouvrier || '—'}
+                      style={{ ...INPUT_S(false), background: 'var(--bg)', color: 'var(--text-2)' }}
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Projet</label>
+                    <input
+                      type="text"
+                      value={form.projet}
+                      onChange={(e) => setF('projet', e.target.value)}
+                      style={INPUT_S(errors.projet)}
+                    />
+                    {errors.projet && <div style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.projet}</div>}
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="form-group">
+                    <label>Projet *</label>
+                    <select value={form.projectId} onChange={(e) => handleProjectChange(e.target.value)} style={INPUT_S(errors.projectId)}>
+                      <option value="">Choisir un projet...</option>
+                      {projects.map((p) => (
+                        <option key={p.id} value={p.id}>{p.ref ? `${p.ref} — ${p.nom}` : p.nom}</option>
+                      ))}
+                    </select>
+                    {errors.projectId && <div style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.projectId}</div>}
+                  </div>
+
+                  <div className="form-group">
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
+                      <label style={{ margin: 0 }}>Ouvriers affectes au projet *</label>
+                      {projectWorkers.length > 0 && (
+                        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.78rem', color: 'var(--text-2)', cursor: 'pointer', fontWeight: 600 }}>
+                          <input
+                            type="checkbox"
+                            checked={allProjectWorkersSelected}
+                            onChange={(e) => toggleAllWorkers(e.target.checked)}
+                          />
+                          Tout selectionner
+                        </label>
+                      )}
+                    </div>
+
+                    {!form.projectId ? (
+                      <div style={{ padding: '12px 14px', borderRadius: 8, background: 'var(--bg)', border: '1px solid var(--border)', color: 'var(--text-3)', fontSize: '0.85rem' }}>
+                        Selectionnez d&apos;abord un projet.
+                      </div>
+                    ) : projectWorkers.length === 0 ? (
+                      <div style={{ padding: '12px 14px', borderRadius: 8, background: '#FFF3E0', border: '1px solid #FFB74D', color: '#E65100', fontSize: '0.85rem' }}>
+                        Aucun ouvrier affecte a ce projet
+                      </div>
+                    ) : (
+                      <div style={{ border: '1.5px solid ' + (errors.workerIds ? 'var(--red)' : 'var(--border)'), borderRadius: 8, maxHeight: 220, overflowY: 'auto', background: '#fff' }}>
+                        {projectWorkers.map((w) => {
+                          const checked = form.workerIds.includes(w.id);
+                          const tarifJour = workerTarifJournalier(w);
+                          return (
+                            <label
+                              key={w.id}
+                              style={{
+                                display: 'flex', alignItems: 'flex-start', gap: 10, padding: '10px 12px',
+                                borderBottom: '1px solid var(--border)', cursor: 'pointer',
+                                background: checked ? '#FFF5F5' : '#fff',
+                              }}
+                            >
+                              <input
+                                type="checkbox"
+                                checked={checked}
+                                onChange={() => toggleWorker(w.id)}
+                                style={{ marginTop: 3 }}
+                              />
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ fontWeight: 700, fontSize: '0.88rem', color: 'var(--text)' }}>{workerFullName(w)}</div>
+                                <div style={{ fontSize: '0.78rem', color: 'var(--text-3)', marginTop: 2 }}>
+                                  {w.fonction || '—'}
+                                  {tarifJour > 0 ? ` · ${Number(tarifJour).toLocaleString('fr-MA')} MAD/jour` : ''}
+                                </div>
+                              </div>
+                            </label>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {form.workerIds.length > 0 && (
+                      <div style={{ fontSize: '0.78rem', color: 'var(--text-2)', marginTop: 6, fontWeight: 600 }}>
+                        {form.workerIds.length} ouvrier{form.workerIds.length > 1 ? 's' : ''} selectionne{form.workerIds.length > 1 ? 's' : ''}
+                      </div>
+                    )}
+                    {errors.workerIds && <div style={{ color: 'var(--red)', fontSize: '0.75rem', marginTop: 4 }}>{errors.workerIds}</div>}
+                  </div>
+                </>
+              )}
+
               <div className="form-group">
-                <label>Ouvrier</label>
-                <select value={form.workerId} onChange={e => handleOuvrierChange(e.target.value)} style={INPUT_S(errors.workerId)}>
-                  <option value="">Choisir un ouvrier...</option>
-                  {workerOptions.map(w => <option key={w.id} value={w.id}>{w.label}</option>)}
-                </select>
-                {errors.workerId && <div style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.workerId}</div>}
-              </div>
-              <div className="form-group">
-                <label>Projet</label>
-                <select value={form.projet} onChange={e => setF('projet', e.target.value)} style={INPUT_S(errors.projet)}>
-                  <option value="">Choisir un projet...</option>
-                  {chantiers.map(p => <option key={p} value={p}>{p}</option>)}
-                </select>
-                {errors.projet && <div style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.projet}</div>}
-              </div>
-              <div className="form-group">
-                <label>Date</label>
+                <label>Date *</label>
                 <input type="date" value={form.date} onChange={e => setF('date', e.target.value)} style={INPUT_S(errors.date)} />
                 {errors.date && <div style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.date}</div>}
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div className="form-group">
-                  <label>Nb. heures supplementaires</label>
+                  <label>Nombre d&apos;heures supplementaires *</label>
                   <input type="number" min="0.5" step="0.5" placeholder="ex: 3" value={form.heures} onChange={e => setF('heures', e.target.value)} style={INPUT_S(errors.heures)} />
                   {errors.heures && <div style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.heures}</div>}
                 </div>
                 <div className="form-group">
-                  <label>Tarif / heure (MAD)</label>
-                  <input type="number" min="0" placeholder="ex: 87" value={form.tarif} onChange={e => setF('tarif', e.target.value)} style={INPUT_S(errors.tarif)} />
+                  <label>Tarif / heure (MAD) *</label>
+                  <input type="number" min="0" step="0.01" placeholder="ex: 20" value={form.tarif} onChange={e => setF('tarif', e.target.value)} style={INPUT_S(errors.tarif)} />
                   {errors.tarif && <div style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.tarif}</div>}
                 </div>
               </div>
+              <div className="form-group">
+                <label>Observation (optionnelle)</label>
+                <textarea
+                  value={form.motif}
+                  onChange={(e) => setF('motif', e.target.value)}
+                  rows={2}
+                  placeholder="Remarque ou justification..."
+                  style={{ ...INPUT_S(false), resize: 'vertical', minHeight: 64 }}
+                />
+              </div>
               {previewMontant > 0 && (
-                <div style={{ background: '#FFF5F5', borderRadius: 8, padding: '10px 14px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ color: 'var(--text-2)', fontSize: '0.85rem' }}>Montant calcule automatiquement</span>
-                  <span style={{ fontFamily: 'var(--font-head)', fontWeight: 800, color: 'var(--red)', fontSize: '1.1rem' }}>{fmtMAD(previewMontant)}</span>
+                <div style={{ background: '#FFF5F5', borderRadius: 8, padding: '10px 14px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span style={{ color: 'var(--text-2)', fontSize: '0.85rem' }}>
+                      {editId ? 'Montant calcule' : `Montant total (${form.workerIds.length || 0} ouvrier${form.workerIds.length > 1 ? 's' : ''})`}
+                    </span>
+                    <span style={{ fontFamily: 'var(--font-head)', fontWeight: 800, color: 'var(--red)', fontSize: '1.1rem' }}>{fmtMAD(previewMontant)}</span>
+                  </div>
+                  {!editId && form.workerIds.length > 1 && lineMontant > 0 && (
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-3)', marginTop: 4 }}>
+                      {fmtMAD(lineMontant)} par ouvrier × {form.workerIds.length}
+                    </div>
+                  )}
                 </div>
               )}
               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 6 }}>

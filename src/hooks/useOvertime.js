@@ -5,10 +5,12 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { formatSupabaseError } from '../services/supabase/formatError';
 import { listWorkers } from '../services/rh/workers';
+import { listProjects } from '../services/projects/projects';
 import { workerFullName } from '../services/rh/attendance';
 import {
   listOvertime,
   createOvertime,
+  createOvertimeBatch,
   updateOvertime,
   deleteOvertime,
   filterOvertimeRecords,
@@ -19,6 +21,7 @@ import {
 export function useOvertime() {
   const [records, setRecords] = useState([]);
   const [workers, setWorkers] = useState([]);
+  const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -34,12 +37,14 @@ export function useOvertime() {
     setLoading(true);
     setError(null);
     try {
-      const [rows, workerRows] = await Promise.all([
+      const [rows, workerRows, projectRows] = await Promise.all([
         listOvertime(),
         listWorkers(),
+        listProjects(),
       ]);
       setRecords(rows);
       setWorkers(workerRows);
+      setProjects(projectRows);
     } catch (err) {
       console.error('[CITYMO] useOvertime load', err);
       setError(formatSupabaseError(err, 'Erreur de chargement des heures supplémentaires.'));
@@ -53,8 +58,20 @@ export function useOvertime() {
   }, [load]);
 
   const chantiers = useMemo(
-    () => collectOvertimeChantiers(workers, records),
-    [workers, records],
+    () => {
+      const set = new Set(collectOvertimeChantiers(workers, records));
+      projects.forEach((p) => { if (p.nom?.trim()) set.add(p.nom.trim()); });
+      return [...set].sort((a, b) => a.localeCompare(b, 'fr'));
+    },
+    [workers, records, projects],
+  );
+
+  const workersByProject = useCallback(
+    (projectId) => {
+      if (!projectId) return [];
+      return workers.filter((w) => String(w.project_id || '') === String(projectId));
+    },
+    [workers],
   );
 
   const workerOptions = useMemo(
@@ -74,6 +91,22 @@ export function useOvertime() {
       await createOvertime(form);
       await load();
       return { success: true };
+    } catch (err) {
+      const msg = formatSupabaseError(err, 'Erreur enregistrement heures sup.');
+      setError(msg);
+      return { success: false, error: msg };
+    } finally {
+      setSaving(false);
+    }
+  }, [load]);
+
+  const createBatch = useCallback(async (baseForm, workerIds) => {
+    setSaving(true);
+    setError(null);
+    try {
+      const created = await createOvertimeBatch(baseForm, workerIds);
+      await load();
+      return { success: true, count: created.length };
     } catch (err) {
       const msg = formatSupabaseError(err, 'Erreur enregistrement heures sup.');
       setError(msg);
@@ -115,14 +148,17 @@ export function useOvertime() {
   return {
     records,
     workers,
+    projects,
     workerOptions,
     chantiers,
+    workersByProject,
     loading,
     saving,
     error,
     configured,
     load,
     create,
+    createBatch,
     update,
     remove,
     filterOvertimeRecords,

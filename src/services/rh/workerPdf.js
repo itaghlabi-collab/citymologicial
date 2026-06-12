@@ -446,7 +446,7 @@ export async function generateWorkerPdf(worker) {
   const proRows = [
     ['Poste / Fonction', w.fonction],
     ['Chantier', w.chantier],
-    ['Tarif journalier', fmtMAD(w.tarif)],
+    ['Tarif horaire', fmtMAD(w.tarif) + '/h'],
     ['Statut', STATUT_LABELS[w.statut] || w.statut],
     ['Disponibilité', w.disponibilite === 'oui' ? 'Disponible' : 'Non disponible'],
     ['Date recrutement', fmtDate(w.date_recrutement)],

@@ -5,7 +5,7 @@ import { getSupabase } from '../../lib/supabase';
 import { workerFullName } from './attendance';
 import { listAttendance } from './attendance';
 import { listOvertime, calcOvertimeAmount } from './overtime';
-import { listWorkers } from './workers';
+import { listWorkers, workerTarifJournalier } from './workers';
 
 const TABLE = 'payroll';
 
@@ -244,7 +244,7 @@ function aggregateWorkerWeek(worker, semaineDebut, semaineFin, attendance, overt
   );
   const heuresSup = round2(workerOt.reduce((s, o) => s + Number(o.heures || 0), 0));
   const montantSup = round2(workerOt.reduce((s, o) => s + Number(o.montant || 0), 0));
-  const tarifJour = Number(worker.tarif) || 0;
+  const tarifJour = workerTarifJournalier(worker);
   const tarifSup = heuresSup > 0 ? round2(montantSup / heuresSup) : round2(tarifJour * 1.25);
 
   const chantiers = [

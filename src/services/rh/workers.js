@@ -29,6 +29,38 @@ function emptyToNull(v) {
   return v;
 }
 
+export const WORKER_HOURS_PER_DAY = 8;
+
+function round2(n) {
+  return Math.round(Number(n) * 100) / 100;
+}
+
+/** Tarif horaire affiché / stocké (unité heure) */
+export function workerTarifHoraire(worker) {
+  const tarif = Number(worker?.tarif) || 0;
+  const unite = worker?.tarif_unite || 'heure';
+  switch (unite) {
+    case 'heure': return tarif;
+    case 'jour': return round2(tarif / WORKER_HOURS_PER_DAY);
+    case 'semaine': return round2(tarif / (5 * WORKER_HOURS_PER_DAY));
+    case 'mois': return round2(tarif / (26 * WORKER_HOURS_PER_DAY));
+    default: return tarif;
+  }
+}
+
+/** Équivalent journalier pour paie (8 h) */
+export function workerTarifJournalier(worker) {
+  const tarif = Number(worker?.tarif) || 0;
+  const unite = worker?.tarif_unite || 'heure';
+  switch (unite) {
+    case 'heure': return round2(tarif * WORKER_HOURS_PER_DAY);
+    case 'jour': return tarif;
+    case 'semaine': return round2(tarif / 5);
+    case 'mois': return round2(tarif / 26);
+    default: return tarif;
+  }
+}
+
 /** Libellé chantier / projet pour affichage */
 export function workerChantierLabel(row) {
   if (!row) return '';
@@ -49,6 +81,7 @@ export function normalizeWorker(row) {
     cin: row.numero_cin || '',
     fonction: row.fonction || '',
     tarif: Number(row.tarif) || 0,
+    tarif_unite: row.tarif_unite || 'heure',
     date_naissance: row.date_naissance || '',
     ville_naissance: row.lieu_naissance || '',
     adresse: row.adresse || '',
@@ -102,6 +135,7 @@ export function toWorkerRow(form, meta = {}) {
     telephone: emptyToNull(form.telephone?.trim()),
     fonction: emptyToNull(form.fonction),
     tarif: Number(form.tarif) || 0,
+    tarif_unite: form.tarif_unite || 'heure',
     experience: form.experience || 'intermediaire',
     date_naissance: emptyToNull(form.date_naissance),
     lieu_naissance: emptyToNull(form.ville_naissance?.trim()),

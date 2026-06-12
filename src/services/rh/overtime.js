@@ -3,6 +3,7 @@
  */
 import { getSupabase } from '../../lib/supabase';
 import { workerFullName } from './attendance';
+import { workerTarifHoraire } from './workers';
 
 const TABLE = 'overtime';
 
@@ -163,6 +164,47 @@ export async function createOvertime(form) {
   return normalizeOvertime(data);
 }
 
+function validateOvertimeRow(row) {
+  if (!row.worker_id) return 'Ouvrier requis.';
+  if (!row.date) return 'Date requise.';
+  if (!row.chantier) return 'Projet requis.';
+  if (!row.nombre_heures || row.nombre_heures <= 0) return 'Nombre d\'heures valide requis.';
+  if (!row.taux_horaire || row.taux_horaire <= 0) return 'Tarif horaire valide requis.';
+  return null;
+}
+
+/** Crée une ligne d'heures sup par ouvrier coché (même date / projet / tarif). */
+export async function createOvertimeBatch(baseForm, workerIds) {
+  await getAuthUserId();
+  const ids = [...new Set((workerIds || []).filter(Boolean))];
+  if (!ids.length) {
+    const err = new Error('Sélectionnez au moins un ouvrier.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+
+  const rows = ids.map((workerId) => toOvertimeRow({ ...baseForm, workerId }));
+  for (const row of rows) {
+    const msg = validateOvertimeRow(row);
+    if (msg) {
+      const err = new Error(msg);
+      err.code = 'VALIDATION';
+      throw err;
+    }
+  }
+
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .insert(rows)
+    .select(OVERTIME_SELECT);
+
+  if (error) {
+    console.error('[CITYMO] overtime batch insert', error, rows);
+    throw error;
+  }
+  return (data || []).map(normalizeOvertime);
+}
+
 export async function updateOvertime(id, form) {
   await getAuthUserId();
   const row = toOvertimeRow(form);
@@ -237,9 +279,9 @@ export function collectOvertimeChantiers(workers, records) {
   return [...set].sort((a, b) => a.localeCompare(b, 'fr'));
 }
 
-/** Tarif horaire sup suggéré (tarif journalier ouvrier × 1.25 / 8h) */
+/** Tarif horaire sup suggéré (tarif horaire ouvrier × 1.25) */
 export function suggestHourlyRate(worker) {
-  const daily = Number(worker?.tarif) || 0;
-  if (!daily) return '';
-  return String(Math.round((daily / 8) * 1.25));
+  const hourly = workerTarifHoraire(worker);
+  if (!hourly) return '';
+  return String(Math.round(hourly * 1.25 * 100) / 100);
 }

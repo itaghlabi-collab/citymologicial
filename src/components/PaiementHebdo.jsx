@@ -2,6 +2,7 @@ import { Banknote, CheckCircle, Filter, Search, Users, TrendingUp, Plus, Pencil,
 import { useState, useRef, useMemo } from 'react';
 import { useWorkerPayroll } from '../hooks/useWorkerPayroll';
 import { calcPayrollTotals, weekStartMonday, weekEndSunday } from '../services/rh/workerPayroll';
+import { workerTarifJournalier } from '../services/rh/workers';
 
 function EmptyState({ icon, title, sub }) {
   return (
@@ -99,7 +100,7 @@ export default function PaiementHebdo() {
 
   function handleOuvrierChange(workerId) {
     const w = workers.find((x) => x.id === workerId);
-    const tarifJour = w?.tarif || 0;
+    const tarifJour = w ? workerTarifJournalier(w) : 0;
     const tarifSup = tarifJour ? Math.round(tarifJour * 1.25) : '';
     setForm((p) => ({
       ...p,
