@@ -13,6 +13,7 @@ import OuvriersListe from './components/OuvriersListe';
 import Presence from './components/Presence';
 import HeuresSupp from './components/HeuresSupp';
 import PaiementHebdo from './components/PaiementHebdo';
+import SousTraitants from './components/SousTraitants';
 import Clients from './components/crm/Clients';
 import Articles from './components/crm/Articles';
 import Categories from './components/crm/Categories';
@@ -39,7 +40,7 @@ import { canAccessExecutiveCalendar } from './services/auth/executiveCalendarAcc
 import {
   LayoutDashboard, CheckSquare, CalendarDays, CalendarClock,
   Building2, Users, CalendarOff,
-  HardHat, ClockIcon, Banknote, BarChart3,
+  HardHat, ClockIcon, Banknote, BarChart3, Handshake,
   UserSquare, FileEdit, CalendarRange, Megaphone,
   NotebookPen, Receipt, Lightbulb,
   Contact, ShoppingBag, Tag, FileText, ScrollText, PackageCheck,
@@ -82,6 +83,7 @@ const NAV = [
       { id: 'presence',           label: 'Presence ouvriers',    icon: ClockIcon },
       { id: 'heures-sup',         label: 'Heures supplementaires', icon: BarChart3 },
       { id: 'paiement-hebdo',     label: 'Paiement hebdomadaire', icon: Banknote },
+      { id: 'sous-traitants',     label: 'Sous-traitants',       icon: Handshake },
     ],
   },
   {
@@ -187,6 +189,7 @@ const MODULE_LABELS = {
   presence:            'Presence ouvriers',
   'heures-sup':        'Heures supplementaires',
   'paiement-hebdo':    'Paiement hebdomadaire',
+  'sous-traitants':    'Sous-traitants',
   prospects:           'Prospects',
   'devis-attente':     'Devis en attente',
   'planning-commercial': 'Planning commercial',
@@ -249,6 +252,7 @@ function PageContent({ module }) {
     case 'presence':            return <Presence />;
     case 'heures-sup':          return <HeuresSupp />;
     case 'paiement-hebdo':      return <PaiementHebdo />;
+    case 'sous-traitants':      return <SousTraitants />;
     /* Commercial / Marketing */
     case 'prospects':           return <Prospects />;
     case 'devis-attente':       return <DevisAttente />;

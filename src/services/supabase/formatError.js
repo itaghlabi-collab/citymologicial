@@ -112,6 +112,9 @@ export function formatSupabaseError(error, fallback = 'Une erreur est survenue.'
   if (code === '42P01' || message.includes('document_folders') || message.includes('documents')) {
     return 'Tables documents absentes — exécutez supabase/RUN_MES_DOCUMENTS.sql dans Supabase (SQL Editor).';
   }
+  if (code === '42P01' || message.includes('subcontractor')) {
+    return 'Module sous-traitants absent — exécutez supabase/RUN_SUBCONTRACTORS.sql dans Supabase (SQL Editor).';
+  }
   if (code === 'VALIDATION') return message;
   if (message.includes('"type"') && message.includes('crm_factures')) {
     return 'Colonnes acompte absentes — exécutez supabase/migrations/20260526041000_crm_factures_acompte.sql';
