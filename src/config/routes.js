@@ -14,6 +14,7 @@ export const ROUTES = {
   DASHBOARD:          'dashboard',
   TACHES:             'taches',
   RENDEZVOUS:         'rendezvous',
+  AGENDA_DIRECTION:   'agenda-direction',
 
   // Ressources Humaines
   DEPARTEMENTS:       'departements',

@@ -9,6 +9,8 @@ import {
   createInternalTask,
   updateInternalTask,
   deleteInternalTask,
+  setInternalTaskStatut,
+  setInternalTaskDgPush,
   filterInternalTasks,
   computeInternalTaskStats,
   collectTaskResponsables,
@@ -98,6 +100,38 @@ export function useInternalTasks() {
     }
   }, [load]);
 
+  const setStatut = useCallback(async (id, statut) => {
+    setSaving(true);
+    setError(null);
+    try {
+      await setInternalTaskStatut(id, statut);
+      await load();
+      return { success: true };
+    } catch (err) {
+      const msg = formatSupabaseError(err, 'Erreur mise à jour statut.');
+      setError(msg);
+      return { success: false, error: msg };
+    } finally {
+      setSaving(false);
+    }
+  }, [load]);
+
+  const toggleDgPush = useCallback(async (id, enabled, userId, dgNote) => {
+    setSaving(true);
+    setError(null);
+    try {
+      await setInternalTaskDgPush(id, enabled, userId, dgNote);
+      await load();
+      return { success: true };
+    } catch (err) {
+      const msg = formatSupabaseError(err, 'Erreur Push DG.');
+      setError(msg);
+      return { success: false, error: msg };
+    } finally {
+      setSaving(false);
+    }
+  }, [load]);
+
   return {
     records,
     loading,
@@ -108,6 +142,8 @@ export function useInternalTasks() {
     create,
     update,
     remove,
+    setStatut,
+    toggleDgPush,
     responsables,
     filterInternalTasks,
     computeInternalTaskStats,

@@ -1,46 +1,163 @@
-import { Plus, CheckSquare, Clock, Trash2, Edit2, X, User, Building2, RefreshCw } from 'lucide-react';
+import {
+  Plus, CheckSquare, Clock, Trash2, Edit2, X, User, Building2, RefreshCw, AlertCircle,
+} from 'lucide-react';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { listEmployees } from '../services/rh/employees';
 import { employeeFullName } from '../services/rh/leaves';
 import { DEPARTMENTS } from '../data/departments';
 import { useInternalTasks } from '../hooks/useInternalTasks';
+import { useAuth } from '../hooks/useAuth';
+import { canManageTaskDgPush } from '../services/auth/taskDgPushAccess';
+import {
+  TASK_STATUTS,
+  TASK_STATUT_LABELS,
+  TASK_STATUT_SELECT_STYLE,
+} from '../services/internal/internalTasks';
 
 function Toast({ toast }) {
   if (!toast) return null;
+  const bg = toast.type === 'success' ? '#2E7D32' : toast.type === 'info' ? '#1565C0' : '#D32F2F';
   return (
-    <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 9999, background: toast.type === 'success' ? '#2E7D32' : '#D32F2F', color: '#fff', padding: '12px 20px', borderRadius: 10, boxShadow: '0 4px 20px rgba(0,0,0,0.22)', fontSize: '0.88rem', fontWeight: 600, maxWidth: 340, animation: 'fadeUp 0.3s ease' }}>
+    <div style={{
+      position: 'fixed', bottom: 24, right: 24, zIndex: 9999, background: bg, color: '#fff',
+      padding: '12px 20px', borderRadius: 10, boxShadow: '0 4px 20px rgba(0,0,0,0.22)',
+      fontSize: '0.88rem', fontWeight: 600, maxWidth: 340,
+    }}>
       {toast.msg}
     </div>
   );
 }
 
-const STATUS_LABELS = { a_faire: 'A faire', en_cours: 'En cours', terminee: 'Terminee' };
-const STATUS_BADGES = { a_faire: 'badge-orange', en_cours: 'badge-blue', terminee: 'badge-green' };
 const PRIORITY_BADGES = { urgente: 'badge-red', haute: 'badge-red', normale: 'badge-blue', basse: 'badge-grey' };
 
-const EMPTY_FORM = { titre: '', description: '', assigne: '', departement_id: '', dateLimite: '', statut: 'a_faire', priorite: 'normale', module_lie: '', commentaire: '' };
+const EMPTY_FORM = {
+  titre: '', description: '', assigne: '', departement_id: '', dateLimite: '',
+  statut: 'a_faire', priorite: 'normale', module_lie: '', commentaire: '',
+};
 
 const INPUT_S = (err) => ({
   padding: '9px 12px', width: '100%', outline: 'none', fontFamily: 'var(--font-body)', fontSize: '0.9rem',
   border: '1.5px solid ' + (err ? 'var(--red)' : 'var(--border)'), borderRadius: 'var(--radius)', background: '#fff',
 });
 
-const FILTER_S = { padding: '7px 10px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius)', fontSize: '0.82rem', background: '#fff', fontFamily: 'var(--font-body)' };
+const FILTER_S = {
+  padding: '7px 10px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius)',
+  fontSize: '0.82rem', background: '#fff', fontFamily: 'var(--font-body)',
+};
+
+function StatusSelect({ value, onChange, disabled }) {
+  const style = TASK_STATUT_SELECT_STYLE[value] || TASK_STATUT_SELECT_STYLE.a_faire;
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      disabled={disabled}
+      className="taches-statut-select"
+      style={{
+        ...style,
+        padding: '5px 8px',
+        borderRadius: 6,
+        border: `1.5px solid ${style.borderColor}`,
+        fontSize: '0.72rem',
+        fontWeight: 700,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        minWidth: 108,
+      }}
+      onClick={(e) => e.stopPropagation()}
+    >
+      {TASK_STATUTS.map((s) => (
+        <option key={s} value={s}>{TASK_STATUT_LABELS[s]}</option>
+      ))}
+    </select>
+  );
+}
+
+function TaskRow({
+  t, canDgPush, onStatusChange, onDgPush, onToggleDone, onEdit, onDelete, saving,
+}) {
+  const isDone = t.statut === 'terminee';
+  const isCancelled = t.statut === 'annulee';
+
+  return (
+    <div
+      className={`taches-row${t.dg_push ? ' taches-row--urgent-dg' : ''}${isDone ? ' taches-row--done' : ''}`}
+    >
+      <input
+        type="checkbox"
+        checked={isDone}
+        disabled={isCancelled || saving}
+        onChange={(e) => onToggleDone(t.id, e.target.checked)}
+        className="taches-row-check"
+      />
+      <div className="taches-row-body">
+        <div className="taches-row-title-row">
+          <div
+            className="taches-row-title"
+            style={{
+              textDecoration: isDone || isCancelled ? 'line-through' : 'none',
+              color: isDone || isCancelled ? 'var(--text-3)' : 'var(--text)',
+            }}
+          >
+            {t.dg_push && <AlertCircle size={14} style={{ color: 'var(--red)', marginRight: 6, verticalAlign: -2 }} />}
+            {t.titre}
+          </div>
+          {t.dg_push && <span className="badge badge-red taches-urgent-badge">URGENT DG</span>}
+        </div>
+        {t.description && <div className="taches-row-desc">{t.description}</div>}
+        {t.dg_note && t.dg_push && (
+          <div className="taches-dg-note"><strong>DG :</strong> {t.dg_note}</div>
+        )}
+        <div className="taches-row-meta">
+          {t.assigne && <span><User size={11} /> {t.assigne}</span>}
+          {t.module_lie && (() => {
+            const dept = DEPARTMENTS.find((d) => d.code === t.module_lie);
+            return dept
+              ? <span><Building2 size={11} /> {dept.code}</span>
+              : <span>{t.module_lie}</span>;
+          })()}
+          {t.dateLimite && <span><Clock size={11} /> {t.dateLimite}</span>}
+        </div>
+      </div>
+      <div className="taches-row-actions">
+        <StatusSelect
+          value={t.statut}
+          disabled={saving}
+          onChange={(next) => onStatusChange(t.id, next)}
+        />
+        <span className={'badge ' + (PRIORITY_BADGES[t.priorite] || 'badge-grey')} style={{ fontSize: '0.7rem' }}>
+          {t.priorite}
+        </span>
+        {canDgPush ? (
+          <button
+            type="button"
+            className={'btn btn-sm taches-dg-push-btn' + (t.dg_push ? ' is-active' : '')}
+            title="Marquer comme urgent par la Direction"
+            onClick={() => onDgPush(t)}
+            disabled={saving}
+          >
+            <AlertCircle size={14} />
+          </button>
+        ) : t.dg_push ? (
+          <span title="Urgent DG" style={{ color: 'var(--red)', display: 'flex', alignItems: 'center' }}>
+            <AlertCircle size={16} />
+          </span>
+        ) : null}
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => onEdit(t)}><Edit2 size={13} /></button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => onDelete(t.id)}>
+          <Trash2 size={13} style={{ color: 'var(--red)' }} />
+        </button>
+      </div>
+    </div>
+  );
+}
 
 export default function Taches() {
+  const { user } = useAuth();
+  const canDgPush = canManageTaskDgPush(user);
   const {
-    records: tasks,
-    loading,
-    saving,
-    error,
-    configured,
-    load,
-    create,
-    update,
-    remove,
-    responsables,
-    filterInternalTasks,
-    computeInternalTaskStats,
+    records: tasks, loading, saving, error, configured, load,
+    create, update, remove, setStatut, toggleDgPush,
+    responsables, filterInternalTasks, computeInternalTaskStats,
   } = useInternalTasks();
 
   const [employees, setEmployees] = useState([]);
@@ -66,12 +183,12 @@ export default function Taches() {
   function showToast(type, msg) {
     setToast({ type, msg });
     clearTimeout(toastRef.current);
-    toastRef.current = setTimeout(() => setToast(null), 3000);
+    toastRef.current = setTimeout(() => setToast(null), 3500);
   }
 
   function deptCodeFromTask(t) {
     if (!t.module_lie) return '';
-    const dept = DEPARTMENTS.find(d => d.code === t.module_lie);
+    const dept = DEPARTMENTS.find((d) => d.code === t.module_lie);
     return dept ? String(dept.id) : '';
   }
 
@@ -93,14 +210,11 @@ export default function Taches() {
     setShowModal(true);
   }
   function closeModal() { setShowModal(false); setEditId(null); }
-  function setF(k, v) { setForm(p => ({ ...p, [k]: v })); }
+  function setF(k, v) { setForm((p) => ({ ...p, [k]: v })); }
 
   function payloadFromForm(f) {
-    const dept = DEPARTMENTS.find(d => d.id === Number(f.departement_id));
-    return {
-      ...f,
-      module_lie: f.module_lie?.trim() || (dept ? dept.code : '') || null,
-    };
+    const dept = DEPARTMENTS.find((d) => d.id === Number(f.departement_id));
+    return { ...f, module_lie: f.module_lie?.trim() || (dept ? dept.code : '') || null };
   }
 
   async function handleSubmit(e) {
@@ -109,49 +223,70 @@ export default function Taches() {
     if (!form.titre.trim()) errs.titre = 'Requis';
     if (!form.dateLimite) errs.dateLimite = 'Requis';
     if (Object.keys(errs).length) { setErrors(errs); return; }
-    if (!configured) { showToast('error', 'Supabase non configure.'); return; }
-    const payload = payloadFromForm(form);
-    const result = editId ? await update(editId, payload) : await create(payload);
+    if (!configured) { showToast('error', 'Supabase non configuré.'); return; }
+    const result = editId ? await update(editId, payloadFromForm(form)) : await create(payloadFromForm(form));
     if (!result.success) { showToast('error', result.error || 'Erreur.'); return; }
-    showToast('success', editId ? 'Tache mise a jour !' : 'Tache creee avec succes !');
+    showToast('success', editId ? 'Tâche mise à jour !' : 'Tâche créée avec succès !');
     closeModal();
   }
 
   async function deleteTask(id) {
-    if (!window.confirm('Supprimer cette tache ?')) return;
+    if (!window.confirm('Supprimer cette tâche ?')) return;
     const result = await remove(id);
-    showToast(result.success ? 'success' : 'error', result.success ? 'Tache supprimee.' : (result.error || 'Erreur.'));
+    showToast(result.success ? 'success' : 'error', result.success ? 'Tâche supprimée.' : (result.error || 'Erreur.'));
   }
 
-  async function cycleStatus(id, current) {
-    const order = ['a_faire', 'en_cours', 'terminee'];
-    const next = order[(order.indexOf(current) + 1) % 3];
-    const t = tasks.find(x => x.id === id);
-    if (!t) return;
-    const result = await update(id, payloadFromForm({ ...t, assigne: t.assigne, departement_id: deptCodeFromTask(t), dateLimite: t.dateLimite, statut: next }));
-    if (!result.success) showToast('error', result.error || 'Erreur.');
+  async function handleStatusChange(id, nextStatut) {
+    const result = await setStatut(id, nextStatut);
+    if (result.success) {
+      showToast('success', `Statut : ${TASK_STATUT_LABELS[nextStatut]}`);
+    } else {
+      showToast('error', result.error || 'Erreur statut.');
+    }
   }
 
   async function toggleDone(id, checked) {
-    const t = tasks.find(x => x.id === id);
-    if (!t) return;
-    const result = await update(id, payloadFromForm({
-      ...t,
-      assigne: t.assigne,
-      departement_id: deptCodeFromTask(t),
-      dateLimite: t.dateLimite,
-      statut: checked ? 'terminee' : 'a_faire',
-    }));
+    const result = await setStatut(id, checked ? 'terminee' : 'a_faire');
     if (!result.success) showToast('error', result.error || 'Erreur.');
   }
 
-  const filtered = useMemo(() => filterInternalTasks(tasks, {
-    statut: filter,
-    priorite: prioriteFilter,
-    responsable: responsableFilter,
-    dateFrom: dateFrom || undefined,
-    dateTo: dateTo || undefined,
-  }), [tasks, filter, prioriteFilter, responsableFilter, dateFrom, dateTo, filterInternalTasks]);
+  async function handleDgPush(t) {
+    if (!canDgPush) return;
+    const next = !t.dg_push;
+    let dgNote = t.dg_note || '';
+    if (next) {
+      const note = window.prompt('Commentaire urgent DG (optionnel) :', dgNote);
+      if (note === null) return;
+      dgNote = note;
+    } else if (!window.confirm('Retirer le Push DG de cette tâche ?')) return;
+
+    const result = await toggleDgPush(t.id, next, user?.id, dgNote);
+    if (result.success) {
+      if (next) {
+        showToast('info', `Push DG activé — « ${t.titre} » remontée en priorité`);
+        window.dispatchEvent(new CustomEvent('citymo:dg-task-push', {
+          detail: { taskId: t.id, title: t.titre },
+        }));
+      } else {
+        showToast('success', 'Push DG retiré');
+      }
+    } else {
+      showToast('error', result.error || 'Erreur Push DG.');
+    }
+  }
+
+  const filtered = useMemo(() => {
+    const base = {
+      priorite: prioriteFilter,
+      responsable: responsableFilter,
+      dateFrom: dateFrom || undefined,
+      dateTo: dateTo || undefined,
+    };
+    if (filter === 'dg_push') {
+      return filterInternalTasks(tasks, { ...base, dgPushOnly: true });
+    }
+    return filterInternalTasks(tasks, { ...base, statut: filter });
+  }, [tasks, filter, prioriteFilter, responsableFilter, dateFrom, dateTo, filterInternalTasks]);
 
   const counts = computeInternalTaskStats(tasks);
 
@@ -167,148 +302,161 @@ export default function Taches() {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '50vh', gap: 12 }}>
         <div style={{ width: 32, height: 32, border: '3px solid var(--border)', borderTopColor: 'var(--red)', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-        <p style={{ color: 'var(--text-3)', fontSize: '0.88rem' }}>Chargement des taches...</p>
+        <p style={{ color: 'var(--text-3)', fontSize: '0.88rem' }}>Chargement des tâches...</p>
       </div>
     );
   }
 
+  const statCards = [
+    ['all', 'Toutes', counts.total],
+    ['a_faire', 'À faire', counts.a_faire],
+    ['en_cours', 'En cours', counts.en_cours],
+    ['en_attente', 'En attente', counts.en_attente],
+    ['terminee', 'Terminées', counts.terminee],
+    ['dg_push', 'Urgent DG', counts.dg_push],
+  ];
+
   return (
-    <div className="animate-fade-in">
+    <div className="animate-fade-in taches-module">
       <Toast toast={toast} />
       <div className="page-header flex-between">
         <div>
-          <h1 className="page-title">Taches a faire</h1>
-          <p className="page-subtitle">Suivi et gestion des taches de l&apos;equipe</p>
+          <h1 className="page-title">Tâches à faire</h1>
+          <p className="page-subtitle">Suivi et gestion des tâches de l&apos;équipe</p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button className="btn btn-secondary btn-sm" onClick={load} disabled={loading}><RefreshCw size={14} /></button>
-          <button className="btn btn-primary" onClick={openCreate} disabled={!configured || saving}><Plus size={15} /> Nouvelle tache</button>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={load} disabled={loading}><RefreshCw size={14} /></button>
+          <button type="button" className="btn btn-primary" onClick={openCreate} disabled={!configured || saving}>
+            <Plus size={15} /> Nouvelle tâche
+          </button>
         </div>
       </div>
 
       {!configured && (
-        <div style={{ background: '#FFF3E0', border: '1px solid #FFB74D', borderRadius: 8, padding: '10px 14px', fontSize: '0.85rem', marginBottom: 16, color: '#E65100' }}>
-          Supabase non configure — ajoutez VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY dans .env
+        <div className="card" style={{ marginBottom: 16, padding: 12, color: '#E65100', fontSize: '0.85rem' }}>
+          Supabase non configuré — exécutez supabase/RUN_INTERNAL_TASKS_ENHANCE.sql
         </div>
       )}
       {error && (
-        <div style={{ background: '#FFF0F0', border: '1px solid rgba(211,47,47,0.3)', borderRadius: 8, padding: '10px 14px', fontSize: '0.85rem', marginBottom: 16, color: '#C62828' }}>
-          {error}
-        </div>
+        <div className="card" style={{ marginBottom: 16, padding: 12, color: 'var(--red)', fontSize: '0.85rem' }}>{error}</div>
       )}
 
-      {/* Stats */}
-      <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', marginBottom: 16 }}>
-        {[['all','Toutes','badge-grey'], ['a_faire','A faire','badge-orange'], ['en_cours','En cours','badge-blue'], ['terminee','Terminees','badge-green']].map(([k, label]) => (
-          <div key={k} className={'stat-card' + (filter === k ? '' : '')} style={{ cursor: 'pointer', border: filter === k ? '2px solid var(--red)' : '1px solid var(--border)', transition: 'border 0.15s' }} onClick={() => setFilter(k)}>
+      <div className="stat-grid taches-kpi-grid" style={{ marginBottom: 16 }}>
+        {statCards.map(([k, label, val]) => (
+          <div
+            key={k}
+            className="stat-card"
+            style={{
+              cursor: 'pointer',
+              border: filter === k ? '2px solid var(--red)' : '1px solid var(--border)',
+            }}
+            onClick={() => setFilter(k)}
+          >
             <div className="stat-body">
-              <div className="stat-value" style={{ color: filter === k ? 'var(--red)' : 'var(--text)' }}>{counts[k === 'all' ? 'total' : k] ?? 0}</div>
+              <div className="stat-value" style={{ color: filter === k ? 'var(--red)' : k === 'dg_push' ? 'var(--red)' : 'var(--text)' }}>
+                {k === 'dg_push' ? counts.dg_push : val}
+              </div>
               <div className="stat-label">{label}</div>
             </div>
           </div>
         ))}
       </div>
 
-      {/* Filtres */}
-      <div className="card" style={{ padding: '12px 16px', marginBottom: 16, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-        <select value={prioriteFilter} onChange={e => setPrioriteFilter(e.target.value)} style={FILTER_S}>
-          <option value="all">Toutes priorites</option>
+      <div className="card taches-filters" style={{ padding: '12px 16px', marginBottom: 16 }}>
+        <select value={prioriteFilter} onChange={(e) => setPrioriteFilter(e.target.value)} style={FILTER_S}>
+          <option value="all">Toutes priorités</option>
           <option value="urgente">Urgente</option>
           <option value="haute">Haute</option>
           <option value="normale">Normale</option>
           <option value="basse">Basse</option>
         </select>
-        <select value={responsableFilter} onChange={e => setResponsableFilter(e.target.value)} style={FILTER_S}>
+        <select value={responsableFilter} onChange={(e) => setResponsableFilter(e.target.value)} style={FILTER_S}>
           <option value="all">Tous responsables</option>
-          {employeeNames.map(n => <option key={n} value={n}>{n}</option>)}
+          {employeeNames.map((n) => <option key={n} value={n}>{n}</option>)}
         </select>
-        <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} style={FILTER_S} title="Date debut" />
+        <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={FILTER_S} title="Date début" />
         <span style={{ color: 'var(--text-3)', fontSize: '0.82rem' }}>→</span>
-        <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} style={FILTER_S} title="Date fin" />
+        <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={FILTER_S} title="Date fin" />
       </div>
 
-      {/* Task list */}
       <div className="card">
-        <div className="card-title" style={{ marginBottom: 16 }}><CheckSquare size={16} /> {filter === 'all' ? 'Toutes les taches' : STATUS_LABELS[filter]}</div>
+        <div className="card-title" style={{ marginBottom: 16 }}>
+          <CheckSquare size={16} />
+          {filter === 'all' ? 'Toutes les tâches' : filter === 'dg_push' ? 'Urgent DG' : (TASK_STATUT_LABELS[filter] || 'Tâches')}
+          {counts.dg_push > 0 && filter === 'all' && (
+            <span className="badge badge-red" style={{ marginLeft: 8, fontSize: '0.68rem' }}>{counts.dg_push} urgent DG</span>
+          )}
+        </div>
         {filtered.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-3)' }}>Aucune tache dans cette categorie.</div>
+          <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-3)' }}>Aucune tâche dans cette catégorie.</div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {filtered.map(t => (
-              <div key={t.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '12px 14px', background: t.statut === 'terminee' ? '#F9FBF9' : 'var(--bg)', borderRadius: 8, border: '1px solid var(--border)', opacity: t.statut === 'terminee' ? 0.75 : 1 }}>
-                <input type="checkbox" checked={t.statut === 'terminee'} onChange={e => toggleDone(t.id, e.target.checked)} style={{ accentColor: 'var(--red)', width: 16, height: 16, cursor: 'pointer', marginTop: 3, flexShrink: 0 }} />
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 600, fontSize: '0.9rem', textDecoration: t.statut === 'terminee' ? 'line-through' : 'none', color: t.statut === 'terminee' ? 'var(--text-3)' : 'var(--text)' }}>{t.titre}</div>
-                  {t.description && <div style={{ fontSize: '0.8rem', color: 'var(--text-3)', marginTop: 2 }}>{t.description}</div>}
-                  <div style={{ display: 'flex', gap: 12, marginTop: 5, fontSize: '0.77rem', color: 'var(--text-3)', flexWrap: 'wrap' }}>
-                    {t.assigne && <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}><User size={11} /> {t.assigne}</span>}
-                    {t.module_lie && (() => { const dept = DEPARTMENTS.find(d => d.code === t.module_lie); return dept ? <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}><Building2 size={11} /> {dept.code}</span> : <span>{t.module_lie}</span>; })()}
-                    {t.dateLimite && <span style={{ display: 'flex', alignItems: 'center', gap: 3 }}><Clock size={11} /> {t.dateLimite}</span>}
-                  </div>
-                </div>
-                <div style={{ display: 'flex', gap: 6, flexShrink: 0, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-                  <span className={'badge ' + STATUS_BADGES[t.statut]} style={{ cursor: 'pointer', fontSize: '0.7rem' }} onClick={() => cycleStatus(t.id, t.statut)} title="Cliquer pour changer">{STATUS_LABELS[t.statut]}</span>
-                  <span className={'badge ' + PRIORITY_BADGES[t.priorite]} style={{ fontSize: '0.7rem' }}>{t.priorite}</span>
-                  <button className="btn btn-ghost btn-sm" style={{ padding: '4px 6px' }} onClick={() => openEdit(t)}><Edit2 size={13} /></button>
-                  <button className="btn btn-ghost btn-sm" style={{ padding: '4px 6px' }} onClick={() => deleteTask(t.id)}><Trash2 size={13} style={{ color: 'var(--red)' }} /></button>
-                </div>
-              </div>
+          <div className="taches-list">
+            {filtered.map((t) => (
+              <TaskRow
+                key={t.id}
+                t={t}
+                canDgPush={canDgPush}
+                saving={saving}
+                onStatusChange={handleStatusChange}
+                onDgPush={handleDgPush}
+                onToggleDone={toggleDone}
+                onEdit={openEdit}
+                onDelete={deleteTask}
+              />
             ))}
           </div>
         )}
       </div>
 
-      {/* Modal */}
       {showModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
-          <div style={{ background: '#fff', borderRadius: 14, padding: 32, width: '100%', maxWidth: 520, boxShadow: '0 8px 40px rgba(0,0,0,0.2)', maxHeight: '90vh', overflowY: 'auto' }}>
+        <div className="taches-modal-backdrop" onClick={(e) => e.target === e.currentTarget && closeModal()}>
+          <div className="taches-modal card">
             <div className="flex-between" style={{ marginBottom: 20 }}>
-              <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.2rem', textTransform: 'uppercase' }}>{editId ? 'Modifier la tache' : 'Nouvelle tache'}</h2>
-              <button onClick={closeModal} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)' }}><X size={20} /></button>
+              <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.2rem', textTransform: 'uppercase' }}>
+                {editId ? 'Modifier la tâche' : 'Nouvelle tâche'}
+              </h2>
+              <button type="button" onClick={closeModal} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={20} /></button>
             </div>
             <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div className="form-group">
                 <label>Titre</label>
-                <input type="text" placeholder="Description de la tache..." value={form.titre} onChange={e => setF('titre', e.target.value)} style={INPUT_S(errors.titre)} />
+                <input type="text" placeholder="Description de la tâche..." value={form.titre} onChange={(e) => setF('titre', e.target.value)} style={INPUT_S(errors.titre)} />
                 {errors.titre && <div style={{ color: 'var(--red)', fontSize: '0.75rem', marginTop: 2 }}>{errors.titre}</div>}
               </div>
               <div className="form-group">
                 <label>Description (optionnel)</label>
-                <textarea rows={2} placeholder="Details supplementaires..." value={form.description} onChange={e => setF('description', e.target.value)} style={{ ...INPUT_S(false), resize: 'vertical' }} />
+                <textarea rows={2} value={form.description} onChange={(e) => setF('description', e.target.value)} style={{ ...INPUT_S(false), resize: 'vertical' }} />
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div className="taches-form-grid-2">
                 <div className="form-group">
-                  <label>Assigne a</label>
-                  <select value={form.assigne} onChange={e => setF('assigne', e.target.value)} style={INPUT_S(false)}>
-                    <option value="">Liste des employes</option>
-                    {employeeNames.map(name => <option key={name} value={name}>{name}</option>)}
+                  <label>Assigné à</label>
+                  <select value={form.assigne} onChange={(e) => setF('assigne', e.target.value)} style={INPUT_S(false)}>
+                    <option value="">Liste des employés</option>
+                    {employeeNames.map((name) => <option key={name} value={name}>{name}</option>)}
                   </select>
                 </div>
                 <div className="form-group">
-                  <label>Departement</label>
-                  <select value={form.departement_id} onChange={e => setF('departement_id', e.target.value)} style={INPUT_S(false)}>
-                    <option value="">Tous les departements</option>
-                    {DEPARTMENTS.map(d => <option key={d.id} value={d.id}>{d.code} — {d.nom}</option>)}
+                  <label>Département</label>
+                  <select value={form.departement_id} onChange={(e) => setF('departement_id', e.target.value)} style={INPUT_S(false)}>
+                    <option value="">Tous les départements</option>
+                    {DEPARTMENTS.map((d) => <option key={d.id} value={d.id}>{d.code} — {d.nom}</option>)}
                   </select>
                 </div>
               </div>
               <div className="form-group">
                 <label>Date limite</label>
-                <input type="date" value={form.dateLimite} onChange={e => setF('dateLimite', e.target.value)} style={INPUT_S(errors.dateLimite)} />
-                {errors.dateLimite && <div style={{ color: 'var(--red)', fontSize: '0.75rem', marginTop: 2 }}>{errors.dateLimite}</div>}
+                <input type="date" value={form.dateLimite} onChange={(e) => setF('dateLimite', e.target.value)} style={INPUT_S(errors.dateLimite)} />
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div className="taches-form-grid-2">
                 <div className="form-group">
                   <label>Statut</label>
-                  <select value={form.statut} onChange={e => setF('statut', e.target.value)} style={INPUT_S(false)}>
-                    <option value="a_faire">A faire</option>
-                    <option value="en_cours">En cours</option>
-                    <option value="terminee">Termine</option>
+                  <select value={form.statut} onChange={(e) => setF('statut', e.target.value)} style={INPUT_S(false)}>
+                    {TASK_STATUTS.map((s) => <option key={s} value={s}>{TASK_STATUT_LABELS[s]}</option>)}
                   </select>
                 </div>
                 <div className="form-group">
-                  <label>Priorite</label>
-                  <select value={form.priorite} onChange={e => setF('priorite', e.target.value)} style={INPUT_S(false)}>
+                  <label>Priorité</label>
+                  <select value={form.priorite} onChange={(e) => setF('priorite', e.target.value)} style={INPUT_S(false)}>
                     <option value="urgente">Urgente</option>
                     <option value="haute">Haute</option>
                     <option value="normale">Normale</option>
@@ -318,7 +466,9 @@ export default function Taches() {
               </div>
               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 6 }}>
                 <button type="button" className="btn btn-secondary" onClick={closeModal}>Annuler</button>
-                <button type="submit" className="btn btn-primary" disabled={saving}><Plus size={14} /> {editId ? 'Mettre a jour' : 'Creer la tache'}</button>
+                <button type="submit" className="btn btn-primary" disabled={saving}>
+                  <Plus size={14} /> {editId ? 'Mettre à jour' : 'Créer la tâche'}
+                </button>
               </div>
             </form>
           </div>

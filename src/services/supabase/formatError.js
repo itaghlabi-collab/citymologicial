@@ -85,11 +85,14 @@ export function formatSupabaseError(error, fallback = 'Une erreur est survenue.'
   if (code === 'AUTH' || message.includes('Session requise')) {
     return 'Session requise. Veuillez vous connecter.';
   }
-  if (code === '42P01' || message.includes('internal_tasks')) {
-    return 'Table taches absente — exécutez supabase/migrations/20260526100000_internal_tasks.sql';
+  if (code === '42P01' || message.includes('internal_tasks') || message.includes('dg_push')) {
+    return 'Table tâches absente ou incomplète — exécutez supabase/RUN_INTERNAL_TASKS_ENHANCE.sql';
   }
   if (code === '42P01' || message.includes('internal_appointments')) {
     return 'Table rendez-vous absente — exécutez supabase/migrations/20260526110000_internal_appointments.sql';
+  }
+  if (code === '42P01' || message.includes('executive_calendar')) {
+    return 'Table agenda direction absente — exécutez supabase/RUN_EXECUTIVE_CALENDAR.sql';
   }
   if (code === '42P01' || message.includes('finance_transactions')) {
     return 'Table journal caisse absente — exécutez supabase/RUN_FINANCE_TRESORERIE.sql dans Supabase (SQL Editor).';

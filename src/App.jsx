@@ -6,6 +6,7 @@ import Dashboard from './components/Dashboard';
 import RH from './components/RH';
 import Taches from './components/Taches';
 import RendezVous from './components/RendezVous';
+import AgendaDirection from './components/AgendaDirection';
 import Departements from './components/Departements';
 import Conges from './components/Conges';
 import OuvriersListe from './components/OuvriersListe';
@@ -33,9 +34,10 @@ import Inventaire from './components/Inventaire';
 import Documents from './components/Documents';
 import SAV from './components/SAV';
 import Administration from './components/Administration';
+import { canAccessExecutiveCalendar } from './services/auth/executiveCalendarAccess';
 
 import {
-  LayoutDashboard, CheckSquare, CalendarDays,
+  LayoutDashboard, CheckSquare, CalendarDays, CalendarClock,
   Building2, Users, CalendarOff,
   HardHat, ClockIcon, Banknote, BarChart3,
   UserSquare, FileEdit, CalendarRange, Megaphone,
@@ -62,6 +64,7 @@ const NAV = [
       { id: 'dashboard',          label: 'Tableau de bord',      icon: LayoutDashboard },
       { id: 'taches',             label: "Taches a faire",        icon: CheckSquare },
       { id: 'rendezvous',         label: 'Rendez-vous',          icon: CalendarDays },
+      { id: 'agenda-direction',   label: 'Agenda de Direction',  icon: CalendarClock },
     ],
   },
   {
@@ -176,6 +179,7 @@ const MODULE_LABELS = {
   dashboard:           'Tableau de Bord',
   taches:              'Taches a faire',
   rendezvous:          'Rendez-vous',
+  'agenda-direction':  'Agenda de Direction',
   departements:        'Departements',
   employes:            'Employes',
   conges:              'Demande de conge',
@@ -235,6 +239,7 @@ function PageContent({ module }) {
     /* Organisation interne */
     case 'taches':              return <Taches />;
     case 'rendezvous':          return <RendezVous />;
+    case 'agenda-direction':    return <AgendaDirection />;
     /* RH */
     case 'departements':        return <Departements />;
     case 'employes':            return <RH />;
@@ -428,10 +433,16 @@ function Sidebar({ active, onNavigate, collapsed, mobileOpen, onMobileClose, use
 
       {/* Nav */}
       <div className="sidebar-scroll">
-        {NAV.map((group) => (
+        {NAV.map((group) => {
+          const items = group.items.filter((item) => {
+            if (item.id === 'agenda-direction') return canAccessExecutiveCalendar(user);
+            return true;
+          });
+          if (!items.length) return null;
+          return (
           <div key={group.section}>
             {!collapsed && <div className="sidebar-section-label">{group.section}</div>}
-            {group.items.map((item) => (
+            {items.map((item) => (
               <div
                 key={item.id}
                 className={'nav-item' + (active === item.id ? ' active' : '')}
@@ -443,7 +454,8 @@ function Sidebar({ active, onNavigate, collapsed, mobileOpen, onMobileClose, use
               </div>
             ))}
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Footer */}
