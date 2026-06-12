@@ -90,7 +90,7 @@ export default function PaiementSousTraitantsSection({ onNotify }) {
             <Handshake size={16} /> Paiement sous-traitant
           </div>
           <p style={{ margin: 0, fontSize: '0.83rem', color: 'var(--text-3)' }}>
-            Formulaire séparé — projet, sous-traitants, type de paiement (mètre / tâche / service)
+            Projet → sous-traitants → avances / retenues → montant net (mètre / tâche / service)
           </p>
         </div>
         <button type="button" className="btn btn-secondary" onClick={openCreate}>
@@ -152,7 +152,7 @@ export default function PaiementSousTraitantsSection({ onNotify }) {
 
       {showModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
-          <div className="card" style={{ width: '100%', maxWidth: 560, maxHeight: '92vh', overflowY: 'auto', padding: 24 }}>
+          <div className="card" style={{ width: '100%', maxWidth: 680, maxHeight: '92vh', overflowY: 'auto', padding: 24 }}>
             <div className="flex-between" style={{ marginBottom: 16 }}>
               <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.05rem', margin: 0 }}>
                 Paiement sous-traitant

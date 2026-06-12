@@ -46,16 +46,28 @@ export function useSubcontractorPaymentForm({ active = false, initialProjectId =
     (async () => {
       const patch = {};
       await Promise.all(pending.map(async ([assignmentId, sel]) => {
-        const totals = await getProjectAdjustmentTotals(sel.subcontractorId, form.projectId);
-        if (cancelled) return;
-        patch[assignmentId] = {
-          ...sel,
-          avances: String(totals.totalAvances || 0),
-          retenues: String(totals.totalRetenues || 0),
-          autoAvances: totals.totalAvances || 0,
-          autoRetenues: totals.totalRetenues || 0,
-          adjustmentsLoaded: true,
-        };
+        try {
+          const totals = await getProjectAdjustmentTotals(sel.subcontractorId, form.projectId);
+          if (cancelled) return;
+          patch[assignmentId] = {
+            ...sel,
+            avances: String(totals.totalAvances || 0),
+            retenues: String(totals.totalRetenues || 0),
+            autoAvances: totals.totalAvances || 0,
+            autoRetenues: totals.totalRetenues || 0,
+            adjustmentsLoaded: true,
+          };
+        } catch {
+          if (cancelled) return;
+          patch[assignmentId] = {
+            ...sel,
+            avances: sel.avances !== '' ? sel.avances : '0',
+            retenues: sel.retenues !== '' ? sel.retenues : '0',
+            autoAvances: 0,
+            autoRetenues: 0,
+            adjustmentsLoaded: true,
+          };
+        }
       }));
       if (!cancelled && Object.keys(patch).length) {
         setForm((p) => ({ ...p, selected: { ...p.selected, ...patch } }));
@@ -123,8 +135,8 @@ export function useSubcontractorPaymentForm({ active = false, initialProjectId =
           unit: 'm²',
           unitPrice: '',
           amount: '',
-          avances: '',
-          retenues: '',
+          avances: '0',
+          retenues: '0',
           adjustmentsLoaded: false,
         };
       }

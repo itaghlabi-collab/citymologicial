@@ -106,7 +106,58 @@ export default function SubcontractorPaymentFormBody({
                     )}
                   </label>
                   {sel?.checked && (
-                    <div style={{ display: 'grid', gap: 8, paddingLeft: 26 }}>
+                    <div style={{ display: 'grid', gap: 10, paddingLeft: 26 }}>
+                      {/* Avances / retenues — visible dès la sélection */}
+                      <div style={{ padding: '10px 12px', border: '1.5px solid #FFB74D', borderRadius: 8, background: '#FFF8E1' }}>
+                        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#E65100', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                          Avances et retenues
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                          <div>
+                            <label style={{ fontSize: '0.75rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>Avances (MAD)</label>
+                            <input
+                              type="number" min="0" step="0.01"
+                              placeholder="0"
+                              value={sel.avances ?? '0'}
+                              onChange={(e) => setSubPaymentField(a.id, 'avances', e.target.value)}
+                              style={INPUT_S(false)}
+                            />
+                            {loadingAdj ? (
+                              <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 2 }}>Chargement…</div>
+                            ) : hasAutoAvances ? (
+                              <div style={{ fontSize: '0.72rem', color: '#E65100', marginTop: 2 }}>
+                                Auto : {fmtMAD(sel.autoAvances)} enregistrée(s)
+                              </div>
+                            ) : (
+                              <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 2 }}>Aucune avance enregistrée</div>
+                            )}
+                          </div>
+                          <div>
+                            <label style={{ fontSize: '0.75rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>Retenues (MAD)</label>
+                            <input
+                              type="number" min="0" step="0.01"
+                              placeholder="0"
+                              value={sel.retenues ?? '0'}
+                              onChange={(e) => setSubPaymentField(a.id, 'retenues', e.target.value)}
+                              style={INPUT_S(false)}
+                            />
+                            {loadingAdj ? (
+                              <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 2 }}>Chargement…</div>
+                            ) : hasAutoRetenues ? (
+                              <div style={{ fontSize: '0.72rem', color: '#C62828', marginTop: 2 }}>
+                                Auto : {fmtMAD(sel.autoRetenues)} enregistrée(s)
+                              </div>
+                            ) : (
+                              <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 2 }}>Aucune retenue enregistrée</div>
+                            )}
+                          </div>
+                        </div>
+                        {totals && <div style={{ marginTop: 10 }}><LineTotalsBox totals={totals} loadingAdjustments={loadingAdj} /></div>}
+                      </div>
+
+                      <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                        Détail du paiement
+                      </div>
                       {form.paymentType === 'metre' && (
                         <>
                           <input placeholder="Désignation *" value={sel.designation || ''} onChange={(e) => setSubPaymentField(a.id, 'designation', e.target.value)} style={INPUT_S(formErr[`d_${a.id}`])} />
@@ -132,42 +183,6 @@ export default function SubcontractorPaymentFormBody({
                         </>
                       )}
 
-                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
-                        <div>
-                          <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Avances</label>
-                          <input
-                            type="number" min="0" step="0.01"
-                            value={sel.avances ?? ''}
-                            onChange={(e) => setSubPaymentField(a.id, 'avances', e.target.value)}
-                            style={INPUT_S(false)}
-                            disabled={loadingAdj}
-                          />
-                          {hasAutoAvances && sel.adjustmentsLoaded && (
-                            <div style={{ fontSize: '0.72rem', color: '#E65100', marginTop: 2 }}>
-                              Auto : {fmtMAD(sel.autoAvances)} enregistrée(s)
-                            </div>
-                          )}
-                        </div>
-                        <div>
-                          <label style={{ fontSize: '0.75rem', fontWeight: 600 }}>Retenues</label>
-                          <input
-                            type="number" min="0" step="0.01"
-                            value={sel.retenues ?? ''}
-                            onChange={(e) => setSubPaymentField(a.id, 'retenues', e.target.value)}
-                            style={INPUT_S(false)}
-                            disabled={loadingAdj}
-                          />
-                          {hasAutoRetenues && sel.adjustmentsLoaded && (
-                            <div style={{ fontSize: '0.72rem', color: '#C62828', marginTop: 2 }}>
-                              Auto : {fmtMAD(sel.autoRetenues)} enregistrée(s)
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      {totals && (
-                        <LineTotalsBox totals={totals} loadingAdjustments={loadingAdj} />
-                      )}
                     </div>
                   )}
                 </div>
