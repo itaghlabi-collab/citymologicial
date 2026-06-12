@@ -28,6 +28,28 @@ export function paymentStatusToDb(ui) {
 export function paymentStatusFromDb(db) {
   return PAYMENT_STATUS_DB_TO_UI[db] || db;
 }
+
+export const EMPTY_SUB_PAYMENT = {
+  projectId: '',
+  paymentDate: new Date().toISOString().slice(0, 10),
+  paymentType: 'metre',
+  paymentMethod: 'virement',
+  reference: '',
+  description: '',
+  statusUi: 'En attente',
+  selected: {},
+};
+
+export function calcSubPaymentAmount(type, line) {
+  if (type === 'metre') {
+    return Math.round((Number(line.quantity) || 0) * (Number(line.unitPrice) || 0) * 100) / 100;
+  }
+  return Math.round((Number(line.amount) || 0) * 100) / 100;
+}
+
+export function paymentTypeLabel(type) {
+  return PAYMENT_TYPES.find((t) => t.id === type)?.label || type || '—';
+}
 export const SUB_STATUTS = ['actif', 'inactif', 'suspendu', 'archive'];
 
 export const ASSIGNMENT_STATUS_LABEL = {

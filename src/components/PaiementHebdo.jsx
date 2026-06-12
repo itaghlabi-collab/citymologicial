@@ -6,6 +6,7 @@ import { useWorkerPayroll } from '../hooks/useWorkerPayroll';
 import { calcWorkerLineAmount, PAYROLL_UI_STATUTS, buildWorkerPayrollLine } from '../services/rh/workerPayroll';
 import { workerFullName } from '../services/rh/attendance';
 import { workerTarifHoraire } from '../services/rh/workers';
+import PaiementSousTraitantsSection from './PaiementSousTraitantsSection';
 
 function fmtMAD(n) {
   return Number(n).toLocaleString('fr-MA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' MAD';
@@ -288,7 +289,10 @@ export default function PaiementHebdo() {
       </div>
 
       <div className="card">
-        <div className="card-title" style={{ marginBottom: 16 }}><Banknote size={16} /> Paiements ouvriers</div>
+        <div className="card-title" style={{ marginBottom: 4 }}><Banknote size={16} /> Paiements ouvriers</div>
+        <p style={{ margin: '0 0 16px', fontSize: '0.83rem', color: 'var(--text-3)' }}>
+          Formulaire ouvriers : projet → cases à cocher → heures × tarif horaire
+        </p>
         {loading ? (
           <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-3)' }}><Loader2 size={28} style={{ animation: 'spin 1s linear infinite', margin: '0 auto 12px' }} />Chargement…</div>
         ) : filtered.length === 0 ? (
@@ -455,6 +459,8 @@ export default function PaiementHebdo() {
           </div>
         </div>
       )}
+
+      <PaiementSousTraitantsSection onNotify={notify} />
     </div>
   );
 }

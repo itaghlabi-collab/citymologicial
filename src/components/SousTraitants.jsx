@@ -4,13 +4,20 @@ import {
 } from 'lucide-react';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useSubcontractors } from '../hooks/useSubcontractors';
+import { useSubcontractorPaymentForm } from '../hooks/useSubcontractorPaymentForm';
+import SubcontractorPaymentFormBody from './SubcontractorPaymentFormBody';
 import { generateSubcontractorProjectPdf } from '../services/rh/subcontractorProjectPdf';
 import {
   REMUNERATION_TYPES, UNIT_TYPES, ASSIGNMENT_STATUSES, SERVICE_STATUSES,
-  PAYMENT_METHODS, SUB_STATUTS, ASSIGNMENT_STATUS_LABEL, SERVICE_STATUS_LABEL,
-  SUB_STATUT_LABEL, PAYMENT_BALANCE_LABEL, PAYMENT_TYPES, PAYMENT_UNITS,
-  PAYMENT_STATUS_UI, paymentStatusToDb, paymentStatusFromDb,
+  SUB_STATUTS, ASSIGNMENT_STATUS_LABEL, SERVICE_STATUS_LABEL,
+  SUB_STATUT_LABEL, PAYMENT_BALANCE_LABEL,
+  paymentStatusToDb, paymentStatusFromDb,
 } from '../services/rh/subcontractorConstants';
+import {
+  validateSubcontractorPaymentForm,
+  buildSubcontractorPaymentPayload,
+  paymentTypeLabel,
+} from '../utils/rh/subcontractorPaymentFormUtils';
 
 function fmtMAD(n) {
   return Number(n || 0).toLocaleString('fr-MA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' MAD';
@@ -34,28 +41,6 @@ const TABS = [
   { id: 'documents', label: 'Documents', icon: FileText },
 ];
 
-const EMPTY_PAYMENT = {
-  projectId: '',
-  paymentDate: new Date().toISOString().slice(0, 10),
-  paymentType: 'metre',
-  paymentMethod: 'virement',
-  reference: '',
-  description: '',
-  statusUi: 'En attente',
-  selected: {},
-};
-
-function calcSubPaymentAmount(type, line) {
-  if (type === 'metre') {
-    return Math.round((Number(line.quantity) || 0) * (Number(line.unitPrice) || 0) * 100) / 100;
-  }
-  return Math.round((Number(line.amount) || 0) * 100) / 100;
-}
-
-function paymentTypeLabel(type) {
-  return PAYMENT_TYPES.find((t) => t.id === type)?.label || type || '—';
-}
-
 const EMPTY_SUB = {
   prenom: '', nom: '', raison_sociale: '', fonction: '', numero_cin: '', passeport: '',
   telephone: '', email: '', adresse: '', ice: '', statut: 'actif', notes: '',
@@ -65,7 +50,7 @@ export default function SousTraitants() {
   const {
     items, projects, loading, saving, error, configured, load, loadDetail,
     create, update, remove, createAssignment, createService, updateService,
-    createPaymentBatch, listAssignmentsByProject,
+    createPaymentBatch,
   } = useSubcontractors();
 
   const [view, setView] = useState('list');
@@ -78,8 +63,7 @@ export default function SousTraitants() {
   const [formErr, setFormErr] = useState({});
   const [toast, setToast] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
-  const [projectAssignments, setProjectAssignments] = useState([]);
-  const [assignmentsLoading, setAssignmentsLoading] = useState(false);
+  const subPayment = useSubcontractorPaymentForm({ active: modal === 'payment' });
 
   const setF = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
@@ -134,67 +118,8 @@ export default function SousTraitants() {
     setFormErr({});
     if (type === 'sub-create') setForm({ ...EMPTY_SUB });
     else if (type === 'sub-edit') setForm({ ...EMPTY_SUB, ...payload });
-    else if (type === 'payment') {
-      setForm({ ...EMPTY_PAYMENT, ...payload });
-      setProjectAssignments([]);
-    } else setForm({ ...payload });
-  }
-
-  useEffect(() => {
-    if (modal !== 'payment' || !form.projectId) {
-      if (modal !== 'payment') setProjectAssignments([]);
-      return;
-    }
-    setAssignmentsLoading(true);
-    listAssignmentsByProject(form.projectId)
-      .then(setProjectAssignments)
-      .catch(() => setProjectAssignments([]))
-      .finally(() => setAssignmentsLoading(false));
-  }, [modal, form.projectId, listAssignmentsByProject]);
-
-  const paymentSelectedLines = useMemo(() => {
-    return Object.entries(form.selected || {})
-      .filter(([, v]) => v.checked)
-      .map(([assignmentId, v]) => ({ assignmentId, ...v }));
-  }, [form.selected]);
-
-  const paymentBatchTotal = useMemo(
-    () => paymentSelectedLines.reduce((s, l) => s + calcSubPaymentAmount(form.paymentType, l), 0),
-    [paymentSelectedLines, form.paymentType],
-  );
-
-  function handlePaymentProjectChange(projectId) {
-    setForm((p) => ({ ...p, projectId, selected: {} }));
-  }
-
-  function toggleSubPayment(assignment) {
-    setForm((p) => {
-      const sel = { ...(p.selected || {}) };
-      if (sel[assignment.id]?.checked) {
-        delete sel[assignment.id];
-      } else {
-        sel[assignment.id] = {
-          checked: true,
-          subcontractorId: assignment.subcontractorId,
-          designation: '',
-          quantity: '',
-          unit: 'm²',
-          unitPrice: '',
-          amount: '',
-        };
-      }
-      return { ...p, selected: sel };
-    });
-  }
-
-  function setSubPaymentField(assignmentId, field, value) {
-    setForm((p) => ({
-      ...p,
-      selected: {
-        ...p.selected,
-        [assignmentId]: { ...p.selected[assignmentId], [field]: value },
-      },
-    }));
+    else if (type === 'payment') subPayment.resetForm(payload);
+    else setForm({ ...payload });
   }
 
   async function handleSaveSub(e) {
@@ -244,47 +169,19 @@ export default function SousTraitants() {
 
   async function handleSavePayment(e) {
     e.preventDefault();
-    const err = {};
-    if (!form.projectId) err.projectId = 'Projet requis';
-    if (!form.paymentDate) err.paymentDate = 'Date requise';
-    if (!paymentSelectedLines.length) err.selected = 'Sélectionnez au moins un sous-traitant';
-    paymentSelectedLines.forEach((l) => {
-      if (form.paymentType === 'metre') {
-        if (!l.designation?.trim()) err[`d_${l.assignmentId}`] = 'Désignation requise';
-        if (!l.quantity || Number(l.quantity) <= 0) err[`q_${l.assignmentId}`] = 'Quantité requise';
-        if (!l.unitPrice || Number(l.unitPrice) <= 0) err[`p_${l.assignmentId}`] = 'Prix unitaire requis';
-      } else if (form.paymentType === 'tache') {
-        if (!l.designation?.trim()) err[`d_${l.assignmentId}`] = 'Tâche requise';
-        if (!l.amount || Number(l.amount) <= 0) err[`a_${l.assignmentId}`] = 'Montant requis';
-      } else {
-        if (!l.designation?.trim()) err[`d_${l.assignmentId}`] = 'Description requise';
-        if (!l.amount || Number(l.amount) <= 0) err[`a_${l.assignmentId}`] = 'Montant requis';
-      }
-    });
-    if (Object.keys(err).length) { setFormErr(err); return; }
-
-    const shared = {
-      paymentDate: form.paymentDate,
-      paymentType: form.paymentType,
-      paymentMethod: form.paymentMethod,
-      reference: form.reference,
-      description: form.description,
-      status: paymentStatusToDb(form.statusUi),
-    };
-
-    const lines = paymentSelectedLines.map((l) => ({
-      subcontractorId: l.subcontractorId,
-      assignmentId: l.assignmentId,
-      designation: l.designation,
-      quantity: l.quantity,
-      unit: l.unit,
-      unitPrice: l.unitPrice,
-      amount: calcSubPaymentAmount(form.paymentType, l),
-    }));
-
-    const res = await createPaymentBatch(form.projectId, shared, lines);
+    const err = validateSubcontractorPaymentForm(subPayment.form, subPayment.paymentSelectedLines);
+    if (Object.keys(err).length) {
+      subPayment.setFormErr(err);
+      return;
+    }
+    const { shared, lines } = buildSubcontractorPaymentPayload(
+      subPayment.form,
+      subPayment.paymentSelectedLines,
+      paymentStatusToDb,
+    );
+    const res = await createPaymentBatch(subPayment.form.projectId, shared, lines);
     if (!res.success) return notify(res.error, false);
-    notify(`${lines.length} paiement(s) enregistré(s) — total ${fmtMAD(paymentBatchTotal)}`);
+    notify(`${lines.length} paiement(s) enregistré(s) — total ${fmtMAD(subPayment.paymentBatchTotal)}`);
     setModal(null);
     if (selectedId) refreshDetail(selectedId);
   }
@@ -679,102 +576,7 @@ export default function SousTraitants() {
 
             {modal === 'payment' && (
               <form onSubmit={handleSavePayment} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <div>
-                  <label>Projet / chantier *</label>
-                  <select value={form.projectId || ''} onChange={(e) => handlePaymentProjectChange(e.target.value)} style={INPUT_S(formErr.projectId)}>
-                    <option value="">Choisir un projet…</option>
-                    {projects.map((p) => <option key={p.id} value={p.id}>{p.ref ? `${p.ref} — ${p.nom}` : p.nom}</option>)}
-                  </select>
-                  {formErr.projectId && <div style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{formErr.projectId}</div>}
-                </div>
-
-                <div>
-                  <label>Type de paiement *</label>
-                  <select value={form.paymentType || 'metre'} onChange={(e) => setF('paymentType', e.target.value)} style={INPUT_S(false)}>
-                    {PAYMENT_TYPES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
-                  </select>
-                </div>
-
-                <div>
-                  <label>Sous-traitants affectés au projet *</label>
-                  {!form.projectId ? (
-                    <div style={{ padding: 12, background: 'var(--bg)', borderRadius: 8, color: 'var(--text-3)', fontSize: '0.85rem' }}>Sélectionnez d&apos;abord un projet.</div>
-                  ) : assignmentsLoading ? (
-                    <div style={{ padding: 12, color: 'var(--text-3)', fontSize: '0.85rem' }}>Chargement…</div>
-                  ) : projectAssignments.length === 0 ? (
-                    <div style={{ padding: 12, background: '#FFF3E0', borderRadius: 8, color: '#E65100', fontSize: '0.85rem' }}>Aucun sous-traitant affecté à ce projet.</div>
-                  ) : (
-                    <div style={{ border: '1.5px solid var(--border)', borderRadius: 8, maxHeight: 320, overflowY: 'auto' }}>
-                      {projectAssignments.map((a) => {
-                        const sel = form.selected?.[a.id];
-                        const lineAmount = sel?.checked ? calcSubPaymentAmount(form.paymentType, sel) : 0;
-                        return (
-                          <div key={a.id} style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', background: sel?.checked ? '#FFF5F5' : '#fff' }}>
-                            <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginBottom: sel?.checked ? 10 : 0 }}>
-                              <input type="checkbox" checked={!!sel?.checked} onChange={() => toggleSubPayment(a)} />
-                              <span style={{ fontWeight: 700 }}>{a.subcontractorName}</span>
-                              <span style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>{a.subcontractorFonction || '—'}</span>
-                            </label>
-                            {sel?.checked && (
-                              <div style={{ display: 'grid', gap: 8, paddingLeft: 26 }}>
-                                {form.paymentType === 'metre' && (
-                                  <>
-                                    <input placeholder="Désignation *" value={sel.designation || ''} onChange={(e) => setSubPaymentField(a.id, 'designation', e.target.value)} style={INPUT_S(formErr[`d_${a.id}`])} />
-                                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-                                      <input type="number" min="0" step="0.01" placeholder="Quantité *" value={sel.quantity || ''} onChange={(e) => setSubPaymentField(a.id, 'quantity', e.target.value)} style={INPUT_S(formErr[`q_${a.id}`])} />
-                                      <select value={sel.unit || 'm²'} onChange={(e) => setSubPaymentField(a.id, 'unit', e.target.value)} style={INPUT_S(false)}>
-                                        {PAYMENT_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
-                                      </select>
-                                      <input type="number" min="0" step="0.01" placeholder="Prix unit. *" value={sel.unitPrice || ''} onChange={(e) => setSubPaymentField(a.id, 'unitPrice', e.target.value)} style={INPUT_S(formErr[`p_${a.id}`])} />
-                                    </div>
-                                  </>
-                                )}
-                                {form.paymentType === 'tache' && (
-                                  <>
-                                    <input placeholder="Désignation de la tâche *" value={sel.designation || ''} onChange={(e) => setSubPaymentField(a.id, 'designation', e.target.value)} style={INPUT_S(formErr[`d_${a.id}`])} />
-                                    <input type="number" min="0" step="0.01" placeholder="Montant (MAD) *" value={sel.amount || ''} onChange={(e) => setSubPaymentField(a.id, 'amount', e.target.value)} style={INPUT_S(formErr[`a_${a.id}`])} />
-                                  </>
-                                )}
-                                {form.paymentType === 'service' && (
-                                  <>
-                                    <input placeholder="Description du service *" value={sel.designation || ''} onChange={(e) => setSubPaymentField(a.id, 'designation', e.target.value)} style={INPUT_S(formErr[`d_${a.id}`])} />
-                                    <input type="number" min="0" step="0.01" placeholder="Montant (MAD) *" value={sel.amount || ''} onChange={(e) => setSubPaymentField(a.id, 'amount', e.target.value)} style={INPUT_S(formErr[`a_${a.id}`])} />
-                                  </>
-                                )}
-                                <div style={{ textAlign: 'right', fontWeight: 700, color: 'var(--red)', fontSize: '0.88rem' }}>{fmtMAD(lineAmount)}</div>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                  {formErr.selected && <div style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{formErr.selected}</div>}
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-                  <div><label>Date *</label><input type="date" value={form.paymentDate || ''} onChange={(e) => setF('paymentDate', e.target.value)} style={INPUT_S(formErr.paymentDate)} /></div>
-                  <div><label>Statut</label>
-                    <select value={form.statusUi || 'En attente'} onChange={(e) => setF('statusUi', e.target.value)} style={INPUT_S(false)}>
-                      {PAYMENT_STATUS_UI.map((s) => <option key={s} value={s}>{s}</option>)}
-                    </select>
-                  </div>
-                </div>
-                <div><label>Mode de paiement</label>
-                  <select value={form.paymentMethod || ''} onChange={(e) => setF('paymentMethod', e.target.value)} style={INPUT_S(false)}>
-                    {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
-                  </select>
-                </div>
-                <div><label>Référence</label><input value={form.reference || ''} onChange={(e) => setF('reference', e.target.value)} style={INPUT_S(false)} /></div>
-                <div><label>Description / Observation</label><textarea rows={2} value={form.description || ''} onChange={(e) => setF('description', e.target.value)} style={{ ...INPUT_S(false), resize: 'vertical' }} /></div>
-
-                {paymentBatchTotal > 0 && (
-                  <div style={{ padding: '12px 14px', background: '#FFF5F5', borderRadius: 8, display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ fontWeight: 600 }}>Total ({paymentSelectedLines.length} sous-traitant{paymentSelectedLines.length > 1 ? 's' : ''})</span>
-                    <span style={{ fontWeight: 800, color: 'var(--red)' }}>{fmtMAD(paymentBatchTotal)}</span>
-                  </div>
-                )}
-
+                <SubcontractorPaymentFormBody {...subPayment} formErr={subPayment.formErr} />
                 <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                   <button type="button" className="btn btn-secondary" onClick={() => setModal(null)}>Annuler</button>
                   <button type="submit" className="btn btn-primary" disabled={saving}>Enregistrer</button>
