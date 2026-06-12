@@ -1,7 +1,9 @@
 import {
-  PAYMENT_METHODS, PAYMENT_TYPES, PAYMENT_UNITS, PAYMENT_STATUS_UI,
+  PAYMENT_METHODS, PAYMENT_TYPES, PAYMENT_STATUS_UI,
 } from '../services/rh/subcontractorConstants';
-import { calcSubPaymentTotals } from '../utils/rh/subcontractorPaymentFormUtils';
+import { calcSubPaymentAmount, calcSubPaymentTotals } from '../utils/rh/subcontractorPaymentFormUtils';
+
+const METRE_UNITS = ['m²', 'ml', 'm³'];
 
 function fmtMAD(n) {
   return Number(n || 0).toLocaleString('fr-MA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' MAD';
@@ -13,12 +15,15 @@ const INPUT_S = (err) => ({
   border: '1.5px solid ' + (err ? 'var(--red)' : 'var(--border)'), background: '#fff',
 });
 
-function LineTotalsBox({ totals, loadingAdjustments }) {
+const LABEL = ({ children, req }) => (
+  <label style={{ fontSize: '0.78rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>
+    {children}{req ? ' *' : ''}
+  </label>
+);
+
+function LineTotalsBox({ totals }) {
   return (
     <div style={{ padding: '10px 12px', background: '#F8F9FA', borderRadius: 8, fontSize: '0.82rem' }}>
-      {loadingAdjustments && (
-        <div style={{ color: 'var(--text-3)', marginBottom: 6, fontSize: '0.78rem' }}>Chargement avances / retenues…</div>
-      )}
       <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
         <span>Montant brut</span>
         <strong>{fmtMAD(totals.gross)}</strong>
@@ -32,8 +37,161 @@ function LineTotalsBox({ totals, loadingAdjustments }) {
         <strong>{fmtMAD(totals.retenues)}</strong>
       </div>
       <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 6, borderTop: '1px solid var(--border)' }}>
-        <span style={{ fontWeight: 700 }}>Montant net à payer</span>
+        <span style={{ fontWeight: 700 }}>Net à payer</span>
         <strong style={{ color: 'var(--red)', fontSize: '0.95rem' }}>{fmtMAD(totals.net)}</strong>
+      </div>
+    </div>
+  );
+}
+
+/** Champs conditionnels selon le type de paiement */
+function PaymentTypeFields({ paymentType, sel, assignmentId, formErr, setSubPaymentField }) {
+  const gross = calcSubPaymentAmount(paymentType, sel);
+
+  if (paymentType === 'metre') {
+    return (
+      <div style={{ display: 'grid', gap: 8 }}>
+        <div>
+          <LABEL req>Désignation</LABEL>
+          <input
+            placeholder="Ex : Carrelage sol salon"
+            value={sel.designation || ''}
+            onChange={(e) => setSubPaymentField(assignmentId, 'designation', e.target.value)}
+            style={INPUT_S(formErr[`d_${assignmentId}`])}
+          />
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
+          <div>
+            <LABEL req>Quantité réalisée</LABEL>
+            <input
+              type="number" min="0" step="0.01"
+              placeholder="0"
+              value={sel.quantity ?? ''}
+              onChange={(e) => setSubPaymentField(assignmentId, 'quantity', e.target.value)}
+              style={INPUT_S(formErr[`q_${assignmentId}`])}
+            />
+          </div>
+          <div>
+            <LABEL req>Unité</LABEL>
+            <select
+              value={sel.unit || 'm²'}
+              onChange={(e) => setSubPaymentField(assignmentId, 'unit', e.target.value)}
+              style={INPUT_S(false)}
+            >
+              {METRE_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
+            </select>
+          </div>
+          <div>
+            <LABEL req>Prix unitaire (MAD)</LABEL>
+            <input
+              type="number" min="0" step="0.01"
+              placeholder="0"
+              value={sel.unitPrice ?? ''}
+              onChange={(e) => setSubPaymentField(assignmentId, 'unitPrice', e.target.value)}
+              style={INPUT_S(formErr[`p_${assignmentId}`])}
+            />
+          </div>
+        </div>
+        <div style={{ padding: '8px 12px', background: '#E3F2FD', borderRadius: 8, display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
+          <span>Montant brut calculé</span>
+          <strong style={{ color: '#1565C0' }}>{fmtMAD(gross)}</strong>
+        </div>
+      </div>
+    );
+  }
+
+  if (paymentType === 'tache') {
+    return (
+      <div style={{ display: 'grid', gap: 8 }}>
+        <div>
+          <LABEL req>Désignation de la tâche</LABEL>
+          <input
+            placeholder="Ex : Pose plomberie complète"
+            value={sel.designation || ''}
+            onChange={(e) => setSubPaymentField(assignmentId, 'designation', e.target.value)}
+            style={INPUT_S(formErr[`d_${assignmentId}`])}
+          />
+        </div>
+        <div>
+          <LABEL>Description</LABEL>
+          <textarea
+            rows={2}
+            placeholder="Détails de la tâche réalisée…"
+            value={sel.lineDescription || ''}
+            onChange={(e) => setSubPaymentField(assignmentId, 'lineDescription', e.target.value)}
+            style={{ ...INPUT_S(false), resize: 'vertical' }}
+          />
+        </div>
+        <div>
+          <LABEL req>Montant forfaitaire (MAD)</LABEL>
+          <input
+            type="number" min="0" step="0.01"
+            placeholder="0"
+            value={sel.amount ?? ''}
+            onChange={(e) => setSubPaymentField(assignmentId, 'amount', e.target.value)}
+            style={INPUT_S(formErr[`a_${assignmentId}`])}
+          />
+        </div>
+        <div style={{ padding: '8px 12px', background: '#E3F2FD', borderRadius: 8, display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
+          <span>Montant brut</span>
+          <strong style={{ color: '#1565C0' }}>{fmtMAD(gross)}</strong>
+        </div>
+      </div>
+    );
+  }
+
+  // service
+  return (
+    <div style={{ display: 'grid', gap: 8 }}>
+      <div>
+        <LABEL req>Désignation du service</LABEL>
+        <input
+          placeholder="Ex : Maintenance électrique"
+          value={sel.designation || ''}
+          onChange={(e) => setSubPaymentField(assignmentId, 'designation', e.target.value)}
+          style={INPUT_S(formErr[`d_${assignmentId}`])}
+        />
+      </div>
+      <div>
+        <LABEL>Description</LABEL>
+        <textarea
+          rows={2}
+          placeholder="Détails du service rendu…"
+          value={sel.lineDescription || ''}
+          onChange={(e) => setSubPaymentField(assignmentId, 'lineDescription', e.target.value)}
+          style={{ ...INPUT_S(false), resize: 'vertical' }}
+        />
+      </div>
+      <div>
+        <LABEL req>Montant forfaitaire (MAD)</LABEL>
+        <input
+          type="number" min="0" step="0.01"
+          placeholder="0"
+          value={sel.amount ?? ''}
+          onChange={(e) => setSubPaymentField(assignmentId, 'amount', e.target.value)}
+          style={INPUT_S(formErr[`a_${assignmentId}`])}
+        />
+      </div>
+      <div style={{ padding: '8px 12px', background: '#E3F2FD', borderRadius: 8, display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
+        <span>Montant brut</span>
+        <strong style={{ color: '#1565C0' }}>{fmtMAD(gross)}</strong>
+      </div>
+    </div>
+  );
+}
+
+function TypePreviewHint({ paymentType }) {
+  const hints = {
+    metre: 'Désignation · Quantité · Unité (m², ml, m³) · Prix unitaire → Montant brut = Quantité × Prix',
+    tache: 'Désignation de la tâche · Description · Montant forfaitaire → Montant brut = Forfait',
+    service: 'Désignation du service · Description · Montant forfaitaire → Montant brut = Forfait',
+  };
+  return (
+    <div style={{ padding: '10px 12px', background: '#E3F2FD', borderRadius: 8, fontSize: '0.82rem', color: '#1565C0' }}>
+      <strong>{PAYMENT_TYPES.find((t) => t.id === paymentType)?.label}</strong>
+      <div style={{ marginTop: 4, color: '#37474F' }}>{hints[paymentType] || ''}</div>
+      <div style={{ marginTop: 4, fontSize: '0.78rem', color: 'var(--text-3)' }}>
+        Cochez un sous-traitant ci-dessous pour saisir les champs et calculer le net (brut − avances − retenues).
       </div>
     </div>
   );
@@ -55,10 +213,12 @@ export default function SubcontractorPaymentFormBody({
   toggleSubPayment,
   setSubPaymentField,
 }) {
+  const paymentType = form.paymentType || 'metre';
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       <div>
-        <label>Projet / chantier *</label>
+        <LABEL req>Projet / chantier</LABEL>
         <select value={form.projectId || ''} onChange={(e) => handlePaymentProjectChange(e.target.value)} style={INPUT_S(formErr.projectId)}>
           <option value="">Choisir un projet…</option>
           {projects.map((p) => (
@@ -69,14 +229,16 @@ export default function SubcontractorPaymentFormBody({
       </div>
 
       <div>
-        <label>Type de paiement *</label>
-        <select value={form.paymentType || 'metre'} onChange={(e) => setF('paymentType', e.target.value)} style={INPUT_S(false)}>
+        <LABEL req>Type de paiement</LABEL>
+        <select value={paymentType} onChange={(e) => setF('paymentType', e.target.value)} style={INPUT_S(false)}>
           {PAYMENT_TYPES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
         </select>
       </div>
 
+      <TypePreviewHint paymentType={paymentType} />
+
       <div>
-        <label>Sous-traitants affectés au projet *</label>
+        <LABEL req>Sous-traitants affectés au projet</LABEL>
         {!form.projectId ? (
           <div style={{ padding: 12, background: 'var(--bg)', borderRadius: 8, color: 'var(--text-3)', fontSize: '0.85rem' }}>
             Sélectionnez d&apos;abord un projet.
@@ -88,36 +250,50 @@ export default function SubcontractorPaymentFormBody({
             Aucun sous-traitant affecté à ce projet.
           </div>
         ) : (
-          <div style={{ border: '1.5px solid var(--border)', borderRadius: 8, maxHeight: 420, overflowY: 'auto' }}>
+          <div style={{ border: '1.5px solid var(--border)', borderRadius: 8, maxHeight: 520, overflowY: 'auto' }}>
             {projectAssignments.map((a) => {
               const sel = form.selected?.[a.id];
-              const totals = sel?.checked ? calcSubPaymentTotals(form.paymentType, sel) : null;
+              const totals = sel?.checked ? calcSubPaymentTotals(paymentType, sel) : null;
               const loadingAdj = sel?.checked && !sel?.adjustmentsLoaded;
               const hasAutoAvances = (sel?.autoAvances || 0) > 0;
               const hasAutoRetenues = (sel?.autoRetenues || 0) > 0;
               return (
-                <div key={a.id} style={{ padding: '10px 12px', borderBottom: '1px solid var(--border)', background: sel?.checked ? '#FFF5F5' : '#fff' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginBottom: sel?.checked ? 10 : 0 }}>
+                <div key={a.id} style={{ padding: '12px', borderBottom: '1px solid var(--border)', background: sel?.checked ? '#FFF5F5' : '#fff' }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', marginBottom: sel?.checked ? 12 : 0 }}>
                     <input type="checkbox" checked={!!sel?.checked} onChange={() => toggleSubPayment(a)} />
                     <span style={{ fontWeight: 700 }}>{a.subcontractorName}</span>
                     <span style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>{a.subcontractorFonction || '—'}</span>
-                    {totals && !loadingAdj && (
+                    {totals && (
                       <span style={{ marginLeft: 'auto', fontWeight: 800, color: 'var(--red)', fontSize: '0.88rem' }}>{fmtMAD(totals.net)}</span>
                     )}
                   </label>
+
                   {sel?.checked && (
-                    <div style={{ display: 'grid', gap: 10, paddingLeft: 26 }}>
-                      {/* Avances / retenues — visible dès la sélection */}
-                      <div style={{ padding: '10px 12px', border: '1.5px solid #FFB74D', borderRadius: 8, background: '#FFF8E1' }}>
-                        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#E65100', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+                    <div style={{ display: 'grid', gap: 12, paddingLeft: 26 }}>
+                      {/* 1. Détail selon type */}
+                      <div style={{ padding: '12px', border: '1.5px solid #90CAF9', borderRadius: 8, background: '#FAFCFF' }}>
+                        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#1565C0', marginBottom: 10, textTransform: 'uppercase' }}>
+                          {PAYMENT_TYPES.find((t) => t.id === paymentType)?.label}
+                        </div>
+                        <PaymentTypeFields
+                          paymentType={paymentType}
+                          sel={sel}
+                          assignmentId={a.id}
+                          formErr={formErr}
+                          setSubPaymentField={setSubPaymentField}
+                        />
+                      </div>
+
+                      {/* 2. Avances / retenues */}
+                      <div style={{ padding: '12px', border: '1.5px solid #FFB74D', borderRadius: 8, background: '#FFF8E1' }}>
+                        <div style={{ fontSize: '0.78rem', fontWeight: 700, color: '#E65100', marginBottom: 8, textTransform: 'uppercase' }}>
                           Avances et retenues
                         </div>
                         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
                           <div>
-                            <label style={{ fontSize: '0.75rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>Avances (MAD)</label>
+                            <LABEL>Avances (MAD)</LABEL>
                             <input
                               type="number" min="0" step="0.01"
-                              placeholder="0"
                               value={sel.avances ?? '0'}
                               onChange={(e) => setSubPaymentField(a.id, 'avances', e.target.value)}
                               style={INPUT_S(false)}
@@ -125,18 +301,15 @@ export default function SubcontractorPaymentFormBody({
                             {loadingAdj ? (
                               <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 2 }}>Chargement…</div>
                             ) : hasAutoAvances ? (
-                              <div style={{ fontSize: '0.72rem', color: '#E65100', marginTop: 2 }}>
-                                Auto : {fmtMAD(sel.autoAvances)} enregistrée(s)
-                              </div>
+                              <div style={{ fontSize: '0.72rem', color: '#E65100', marginTop: 2 }}>Auto : {fmtMAD(sel.autoAvances)}</div>
                             ) : (
-                              <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 2 }}>Aucune avance enregistrée</div>
+                              <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 2 }}>0 MAD si aucune avance</div>
                             )}
                           </div>
                           <div>
-                            <label style={{ fontSize: '0.75rem', fontWeight: 600, display: 'block', marginBottom: 4 }}>Retenues (MAD)</label>
+                            <LABEL>Retenues (MAD)</LABEL>
                             <input
                               type="number" min="0" step="0.01"
-                              placeholder="0"
                               value={sel.retenues ?? '0'}
                               onChange={(e) => setSubPaymentField(a.id, 'retenues', e.target.value)}
                               style={INPUT_S(false)}
@@ -144,45 +317,16 @@ export default function SubcontractorPaymentFormBody({
                             {loadingAdj ? (
                               <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 2 }}>Chargement…</div>
                             ) : hasAutoRetenues ? (
-                              <div style={{ fontSize: '0.72rem', color: '#C62828', marginTop: 2 }}>
-                                Auto : {fmtMAD(sel.autoRetenues)} enregistrée(s)
-                              </div>
+                              <div style={{ fontSize: '0.72rem', color: '#C62828', marginTop: 2 }}>Auto : {fmtMAD(sel.autoRetenues)}</div>
                             ) : (
-                              <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 2 }}>Aucune retenue enregistrée</div>
+                              <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 2 }}>0 MAD si aucune retenue</div>
                             )}
                           </div>
                         </div>
-                        {totals && <div style={{ marginTop: 10 }}><LineTotalsBox totals={totals} loadingAdjustments={loadingAdj} /></div>}
                       </div>
 
-                      <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
-                        Détail du paiement
-                      </div>
-                      {form.paymentType === 'metre' && (
-                        <>
-                          <input placeholder="Désignation *" value={sel.designation || ''} onChange={(e) => setSubPaymentField(a.id, 'designation', e.target.value)} style={INPUT_S(formErr[`d_${a.id}`])} />
-                          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8 }}>
-                            <input type="number" min="0" step="0.01" placeholder="Quantité *" value={sel.quantity || ''} onChange={(e) => setSubPaymentField(a.id, 'quantity', e.target.value)} style={INPUT_S(formErr[`q_${a.id}`])} />
-                            <select value={sel.unit || 'm²'} onChange={(e) => setSubPaymentField(a.id, 'unit', e.target.value)} style={INPUT_S(false)}>
-                              {PAYMENT_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
-                            </select>
-                            <input type="number" min="0" step="0.01" placeholder="Prix unit. *" value={sel.unitPrice || ''} onChange={(e) => setSubPaymentField(a.id, 'unitPrice', e.target.value)} style={INPUT_S(formErr[`p_${a.id}`])} />
-                          </div>
-                        </>
-                      )}
-                      {form.paymentType === 'tache' && (
-                        <>
-                          <input placeholder="Désignation de la tâche *" value={sel.designation || ''} onChange={(e) => setSubPaymentField(a.id, 'designation', e.target.value)} style={INPUT_S(formErr[`d_${a.id}`])} />
-                          <input type="number" min="0" step="0.01" placeholder="Montant brut (MAD) *" value={sel.amount || ''} onChange={(e) => setSubPaymentField(a.id, 'amount', e.target.value)} style={INPUT_S(formErr[`a_${a.id}`])} />
-                        </>
-                      )}
-                      {form.paymentType === 'service' && (
-                        <>
-                          <input placeholder="Description du service *" value={sel.designation || ''} onChange={(e) => setSubPaymentField(a.id, 'designation', e.target.value)} style={INPUT_S(formErr[`d_${a.id}`])} />
-                          <input type="number" min="0" step="0.01" placeholder="Montant brut (MAD) *" value={sel.amount || ''} onChange={(e) => setSubPaymentField(a.id, 'amount', e.target.value)} style={INPUT_S(formErr[`a_${a.id}`])} />
-                        </>
-                      )}
-
+                      {/* 3. Récap net */}
+                      {totals && <LineTotalsBox totals={totals} />}
                     </div>
                   )}
                 </div>
@@ -190,37 +334,38 @@ export default function SubcontractorPaymentFormBody({
             })}
           </div>
         )}
-        {formErr.selected && <div style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{formErr.selected}</div>}
+        {formErr.selected && <div style={{ color: 'var(--red)', fontSize: '0.75rem', marginTop: 4 }}>{formErr.selected}</div>}
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
         <div>
-          <label>Date *</label>
+          <LABEL req>Date</LABEL>
           <input type="date" value={form.paymentDate || ''} onChange={(e) => setF('paymentDate', e.target.value)} style={INPUT_S(formErr.paymentDate)} />
         </div>
         <div>
-          <label>Statut</label>
+          <LABEL>Statut</LABEL>
           <select value={form.statusUi || 'En attente'} onChange={(e) => setF('statusUi', e.target.value)} style={INPUT_S(false)}>
             {PAYMENT_STATUS_UI.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
         </div>
       </div>
       <div>
-        <label>Mode de paiement</label>
+        <LABEL>Mode de paiement</LABEL>
         <select value={form.paymentMethod || ''} onChange={(e) => setF('paymentMethod', e.target.value)} style={INPUT_S(false)}>
           {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
         </select>
       </div>
-      <div><label>Référence</label><input value={form.reference || ''} onChange={(e) => setF('reference', e.target.value)} style={INPUT_S(false)} /></div>
+      <div><LABEL>Référence</LABEL><input value={form.reference || ''} onChange={(e) => setF('reference', e.target.value)} style={INPUT_S(false)} /></div>
       <div>
-        <label>Description / Observation</label>
+        <LABEL>Description / Observation (global)</LABEL>
         <textarea rows={2} value={form.description || ''} onChange={(e) => setF('description', e.target.value)} style={{ ...INPUT_S(false), resize: 'vertical' }} />
       </div>
 
       {paymentSelectedLines.length > 0 && (
-        <div style={{ padding: '12px 14px', background: '#FFF5F5', borderRadius: 8, fontSize: '0.85rem' }}>
+        <div style={{ padding: '14px 16px', background: '#FFF5F5', borderRadius: 8, fontSize: '0.85rem', border: '1.5px solid #FFCDD2' }}>
+          <div style={{ fontWeight: 700, marginBottom: 10, fontSize: '0.9rem' }}>Récapitulatif du paiement</div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-            <span>Montant brut total</span><strong>{fmtMAD(paymentBatchGross)}</strong>
+            <span>Montant brut</span><strong>{fmtMAD(paymentBatchGross)}</strong>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, color: '#E65100' }}>
             <span>Avances déduites</span><strong>{fmtMAD(paymentBatchAvances)}</strong>
@@ -229,7 +374,7 @@ export default function SubcontractorPaymentFormBody({
             <span>Retenues déduites</span><strong>{fmtMAD(paymentBatchRetenues)}</strong>
           </div>
           <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 8, borderTop: '1px solid var(--border)' }}>
-            <span style={{ fontWeight: 700 }}>Montant net ({paymentSelectedLines.length} sous-traitant{paymentSelectedLines.length > 1 ? 's' : ''})</span>
+            <span style={{ fontWeight: 700 }}>Net à payer ({paymentSelectedLines.length} sous-traitant{paymentSelectedLines.length > 1 ? 's' : ''})</span>
             <span style={{ fontWeight: 800, color: 'var(--red)', fontSize: '1.05rem' }}>{fmtMAD(paymentBatchTotal)}</span>
           </div>
         </div>

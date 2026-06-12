@@ -235,7 +235,7 @@ function toPaymentRow(form, subcontractorId) {
     amount: net,
     payment_method: emptyToNull(form.paymentMethod),
     reference: emptyToNull(form.reference?.trim()),
-    description: emptyToNull(form.description?.trim()),
+    description: emptyToNull(form.lineDescription?.trim()) || emptyToNull(form.description?.trim()),
     status: form.status || 'paid',
     notes: emptyToNull(form.notes?.trim()),
   };

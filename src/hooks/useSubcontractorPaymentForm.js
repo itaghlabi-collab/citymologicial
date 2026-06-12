@@ -131,6 +131,7 @@ export function useSubcontractorPaymentForm({ active = false, initialProjectId =
           checked: true,
           subcontractorId: assignment.subcontractorId,
           designation: '',
+          lineDescription: '',
           quantity: '',
           unit: 'm²',
           unitPrice: '',

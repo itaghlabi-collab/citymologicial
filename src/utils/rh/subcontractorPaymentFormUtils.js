@@ -73,13 +73,15 @@ export function buildSubcontractorPaymentPayload(form, paymentSelectedLines, pay
       subcontractorId: l.subcontractorId,
       assignmentId: l.assignmentId,
       designation: l.designation,
+      lineDescription: l.lineDescription,
       quantity: l.quantity,
       unit: l.unit,
       unitPrice: l.unitPrice,
+      amount: l.amount,
       grossAmount: totals.gross,
       avances: totals.avances,
       retenues: totals.retenues,
-      amount: totals.net,
+      netAmount: totals.net,
     };
   });
   return { shared, lines };
