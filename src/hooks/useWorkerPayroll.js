@@ -1,28 +1,27 @@
 /**
- * useWorkerPayroll.js — Paiement hebdomadaire ouvriers
+ * useWorkerPayroll.js — Paiement ouvriers par projet
  */
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { formatSupabaseError } from '../services/supabase/formatError';
 import { listWorkers } from '../services/rh/workers';
 import { workerFullName } from '../services/rh/attendance';
+import { listProjects } from '../services/projects/projects';
 import {
   listWorkerPayroll,
-  createWorkerPayroll,
+  createWorkerPayrollBatch,
   updateWorkerPayroll,
   updateWorkerPayrollStatut,
   deleteWorkerPayroll,
-  generateWorkerPayrollWeek,
   filterWorkerPayroll,
   computePayrollStats,
   collectPayrollChantiers,
-  collectPayrollWeeks,
-  weekStartMonday,
 } from '../services/rh/workerPayroll';
 
 export function useWorkerPayroll() {
   const [records, setRecords] = useState([]);
   const [workers, setWorkers] = useState([]);
+  const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
@@ -38,12 +37,14 @@ export function useWorkerPayroll() {
     setLoading(true);
     setError(null);
     try {
-      const [rows, workerRows] = await Promise.all([
+      const [rows, workerRows, projectRows] = await Promise.all([
         listWorkerPayroll(),
         listWorkers(),
+        listProjects(),
       ]);
       setRecords(rows);
       setWorkers(workerRows);
+      setProjects(projectRows);
     } catch (err) {
       console.error('[CITYMO] useWorkerPayroll load', err);
       setError(formatSupabaseError(err, 'Erreur de chargement des paiements.'));
@@ -57,32 +58,35 @@ export function useWorkerPayroll() {
   }, [load]);
 
   const chantiers = useMemo(
-    () => collectPayrollChantiers(workers, records),
-    [workers, records],
+    () => collectPayrollChantiers(projects, records),
+    [projects, records],
   );
 
-  const semaines = useMemo(
-    () => collectPayrollWeeks(records),
-    [records],
+  const workersByProject = useCallback(
+    (projectId) => {
+      if (!projectId) return [];
+      return workers.filter((w) => String(w.project_id || '') === String(projectId));
+    },
+    [workers],
   );
 
   const workerOptions = useMemo(
     () => workers.map((w) => ({
       id: w.id,
       label: workerFullName(w),
-      chantier: w.chantier || '',
-      tarif: w.tarif || 0,
+      fonction: w.fonction || '',
+      project_id: w.project_id || '',
     })).filter((o) => o.label),
     [workers],
   );
 
-  const create = useCallback(async (form) => {
+  const createBatch = useCallback(async (batchMeta, lines) => {
     setSaving(true);
     setError(null);
     try {
-      await createWorkerPayroll(form);
+      const created = await createWorkerPayrollBatch(batchMeta, lines);
       await load();
-      return { success: true };
+      return { success: true, count: created.length };
     } catch (err) {
       const msg = formatSupabaseError(err, 'Erreur enregistrement paiement.');
       setError(msg);
@@ -111,29 +115,13 @@ export function useWorkerPayroll() {
   const markPaid = useCallback(async (id) => {
     setError(null);
     try {
-      await updateWorkerPayrollStatut(id, 'Paye');
+      await updateWorkerPayrollStatut(id, 'Payé');
       await load();
       return { success: true };
     } catch (err) {
       const msg = formatSupabaseError(err, 'Erreur validation paiement.');
       setError(msg);
       return { success: false, error: msg };
-    }
-  }, [load]);
-
-  const markAllPaid = useCallback(async (ids) => {
-    setSaving(true);
-    setError(null);
-    try {
-      await Promise.all(ids.map((id) => updateWorkerPayrollStatut(id, 'Paye')));
-      await load();
-      return { success: true };
-    } catch (err) {
-      const msg = formatSupabaseError(err, 'Erreur validation des paiements.');
-      setError(msg);
-      return { success: false, error: msg };
-    } finally {
-      setSaving(false);
     }
   }, [load]);
 
@@ -150,40 +138,22 @@ export function useWorkerPayroll() {
     }
   }, [load]);
 
-  const generateWeek = useCallback(async (semaineDebut) => {
-    setSaving(true);
-    setError(null);
-    try {
-      const start = semaineDebut || weekStartMonday(new Date().toISOString().slice(0, 10));
-      await generateWorkerPayrollWeek(start);
-      await load();
-      return { success: true };
-    } catch (err) {
-      const msg = formatSupabaseError(err, 'Erreur génération des paiements.');
-      setError(msg);
-      return { success: false, error: msg };
-    } finally {
-      setSaving(false);
-    }
-  }, [load]);
-
   return {
     records,
     workers,
+    projects,
     workerOptions,
     chantiers,
-    semaines,
+    workersByProject,
     loading,
     saving,
     error,
     configured,
     load,
-    create,
+    createBatch,
     update,
     markPaid,
-    markAllPaid,
     remove,
-    generateWeek,
     filterWorkerPayroll,
     computePayrollStats,
   };

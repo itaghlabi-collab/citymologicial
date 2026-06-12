@@ -3,7 +3,31 @@ export const UNIT_TYPES = ['tâche', 'm²', 'ml', 'unité', 'forfait', 'jour', '
 export const ASSIGNMENT_STATUSES = ['active', 'terminée', 'suspendue', 'annulée'];
 export const SERVICE_STATUSES = ['pending', 'validated', 'rejected', 'paid'];
 export const PAYMENT_METHODS = ['espèces', 'virement', 'chèque', 'autre'];
-export const PAYMENT_STATUSES = ['paid', 'pending', 'cancelled'];
+export const PAYMENT_STATUSES = ['pending', 'paid', 'partial', 'cancelled'];
+export const PAYMENT_TYPES = [
+  { id: 'metre', label: 'Par mètre travaillé' },
+  { id: 'tache', label: 'Par tâche réalisée' },
+  { id: 'service', label: 'Par service' },
+];
+export const PAYMENT_UNITS = ['m²', 'ml', 'm³', 'm', 'unité', 'forfait'];
+export const PAYMENT_STATUS_UI = ['En attente', 'Payé', 'Partiel'];
+const PAYMENT_STATUS_UI_TO_DB = {
+  'En attente': 'pending',
+  'Payé': 'paid',
+  'Partiel': 'partial',
+};
+const PAYMENT_STATUS_DB_TO_UI = {
+  pending: 'En attente',
+  paid: 'Payé',
+  partial: 'Partiel',
+  cancelled: 'Annulé',
+};
+export function paymentStatusToDb(ui) {
+  return PAYMENT_STATUS_UI_TO_DB[ui] || ui;
+}
+export function paymentStatusFromDb(db) {
+  return PAYMENT_STATUS_DB_TO_UI[db] || db;
+}
 export const SUB_STATUTS = ['actif', 'inactif', 'suspendu', 'archive'];
 
 export const ASSIGNMENT_STATUS_LABEL = {
@@ -23,6 +47,7 @@ export const SERVICE_STATUS_LABEL = {
 export const PAYMENT_STATUS_LABEL = {
   paid: 'Payé',
   pending: 'En attente',
+  partial: 'Partiel',
   cancelled: 'Annulé',
 };
 

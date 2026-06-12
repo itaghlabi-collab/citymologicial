@@ -18,6 +18,8 @@ import {
   updateService,
   listPayments,
   createPayment,
+  createPaymentBatch,
+  listAssignmentsByProject,
   listProjectBalances,
   listDocuments,
   computeGlobalSummary,
@@ -108,5 +110,7 @@ export function useSubcontractors() {
     createService: (subId, form) => wrapSave(() => createService(subId, form)),
     updateService: (subId, id, form) => wrapSave(() => updateService(id, subId, form)),
     createPayment: (subId, form) => wrapSave(() => createPayment(subId, form)),
+    createPaymentBatch: (projectId, shared, lines) => wrapSave(() => createPaymentBatch(projectId, shared, lines)),
+    listAssignmentsByProject,
   };
 }

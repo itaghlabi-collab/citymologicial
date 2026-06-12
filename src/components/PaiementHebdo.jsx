@@ -1,24 +1,18 @@
-import { Banknote, CheckCircle, Filter, Search, Users, TrendingUp, Plus, Pencil, Trash2, Loader2, RefreshCw, X } from 'lucide-react';
+import {
+  Banknote, CheckCircle, Filter, Search, Users, TrendingUp, Plus, Pencil, Trash2, Loader2, X,
+} from 'lucide-react';
 import { useState, useRef, useMemo } from 'react';
 import { useWorkerPayroll } from '../hooks/useWorkerPayroll';
-import { calcPayrollTotals, weekStartMonday, weekEndSunday } from '../services/rh/workerPayroll';
-import { workerTarifJournalier, workerTarifHoraire, WORKER_HOURS_PER_DAY } from '../services/rh/workers';
-import PaiementSousTraitantsSection from './PaiementSousTraitantsSection';
-
-function EmptyState({ icon, title, sub }) {
-  return (
-    <div style={{ textAlign: 'center', padding: '48px 24px', color: 'var(--text-3)' }}>
-      <div style={{ width: 52, height: 52, borderRadius: '50%', background: 'var(--surface)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px' }}>
-        {icon}
-      </div>
-      <div style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-2)', marginBottom: 5 }}>{title}</div>
-      <div style={{ fontSize: '0.83rem' }}>{sub}</div>
-    </div>
-  );
-}
+import { calcWorkerLineAmount, PAYROLL_UI_STATUTS, buildWorkerPayrollLine } from '../services/rh/workerPayroll';
+import { workerFullName } from '../services/rh/attendance';
+import { workerTarifHoraire } from '../services/rh/workers';
 
 function fmtMAD(n) {
-  return Number(n).toLocaleString('fr-MA') + ' MAD';
+  return Number(n).toLocaleString('fr-MA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' MAD';
+}
+
+function today() {
+  return new Date().toISOString().slice(0, 10);
 }
 
 function Toast({ toast }) {
@@ -38,55 +32,28 @@ const INPUT_S = (err) => ({
   borderRadius: 'var(--radius)', background: '#fff', boxSizing: 'border-box',
 });
 
-function currentWeekStart() {
-  return weekStartMonday(new Date().toISOString().slice(0, 10));
-}
-
-const EMPTY_FORM = {
-  workerId: '',
+const EMPTY_BATCH = {
+  projectId: '',
   projet: '',
-  semaineDebut: currentWeekStart(),
-  joursPaies: '',
-  tarifHoraire: '',
-  heuresSup: '',
-  tarifSup: '',
-  avances: '',
-  retenues: '',
+  paymentDate: today(),
   statut: 'En attente',
   notes: '',
+  selected: {},
 };
 
 export default function PaiementHebdo() {
   const {
-    records,
-    workers,
-    workerOptions,
-    chantiers,
-    semaines,
-    loading,
-    saving,
-    error,
-    configured,
-    load,
-    create,
-    update,
-    markPaid,
-    markAllPaid,
-    remove,
-    generateWeek,
-    filterWorkerPayroll,
-    computePayrollStats,
+    records, projects, workersByProject, loading, saving, error, configured, load,
+    createBatch, update, markPaid, remove, filterWorkerPayroll, computePayrollStats, chantiers,
   } = useWorkerPayroll();
 
   const [search, setSearch] = useState('');
   const [filterProjet, setFilterProjet] = useState('');
-  const [filterSemaine, setFilterSemaine] = useState('');
-  const [filterMois, setFilterMois] = useState('');
   const [filterStatut, setFilterStatut] = useState('');
-  const [generateSemaine, setGenerateSemaine] = useState(currentWeekStart());
   const [showModal, setShowModal] = useState(false);
   const [editId, setEditId] = useState(null);
-  const [form, setForm] = useState(EMPTY_FORM);
+  const [form, setForm] = useState(EMPTY_BATCH);
+  const [editForm, setEditForm] = useState({});
   const [errors, setErrors] = useState({});
   const [toast, setToast] = useState(null);
   const toastRef = useRef(null);
@@ -97,51 +64,82 @@ export default function PaiementHebdo() {
     toastRef.current = setTimeout(() => setToast(null), 3000);
   }
 
-  function setF(k, v) { setForm((p) => ({ ...p, [k]: v })); }
+  const projectWorkers = useMemo(
+    () => (editId ? [] : workersByProject(form.projectId)),
+    [editId, form.projectId, workersByProject],
+  );
 
-  function handleOuvrierChange(workerId) {
-    const w = workers.find((x) => x.id === workerId);
-    const tarifH = w ? workerTarifHoraire(w) : 0;
-    const tarifSup = tarifH ? Math.round(tarifH * 1.25 * 100) / 100 : '';
-    setForm((p) => ({
-      ...p,
-      workerId,
-      projet: p.projet || w?.chantier || '',
-      tarifHoraire: tarifH ? String(tarifH) : p.tarifHoraire,
-      tarifSup: tarifSup ? String(tarifSup) : p.tarifSup,
-    }));
+  const selectedLines = useMemo(() => {
+    return Object.entries(form.selected)
+      .filter(([, v]) => v.checked)
+      .map(([workerId, v]) => ({
+        workerId,
+        heures: Number(v.heures) || 0,
+        tarifHoraire: Number(v.tarifHoraire) || 0,
+      }));
+  }, [form.selected]);
+
+  const batchTotal = useMemo(
+    () => selectedLines.reduce((s, l) => s + calcWorkerLineAmount(l.heures, l.tarifHoraire), 0),
+    [selectedLines],
+  );
+
+  function handleProjectChange(projectId) {
+    const pr = projects.find((p) => String(p.id) === String(projectId));
+    setForm((p) => ({ ...p, projectId, projet: pr?.nom || '', selected: {} }));
   }
 
-  function payrollFormPayload(formState) {
-    const tarifH = Number(formState.tarifHoraire) || 0;
-    const jours = Number(formState.joursPaies) || 0;
-    return {
-      ...formState,
-      tarifJour: tarifH * WORKER_HOURS_PER_DAY,
-      joursPaies: jours,
-    };
+  function toggleWorker(worker) {
+    setForm((p) => {
+      const sel = { ...p.selected };
+      if (sel[worker.id]?.checked) {
+        delete sel[worker.id];
+      } else {
+        const line = buildWorkerPayrollLine(worker);
+        sel[worker.id] = { checked: true, heures: '', tarifHoraire: line.tarifHoraire };
+      }
+      return { ...p, selected: sel };
+    });
+  }
+
+  function toggleAll(checked) {
+    if (!checked) {
+      setForm((p) => ({ ...p, selected: {} }));
+      return;
+    }
+    const sel = {};
+    projectWorkers.forEach((w) => {
+      const line = buildWorkerPayrollLine(w);
+      sel[w.id] = { checked: true, heures: '', tarifHoraire: line.tarifHoraire };
+    });
+    setForm((p) => ({ ...p, selected: sel }));
+  }
+
+  function setWorkerField(workerId, field, value) {
+    setForm((p) => ({
+      ...p,
+      selected: {
+        ...p.selected,
+        [workerId]: { ...p.selected[workerId], [field]: value },
+      },
+    }));
   }
 
   function openCreate() {
     setEditId(null);
-    setForm(EMPTY_FORM);
+    setForm(EMPTY_BATCH);
     setErrors({});
     setShowModal(true);
   }
 
   function openEdit(record) {
     setEditId(record.id);
-    const tarifH = record.tarifJour ? record.tarifJour / WORKER_HOURS_PER_DAY : 0;
-    setForm({
-      workerId: record.workerId || '',
+    setEditForm({
+      projectId: record.projectId || '',
       projet: record.projet || '',
-      semaineDebut: record.semaineDebut || currentWeekStart(),
-      joursPaies: String(record.joursPaies ?? ''),
-      tarifHoraire: tarifH ? String(Math.round(tarifH * 100) / 100) : '',
-      heuresSup: String(record.heuresSup ?? ''),
-      tarifSup: String(record.tarifSup ?? ''),
-      avances: String(record.avances ?? ''),
-      retenues: String(record.retenues ?? ''),
+      paymentDate: record.paymentDate || today(),
+      heures: String(record.heures ?? ''),
+      tarifHoraire: String(record.tarifHoraire ?? ''),
       statut: record.statut || 'En attente',
       notes: record.notes || '',
     });
@@ -149,82 +147,66 @@ export default function PaiementHebdo() {
     setShowModal(true);
   }
 
-  function validate() {
+  function validateBatch() {
     const e = {};
-    if (!form.workerId) e.workerId = 'Requis';
-    if (!form.projet) e.projet = 'Requis';
-    if (!form.semaineDebut) e.semaineDebut = 'Requis';
-    if (form.joursPaies === '' || Number.isNaN(Number(form.joursPaies)) || Number(form.joursPaies) < 0) e.joursPaies = 'Valeur valide requise';
-    if (!form.tarifHoraire || Number.isNaN(Number(form.tarifHoraire)) || Number(form.tarifHoraire) <= 0) e.tarifHoraire = 'Tarif valide requis';
+    if (!form.projectId) e.projectId = 'Requis';
+    if (!form.paymentDate) e.paymentDate = 'Requis';
+    if (!selectedLines.length) e.workers = 'Sélectionnez au moins un ouvrier';
+    selectedLines.forEach((l) => {
+      if (!l.heures || l.heures <= 0) e[`h_${l.workerId}`] = 'Heures requises';
+    });
+    return e;
+  }
+
+  function validateEdit() {
+    const e = {};
+    if (!editForm.heures || Number(editForm.heures) <= 0) e.heures = 'Heures requises';
+    if (!editForm.tarifHoraire || Number(editForm.tarifHoraire) <= 0) e.tarifHoraire = 'Tarif requis';
     return e;
   }
 
   async function handleSubmit(ev) {
     ev.preventDefault();
-    const errs = validate();
-    if (Object.keys(errs).length) { setErrors(errs); return; }
-
-    const payload = {
-      ...payrollFormPayload(form),
-      semaineFin: weekEndSunday(form.semaineDebut),
-      montantSup: calcPayrollTotals(payrollFormPayload(form)).montant_heures_sup,
-    };
-
-    const result = editId ? await update(editId, payload) : await create(payload);
-    if (!result.success) {
-      notify('error', result.error || 'Erreur enregistrement.');
-      return;
+    if (editId) {
+      const errs = validateEdit();
+      if (Object.keys(errs).length) { setErrors(errs); return; }
+      const result = await update(editId, editForm);
+      if (!result.success) { notify('error', result.error || 'Erreur.'); return; }
+      notify('success', 'Paiement modifié.');
+    } else {
+      const errs = validateBatch();
+      if (Object.keys(errs).length) { setErrors(errs); return; }
+      const result = await createBatch(
+        {
+          projectId: form.projectId,
+          projet: form.projet,
+          paymentDate: form.paymentDate,
+          statut: form.statut,
+          notes: form.notes,
+        },
+        selectedLines,
+      );
+      if (!result.success) { notify('error', result.error || 'Erreur.'); return; }
+      notify('success', `${result.count} paiement(s) enregistré(s) — total ${fmtMAD(batchTotal)}`);
     }
-
-    notify('success', editId ? 'Paiement modifie.' : 'Paiement enregistre.');
     setShowModal(false);
-    setEditId(null);
-  }
-
-  async function valider(id) {
-    const result = await markPaid(id);
-    notify(result.success ? 'success' : 'error', result.success ? 'Paiement valide.' : (result.error || 'Erreur.'));
-  }
-
-  async function validerTous() {
-    const ids = filtered.filter((p) => p.statut === 'En attente').map((p) => p.id);
-    if (!ids.length) return;
-    const result = await markAllPaid(ids);
-    notify(result.success ? 'success' : 'error', result.success ? 'Tous les paiements valides.' : (result.error || 'Erreur.'));
   }
 
   async function handleDelete(id) {
     if (!window.confirm('Supprimer ce paiement ?')) return;
     const result = await remove(id);
-    notify(result.success ? 'success' : 'error', result.success ? 'Supprime.' : (result.error || 'Erreur.'));
-  }
-
-  async function handleGenerate() {
-    const result = await generateWeek(generateSemaine);
-    notify(
-      result.success ? 'success' : 'error',
-      result.success ? 'Paiements generes depuis presences et heures sup.' : (result.error || 'Erreur.'),
-    );
+    notify(result.success ? 'success' : 'error', result.success ? 'Supprimé.' : (result.error || 'Erreur.'));
   }
 
   const filtered = useMemo(
-    () => filterWorkerPayroll(records, {
-      search,
-      projet: filterProjet,
-      semaine: filterSemaine,
-      mois: filterMois,
-      statut: filterStatut,
-    }),
-    [records, search, filterProjet, filterSemaine, filterMois, filterStatut, filterWorkerPayroll],
+    () => filterWorkerPayroll(records, { search, projet: filterProjet, statut: filterStatut }),
+    [records, search, filterProjet, filterStatut, filterWorkerPayroll],
   );
 
   const stats = useMemo(() => computePayrollStats(filtered), [filtered, computePayrollStats]);
-  const preview = useMemo(() => calcPayrollTotals(payrollFormPayload(form)), [form]);
-  const hasFilters = search || filterProjet || filterSemaine || filterMois || filterStatut;
-
-  function notifySub(type, msg) {
-    notify(type, msg);
-  }
+  const allSelected = projectWorkers.length > 0 && projectWorkers.every((w) => form.selected[w.id]?.checked);
+  const hasFilters = search || filterProjet || filterStatut;
+  const editPreview = calcWorkerLineAmount(editForm.heures, editForm.tarifHoraire);
 
   return (
     <div className="animate-fade-in">
@@ -232,29 +214,12 @@ export default function PaiementHebdo() {
 
       <div className="page-header flex-between">
         <div>
-          <h1 className="page-title">Paiement hebdomadaire</h1>
-          <p className="page-subtitle">Ouvriers — tarif horaire × heures travaillées + heures supplémentaires</p>
+          <h1 className="page-title">Paiement hebdomadaire ouvriers</h1>
+          <p className="page-subtitle">Projet → ouvriers affectés → heures × tarif horaire (MAD)</p>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-          <input
-            type="date"
-            value={generateSemaine}
-            onChange={(e) => setGenerateSemaine(weekStartMonday(e.target.value || currentWeekStart()))}
-            style={{ padding: '7px 12px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius)', fontSize: '0.85rem', fontFamily: 'var(--font-body)', outline: 'none' }}
-            title="Semaine a generer"
-          />
-          <button className="btn btn-secondary" onClick={handleGenerate} disabled={loading || saving || !configured}>
-            <RefreshCw size={15} /> Generer semaine
-          </button>
-          <button className="btn btn-secondary" onClick={openCreate} disabled={loading || saving || !configured}>
-            <Plus size={15} /> Ajouter paiement
-          </button>
-          {stats.nbEnAttente > 0 && (
-            <button className="btn btn-primary" onClick={validerTous} disabled={loading || saving}>
-              <CheckCircle size={15} /> Valider tous les paiements
-            </button>
-          )}
-        </div>
+        <button className="btn btn-primary" onClick={openCreate} disabled={loading || saving || !configured}>
+          <Plus size={15} /> Nouveau paiement
+        </button>
       </div>
 
       {!configured && (
@@ -270,20 +235,19 @@ export default function PaiementHebdo() {
         </div>
       )}
 
-      {/* KPIs */}
       <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(190px,1fr))', marginBottom: 16 }}>
         <div className="stat-card">
           <div className="stat-icon blue"><Banknote size={18} /></div>
           <div className="stat-body">
             <div className="stat-value" style={{ fontSize: '1rem' }}>{loading ? '—' : fmtMAD(stats.totalAPayer)}</div>
-            <div className="stat-label">Total a payer</div>
+            <div className="stat-label">Total</div>
           </div>
         </div>
         <div className="stat-card">
           <div className="stat-icon green"><CheckCircle size={18} /></div>
           <div className="stat-body">
             <div className="stat-value" style={{ fontSize: '1rem' }}>{loading ? '—' : fmtMAD(stats.totalPaye)}</div>
-            <div className="stat-label">Deja paye</div>
+            <div className="stat-label">Payé</div>
           </div>
         </div>
         <div className="stat-card">
@@ -297,280 +261,200 @@ export default function PaiementHebdo() {
           <div className="stat-icon"><Users size={18} /></div>
           <div className="stat-body">
             <div className="stat-value">{loading ? '—' : stats.count}</div>
-            <div className="stat-label">Ouvriers concernes</div>
+            <div className="stat-label">Lignes</div>
           </div>
         </div>
       </div>
 
-      {/* Filters */}
       <div className="card" style={{ marginBottom: 12, padding: '14px 20px' }}>
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-3)', fontSize: '0.85rem' }}>
-            <Filter size={14} /> Filtres
-          </div>
+          <Filter size={14} style={{ color: 'var(--text-3)' }} />
           <div style={{ position: 'relative' }}>
             <Search size={13} style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
-            <input
-              placeholder="Rechercher un ouvrier..."
-              value={search}
-              onChange={e => setSearch(e.target.value)}
-              style={{ paddingLeft: 28, paddingRight: 12, paddingTop: 7, paddingBottom: 7, border: '1.5px solid var(--border)', borderRadius: 'var(--radius)', fontSize: '0.85rem', fontFamily: 'var(--font-body)', outline: 'none' }}
-            />
+            <input placeholder="Rechercher un ouvrier..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ paddingLeft: 28, padding: '7px 12px 7px 28px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius)', fontSize: '0.85rem' }} />
           </div>
-          <select value={filterProjet} onChange={e => setFilterProjet(e.target.value)} style={{ padding: '7px 12px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius)', fontSize: '0.85rem', fontFamily: 'var(--font-body)', outline: 'none', background: '#fff' }}>
+          <select value={filterProjet} onChange={(e) => setFilterProjet(e.target.value)} style={{ padding: '7px 12px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius)', fontSize: '0.85rem', background: '#fff' }}>
             <option value="">Tous les projets</option>
-            {chantiers.map(p => <option key={p} value={p}>{p}</option>)}
+            {chantiers.map((p) => <option key={p} value={p}>{p}</option>)}
           </select>
-          <select value={filterSemaine} onChange={e => setFilterSemaine(e.target.value)} style={{ padding: '7px 12px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius)', fontSize: '0.85rem', fontFamily: 'var(--font-body)', outline: 'none', background: '#fff' }}>
-            <option value="">Toutes les semaines</option>
-            {semaines.map(s => <option key={s} value={s}>Sem. du {s}</option>)}
-          </select>
-          <input
-            type="month"
-            value={filterMois}
-            onChange={e => setFilterMois(e.target.value)}
-            style={{ padding: '7px 12px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius)', fontSize: '0.85rem', fontFamily: 'var(--font-body)', outline: 'none' }}
-          />
-          <select value={filterStatut} onChange={e => setFilterStatut(e.target.value)} style={{ padding: '7px 12px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius)', fontSize: '0.85rem', fontFamily: 'var(--font-body)', outline: 'none', background: '#fff' }}>
+          <select value={filterStatut} onChange={(e) => setFilterStatut(e.target.value)} style={{ padding: '7px 12px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius)', fontSize: '0.85rem', background: '#fff' }}>
             <option value="">Tous les statuts</option>
-            <option value="En attente">En attente</option>
-            <option value="Paye">Paye</option>
+            {PAYROLL_UI_STATUTS.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
           {hasFilters && (
-            <button onClick={() => { setSearch(''); setFilterProjet(''); setFilterSemaine(''); setFilterMois(''); setFilterStatut(''); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', fontSize: '0.82rem', fontWeight: 600 }}>
-              Effacer filtres
-            </button>
+            <button type="button" onClick={() => { setSearch(''); setFilterProjet(''); setFilterStatut(''); }} style={{ background: 'none', border: 'none', color: 'var(--red)', fontSize: '0.82rem', fontWeight: 600, cursor: 'pointer' }}>Effacer</button>
           )}
         </div>
       </div>
 
       <div className="card">
-        <div className="card-title" style={{ marginBottom: 16 }}><Banknote size={16} /> Paiement hebdomadaire — Ouvriers</div>
-
+        <div className="card-title" style={{ marginBottom: 16 }}><Banknote size={16} /> Paiements ouvriers</div>
         {loading ? (
-          <div style={{ textAlign: 'center', padding: '40px 24px', color: 'var(--text-3)' }}>
-            <Loader2 size={28} style={{ animation: 'spin 1s linear infinite', margin: '0 auto 12px' }} />
-            <div style={{ fontSize: '0.88rem' }}>Chargement…</div>
-          </div>
+          <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-3)' }}><Loader2 size={28} style={{ animation: 'spin 1s linear infinite', margin: '0 auto 12px' }} />Chargement…</div>
         ) : filtered.length === 0 ? (
-          <EmptyState
-            icon={<Banknote size={22} style={{ color: 'var(--text-3)' }} />}
-            title={records.length === 0 ? "Aucun paiement genere" : "Aucun resultat pour ces filtres"}
-            sub={records.length === 0 ? "Les paiements sont calcules automatiquement a partir des presences et heures supplementaires" : "Modifiez vos criteres de recherche"}
-          />
+          <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-3)', fontSize: '0.88rem' }}>
+            {records.length === 0 ? 'Aucun paiement. Cliquez sur « Nouveau paiement ».' : 'Aucun résultat.'}
+          </div>
         ) : (
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>Ouvrier</th>
-                  <th>Projet</th>
-                  <th>Jours</th>
-                  <th>Tarif/h</th>
-                  <th>Heures sup</th>
-                  <th>Montant sup</th>
-                  <th>Total</th>
-                  <th>Statut</th>
-                  <th>Actions</th>
+                  <th>Date</th><th>Ouvrier</th><th>Fonction</th><th>Projet</th>
+                  <th>Heures</th><th>Tarif/h</th><th>Montant</th><th>Statut</th><th>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {filtered.map(p => {
-                  const montantSup = p.montantSup || Math.round(p.heuresSup * p.tarifSup);
-                  const isPaye = p.statut === 'Paye';
-                  const tarifH = p.tarifJour / WORKER_HOURS_PER_DAY;
-                  return (
-                    <tr key={p.id}>
-                      <td style={{ fontWeight: 600 }}>{p.ouvrier}</td>
-                      <td style={{ color: 'var(--text-2)' }}>{p.projet}</td>
-                      <td>
-                        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                          <span style={{ fontFamily: 'var(--font-head)', fontWeight: 700 }}>{p.joursPaies}</span>
-                          <span style={{ fontSize: '0.75rem', color: 'var(--text-3)' }}>j</span>
-                        </span>
-                      </td>
-                      <td style={{ color: 'var(--text-2)', fontSize: '0.85rem' }}>{fmtMAD(tarifH)}</td>
-                      <td>
-                        {p.heuresSup > 0
-                          ? <span style={{ fontFamily: 'var(--font-head)', fontWeight: 700, color: '#E65100' }}>{p.heuresSup}h</span>
-                          : <span style={{ color: 'var(--text-3)' }}>—</span>
-                        }
-                      </td>
-                      <td style={{ color: '#E65100', fontFamily: 'var(--font-head)', fontWeight: 600, fontSize: '0.88rem' }}>
-                        {p.heuresSup > 0 ? fmtMAD(montantSup) : '—'}
-                      </td>
-                      <td>
-                        <span style={{ fontFamily: 'var(--font-head)', fontWeight: 800, color: 'var(--red)', fontSize: '0.98rem' }}>
-                          {fmtMAD(p.total)}
-                        </span>
-                      </td>
-                      <td>
-                        <span className={'badge ' + (isPaye ? 'badge-green' : 'badge-orange')}>
-                          {p.statut}
-                        </span>
-                      </td>
-                      <td>
-                        <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
-                          {!isPaye && (
-                            <button
-                              className="btn btn-sm"
-                              style={{ background: '#E8F5E9', color: '#2E7D32', border: 'none', cursor: 'pointer', borderRadius: 6, padding: '5px 12px', fontSize: '0.8rem', fontWeight: 600, whiteSpace: 'nowrap' }}
-                              onClick={() => valider(p.id)}
-                              disabled={saving}
-                            >
-                              <CheckCircle size={12} style={{ marginRight: 4 }} /> Payer
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            onClick={() => openEdit(p)}
-                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: 4 }}
-                            title="Modifier"
-                          >
-                            <Pencil size={14} />
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => handleDelete(p.id)}
-                            style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', padding: 4 }}
-                            title="Supprimer"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
+                {filtered.map((p) => (
+                  <tr key={p.id}>
+                    <td>{p.paymentDate ? new Date(p.paymentDate).toLocaleDateString('fr-MA') : '—'}</td>
+                    <td style={{ fontWeight: 600 }}>{p.ouvrier}</td>
+                    <td>{p.fonction || '—'}</td>
+                    <td>{p.projet || '—'}</td>
+                    <td>{p.heures} h</td>
+                    <td>{fmtMAD(p.tarifHoraire)}</td>
+                    <td style={{ fontWeight: 800, color: 'var(--red)' }}>{fmtMAD(p.total)}</td>
+                    <td>
+                      <span className={'badge ' + (p.statut === 'Payé' ? 'badge-green' : p.statut === 'En attente' ? 'badge-orange' : 'badge-red')}>
+                        {p.statut}
+                      </span>
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        {p.statut === 'En attente' && (
+                          <button type="button" className="btn btn-sm" style={{ background: '#E8F5E9', color: '#2E7D32', border: 'none' }} onClick={() => markPaid(p.id).then((r) => notify(r.success ? 'success' : 'error', r.success ? 'Marqué payé.' : r.error))}>Payer</button>
+                        )}
+                        <button type="button" onClick={() => openEdit(p)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)' }}><Pencil size={14} /></button>
+                        <button type="button" onClick={() => handleDelete(p.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)' }}><Trash2 size={14} /></button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
               </tbody>
             </table>
           </div>
         )}
-
-        {/* Summary footer */}
-        <div style={{ marginTop: 16, padding: '14px 16px', background: '#F8F9FA', borderRadius: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
-          <div style={{ display: 'flex', gap: 24 }}>
-            <div>
-              <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Nombre d&apos;ouvriers</div>
-              <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800 }}>{loading ? '—' : filtered.length}</div>
-            </div>
-            <div>
-              <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>En attente</div>
-              <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, color: '#E65100' }}>{loading ? '—' : stats.nbEnAttente}</div>
-            </div>
-          </div>
-          <div style={{ textAlign: 'right' }}>
-            <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Total a payer cette semaine</div>
-            <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, color: 'var(--red)', fontSize: '1.4rem' }}>{loading ? '—' : fmtMAD(stats.totalAPayer)}</div>
-          </div>
-        </div>
       </div>
 
       {showModal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
-          <div className="card" style={{ width: '100%', maxWidth: 520, maxHeight: '90vh', overflowY: 'auto', padding: 24 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
-              <h2 style={{ fontFamily: 'var(--font-head)', fontSize: '1.05rem', fontWeight: 800, margin: 0 }}>
-                {editId ? 'Modifier paiement ouvrier' : 'Ajouter paiement ouvrier'}
+          <div className="card" style={{ width: '100%', maxWidth: 640, maxHeight: '92vh', overflowY: 'auto', padding: 24 }}>
+            <div className="flex-between" style={{ marginBottom: 16 }}>
+              <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.05rem', margin: 0 }}>
+                {editId ? 'Modifier paiement ouvrier' : 'Nouveau paiement ouvriers'}
               </h2>
-              <button type="button" onClick={() => setShowModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)' }}>
-                <X size={18} />
-              </button>
+              <button type="button" onClick={() => setShowModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
             </div>
 
             <form onSubmit={handleSubmit}>
-              <div style={{ display: 'grid', gap: 14 }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: 5 }}>Ouvrier *</label>
-                  <select value={form.workerId} onChange={e => handleOuvrierChange(e.target.value)} style={INPUT_S(errors.workerId)}>
-                    <option value="">Selectionner…</option>
-                    {workerOptions.map(w => <option key={w.id} value={w.id}>{w.label}</option>)}
-                  </select>
-                  {errors.workerId && <div style={{ color: 'var(--red)', fontSize: '0.78rem', marginTop: 4 }}>{errors.workerId}</div>}
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: 5 }}>Projet / chantier *</label>
-                  <input value={form.projet} onChange={e => setF('projet', e.target.value)} style={INPUT_S(errors.projet)} placeholder="Chantier" />
-                  {errors.projet && <div style={{ color: 'var(--red)', fontSize: '0.78rem', marginTop: 4 }}>{errors.projet}</div>}
-                </div>
-
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: 5 }}>Semaine (debut) *</label>
-                  <input type="date" value={form.semaineDebut} onChange={e => setF('semaineDebut', weekStartMonday(e.target.value || currentWeekStart()))} style={INPUT_S(errors.semaineDebut)} />
-                  {errors.semaineDebut && <div style={{ color: 'var(--red)', fontSize: '0.78rem', marginTop: 4 }}>{errors.semaineDebut}</div>}
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: 5 }}>Jours travailles *</label>
-                    <input type="number" min="0" step="0.5" value={form.joursPaies} onChange={e => setF('joursPaies', e.target.value)} style={INPUT_S(errors.joursPaies)} />
-                    {errors.joursPaies && <div style={{ color: 'var(--red)', fontSize: '0.78rem', marginTop: 4 }}>{errors.joursPaies}</div>}
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-3)', marginTop: 4 }}>
-                      {form.joursPaies ? `${Number(form.joursPaies) * WORKER_HOURS_PER_DAY} h normales` : '1 jour = 8 h'}
+              {editId ? (
+                <div style={{ display: 'grid', gap: 14 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <div>
+                      <label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Heures travaillées *</label>
+                      <input type="number" min="0" step="0.5" value={editForm.heures} onChange={(e) => setEditForm((p) => ({ ...p, heures: e.target.value }))} style={INPUT_S(errors.heures)} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Tarif horaire *</label>
+                      <input type="number" min="0" step="0.01" value={editForm.tarifHoraire} onChange={(e) => setEditForm((p) => ({ ...p, tarifHoraire: e.target.value }))} style={INPUT_S(errors.tarifHoraire)} />
                     </div>
                   </div>
                   <div>
-                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: 5 }}>Tarif horaire *</label>
-                    <input type="number" min="0" step="0.01" value={form.tarifHoraire} onChange={e => setF('tarifHoraire', e.target.value)} style={INPUT_S(errors.tarifHoraire)} />
-                    {errors.tarifHoraire && <div style={{ color: 'var(--red)', fontSize: '0.78rem', marginTop: 4 }}>{errors.tarifHoraire}</div>}
+                    <label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Statut</label>
+                    <select value={editForm.statut} onChange={(e) => setEditForm((p) => ({ ...p, statut: e.target.value }))} style={INPUT_S(false)}>
+                      {PAYROLL_UI_STATUTS.map((s) => <option key={s} value={s}>{s}</option>)}
+                    </select>
+                  </div>
+                  <div style={{ padding: 12, background: '#F8F9FA', borderRadius: 8, display: 'flex', justifyContent: 'space-between' }}>
+                    <span>Montant</span><strong style={{ color: 'var(--red)' }}>{fmtMAD(editPreview)}</strong>
                   </div>
                 </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              ) : (
+                <div style={{ display: 'grid', gap: 14 }}>
                   <div>
-                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: 5 }}>Heures sup</label>
-                    <input type="number" min="0" step="0.5" value={form.heuresSup} onChange={e => setF('heuresSup', e.target.value)} style={INPUT_S()} />
+                    <label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Projet / chantier *</label>
+                    <select value={form.projectId} onChange={(e) => handleProjectChange(e.target.value)} style={INPUT_S(errors.projectId)}>
+                      <option value="">Choisir un projet…</option>
+                      {projects.map((p) => <option key={p.id} value={p.id}>{p.ref ? `${p.ref} — ${p.nom}` : p.nom}</option>)}
+                    </select>
+                    {errors.projectId && <div style={{ color: 'var(--red)', fontSize: '0.78rem' }}>{errors.projectId}</div>}
                   </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: 5 }}>Tarif heures sup</label>
-                    <input type="number" min="0" value={form.tarifSup} onChange={e => setF('tarifSup', e.target.value)} style={INPUT_S()} />
-                  </div>
-                </div>
 
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   <div>
-                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: 5 }}>Avances</label>
-                    <input type="number" min="0" value={form.avances} onChange={e => setF('avances', e.target.value)} style={INPUT_S()} />
+                    <div className="flex-between" style={{ marginBottom: 8 }}>
+                      <label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Ouvriers affectés *</label>
+                      {projectWorkers.length > 0 && (
+                        <label style={{ fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+                          <input type="checkbox" checked={allSelected} onChange={(e) => toggleAll(e.target.checked)} /> Tout sélectionner
+                        </label>
+                      )}
+                    </div>
+                    {!form.projectId ? (
+                      <div style={{ padding: 12, background: 'var(--bg)', borderRadius: 8, color: 'var(--text-3)', fontSize: '0.85rem' }}>Sélectionnez d&apos;abord un projet.</div>
+                    ) : projectWorkers.length === 0 ? (
+                      <div style={{ padding: 12, background: '#FFF3E0', borderRadius: 8, color: '#E65100', fontSize: '0.85rem' }}>Aucun ouvrier affecté à ce projet.</div>
+                    ) : (
+                      <div style={{ border: '1.5px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
+                        <div style={{ display: 'grid', gridTemplateColumns: '32px 1fr 90px 90px 100px', gap: 8, padding: '8px 12px', background: '#F8F9FA', fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-3)' }}>
+                          <span /><span>Ouvrier</span><span>Tarif/h</span><span>Heures</span><span>Montant</span>
+                        </div>
+                        {projectWorkers.map((w) => {
+                          const sel = form.selected[w.id];
+                          const tarifH = sel?.tarifHoraire ?? workerTarifHoraire(w);
+                          const montant = calcWorkerLineAmount(sel?.heures, tarifH);
+                          return (
+                            <div key={w.id} style={{ display: 'grid', gridTemplateColumns: '32px 1fr 90px 90px 100px', gap: 8, padding: '10px 12px', borderTop: '1px solid var(--border)', alignItems: 'center', background: sel?.checked ? '#FFF5F5' : '#fff' }}>
+                              <input type="checkbox" checked={!!sel?.checked} onChange={() => toggleWorker(w)} />
+                              <div>
+                                <div style={{ fontWeight: 700, fontSize: '0.88rem' }}>{workerFullName(w)}</div>
+                                <div style={{ fontSize: '0.75rem', color: 'var(--text-3)' }}>{w.fonction || '—'}</div>
+                              </div>
+                              <span style={{ fontSize: '0.82rem' }}>{fmtMAD(tarifH)}</span>
+                              <input
+                                type="number" min="0" step="0.5" disabled={!sel?.checked}
+                                value={sel?.heures ?? ''} placeholder="h"
+                                onChange={(e) => setWorkerField(w.id, 'heures', e.target.value)}
+                                style={{ ...INPUT_S(errors[`h_${w.id}`]), padding: '6px 8px', fontSize: '0.85rem' }}
+                              />
+                              <span style={{ fontWeight: 700, fontSize: '0.82rem', color: 'var(--red)' }}>{sel?.checked && montant > 0 ? fmtMAD(montant) : '—'}</span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                    {errors.workers && <div style={{ color: 'var(--red)', fontSize: '0.78rem', marginTop: 4 }}>{errors.workers}</div>}
                   </div>
-                  <div>
-                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: 5 }}>Retenues</label>
-                    <input type="number" min="0" value={form.retenues} onChange={e => setF('retenues', e.target.value)} style={INPUT_S()} />
-                  </div>
-                </div>
 
-                <div>
-                  <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: 5 }}>Statut</label>
-                  <select value={form.statut} onChange={e => setF('statut', e.target.value)} style={INPUT_S()}>
-                    <option value="En attente">En attente</option>
-                    <option value="Paye">Paye</option>
-                  </select>
-                </div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <div>
+                      <label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Date de paiement *</label>
+                      <input type="date" value={form.paymentDate} onChange={(e) => setForm((p) => ({ ...p, paymentDate: e.target.value }))} style={INPUT_S(errors.paymentDate)} />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Statut</label>
+                      <select value={form.statut} onChange={(e) => setForm((p) => ({ ...p, statut: e.target.value }))} style={INPUT_S(false)}>
+                        {PAYROLL_UI_STATUTS.map((s) => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </div>
+                  </div>
 
-                <div style={{ padding: '12px 14px', background: '#F8F9FA', borderRadius: 8, fontSize: '0.85rem' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                    <span>Montant heures sup</span>
-                    <strong>{fmtMAD(preview.montant_heures_sup)}</strong>
-                  </div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span>Total net</span>
-                    <strong style={{ color: 'var(--red)' }}>{fmtMAD(preview.montant_net)}</strong>
-                  </div>
+                  {batchTotal > 0 && (
+                    <div style={{ padding: '12px 14px', background: '#FFF5F5', borderRadius: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontWeight: 600 }}>Total général ({selectedLines.length} ouvrier{selectedLines.length > 1 ? 's' : ''})</span>
+                      <span style={{ fontFamily: 'var(--font-head)', fontWeight: 800, color: 'var(--red)', fontSize: '1.15rem' }}>{fmtMAD(batchTotal)}</span>
+                    </div>
+                  )}
                 </div>
-              </div>
+              )}
 
               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 20 }}>
                 <button type="button" className="btn btn-secondary" onClick={() => setShowModal(false)}>Annuler</button>
-                <button type="submit" className="btn btn-primary" disabled={saving}>
-                  {saving ? 'Enregistrement…' : (editId ? 'Enregistrer' : 'Ajouter')}
-                </button>
+                <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Enregistrement…' : 'Enregistrer'}</button>
               </div>
             </form>
           </div>
         </div>
       )}
-
-      <PaiementSousTraitantsSection onNotify={notifySub} />
     </div>
   );
 }

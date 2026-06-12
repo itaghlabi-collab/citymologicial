@@ -104,13 +104,21 @@ export function normalizeService(row) {
 
 export function normalizePayment(row) {
   if (!row) return null;
+  const qty = Number(row.quantity) || 0;
+  const unitPrice = Number(row.unit_price) || 0;
+  const amount = Number(row.amount) || round2(qty * unitPrice);
   return {
     id: row.id,
     subcontractorId: row.subcontractor_id,
     projectId: row.project_id ? String(row.project_id) : '',
     assignmentId: row.assignment_id,
     paymentDate: row.payment_date || '',
-    amount: Number(row.amount) || 0,
+    amount,
+    paymentType: row.payment_type || '',
+    designation: row.designation || '',
+    quantity: qty,
+    unit: row.unit || '',
+    unitPrice,
     paymentMethod: row.payment_method || '',
     reference: row.reference || '',
     description: row.description || '',
@@ -194,12 +202,24 @@ function toServiceRow(form, subcontractorId) {
 }
 
 function toPaymentRow(form, subcontractorId) {
+  const paymentType = form.paymentType || null;
+  let amount = Number(form.amount) || 0;
+  const quantity = Number(form.quantity) || 0;
+  const unitPrice = Number(form.unitPrice) || 0;
+  if (paymentType === 'metre') {
+    amount = round2(quantity * unitPrice);
+  }
   return {
     subcontractor_id: subcontractorId,
     project_id: emptyToNull(form.projectId) || null,
     assignment_id: emptyToNull(form.assignmentId) || null,
     payment_date: form.paymentDate,
-    amount: Number(form.amount) || 0,
+    payment_type: paymentType,
+    designation: emptyToNull(form.designation?.trim()),
+    quantity: paymentType === 'metre' ? quantity : 0,
+    unit: paymentType === 'metre' ? emptyToNull(form.unit) : null,
+    unit_price: paymentType === 'metre' ? unitPrice : 0,
+    amount,
     payment_method: emptyToNull(form.paymentMethod),
     reference: emptyToNull(form.reference?.trim()),
     description: emptyToNull(form.description?.trim()),
@@ -400,17 +420,57 @@ export async function listAllSubcontractorPayments(limit = 50) {
   });
 }
 
+export async function listAssignmentsByProject(projectId) {
+  await getAuthUserId();
+  const { data, error } = await getSupabase()
+    .from(ASSIGN_TABLE)
+    .select('*, subcontractors ( id, prenom, nom, raison_sociale, fonction ), projects ( id, nom, ref )')
+    .eq('project_id', projectId)
+    .eq('status', 'active')
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data || []).map((row) => ({
+    ...normalizeAssignment(row),
+    subcontractorName: subcontractorFullName(row.subcontractors),
+    subcontractorFonction: row.subcontractors?.fonction || '',
+  }));
+}
+
 export async function createPayment(subcontractorId, form) {
   await getAuthUserId();
   const row = toPaymentRow(form, subcontractorId);
-  if (!row.payment_date || !row.amount) {
-    const err = new Error('Date et montant requis.');
+  if (!row.payment_date) {
+    const err = new Error('Date requise.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  if (!row.amount || row.amount <= 0) {
+    const err = new Error('Montant requis.');
     err.code = 'VALIDATION';
     throw err;
   }
   const { data, error } = await getSupabase().from(PAYMENT_TABLE).insert([row]).select('*').single();
   if (error) throw error;
   return normalizePayment(data);
+}
+
+export async function createPaymentBatch(projectId, sharedForm, lines) {
+  await getAuthUserId();
+  if (!projectId || !lines?.length) {
+    const err = new Error('Projet et sous-traitants requis.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  const rows = lines.map((line) => toPaymentRow({
+    ...sharedForm,
+    ...line,
+    projectId,
+    assignmentId: line.assignmentId,
+  }, line.subcontractorId));
+
+  const { data, error } = await getSupabase().from(PAYMENT_TABLE).insert(rows).select('*');
+  if (error) throw error;
+  return (data || []).map(normalizePayment);
 }
 
 export async function listDocuments(subcontractorId) {
