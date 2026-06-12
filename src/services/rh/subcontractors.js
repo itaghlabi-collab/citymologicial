@@ -620,6 +620,32 @@ export async function createPaymentBatch(projectId, sharedForm, lines) {
   return payments;
 }
 
+export async function updateSubcontractorPayment(id, form, subcontractorId) {
+  await getAuthUserId();
+  const row = toPaymentRow({ ...form, subcontractorId }, subcontractorId);
+  if (!row.gross_amount || row.gross_amount <= 0) {
+    const err = new Error('Montant brut requis.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  const { data, error } = await getSupabase()
+    .from(PAYMENT_TABLE)
+    .update(row)
+    .eq('id', id)
+    .select(`
+      *,
+      subcontractors ( prenom, nom, raison_sociale ),
+      projects ( nom )
+    `)
+    .single();
+  if (error) throw error;
+  return {
+    ...normalizePayment(data),
+    subcontractorName: subcontractorFullName(data.subcontractors),
+    projectName: data.projects?.nom || '',
+  };
+}
+
 export async function listDocuments(subcontractorId) {
   await getAuthUserId();
   const { data, error } = await getSupabase()

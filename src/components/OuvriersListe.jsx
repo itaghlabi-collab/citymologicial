@@ -898,7 +898,7 @@ function OuvrierDetail({ worker, onBack, onEdit, onDownloadPdf, pdfLoading }) {
   const cfg = STATUT_CFG[worker.statut] || STATUT_CFG.actif;
 
   return (
-    <div className="animate-fade-in">
+    <div className="animate-fade-in rh-ext-page">
       <button onClick={onBack} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-2)', fontSize: '0.875rem', fontWeight: 600, marginBottom: 16, padding: 0 }}>
         <ChevronLeft size={16} /> Retour aux ouvriers
       </button>
@@ -926,7 +926,7 @@ function OuvrierDetail({ worker, onBack, onEdit, onDownloadPdf, pdfLoading }) {
               )}
             </div>
           </div>
-          <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
+          <div className="rh-ext-detail-header-actions">
             <button className="btn btn-ghost" onClick={() => onEdit(worker)} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
               <Edit2 size={13} /> Modifier
             </button>
@@ -940,9 +940,9 @@ function OuvrierDetail({ worker, onBack, onEdit, onDownloadPdf, pdfLoading }) {
       </div>
 
       {/* Tabs */}
-      <div style={{ display: 'flex', gap: 0, borderBottom: '1.5px solid var(--border)', marginBottom: 16 }}>
+      <div className="rh-ext-detail-tabs">
         {tabs.map(t => (
-          <button key={t.id} onClick={() => setTab(t.id)} style={{ padding: '8px 16px', border: 'none', cursor: 'pointer', background: 'none', fontFamily: 'var(--font-body)', fontSize: '0.875rem', fontWeight: tab === t.id ? 700 : 500, color: tab === t.id ? 'var(--red)' : 'var(--text-2)', borderBottom: tab === t.id ? '2px solid var(--red)' : '2px solid transparent', transition: 'all 0.15s' }}>
+          <button key={t.id} type="button" onClick={() => setTab(t.id)} className="rh-ext-detail-tab-btn" style={{ fontWeight: tab === t.id ? 700 : 500, color: tab === t.id ? 'var(--red)' : 'var(--text-2)', borderBottom: tab === t.id ? '2px solid var(--red)' : '2px solid transparent' }}>
             {t.label}
           </button>
         ))}
@@ -950,7 +950,7 @@ function OuvrierDetail({ worker, onBack, onEdit, onDownloadPdf, pdfLoading }) {
 
       {/* Tab content */}
       {tab === 'infos' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        <div className="rh-ext-fields-grid">
           <div className="card" style={{ padding: '20px 22px' }}>
             <STitle><User size={14} /> Informations personnelles</STitle>
             {[
@@ -993,7 +993,7 @@ function OuvrierDetail({ worker, onBack, onEdit, onDownloadPdf, pdfLoading }) {
       )}
 
       {tab === 'documents' && (
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        <div className="rh-ext-fields-grid">
           <div className="card" style={{ padding: '20px 22px' }}>
             <STitle><FileText size={14} /> CIN Recto</STitle>
             {worker.cin_recto ? (
@@ -1715,7 +1715,7 @@ export default function OuvriersListe({ onWorkersChange }) {
   }
 
   return (
-    <div className="animate-fade-in">
+    <div className="animate-fade-in rh-ext-page">
       <Toast toast={toast} />
 
       {showModal && (
@@ -1848,14 +1848,12 @@ export default function OuvriersListe({ onWorkersChange }) {
                       </td>
 
                       {/* CIN */}
-                      <td style={{ padding: '10px 12px' }}>
+                      <td data-label="CIN" style={{ padding: '10px 12px' }}>
                         <span style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.85rem', letterSpacing: '0.04em', color: 'var(--text-2)', display: 'flex', alignItems: 'center', gap: 5 }}>
                           {w.cin_recto ? <CheckCircle size={11} style={{ color: '#388E3C' }} /> : null}
                           {w.cin || '—'}
                         </span>
                       </td>
-
-                      {/* Tel */}
                       <td data-label="Tel" style={{ padding: '10px 12px', color: 'var(--text-2)', fontSize: '0.82rem', whiteSpace: 'nowrap' }}>{w.telephone || '—'}</td>
 
                       {/* Fonction */}
@@ -1875,7 +1873,7 @@ export default function OuvriersListe({ onWorkersChange }) {
                       <td data-label="Statut" style={{ padding: '10px 12px' }}><span className={'badge ' + cfg.cls}>{cfg.label}</span></td>
 
                       {/* Badge */}
-                      <td style={{ padding: '10px 12px' }}>
+                      <td data-label="Badge" style={{ padding: '10px 12px' }}>
                         {w.badge ? (
                           <span style={{ fontSize: '0.72rem', display: 'flex', alignItems: 'center', gap: 4, color: 'var(--text-3)', fontFamily: 'var(--font-head)', letterSpacing: '0.04em' }}>
                             <QrCode size={11} /> {w.badge}
@@ -1884,8 +1882,8 @@ export default function OuvriersListe({ onWorkersChange }) {
                       </td>
 
                       {/* Actions */}
-                      <td style={{ padding: '10px 10px', whiteSpace: 'nowrap' }}>
-                        <div style={{ display: 'flex', gap: 2 }}>
+                      <td className="rh-ext-actions-cell" style={{ padding: '10px 10px', whiteSpace: 'nowrap' }}>
+                        <div className="rh-ext-actions">
                           <button title="Voir fiche" className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} onClick={() => { setDetail(w); setView('detail'); }}><Eye size={13} /></button>
                           <button title="Modifier" className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} onClick={() => openEdit(w)}><Edit2 size={13} /></button>
                           <button title="Télécharger fiche" className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }}

@@ -116,6 +116,8 @@ export function normalizeWorkerPayroll(row) {
     montantBrut: Number(row.montant_brut) || totals.montantBrut,
     statut: DB_TO_UI_STATUT[row.statut] || 'En attente',
     notes: row.notes || '',
+    reference: row.reference || '',
+    paymentMethod: row.payment_method || '',
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -233,6 +235,8 @@ export async function updateWorkerPayroll(id, form) {
     montant_net: totals.montantNet,
     statut: UI_TO_DB_STATUT[form.statut] || 'En attente',
     notes: form.notes?.trim() || null,
+    reference: form.reference?.trim() || null,
+    payment_method: form.paymentMethod?.trim() || null,
   };
 
   const { data, error } = await getSupabase()

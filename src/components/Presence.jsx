@@ -24,7 +24,7 @@ function Toast({ toast }) {
   if (!toast) return null;
   const bg = toast.type === 'success' ? '#2E7D32' : '#D32F2F';
   return (
-    <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 9999, background: bg, color: '#fff', padding: '12px 20px', borderRadius: 10, boxShadow: '0 4px 20px rgba(0,0,0,0.22)', fontSize: '0.88rem', fontWeight: 600 }}>
+    <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 9999, background: bg, color: '#fff', padding: '12px 20px', borderRadius: 10, boxShadow: '0 4px 20px rgba(0,0,0,0.22)', fontSize: '0.88rem', fontWeight: 600, maxWidth: 'min(380px, calc(100vw - 32px))' }}>
       {toast.msg}
     </div>
   );
@@ -432,7 +432,7 @@ export default function Presence() {
   }
 
   return (
-    <div className="animate-fade-in">
+    <div className="animate-fade-in rh-ext-page">
       <Toast toast={toast} />
 
       <div className="page-header flex-between">
@@ -459,7 +459,7 @@ export default function Presence() {
       )}
 
       {/* Stats */}
-      <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px,1fr))', marginBottom: 16 }}>
+      <div className="stat-grid rh-ext-stat-grid">
         <div className="stat-card">
           <div className="stat-icon green"><CheckCircle size={18} /></div>
           <div className="stat-body"><div className="stat-value">{loading ? '—' : stats.present}</div><div className="stat-label">Presents</div></div>
@@ -475,44 +475,46 @@ export default function Presence() {
       </div>
 
       {/* Filters */}
-      <div className="card" style={{ marginBottom: 12, padding: '14px 20px' }}>
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+      <div className="card rh-ext-filter-card">
+        <div className="rh-ext-filter-bar">
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-3)', fontSize: '0.85rem' }}>
             <Filter size={14} /> Filtres
           </div>
-          <select value={filterOuvrier} onChange={e => setFilterOuvrier(e.target.value)} style={{ padding: '7px 12px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius)', fontSize: '0.85rem', fontFamily: 'var(--font-body)', outline: 'none', background: '#fff' }}>
+          <select value={filterOuvrier} onChange={e => setFilterOuvrier(e.target.value)}>
             <option value="">Tous les ouvriers</option>
             {filterWorkerOptions.map(w => <option key={w.id} value={w.label}>{w.label}</option>)}
           </select>
-          <select value={filterProjectId} onChange={e => { setFilterProjectId(e.target.value); setFilterOuvrier(''); }} style={{ padding: '7px 12px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius)', fontSize: '0.85rem', fontFamily: 'var(--font-body)', outline: 'none', background: '#fff' }}>
+          <select value={filterProjectId} onChange={e => { setFilterProjectId(e.target.value); setFilterOuvrier(''); }}>
             <option value="">Tous les projets</option>
             {projectOptions.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
           </select>
-          <select value={filterChefId} onChange={e => setFilterChefId(e.target.value)} style={{ padding: '7px 12px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius)', fontSize: '0.85rem', fontFamily: 'var(--font-body)', outline: 'none', background: '#fff' }}>
+          <select value={filterChefId} onChange={e => setFilterChefId(e.target.value)}>
             <option value="">Tous les chefs</option>
             {chefsChantier.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
           </select>
-          <select value={filterStatut} onChange={e => setFilterStatut(e.target.value)} style={{ padding: '7px 12px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius)', fontSize: '0.85rem', fontFamily: 'var(--font-body)', outline: 'none', background: '#fff' }}>
+          <select value={filterStatut} onChange={e => setFilterStatut(e.target.value)}>
             <option value="">Tous les statuts</option>
             {STATUS_OPTS.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
-          <input type="date" value={filterDate} onChange={e => setFilterDate(e.target.value)} style={{ padding: '7px 12px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius)', fontSize: '0.85rem', fontFamily: 'var(--font-body)', outline: 'none' }} />
+          <input type="date" value={filterDate} onChange={e => setFilterDate(e.target.value)} />
           {hasFilters && (
-            <button onClick={() => { setFilterOuvrier(''); setFilterProjectId(''); setFilterChefId(''); setFilterDate(''); setFilterStatut(''); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', fontSize: '0.82rem', fontWeight: 600 }}>
+            <button type="button" onClick={() => { setFilterOuvrier(''); setFilterProjectId(''); setFilterChefId(''); setFilterDate(''); setFilterStatut(''); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', fontSize: '0.82rem', fontWeight: 600 }}>
               Effacer filtres
             </button>
           )}
-          <button
-            type="button"
-            className="btn btn-secondary btn-sm"
-            onClick={handleDownloadSheet}
-            disabled={pdfLoading || loading || !canDownloadSheet}
-            title="PDF du projet et du jour (détectés automatiquement)"
-            style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 6 }}
-          >
-            {pdfLoading ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Download size={14} />}
-            Télécharger PDF
-          </button>
+          <div className="rh-ext-filter-btn-end">
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={handleDownloadSheet}
+              disabled={pdfLoading || loading || !canDownloadSheet}
+              title="PDF du projet et du jour (détectés automatiquement)"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            >
+              {pdfLoading ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Download size={14} />}
+              Télécharger PDF
+            </button>
+          </div>
         </div>
       </div>
 
@@ -534,23 +536,22 @@ export default function Presence() {
           <div className="table-wrap">
             <table>
               <thead>
-                <tr><th>#</th><th>Ouvrier</th><th>Chef chantier</th><th>Projet</th><th>Date</th><th>Entree</th><th>Sortie</th><th>Statut</th><th>Notes</th><th>Actions</th></tr>
+                <tr><th>Ouvrier</th><th>Date</th><th>Projet</th><th>Chef chantier</th><th>Entree</th><th>Sortie</th><th>Statut</th><th>Notes</th><th>Actions</th><th className="rh-ext-col-index">#</th></tr>
               </thead>
               <tbody>
                 {filtered.map((r, i) => (
                   <tr key={r.id}>
-                    <td style={{ color: 'var(--text-3)', fontSize: '0.78rem' }}>{String(i + 1).padStart(3, '0')}</td>
-                    <td style={{ fontWeight: 600 }}>{r.ouvrier}</td>
-                    <td style={{ color: 'var(--text-2)', fontSize: '0.84rem' }}>{r.chefChantier || '—'}</td>
-                    <td style={{ color: 'var(--text-2)' }}>{r.projet}</td>
-                    <td style={{ whiteSpace: 'nowrap' }}>{r.date}</td>
-                    <td style={{ fontFamily: 'var(--font-head)', fontWeight: 700 }}>{r.heureEntree || '—'}</td>
-                    <td style={{ fontFamily: 'var(--font-head)', fontWeight: 700 }}>{r.heureSortie || '—'}</td>
-                    <td><span className={'badge ' + (STATUS_BADGE[r.statut] || 'badge-grey')}>{r.statut}</span></td>
-                    <td style={{ color: 'var(--text-3)', fontSize: '0.82rem', maxWidth: 120, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{r.notes || '—'}</td>
-                    <td>
-                      <div style={{ display: 'flex', gap: 4 }}>
-                        <button className="btn btn-ghost btn-sm" style={{ padding: '4px 8px' }} onClick={() => handleDownloadRow(r)} disabled={pdfLoading} title="PDF fiche du jour (projet + date)">
+                    <td data-label="Ouvrier" style={{ fontWeight: 600 }}>{r.ouvrier}</td>
+                    <td data-label="Date" style={{ whiteSpace: 'nowrap' }}>{r.date}</td>
+                    <td data-label="Projet" style={{ color: 'var(--text-2)' }}>{r.projet}</td>
+                    <td data-label="Chef chantier" style={{ color: 'var(--text-2)', fontSize: '0.84rem' }}>{r.chefChantier || '—'}</td>
+                    <td data-label="Entree" style={{ fontFamily: 'var(--font-head)', fontWeight: 700 }}>{r.heureEntree || '—'}</td>
+                    <td data-label="Sortie" style={{ fontFamily: 'var(--font-head)', fontWeight: 700 }}>{r.heureSortie || '—'}</td>
+                    <td data-label="Statut"><span className={'badge ' + (STATUS_BADGE[r.statut] || 'badge-grey')}>{r.statut}</span></td>
+                    <td data-label="Notes" style={{ color: 'var(--text-3)', fontSize: '0.82rem' }}>{r.notes || '—'}</td>
+                    <td className="rh-ext-actions-cell">
+                      <div className="rh-ext-actions">
+                        <button className="btn btn-ghost btn-sm" style={{ padding: '4px 8px' }} onClick={() => handleDownloadRow(r)} disabled={pdfLoading} title="PDF fiche du jour">
                           <Download size={13} style={{ color: 'var(--red)' }} />
                         </button>
                         <button className="btn btn-ghost btn-sm" style={{ padding: '4px 8px' }} onClick={() => openEdit(r)} title="Modifier">
@@ -561,6 +562,7 @@ export default function Presence() {
                         </button>
                       </div>
                     </td>
+                    <td className="rh-ext-col-index" style={{ color: 'var(--text-3)', fontSize: '0.78rem' }}>{String(i + 1).padStart(3, '0')}</td>
                   </tr>
                 ))}
               </tbody>
@@ -571,8 +573,8 @@ export default function Presence() {
 
       {/* Modal choix fiche PDF (plusieurs projets / dates) */}
       {showPdfModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
-          <div style={{ background: '#fff', borderRadius: 14, padding: 28, width: '100%', maxWidth: 440, boxShadow: '0 8px 40px rgba(0,0,0,0.2)' }}>
+        <div className="rh-ext-modal-overlay" style={{ zIndex: 1000 }}>
+          <div className="card rh-ext-modal-box rh-ext-modal-box--sm">
             <h3 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1rem', marginBottom: 8, textTransform: 'uppercase' }}>
               Fiche de présence
             </h3>
@@ -603,8 +605,8 @@ export default function Presence() {
 
       {/* Modal */}
       {showModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
-          <div style={{ background: '#fff', borderRadius: 14, padding: 32, width: '100%', maxWidth: editId ? 500 : 560, boxShadow: '0 8px 40px rgba(0,0,0,0.2)', maxHeight: '90vh', overflowY: 'auto' }}>
+        <div className="rh-ext-modal-overlay" style={{ zIndex: 1000 }}>
+          <div className="card rh-ext-modal-box rh-ext-modal-box--md">
             <div className="flex-between" style={{ marginBottom: 20 }}>
               <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.2rem', textTransform: 'uppercase' }}>
                 {editId ? 'Modifier la presence' : 'Ajouter une presence'}

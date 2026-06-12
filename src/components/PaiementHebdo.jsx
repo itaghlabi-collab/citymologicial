@@ -1,5 +1,6 @@
 import {
-  Banknote, CheckCircle, Filter, Search, Users, TrendingUp, Plus, Pencil, Trash2, Loader2, X,
+  Banknote, CheckCircle, Filter, Search, Users, TrendingUp, Plus, Trash2, Loader2, X,
+  FileDown, Printer,
 } from 'lucide-react';
 import { useState, useRef, useMemo } from 'react';
 import { useWorkerPayroll } from '../hooks/useWorkerPayroll';
@@ -11,6 +12,8 @@ import {
   weekEndSunday,
   WORKER_HOURS_PER_DAY,
 } from '../services/rh/workerPayroll';
+import { PAYMENT_METHODS } from '../services/rh/subcontractorConstants';
+import { exportWorkerPaymentPdf } from '../services/rh/workerPaymentPdf';
 import { workerFullName } from '../services/rh/attendance';
 import PaiementSousTraitantsSection from './PaiementSousTraitantsSection';
 
@@ -71,6 +74,7 @@ export default function PaiementHebdo() {
   const [filterStatut, setFilterStatut] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editId, setEditId] = useState(null);
+  const [detailId, setDetailId] = useState(null);
   const [form, setForm] = useState(EMPTY_BATCH);
   const [editForm, setEditForm] = useState({});
   const [errors, setErrors] = useState({});
@@ -160,6 +164,7 @@ export default function PaiementHebdo() {
 
   function openEdit(record) {
     setEditId(record.id);
+    setDetailId(null);
     setEditForm({
       projectId: record.projectId || '',
       projet: record.projet || '',
@@ -172,9 +177,23 @@ export default function PaiementHebdo() {
       retenues: String(record.retenues ?? ''),
       statut: record.statut || 'En attente',
       notes: record.notes || '',
+      reference: record.reference || '',
+      paymentMethod: record.paymentMethod || '',
     });
     setErrors({});
     setShowModal(true);
+  }
+
+  function openDetail(record) {
+    setDetailId(record.id);
+  }
+
+  async function handleWorkerPdf(record, print = false) {
+    try {
+      await exportWorkerPaymentPdf(record, { print });
+    } catch {
+      notify('error', 'Erreur lors de la génération du PDF.');
+    }
   }
 
   function validateBatch() {
@@ -243,9 +262,10 @@ export default function PaiementHebdo() {
   const allSelected = projectWorkers.length > 0 && projectWorkers.every((w) => form.selected[w.id]?.checked);
   const hasFilters = search || filterProjet || filterStatut;
   const editPreview = calcWorkerPayrollTotals(editForm);
+  const detailRecord = detailId ? filtered.find((p) => p.id === detailId) : null;
 
   return (
-    <div className="animate-fade-in">
+    <div className="animate-fade-in rh-ext-page">
       <Toast toast={toast} />
 
       <div className="page-header flex-between">
@@ -271,25 +291,25 @@ export default function PaiementHebdo() {
         </div>
       )}
 
-      <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(190px,1fr))', marginBottom: 16 }}>
+      <div className="stat-grid rh-ext-stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(190px,1fr))' }}>
         <div className="stat-card"><div className="stat-icon blue"><Banknote size={18} /></div><div className="stat-body"><div className="stat-value" style={{ fontSize: '1rem' }}>{loading ? '—' : fmtMAD(stats.totalAPayer)}</div><div className="stat-label">Total ouvriers</div></div></div>
         <div className="stat-card"><div className="stat-icon green"><CheckCircle size={18} /></div><div className="stat-body"><div className="stat-value" style={{ fontSize: '1rem' }}>{loading ? '—' : fmtMAD(stats.totalPaye)}</div><div className="stat-label">Payé</div></div></div>
         <div className="stat-card"><div className="stat-icon orange"><TrendingUp size={18} /></div><div className="stat-body"><div className="stat-value" style={{ fontSize: '1rem' }}>{loading ? '—' : fmtMAD(stats.totalEnAttente)}</div><div className="stat-label">En attente</div></div></div>
         <div className="stat-card"><div className="stat-icon"><Users size={18} /></div><div className="stat-body"><div className="stat-value">{loading ? '—' : stats.count}</div><div className="stat-label">Lignes</div></div></div>
       </div>
 
-      <div className="card" style={{ marginBottom: 12, padding: '14px 20px' }}>
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+      <div className="card rh-ext-filter-card">
+        <div className="rh-ext-filter-bar">
           <Filter size={14} style={{ color: 'var(--text-3)' }} />
-          <div style={{ position: 'relative' }}>
+          <div className="rh-ext-search-wrap">
             <Search size={13} style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
-            <input placeholder="Rechercher un ouvrier..." value={search} onChange={(e) => setSearch(e.target.value)} style={{ paddingLeft: 28, padding: '7px 12px 7px 28px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius)', fontSize: '0.85rem' }} />
+            <input type="search" placeholder="Rechercher un ouvrier..." value={search} onChange={(e) => setSearch(e.target.value)} />
           </div>
-          <select value={filterProjet} onChange={(e) => setFilterProjet(e.target.value)} style={{ padding: '7px 12px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius)', fontSize: '0.85rem', background: '#fff' }}>
+          <select value={filterProjet} onChange={(e) => setFilterProjet(e.target.value)}>
             <option value="">Tous les projets</option>
             {chantiers.map((p) => <option key={p} value={p}>{p}</option>)}
           </select>
-          <select value={filterStatut} onChange={(e) => setFilterStatut(e.target.value)} style={{ padding: '7px 12px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius)', fontSize: '0.85rem', background: '#fff' }}>
+          <select value={filterStatut} onChange={(e) => setFilterStatut(e.target.value)}>
             <option value="">Tous les statuts</option>
             {PAYROLL_UI_STATUTS.map((s) => <option key={s} value={s}>{s}</option>)}
           </select>
@@ -310,28 +330,34 @@ export default function PaiementHebdo() {
             <table>
               <thead>
                 <tr>
-                  <th>Semaine</th><th>Ouvrier</th><th>Projet</th><th>Jours</th><th>H. sup</th>
+                  <th>Ouvrier</th><th>Semaine</th><th>Projet</th><th>Jours</th><th>H. sup</th>
                   <th>Montant sup</th><th>Total net</th><th>Statut</th><th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((p) => (
                   <tr key={p.id}>
-                    <td>{p.semaineDebut ? new Date(p.semaineDebut).toLocaleDateString('fr-MA') : '—'}</td>
-                    <td style={{ fontWeight: 600 }}>{p.ouvrier}</td>
-                    <td>{p.projet || '—'}</td>
-                    <td>{p.joursPaies} j</td>
-                    <td>{p.heuresSup > 0 ? `${p.heuresSup} h` : '—'}</td>
-                    <td>{p.montantSup > 0 ? fmtMAD(p.montantSup) : '—'}</td>
-                    <td style={{ fontWeight: 800, color: 'var(--red)' }}>{fmtMAD(p.total)}</td>
-                    <td><span className={'badge ' + (p.statut === 'Payé' ? 'badge-green' : p.statut === 'En attente' ? 'badge-orange' : 'badge-red')}>{p.statut}</span></td>
-                    <td>
-                      <div style={{ display: 'flex', gap: 6 }}>
+                    <td data-label="Ouvrier" style={{ fontWeight: 600 }}>
+                      <button type="button" onClick={() => openDetail(p)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600, color: 'var(--text)', padding: 0, textDecoration: 'underline', textUnderlineOffset: 2 }}>
+                        {p.ouvrier}
+                      </button>
+                    </td>
+                    <td data-label="Semaine">{p.semaineDebut ? new Date(p.semaineDebut).toLocaleDateString('fr-MA') : '—'}</td>
+                    <td data-label="Projet">{p.projet || '—'}</td>
+                    <td data-label="Jours">{p.joursPaies} j</td>
+                    <td data-label="H. sup">{p.heuresSup > 0 ? `${p.heuresSup} h` : '—'}</td>
+                    <td data-label="Montant sup">{p.montantSup > 0 ? fmtMAD(p.montantSup) : '—'}</td>
+                    <td data-label="Total net" style={{ fontWeight: 800, color: 'var(--red)' }}>{fmtMAD(p.total)}</td>
+                    <td data-label="Statut"><span className={'badge ' + (p.statut === 'Payé' ? 'badge-green' : p.statut === 'En attente' ? 'badge-orange' : 'badge-red')}>{p.statut}</span></td>
+                    <td data-label="Actions" className="payment-actions-cell">
+                      <div className="payment-row-actions">
                         {p.statut === 'En attente' && (
                           <button type="button" className="btn btn-sm" style={{ background: '#E8F5E9', color: '#2E7D32', border: 'none' }} onClick={() => markPaid(p.id).then((r) => notify(r.success ? 'success' : 'error', r.success ? 'Payé.' : r.error))}>Payer</button>
                         )}
-                        <button type="button" onClick={() => openEdit(p)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)' }}><Pencil size={14} /></button>
-                        <button type="button" onClick={() => handleDelete(p.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)' }}><Trash2 size={14} /></button>
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => openEdit(p)}>Modifier</button>
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleWorkerPdf(p, false)}><FileDown size={13} /> Télécharger PDF</button>
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleWorkerPdf(p, true)}><Printer size={13} /> Imprimer</button>
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleDelete(p.id)} title="Supprimer"><Trash2 size={13} style={{ color: 'var(--red)' }} /></button>
                       </div>
                     </td>
                   </tr>
@@ -343,8 +369,8 @@ export default function PaiementHebdo() {
       </div>
 
       {showModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
-          <div className="card" style={{ width: '100%', maxWidth: 720, maxHeight: '92vh', overflowY: 'auto', padding: 24 }}>
+        <div className="rh-ext-modal-overlay">
+          <div className="card rh-ext-modal-box">
             <div className="flex-between" style={{ marginBottom: 16 }}>
               <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.05rem', margin: 0 }}>
                 {editId ? 'Modifier paiement ouvrier' : 'Paiement hebdomadaire ouvriers'}
@@ -380,9 +406,23 @@ export default function PaiementHebdo() {
                     <select value={editForm.statut} onChange={(e) => setEditForm((p) => ({ ...p, statut: e.target.value }))} style={INPUT_S(false)}>
                       {PAYROLL_UI_STATUTS.map((s) => <option key={s} value={s}>{s}</option>)}
                     </select></div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <div><label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Référence</label>
+                      <input value={editForm.reference || ''} onChange={(e) => setEditForm((p) => ({ ...p, reference: e.target.value }))} style={INPUT_S(false)} /></div>
+                    <div><label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Mode de paiement</label>
+                      <select value={editForm.paymentMethod || ''} onChange={(e) => setEditForm((p) => ({ ...p, paymentMethod: e.target.value }))} style={INPUT_S(false)}>
+                        <option value="">—</option>
+                        {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
+                      </select></div>
+                  </div>
+                  <div><label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Description / Observation</label>
+                    <textarea rows={2} value={editForm.notes || ''} onChange={(e) => setEditForm((p) => ({ ...p, notes: e.target.value }))} style={{ ...INPUT_S(false), resize: 'vertical' }} /></div>
                   <div style={{ padding: 12, background: '#F8F9FA', borderRadius: 8, fontSize: '0.85rem' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>Montant brut</span><strong>{fmtMAD(editPreview.montantBrut)}</strong></div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, color: '#E65100' }}><span>Avances déduites</span><strong>{fmtMAD(editPreview.avances)}</strong></div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, color: '#C62828' }}><span>Retenues déduites</span><strong>{fmtMAD(editPreview.retenues)}</strong></div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>Montant heures sup</span><strong>{fmtMAD(editPreview.montantSup)}</strong></div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Total net</span><strong style={{ color: 'var(--red)' }}>{fmtMAD(editPreview.montantNet)}</strong></div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 6, borderTop: '1px solid var(--border)' }}><span style={{ fontWeight: 700 }}>Net à payer</span><strong style={{ color: 'var(--red)' }}>{fmtMAD(editPreview.montantNet)}</strong></div>
                   </div>
                 </div>
               ) : (
@@ -474,6 +514,36 @@ export default function PaiementHebdo() {
                 <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Enregistrement…' : 'Enregistrer'}</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {detailRecord && (
+        <div className="rh-ext-modal-overlay">
+          <div className="card rh-ext-modal-box rh-ext-modal-box--md">
+            <div className="flex-between" style={{ marginBottom: 16 }}>
+              <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.05rem', margin: 0 }}>Détail paiement ouvrier</h2>
+              <button type="button" onClick={() => setDetailId(null)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
+            </div>
+            <div style={{ display: 'grid', gap: 8, fontSize: '0.88rem', marginBottom: 16 }}>
+              <div><strong>Ouvrier :</strong> {detailRecord.ouvrier}</div>
+              <div><strong>Projet :</strong> {detailRecord.projet || '—'}</div>
+              <div><strong>Semaine :</strong> {detailRecord.semaineDebut ? new Date(detailRecord.semaineDebut).toLocaleDateString('fr-MA') : '—'}</div>
+              <div><strong>Référence :</strong> {detailRecord.reference || '—'}</div>
+              <div><strong>Statut :</strong> {detailRecord.statut}</div>
+              <div><strong>Mode :</strong> {detailRecord.paymentMethod || '—'}</div>
+              <div><strong>Jours / H. sup :</strong> {detailRecord.joursPaies} j · {detailRecord.heuresSup || 0} h sup</div>
+              <div><strong>Brut :</strong> {fmtMAD(detailRecord.montantBrut)}</div>
+              <div><strong style={{ color: '#E65100' }}>Avances :</strong> {fmtMAD(detailRecord.avances)}</div>
+              <div><strong style={{ color: '#C62828' }}>Retenues :</strong> {fmtMAD(detailRecord.retenues)}</div>
+              <div><strong>Net à payer :</strong> <span style={{ color: 'var(--red)', fontWeight: 800 }}>{fmtMAD(detailRecord.total)}</span></div>
+              {detailRecord.notes && <div><strong>Observations :</strong> {detailRecord.notes}</div>}
+            </div>
+            <div className="rh-ext-detail-header-actions">
+              <button type="button" className="btn btn-secondary" onClick={() => { setDetailId(null); openEdit(detailRecord); }}>Modifier</button>
+              <button type="button" className="btn btn-secondary" onClick={() => handleWorkerPdf(detailRecord, false)}><FileDown size={14} /> Télécharger PDF</button>
+              <button type="button" className="btn btn-secondary" onClick={() => handleWorkerPdf(detailRecord, true)}><Printer size={14} /> Imprimer</button>
+            </div>
           </div>
         </div>
       )}

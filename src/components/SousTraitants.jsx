@@ -253,10 +253,10 @@ export default function SousTraitants() {
   const sub = detail?.sub;
 
   return (
-    <div className="animate-fade-in">
+    <div className="animate-fade-in rh-ext-page">
       {toast && (
-        <div style={{
-          position: 'fixed', bottom: 24, right: 24, zIndex: 9999, padding: '12px 20px', borderRadius: 10,
+        <div className="rh-ext-toast" style={{
+          padding: '12px 20px', borderRadius: 10,
           background: toast.ok ? '#2E7D32' : '#D32F2F', color: '#fff', fontWeight: 600, fontSize: '0.88rem',
         }}>{toast.msg}</div>
       )}
@@ -286,10 +286,10 @@ export default function SousTraitants() {
             </div>
           )}
 
-          <div className="card" style={{ marginBottom: 12, padding: '12px 16px' }}>
-            <div style={{ position: 'relative', maxWidth: 360 }}>
+          <div className="card rh-ext-filter-card">
+            <div className="rh-ext-search-wrap" style={{ maxWidth: 360 }}>
               <Search size={15} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
-              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher..." style={{ ...INPUT_S(false), paddingLeft: 34 }} />
+              <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher..." style={INPUT_S(false)} />
             </div>
           </div>
 
@@ -315,16 +315,16 @@ export default function SousTraitants() {
                   <tbody>
                     {filtered.map((s) => (
                       <tr key={s.id}>
-                        <td style={{ fontWeight: 700 }}>{s.fullName}</td>
-                        <td>{s.fonction || '—'}</td>
-                        <td>{s.cinLabel}</td>
-                        <td style={{ textAlign: 'center' }}>{s.activeProjectsCount}</td>
-                        <td style={{ fontWeight: 600, color: 'var(--text-2)' }}>{fmtMAD(s.totalServices)}</td>
-                        <td style={{ fontWeight: 600, color: '#2E7D32' }}>{fmtMAD(s.totalPaid)}</td>
-                        <td style={{ fontWeight: 800, color: 'var(--red)' }}>{fmtMAD(s.remaining)}</td>
-                        <td><span className="badge badge-green">{SUB_STATUT_LABEL[s.statut] || s.statut}</span></td>
-                        <td>
-                          <div style={{ display: 'flex', gap: 4 }}>
+                        <td data-label="Nom complet" style={{ fontWeight: 700 }}>{s.fullName}</td>
+                        <td data-label="Fonction">{s.fonction || '—'}</td>
+                        <td data-label="CIN / Passeport">{s.cinLabel}</td>
+                        <td data-label="Projets actifs" style={{ textAlign: 'center' }}>{s.activeProjectsCount}</td>
+                        <td data-label="Prestations" style={{ fontWeight: 600, color: 'var(--text-2)' }}>{fmtMAD(s.totalServices)}</td>
+                        <td data-label="Total payé" style={{ fontWeight: 600, color: '#2E7D32' }}>{fmtMAD(s.totalPaid)}</td>
+                        <td data-label="Reste à payer" style={{ fontWeight: 800, color: 'var(--red)' }}>{fmtMAD(s.remaining)}</td>
+                        <td data-label="Statut"><span className="badge badge-green">{SUB_STATUT_LABEL[s.statut] || s.statut}</span></td>
+                        <td className="rh-ext-actions-cell">
+                          <div className="rh-ext-actions">
                             <button className="btn btn-ghost btn-sm" onClick={() => openDetail(s.id)} title="Voir"><Eye size={14} /></button>
                             <button className="btn btn-ghost btn-sm" onClick={() => { openDetail(s.id); setTimeout(() => openModal('sub-edit', s), 0); }} title="Modifier"><Edit2 size={14} /></button>
                             <button className="btn btn-ghost btn-sm" onClick={() => handleDelete(s.id)} title="Supprimer"><Trash2 size={14} style={{ color: 'var(--red)' }} /></button>
@@ -348,7 +348,7 @@ export default function SousTraitants() {
                 <p className="page-subtitle">{sub?.fonction || '—'} · {sub?.cinLabel}</p>
               </div>
             </div>
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div className="rh-ext-detail-header-actions">
               <button className="btn btn-secondary" onClick={() => refreshDetail(selectedId)} disabled={detailLoading}>
                 <RefreshCw size={14} /> Actualiser
               </button>
@@ -357,7 +357,7 @@ export default function SousTraitants() {
           </div>
 
           {detail?.summary && (
-            <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(160px,1fr))', marginBottom: 16 }}>
+            <div className="stat-grid rh-ext-stat-grid">
               <div className="stat-card"><div className="stat-body"><div className="stat-value">{detail.summary.activeProjects}</div><div className="stat-label">Projets</div></div></div>
               <div className="stat-card"><div className="stat-body"><div className="stat-value" style={{ fontSize: '0.95rem' }}>{fmtMAD(detail.summary.totalServices)}</div><div className="stat-label">Prestations</div></div></div>
               <div className="stat-card"><div className="stat-body"><div className="stat-value" style={{ fontSize: '0.95rem', color: '#2E7D32' }}>{fmtMAD(detail.summary.totalPaid)}</div><div className="stat-label">Payé</div></div></div>
@@ -365,7 +365,7 @@ export default function SousTraitants() {
             </div>
           )}
 
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
+          <div className="rh-ext-tab-bar">
             {TABS.map((t) => (
               <button key={t.id} type="button" onClick={() => setTab(t.id)}
                 className={'btn ' + (tab === t.id ? 'btn-primary' : 'btn-secondary')} style={{ fontSize: '0.78rem' }}>
@@ -379,7 +379,7 @@ export default function SousTraitants() {
           ) : (
             <div className="card" style={{ padding: 20 }}>
               {tab === 'info' && sub && (
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(220px,1fr))', gap: 12 }}>
+                <div className="rh-ext-info-grid">
                   {[['Nom', sub.fullName], ['Fonction', sub.fonction], ['CIN', sub.numero_cin], ['Passeport', sub.passeport], ['Téléphone', sub.telephone], ['Email', sub.email], ['Adresse', sub.adresse], ['ICE', sub.ice], ['Statut', SUB_STATUT_LABEL[sub.statut]], ['Notes', sub.notes]].map(([k, v]) => (
                     <div key={k}><div style={{ fontSize: '0.7rem', color: 'var(--text-3)', fontWeight: 700, textTransform: 'uppercase' }}>{k}</div><div style={{ fontWeight: 600, marginTop: 4 }}>{v || '—'}</div></div>
                   ))}
@@ -400,12 +400,12 @@ export default function SousTraitants() {
                       <tbody>
                         {(detail?.assignments || []).map((a) => (
                           <tr key={a.id}>
-                            <td style={{ fontWeight: 600 }}>{a.projectName || a.projectRef || '—'}</td>
-                            <td>{a.role || '—'}</td>
-                            <td>{a.remunerationType || '—'}</td>
-                            <td>{a.unitType || '—'}</td>
-                            <td>{fmtMAD(a.unitPrice)}</td>
-                            <td>{ASSIGNMENT_STATUS_LABEL[a.status] || a.status}</td>
+                            <td data-label="Projet" style={{ fontWeight: 600 }}>{a.projectName || a.projectRef || '—'}</td>
+                            <td data-label="Rôle">{a.role || '—'}</td>
+                            <td data-label="Rémunération">{a.remunerationType || '—'}</td>
+                            <td data-label="Unité">{a.unitType || '—'}</td>
+                            <td data-label="Prix unit.">{fmtMAD(a.unitPrice)}</td>
+                            <td data-label="Statut">{ASSIGNMENT_STATUS_LABEL[a.status] || a.status}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -428,12 +428,12 @@ export default function SousTraitants() {
                       <tbody>
                         {(detail?.services || []).map((s) => (
                           <tr key={s.id}>
-                            <td>{fmtDate(s.serviceDate)}</td>
-                            <td>{s.description || '—'}</td>
-                            <td>{s.quantity} {s.unitType}</td>
-                            <td style={{ fontWeight: 700, color: 'var(--red)' }}>{fmtMAD(s.totalAmount)}</td>
-                            <td>{SERVICE_STATUS_LABEL[s.status] || s.status}</td>
-                            <td>
+                            <td data-label="Date">{fmtDate(s.serviceDate)}</td>
+                            <td data-label="Description">{s.description || '—'}</td>
+                            <td data-label="Quantité">{s.quantity} {s.unitType}</td>
+                            <td data-label="Montant" style={{ fontWeight: 700, color: 'var(--red)' }}>{fmtMAD(s.totalAmount)}</td>
+                            <td data-label="Statut">{SERVICE_STATUS_LABEL[s.status] || s.status}</td>
+                            <td className="rh-ext-actions-cell">
                               {s.status === 'pending' && (
                                 <button className="btn btn-ghost btn-sm" onClick={() => validateService(s)}>Valider</button>
                               )}
@@ -465,13 +465,13 @@ export default function SousTraitants() {
                       <tbody>
                         {(detail?.payments || []).map((p) => (
                           <tr key={p.id}>
-                            <td>{fmtDate(p.paymentDate)}</td>
-                            <td>{paymentTypeLabel(p.paymentType)}</td>
-                            <td>{p.designation || p.description || '—'}</td>
-                            <td style={{ fontWeight: 700, color: '#2E7D32' }}>{fmtMAD(p.amount)}</td>
-                            <td>{p.paymentMethod || '—'}</td>
-                            <td>{p.reference || '—'}</td>
-                            <td>{paymentStatusFromDb(p.status)}</td>
+                            <td data-label="Date">{fmtDate(p.paymentDate)}</td>
+                            <td data-label="Type">{paymentTypeLabel(p.paymentType)}</td>
+                            <td data-label="Désignation">{p.designation || p.description || '—'}</td>
+                            <td data-label="Montant" style={{ fontWeight: 700, color: '#2E7D32' }}>{fmtMAD(p.amount)}</td>
+                            <td data-label="Mode">{p.paymentMethod || '—'}</td>
+                            <td data-label="Référence">{p.reference || '—'}</td>
+                            <td data-label="Statut">{paymentStatusFromDb(p.status)}</td>
                           </tr>
                         ))}
                       </tbody>
@@ -489,14 +489,14 @@ export default function SousTraitants() {
                     <tbody>
                       {(detail?.balances || []).map((b) => (
                         <tr key={b.assignmentId}>
-                          <td style={{ fontWeight: 600 }}>{b.projectName}</td>
-                          <td>{b.remunerationType || '—'}</td>
-                          <td>{fmtMAD(b.totalServicesAmount)}</td>
-                          <td>{fmtMAD(b.totalPaidAmount)}</td>
-                          <td style={{ fontWeight: 800, color: 'var(--red)' }}>{fmtMAD(b.remainingAmount)}</td>
-                          <td>{PAYMENT_BALANCE_LABEL[b.paymentStatus] || b.paymentStatus}</td>
-                          <td>
-                            <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                          <td data-label="Projet" style={{ fontWeight: 600 }}>{b.projectName}</td>
+                          <td data-label="Type rémun.">{b.remunerationType || '—'}</td>
+                          <td data-label="Prestations">{fmtMAD(b.totalServicesAmount)}</td>
+                          <td data-label="Payé">{fmtMAD(b.totalPaidAmount)}</td>
+                          <td data-label="Reste" style={{ fontWeight: 800, color: 'var(--red)' }}>{fmtMAD(b.remainingAmount)}</td>
+                          <td data-label="Statut">{PAYMENT_BALANCE_LABEL[b.paymentStatus] || b.paymentStatus}</td>
+                          <td className="rh-ext-actions-cell">
+                            <div className="rh-ext-actions">
                               <button className="btn btn-ghost btn-sm" onClick={() => openModal('service', { assignmentId: b.assignmentId, serviceDate: new Date().toISOString().slice(0, 10), status: 'pending' })}>+ Prestation</button>
                               <button className="btn btn-ghost btn-sm" onClick={() => openModal('payment', { projectId: b.projectId || '' })}>+ Paiement</button>
                               <button className="btn btn-ghost btn-sm" onClick={() => exportBalancePdf(b)}><Download size={13} /> PDF</button>
@@ -525,8 +525,8 @@ export default function SousTraitants() {
       )}
 
       {modal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
-          <div style={{ background: '#fff', borderRadius: 14, padding: 28, width: '100%', maxWidth: 560, maxHeight: '90vh', overflowY: 'auto' }}>
+        <div className="rh-ext-modal-overlay" style={{ zIndex: 1000 }}>
+          <div className="card rh-ext-modal-box rh-ext-modal-box--md">
             <div className="flex-between" style={{ marginBottom: 16 }}>
               <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.1rem', margin: 0 }}>
                 {modal === 'sub-create' && 'Nouveau sous-traitant'}

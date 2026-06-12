@@ -1,14 +1,24 @@
-import { Handshake, Plus, Loader2, X } from 'lucide-react';
+import { Handshake, Plus, Loader2, X, FileDown, Printer } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import { useSubcontractorPaymentForm } from '../hooks/useSubcontractorPaymentForm';
 import SubcontractorPaymentFormBody from './SubcontractorPaymentFormBody';
-import { createPaymentBatch, listAllSubcontractorPayments } from '../services/rh/subcontractors';
+import SubcontractorPaymentEditForm, {
+  paymentToEditForm,
+  validateSubcontractorPaymentEdit,
+  buildSubcontractorPaymentUpdatePayload,
+} from './SubcontractorPaymentEditForm';
+import {
+  createPaymentBatch,
+  listAllSubcontractorPayments,
+  updateSubcontractorPayment,
+} from '../services/rh/subcontractors';
 import { paymentStatusFromDb, paymentStatusToDb } from '../services/rh/subcontractorConstants';
 import {
   validateSubcontractorPaymentForm,
   buildSubcontractorPaymentPayload,
   paymentTypeLabel,
 } from '../utils/rh/subcontractorPaymentFormUtils';
+import { exportSubcontractorPaymentPdf } from '../services/rh/subcontractorPaymentPdf';
 import { formatSupabaseError } from '../services/supabase/formatError';
 import { isSupabaseConfigured } from '../lib/supabase';
 
@@ -26,6 +36,13 @@ export default function PaiementSousTraitantsSection({ onNotify }) {
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  const [editRecord, setEditRecord] = useState(null);
+  const [editForm, setEditForm] = useState(null);
+  const [editFormErr, setEditFormErr] = useState({});
+  const [editSaving, setEditSaving] = useState(false);
+
+  const [detailRecord, setDetailRecord] = useState(null);
 
   const paymentForm = useSubcontractorPaymentForm({ active: showModal });
 
@@ -52,6 +69,54 @@ export default function PaiementSousTraitantsSection({ onNotify }) {
   function openCreate() {
     paymentForm.resetForm();
     setShowModal(true);
+  }
+
+  function openEdit(p) {
+    setDetailRecord(null);
+    setEditRecord(p);
+    setEditForm(paymentToEditForm(p));
+    setEditFormErr({});
+  }
+
+  function openDetail(p) {
+    setDetailRecord(p);
+  }
+
+  function setEditField(field, value) {
+    setEditForm((prev) => ({ ...prev, [field]: value }));
+  }
+
+  async function handleSubPdf(record, print = false) {
+    try {
+      await exportSubcontractorPaymentPdf(record, { print });
+    } catch {
+      onNotify?.('error', 'Erreur lors de la génération du PDF.');
+    }
+  }
+
+  async function handleEditSave(e) {
+    e.preventDefault();
+    const err = validateSubcontractorPaymentEdit(editForm);
+    if (Object.keys(err).length) {
+      setEditFormErr(err);
+      return;
+    }
+    setEditSaving(true);
+    try {
+      const payload = buildSubcontractorPaymentUpdatePayload(editForm, {
+        projectId: editRecord.projectId,
+        assignmentId: editRecord.assignmentId,
+      });
+      await updateSubcontractorPayment(editRecord.id, payload, editRecord.subcontractorId);
+      onNotify?.('success', 'Paiement sous-traitant modifié.');
+      setEditRecord(null);
+      setEditForm(null);
+      await loadPayments();
+    } catch (err) {
+      onNotify?.('error', formatSupabaseError(err, 'Erreur modification paiement.'));
+    } finally {
+      setEditSaving(false);
+    }
   }
 
   async function handleSubmit(e) {
@@ -98,7 +163,7 @@ export default function PaiementSousTraitantsSection({ onNotify }) {
         </button>
       </div>
 
-      <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(170px,1fr))', marginBottom: 16 }}>
+      <div className="stat-grid rh-ext-stat-grid">
         <div className="stat-card">
           <div className="stat-body">
             <div className="stat-value" style={{ fontSize: '0.95rem' }}>{loading ? '—' : payments.length}</div>
@@ -126,23 +191,34 @@ export default function PaiementSousTraitantsSection({ onNotify }) {
         <div className="table-wrap">
           <table>
             <thead>
-              <tr>
-                <th>Date</th><th>Sous-traitant</th><th>Projet</th><th>Type</th>
-                <th>Brut</th><th>Avances</th><th>Retenues</th><th>Net</th><th>Statut</th>
+                <tr>
+                <th>Sous-traitant</th><th>Date</th><th>Projet</th><th>Type</th>
+                <th>Brut</th><th>Avances</th><th>Retenues</th><th>Net</th><th>Statut</th><th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {payments.map((p) => (
                 <tr key={p.id}>
-                  <td>{fmtDate(p.paymentDate)}</td>
-                  <td style={{ fontWeight: 600 }}>{p.subcontractorName || '—'}</td>
-                  <td>{p.projectName || '—'}</td>
-                  <td>{paymentTypeLabel(p.paymentType)}</td>
-                  <td>{fmtMAD(p.grossAmount)}</td>
-                  <td style={{ color: '#E65100' }}>{fmtMAD(p.avances)}</td>
-                  <td style={{ color: '#C62828' }}>{fmtMAD(p.retenues)}</td>
-                  <td style={{ fontWeight: 700, color: '#2E7D32' }}>{fmtMAD(p.amount)}</td>
-                  <td>{paymentStatusFromDb(p.status)}</td>
+                  <td data-label="Sous-traitant" style={{ fontWeight: 600 }}>
+                    <button type="button" onClick={() => openDetail(p)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600, color: 'var(--text)', padding: 0, textDecoration: 'underline', textUnderlineOffset: 2 }}>
+                      {p.subcontractorName || '—'}
+                    </button>
+                  </td>
+                  <td data-label="Date">{fmtDate(p.paymentDate)}</td>
+                  <td data-label="Projet">{p.projectName || '—'}</td>
+                  <td data-label="Type">{paymentTypeLabel(p.paymentType)}</td>
+                  <td data-label="Brut">{fmtMAD(p.grossAmount)}</td>
+                  <td data-label="Avances" style={{ color: '#E65100' }}>{fmtMAD(p.avances)}</td>
+                  <td data-label="Retenues" style={{ color: '#C62828' }}>{fmtMAD(p.retenues)}</td>
+                  <td data-label="Net" style={{ fontWeight: 700, color: '#2E7D32' }}>{fmtMAD(p.amount)}</td>
+                  <td data-label="Statut">{paymentStatusFromDb(p.status)}</td>
+                  <td data-label="Actions" className="payment-actions-cell">
+                    <div className="payment-row-actions">
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => openEdit(p)}>Modifier</button>
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleSubPdf(p, false)}><FileDown size={13} /> Télécharger PDF</button>
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleSubPdf(p, true)}><Printer size={13} /> Imprimer</button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -151,8 +227,8 @@ export default function PaiementSousTraitantsSection({ onNotify }) {
       )}
 
       {showModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 9000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
-          <div className="card" style={{ width: '100%', maxWidth: 680, maxHeight: '92vh', overflowY: 'auto', padding: 24 }}>
+        <div className="rh-ext-modal-overlay">
+          <div className="card rh-ext-modal-box rh-ext-modal-box--lg">
             <div className="flex-between" style={{ marginBottom: 16 }}>
               <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.05rem', margin: 0 }}>
                 Paiement sous-traitant
@@ -170,6 +246,55 @@ export default function PaiementSousTraitantsSection({ onNotify }) {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {editRecord && editForm && (
+        <div className="rh-ext-modal-overlay">
+          <div className="card rh-ext-modal-box rh-ext-modal-box--md">
+            <div className="flex-between" style={{ marginBottom: 12 }}>
+              <div>
+                <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.05rem', margin: 0 }}>Modifier paiement sous-traitant</h2>
+                <p style={{ margin: '4px 0 0', fontSize: '0.82rem', color: 'var(--text-3)' }}>{editRecord.subcontractorName} · {editRecord.projectName || '—'}</p>
+              </div>
+              <button type="button" onClick={() => { setEditRecord(null); setEditForm(null); }} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
+                <X size={18} />
+              </button>
+            </div>
+            <form onSubmit={handleEditSave}>
+              <SubcontractorPaymentEditForm form={editForm} setF={setEditField} formErr={editFormErr} />
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 20 }}>
+                <button type="button" className="btn btn-secondary" onClick={() => { setEditRecord(null); setEditForm(null); }}>Annuler</button>
+                <button type="submit" className="btn btn-primary" disabled={editSaving}>
+                  {editSaving ? 'Enregistrement…' : 'Enregistrer'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {detailRecord && (
+        <div className="rh-ext-modal-overlay">
+          <div className="card rh-ext-modal-box rh-ext-modal-box--md">
+            <div className="flex-between" style={{ marginBottom: 12 }}>
+              <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.05rem', margin: 0 }}>Détail paiement sous-traitant</h2>
+              <button type="button" onClick={() => setDetailRecord(null)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
+                <X size={18} />
+              </button>
+            </div>
+            <SubcontractorPaymentEditForm
+              form={paymentToEditForm(detailRecord)}
+              setF={() => {}}
+              formErr={{}}
+              readOnly
+            />
+            <div className="rh-ext-detail-header-actions" style={{ marginTop: 16 }}>
+              <button type="button" className="btn btn-secondary" onClick={() => { setDetailRecord(null); openEdit(detailRecord); }}>Modifier</button>
+              <button type="button" className="btn btn-secondary" onClick={() => handleSubPdf(detailRecord, false)}><FileDown size={14} /> Télécharger PDF</button>
+              <button type="button" className="btn btn-secondary" onClick={() => handleSubPdf(detailRecord, true)}><Printer size={14} /> Imprimer</button>
+            </div>
           </div>
         </div>
       )}

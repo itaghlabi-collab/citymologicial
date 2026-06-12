@@ -13,7 +13,7 @@ function Toast({ toast }) {
   if (!toast) return null;
   const bg = toast.type === 'success' ? '#2E7D32' : '#D32F2F';
   return (
-    <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 9999, background: bg, color: '#fff', padding: '12px 20px', borderRadius: 10, boxShadow: '0 4px 20px rgba(0,0,0,0.22)', fontSize: '0.88rem', fontWeight: 600 }}>
+    <div className="rh-ext-toast" style={{ background: bg, color: '#fff', padding: '12px 20px', borderRadius: 10, boxShadow: '0 4px 20px rgba(0,0,0,0.22)', fontSize: '0.88rem', fontWeight: 600 }}>
       {toast.msg}
     </div>
   );
@@ -234,7 +234,7 @@ export default function HeuresSupp() {
   const hasFilters = filterOuvrier || filterProjet || filterDate || filterStatut;
 
   return (
-    <div className="animate-fade-in">
+    <div className="animate-fade-in rh-ext-page">
       <Toast toast={toast} />
 
       <div className="page-header flex-between">
@@ -261,7 +261,7 @@ export default function HeuresSupp() {
       )}
 
       {/* KPIs */}
-      <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(170px,1fr))', marginBottom: 16 }}>
+      <div className="stat-grid rh-ext-stat-grid">
         <div className="stat-card">
           <div className="stat-icon orange"><BarChart3 size={18} /></div>
           <div className="stat-body"><div className="stat-value">{loading ? '—' : `${stats.totalHeures}h`}</div><div className="stat-label">Total heures sup</div></div>
@@ -280,26 +280,26 @@ export default function HeuresSupp() {
       </div>
 
       {/* Filters */}
-      <div className="card" style={{ marginBottom: 12, padding: '14px 20px' }}>
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+      <div className="card rh-ext-filter-card">
+        <div className="rh-ext-filter-bar">
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-3)', fontSize: '0.85rem' }}>
             <Filter size={14} /> Filtres
           </div>
-          <select value={filterOuvrier} onChange={e => setFilterOuvrier(e.target.value)} style={{ padding: '7px 12px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius)', fontSize: '0.85rem', fontFamily: 'var(--font-body)', outline: 'none', background: '#fff' }}>
+          <select value={filterOuvrier} onChange={e => setFilterOuvrier(e.target.value)}>
             <option value="">Tous les ouvriers</option>
             {workerOptions.map(w => <option key={w.id} value={w.label}>{w.label}</option>)}
           </select>
-          <select value={filterProjet} onChange={e => setFilterProjet(e.target.value)} style={{ padding: '7px 12px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius)', fontSize: '0.85rem', fontFamily: 'var(--font-body)', outline: 'none', background: '#fff' }}>
+          <select value={filterProjet} onChange={e => setFilterProjet(e.target.value)}>
             <option value="">Tous les projets</option>
             {chantiers.map(p => <option key={p} value={p}>{p}</option>)}
           </select>
-          <select value={filterStatut} onChange={e => setFilterStatut(e.target.value)} style={{ padding: '7px 12px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius)', fontSize: '0.85rem', fontFamily: 'var(--font-body)', outline: 'none', background: '#fff' }}>
+          <select value={filterStatut} onChange={e => setFilterStatut(e.target.value)}>
             <option value="">Tous les statuts</option>
             {STATUS_OPTS.map(s => <option key={s} value={s}>{s}</option>)}
           </select>
-          <input type="date" value={filterDate} onChange={e => setFilterDate(e.target.value)} style={{ padding: '7px 12px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius)', fontSize: '0.85rem', fontFamily: 'var(--font-body)', outline: 'none' }} />
+          <input type="date" value={filterDate} onChange={e => setFilterDate(e.target.value)} />
           {hasFilters && (
-            <button onClick={() => { setFilterOuvrier(''); setFilterProjet(''); setFilterDate(''); setFilterStatut(''); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', fontSize: '0.82rem', fontWeight: 600 }}>
+            <button type="button" onClick={() => { setFilterOuvrier(''); setFilterProjet(''); setFilterDate(''); setFilterStatut(''); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', fontSize: '0.82rem', fontWeight: 600 }}>
               Effacer filtres
             </button>
           )}
@@ -321,28 +321,27 @@ export default function HeuresSupp() {
           <div className="table-wrap">
             <table>
               <thead>
-                <tr><th>#</th><th>Ouvrier</th><th>Projet</th><th>Date</th><th>Heures sup</th><th>Tarif/h (MAD)</th><th>Montant (MAD)</th><th>Actions</th></tr>
+                <tr><th>Ouvrier</th><th>Date</th><th>Projet</th><th>Heures sup</th><th>Tarif/h</th><th>Montant</th><th>Actions</th><th className="rh-ext-col-index">#</th></tr>
               </thead>
               <tbody>
                 {filtered.map((r, i) => (
                   <tr key={r.id}>
-                    <td style={{ color: 'var(--text-3)', fontSize: '0.78rem' }}>{String(i + 1).padStart(3, '0')}</td>
-                    <td style={{ fontWeight: 600 }}>{r.ouvrier}</td>
-                    <td style={{ color: 'var(--text-2)' }}>{r.projet}</td>
-                    <td style={{ whiteSpace: 'nowrap' }}>{r.date}</td>
-                    <td>
+                    <td data-label="Ouvrier" style={{ fontWeight: 600 }}>{r.ouvrier}</td>
+                    <td data-label="Date" style={{ whiteSpace: 'nowrap' }}>{r.date}</td>
+                    <td data-label="Projet" style={{ color: 'var(--text-2)' }}>{r.projet}</td>
+                    <td data-label="Heures sup">
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontFamily: 'var(--font-head)', fontWeight: 700, color: '#E65100' }}>
                         {r.heures}h
                       </span>
                     </td>
-                    <td style={{ fontFamily: 'var(--font-head)', fontWeight: 600 }}>{fmtMAD(r.tarif)}</td>
-                    <td>
+                    <td data-label="Tarif/h" style={{ fontFamily: 'var(--font-head)', fontWeight: 600 }}>{fmtMAD(r.tarif)}</td>
+                    <td data-label="Montant">
                       <span style={{ fontFamily: 'var(--font-head)', fontWeight: 800, color: 'var(--red)', fontSize: '0.95rem' }}>
                         {fmtMAD(r.montant)}
                       </span>
                     </td>
-                    <td>
-                      <div style={{ display: 'flex', gap: 4 }}>
+                    <td className="rh-ext-actions-cell">
+                      <div className="rh-ext-actions">
                         <button className="btn btn-ghost btn-sm" style={{ padding: '4px 8px' }} onClick={() => openEdit(r)} title="Modifier">
                           <Pencil size={13} style={{ color: 'var(--text-2)' }} />
                         </button>
@@ -351,6 +350,7 @@ export default function HeuresSupp() {
                         </button>
                       </div>
                     </td>
+                    <td className="rh-ext-col-index" style={{ color: 'var(--text-3)', fontSize: '0.78rem' }}>{String(i + 1).padStart(3, '0')}</td>
                   </tr>
                 ))}
               </tbody>
@@ -360,7 +360,7 @@ export default function HeuresSupp() {
 
         {/* Total row */}
         {filtered.length > 0 && (
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 12, padding: '10px 16px', background: '#FFF5F5', borderRadius: 8, gap: 32 }}>
+          <div className="rh-ext-totals-bar">
             <div>
               <div style={{ fontSize: '0.75rem', color: 'var(--text-3)' }}>Total heures</div>
               <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, color: '#E65100' }}>{stats.totalHeures}h</div>
@@ -375,8 +375,8 @@ export default function HeuresSupp() {
 
       {/* Modal */}
       {showModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
-          <div style={{ background: '#fff', borderRadius: 14, padding: 32, width: '100%', maxWidth: 560, boxShadow: '0 8px 40px rgba(0,0,0,0.2)', maxHeight: '90vh', overflowY: 'auto' }}>
+        <div className="rh-ext-modal-overlay" style={{ zIndex: 1000 }}>
+          <div className="card rh-ext-modal-box rh-ext-modal-box--md">
             <div className="flex-between" style={{ marginBottom: 20 }}>
               <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.2rem', textTransform: 'uppercase' }}>
                 {editId ? 'Modifier heures sup' : 'Heures supplementaires'}
