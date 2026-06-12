@@ -3,6 +3,7 @@ import {
   Layers, Plus, Edit2, Trash2, Search, X, AlertCircle, Package, Loader2
 } from 'lucide-react';
 import { useCategories } from '../../hooks/useCategories';
+import { formatCategoryDisplayName } from '../../utils/crm/categoryDisplay';
 
 /* ── Helpers ── */
 function IS(err) {
@@ -341,7 +342,7 @@ export default function Categories() {
                         <td style={{ width: 48 }}>
                           <div style={{ width: 28, height: 28, borderRadius: '50%', background: c.couleur || '#1976D2', flexShrink: 0 }} />
                         </td>
-                        <td style={{ fontWeight: 700, fontSize: '0.92rem' }}>{c.nom}</td>
+                        <td style={{ fontWeight: 700, fontSize: '0.92rem' }}>{formatCategoryDisplayName(c.nom)}</td>
                         <td style={{ color: 'var(--text-2)', fontSize: '0.85rem', maxWidth: 240 }}>
                           {c.description
                             ? <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'block', maxWidth: 220 }}>{c.description}</span>
@@ -386,7 +387,7 @@ export default function Categories() {
                     <div className="crm-compact-main">
                       <div className="crm-compact-title">
                         <span className="crm-compact-dot" style={{ background: c.couleur || '#1976D2' }} />
-                        {c.nom}
+                        {formatCategoryDisplayName(c.nom)}
                       </div>
                       <div className="crm-compact-meta">
                         <Package size={11} style={{ display: 'inline', verticalAlign: 'middle', marginRight: 3 }} />

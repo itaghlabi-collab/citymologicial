@@ -3,6 +3,7 @@
  */
 import { jsPDF } from 'jspdf';
 import { clientDisplayName } from './clients';
+import { formatCategoryDisplayName } from '../../utils/crm/categoryDisplay';
 
 const LOGO_URL = 'https://i.ibb.co/N6SbC06M/logopng.png';
 const ICON_URL = 'https://i.ibb.co/S79nbLdm/icone.png';
@@ -164,7 +165,7 @@ function buildPdfRows(devis, catMap) {
       currentCat = catKey;
       const label = catKey === '__none__'
         ? 'SANS CATÉGORIE'
-        : (catMap[catKey] || 'SANS CATÉGORIE').toUpperCase();
+        : formatCategoryDisplayName(catMap[catKey] || 'SANS CATÉGORIE');
       rows.push({ kind: 'section', text: label });
     }
 

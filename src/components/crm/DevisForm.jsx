@@ -8,6 +8,7 @@ import { listArticles } from '../../services/crm/articles';
 import { listCategories } from '../../services/crm/categories';
 import { generateCrmDevisReference } from '../../services/crm/crmDevis';
 import { generateDevisPdf } from '../../services/crm/devisPdf';
+import { formatCategoryDisplayName } from '../../utils/crm/categoryDisplay';
 import { TYPE_PROJET_VALUES, TYPE_PROJET_LABEL } from '../../constants/commercial';
 
 /* ── Helpers ── */
@@ -102,20 +103,60 @@ function Spinner() {
 }
 
 /* ── Ligne article row ── */
-function LigneRow({ ligne, idx, categories, articles, onChange, onDelete, onDuplicate }) {
+function DragHandle({ onDragStart, onDragEnd }) {
+  return (
+    <span
+      draggable
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      title="Glisser pour réorganiser"
+      style={{ cursor: 'grab', display: 'inline-flex', alignItems: 'center', touchAction: 'none' }}
+    >
+      <GripVertical size={13} style={{ color: 'var(--text-3)' }} />
+    </span>
+  );
+}
+
+function rowDragStyle(isDragging, isOver) {
+  if (isDragging) return { opacity: 0.45 };
+  if (isOver) return { boxShadow: 'inset 0 0 0 2px var(--red)' };
+  return {};
+}
+
+function LigneRow({ ligne, idx, categories, articles, onChange, onDelete, onDuplicate, drag }) {
   const [showDesc, setShowDesc] = useState(false);
   const catArticles = articles.filter(a => !ligne.categorie_id || String(a.categorie_id) === String(ligne.categorie_id));
+  const isEphemeral = !ligne.article_id;
   const sous_total_ht = Number(ligne.quantite) * Number(ligne.prix_ht) * (1 - Number(ligne.remise) / 100);
   const sous_total_ttc = sous_total_ht * (1 + Number(ligne.tva) / 100);
 
   function setField(k, v) { onChange({ ...ligne, [k]: v }); }
 
+  function onCategorieChange(catId) {
+    onChange({
+      ...ligne,
+      categorie_id: catId,
+      article_id: '',
+      designation: '',
+      description: '',
+    });
+  }
+
   function onArticleChange(articleId) {
+    if (articleId === '__libre__') {
+      onChange({
+        ...ligne,
+        article_id: '',
+        designation: ligne.designation || '',
+      });
+      return;
+    }
     const art = articles.find(a => String(a.id) === String(articleId));
     if (art) {
       onChange({
         ...ligne,
         article_id: articleId,
+        categorie_id: art.categorie_id ? String(art.categorie_id) : ligne.categorie_id,
         designation: art.nom || '',
         description: art.description || '',
         unite: art.unite || 'unite',
@@ -128,12 +169,31 @@ function LigneRow({ ligne, idx, categories, articles, onChange, onDelete, onDupl
     }
   }
 
+  function onDesignationChange(val) {
+    onChange({
+      ...ligne,
+      designation: val,
+      article_id: '',
+    });
+  }
+
+  const dragRowProps = {
+    style: rowDragStyle(drag.isDragging, drag.isOver),
+    onDragOver: (e) => { e.preventDefault(); drag.onDragOver(idx); },
+    onDrop: (e) => { e.preventDefault(); drag.onDrop(idx); },
+  };
+
+  const handleProps = {
+    onDragStart: (e) => drag.onDragStart(e, idx),
+    onDragEnd: drag.onDragEnd,
+  };
+
   if (ligne.type === 'titre') {
     return (
-      <tr style={{ background: '#F5F6F8' }}>
+      <tr {...dragRowProps} style={{ background: '#F5F6F8', ...dragRowProps.style }}>
         <td colSpan={9} style={{ padding: '8px 10px' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <GripVertical size={13} style={{ color: 'var(--text-3)', cursor: 'grab', flexShrink: 0 }} />
+            <DragHandle {...handleProps} />
             <input value={ligne.designation} onChange={e => setField('designation', e.target.value)} placeholder="Titre de section..." style={{ ...IS(false), fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.92rem', flex: 1 }} />
             <span style={{ fontSize: '0.72rem', color: 'var(--text-3)', background: 'var(--border)', borderRadius: 4, padding: '2px 6px', flexShrink: 0 }}>Titre</span>
             <button type="button" onClick={onDelete} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: 3, flexShrink: 0 }}><X size={13} /></button>
@@ -145,10 +205,10 @@ function LigneRow({ ligne, idx, categories, articles, onChange, onDelete, onDupl
 
   if (ligne.type === 'note') {
     return (
-      <tr style={{ background: '#FFFDE7' }}>
+      <tr {...dragRowProps} style={{ background: '#FFFDE7', ...dragRowProps.style }}>
         <td colSpan={9} style={{ padding: '8px 10px' }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
-            <GripVertical size={13} style={{ color: 'var(--text-3)', cursor: 'grab', flexShrink: 0, marginTop: 6 }} />
+            <DragHandle {...handleProps} />
             <textarea value={ligne.designation} onChange={e => setField('designation', e.target.value)} placeholder="Note ou commentaire..." rows={2} style={{ ...IS(false), resize: 'vertical', flex: 1, fontSize: '0.82rem', background: 'transparent' }} />
             <span style={{ fontSize: '0.72rem', color: '#F57C00', background: '#FFF3E0', borderRadius: 4, padding: '2px 6px', flexShrink: 0 }}>Note</span>
             <button type="button" onClick={onDelete} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: 3, flexShrink: 0, marginTop: 2 }}><X size={13} /></button>
@@ -160,23 +220,34 @@ function LigneRow({ ligne, idx, categories, articles, onChange, onDelete, onDupl
 
   return (
     <>
-      <tr>
-        <td style={{ padding: '8px 6px', width: 20 }}>
-          <GripVertical size={13} style={{ color: 'var(--text-3)', cursor: 'grab' }} />
+      <tr {...dragRowProps}>
+        <td style={{ padding: '8px 6px', width: 20, verticalAlign: 'top' }}>
+          <DragHandle {...handleProps} />
         </td>
         <td style={{ padding: '6px 6px', minWidth: 200 }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <div style={{ display: 'flex', gap: 4 }}>
-              <select value={ligne.categorie_id} onChange={e => setField('categorie_id', e.target.value)} style={{ ...IS(false), fontSize: '0.78rem', flex: 1, minWidth: 0 }}>
-                <option value="">Categorie...</option>
-                {categories.map(c => <option key={c.id} value={c.id}>{c.nom}</option>)}
-              </select>
-            </div>
-            <select value={ligne.article_id} onChange={e => onArticleChange(e.target.value)} style={{ ...IS(false), fontSize: '0.82rem' }}>
-              <option value="">Choisir article...</option>
+            <select value={ligne.categorie_id} onChange={e => onCategorieChange(e.target.value)} style={{ ...IS(false), fontSize: '0.78rem', flex: 1, minWidth: 0 }}>
+              <option value="">Catégorie...</option>
+              {categories.map(c => <option key={c.id} value={c.id}>{formatCategoryDisplayName(c.nom)}</option>)}
+            </select>
+            <select
+              value={ligne.article_id || (isEphemeral && ligne.designation ? '__libre__' : '')}
+              onChange={e => onArticleChange(e.target.value)}
+              style={{ ...IS(false), fontSize: '0.82rem' }}
+            >
+              <option value="">Choisir dans le catalogue...</option>
+              <option value="__libre__">Saisie libre (article éphémère)</option>
               {catArticles.map(a => <option key={a.id} value={a.id}>{a.nom}</option>)}
             </select>
-            <input value={ligne.designation} onChange={e => setField('designation', e.target.value)} placeholder="Designation libre..." style={{ ...IS(false), fontSize: '0.82rem' }} />
+            <input
+              value={ligne.designation}
+              onChange={e => onDesignationChange(e.target.value)}
+              placeholder={isEphemeral ? 'Ex : Démolition cloison BA13' : 'Désignation...'}
+              style={{ ...IS(false, isEphemeral && ligne.designation ? { borderColor: '#F57C00', background: '#FFFDE7' } : {}), fontSize: '0.82rem' }}
+            />
+            {isEphemeral && ligne.designation?.trim() && (
+              <span style={{ fontSize: '0.68rem', color: '#E65100', fontWeight: 600 }}>Article éphémère — non enregistré au catalogue</span>
+            )}
             <button type="button" onClick={() => setShowDesc(s => !s)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', fontSize: '0.72rem', textAlign: 'left', padding: 0, display: 'flex', alignItems: 'center', gap: 3 }}>
               {showDesc ? <ChevronUp size={11} /> : <ChevronDown size={11} />} Description
             </button>
@@ -235,6 +306,8 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
   const [errors, setErrors] = useState({});
   const [savingLocal, setSavingLocal] = useState(false);
   const [apiError, setApiError] = useState('');
+  const [dragIdx, setDragIdx] = useState(null);
+  const [overIdx, setOverIdx] = useState(null);
   const isSaving = saving || savingLocal;
 
   /* Load reference data */
@@ -274,6 +347,36 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
       return { ...p, lignes: ls };
     });
   }
+
+  function reorderLignes(from, to) {
+    if (from == null || to == null || from === to) return;
+    setForm(p => {
+      const ls = [...p.lignes];
+      const [item] = ls.splice(from, 1);
+      ls.splice(to, 0, item);
+      return { ...p, lignes: ls };
+    });
+  }
+
+  const dragHandlers = {
+    onDragStart: (e, idx) => {
+      setDragIdx(idx);
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', String(idx));
+    },
+    onDragOver: (idx) => setOverIdx(idx),
+    onDrop: (idx) => {
+      if (dragIdx !== null) reorderLignes(dragIdx, idx);
+      setDragIdx(null);
+      setOverIdx(null);
+    },
+    onDragEnd: () => {
+      setDragIdx(null);
+      setOverIdx(null);
+    },
+    isDragging: (idx) => dragIdx === idx,
+    isOver: (idx) => overIdx === idx && dragIdx !== idx,
+  };
 
   /* Totals */
   const articleLignes = form.lignes.filter(l => l.type === 'article');
@@ -321,7 +424,7 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
   async function handlePdf() {
     if (!isEdit || !devis?.id) return;
     try {
-      const catMap = Object.fromEntries(categories.map(c => [String(c.id), c.nom]));
+      const catMap = Object.fromEntries(categories.map(c => [String(c.id), formatCategoryDisplayName(c.nom)]));
       await generateDevisPdf({
         ...form,
         id: devis.id,
@@ -478,6 +581,11 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
                         onChange={data => updateLigne(idx, data)}
                         onDelete={() => deleteLigne(idx)}
                         onDuplicate={() => duplicateLigne(idx)}
+                        drag={{
+                          ...dragHandlers,
+                          isDragging: dragHandlers.isDragging(idx),
+                          isOver: dragHandlers.isOver(idx),
+                        }}
                       />
                     ))}
                   </tbody>

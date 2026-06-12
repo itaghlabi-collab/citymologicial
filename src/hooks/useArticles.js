@@ -10,6 +10,7 @@ import {
   updateArticle,
   deleteArticle,
   duplicateArticle,
+  backfillMissingArticleReferences,
   filterArticles,
   computeArticlesStats,
 } from '../services/crm/articles';
@@ -31,6 +32,7 @@ export function useArticles() {
     setLoading(true);
     setError(null);
     try {
+      await backfillMissingArticleReferences().catch(() => {});
       const rows = await listArticles();
       setRecords(rows);
     } catch (err) {

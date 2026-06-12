@@ -5,6 +5,7 @@ import {
 } from 'lucide-react';
 import { listCategories } from '../../services/crm/categories';
 import { useArticles } from '../../hooks/useArticles';
+import { formatCategoryDisplayName } from '../../utils/crm/categoryDisplay';
 
 /* ── Helpers ── */
 function fmtMAD(v) {
@@ -183,7 +184,7 @@ function ArticleModal({ article, categories, onClose, onSave, saving }) {
                   <label>Categorie</label>
                   <select value={form.categorie_id} onChange={e => setField('categorie_id', e.target.value)} style={IS(false)}>
                     <option value="">Sans categorie</option>
-                    {categories.map(c => <option key={c.id} value={String(c.id)}>{c.nom}</option>)}
+                    {categories.map(c => <option key={c.id} value={String(c.id)}>{formatCategoryDisplayName(c.nom)}</option>)}
                   </select>
                 </div>
                 <div className="form-group">
@@ -555,7 +556,7 @@ export default function Articles() {
           <select className="crm-filter-select" value={filterCat} onChange={e => { setFilterCat(e.target.value); setPage(1); }}>
             <option value="">Toutes categories</option>
             <option value="__none__">Sans categorie</option>
-            {categories.map(c => <option key={c.id} value={String(c.id)}>{c.nom}</option>)}
+            {categories.map(c => <option key={c.id} value={String(c.id)}>{formatCategoryDisplayName(c.nom)}</option>)}
           </select>
           <select className="crm-filter-select crm-filter-select--sm" value={filterStatut} onChange={e => { setFilterStatut(e.target.value); setPage(1); }}>
             <option value="">Tous statuts</option>
@@ -604,7 +605,7 @@ export default function Articles() {
                     : paginated.map(a => (
                       <tr key={a.id}>
                         <td style={{ fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--red)', fontSize: '0.82rem', whiteSpace: 'nowrap' }}>
-                          {a.reference || ('ART-' + String(a.id).padStart(4, '0'))}
+                          {a.reference || '—'}
                         </td>
                         <td>
                           <div style={{ fontWeight: 600, fontSize: '0.9rem' }}>{a.nom}</div>

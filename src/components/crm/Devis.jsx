@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { useCrmDevis } from '../../hooks/useCrmDevis';
 import { listCategories } from '../../services/crm/categories';
+import { formatCategoryDisplayName } from '../../utils/crm/categoryDisplay';
 import { generateDevisPdf } from '../../services/crm/devisPdf';
 import DevisForm from './DevisForm';
 
@@ -213,7 +214,7 @@ export default function Devis() {
     try {
       const full = await fetchOne(d.id);
       const cats = await listCategories();
-      const catMap = Object.fromEntries(cats.map(c => [String(c.id), c.nom]));
+      const catMap = Object.fromEntries(cats.map(c => [String(c.id), formatCategoryDisplayName(c.nom)]));
       await generateDevisPdf(full, catMap);
     } catch (err) {
       showToast(err.message || 'Erreur generation PDF.', 'error');
