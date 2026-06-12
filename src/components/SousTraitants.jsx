@@ -44,6 +44,10 @@ const TABS = [
 const EMPTY_SUB = {
   prenom: '', nom: '', raison_sociale: '', fonction: '', numero_cin: '', passeport: '',
   telephone: '', email: '', adresse: '', ice: '', statut: 'actif', notes: '',
+  assignmentProjectId: '',
+  remunerationType: REMUNERATION_TYPES[0],
+  unitType: UNIT_TYPES[0],
+  unitPrice: '',
 };
 
 export default function SousTraitants() {
@@ -127,14 +131,49 @@ export default function SousTraitants() {
     const err = {};
     if (!form.nom?.trim() && !form.raison_sociale?.trim()) err.nom = 'Nom ou raison sociale requis';
     if (Object.keys(err).length) { setFormErr(err); return; }
+
+    const {
+      assignmentProjectId,
+      remunerationType,
+      unitType,
+      unitPrice,
+      ...subForm
+    } = form;
+
     const res = modal === 'sub-edit'
-      ? await update(selectedId || form.id, form)
-      : await create(form);
+      ? await update(selectedId || form.id, subForm)
+      : await create(subForm);
     if (!res.success) return notify(res.error, false);
+
+    const subId = modal === 'sub-edit' ? (selectedId || form.id) : res.data?.id;
+
+    if (assignmentProjectId && subId) {
+      const alreadyAssigned = (detail?.assignments || []).some(
+        (a) => String(a.projectId) === String(assignmentProjectId),
+      );
+      if (!alreadyAssigned) {
+        const pr = projects.find((p) => String(p.id) === String(assignmentProjectId));
+        const assignRes = await createAssignment(subId, {
+          projectId: assignmentProjectId,
+          projectName: pr?.nom || '',
+          projectRef: pr?.ref || '',
+          remunerationType: remunerationType || REMUNERATION_TYPES[0],
+          unitType: unitType || UNIT_TYPES[0],
+          unitPrice: unitPrice || 0,
+          status: 'active',
+        });
+        if (!assignRes.success) return notify(assignRes.error, false);
+      }
+    }
+
     notify(modal === 'sub-edit' ? 'Sous-traitant modifié.' : 'Sous-traitant créé.');
     setModal(null);
-    if (modal === 'sub-edit' && selectedId) refreshDetail(selectedId);
-    else if (res.data?.id) openDetail(res.data.id);
+    if (subId && (modal === 'sub-edit' || assignmentProjectId)) {
+      if (view === 'detail') refreshDetail(subId);
+      else openDetail(subId);
+    } else if (modal === 'sub-create' && res.data?.id) {
+      openDetail(res.data.id);
+    }
   }
 
   async function handleSaveAssignment(e) {
@@ -487,7 +526,7 @@ export default function SousTraitants() {
 
       {modal && (
         <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
-          <div style={{ background: '#fff', borderRadius: 14, padding: 28, width: '100%', maxWidth: 520, maxHeight: '90vh', overflowY: 'auto' }}>
+          <div style={{ background: '#fff', borderRadius: 14, padding: 28, width: '100%', maxWidth: 560, maxHeight: '90vh', overflowY: 'auto' }}>
             <div className="flex-between" style={{ marginBottom: 16 }}>
               <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.1rem', margin: 0 }}>
                 {modal === 'sub-create' && 'Nouveau sous-traitant'}
@@ -513,6 +552,53 @@ export default function SousTraitants() {
                 </div>
                 <div><label>Téléphone</label><input value={form.telephone || ''} onChange={(e) => setF('telephone', e.target.value)} style={INPUT_S(false)} /></div>
                 <div><label>Adresse</label><input value={form.adresse || ''} onChange={(e) => setF('adresse', e.target.value)} style={INPUT_S(false)} /></div>
+
+                <div style={{ borderTop: '1.5px solid var(--border)', paddingTop: 12, marginTop: 4 }}>
+                  <div style={{ fontWeight: 700, fontSize: '0.88rem', marginBottom: 6, color: '#1565C0' }}>Affectation projet</div>
+                  <p style={{ fontSize: '0.78rem', color: 'var(--text-3)', margin: '0 0 10px' }}>
+                    Nécessaire pour afficher ce sous-traitant dans le formulaire <strong>Paiement sous-traitant</strong> du projet choisi.
+                  </p>
+                  {modal === 'sub-edit' && (detail?.assignments || []).length > 0 && (
+                    <div style={{ marginBottom: 10 }}>
+                      <div style={{ fontSize: '0.75rem', fontWeight: 600, marginBottom: 6, color: 'var(--text-3)' }}>Projets déjà affectés</div>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                        {(detail?.assignments || []).map((a) => (
+                          <span key={a.id} style={{ padding: '4px 10px', background: '#E3F2FD', borderRadius: 20, fontSize: '0.78rem', fontWeight: 600, color: '#1565C0' }}>
+                            {a.projectName || a.projectRef || 'Projet'}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  <div><label>Projet / chantier</label>
+                    <select value={form.assignmentProjectId || ''} onChange={(e) => setF('assignmentProjectId', e.target.value)} style={INPUT_S(false)}>
+                      <option value="">— Choisir un projet —</option>
+                      {projects
+                        .filter((p) => !(detail?.assignments || []).some((a) => String(a.projectId) === String(p.id)))
+                        .map((p) => (
+                          <option key={p.id} value={p.id}>{p.ref ? `${p.ref} — ${p.nom}` : p.nom}</option>
+                        ))}
+                    </select>
+                  </div>
+                  {form.assignmentProjectId && (
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 10 }}>
+                      <div><label>Type rémunération</label>
+                        <select value={form.remunerationType || REMUNERATION_TYPES[0]} onChange={(e) => setF('remunerationType', e.target.value)} style={INPUT_S(false)}>
+                          {REMUNERATION_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                      </div>
+                      <div><label>Unité</label>
+                        <select value={form.unitType || UNIT_TYPES[0]} onChange={(e) => setF('unitType', e.target.value)} style={INPUT_S(false)}>
+                          {UNIT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                        </select>
+                      </div>
+                      <div style={{ gridColumn: '1 / -1' }}><label>Prix unitaire (MAD)</label>
+                        <input type="number" min="0" step="0.01" value={form.unitPrice || ''} onChange={(e) => setF('unitPrice', e.target.value)} style={INPUT_S(false)} placeholder="0" />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
                 <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                   <button type="button" className="btn btn-secondary" onClick={() => setModal(null)}>Annuler</button>
                   <button type="submit" className="btn btn-primary" disabled={saving}>Enregistrer</button>
