@@ -2,34 +2,44 @@
  * paymentPdfShared.js — Mise en page PDF paiements CITYMO (A4)
  */
 import { jsPDF } from 'jspdf';
-import { loadCompanyLogo, formatPdfMAD, TEXT, MUTED, RED, BORDER, FINANCE_COMPANY } from '../finance/pdfShared';
+import { loadCompanyLogoFit, formatPdfMAD, TEXT, MUTED, RED, BORDER, FINANCE_COMPANY } from '../finance/pdfShared';
 
 function fmtDate(iso) {
   if (!iso) return '—';
   try { return new Date(iso).toLocaleDateString('fr-MA'); } catch { return String(iso); }
 }
 
+const LOGO_X = 14;
+const LOGO_Y = 10;
+const LOGO_MAX_W = 42;
+const LOGO_MAX_H = 16;
+
+/** @returns {number} Y de départ du titre (sous le logo) */
 async function addLogo(doc) {
-  const logo = await loadCompanyLogo();
+  const logo = await loadCompanyLogoFit(LOGO_MAX_W, LOGO_MAX_H);
   if (logo) {
-    doc.addImage(logo, 'PNG', 14, 10, 38, 14);
+    doc.addImage(logo.dataUrl, 'PNG', LOGO_X, LOGO_Y, logo.w, logo.h);
+    return LOGO_Y + logo.h + 8;
   }
+  return 28;
 }
 
-function addHeader(doc, title, subtitle) {
+function addHeader(doc, title, subtitle, titleY = 28) {
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(13);
   doc.setTextColor(...RED);
-  doc.text(title, 14, 32);
+  doc.text(title, LOGO_X, titleY);
+  let lineY = titleY + 6;
   if (subtitle) {
     doc.setFontSize(9);
     doc.setTextColor(...MUTED);
     doc.setFont('helvetica', 'normal');
-    doc.text(subtitle, 14, 38);
+    doc.text(subtitle, LOGO_X, titleY + 6);
+    lineY = titleY + 10;
   }
   doc.setDrawColor(...BORDER);
-  doc.line(14, 42, 196, 42);
-  return 46;
+  doc.line(LOGO_X, lineY + 2, 196, lineY + 2);
+  return lineY + 6;
 }
 
 function addMetaGrid(doc, y, pairs) {
@@ -129,8 +139,8 @@ export async function generatePaymentVoucherPdf(opts) {
   } = opts;
 
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
-  await addLogo(doc);
-  let y = addHeader(doc, title, subtitle);
+  const titleY = await addLogo(doc);
+  let y = addHeader(doc, title, subtitle, titleY);
   y = addMetaGrid(doc, y, meta);
 
   if (detailHeaders?.length && detailRows?.length) {

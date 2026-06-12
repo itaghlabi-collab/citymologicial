@@ -39,6 +39,18 @@ function imageFit(nw, nh, maxW, maxH) {
   return { w: nw * ratio, h: nh * ratio };
 }
 
+/** Logo CITYMO dimensionné sans déformation (contain dans maxW × maxH). */
+export async function loadCompanyLogoFit(maxW = 42, maxH = 16) {
+  const dataUrl = await loadCompanyLogo();
+  if (!dataUrl) return null;
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve({ dataUrl, ...imageFit(img.naturalWidth, img.naturalHeight, maxW, maxH) });
+    img.onerror = () => resolve({ dataUrl, w: maxW, h: maxW / 2.75 });
+    img.src = dataUrl;
+  });
+}
+
 /** Charge le logo CITYMO (PNG) pour les exports PDF. */
 export async function loadCompanyLogo() {
   return loadImage(LOGO_URL);
@@ -46,15 +58,9 @@ export async function loadCompanyLogo() {
 
 export async function createFinancePdf(title) {
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
-  const logo = await loadCompanyLogo();
+  const logo = await loadCompanyLogoFit(38, 16);
   if (logo) {
-    const size = await new Promise((resolve) => {
-      const img = new Image();
-      img.onload = () => resolve(imageFit(img.naturalWidth, img.naturalHeight, 38, 16));
-      img.onerror = () => resolve({ w: 38, h: 12 });
-      img.src = logo;
-    });
-    doc.addImage(logo, 'PNG', 14, 10, size.w, size.h);
+    doc.addImage(logo.dataUrl, 'PNG', 14, 10, logo.w, logo.h);
   }
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(14);
