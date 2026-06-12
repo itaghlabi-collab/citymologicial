@@ -180,23 +180,6 @@ function PaymentTypeFields({ paymentType, sel, assignmentId, formErr, setSubPaym
   );
 }
 
-function TypePreviewHint({ paymentType }) {
-  const hints = {
-    metre: 'Désignation · Quantité · Unité (m², ml, m³) · Prix unitaire → Montant brut = Quantité × Prix',
-    tache: 'Désignation de la tâche · Description · Montant forfaitaire → Montant brut = Forfait',
-    service: 'Désignation du service · Description · Montant forfaitaire → Montant brut = Forfait',
-  };
-  return (
-    <div style={{ padding: '10px 12px', background: '#E3F2FD', borderRadius: 8, fontSize: '0.82rem', color: '#1565C0' }}>
-      <strong>{PAYMENT_TYPES.find((t) => t.id === paymentType)?.label}</strong>
-      <div style={{ marginTop: 4, color: '#37474F' }}>{hints[paymentType] || ''}</div>
-      <div style={{ marginTop: 4, fontSize: '0.78rem', color: 'var(--text-3)' }}>
-        Cochez un sous-traitant ci-dessous pour saisir les champs et calculer le net (brut − avances − retenues).
-      </div>
-    </div>
-  );
-}
-
 export default function SubcontractorPaymentFormBody({
   form,
   setF,
@@ -204,6 +187,7 @@ export default function SubcontractorPaymentFormBody({
   projects,
   projectAssignments,
   assignmentsLoading,
+  usingAllSubcontractors,
   paymentSelectedLines,
   paymentBatchGross,
   paymentBatchAvances,
@@ -235,10 +219,13 @@ export default function SubcontractorPaymentFormBody({
         </select>
       </div>
 
-      <TypePreviewHint paymentType={paymentType} />
-
       <div>
-        <LABEL req>Sous-traitants affectés au projet</LABEL>
+        <LABEL req>Sous-traitants — cochez pour saisir le paiement</LABEL>
+        {usingAllSubcontractors && form.projectId && (
+          <div style={{ padding: '8px 12px', background: '#FFF3E0', borderRadius: 8, color: '#E65100', fontSize: '0.82rem', marginBottom: 8 }}>
+            Aucune affectation enregistrée sur ce projet — liste de tous les sous-traitants disponibles.
+          </div>
+        )}
         {!form.projectId ? (
           <div style={{ padding: 12, background: 'var(--bg)', borderRadius: 8, color: 'var(--text-3)', fontSize: '0.85rem' }}>
             Sélectionnez d&apos;abord un projet.
@@ -247,7 +234,7 @@ export default function SubcontractorPaymentFormBody({
           <div style={{ padding: 12, color: 'var(--text-3)', fontSize: '0.85rem' }}>Chargement…</div>
         ) : projectAssignments.length === 0 ? (
           <div style={{ padding: 12, background: '#FFF3E0', borderRadius: 8, color: '#E65100', fontSize: '0.85rem' }}>
-            Aucun sous-traitant affecté à ce projet.
+            Aucun sous-traitant dans la base. Ajoutez-en via le module Sous-traitants.
           </div>
         ) : (
           <div style={{ border: '1.5px solid var(--border)', borderRadius: 8, maxHeight: 520, overflowY: 'auto' }}>

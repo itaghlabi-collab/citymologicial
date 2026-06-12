@@ -3,7 +3,7 @@
  */
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { listProjects } from '../services/projects/projects';
-import { listAssignmentsByProject, getProjectAdjustmentTotals } from '../services/rh/subcontractors';
+import { listSubcontractorsForProjectPayment, getProjectAdjustmentTotals } from '../services/rh/subcontractors';
 import {
   EMPTY_SUB_PAYMENT,
   calcSubPaymentTotals,
@@ -15,6 +15,7 @@ export function useSubcontractorPaymentForm({ active = false, initialProjectId =
   const [projects, setProjects] = useState([]);
   const [projectAssignments, setProjectAssignments] = useState([]);
   const [assignmentsLoading, setAssignmentsLoading] = useState(false);
+  const [usingAllSubcontractors, setUsingAllSubcontractors] = useState(false);
 
   const setF = useCallback((k, v) => setForm((p) => ({ ...p, [k]: v })), []);
 
@@ -25,13 +26,22 @@ export function useSubcontractorPaymentForm({ active = false, initialProjectId =
 
   useEffect(() => {
     if (!active || !form.projectId) {
-      if (!active) setProjectAssignments([]);
+      if (!active) {
+        setProjectAssignments([]);
+        setUsingAllSubcontractors(false);
+      }
       return;
     }
     setAssignmentsLoading(true);
-    listAssignmentsByProject(form.projectId)
-      .then(setProjectAssignments)
-      .catch(() => setProjectAssignments([]))
+    listSubcontractorsForProjectPayment(form.projectId)
+      .then((rows) => {
+        setProjectAssignments(rows);
+        setUsingAllSubcontractors(rows.length > 0 && !rows[0].fromAssignment);
+      })
+      .catch(() => {
+        setProjectAssignments([]);
+        setUsingAllSubcontractors(false);
+      })
       .finally(() => setAssignmentsLoading(false));
   }, [active, form.projectId]);
 
@@ -80,7 +90,11 @@ export function useSubcontractorPaymentForm({ active = false, initialProjectId =
   const paymentSelectedLines = useMemo(
     () => Object.entries(form.selected || {})
       .filter(([, v]) => v.checked)
-      .map(([assignmentId, v]) => ({ assignmentId, ...v })),
+      .map(([lineKey, v]) => ({
+        lineKey,
+        assignmentId: v.assignmentId ?? (String(lineKey).startsWith('sub-') ? null : lineKey),
+        ...v,
+      })),
     [form.selected],
   );
 
@@ -130,6 +144,7 @@ export function useSubcontractorPaymentForm({ active = false, initialProjectId =
         sel[assignment.id] = {
           checked: true,
           subcontractorId: assignment.subcontractorId,
+          assignmentId: assignment.assignmentId ?? (assignment.fromAssignment ? assignment.id : null) ?? null,
           designation: '',
           lineDescription: '',
           quantity: '',
@@ -164,6 +179,7 @@ export function useSubcontractorPaymentForm({ active = false, initialProjectId =
     projects,
     projectAssignments,
     assignmentsLoading,
+    usingAllSubcontractors,
     paymentSelectedLines,
     paymentLineTotals,
     paymentBatchGross,

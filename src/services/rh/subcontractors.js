@@ -439,13 +439,47 @@ export async function listAssignmentsByProject(projectId) {
     .from(ASSIGN_TABLE)
     .select('*, subcontractors ( id, prenom, nom, raison_sociale, fonction ), projects ( id, nom, ref )')
     .eq('project_id', projectId)
-    .eq('status', 'active')
+    .neq('status', 'annulée')
     .order('created_at', { ascending: false });
   if (error) throw error;
   return (data || []).map((row) => ({
     ...normalizeAssignment(row),
     subcontractorName: subcontractorFullName(row.subcontractors),
     subcontractorFonction: row.subcontractors?.fonction || '',
+  }));
+}
+
+/** Sous-traitants payables sur un projet : affectations d'abord, sinon tous les actifs */
+export async function listSubcontractorsForProjectPayment(projectId) {
+  if (!projectId) return [];
+  await getAuthUserId();
+
+  const assignments = await listAssignmentsByProject(projectId);
+  if (assignments.length) {
+    return assignments.map((a) => ({
+      ...a,
+      lineKey: a.id,
+      fromAssignment: true,
+    }));
+  }
+
+  const { data: subs, error } = await getSupabase()
+    .from(SUB_TABLE)
+    .select('id, prenom, nom, raison_sociale, fonction, statut')
+    .in('statut', ['actif', 'inactif', 'suspendu'])
+    .order('nom')
+    .order('prenom');
+  if (error) throw error;
+
+  return (subs || []).map((sub) => ({
+    id: `sub-${sub.id}`,
+    lineKey: `sub-${sub.id}`,
+    assignmentId: null,
+    subcontractorId: sub.id,
+    projectId: String(projectId),
+    subcontractorName: subcontractorFullName(sub),
+    subcontractorFonction: sub.fonction || '',
+    fromAssignment: false,
   }));
 }
 

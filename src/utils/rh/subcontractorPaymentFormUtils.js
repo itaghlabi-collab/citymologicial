@@ -41,19 +41,20 @@ export function validateSubcontractorPaymentForm(form, paymentSelectedLines) {
   if (!form.paymentDate) err.paymentDate = 'Date requise';
   if (!paymentSelectedLines.length) err.selected = 'Sélectionnez au moins un sous-traitant';
   paymentSelectedLines.forEach((l) => {
+    const key = l.lineKey || l.assignmentId;
     const totals = calcSubPaymentTotals(form.paymentType, l);
     if (form.paymentType === 'metre') {
-      if (!l.designation?.trim()) err[`d_${l.assignmentId}`] = 'Désignation requise';
-      if (!l.quantity || Number(l.quantity) <= 0) err[`q_${l.assignmentId}`] = 'Quantité requise';
-      if (!l.unitPrice || Number(l.unitPrice) <= 0) err[`p_${l.assignmentId}`] = 'Prix unitaire requis';
+      if (!l.designation?.trim()) err[`d_${key}`] = 'Désignation requise';
+      if (!l.quantity || Number(l.quantity) <= 0) err[`q_${key}`] = 'Quantité requise';
+      if (!l.unitPrice || Number(l.unitPrice) <= 0) err[`p_${key}`] = 'Prix unitaire requis';
     } else if (form.paymentType === 'tache') {
-      if (!l.designation?.trim()) err[`d_${l.assignmentId}`] = 'Tâche requise';
-      if (!l.amount || Number(l.amount) <= 0) err[`a_${l.assignmentId}`] = 'Montant requis';
+      if (!l.designation?.trim()) err[`d_${key}`] = 'Tâche requise';
+      if (!l.amount || Number(l.amount) <= 0) err[`a_${key}`] = 'Montant requis';
     } else {
-      if (!l.designation?.trim()) err[`d_${l.assignmentId}`] = 'Description requise';
-      if (!l.amount || Number(l.amount) <= 0) err[`a_${l.assignmentId}`] = 'Montant requis';
+      if (!l.designation?.trim()) err[`d_${key}`] = 'Description requise';
+      if (!l.amount || Number(l.amount) <= 0) err[`a_${key}`] = 'Montant requis';
     }
-    if (totals.gross <= 0) err[`g_${l.assignmentId}`] = 'Montant brut requis';
+    if (totals.gross <= 0) err[`g_${key}`] = 'Montant brut requis';
   });
   return err;
 }
@@ -71,7 +72,7 @@ export function buildSubcontractorPaymentPayload(form, paymentSelectedLines, pay
     const totals = calcSubPaymentTotals(form.paymentType, l);
     return {
       subcontractorId: l.subcontractorId,
-      assignmentId: l.assignmentId,
+      assignmentId: l.assignmentId || null,
       designation: l.designation,
       lineDescription: l.lineDescription,
       quantity: l.quantity,
