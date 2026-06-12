@@ -2,7 +2,8 @@ import { Banknote, CheckCircle, Filter, Search, Users, TrendingUp, Plus, Pencil,
 import { useState, useRef, useMemo } from 'react';
 import { useWorkerPayroll } from '../hooks/useWorkerPayroll';
 import { calcPayrollTotals, weekStartMonday, weekEndSunday } from '../services/rh/workerPayroll';
-import { workerTarifJournalier } from '../services/rh/workers';
+import { workerTarifJournalier, workerTarifHoraire, WORKER_HOURS_PER_DAY } from '../services/rh/workers';
+import PaiementSousTraitantsSection from './PaiementSousTraitantsSection';
 
 function EmptyState({ icon, title, sub }) {
   return (
@@ -46,7 +47,7 @@ const EMPTY_FORM = {
   projet: '',
   semaineDebut: currentWeekStart(),
   joursPaies: '',
-  tarifJour: '',
+  tarifHoraire: '',
   heuresSup: '',
   tarifSup: '',
   avances: '',
@@ -100,15 +101,25 @@ export default function PaiementHebdo() {
 
   function handleOuvrierChange(workerId) {
     const w = workers.find((x) => x.id === workerId);
-    const tarifJour = w ? workerTarifJournalier(w) : 0;
-    const tarifSup = tarifJour ? Math.round(tarifJour * 1.25) : '';
+    const tarifH = w ? workerTarifHoraire(w) : 0;
+    const tarifSup = tarifH ? Math.round(tarifH * 1.25 * 100) / 100 : '';
     setForm((p) => ({
       ...p,
       workerId,
       projet: p.projet || w?.chantier || '',
-      tarifJour: tarifJour ? String(tarifJour) : p.tarifJour,
+      tarifHoraire: tarifH ? String(tarifH) : p.tarifHoraire,
       tarifSup: tarifSup ? String(tarifSup) : p.tarifSup,
     }));
+  }
+
+  function payrollFormPayload(formState) {
+    const tarifH = Number(formState.tarifHoraire) || 0;
+    const jours = Number(formState.joursPaies) || 0;
+    return {
+      ...formState,
+      tarifJour: tarifH * WORKER_HOURS_PER_DAY,
+      joursPaies: jours,
+    };
   }
 
   function openCreate() {
@@ -120,12 +131,13 @@ export default function PaiementHebdo() {
 
   function openEdit(record) {
     setEditId(record.id);
+    const tarifH = record.tarifJour ? record.tarifJour / WORKER_HOURS_PER_DAY : 0;
     setForm({
       workerId: record.workerId || '',
       projet: record.projet || '',
       semaineDebut: record.semaineDebut || currentWeekStart(),
       joursPaies: String(record.joursPaies ?? ''),
-      tarifJour: String(record.tarifJour ?? ''),
+      tarifHoraire: tarifH ? String(Math.round(tarifH * 100) / 100) : '',
       heuresSup: String(record.heuresSup ?? ''),
       tarifSup: String(record.tarifSup ?? ''),
       avances: String(record.avances ?? ''),
@@ -143,7 +155,7 @@ export default function PaiementHebdo() {
     if (!form.projet) e.projet = 'Requis';
     if (!form.semaineDebut) e.semaineDebut = 'Requis';
     if (form.joursPaies === '' || Number.isNaN(Number(form.joursPaies)) || Number(form.joursPaies) < 0) e.joursPaies = 'Valeur valide requise';
-    if (!form.tarifJour || Number.isNaN(Number(form.tarifJour)) || Number(form.tarifJour) <= 0) e.tarifJour = 'Tarif valide requis';
+    if (!form.tarifHoraire || Number.isNaN(Number(form.tarifHoraire)) || Number(form.tarifHoraire) <= 0) e.tarifHoraire = 'Tarif valide requis';
     return e;
   }
 
@@ -153,9 +165,9 @@ export default function PaiementHebdo() {
     if (Object.keys(errs).length) { setErrors(errs); return; }
 
     const payload = {
-      ...form,
+      ...payrollFormPayload(form),
       semaineFin: weekEndSunday(form.semaineDebut),
-      montantSup: calcPayrollTotals(form).montant_heures_sup,
+      montantSup: calcPayrollTotals(payrollFormPayload(form)).montant_heures_sup,
     };
 
     const result = editId ? await update(editId, payload) : await create(payload);
@@ -207,8 +219,12 @@ export default function PaiementHebdo() {
   );
 
   const stats = useMemo(() => computePayrollStats(filtered), [filtered, computePayrollStats]);
-  const preview = useMemo(() => calcPayrollTotals(form), [form]);
+  const preview = useMemo(() => calcPayrollTotals(payrollFormPayload(form)), [form]);
   const hasFilters = search || filterProjet || filterSemaine || filterMois || filterStatut;
+
+  function notifySub(type, msg) {
+    notify(type, msg);
+  }
 
   return (
     <div className="animate-fade-in">
@@ -217,7 +233,7 @@ export default function PaiementHebdo() {
       <div className="page-header flex-between">
         <div>
           <h1 className="page-title">Paiement hebdomadaire</h1>
-          <p className="page-subtitle">Calcul automatique : (jours x tarif) + heures supplementaires</p>
+          <p className="page-subtitle">Ouvriers — tarif horaire × heures travaillées + heures supplémentaires</p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
           <input
@@ -281,7 +297,7 @@ export default function PaiementHebdo() {
           <div className="stat-icon"><Users size={18} /></div>
           <div className="stat-body">
             <div className="stat-value">{loading ? '—' : stats.count}</div>
-            <div className="stat-label">Employes concernes</div>
+            <div className="stat-label">Ouvriers concernes</div>
           </div>
         </div>
       </div>
@@ -295,7 +311,7 @@ export default function PaiementHebdo() {
           <div style={{ position: 'relative' }}>
             <Search size={13} style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
             <input
-              placeholder="Rechercher un employe..."
+              placeholder="Rechercher un ouvrier..."
               value={search}
               onChange={e => setSearch(e.target.value)}
               style={{ paddingLeft: 28, paddingRight: 12, paddingTop: 7, paddingBottom: 7, border: '1.5px solid var(--border)', borderRadius: 'var(--radius)', fontSize: '0.85rem', fontFamily: 'var(--font-body)', outline: 'none' }}
@@ -329,7 +345,7 @@ export default function PaiementHebdo() {
       </div>
 
       <div className="card">
-        <div className="card-title" style={{ marginBottom: 16 }}><Banknote size={16} /> Tableau de paiement</div>
+        <div className="card-title" style={{ marginBottom: 16 }}><Banknote size={16} /> Paiement hebdomadaire — Ouvriers</div>
 
         {loading ? (
           <div style={{ textAlign: 'center', padding: '40px 24px', color: 'var(--text-3)' }}>
@@ -347,10 +363,10 @@ export default function PaiementHebdo() {
             <table>
               <thead>
                 <tr>
-                  <th>Employe</th>
+                  <th>Ouvrier</th>
                   <th>Projet</th>
-                  <th>Jours paies</th>
-                  <th>Salaire/jour</th>
+                  <th>Jours</th>
+                  <th>Tarif/h</th>
                   <th>Heures sup</th>
                   <th>Montant sup</th>
                   <th>Total</th>
@@ -362,6 +378,7 @@ export default function PaiementHebdo() {
                 {filtered.map(p => {
                   const montantSup = p.montantSup || Math.round(p.heuresSup * p.tarifSup);
                   const isPaye = p.statut === 'Paye';
+                  const tarifH = p.tarifJour / WORKER_HOURS_PER_DAY;
                   return (
                     <tr key={p.id}>
                       <td style={{ fontWeight: 600 }}>{p.ouvrier}</td>
@@ -372,7 +389,7 @@ export default function PaiementHebdo() {
                           <span style={{ fontSize: '0.75rem', color: 'var(--text-3)' }}>j</span>
                         </span>
                       </td>
-                      <td style={{ color: 'var(--text-2)', fontSize: '0.85rem' }}>{fmtMAD(p.tarifJour)}</td>
+                      <td style={{ color: 'var(--text-2)', fontSize: '0.85rem' }}>{fmtMAD(tarifH)}</td>
                       <td>
                         {p.heuresSup > 0
                           ? <span style={{ fontFamily: 'var(--font-head)', fontWeight: 700, color: '#E65100' }}>{p.heuresSup}h</span>
@@ -434,7 +451,7 @@ export default function PaiementHebdo() {
         <div style={{ marginTop: 16, padding: '14px 16px', background: '#F8F9FA', borderRadius: 8, display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 12 }}>
           <div style={{ display: 'flex', gap: 24 }}>
             <div>
-              <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Nombre d&apos;employes</div>
+              <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Nombre d&apos;ouvriers</div>
               <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800 }}>{loading ? '—' : filtered.length}</div>
             </div>
             <div>
@@ -454,7 +471,7 @@ export default function PaiementHebdo() {
           <div className="card" style={{ width: '100%', maxWidth: 520, maxHeight: '90vh', overflowY: 'auto', padding: 24 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
               <h2 style={{ fontFamily: 'var(--font-head)', fontSize: '1.05rem', fontWeight: 800, margin: 0 }}>
-                {editId ? 'Modifier paiement' : 'Ajouter paiement'}
+                {editId ? 'Modifier paiement ouvrier' : 'Ajouter paiement ouvrier'}
               </h2>
               <button type="button" onClick={() => setShowModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)' }}>
                 <X size={18} />
@@ -486,14 +503,17 @@ export default function PaiementHebdo() {
 
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                   <div>
-                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: 5 }}>Jours paies *</label>
+                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: 5 }}>Jours travailles *</label>
                     <input type="number" min="0" step="0.5" value={form.joursPaies} onChange={e => setF('joursPaies', e.target.value)} style={INPUT_S(errors.joursPaies)} />
                     {errors.joursPaies && <div style={{ color: 'var(--red)', fontSize: '0.78rem', marginTop: 4 }}>{errors.joursPaies}</div>}
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-3)', marginTop: 4 }}>
+                      {form.joursPaies ? `${Number(form.joursPaies) * WORKER_HOURS_PER_DAY} h normales` : '1 jour = 8 h'}
+                    </div>
                   </div>
                   <div>
-                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: 5 }}>Salaire / jour *</label>
-                    <input type="number" min="0" value={form.tarifJour} onChange={e => setF('tarifJour', e.target.value)} style={INPUT_S(errors.tarifJour)} />
-                    {errors.tarifJour && <div style={{ color: 'var(--red)', fontSize: '0.78rem', marginTop: 4 }}>{errors.tarifJour}</div>}
+                    <label style={{ display: 'block', fontSize: '0.82rem', fontWeight: 600, marginBottom: 5 }}>Tarif horaire *</label>
+                    <input type="number" min="0" step="0.01" value={form.tarifHoraire} onChange={e => setF('tarifHoraire', e.target.value)} style={INPUT_S(errors.tarifHoraire)} />
+                    {errors.tarifHoraire && <div style={{ color: 'var(--red)', fontSize: '0.78rem', marginTop: 4 }}>{errors.tarifHoraire}</div>}
                   </div>
                 </div>
 
@@ -549,6 +569,8 @@ export default function PaiementHebdo() {
           </div>
         </div>
       )}
+
+      <PaiementSousTraitantsSection onNotify={notifySub} />
     </div>
   );
 }

@@ -376,6 +376,30 @@ export async function listPayments(subcontractorId) {
   return (data || []).map(normalizePayment);
 }
 
+export async function listAllSubcontractorPayments(limit = 50) {
+  await getAuthUserId();
+  let q = getSupabase()
+    .from(PAYMENT_TABLE)
+    .select(`
+      *,
+      subcontractors ( prenom, nom, raison_sociale ),
+      projects ( nom )
+    `)
+    .order('payment_date', { ascending: false })
+    .order('created_at', { ascending: false });
+  if (limit) q = q.limit(limit);
+  const { data, error } = await q;
+  if (error) throw error;
+  return (data || []).map((row) => {
+    const payment = normalizePayment(row);
+    return {
+      ...payment,
+      subcontractorName: subcontractorFullName(row.subcontractors),
+      projectName: row.projects?.nom || '',
+    };
+  });
+}
+
 export async function createPayment(subcontractorId, form) {
   await getAuthUserId();
   const row = toPaymentRow(form, subcontractorId);
