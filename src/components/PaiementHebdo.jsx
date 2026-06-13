@@ -19,6 +19,14 @@ function fmtMAD(n) {
   return Number(n).toLocaleString('fr-MA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' MAD';
 }
 
+function fmtDayEquiv(n) {
+  return Number(n || 0).toLocaleString('fr-MA', { minimumFractionDigits: 0, maximumFractionDigits: 3 });
+}
+
+function fmtHours(n) {
+  return `${Number(n || 0).toLocaleString('fr-MA', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} h`;
+}
+
 function currentWeekStart() {
   return weekStartMonday(new Date().toISOString().slice(0, 10));
 }
@@ -59,6 +67,7 @@ function lineFromSelection(workerId, sel) {
   return {
     workerId,
     joursPaies: sel.joursPaies,
+    heuresNormales: sel.heuresNormales,
     heuresSup: sel.heuresSup,
     tarifJournalier: sel.tarifJournalier,
     tarifHoraire: sel.tarifHoraire,
@@ -178,9 +187,18 @@ export default function PaiementHebdo() {
         if (!w) return;
         const line = computeLineFromPresence(w, p.projectId, p.semaineDebut, p.projet);
         const prev = sel[workerId];
-        if (String(prev.joursPaies) !== String(line.joursPaies) || String(prev.heuresSup) !== String(line.heuresSup)) {
+        if (String(prev.joursPaies) !== String(line.joursPaies)
+          || String(prev.heuresNormales) !== String(line.heuresNormales)
+          || String(prev.heuresSup) !== String(line.heuresSup)) {
           changed = true;
-          sel[workerId] = { ...prev, joursPaies: line.joursPaies, heuresSup: line.heuresSup, tarifSup: line.tarifSup, fromPresence: line.fromPresence };
+          sel[workerId] = {
+            ...prev,
+            joursPaies: line.joursPaies,
+            heuresNormales: line.heuresNormales,
+            heuresSup: line.heuresSup,
+            tarifSup: line.tarifSup,
+            fromPresence: line.fromPresence,
+          };
         }
       });
       return changed ? { ...p, selected: sel } : p;
@@ -341,7 +359,7 @@ export default function PaiementHebdo() {
         <div>
           <h1 className="page-title">Paiement hebdomadaire ouvriers</h1>
           <p className="page-subtitle">
-            Situations générées automatiquement depuis les présences · jours × tarif journalier (horaire × 8)
+            Présences → jours équivalents (8 h = 1 j) × tarif journalier + heures sup − avances − retenues
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -457,7 +475,7 @@ export default function PaiementHebdo() {
               <table>
                 <thead>
                   <tr>
-                    <th>Ouvrier</th><th>Fonction</th><th>Jours</th><th>Tarif/j</th>
+                    <th>Ouvrier</th><th>Fonction</th><th>Jours équiv.</th><th>H. travaillées</th><th>Tarif/j</th>
                     <th>H. sup</th><th>Montant brut</th><th>Avances</th><th>Retenues</th>
                     <th>Net à payer</th><th>Statut</th><th>Actions</th>
                   </tr>
@@ -474,7 +492,8 @@ export default function PaiementHebdo() {
                         )}
                       </td>
                       <td data-label="Fonction">{p.fonction || '—'}</td>
-                      <td data-label="Jours">{p.joursPaies} j</td>
+                      <td data-label="Jours équiv.">{fmtDayEquiv(p.joursPaies)} j</td>
+                      <td data-label="H. travaillées">{fmtHours(p.heuresNormales)}</td>
                       <td data-label="Tarif/j">{fmtMAD(p.tarifJournalier)}</td>
                       <td data-label="H. sup">{p.heuresSup > 0 ? `${p.heuresSup} h` : '—'}</td>
                       <td data-label="Montant brut">{fmtMAD(p.montantBrut)}</td>
@@ -523,9 +542,9 @@ export default function PaiementHebdo() {
                       {editRecord.projet} · {fmtWeekRange(editRecord.semaineDebut, editRecord.semaineFin)}
                     </div>
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginTop: 10 }}>
-                      <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Jours travaillés</span><div style={{ fontWeight: 700 }}>{editRecord.joursPaies} j</div></div>
+                      <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Jours équivalents</span><div style={{ fontWeight: 700 }}>{fmtDayEquiv(editRecord.joursPaies)} j</div></div>
+                      <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Heures travaillées</span><div style={{ fontWeight: 700 }}>{fmtHours(editRecord.heuresNormales)}</div></div>
                       <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Tarif journalier</span><div style={{ fontWeight: 700 }}>{fmtMAD(editRecord.tarifJournalier)}</div></div>
-                      <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Base normale</span><div style={{ fontWeight: 700 }}>{fmtMAD(editRecord.montantNormales)}</div></div>
                     </div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-3)', marginTop: 8 }}>
                       Calculé automatiquement depuis les présences — non modifiable ici.
@@ -673,7 +692,8 @@ export default function PaiementHebdo() {
               {detailRecord.chefChantier && <div><strong>Chef de chantier :</strong> {detailRecord.chefChantier}</div>}
               <div><strong>Semaine :</strong> {fmtWeekRange(detailRecord.semaineDebut, detailRecord.semaineFin)}</div>
               <div><strong>Statut :</strong> {detailRecord.statut}</div>
-              <div><strong>Jours / Tarif/j :</strong> {detailRecord.joursPaies} j · {fmtMAD(detailRecord.tarifJournalier)}/j ({fmtMAD(detailRecord.tarifHoraire)}/h × 8)</div>
+              <div><strong>Jours équiv. / H. travaillées :</strong> {fmtDayEquiv(detailRecord.joursPaies)} j · {fmtHours(detailRecord.heuresNormales)}</div>
+              <div><strong>Tarif/j :</strong> {fmtMAD(detailRecord.tarifJournalier)}/j ({fmtMAD(detailRecord.tarifHoraire)}/h × 8)</div>
               <div><strong>H. sup :</strong> {detailRecord.heuresSup || 0} h · {fmtMAD(detailRecord.montantSup)}</div>
               <div><strong>Montant brut :</strong> {fmtMAD(detailRecord.montantBrut)}</div>
               <div><strong style={{ color: '#E65100' }}>Avances :</strong> {fmtMAD(detailRecord.avances)}</div>

@@ -2,7 +2,7 @@
  * workerPayroll.js — Paiement hebdomadaire ouvriers (tarif journalier)
  */
 import { getSupabase } from '../../lib/supabase';
-import { workerFullName, attendanceDayWeight, listAttendance } from './attendance';
+import { workerFullName, listAttendance, computeAttendanceWorkMetrics } from './attendance';
 import { listOvertime, sumWorkerOvertimeFromRecords } from './overtime';
 import { listWorkers, workerTarifHoraire, workerTarifJournalier, WORKER_HOURS_PER_DAY } from './workers';
 import { listProjects } from '../projects/projects';
@@ -70,7 +70,9 @@ export function resolveWorkerRates(line = {}) {
 export function calcWorkerPayrollTotals(line) {
   const joursPaies = Number(line.joursPaies) || 0;
   const { tarifJournalier, tarifHoraire } = resolveWorkerRates(line);
-  const heuresNormales = round2(joursPaies * WORKER_HOURS_PER_DAY);
+  const heuresNormales = Number(line.heuresNormales) > 0
+    ? round2(line.heuresNormales)
+    : round2(joursPaies * WORKER_HOURS_PER_DAY);
   const montantNormales = round2(joursPaies * tarifJournalier);
   const heuresSup = Number(line.heuresSup) || 0;
   const tarifSup = Number(line.tarifSup) || round2(tarifHoraire * 1.25);
@@ -302,6 +304,7 @@ export async function updateWorkerPayrollAdjustments(id, existing, adjustments =
     semaineDebut: existing.semaineDebut,
     semaineFin: existing.semaineFin || weekEndSunday(existing.semaineDebut),
     joursPaies: existing.joursPaies,
+    heuresNormales: existing.heuresNormales,
     tarifJournalier: existing.tarifJournalier,
     tarifHoraire: existing.tarifHoraire,
     heuresSup: adjustments.heuresSup ?? existing.heuresSup,
@@ -416,8 +419,8 @@ export function buildAttendancePayrollDrafts({ attendance, workers, overtime, pr
     if (!projectId) continue;
 
     const weekStart = weekStartMonday(att.date);
-    const weight = attendanceDayWeight(att.statut);
-    if (weight <= 0) continue;
+    const metrics = computeAttendanceWorkMetrics(att);
+    if (metrics.joursEquivalent <= 0) continue;
 
     const key = `${projectId}|${weekStart}|${att.workerId}`;
     if (!bucket.has(key)) {
@@ -429,13 +432,15 @@ export function buildAttendancePayrollDrafts({ attendance, workers, overtime, pr
         semaineDebut: weekStart,
         semaineFin: weekEndSunday(weekStart),
         joursPaies: 0,
+        heuresTravaillees: 0,
         chefCounts: {},
         chefProjet: project?.chef_projet || project?.responsable || '',
         chefChantier: project?.chef_chantier || '',
       });
     }
     const entry = bucket.get(key);
-    entry.joursPaies = round2(entry.joursPaies + weight);
+    entry.joursPaies = round2(entry.joursPaies + metrics.joursEquivalent);
+    entry.heuresTravaillees = round2(entry.heuresTravaillees + metrics.heuresTravaillees);
     const chef = (att.chefChantier || '').trim();
     if (chef) entry.chefCounts[chef] = (entry.chefCounts[chef] || 0) + 1;
   }
@@ -462,6 +467,7 @@ export function buildAttendancePayrollDrafts({ attendance, workers, overtime, pr
 
     const line = buildWorkerPayrollLine(worker, {
       joursPaies: entry.joursPaies,
+      heuresNormales: entry.heuresTravaillees,
       heuresSup: ot.heures > 0 ? ot.heures : 0,
       avgTarifSup: ot.avgTarif,
       fromPresence: true,
@@ -509,6 +515,7 @@ export async function syncWorkerPayrollFromAttendance(ctx) {
     const linePayload = {
       workerId: draft.workerId,
       joursPaies: draft.joursPaies,
+      heuresNormales: draft.heuresNormales,
       tarifJournalier: draft.tarifJournalier,
       tarifHoraire: draft.tarifHoraire,
       heuresSup: draft.heuresSup,
@@ -584,6 +591,7 @@ export function buildWorkerPayrollLine(worker, presenceData = {}) {
   return {
     workerId: worker.id,
     joursPaies: presenceData.joursPaies ?? '',
+    heuresNormales: presenceData.heuresNormales ?? '',
     heuresSup,
     tarifHoraire: tarifH,
     tarifJournalier: tarifJ,

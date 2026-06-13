@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { formatSupabaseError } from '../services/supabase/formatError';
 import { listWorkers } from '../services/rh/workers';
-import { workerFullName, listAttendance, countWorkerPaidDaysFromRecords } from '../services/rh/attendance';
+import { workerFullName, listAttendance, sumWorkerAttendanceFromRecords } from '../services/rh/attendance';
 import { listOvertime, sumWorkerOvertimeFromRecords } from '../services/rh/overtime';
 import { listProjects } from '../services/projects/projects';
 import {
@@ -143,7 +143,7 @@ export function useWorkerPayroll() {
 
   const computeLineFromPresence = useCallback((worker, projectId, weekStart, projectName = '') => {
     const semaineFin = weekEndSunday(weekStart);
-    const joursPaies = countWorkerPaidDaysFromRecords(
+    const att = sumWorkerAttendanceFromRecords(
       attendance,
       worker.id,
       projectId,
@@ -159,10 +159,11 @@ export function useWorkerPayroll() {
     );
 
     return buildWorkerPayrollLine(worker, {
-      joursPaies: joursPaies > 0 ? joursPaies : '',
+      joursPaies: att.joursEquivalent > 0 ? att.joursEquivalent : '',
+      heuresNormales: att.heuresTravaillees > 0 ? att.heuresTravaillees : '',
       heuresSup: ot.heures > 0 ? ot.heures : '',
       avgTarifSup: ot.avgTarif,
-      fromPresence: joursPaies > 0,
+      fromPresence: att.joursEquivalent > 0,
     });
   }, [attendance, overtime]);
 

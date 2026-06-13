@@ -2,8 +2,12 @@
  * attendance.js — Présence ouvriers CRUD (Supabase public.attendance)
  */
 import { getSupabase } from '../../lib/supabase';
+import { WORKER_HOURS_PER_DAY } from './workers';
 
 const TABLE = 'attendance';
+
+export const STANDARD_SHIFT_START = '07:30';
+export const STANDARD_SHIFT_END = '17:00';
 
 export const UI_STATUTS = ['Present', 'Absent', 'Retard', 'Demi-journee'];
 
@@ -33,13 +37,73 @@ function fmtTime(raw) {
   return s.length >= 5 ? s.slice(0, 5) : s;
 }
 
+function round2(n) {
+  return Math.round((Number(n) || 0) * 100) / 100;
+}
+
+/** "HH:MM" → minutes depuis minuit */
+export function timeToMinutes(t) {
+  if (!t) return null;
+  const s = String(t).slice(0, 5);
+  const [h, m] = s.split(':').map(Number);
+  if (Number.isNaN(h) || Number.isNaN(m)) return null;
+  return h * 60 + m;
+}
+
+/**
+ * Calcule heures travaillées, retard et équivalent jour (base 8 h).
+ * Ex. entrée 08:30, sortie 17:00 → 7 h, retard 1 h, 0,875 j.
+ */
+export function computeAttendanceWorkMetrics(record = {}) {
+  const fullDay = WORKER_HOURS_PER_DAY;
+  const statut = record.statut || 'Absent';
+
+  if (statut === 'Absent') {
+    return { heuresTravaillees: 0, retardHeures: 0, joursEquivalent: 0 };
+  }
+  if (statut === 'Demi-journee') {
+    const h = round2(fullDay / 2);
+    return { heuresTravaillees: h, retardHeures: 0, joursEquivalent: 0.5 };
+  }
+
+  const standardStart = timeToMinutes(STANDARD_SHIFT_START);
+  const standardEnd = timeToMinutes(STANDARD_SHIFT_END);
+  const entry = timeToMinutes(record.heureEntree) ?? standardStart;
+  const exit = timeToMinutes(record.heureSortie) ?? standardEnd;
+  const effectiveExit = Math.max(entry, Math.min(exit, standardEnd));
+
+  const retardMinutes = Math.max(0, entry - standardStart);
+  const retardHeures = round2(retardMinutes / 60);
+
+  let heuresTravaillees;
+
+  if (entry <= standardStart && exit >= standardEnd) {
+    heuresTravaillees = fullDay;
+  } else if (retardMinutes > 0 && exit >= standardEnd) {
+    heuresTravaillees = round2(Math.max(0, fullDay - retardHeures));
+  } else {
+    const workedMinutes = Math.max(0, effectiveExit - Math.max(entry, standardStart));
+    heuresTravaillees = round2(Math.min(fullDay, workedMinutes / 60));
+  }
+
+  heuresTravaillees = round2(Math.min(fullDay, Math.max(0, heuresTravaillees)));
+  const joursEquivalent = round2(heuresTravaillees / fullDay);
+
+  return { heuresTravaillees, retardHeures, joursEquivalent };
+}
+
+function enrichAttendanceMetrics(base) {
+  const metrics = computeAttendanceWorkMetrics(base);
+  return { ...base, ...metrics };
+}
+
 /** DB row → shape Presence.jsx */
 export function normalizeAttendance(row) {
   if (!row) return null;
   const w = row.workers;
   const proj = row.projects || w?.projects;
   const projetNom = proj?.nom || row.chantier || w?.chantier || '';
-  return {
+  return enrichAttendanceMetrics({
     id: row.id,
     workerId: row.worker_id || '',
     ouvrier: workerFullName(w) || row.ouvrier_label || '—',
@@ -57,7 +121,7 @@ export function normalizeAttendance(row) {
       || '',
     created_at: row.created_at,
     updated_at: row.updated_at,
-  };
+  });
 }
 
 /** Form UI → DB row */
@@ -351,40 +415,46 @@ export function findSheetGroupForRecord(groups, record) {
   ));
 }
 
-/** Poids d'une journée selon le statut de présence */
-export function attendanceDayWeight(statutUi) {
-  switch (statutUi) {
-    case 'Present':
-    case 'Retard':
-      return 1;
-    case 'Demi-journee':
-      return 0.5;
-    default:
-      return 0;
-  }
+/** Poids jour équivalent selon statut + horaires (rétrocompat). */
+export function attendanceDayWeight(recordOrStatut, maybeRecord) {
+  const record = typeof recordOrStatut === 'object' && recordOrStatut !== null
+    ? recordOrStatut
+    : { statut: recordOrStatut, ...(maybeRecord || {}) };
+  return computeAttendanceWorkMetrics(record).joursEquivalent;
 }
 
-/** Compte les jours travaillés depuis des enregistrements de présence déjà chargés. */
-export function countWorkerPaidDaysFromRecords(records, workerId, projectId, weekStart, weekEnd) {
+function matchAttendanceWeekRecord(r, workerId, projectId, weekStart, weekEnd) {
+  if (String(r.workerId) !== String(workerId)) return false;
+  if (projectId) {
+    const pid = String(projectId);
+    const match = String(r.projectId) === pid || String(r.workerProjectId) === pid;
+    if (!match) return false;
+  }
+  const d = (r.date || '').slice(0, 10);
+  if (!d || d < weekStart || d > weekEnd) return false;
+  return true;
+}
+
+/** Agrège jours équivalents + heures travaillées depuis les présences chargées. */
+export function sumWorkerAttendanceFromRecords(records, workerId, projectId, weekStart, weekEnd) {
   const ws = weekStart;
   const we = weekEnd;
-  if (!ws || !we || !workerId) return 0;
+  if (!ws || !we || !workerId) {
+    return { joursEquivalent: 0, heuresTravaillees: 0 };
+  }
 
-  return round2((records || []).reduce((sum, r) => {
-    if (String(r.workerId) !== String(workerId)) return sum;
-    if (projectId) {
-      const pid = String(projectId);
-      const match = String(r.projectId) === pid || String(r.workerProjectId) === pid;
-      if (!match) return sum;
-    }
-    const d = (r.date || '').slice(0, 10);
-    if (!d || d < ws || d > we) return sum;
-    return sum + attendanceDayWeight(r.statut);
-  }, 0));
+  return (records || []).reduce((acc, r) => {
+    if (!matchAttendanceWeekRecord(r, workerId, projectId, ws, we)) return acc;
+    const m = computeAttendanceWorkMetrics(r);
+    acc.joursEquivalent = round2(acc.joursEquivalent + m.joursEquivalent);
+    acc.heuresTravaillees = round2(acc.heuresTravaillees + m.heuresTravaillees);
+    return acc;
+  }, { joursEquivalent: 0, heuresTravaillees: 0 });
 }
 
-function round2(n) {
-  return Math.round((Number(n) || 0) * 100) / 100;
+/** Compte les jours équivalents travaillés depuis des enregistrements de présence déjà chargés. */
+export function countWorkerPaidDaysFromRecords(records, workerId, projectId, weekStart, weekEnd) {
+  return sumWorkerAttendanceFromRecords(records, workerId, projectId, weekStart, weekEnd).joursEquivalent;
 }
 
 /** Compte les jours travaillés pour un ouvrier sur une semaine (requête directe). */
@@ -392,7 +462,7 @@ export async function countWorkerPaidDays(workerId, projectId, weekStart, weekEn
   await getAuthUserId();
   let query = getSupabase()
     .from(TABLE)
-    .select('worker_id, project_id, date, statut, workers ( project_id )')
+    .select('worker_id, project_id, date, statut, heure_entree, heure_sortie, workers ( project_id )')
     .eq('worker_id', workerId)
     .gte('date', weekStart)
     .lte('date', weekEnd);
@@ -414,8 +484,12 @@ export async function countWorkerPaidDays(workerId, projectId, weekStart, weekEn
       const workerPid = row.workers?.project_id ? String(row.workers.project_id) : '';
       if (rowPid !== pid && workerPid !== pid) return sum;
     }
-    const statut = DB_TO_UI[row.statut] || 'Absent';
-    return sum + attendanceDayWeight(statut);
+    const record = {
+      statut: DB_TO_UI[row.statut] || 'Absent',
+      heureEntree: fmtTime(row.heure_entree),
+      heureSortie: fmtTime(row.heure_sortie),
+    };
+    return sum + computeAttendanceWorkMetrics(record).joursEquivalent;
   }, 0));
 }
 

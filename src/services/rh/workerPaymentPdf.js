@@ -20,7 +20,8 @@ export async function exportWorkerPaymentPdf(record, { print = false } = {}) {
   ];
 
   const detailRows = [
-    ['Jours travaillés', `${record.joursPaies} j`, formatPdfMAD(record.tarifJournalier) + '/j', formatPdfMAD(record.montantNormales || (record.joursPaies * record.tarifJournalier))],
+    ['Jours équivalents', `${record.joursPaies} j`, formatPdfMAD(record.tarifJournalier) + '/j', formatPdfMAD(record.montantNormales || (record.joursPaies * record.tarifJournalier))],
+    ['Heures travaillées', `${record.heuresNormales || record.joursPaies * 8} h`, formatPdfMAD(record.tarifHoraire) + '/h', formatPdfMAD(record.montantNormales || (record.joursPaies * record.tarifJournalier))],
   ];
   if (Number(record.heuresSup) > 0) {
     detailRows.push(['Heures supplémentaires', `${record.heuresSup} h`, formatPdfMAD(record.tarifSup) + '/h', formatPdfMAD(record.montantSup)]);

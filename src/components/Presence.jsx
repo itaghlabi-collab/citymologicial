@@ -3,6 +3,7 @@ import { useState, useRef, useMemo } from 'react';
 import { useAttendance } from '../hooks/useAttendance';
 import { generateAttendanceSheetPdf } from '../services/rh/attendanceSheetPdf';
 import { syncPayrollAfterAttendanceChange } from '../services/rh/workerPayroll';
+import { computeAttendanceWorkMetrics, STANDARD_SHIFT_START } from '../services/rh/attendance';
 
 function EmptyState({ icon, title, sub }) {
   return (
@@ -20,6 +21,14 @@ const STATUS_OPTS = ['Present', 'Absent', 'Retard', 'Demi-journee'];
 const STATUS_BADGE = { Present: 'badge-green', Absent: 'badge-red', Retard: 'badge-orange', 'Demi-journee': 'badge-blue' };
 
 function today() { return new Date().toISOString().slice(0, 10); }
+
+function fmtHours(n) {
+  return `${Number(n || 0).toLocaleString('fr-MA', { minimumFractionDigits: 0, maximumFractionDigits: 2 })} h`;
+}
+
+function fmtDayEquiv(n) {
+  return Number(n || 0).toLocaleString('fr-MA', { minimumFractionDigits: 0, maximumFractionDigits: 3 });
+}
 
 function Toast({ toast }) {
   if (!toast) return null;
@@ -274,6 +283,13 @@ export default function Presence() {
         const chef = chefsChantier.find((c) => c.id === v);
         next.chefChantierNom = chef?.label || '';
       }
+      if (k === 'heureEntree' || k === 'heureSortie') {
+        if (next.statut !== 'Demi-journee' && next.statut !== 'Absent') {
+          const preview = computeAttendanceWorkMetrics(next);
+          if (preview.retardHeures > 0) next.statut = 'Retard';
+          else if (next.statut === 'Retard') next.statut = 'Present';
+        }
+      }
       return next;
     });
   }
@@ -383,6 +399,11 @@ export default function Presence() {
   );
 
   const stats = useMemo(() => computeAttendanceStats(filtered), [filtered, computeAttendanceStats]);
+
+  const formWorkPreview = useMemo(
+    () => computeAttendanceWorkMetrics(form),
+    [form],
+  );
 
   const hasFilters = filterOuvrier || filterProjectId || filterChefId || filterDate || filterStatut;
 
@@ -576,7 +597,7 @@ export default function Presence() {
           <div className="table-wrap">
             <table>
               <thead>
-                <tr><th>Ouvrier</th><th>Date</th><th>Projet</th><th>Chef chantier</th><th>Entree</th><th>Sortie</th><th>Statut</th><th>Notes</th><th>Actions</th><th className="rh-ext-col-index">#</th></tr>
+                <tr><th>Ouvrier</th><th>Date</th><th>Projet</th><th>Chef chantier</th><th>Entree</th><th>Sortie</th><th>H. trav.</th><th>Retard</th><th>Equiv. j</th><th>Statut</th><th>Notes</th><th>Actions</th><th className="rh-ext-col-index">#</th></tr>
               </thead>
               <tbody>
                 {filtered.map((r, i) => (
@@ -587,6 +608,9 @@ export default function Presence() {
                     <td data-label="Chef chantier" style={{ color: 'var(--text-2)', fontSize: '0.84rem' }}>{r.chefChantier || '—'}</td>
                     <td data-label="Entree" style={{ fontFamily: 'var(--font-head)', fontWeight: 700 }}>{r.heureEntree || '—'}</td>
                     <td data-label="Sortie" style={{ fontFamily: 'var(--font-head)', fontWeight: 700 }}>{r.heureSortie || '—'}</td>
+                    <td data-label="H. trav.">{r.heuresTravaillees > 0 ? fmtHours(r.heuresTravaillees) : '—'}</td>
+                    <td data-label="Retard" style={{ color: r.retardHeures > 0 ? '#E65100' : 'var(--text-3)' }}>{r.retardHeures > 0 ? fmtHours(r.retardHeures) : '—'}</td>
+                    <td data-label="Equiv. j" style={{ fontWeight: 600 }}>{r.joursEquivalent > 0 ? fmtDayEquiv(r.joursEquivalent) : '—'}</td>
                     <td data-label="Statut"><span className={'badge ' + (STATUS_BADGE[r.statut] || 'badge-grey')}>{r.statut}</span></td>
                     <td data-label="Notes" style={{ color: 'var(--text-3)', fontSize: '0.82rem' }}>{r.notes || '—'}</td>
                     <td className="rh-ext-actions-cell">
@@ -725,12 +749,20 @@ export default function Presence() {
                 <div className="form-group">
                   <label>Heure entree</label>
                   <input type="time" value={form.heureEntree} onChange={e => setF('heureEntree', e.target.value)} style={INPUT_S(false)} />
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 4 }}>Reference : {STANDARD_SHIFT_START}</div>
                 </div>
                 <div className="form-group">
                   <label>Heure sortie</label>
                   <input type="time" value={form.heureSortie} onChange={e => setF('heureSortie', e.target.value)} style={INPUT_S(false)} />
                 </div>
               </div>
+              {(form.statut === 'Present' || form.statut === 'Retard') && (
+                <div style={{ padding: '10px 12px', background: '#F8F9FA', borderRadius: 8, fontSize: '0.84rem', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 10 }}>
+                  <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Heures travaillees</span><div style={{ fontWeight: 700 }}>{fmtHours(formWorkPreview.heuresTravaillees)}</div></div>
+                  <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Retard</span><div style={{ fontWeight: 700, color: formWorkPreview.retardHeures > 0 ? '#E65100' : 'inherit' }}>{formWorkPreview.retardHeures > 0 ? fmtHours(formWorkPreview.retardHeures) : '—'}</div></div>
+                  <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Equivalent jour</span><div style={{ fontWeight: 700 }}>{fmtDayEquiv(formWorkPreview.joursEquivalent)} j</div></div>
+                </div>
+              )}
               <div className="form-group">
                 <label>Statut</label>
                 <select value={form.statut} onChange={e => setF('statut', e.target.value)} style={INPUT_S(false)}>
