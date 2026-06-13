@@ -598,6 +598,7 @@ export function groupAttendanceByProjectWeekWorker(records, options = {}) {
     g.chefChantier = chefs[0]?.[0] || '';
     g.lignes.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
     g.statutGlobal = resolveAttendanceGlobalStatut(g.lignes);
+    g.nbPresences = g.lignes.length;
     delete g.chefCounts;
     return g;
   }).sort((a, b) => {

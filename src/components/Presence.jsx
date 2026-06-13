@@ -1,10 +1,10 @@
-import { ClockIcon, Plus, X, Filter, CheckCircle, XCircle, CalendarOff, Pencil, Loader2, Search, Users, HardHat, Download, Eye } from 'lucide-react';
+import { ClockIcon, Plus, X, Filter, CheckCircle, XCircle, CalendarOff, Pencil, Loader2, Search, Users, HardHat, Download, Eye, Printer, Building2 } from 'lucide-react';
 import { useState, useRef, useMemo } from 'react';
 import { useAttendance } from '../hooks/useAttendance';
-import { generateAttendanceSheetPdf } from '../services/rh/attendanceSheetPdf';
+import { generateAttendanceWeeklyPdf } from '../services/rh/attendanceSheetPdf';
 import { syncPayrollAfterAttendanceChange } from '../services/rh/workerPayroll';
 import { computeAttendanceWorkMetrics, STANDARD_SHIFT_START, groupAttendanceSummariesByProjectWeek, collectAttendanceWeeks, fmtWeekRange, weekStartMonday } from '../services/rh/attendance';
-import AttendanceDailyDetailTable from './rh/AttendanceDailyDetailTable';
+import AttendanceDetailModal from './rh/AttendanceDetailModal';
 
 function EmptyState({ icon, title, sub }) {
   return (
@@ -213,6 +213,7 @@ function WorkerChecklist({ workers, selectedIds, onChange, error, disabled }) {
 export default function Presence() {
   const {
     records,
+    workers,
     workerOptions,
     projectOptions,
     chefsChantier,
@@ -229,10 +230,6 @@ export default function Presence() {
     filterAttendanceRecords,
     computeAttendanceStats,
     filterWorkersForProject,
-    buildAttendanceSheetGroups,
-    pickSheetGroupForExport,
-    findSheetGroupForRecord,
-    sheetGroupLabel,
   } = useAttendance();
 
   const [filterOuvrier, setFilterOuvrier] = useState('');
@@ -445,79 +442,103 @@ export default function Presence() {
     return group?.projet || 'Projet';
   }
 
-  function chefLabelForRecords(rows) {
-    if (filterChefId) {
-      return chefsChantier.find((c) => c.id === filterChefId)?.label || '';
+  function handleDownloadSheet(print = false) {
+    if (!summaryGroups.length) {
+      notify('error', 'Aucune présence à exporter.');
+      return;
     }
-    const chefs = [...new Set((rows || []).map((r) => r.chefChantier).filter(Boolean))];
-    return chefs.join(' · ');
+
+    let candidates = summaryGroups;
+    if (filterProjectId) {
+      candidates = candidates.filter((g) => String(g.projectId) === String(filterProjectId));
+    }
+    if (filterSemaine) {
+      candidates = candidates.filter((g) => g.semaineDebut === filterSemaine);
+    }
+
+    if (!candidates.length) {
+      notify('error', 'Aucune fiche pour les filtres sélectionnés.');
+      return;
+    }
+
+    if (candidates.length === 1) {
+      handleGroupPdf(candidates[0], print);
+      return;
+    }
+
+    setPdfCandidates(candidates);
+    setPdfGroupKey(`${candidates[0].projectId}|${candidates[0].semaineDebut}`);
+    setShowPdfModal(true);
   }
 
-  async function runPdfExport(group) {
-    if (!group?.records?.length) {
+  function confirmPdfPicker(print = false) {
+    const group = pdfCandidates.find((g) => `${g.projectId}|${g.semaineDebut}` === pdfGroupKey);
+    if (group) handleGroupPdf(group, print);
+    else notify('error', 'Choisissez une fiche.');
+  }
+
+  function workerFonction(workerId) {
+    return workers.find((w) => String(w.id) === String(workerId))?.fonction || '';
+  }
+
+  function groupPdfLabel(group) {
+    return `${group.projet} — ${fmtWeekRange(group.semaineDebut, group.semaineFin)} (${group.ouvriers.length} ouvrier${group.ouvriers.length > 1 ? 's' : ''})`;
+  }
+
+  async function runWeeklyPdf({ projectLabel, semaineDebut, semaineFin, chefChantier, summaries, print = false }) {
+    if (!summaries?.length) {
       notify('error', 'Aucune présence pour cette fiche.');
       return;
     }
-    const projectLabel = resolveProjectLabel(group);
-    const sheetStats = computeAttendanceStats(group.records);
-
     setPdfLoading(true);
     try {
-      await generateAttendanceSheetPdf({
+      await generateAttendanceWeeklyPdf({
         projectLabel,
-        date: group.date,
-        chefChantier: chefLabelForRecords(group.records),
-        records: group.records,
-        stats: sheetStats,
+        semaineDebut,
+        semaineFin,
+        chefChantier,
+        summaries,
+        print,
       });
-      notify('success', 'Fiche de présence téléchargée.');
+      notify('success', print ? 'Ouverture pour impression…' : 'Fiche de présence téléchargée.');
       setShowPdfModal(false);
     } catch (err) {
-      console.error('[CITYMO] attendance PDF', err);
+      console.error('[CITYMO] attendance weekly PDF', err);
       notify('error', err?.message || 'Erreur génération PDF.');
     } finally {
       setPdfLoading(false);
     }
   }
 
-  function handleDownloadSheet() {
-    const source = filtered.length ? filtered : records;
-    const groups = buildAttendanceSheetGroups(source);
-    if (!groups.length) {
-      notify('error', 'Aucune présence à exporter.');
-      return;
-    }
-
-    const { group, ambiguous, candidates } = pickSheetGroupForExport(groups, {
-      projectId: filterProjectId,
-      date: filterDate,
+  function handleSummaryPdf(summary, print = false) {
+    runWeeklyPdf({
+      projectLabel: resolveProjectLabel({ projectId: summary.projectId, projet: summary.projet }),
+      semaineDebut: summary.semaineDebut,
+      semaineFin: summary.semaineFin,
+      chefChantier: summary.chefChantier,
+      summaries: [summary],
+      print,
     });
-
-    if (group && !ambiguous) {
-      runPdfExport(group);
-      return;
-    }
-
-    const list = candidates.length ? candidates : groups;
-    setPdfCandidates(list);
-    setPdfGroupKey(list[0]?.key || '');
-    setShowPdfModal(true);
   }
 
-  function handleDownloadRow(record) {
-    const groups = buildAttendanceSheetGroups(records);
-    const group = findSheetGroupForRecord(groups, record);
-    if (group) {
-      runPdfExport(group);
-      return;
-    }
-    notify('error', 'Impossible de générer la fiche pour cette ligne.');
+  function handleGroupPdf(group, print = false) {
+    const chefs = [...new Set(group.ouvriers.map((o) => o.chefChantier).filter(Boolean))];
+    runWeeklyPdf({
+      projectLabel: resolveProjectLabel(group),
+      semaineDebut: group.semaineDebut,
+      semaineFin: group.semaineFin,
+      chefChantier: chefs.join(' · '),
+      summaries: group.ouvriers,
+      print,
+    });
   }
 
-  function confirmPdfPicker() {
-    const group = pdfCandidates.find((g) => g.key === pdfGroupKey);
-    if (group) runPdfExport(group);
-    else notify('error', 'Choisissez une fiche.');
+  function handleModifySummary(summary) {
+    if (summary.lignes?.length === 1) {
+      openEdit(summary.lignes[0]);
+      return;
+    }
+    setDetailSummary(summary);
   }
 
   return (
@@ -601,9 +622,9 @@ export default function Presence() {
             <button
               type="button"
               className="btn btn-secondary btn-sm"
-              onClick={handleDownloadSheet}
+              onClick={() => handleDownloadSheet(false)}
               disabled={pdfLoading || loading || !canDownloadSheet}
-              title="PDF du projet et du jour (détectés automatiquement)"
+              title="PDF récapitulatif par ouvrier (projet + période)"
               style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
             >
               {pdfLoading ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Download size={14} />}
@@ -629,32 +650,68 @@ export default function Presence() {
       ) : (
         summaryGroups.map((group) => (
           <div key={`${group.projectId}|${group.semaineDebut}`} className="card" style={{ marginBottom: 16 }}>
-            <div className="card-title" style={{ marginBottom: 12 }}><ClockIcon size={16} /> {group.projet}</div>
-            <div style={{ fontSize: '0.82rem', color: 'var(--text-3)', marginBottom: 12 }}>
-              Semaine : {fmtWeekRange(group.semaineDebut, group.semaineFin)} · {group.ouvriers.length} ouvrier{group.ouvriers.length > 1 ? 's' : ''}
+            <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 16, paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>
+              <div>
+                <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.05rem', marginBottom: 6 }}>
+                  <Building2 size={16} style={{ verticalAlign: -2, marginRight: 6 }} />
+                  {group.projet}
+                </div>
+                <div style={{ fontSize: '0.83rem', color: 'var(--text-3)' }}>
+                  Période : {fmtWeekRange(group.semaineDebut, group.semaineFin)} · {group.ouvriers.length} ouvrier{group.ouvriers.length > 1 ? 's' : ''}
+                </div>
+              </div>
+              <div className="rh-ext-detail-header-actions">
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleGroupPdf(group, false)} disabled={pdfLoading}>
+                  <Download size={13} /> Télécharger PDF
+                </button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleGroupPdf(group, true)} disabled={pdfLoading}>
+                  <Printer size={13} /> Imprimer
+                </button>
+              </div>
             </div>
             <div className="table-wrap">
               <table>
                 <thead>
                   <tr>
-                    <th>Ouvrier</th><th>Chef chantier</th><th>Jours trav.</th><th>H. travaillées</th>
-                    <th>Retard</th><th>Équiv. jours</th><th>Statut</th><th>Actions</th>
+                    <th>Ouvrier</th><th>Projet / chantier</th><th>Chef chantier</th><th>Période</th>
+                    <th>Présences</th><th>H. travaillées</th><th>Retard</th><th>Équiv. jours</th><th>Statut</th><th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {group.ouvriers.map((s) => (
                     <tr key={s.key}>
-                      <td data-label="Ouvrier" style={{ fontWeight: 600 }}>{s.ouvrier}</td>
+                      <td data-label="Ouvrier">
+                        <button
+                          type="button"
+                          onClick={() => setDetailSummary(s)}
+                          style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontWeight: 700, color: 'var(--text)', textAlign: 'left', fontFamily: 'inherit', fontSize: 'inherit' }}
+                        >
+                          {s.ouvrier}
+                        </button>
+                      </td>
+                      <td data-label="Projet / chantier">{s.projet || group.projet || '—'}</td>
                       <td data-label="Chef chantier">{s.chefChantier || '—'}</td>
-                      <td data-label="Jours trav.">{s.nbJoursTravailles}</td>
+                      <td data-label="Période" style={{ fontSize: '0.82rem', color: 'var(--text-2)' }}>{fmtWeekRange(s.semaineDebut, s.semaineFin)}</td>
+                      <td data-label="Présences">{s.nbPresences ?? s.lignes?.length ?? 0}</td>
                       <td data-label="H. travaillées">{fmtHours(s.totalHeures)}</td>
                       <td data-label="Retard" style={{ color: s.totalRetard > 0 ? '#E65100' : 'var(--text-3)' }}>{s.totalRetard > 0 ? fmtHours(s.totalRetard) : '—'}</td>
                       <td data-label="Équiv. jours" style={{ fontWeight: 600 }}>{fmtDayEquiv(s.joursEquivalent)}</td>
                       <td data-label="Statut"><span className={'badge ' + (STATUS_BADGE[s.statutGlobal] || 'badge-grey')}>{s.statutGlobal}</span></td>
-                      <td data-label="Actions">
-                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => setDetailSummary(s)}>
-                          <Eye size={13} /> Voir détail
-                        </button>
+                      <td data-label="Actions" className="payment-actions-cell">
+                        <div className="payment-row-actions">
+                          <button type="button" className="btn btn-secondary btn-sm" onClick={() => setDetailSummary(s)}>
+                            <Eye size={13} /> Détail
+                          </button>
+                          <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleModifySummary(s)}>
+                            <Pencil size={13} /> Modifier
+                          </button>
+                          <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleSummaryPdf(s, false)} disabled={pdfLoading}>
+                            <Download size={13} /> Télécharger
+                          </button>
+                          <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleSummaryPdf(s, true)} disabled={pdfLoading} title="Imprimer">
+                            <Printer size={13} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -666,37 +723,21 @@ export default function Presence() {
       )}
 
       {detailSummary && (
-        <div className="rh-ext-modal-overlay" style={{ zIndex: 1000 }}>
-          <div className="card rh-ext-modal-box rh-ext-modal-box--lg">
-            <div className="flex-between" style={{ marginBottom: 16 }}>
-              <div>
-                <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.05rem', margin: 0 }}>{detailSummary.ouvrier}</h2>
-                <div style={{ fontSize: '0.83rem', color: 'var(--text-3)', marginTop: 4 }}>
-                  {detailSummary.projet} · {fmtWeekRange(detailSummary.semaineDebut, detailSummary.semaineFin)}
-                </div>
-              </div>
-              <button type="button" onClick={() => setDetailSummary(null)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={20} /></button>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 10, marginBottom: 16, padding: 12, background: '#F8F9FA', borderRadius: 8, fontSize: '0.84rem' }}>
-              <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Jours travaillés</span><div style={{ fontWeight: 700 }}>{detailSummary.nbJoursTravailles}</div></div>
-              <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Heures travaillées</span><div style={{ fontWeight: 700 }}>{fmtHours(detailSummary.totalHeures)}</div></div>
-              <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Retard total</span><div style={{ fontWeight: 700, color: detailSummary.totalRetard > 0 ? '#E65100' : 'inherit' }}>{detailSummary.totalRetard > 0 ? fmtHours(detailSummary.totalRetard) : '—'}</div></div>
-              <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Équivalent jours</span><div style={{ fontWeight: 700 }}>{fmtDayEquiv(detailSummary.joursEquivalent)} j</div></div>
-            </div>
-            <div style={{ fontSize: '0.82rem', fontWeight: 700, marginBottom: 8 }}>Détail jour par jour</div>
-            <AttendanceDailyDetailTable
-              lignes={detailSummary.lignes}
-              onEdit={(r) => { setDetailSummary(null); openEdit(r); }}
-              onDelete={async (id) => {
-                await handleDelete(id);
-                setDetailSummary(null);
-              }}
-            />
-          </div>
-        </div>
+        <AttendanceDetailModal
+          summary={detailSummary}
+          fonction={workerFonction(detailSummary.workerId)}
+          onClose={() => setDetailSummary(null)}
+          onEditLine={(r) => { setDetailSummary(null); openEdit(r); }}
+          onDeleteLine={async (id) => {
+            await handleDelete(id);
+            setDetailSummary(null);
+          }}
+          onPdf={() => handleSummaryPdf(detailSummary, false)}
+          onPrint={() => handleSummaryPdf(detailSummary, true)}
+        />
       )}
 
-      {/* Modal choix fiche PDF (plusieurs projets / dates) */}
+      {/* Modal choix fiche PDF (plusieurs projets / périodes) */}
       {showPdfModal && (
         <div className="rh-ext-modal-overlay" style={{ zIndex: 1000 }}>
           <div className="card rh-ext-modal-box rh-ext-modal-box--sm">
@@ -704,7 +745,7 @@ export default function Presence() {
               Fiche de présence
             </h3>
             <p style={{ fontSize: '0.85rem', color: 'var(--text-2)', marginBottom: 16 }}>
-              Plusieurs fiches disponibles — choisissez celle à télécharger :
+              Plusieurs fiches disponibles — choisissez celle à exporter :
             </p>
             <select
               value={pdfGroupKey}
@@ -712,14 +753,18 @@ export default function Presence() {
               style={{ ...INPUT_S(false), marginBottom: 20 }}
             >
               {pdfCandidates.map((g) => (
-                <option key={g.key} value={g.key}>{sheetGroupLabel(g)}</option>
+                <option key={`${g.projectId}|${g.semaineDebut}`} value={`${g.projectId}|${g.semaineDebut}`}>{groupPdfLabel(g)}</option>
               ))}
             </select>
-            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+            <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
               <button type="button" className="btn btn-secondary" onClick={() => setShowPdfModal(false)} disabled={pdfLoading}>
                 Annuler
               </button>
-              <button type="button" className="btn btn-primary" onClick={confirmPdfPicker} disabled={pdfLoading}>
+              <button type="button" className="btn btn-secondary" onClick={() => confirmPdfPicker(true)} disabled={pdfLoading}>
+                {pdfLoading ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Printer size={14} />}
+                Imprimer
+              </button>
+              <button type="button" className="btn btn-primary" onClick={() => confirmPdfPicker(false)} disabled={pdfLoading}>
                 {pdfLoading ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Download size={14} />}
                 Télécharger
               </button>
