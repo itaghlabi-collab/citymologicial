@@ -1,3 +1,5 @@
+import { Pencil, Trash2 } from 'lucide-react';
+
 const STATUS_BADGE = {
   Present: 'badge-green',
   Absent: 'badge-red',
@@ -34,6 +36,33 @@ function fmtJour(iso) {
   }
 }
 
+const HEADERS = {
+  default: {
+    date: 'Date',
+    jour: 'Jour',
+    entree: 'Entrée',
+    sortie: 'Sortie',
+    heures: 'H. travaillées',
+    retard: 'Retard',
+    equiv: 'Équiv. jour',
+    statut: 'Statut',
+    notes: 'Notes',
+    actions: 'Actions',
+  },
+  compact: {
+    date: 'Date',
+    jour: 'Jour',
+    entree: 'Entrée',
+    sortie: 'Sortie',
+    heures: 'H. trav.',
+    retard: 'Retard',
+    equiv: 'Équiv.',
+    statut: 'Statut',
+    notes: 'Notes',
+    actions: '',
+  },
+};
+
 export default function AttendanceDailyDetailTable({
   lignes = [],
   onEdit,
@@ -41,30 +70,38 @@ export default function AttendanceDailyDetailTable({
   showActions = true,
   showJour = false,
   striped = false,
+  compact = false,
 }) {
+  const labels = compact ? HEADERS.compact : HEADERS.default;
+  const wrapClass = [
+    'table-wrap',
+    striped ? 'rh-attendance-table--striped' : '',
+    compact ? 'rh-attendance-detail-scroll' : '',
+  ].filter(Boolean).join(' ');
+
   if (!lignes.length) {
     return (
-      <div style={{ padding: 16, textAlign: 'center', color: 'var(--text-3)', fontSize: '0.85rem' }}>
+      <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-3)', fontSize: '0.85rem', background: 'var(--surface-2)', borderRadius: 8 }}>
         Aucune présence journalière pour cette période.
       </div>
     );
   }
 
   return (
-    <div className={`table-wrap${striped ? ' rh-attendance-table--striped' : ''}`}>
+    <div className={wrapClass}>
       <table>
         <thead>
           <tr>
-            <th>Date</th>
-            {showJour && <th>Jour</th>}
-            <th>Entrée</th>
-            <th>Sortie</th>
-            <th>H. travaillées</th>
-            <th>Retard</th>
-            <th>Équiv. jour</th>
-            <th>Statut</th>
-            <th>Notes</th>
-            {showActions && <th>Actions</th>}
+            <th>{labels.date}</th>
+            {showJour && <th>{labels.jour}</th>}
+            <th>{labels.entree}</th>
+            <th>{labels.sortie}</th>
+            <th>{labels.heures}</th>
+            <th>{labels.retard}</th>
+            <th>{labels.equiv}</th>
+            <th>{labels.statut}</th>
+            <th>{labels.notes}</th>
+            {showActions && <th style={{ width: compact ? 72 : undefined }}>{labels.actions}</th>}
           </tr>
         </thead>
         <tbody>
@@ -75,22 +112,34 @@ export default function AttendanceDailyDetailTable({
               <td data-label="Entrée">{r.heureEntree || '—'}</td>
               <td data-label="Sortie">{r.heureSortie || '—'}</td>
               <td data-label="H. travaillées">{r.heuresTravaillees > 0 ? fmtHours(r.heuresTravaillees) : '—'}</td>
-              <td data-label="Retard" style={{ color: r.retardHeures > 0 ? '#E65100' : 'var(--text-3)' }}>
+              <td data-label="Retard" style={{ color: r.retardHeures > 0 ? '#E65100' : 'var(--text-3)', fontWeight: r.retardHeures > 0 ? 600 : 400 }}>
                 {r.retardHeures > 0 ? fmtHours(r.retardHeures) : '—'}
               </td>
-              <td data-label="Équiv. jour">{r.joursEquivalent > 0 ? fmtDayEquiv(r.joursEquivalent) : '—'}</td>
+              <td data-label="Équiv. jour" style={{ fontWeight: 600 }}>{r.joursEquivalent > 0 ? fmtDayEquiv(r.joursEquivalent) : '—'}</td>
               <td data-label="Statut">
                 <span className={`badge ${STATUS_BADGE[r.statut] || 'badge-grey'}`}>{r.statut}</span>
               </td>
-              <td data-label="Notes" style={{ color: 'var(--text-3)', fontSize: '0.82rem', maxWidth: 160 }}>{r.notes || '—'}</td>
+              <td data-label="Notes" style={{ color: 'var(--text-3)', fontSize: '0.82rem' }}>{r.notes || '—'}</td>
               {showActions && (
                 <td data-label="Actions">
-                  <div style={{ display: 'flex', gap: 6 }}>
+                  <div className={compact ? 'rh-att-detail-actions' : ''} style={{ display: 'flex', gap: 6 }}>
                     {onEdit && (
-                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => onEdit(r)}>Modifier</button>
+                      compact ? (
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => onEdit(r)} title="Modifier" aria-label="Modifier">
+                          <Pencil size={14} />
+                        </button>
+                      ) : (
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => onEdit(r)}>Modifier</button>
+                      )
                     )}
                     {onDelete && (
-                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => onDelete(r.id)} style={{ color: 'var(--red)' }}>Suppr.</button>
+                      compact ? (
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => onDelete(r.id)} title="Supprimer" aria-label="Supprimer" style={{ color: 'var(--red)' }}>
+                          <Trash2 size={14} />
+                        </button>
+                      ) : (
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => onDelete(r.id)} style={{ color: 'var(--red)' }}>Suppr.</button>
+                      )
                     )}
                   </div>
                 </td>

@@ -1865,7 +1865,63 @@ tbody tr:last-child td { border-bottom: none; }
 .rh-ext-modal-box--sm { max-width: 440px; }
 .rh-ext-modal-box--md { max-width: 560px; }
 .rh-ext-modal-box--lg { max-width: 680px; }
-.rh-ext-modal-box--xl { max-width: 900px; }
+.rh-ext-modal-box--xl { max-width: 960px; }
+
+.rh-pay-detail-modal {
+  padding: 20px 24px 24px;
+}
+
+.rh-pay-detail-modal .rh-detail-table-card {
+  padding: 16px 14px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.rh-pay-detail-modal .rh-attendance-detail-scroll {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 6px;
+}
+
+.rh-pay-detail-modal .rh-attendance-detail-scroll table {
+  min-width: 820px;
+  width: 100%;
+  font-size: 0.82rem;
+}
+
+.rh-pay-detail-modal .rh-attendance-detail-scroll th {
+  white-space: nowrap;
+  font-size: 0.68rem;
+  letter-spacing: 0.04em;
+  padding: 10px 10px;
+  background: var(--surface-2, #F5F5F5);
+}
+
+.rh-pay-detail-modal .rh-attendance-detail-scroll td {
+  padding: 10px 10px;
+  vertical-align: middle;
+  white-space: nowrap;
+}
+
+.rh-pay-detail-modal .rh-attendance-detail-scroll td[data-label="Notes"] {
+  white-space: normal;
+  max-width: 140px;
+  min-width: 100px;
+}
+
+.rh-pay-detail-modal .rh-att-detail-actions {
+  display: flex;
+  gap: 4px;
+  flex-wrap: nowrap;
+  justify-content: flex-end;
+}
+
+.rh-pay-detail-modal .rh-att-detail-actions .btn {
+  padding: 5px 8px;
+  min-width: 32px;
+}
 
 .rh-pay-detail-header {
   position: relative;
