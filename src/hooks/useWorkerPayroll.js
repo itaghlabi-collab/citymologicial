@@ -227,6 +227,7 @@ export function useWorkerPayroll() {
 
   return {
     records,
+    attendance,
     workers,
     projects,
     workerOptions,

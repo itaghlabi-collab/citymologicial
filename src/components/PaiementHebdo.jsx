@@ -1,6 +1,6 @@
 import {
   Banknote, CheckCircle, Filter, Search, Users, TrendingUp, Plus, Trash2, Loader2, X,
-  FileDown, Printer, RefreshCw, Building2, Calendar,
+  FileDown, Printer, RefreshCw, Building2, Calendar, Eye,
 } from 'lucide-react';
 import { useState, useRef, useMemo, useEffect } from 'react';
 import { useWorkerPayroll } from '../hooks/useWorkerPayroll';
@@ -13,6 +13,8 @@ import {
   fmtWeekRange,
 } from '../services/rh/workerPayroll';
 import { exportWorkerPaymentPdf } from '../services/rh/workerPaymentPdf';
+import { filterAttendanceForWorkerWeek } from '../services/rh/attendance';
+import AttendanceDailyDetailTable from './rh/AttendanceDailyDetailTable';
 import { workerFullName } from '../services/rh/attendance';
 
 function fmtMAD(n) {
@@ -89,6 +91,7 @@ export default function PaiementHebdo() {
     records, projects, workersByProject, loading, saving, syncing, error, configured, load,
     createBatch, updateAdjustments, markPaid, remove, filterWorkerPayroll, computePayrollStats,
     chantiers, weeks, computeLineFromPresence, groupPayrollByProjectWeek, syncFromPresence,
+    attendance,
   } = useWorkerPayroll();
 
   const [search, setSearch] = useState('');
@@ -245,7 +248,13 @@ export default function PaiementHebdo() {
 
   async function handleWorkerPdf(record, print = false) {
     try {
-      await exportWorkerPaymentPdf(record, { print });
+      const days = record.presenceLignes || filterAttendanceForWorkerWeek(attendance, {
+        workerId: record.workerId,
+        projectId: record.projectId,
+        semaineDebut: record.semaineDebut,
+        semaineFin: record.semaineFin,
+      });
+      await exportWorkerPaymentPdf(record, { attendanceDays: days, print });
     } catch {
       notify('error', 'Erreur lors de la génération du PDF.');
     }
@@ -331,6 +340,29 @@ export default function PaiementHebdo() {
     [filtered, filterSemaine, groupPayrollByProjectWeek],
   );
 
+  const enrichedGroups = useMemo(
+    () => situationGroups.map((g) => ({
+      ...g,
+      lignes: g.lignes.map((p) => {
+        const presenceLignes = filterAttendanceForWorkerWeek(attendance, {
+          workerId: p.workerId,
+          projectId: p.projectId,
+          semaineDebut: p.semaineDebut,
+          semaineFin: p.semaineFin,
+        });
+        const nbJoursTravailles = presenceLignes.filter((d) => (d.joursEquivalent || 0) > 0).length;
+        const totalRetard = presenceLignes.reduce((s, d) => s + (Number(d.retardHeures) || 0), 0);
+        return {
+          ...p,
+          presenceLignes,
+          nbJoursTravailles: nbJoursTravailles || Math.round(Number(p.joursPaies) || 0),
+          totalRetard: Math.round(totalRetard * 100) / 100,
+        };
+      }),
+    })),
+    [situationGroups, attendance],
+  );
+
   const stats = useMemo(() => computePayrollStats(filtered), [filtered, computePayrollStats]);
   const allSelected = projectWorkers.length > 0 && projectWorkers.every((w) => form.selected[w.id]?.checked);
   const editPreview = editRecord ? calcWorkerPayrollTotals({
@@ -342,7 +374,7 @@ export default function PaiementHebdo() {
     avances: editForm.avances,
     retenues: editForm.retenues,
   }) : null;
-  const detailRecord = detailId ? records.find((p) => p.id === detailId) : null;
+  const detailRecord = detailId ? enrichedGroups.flatMap((g) => g.lignes).find((p) => p.id === detailId) : null;
 
   const weekOptions = useMemo(() => {
     const set = new Set(weeks);
@@ -436,7 +468,7 @@ export default function PaiementHebdo() {
           <Loader2 size={28} style={{ animation: 'spin 1s linear infinite', margin: '0 auto 12px' }} />
           Chargement et synchronisation des présences…
         </div>
-      ) : situationGroups.length === 0 ? (
+      ) : enrichedGroups.length === 0 ? (
         <div className="card" style={{ textAlign: 'center', padding: 48, color: 'var(--text-3)' }}>
           <Building2 size={32} style={{ margin: '0 auto 12px', opacity: 0.4 }} />
           <p style={{ margin: '0 0 8px', fontWeight: 600 }}>Aucune situation pour cette semaine</p>
@@ -448,7 +480,7 @@ export default function PaiementHebdo() {
           </button>
         </div>
       ) : (
-        situationGroups.map((group) => (
+        enrichedGroups.map((group) => (
           <div key={`${group.projectId}|${group.semaineDebut}`} className="card" style={{ marginBottom: 16 }}>
             <div style={{ marginBottom: 16, paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>
               <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
@@ -475,34 +507,25 @@ export default function PaiementHebdo() {
               <table>
                 <thead>
                   <tr>
-                    <th>Ouvrier</th><th>Fonction</th><th>Jours équiv.</th><th>H. travaillées</th><th>Tarif/j</th>
-                    <th>H. sup</th><th>Montant brut</th><th>Avances</th><th>Retenues</th>
-                    <th>Net à payer</th><th>Statut</th><th>Actions</th>
+                    <th>Ouvrier</th><th>Chef chantier</th><th>Jours trav.</th><th>H. travaillées</th>
+                    <th>Retard</th><th>Équiv. jours</th><th>Tarif/j</th><th>Net à payer</th><th>Statut</th><th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {group.lignes.map((p) => (
                     <tr key={p.id}>
-                      <td data-label="Ouvrier" style={{ fontWeight: 600 }}>
-                        <button type="button" onClick={() => openDetail(p)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600, color: 'var(--text)', padding: 0, textDecoration: 'underline', textUnderlineOffset: 2 }}>
-                          {p.ouvrier}
-                        </button>
-                        {p.autoGenerated && (
-                          <span style={{ display: 'block', fontSize: '0.68rem', color: '#2E7D32', fontWeight: 500 }}>Auto · présences</span>
-                        )}
-                      </td>
-                      <td data-label="Fonction">{p.fonction || '—'}</td>
-                      <td data-label="Jours équiv.">{fmtDayEquiv(p.joursPaies)} j</td>
+                      <td data-label="Ouvrier" style={{ fontWeight: 600 }}>{p.ouvrier}</td>
+                      <td data-label="Chef chantier">{p.chefChantier || group.chefChantier || '—'}</td>
+                      <td data-label="Jours trav.">{p.nbJoursTravailles}</td>
                       <td data-label="H. travaillées">{fmtHours(p.heuresNormales)}</td>
+                      <td data-label="Retard" style={{ color: p.totalRetard > 0 ? '#E65100' : 'var(--text-3)' }}>{p.totalRetard > 0 ? fmtHours(p.totalRetard) : '—'}</td>
+                      <td data-label="Équiv. jours">{fmtDayEquiv(p.joursPaies)} j</td>
                       <td data-label="Tarif/j">{fmtMAD(p.tarifJournalier)}</td>
-                      <td data-label="H. sup">{p.heuresSup > 0 ? `${p.heuresSup} h` : '—'}</td>
-                      <td data-label="Montant brut">{fmtMAD(p.montantBrut)}</td>
-                      <td data-label="Avances" style={{ color: '#E65100' }}>{p.avances > 0 ? fmtMAD(p.avances) : '—'}</td>
-                      <td data-label="Retenues" style={{ color: '#C62828' }}>{p.retenues > 0 ? fmtMAD(p.retenues) : '—'}</td>
                       <td data-label="Net à payer" style={{ fontWeight: 800, color: 'var(--red)' }}>{fmtMAD(p.total)}</td>
                       <td data-label="Statut"><span className={`badge ${statutBadgeClass(p.statut)}`}>{p.statut}</span></td>
                       <td data-label="Actions" className="payment-actions-cell">
                         <div className="payment-row-actions">
+                          <button type="button" className="btn btn-secondary btn-sm" onClick={() => openDetail(p)}><Eye size={13} /> Détail</button>
                           {p.statut === 'En attente' && (
                             <button type="button" className="btn btn-sm" style={{ background: '#E8F5E9', color: '#2E7D32', border: 'none' }} onClick={() => markPaid(p.id).then((r) => notify(r.success ? 'success' : 'error', r.success ? 'Payé.' : r.error))}>Payer</button>
                           )}
@@ -680,29 +703,34 @@ export default function PaiementHebdo() {
 
       {detailRecord && (
         <div className="rh-ext-modal-overlay">
-          <div className="card rh-ext-modal-box rh-ext-modal-box--md">
+          <div className="card rh-ext-modal-box rh-ext-modal-box--lg">
             <div className="flex-between" style={{ marginBottom: 16 }}>
-              <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.05rem', margin: 0 }}>Détail paiement ouvrier</h2>
+              <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.05rem', margin: 0 }}>Détail paiement — {detailRecord.ouvrier}</h2>
               <button type="button" onClick={() => setDetailId(null)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
             </div>
-            <div style={{ display: 'grid', gap: 8, fontSize: '0.88rem', marginBottom: 16 }}>
-              <div><strong>Ouvrier :</strong> {detailRecord.ouvrier} · {detailRecord.fonction || '—'}</div>
-              <div><strong>Projet :</strong> {detailRecord.projet || '—'}</div>
-              {detailRecord.chefProjet && <div><strong>Chef de projet :</strong> {detailRecord.chefProjet}</div>}
-              {detailRecord.chefChantier && <div><strong>Chef de chantier :</strong> {detailRecord.chefChantier}</div>}
-              <div><strong>Semaine :</strong> {fmtWeekRange(detailRecord.semaineDebut, detailRecord.semaineFin)}</div>
-              <div><strong>Statut :</strong> {detailRecord.statut}</div>
-              <div><strong>Jours équiv. / H. travaillées :</strong> {fmtDayEquiv(detailRecord.joursPaies)} j · {fmtHours(detailRecord.heuresNormales)}</div>
-              <div><strong>Tarif/j :</strong> {fmtMAD(detailRecord.tarifJournalier)}/j ({fmtMAD(detailRecord.tarifHoraire)}/h × 8)</div>
-              <div><strong>H. sup :</strong> {detailRecord.heuresSup || 0} h · {fmtMAD(detailRecord.montantSup)}</div>
-              <div><strong>Montant brut :</strong> {fmtMAD(detailRecord.montantBrut)}</div>
-              <div><strong style={{ color: '#E65100' }}>Avances :</strong> {fmtMAD(detailRecord.avances)}</div>
-              <div><strong style={{ color: '#C62828' }}>Retenues :</strong> {fmtMAD(detailRecord.retenues)}</div>
-              <div><strong>Net à payer :</strong> <span style={{ color: 'var(--red)', fontWeight: 800 }}>{fmtMAD(detailRecord.total)}</span></div>
-              {detailRecord.notes && <div><strong>Observations :</strong> {detailRecord.notes}</div>}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10, marginBottom: 16, padding: 12, background: '#F8F9FA', borderRadius: 8, fontSize: '0.84rem' }}>
+              <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Projet</span><div style={{ fontWeight: 700 }}>{detailRecord.projet || '—'}</div></div>
+              <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Semaine</span><div style={{ fontWeight: 700 }}>{fmtWeekRange(detailRecord.semaineDebut, detailRecord.semaineFin)}</div></div>
+              <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Jours travaillés</span><div style={{ fontWeight: 700 }}>{detailRecord.nbJoursTravailles ?? '—'}</div></div>
+              <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>H. travaillées</span><div style={{ fontWeight: 700 }}>{fmtHours(detailRecord.heuresNormales)}</div></div>
+              <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Retard</span><div style={{ fontWeight: 700, color: (detailRecord.totalRetard || 0) > 0 ? '#E65100' : 'inherit' }}>{detailRecord.totalRetard > 0 ? fmtHours(detailRecord.totalRetard) : '—'}</div></div>
+              <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Équiv. jours</span><div style={{ fontWeight: 700 }}>{fmtDayEquiv(detailRecord.joursPaies)} j</div></div>
+              <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Tarif/j</span><div style={{ fontWeight: 700 }}>{fmtMAD(detailRecord.tarifJournalier)}</div></div>
+              <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Net à payer</span><div style={{ fontWeight: 800, color: 'var(--red)' }}>{fmtMAD(detailRecord.total)}</div></div>
+              <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Statut</span><div style={{ fontWeight: 700 }}>{detailRecord.statut}</div></div>
             </div>
-            <div className="rh-ext-detail-header-actions">
-              <button type="button" className="btn btn-secondary" onClick={() => { setDetailId(null); openEdit(detailRecord); }}>Modifier</button>
+            {(detailRecord.heuresSup > 0 || detailRecord.avances > 0 || detailRecord.retenues > 0) && (
+              <div style={{ display: 'grid', gap: 4, fontSize: '0.85rem', marginBottom: 16 }}>
+                {detailRecord.heuresSup > 0 && <div>H. sup : {detailRecord.heuresSup} h · {fmtMAD(detailRecord.montantSup)}</div>}
+                {detailRecord.avances > 0 && <div style={{ color: '#E65100' }}>Avances : {fmtMAD(detailRecord.avances)}</div>}
+                {detailRecord.retenues > 0 && <div style={{ color: '#C62828' }}>Retenues : {fmtMAD(detailRecord.retenues)}</div>}
+                <div>Brut : {fmtMAD(detailRecord.montantBrut)}</div>
+              </div>
+            )}
+            <div style={{ fontSize: '0.82rem', fontWeight: 700, marginBottom: 8 }}>Présences jour par jour</div>
+            <AttendanceDailyDetailTable lignes={detailRecord.presenceLignes || []} showActions={false} />
+            <div className="rh-ext-detail-header-actions" style={{ marginTop: 16 }}>
+              <button type="button" className="btn btn-secondary" onClick={() => { setDetailId(null); openEdit(detailRecord); }}>Modifier ajustements</button>
               <button type="button" className="btn btn-secondary" onClick={() => handleWorkerPdf(detailRecord, false)}><FileDown size={14} /> PDF</button>
               <button type="button" className="btn btn-secondary" onClick={() => handleWorkerPdf(detailRecord, true)}><Printer size={14} /> Imprimer</button>
             </div>

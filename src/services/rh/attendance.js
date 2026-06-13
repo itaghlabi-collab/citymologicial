@@ -493,6 +493,151 @@ export async function countWorkerPaidDays(workerId, projectId, weekStart, weekEn
   }, 0));
 }
 
+/** Lundi ISO pour une date YYYY-MM-DD. */
+export function weekStartMonday(isoDate) {
+  const d = new Date(`${isoDate || new Date().toISOString().slice(0, 10)}T12:00:00`);
+  const day = d.getDay();
+  const diff = day === 0 ? -6 : 1 - day;
+  d.setDate(d.getDate() + diff);
+  return d.toISOString().slice(0, 10);
+}
+
+export function weekEndSunday(weekStart) {
+  const d = new Date(`${weekStart}T12:00:00`);
+  d.setDate(d.getDate() + 6);
+  return d.toISOString().slice(0, 10);
+}
+
+export function fmtWeekRange(debut, fin) {
+  const d = debut ? new Date(`${debut}T12:00:00`).toLocaleDateString('fr-MA') : '—';
+  const f = fin ? new Date(`${fin}T12:00:00`).toLocaleDateString('fr-MA') : '—';
+  return `${d} - ${f}`;
+}
+
+export function collectAttendanceWeeks(records) {
+  const set = new Set();
+  (records || []).forEach((r) => {
+    if (r.date) set.add(weekStartMonday(r.date));
+  });
+  return [...set].sort((a, b) => b.localeCompare(a));
+}
+
+/** Statut synthétique pour un ensemble de présences journalières. */
+export function resolveAttendanceGlobalStatut(lignes = []) {
+  const stats = (lignes || []).map((l) => l.statut).filter(Boolean);
+  if (!stats.length) return '—';
+  if (stats.every((s) => s === 'Absent')) return 'Absent';
+  if (stats.some((s) => s === 'Retard')) return 'Retard';
+  if (stats.every((s) => s === 'Present')) return 'Present';
+  if (stats.every((s) => s === 'Demi-journee')) return 'Demi-journee';
+  return 'Mixte';
+}
+
+/** Présences journalières d'un ouvrier sur une semaine / projet. */
+export function filterAttendanceForWorkerWeek(records, { workerId, projectId, semaineDebut, semaineFin }) {
+  const ws = semaineDebut;
+  const we = semaineFin || weekEndSunday(semaineDebut);
+  if (!ws || !workerId) return [];
+
+  return (records || []).filter((r) => {
+    if (String(r.workerId) !== String(workerId)) return false;
+    const pid = r.projectId || r.workerProjectId || '';
+    if (projectId && String(pid) !== String(projectId)) return false;
+    const d = (r.date || '').slice(0, 10);
+    if (!d || d < ws || d > we) return false;
+    return true;
+  }).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+}
+
+/** Résumé agrégé par ouvrier (projet × semaine × ouvrier). */
+export function groupAttendanceByProjectWeekWorker(records, options = {}) {
+  const { weekFilter = '', projectIdFilter = '', search = '' } = options;
+  const map = new Map();
+
+  for (const r of records || []) {
+    if (!r.workerId || !r.date) continue;
+    const pid = r.projectId || r.workerProjectId || '';
+    if (!pid) continue;
+    if (projectIdFilter && String(pid) !== String(projectIdFilter)) continue;
+    if (search && !(r.ouvrier || '').toLowerCase().includes(search.toLowerCase())) continue;
+
+    const weekStart = weekStartMonday(r.date);
+    if (weekFilter && weekStart !== weekFilter) continue;
+
+    const key = `${pid}|${weekStart}|${r.workerId}`;
+    if (!map.has(key)) {
+      map.set(key, {
+        key,
+        workerId: r.workerId,
+        ouvrier: r.ouvrier || '—',
+        projectId: String(pid),
+        projet: r.projet || '—',
+        semaineDebut: weekStart,
+        semaineFin: weekEndSunday(weekStart),
+        chefChantier: '',
+        chefCounts: {},
+        nbJoursTravailles: 0,
+        totalHeures: 0,
+        totalRetard: 0,
+        joursEquivalent: 0,
+        lignes: [],
+      });
+    }
+    const g = map.get(key);
+    g.lignes.push(r);
+    if ((r.joursEquivalent || 0) > 0) g.nbJoursTravailles += 1;
+    g.totalHeures = round2(g.totalHeures + (Number(r.heuresTravaillees) || 0));
+    g.totalRetard = round2(g.totalRetard + (Number(r.retardHeures) || 0));
+    g.joursEquivalent = round2(g.joursEquivalent + (Number(r.joursEquivalent) || 0));
+    const chef = (r.chefChantier || '').trim();
+    if (chef) g.chefCounts[chef] = (g.chefCounts[chef] || 0) + 1;
+  }
+
+  return [...map.values()].map((g) => {
+    const chefs = Object.entries(g.chefCounts).sort((a, b) => b[1] - a[1]);
+    g.chefChantier = chefs[0]?.[0] || '';
+    g.lignes.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    g.statutGlobal = resolveAttendanceGlobalStatut(g.lignes);
+    delete g.chefCounts;
+    return g;
+  }).sort((a, b) => {
+    const da = a.semaineDebut || '';
+    const db = b.semaineDebut || '';
+    if (da !== db) return db.localeCompare(da);
+    const pa = a.projet || '';
+    const pb = b.projet || '';
+    if (pa !== pb) return pa.localeCompare(pb, 'fr');
+    return (a.ouvrier || '').localeCompare(b.ouvrier || '', 'fr');
+  });
+}
+
+/** Cartes projet + semaine contenant les résumés ouvriers. */
+export function groupAttendanceSummariesByProjectWeek(records, options = {}) {
+  const summaries = groupAttendanceByProjectWeekWorker(records, options);
+  const map = new Map();
+
+  for (const s of summaries) {
+    const key = `${s.projectId}|${s.semaineDebut}`;
+    if (!map.has(key)) {
+      map.set(key, {
+        projectId: s.projectId,
+        projet: s.projet,
+        semaineDebut: s.semaineDebut,
+        semaineFin: s.semaineFin,
+        ouvriers: [],
+      });
+    }
+    map.get(key).ouvriers.push(s);
+  }
+
+  return [...map.values()].sort((a, b) => {
+    const da = a.semaineDebut || '';
+    const db = b.semaineDebut || '';
+    if (da !== db) return db.localeCompare(da);
+    return (a.projet || '').localeCompare(b.projet || '', 'fr');
+  });
+}
+
 export function collectChantierOptions(workers, records) {
   const set = new Set();
   (workers || []).forEach((w) => { if (w.chantier?.trim()) set.add(w.chantier.trim()); });

@@ -133,6 +133,10 @@ export async function generatePaymentVoucherPdf(opts) {
     detailHeaders,
     detailRows,
     detailColWidths = [70, 35, 35, 46],
+    secondaryTitle = 'Détail des présences',
+    secondaryHeaders,
+    secondaryRows,
+    secondaryColWidths,
     totals = [],
     observations = '',
     print = false,
@@ -147,9 +151,22 @@ export async function generatePaymentVoucherPdf(opts) {
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(9);
     doc.setTextColor(...TEXT);
-    doc.text('Détail du calcul', 14, y);
+    doc.text('Récapitulatif paiement', 14, y);
     y += 5;
     y = addTable(doc, y, detailHeaders, detailRows, detailColWidths);
+  }
+
+  if (secondaryHeaders?.length && secondaryRows?.length) {
+    if (y > 240) {
+      doc.addPage();
+      y = 30;
+    }
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(...TEXT);
+    doc.text(secondaryTitle, 14, y);
+    y += 5;
+    y = addTable(doc, y, secondaryHeaders, secondaryRows, secondaryColWidths || detailColWidths);
   }
 
   if (totals.length) {

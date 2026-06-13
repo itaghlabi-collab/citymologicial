@@ -1,9 +1,10 @@
-import { ClockIcon, Plus, X, Filter, CheckCircle, XCircle, CalendarOff, Pencil, Loader2, Search, Users, HardHat, Download } from 'lucide-react';
+import { ClockIcon, Plus, X, Filter, CheckCircle, XCircle, CalendarOff, Pencil, Loader2, Search, Users, HardHat, Download, Eye } from 'lucide-react';
 import { useState, useRef, useMemo } from 'react';
 import { useAttendance } from '../hooks/useAttendance';
 import { generateAttendanceSheetPdf } from '../services/rh/attendanceSheetPdf';
 import { syncPayrollAfterAttendanceChange } from '../services/rh/workerPayroll';
-import { computeAttendanceWorkMetrics, STANDARD_SHIFT_START } from '../services/rh/attendance';
+import { computeAttendanceWorkMetrics, STANDARD_SHIFT_START, groupAttendanceSummariesByProjectWeek, collectAttendanceWeeks, fmtWeekRange, weekStartMonday } from '../services/rh/attendance';
+import AttendanceDailyDetailTable from './rh/AttendanceDailyDetailTable';
 
 function EmptyState({ icon, title, sub }) {
   return (
@@ -18,7 +19,11 @@ function EmptyState({ icon, title, sub }) {
 }
 
 const STATUS_OPTS = ['Present', 'Absent', 'Retard', 'Demi-journee'];
-const STATUS_BADGE = { Present: 'badge-green', Absent: 'badge-red', Retard: 'badge-orange', 'Demi-journee': 'badge-blue' };
+const STATUS_BADGE = { Present: 'badge-green', Absent: 'badge-red', Retard: 'badge-orange', 'Demi-journee': 'badge-blue', Mixte: 'badge-grey' };
+
+function currentWeekStart() {
+  return weekStartMonday(new Date().toISOString().slice(0, 10));
+}
 
 function today() { return new Date().toISOString().slice(0, 10); }
 
@@ -235,6 +240,7 @@ export default function Presence() {
   const [filterDate, setFilterDate] = useState('');
   const [filterStatut, setFilterStatut] = useState('');
   const [filterChefId, setFilterChefId] = useState('');
+  const [filterSemaine, setFilterSemaine] = useState(currentWeekStart());
   const [pdfLoading, setPdfLoading] = useState(false);
   const [showPdfModal, setShowPdfModal] = useState(false);
   const [pdfGroupKey, setPdfGroupKey] = useState('');
@@ -244,6 +250,7 @@ export default function Presence() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [errors, setErrors] = useState({});
   const [toast, setToast] = useState(null);
+  const [detailSummary, setDetailSummary] = useState(null);
   const toastRef = useRef(null);
 
   function notify(type, msg) {
@@ -398,6 +405,27 @@ export default function Presence() {
     [records, filterOuvrier, filterProjectId, filterChefId, filterDate, filterStatut, filterAttendanceRecords],
   );
 
+  const summaryGroups = useMemo(
+    () => groupAttendanceSummariesByProjectWeek(filtered, {
+      weekFilter: filterSemaine,
+      projectIdFilter: filterProjectId,
+      search: filterOuvrier,
+    }),
+    [filtered, filterSemaine, filterProjectId, filterOuvrier],
+  );
+
+  const weekOptions = useMemo(() => {
+    const set = new Set(collectAttendanceWeeks(records));
+    if (filterSemaine) set.add(filterSemaine);
+    set.add(currentWeekStart());
+    return [...set].sort((a, b) => b.localeCompare(a));
+  }, [records, filterSemaine]);
+
+  const summaryCount = useMemo(
+    () => summaryGroups.reduce((n, g) => n + g.ouvriers.length, 0),
+    [summaryGroups],
+  );
+
   const stats = useMemo(() => computeAttendanceStats(filtered), [filtered, computeAttendanceStats]);
 
   const formWorkPreview = useMemo(
@@ -499,7 +527,7 @@ export default function Presence() {
       <div className="page-header flex-between">
         <div>
           <h1 className="page-title">Presence ouvriers</h1>
-          <p className="page-subtitle">Suivi des entrees, sorties et absences</p>
+          <p className="page-subtitle">Vue récapitulative par ouvrier et semaine — détail journalier disponible</p>
         </div>
         <button className="btn btn-primary" onClick={openCreate} disabled={loading || saving}>
           <Plus size={15} /> Ajouter une presence
@@ -531,7 +559,7 @@ export default function Presence() {
         </div>
         <div className="stat-card">
           <div className="stat-icon blue"><ClockIcon size={18} /></div>
-          <div className="stat-body"><div className="stat-value">{loading ? '—' : stats.total}</div><div className="stat-label">Enregistrements</div></div>
+          <div className="stat-body"><div className="stat-value">{loading ? '—' : summaryCount}</div><div className="stat-label">Récap. ouvriers</div></div>
         </div>
       </div>
 
@@ -541,6 +569,12 @@ export default function Presence() {
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text-3)', fontSize: '0.85rem' }}>
             <Filter size={14} /> Filtres
           </div>
+          <select value={filterSemaine} onChange={e => setFilterSemaine(e.target.value ? weekStartMonday(e.target.value) : '')}>
+            <option value="">Toutes les semaines</option>
+            {weekOptions.map(w => (
+              <option key={w} value={w}>Semaine du {new Date(`${w}T12:00:00`).toLocaleDateString('fr-MA')}</option>
+            ))}
+          </select>
           <select value={filterOuvrier} onChange={e => setFilterOuvrier(e.target.value)}>
             <option value="">Tous les ouvriers</option>
             {filterWorkerOptions.map(w => <option key={w.id} value={w.label}>{w.label}</option>)}
@@ -579,61 +613,88 @@ export default function Presence() {
         </div>
       </div>
 
-      {/* Table */}
-      <div className="card">
-        <div className="card-title" style={{ marginBottom: 16 }}><ClockIcon size={16} /> Feuille de presence</div>
-        {loading ? (
-          <div style={{ textAlign: 'center', padding: '40px 24px', color: 'var(--text-3)' }}>
-            <Loader2 size={28} style={{ animation: 'spin 1s linear infinite', margin: '0 auto 12px' }} />
-            <div style={{ fontSize: '0.88rem' }}>Chargement des présences…</div>
-          </div>
-        ) : filtered.length === 0 ? (
+      {loading ? (
+        <div className="card" style={{ textAlign: 'center', padding: '40px 24px', color: 'var(--text-3)' }}>
+          <Loader2 size={28} style={{ animation: 'spin 1s linear infinite', margin: '0 auto 12px' }} />
+          <div style={{ fontSize: '0.88rem' }}>Chargement des présences…</div>
+        </div>
+      ) : summaryGroups.length === 0 ? (
+        <div className="card">
           <EmptyState
             icon={<CalendarOff size={22} style={{ color: 'var(--text-3)' }} />}
             title={records.length === 0 ? "Aucune presence enregistree" : "Aucun resultat pour ces filtres"}
             sub={records.length === 0 ? "Ajoutez la premiere feuille de presence via le bouton ci-dessus" : "Modifiez vos criteres de recherche"}
           />
-        ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr><th>Ouvrier</th><th>Date</th><th>Projet</th><th>Chef chantier</th><th>Entree</th><th>Sortie</th><th>H. trav.</th><th>Retard</th><th>Equiv. j</th><th>Statut</th><th>Notes</th><th>Actions</th><th className="rh-ext-col-index">#</th></tr>
-              </thead>
-              <tbody>
-                {filtered.map((r, i) => (
-                  <tr key={r.id}>
-                    <td data-label="Ouvrier" style={{ fontWeight: 600 }}>{r.ouvrier}</td>
-                    <td data-label="Date" style={{ whiteSpace: 'nowrap' }}>{r.date}</td>
-                    <td data-label="Projet" style={{ color: 'var(--text-2)' }}>{r.projet}</td>
-                    <td data-label="Chef chantier" style={{ color: 'var(--text-2)', fontSize: '0.84rem' }}>{r.chefChantier || '—'}</td>
-                    <td data-label="Entree" style={{ fontFamily: 'var(--font-head)', fontWeight: 700 }}>{r.heureEntree || '—'}</td>
-                    <td data-label="Sortie" style={{ fontFamily: 'var(--font-head)', fontWeight: 700 }}>{r.heureSortie || '—'}</td>
-                    <td data-label="H. trav.">{r.heuresTravaillees > 0 ? fmtHours(r.heuresTravaillees) : '—'}</td>
-                    <td data-label="Retard" style={{ color: r.retardHeures > 0 ? '#E65100' : 'var(--text-3)' }}>{r.retardHeures > 0 ? fmtHours(r.retardHeures) : '—'}</td>
-                    <td data-label="Equiv. j" style={{ fontWeight: 600 }}>{r.joursEquivalent > 0 ? fmtDayEquiv(r.joursEquivalent) : '—'}</td>
-                    <td data-label="Statut"><span className={'badge ' + (STATUS_BADGE[r.statut] || 'badge-grey')}>{r.statut}</span></td>
-                    <td data-label="Notes" style={{ color: 'var(--text-3)', fontSize: '0.82rem' }}>{r.notes || '—'}</td>
-                    <td className="rh-ext-actions-cell">
-                      <div className="rh-ext-actions">
-                        <button className="btn btn-ghost btn-sm" style={{ padding: '4px 8px' }} onClick={() => handleDownloadRow(r)} disabled={pdfLoading} title="PDF fiche du jour">
-                          <Download size={13} style={{ color: 'var(--red)' }} />
-                        </button>
-                        <button className="btn btn-ghost btn-sm" style={{ padding: '4px 8px' }} onClick={() => openEdit(r)} title="Modifier">
-                          <Pencil size={13} style={{ color: 'var(--text-2)' }} />
-                        </button>
-                        <button className="btn btn-ghost btn-sm" style={{ padding: '4px 8px' }} onClick={() => handleDelete(r.id)} title="Supprimer">
-                          <X size={13} style={{ color: 'var(--red)' }} />
-                        </button>
-                      </div>
-                    </td>
-                    <td className="rh-ext-col-index" style={{ color: 'var(--text-3)', fontSize: '0.78rem' }}>{String(i + 1).padStart(3, '0')}</td>
+        </div>
+      ) : (
+        summaryGroups.map((group) => (
+          <div key={`${group.projectId}|${group.semaineDebut}`} className="card" style={{ marginBottom: 16 }}>
+            <div className="card-title" style={{ marginBottom: 12 }}><ClockIcon size={16} /> {group.projet}</div>
+            <div style={{ fontSize: '0.82rem', color: 'var(--text-3)', marginBottom: 12 }}>
+              Semaine : {fmtWeekRange(group.semaineDebut, group.semaineFin)} · {group.ouvriers.length} ouvrier{group.ouvriers.length > 1 ? 's' : ''}
+            </div>
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Ouvrier</th><th>Chef chantier</th><th>Jours trav.</th><th>H. travaillées</th>
+                    <th>Retard</th><th>Équiv. jours</th><th>Statut</th><th>Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {group.ouvriers.map((s) => (
+                    <tr key={s.key}>
+                      <td data-label="Ouvrier" style={{ fontWeight: 600 }}>{s.ouvrier}</td>
+                      <td data-label="Chef chantier">{s.chefChantier || '—'}</td>
+                      <td data-label="Jours trav.">{s.nbJoursTravailles}</td>
+                      <td data-label="H. travaillées">{fmtHours(s.totalHeures)}</td>
+                      <td data-label="Retard" style={{ color: s.totalRetard > 0 ? '#E65100' : 'var(--text-3)' }}>{s.totalRetard > 0 ? fmtHours(s.totalRetard) : '—'}</td>
+                      <td data-label="Équiv. jours" style={{ fontWeight: 600 }}>{fmtDayEquiv(s.joursEquivalent)}</td>
+                      <td data-label="Statut"><span className={'badge ' + (STATUS_BADGE[s.statutGlobal] || 'badge-grey')}>{s.statutGlobal}</span></td>
+                      <td data-label="Actions">
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => setDetailSummary(s)}>
+                          <Eye size={13} /> Voir détail
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-        )}
-      </div>
+        ))
+      )}
+
+      {detailSummary && (
+        <div className="rh-ext-modal-overlay" style={{ zIndex: 1000 }}>
+          <div className="card rh-ext-modal-box rh-ext-modal-box--lg">
+            <div className="flex-between" style={{ marginBottom: 16 }}>
+              <div>
+                <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.05rem', margin: 0 }}>{detailSummary.ouvrier}</h2>
+                <div style={{ fontSize: '0.83rem', color: 'var(--text-3)', marginTop: 4 }}>
+                  {detailSummary.projet} · {fmtWeekRange(detailSummary.semaineDebut, detailSummary.semaineFin)}
+                </div>
+              </div>
+              <button type="button" onClick={() => setDetailSummary(null)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={20} /></button>
+            </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: 10, marginBottom: 16, padding: 12, background: '#F8F9FA', borderRadius: 8, fontSize: '0.84rem' }}>
+              <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Jours travaillés</span><div style={{ fontWeight: 700 }}>{detailSummary.nbJoursTravailles}</div></div>
+              <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Heures travaillées</span><div style={{ fontWeight: 700 }}>{fmtHours(detailSummary.totalHeures)}</div></div>
+              <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Retard total</span><div style={{ fontWeight: 700, color: detailSummary.totalRetard > 0 ? '#E65100' : 'inherit' }}>{detailSummary.totalRetard > 0 ? fmtHours(detailSummary.totalRetard) : '—'}</div></div>
+              <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Équivalent jours</span><div style={{ fontWeight: 700 }}>{fmtDayEquiv(detailSummary.joursEquivalent)} j</div></div>
+            </div>
+            <div style={{ fontSize: '0.82rem', fontWeight: 700, marginBottom: 8 }}>Détail jour par jour</div>
+            <AttendanceDailyDetailTable
+              lignes={detailSummary.lignes}
+              onEdit={(r) => { setDetailSummary(null); openEdit(r); }}
+              onDelete={async (id) => {
+                await handleDelete(id);
+                setDetailSummary(null);
+              }}
+            />
+          </div>
+        </div>
+      )}
 
       {/* Modal choix fiche PDF (plusieurs projets / dates) */}
       {showPdfModal && (
