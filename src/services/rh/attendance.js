@@ -103,12 +103,15 @@ export function normalizeAttendance(row) {
   const w = row.workers;
   const proj = row.projects || w?.projects;
   const projetNom = proj?.nom || row.chantier || w?.chantier || '';
+  const resolvedProjectId = row.project_id
+    ? String(row.project_id)
+    : (w?.project_id ? String(w.project_id) : '');
   return enrichAttendanceMetrics({
     id: row.id,
     workerId: row.worker_id || '',
-    ouvrier: workerFullName(w) || row.ouvrier_label || row.ouvrier || '—',
-    projectId: row.project_id ? String(row.project_id) : (w?.project_id ? String(w.project_id) : ''),
-    workerProjectId: w?.project_id ? String(w.project_id) : '',
+    ouvrier: workerFullName(w) || row.ouvrier_label || '—',
+    projectId: resolvedProjectId,
+    workerProjectId: w?.project_id ? String(w.project_id) : resolvedProjectId,
     projet: projetNom,
     date: row.date || '',
     heureEntree: fmtTime(row.heure_entree),
@@ -549,17 +552,13 @@ export function filterAttendanceForWorkerWeek(records, { workerId, projectId, se
   }).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 }
 
-/** Identifiant projet pour le regroupement (UUID ou fallback chantier). */
-export function resolveAttendanceProjectKey(r) {
-  const pid = r.projectId || r.workerProjectId || '';
-  if (pid) {
-    return { projectId: String(pid), projet: (r.projet || '').trim() || '—' };
-  }
-  const label = (r.projet || r.chantier || '').trim();
-  if (label) {
-    return { projectId: `chantier:${label.toLowerCase()}`, projet: label };
-  }
-  return null;
+/** Clé de regroupement récap : worker_id + project_id + lundi de semaine. */
+export function attendanceRecapKey(r) {
+  if (!r?.workerId || !r?.date) return null;
+  const projectId = String(r.projectId || r.workerProjectId || '').trim();
+  if (!projectId) return null;
+  const weekStart = weekStartMonday(r.date);
+  return `${r.workerId}|${projectId}|${weekStart}`;
 }
 
 /** Résumé agrégé par ouvrier (projet × semaine × ouvrier). */
@@ -568,32 +567,23 @@ export function groupAttendanceByProjectWeekWorker(records, options = {}) {
   const map = new Map();
 
   for (const r of records || []) {
-    if (!r.workerId || !r.date) continue;
-
-    const projectKey = resolveAttendanceProjectKey(r);
-    if (!projectKey) continue;
-
-    const { projectId: pid, projet: projetLabel } = projectKey;
-    if (projectIdFilter) {
-      const fp = String(projectIdFilter);
-      const match = String(r.projectId) === fp
-        || String(r.workerProjectId) === fp
-        || String(pid) === fp;
-      if (!match) continue;
-    }
-    if (search && !(r.ouvrier || '').toLowerCase().includes(search.toLowerCase())) continue;
+    const recapKey = attendanceRecapKey(r);
+    if (!recapKey) continue;
 
     const weekStart = weekStartMonday(r.date);
+    const pid = String(r.projectId || r.workerProjectId || '').trim();
+
+    if (projectIdFilter && pid !== String(projectIdFilter)) continue;
+    if (search && !(r.ouvrier || '').toLowerCase().includes(search.toLowerCase())) continue;
     if (weekFilter && weekStart !== weekFilter) continue;
 
-    const key = `${pid}|${weekStart}|${r.workerId}`;
-    if (!map.has(key)) {
-      map.set(key, {
-        key,
+    if (!map.has(recapKey)) {
+      map.set(recapKey, {
+        key: recapKey,
         workerId: r.workerId,
         ouvrier: r.ouvrier || '—',
         projectId: pid,
-        projet: projetLabel || r.projet || '—',
+        projet: (r.projet || '').trim() || '—',
         semaineDebut: weekStart,
         semaineFin: weekEndSunday(weekStart),
         chefChantier: '',
@@ -605,7 +595,7 @@ export function groupAttendanceByProjectWeekWorker(records, options = {}) {
         lignes: [],
       });
     }
-    const g = map.get(key);
+    const g = map.get(recapKey);
     g.lignes.push(r);
     if ((r.joursEquivalent || 0) > 0) g.nbJoursTravailles += 1;
     g.totalHeures = round2(g.totalHeures + (Number(r.heuresTravaillees) || 0));

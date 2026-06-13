@@ -372,10 +372,11 @@ export default function Presence() {
 
     setShowModal(false);
     setEditId(null);
+    setDetailSummary(null);
 
     const addedWeek = weekStartMonday(form.date);
     setFilterSemaine(addedWeek);
-    if (form.projectId) setFilterProjectId(form.projectId);
+    if (form.projectId) setFilterProjectId(String(form.projectId));
     setFilterDate('');
 
     syncPayrollAfterAttendanceChange().catch(() => {});
@@ -384,7 +385,10 @@ export default function Presence() {
   async function handleDelete(id) {
     const result = await remove(id);
     notify(result.success ? 'success' : 'error', result.success ? 'Enregistrement supprime.' : (result.error || 'Erreur.'));
-    if (result.success) syncPayrollAfterAttendanceChange().catch(() => {});
+    if (result.success) {
+      setDetailSummary(null);
+      syncPayrollAfterAttendanceChange().catch(() => {});
+    }
   }
 
   const filterWorkerOptions = useMemo(
@@ -408,11 +412,6 @@ export default function Presence() {
     [records, filterOuvrier, filterProjectId, filterChefId, filterDate, filterStatut, filterAttendanceRecords],
   );
 
-  const weekScopedRecords = useMemo(() => {
-    if (!filterSemaine) return filtered;
-    return filtered.filter((r) => r.date && weekStartMonday(r.date) === filterSemaine);
-  }, [filtered, filterSemaine]);
-
   const summaryGroups = useMemo(
     () => groupAttendanceSummariesByProjectWeek(filtered, {
       weekFilter: filterSemaine,
@@ -434,7 +433,7 @@ export default function Presence() {
     [summaryGroups],
   );
 
-  const stats = useMemo(() => computeAttendanceStats(weekScopedRecords), [weekScopedRecords, computeAttendanceStats]);
+  const stats = useMemo(() => computeAttendanceStats(filtered), [filtered, computeAttendanceStats]);
 
   const formWorkPreview = useMemo(
     () => computeAttendanceWorkMetrics(form),
