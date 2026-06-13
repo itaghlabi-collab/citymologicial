@@ -1,4 +1,4 @@
-import { ClockIcon, Plus, X, Filter, CheckCircle, XCircle, CalendarOff, Pencil, Loader2, Search, Users, HardHat, Download, Briefcase } from 'lucide-react';
+import { ClockIcon, Plus, X, Filter, CheckCircle, XCircle, CalendarOff, Pencil, Loader2, Search, Users, HardHat, Download } from 'lucide-react';
 import { useState, useRef, useMemo } from 'react';
 import { useAttendance } from '../hooks/useAttendance';
 import { generateAttendanceSheetPdf } from '../services/rh/attendanceSheetPdf';
@@ -40,14 +40,34 @@ const INPUT_S = (err) => ({
 
 const EMPTY_FORM = {
   workerId: '', workerIds: [], projectId: '', projet: '', projetNom: '',
-  chefProjetNom: '',
   chefChantierId: '', chefChantierNom: '',
   date: today(), heureEntree: '07:30', heureSortie: '17:00', statut: 'Present', notes: '',
 };
 
-function chefProjetFromProject(projects, projectId) {
+function matchChefChantierEmployee(chefsChantier, name) {
+  const chefName = (name || '').trim().toLowerCase();
+  if (!chefName) return null;
+  return (chefsChantier || []).find((c) => c.label.toLowerCase() === chefName
+    || c.label.toLowerCase().includes(chefName)
+    || chefName.includes(c.label.toLowerCase())) || null;
+}
+
+function chefChantierFromProject(projects, projectId) {
   const proj = (projects || []).find((o) => String(o.id) === String(projectId));
-  return (proj?.chef_projet || proj?.responsable || '').trim();
+  return (proj?.chef_chantier || '').trim();
+}
+
+function applyProjectChefChantier(next, projectId, projects, chefsChantier) {
+  const proj = (projects || []).find((o) => String(o.id) === String(projectId));
+  const name = (proj?.chef_chantier || '').trim();
+  next.chefChantierNom = name;
+  if (name) {
+    const match = matchChefChantierEmployee(chefsChantier, name);
+    next.chefChantierId = match?.id || '';
+  } else {
+    next.chefChantierId = '';
+  }
+  return next;
 }
 
 function WorkerChecklist({ workers, selectedIds, onChange, error, disabled }) {
@@ -217,29 +237,20 @@ export default function Presence() {
           next.projectId = w.project_id;
           next.projetNom = w.projet_nom || '';
           next.projet = w.projet_nom || '';
-          next.chefProjetNom = chefProjetFromProject(projects, w.project_id);
+          applyProjectChefChantier(next, w.project_id, projects, chefsChantier);
         }
       }
       if (k === 'projectId') {
         const pr = projectOptions.find((o) => o.id === v);
         next.projetNom = pr?.label?.includes(' — ') ? pr.label.split(' — ').slice(1).join(' — ') : (pr?.label || '');
         next.projet = next.projetNom;
-        next.chefProjetNom = chefProjetFromProject(projects, v);
         const allowed = new Set(
           filterWorkersForProject(workerOptions, v).map((w) => w.id),
         );
         next.workerIds = (p.workerIds || []).filter((id) => allowed.has(id));
-        const proj = projects.find((o) => String(o.id) === String(v));
-        if (proj?.chef_chantier) {
-          const chefName = proj.chef_chantier.trim().toLowerCase();
-          const match = chefsChantier.find((c) => c.label.toLowerCase() === chefName
-            || c.label.toLowerCase().includes(chefName)
-            || chefName.includes(c.label.toLowerCase()));
-          if (match) {
-            next.chefChantierId = match.id;
-            next.chefChantierNom = match.label;
-          }
-        } else if (!v) {
+        if (v) {
+          applyProjectChefChantier(next, v, projects, chefsChantier);
+        } else {
           next.chefChantierId = '';
           next.chefChantierNom = '';
         }
@@ -267,9 +278,8 @@ export default function Presence() {
       projectId: record.projectId || '',
       projet: record.projet || '',
       projetNom: record.projet || '',
-      chefProjetNom: chefProjetFromProject(projects, record.projectId),
       chefChantierId: record.chefChantierId || '',
-      chefChantierNom: record.chefChantier || '',
+      chefChantierNom: record.chefChantier || chefChantierFromProject(projects, record.projectId),
       date: record.date || today(),
       heureEntree: record.heureEntree || '07:30',
       heureSortie: record.heureSortie || '17:00',
@@ -640,37 +650,54 @@ export default function Presence() {
                 </div>
                 <div className="form-group">
                   <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <Briefcase size={14} /> Chef de projet
+                    <HardHat size={14} /> Chef de chantier
                   </label>
                   <input
                     type="text"
                     readOnly
-                    value={form.chefProjetNom || (form.projectId ? '—' : '')}
+                    value={form.chefChantierNom || (form.projectId ? '—' : '')}
                     placeholder={form.projectId ? 'Non renseigné sur le projet' : 'Choisir un projet…'}
                     style={{ ...INPUT_S(false), background: 'var(--surface-2)', color: 'var(--text-2)' }}
                   />
-                  {form.chefProjetNom && (
+                  {form.chefChantierNom && (
                     <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 4 }}>
                       Renseigné automatiquement depuis la fiche projet
                     </div>
                   )}
                 </div>
               </div>
-              <div className="form-group">
-                <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <HardHat size={14} /> Chef de chantier
-                </label>
-                <select value={form.chefChantierId} onChange={e => setF('chefChantierId', e.target.value)} style={INPUT_S(errors.chefChantierId)}>
-                  <option value="">Qui saisit la présence ?</option>
-                  {chefsChantier.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
-                </select>
-                {errors.chefChantierId && <div style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.chefChantierId}</div>}
-                {chefsChantier.length === 0 && (
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-3)', marginTop: 4 }}>
-                    Liste vide : vérifiez le poste « Chef de chantier » en RH ou rechargez la page.
+              {!form.chefChantierId && form.projectId && (
+                <div className="form-group">
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <HardHat size={14} /> Associer le chef de chantier (RH)
+                  </label>
+                  <select value={form.chefChantierId} onChange={e => setF('chefChantierId', e.target.value)} style={INPUT_S(errors.chefChantierId)}>
+                    <option value="">Choisir dans la liste RH…</option>
+                    {chefsChantier.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                  </select>
+                  {errors.chefChantierId && <div style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.chefChantierId}</div>}
+                  <div style={{ fontSize: '0.72rem', color: '#E65100', marginTop: 4 }}>
+                    « {form.chefChantierNom} » n&apos;a pas été trouvé en RH — sélectionnez manuellement.
                   </div>
-                )}
-              </div>
+                </div>
+              )}
+              {form.chefChantierId && !form.chefChantierNom && (
+                <div className="form-group">
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <HardHat size={14} /> Qui saisit la présence ?
+                  </label>
+                  <select value={form.chefChantierId} onChange={e => setF('chefChantierId', e.target.value)} style={INPUT_S(errors.chefChantierId)}>
+                    <option value="">Choisir…</option>
+                    {chefsChantier.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                  </select>
+                  {errors.chefChantierId && <div style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.chefChantierId}</div>}
+                  {chefsChantier.length === 0 && (
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-3)', marginTop: 4 }}>
+                      Liste vide : vérifiez le poste « Chef de chantier » en RH ou rechargez la page.
+                    </div>
+                  )}
+                </div>
+              )}
 
               {editId ? (
                 <>
