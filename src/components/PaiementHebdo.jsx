@@ -90,7 +90,7 @@ function statutBadgeClass(statut) {
 export default function PaiementHebdo() {
   const {
     records, projects, workersByProject, loading, saving, syncing, error, configured, load,
-    createBatch, updateAdjustments, markPaid, remove, filterWorkerPayroll, computePayrollStats,
+    createBatch, updateAdjustments, markPaid, remove, filterWorkerPayroll,
     chantiers, weeks, computeLineFromPresence, groupPayrollByProjectWeek, syncFromPresence,
     attendance,
   } = useWorkerPayroll();
@@ -245,8 +245,12 @@ export default function PaiementHebdo() {
   }
 
   function openDetail(record, chefChantier = '') {
-    setDetailId(record.id);
+    setDetailId(record.key || record.id);
     setDetailChefChantier(chefChantier);
+  }
+
+  function payrollGroupKey(group) {
+    return filterSemaine ? `${group.projectId}|${group.semaineDebut}` : String(group.projectId || group.projet);
   }
 
   async function handleWorkerPdf(record, print = false) {
@@ -356,7 +360,20 @@ export default function PaiementHebdo() {
     [situationGroups, attendance],
   );
 
-  const stats = useMemo(() => computePayrollStats(filtered), [filtered, computePayrollStats]);
+  const summaryCount = useMemo(
+    () => enrichedGroups.reduce((n, g) => n + g.lignes.length, 0),
+    [enrichedGroups],
+  );
+
+  const stats = useMemo(() => {
+    const lignes = enrichedGroups.flatMap((g) => g.lignes);
+    return {
+      totalAPayer: Math.round(lignes.reduce((s, p) => s + (Number(p.total) || 0), 0) * 100) / 100,
+      totalPaye: Math.round(lignes.filter((p) => p.statut === 'Payé').reduce((s, p) => s + (Number(p.total) || 0), 0) * 100) / 100,
+      totalEnAttente: Math.round(lignes.filter((p) => p.statut === 'En attente').reduce((s, p) => s + (Number(p.total) || 0), 0) * 100) / 100,
+      count: summaryCount,
+    };
+  }, [enrichedGroups, summaryCount]);
   const allSelected = projectWorkers.length > 0 && projectWorkers.every((w) => form.selected[w.id]?.checked);
   const editPreview = editRecord ? calcWorkerPayrollTotals({
     joursPaies: editRecord.joursPaies,
@@ -367,7 +384,9 @@ export default function PaiementHebdo() {
     avances: editForm.avances,
     retenues: editForm.retenues,
   }) : null;
-  const detailRecord = detailId ? enrichedGroups.flatMap((g) => g.lignes).find((p) => p.id === detailId) : null;
+  const detailRecord = detailId
+    ? enrichedGroups.flatMap((g) => g.lignes).find((p) => (p.key || p.id) === detailId)
+    : null;
 
   const weekOptions = useMemo(() => {
     const set = new Set([...weeks, ...collectAttendanceWeeks(attendance)]);
@@ -383,9 +402,7 @@ export default function PaiementHebdo() {
       <div className="page-header flex-between">
         <div>
           <h1 className="page-title">Paiement hebdomadaire ouvriers</h1>
-          <p className="page-subtitle">
-            Présences → jours équivalents (8 h = 1 j) × tarif journalier + heures sup − avances − retenues
-          </p>
+          <p className="page-subtitle">Une ligne par ouvrier — détail journalier et récap financier dans « Détail »</p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button
@@ -424,10 +441,10 @@ export default function PaiementHebdo() {
       )}
 
       <div className="stat-grid rh-ext-stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(190px,1fr))' }}>
-        <div className="stat-card"><div className="stat-icon blue"><Banknote size={18} /></div><div className="stat-body"><div className="stat-value" style={{ fontSize: '1rem' }}>{loading ? '—' : fmtMAD(stats.totalAPayer)}</div><div className="stat-label">Net semaine</div></div></div>
+        <div className="stat-card"><div className="stat-icon blue"><Banknote size={18} /></div><div className="stat-body"><div className="stat-value" style={{ fontSize: '1rem' }}>{loading ? '—' : fmtMAD(stats.totalAPayer)}</div><div className="stat-label">Net {filterSemaine ? 'semaine' : 'total'}</div></div></div>
         <div className="stat-card"><div className="stat-icon green"><CheckCircle size={18} /></div><div className="stat-body"><div className="stat-value" style={{ fontSize: '1rem' }}>{loading ? '—' : fmtMAD(stats.totalPaye)}</div><div className="stat-label">Payé</div></div></div>
         <div className="stat-card"><div className="stat-icon orange"><TrendingUp size={18} /></div><div className="stat-body"><div className="stat-value" style={{ fontSize: '1rem' }}>{loading ? '—' : fmtMAD(stats.totalEnAttente)}</div><div className="stat-label">En attente</div></div></div>
-        <div className="stat-card"><div className="stat-icon"><Users size={18} /></div><div className="stat-body"><div className="stat-value">{loading ? '—' : stats.count}</div><div className="stat-label">Lignes</div></div></div>
+        <div className="stat-card"><div className="stat-icon"><Users size={18} /></div><div className="stat-body"><div className="stat-value">{loading ? '—' : stats.count}</div><div className="stat-label">Récap. ouvriers</div></div></div>
       </div>
 
       <div className="card rh-ext-filter-card">
@@ -465,7 +482,7 @@ export default function PaiementHebdo() {
       ) : enrichedGroups.length === 0 ? (
         <div className="card" style={{ textAlign: 'center', padding: 48, color: 'var(--text-3)' }}>
           <Building2 size={32} style={{ margin: '0 auto 12px', opacity: 0.4 }} />
-          <p style={{ margin: '0 0 8px', fontWeight: 600 }}>Aucune situation pour cette semaine</p>
+          <p style={{ margin: '0 0 8px', fontWeight: 600 }}>{filterSemaine ? 'Aucune situation pour cette semaine' : 'Aucune situation enregistrée'}</p>
           <p style={{ margin: '0 0 16px', fontSize: '0.85rem' }}>
             Les paiements sont générés automatiquement dès qu&apos;une présence est enregistrée.
           </p>
@@ -475,7 +492,7 @@ export default function PaiementHebdo() {
         </div>
       ) : (
         enrichedGroups.map((group) => (
-          <div key={`${group.projectId}|${group.semaineDebut}`} className="card" style={{ marginBottom: 16 }}>
+          <div key={payrollGroupKey(group)} className="card" style={{ marginBottom: 16 }}>
             <div style={{ marginBottom: 16, paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>
               <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
                 <div>
@@ -483,16 +500,14 @@ export default function PaiementHebdo() {
                     <Building2 size={16} style={{ verticalAlign: -2, marginRight: 6 }} />
                     {group.projet}
                   </div>
-                  <div style={{ fontSize: '0.83rem', color: 'var(--text-3)', display: 'flex', flexWrap: 'wrap', gap: '8px 20px' }}>
-                    {group.chefProjet && <span><strong>Chef de projet :</strong> {group.chefProjet}</span>}
-                    {group.chefChantier && <span><strong>Chef de chantier :</strong> {group.chefChantier}</span>}
-                    <span><strong>Semaine :</strong> {fmtWeekRange(group.semaineDebut, group.semaineFin)}</span>
+                  <div style={{ fontSize: '0.83rem', color: 'var(--text-3)' }}>
+                    {filterSemaine ? fmtWeekRange(group.semaineDebut, group.semaineFin) : 'Toutes les semaines'} · {group.lignes.length} ouvrier{group.lignes.length > 1 ? 's' : ''}
                   </div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
                   <div style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>Total net chantier</div>
                   <div style={{ fontWeight: 800, color: 'var(--red)', fontSize: '1.1rem' }}>{fmtMAD(group.totalNet)}</div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-3)' }}>Brut {fmtMAD(group.totalBrut)} · {group.lignes.length} ouvrier{group.lignes.length > 1 ? 's' : ''}</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-3)' }}>Brut {fmtMAD(group.totalBrut)}</div>
                 </div>
               </div>
             </div>
@@ -501,32 +516,43 @@ export default function PaiementHebdo() {
               <table>
                 <thead>
                   <tr>
-                    <th>Ouvrier</th><th>Chef chantier</th><th>Jours trav.</th><th>H. travaillées</th>
-                    <th>Retard</th><th>Équiv. jours</th><th>Tarif/j</th><th>Net à payer</th><th>Statut</th><th>Actions</th>
+                    <th>Ouvrier</th><th>Projet / chantier</th><th>Chef chantier</th><th>Présences</th>
+                    <th>H. travaillées</th><th>Retard</th><th>Équiv. jours</th><th>Tarif/j</th><th>Net à payer</th><th>Statut</th><th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {group.lignes.map((p) => (
-                    <tr key={p.id}>
-                      <td data-label="Ouvrier" style={{ fontWeight: 600 }}>{p.ouvrier}</td>
+                    <tr key={p.key || p.id}>
+                      <td data-label="Ouvrier">
+                        <button
+                          type="button"
+                          onClick={() => openDetail(p, group.chefChantier)}
+                          style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontWeight: 700, color: 'var(--text)', textAlign: 'left', fontFamily: 'inherit', fontSize: 'inherit' }}
+                        >
+                          {p.ouvrier}
+                        </button>
+                      </td>
+                      <td data-label="Projet / chantier">{p.projet || group.projet || '—'}</td>
                       <td data-label="Chef chantier">{p.chefChantier || group.chefChantier || '—'}</td>
-                      <td data-label="Jours trav.">{p.nbJoursTravailles}</td>
+                      <td data-label="Présences">{p.nbPresences ?? p.presenceLignes?.length ?? p.nbJoursTravailles ?? 0}</td>
                       <td data-label="H. travaillées">{fmtHours(p.heuresNormales)}</td>
                       <td data-label="Retard" style={{ color: p.totalRetard > 0 ? '#E65100' : 'var(--text-3)' }}>{p.totalRetard > 0 ? fmtHours(p.totalRetard) : '—'}</td>
-                      <td data-label="Équiv. jours">{fmtDayEquiv(p.joursPaies)} j</td>
+                      <td data-label="Équiv. jours" style={{ fontWeight: 600 }}>{fmtDayEquiv(p.joursPaies)}</td>
                       <td data-label="Tarif/j">{fmtMAD(p.tarifJournalier)}</td>
                       <td data-label="Net à payer" style={{ fontWeight: 800, color: 'var(--red)' }}>{fmtMAD(p.total)}</td>
                       <td data-label="Statut"><span className={`badge ${statutBadgeClass(p.statut)}`}>{p.statut}</span></td>
                       <td data-label="Actions" className="payment-actions-cell">
                         <div className="payment-row-actions">
                           <button type="button" className="btn btn-secondary btn-sm" onClick={() => openDetail(p, group.chefChantier)}><Eye size={13} /> Détail</button>
-                          {p.statut === 'En attente' && (
+                          {!p.mergeAllWeeks && p.statut === 'En attente' && (
                             <button type="button" className="btn btn-sm" style={{ background: '#E8F5E9', color: '#2E7D32', border: 'none' }} onClick={() => markPaid(p.id).then((r) => notify(r.success ? 'success' : 'error', r.success ? 'Payé.' : r.error))}>Payer</button>
                           )}
-                          <button type="button" className="btn btn-secondary btn-sm" onClick={() => openEdit(p)}>Modifier</button>
+                          {!p.mergeAllWeeks && (
+                            <button type="button" className="btn btn-secondary btn-sm" onClick={() => openEdit(p)}>Modifier</button>
+                          )}
                           <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleWorkerPdf(p, false)}><FileDown size={13} /></button>
                           <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleWorkerPdf(p, true)}><Printer size={13} /></button>
-                          {!p.autoGenerated && (
+                          {!p.autoGenerated && !p.mergeAllWeeks && (
                             <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleDelete(p.id)} title="Supprimer"><Trash2 size={13} style={{ color: 'var(--red)' }} /></button>
                           )}
                         </div>

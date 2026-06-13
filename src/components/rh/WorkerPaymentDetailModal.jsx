@@ -130,7 +130,16 @@ export default function WorkerPaymentDetailModal({
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text-2)' }}>
                   <Calendar size={14} style={{ color: 'var(--text-3)', flexShrink: 0 }} />
-                  <span><span style={{ color: 'var(--text-3)' }}>Période · </span><strong>{fmtWeekRange(record.semaineDebut, record.semaineFin)}</strong></span>
+                  <span><span style={{ color: 'var(--text-3)' }}>Période · </span><strong>{
+                    record.mergeAllWeeks || !record.semaineDebut
+                      ? (() => {
+                        const dates = (record.presenceLignes || []).map((l) => l.date).filter(Boolean).sort();
+                        if (dates.length >= 2) return fmtWeekRange(dates[0], dates[dates.length - 1]);
+                        if (dates.length === 1) return fmtWeekRange(dates[0], dates[0]);
+                        return 'Toutes les semaines';
+                      })()
+                      : fmtWeekRange(record.semaineDebut, record.semaineFin)
+                  }</strong></span>
                 </div>
               </div>
             </div>

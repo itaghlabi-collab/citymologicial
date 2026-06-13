@@ -552,6 +552,31 @@ export function filterAttendanceForWorkerWeek(records, { workerId, projectId, se
   }).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 }
 
+/** Présences journalières d'un ouvrier sur un projet (toutes semaines). */
+export function filterAttendanceForWorkerProject(records, { workerId, projectId }) {
+  if (!workerId) return [];
+  return (records || []).filter((r) => {
+    if (String(r.workerId) !== String(workerId)) return false;
+    const pid = r.projectId || r.workerProjectId || '';
+    if (projectId && String(pid) !== String(projectId)) return false;
+    return Boolean((r.date || '').slice(0, 10));
+  }).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+}
+
+/** Agrège jours équivalents + heures sur tout un projet (sans filtre semaine). */
+export function sumWorkerAttendanceForProject(records, workerId, projectId) {
+  if (!workerId) return { joursEquivalent: 0, heuresTravaillees: 0 };
+  return (records || []).reduce((acc, r) => {
+    const pid = r.projectId || r.workerProjectId || '';
+    if (String(r.workerId) !== String(workerId)) return acc;
+    if (projectId && String(pid) !== String(projectId)) return acc;
+    const m = computeAttendanceWorkMetrics(r);
+    acc.joursEquivalent = round2(acc.joursEquivalent + m.joursEquivalent);
+    acc.heuresTravaillees = round2(acc.heuresTravaillees + m.heuresTravaillees);
+    return acc;
+  }, { joursEquivalent: 0, heuresTravaillees: 0 });
+}
+
 /** Clé de regroupement récap : worker_id + project_id + lundi de semaine. */
 export function attendanceRecapKey(r) {
   if (!r?.workerId || !r?.date) return null;
