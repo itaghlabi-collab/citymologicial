@@ -11,9 +11,10 @@ import {
   weekStartMonday,
   weekEndSunday,
   fmtWeekRange,
+  enrichPayrollWithAttendance,
 } from '../services/rh/workerPayroll';
 import { exportWorkerPaymentPdf } from '../services/rh/workerPaymentPdf';
-import { filterAttendanceForWorkerWeek } from '../services/rh/attendance';
+import { collectAttendanceWeeks } from '../services/rh/attendance';
 import WorkerPaymentDetailModal from './rh/WorkerPaymentDetailModal';
 import { workerFullName } from '../services/rh/attendance';
 
@@ -97,7 +98,7 @@ export default function PaiementHebdo() {
   const [search, setSearch] = useState('');
   const [filterProjet, setFilterProjet] = useState('');
   const [filterStatut, setFilterStatut] = useState('');
-  const [filterSemaine, setFilterSemaine] = useState(currentWeekStart());
+  const [filterSemaine, setFilterSemaine] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editId, setEditId] = useState(null);
   const [editRecord, setEditRecord] = useState(null);
@@ -250,13 +251,9 @@ export default function PaiementHebdo() {
 
   async function handleWorkerPdf(record, print = false) {
     try {
-      const days = record.presenceLignes || filterAttendanceForWorkerWeek(attendance, {
-        workerId: record.workerId,
-        projectId: record.projectId,
-        semaineDebut: record.semaineDebut,
-        semaineFin: record.semaineFin,
-      });
-      await exportWorkerPaymentPdf(record, { attendanceDays: days, print });
+      const enriched = enrichPayrollWithAttendance(record, attendance);
+      const days = enriched?.presenceLignes || [];
+      await exportWorkerPaymentPdf(enriched || record, { attendanceDays: days, print });
     } catch {
       notify('error', 'Erreur lors de la génération du PDF.');
     }
@@ -268,11 +265,15 @@ export default function PaiementHebdo() {
       notify('error', result.error || 'Erreur synchronisation.');
       return;
     }
-    const { created = 0, updated = 0 } = result;
-    if (created + updated === 0) {
+    const { created = 0, updated = 0, removed = 0 } = result;
+    if (created + updated + removed === 0) {
       notify('success', 'Situations à jour — aucune modification.');
     } else {
-      notify('success', `${created} créée(s), ${updated} mise(s) à jour depuis les présences.`);
+      const parts = [];
+      if (created) parts.push(`${created} créée(s)`);
+      if (updated) parts.push(`${updated} mise(s) à jour`);
+      if (removed) parts.push(`${removed} supprimée(s)`);
+      notify('success', `${parts.join(', ')} depuis les présences.`);
     }
   }
 
@@ -343,25 +344,15 @@ export default function PaiementHebdo() {
   );
 
   const enrichedGroups = useMemo(
-    () => situationGroups.map((g) => ({
-      ...g,
-      lignes: g.lignes.map((p) => {
-        const presenceLignes = filterAttendanceForWorkerWeek(attendance, {
-          workerId: p.workerId,
-          projectId: p.projectId,
-          semaineDebut: p.semaineDebut,
-          semaineFin: p.semaineFin,
-        });
-        const nbJoursTravailles = presenceLignes.filter((d) => (d.joursEquivalent || 0) > 0).length;
-        const totalRetard = presenceLignes.reduce((s, d) => s + (Number(d.retardHeures) || 0), 0);
-        return {
-          ...p,
-          presenceLignes,
-          nbJoursTravailles: nbJoursTravailles || Math.round(Number(p.joursPaies) || 0),
-          totalRetard: Math.round(totalRetard * 100) / 100,
-        };
-      }),
-    })),
+    () => situationGroups.map((g) => {
+      const lignes = g.lignes.map((p) => enrichPayrollWithAttendance(p, attendance));
+      return {
+        ...g,
+        lignes,
+        totalNet: Math.round(lignes.reduce((s, p) => s + (Number(p.total) || 0), 0) * 100) / 100,
+        totalBrut: Math.round(lignes.reduce((s, p) => s + (Number(p.montantBrut) || 0), 0) * 100) / 100,
+      };
+    }),
     [situationGroups, attendance],
   );
 
@@ -379,11 +370,11 @@ export default function PaiementHebdo() {
   const detailRecord = detailId ? enrichedGroups.flatMap((g) => g.lignes).find((p) => p.id === detailId) : null;
 
   const weekOptions = useMemo(() => {
-    const set = new Set(weeks);
+    const set = new Set([...weeks, ...collectAttendanceWeeks(attendance)]);
     if (filterSemaine) set.add(filterSemaine);
     set.add(currentWeekStart());
     return [...set].sort((a, b) => b.localeCompare(a));
-  }, [weeks, filterSemaine]);
+  }, [weeks, filterSemaine, attendance]);
 
   return (
     <div className="animate-fade-in rh-ext-page">
@@ -444,7 +435,8 @@ export default function PaiementHebdo() {
           <Filter size={14} style={{ color: 'var(--text-3)' }} />
           <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <Calendar size={14} style={{ color: 'var(--text-3)' }} />
-            <select value={filterSemaine} onChange={(e) => setFilterSemaine(weekStartMonday(e.target.value))} style={{ minWidth: 160 }}>
+            <select value={filterSemaine} onChange={(e) => setFilterSemaine(e.target.value ? weekStartMonday(e.target.value) : '')} style={{ minWidth: 160 }}>
+              <option value="">Toutes les semaines</option>
               {weekOptions.map((w) => (
                 <option key={w} value={w}>Semaine du {new Date(`${w}T12:00:00`).toLocaleDateString('fr-MA')}</option>
               ))}

@@ -77,7 +77,7 @@ export function useWorkerPayroll() {
           projects: projectRows,
           existingRecords: rows,
         });
-        if (syncResult.created > 0 || syncResult.updated > 0) {
+        if (syncResult.created > 0 || syncResult.updated > 0 || syncResult.removed > 0) {
           rows = await listWorkerPayroll();
         }
       }
@@ -104,6 +104,7 @@ export function useWorkerPayroll() {
         success: true,
         created: result?.created ?? 0,
         updated: result?.updated ?? 0,
+        removed: result?.removed ?? 0,
       };
     } catch (err) {
       const msg = formatSupabaseError(err, 'Erreur synchronisation présences.');
@@ -114,6 +115,12 @@ export function useWorkerPayroll() {
 
   useEffect(() => {
     load();
+  }, [load]);
+
+  useEffect(() => {
+    const handler = () => { load(); };
+    window.addEventListener('citymo:attendance-changed', handler);
+    return () => window.removeEventListener('citymo:attendance-changed', handler);
   }, [load]);
 
   const chantiers = useMemo(
