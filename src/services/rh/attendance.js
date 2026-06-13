@@ -561,21 +561,26 @@ export function attendanceRecapKey(r) {
   return `${r.workerId}|${projectId}|${weekStart}`;
 }
 
-/** Résumé agrégé par ouvrier (projet × semaine × ouvrier). */
+/** Résumé agrégé par ouvrier (projet × ouvrier, ou × semaine si filtre actif). */
 export function groupAttendanceByProjectWeekWorker(records, options = {}) {
   const { weekFilter = '', projectIdFilter = '', search = '' } = options;
+  const mergeWeeks = !weekFilter;
   const map = new Map();
 
   for (const r of records || []) {
-    const recapKey = attendanceRecapKey(r);
-    if (!recapKey) continue;
+    if (!r?.workerId || !r?.date) continue;
 
     const weekStart = weekStartMonday(r.date);
     const pid = String(r.projectId || r.workerProjectId || '').trim();
+    if (!pid) continue;
 
     if (projectIdFilter && pid !== String(projectIdFilter)) continue;
     if (search && !(r.ouvrier || '').toLowerCase().includes(search.toLowerCase())) continue;
     if (weekFilter && weekStart !== weekFilter) continue;
+
+    const recapKey = mergeWeeks
+      ? `${r.workerId}|${pid}`
+      : `${r.workerId}|${pid}|${weekStart}`;
 
     if (!map.has(recapKey)) {
       map.set(recapKey, {
@@ -584,8 +589,8 @@ export function groupAttendanceByProjectWeekWorker(records, options = {}) {
         ouvrier: r.ouvrier || '—',
         projectId: pid,
         projet: (r.projet || '').trim() || '—',
-        semaineDebut: weekStart,
-        semaineFin: weekEndSunday(weekStart),
+        semaineDebut: mergeWeeks ? '' : weekStart,
+        semaineFin: mergeWeeks ? '' : weekEndSunday(weekStart),
         chefChantier: '',
         chefCounts: {},
         nbJoursTravailles: 0,
@@ -609,6 +614,11 @@ export function groupAttendanceByProjectWeekWorker(records, options = {}) {
     const chefs = Object.entries(g.chefCounts).sort((a, b) => b[1] - a[1]);
     g.chefChantier = chefs[0]?.[0] || '';
     g.lignes.sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    if (mergeWeeks) {
+      const dates = g.lignes.map((l) => l.date).filter(Boolean).sort();
+      g.semaineDebut = dates[0] || '';
+      g.semaineFin = dates[dates.length - 1] || '';
+    }
     g.statutGlobal = resolveAttendanceGlobalStatut(g.lignes);
     g.nbPresences = g.lignes.length;
     delete g.chefCounts;
@@ -624,19 +634,20 @@ export function groupAttendanceByProjectWeekWorker(records, options = {}) {
   });
 }
 
-/** Cartes projet + semaine contenant les résumés ouvriers. */
+/** Cartes projet (× semaine si filtre actif) contenant les résumés ouvriers. */
 export function groupAttendanceSummariesByProjectWeek(records, options = {}) {
+  const { weekFilter = '' } = options;
   const summaries = groupAttendanceByProjectWeekWorker(records, options);
   const map = new Map();
 
   for (const s of summaries) {
-    const key = `${s.projectId}|${s.semaineDebut}`;
+    const key = weekFilter ? `${s.projectId}|${s.semaineDebut}` : String(s.projectId);
     if (!map.has(key)) {
       map.set(key, {
         projectId: s.projectId,
         projet: s.projet,
-        semaineDebut: s.semaineDebut,
-        semaineFin: s.semaineFin,
+        semaineDebut: weekFilter ? s.semaineDebut : '',
+        semaineFin: weekFilter ? s.semaineFin : '',
         ouvriers: [],
       });
     }

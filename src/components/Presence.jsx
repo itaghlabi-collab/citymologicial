@@ -1,5 +1,5 @@
 import { ClockIcon, Plus, X, Filter, CheckCircle, XCircle, CalendarOff, Pencil, Loader2, Search, Users, HardHat, Download, Eye, Printer, Building2 } from 'lucide-react';
-import { useState, useRef, useMemo, useEffect } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import { useAttendance } from '../hooks/useAttendance';
 import { generateAttendanceWeeklyPdf } from '../services/rh/attendanceSheetPdf';
 import { syncPayrollAfterAttendanceChange } from '../services/rh/workerPayroll';
@@ -374,8 +374,6 @@ export default function Presence() {
     setEditId(null);
     setDetailSummary(null);
 
-    const addedWeek = weekStartMonday(form.date);
-    setFilterSemaine(addedWeek);
     if (form.projectId) setFilterProjectId(String(form.projectId));
     setFilterDate('');
 
@@ -433,18 +431,7 @@ export default function Presence() {
     [summaryGroups],
   );
 
-  const weekFiltered = useMemo(() => {
-    if (!filterSemaine) return filtered;
-    return filtered.filter((r) => weekStartMonday(r.date) === filterSemaine);
-  }, [filtered, filterSemaine]);
-
-  const stats = useMemo(() => computeAttendanceStats(weekFiltered), [weekFiltered, computeAttendanceStats]);
-
-  useEffect(() => {
-    if (loading || !records.length || filterSemaine) return;
-    const weeks = collectAttendanceWeeks(records);
-    if (weeks.length) setFilterSemaine(weeks[0]);
-  }, [records, loading, filterSemaine]);
+  const stats = useMemo(() => computeAttendanceStats(filtered), [filtered, computeAttendanceStats]);
 
   const formWorkPreview = useMemo(
     () => computeAttendanceWorkMetrics(form),
@@ -488,12 +475,12 @@ export default function Presence() {
     }
 
     setPdfCandidates(candidates);
-    setPdfGroupKey(`${candidates[0].projectId}|${candidates[0].semaineDebut}`);
+    setPdfGroupKey(groupKey(candidates[0]));
     setShowPdfModal(true);
   }
 
   function confirmPdfPicker(print = false) {
-    const group = pdfCandidates.find((g) => `${g.projectId}|${g.semaineDebut}` === pdfGroupKey);
+    const group = pdfCandidates.find((g) => groupKey(g) === pdfGroupKey);
     if (group) handleGroupPdf(group, print);
     else notify('error', 'Choisissez une fiche.');
   }
@@ -502,8 +489,15 @@ export default function Presence() {
     return workers.find((w) => String(w.id) === String(workerId))?.fonction || '';
   }
 
+  function groupKey(group) {
+    return filterSemaine ? `${group.projectId}|${group.semaineDebut}` : String(group.projectId);
+  }
+
   function groupPdfLabel(group) {
-    return `${group.projet} — ${fmtWeekRange(group.semaineDebut, group.semaineFin)} (${group.ouvriers.length} ouvrier${group.ouvriers.length > 1 ? 's' : ''})`;
+    const n = group.ouvriers.length;
+    const suffix = `${n} ouvrier${n > 1 ? 's' : ''}`;
+    if (filterSemaine) return `${group.projet} — ${fmtWeekRange(group.semaineDebut, group.semaineFin)} (${suffix})`;
+    return `${group.projet} (${suffix})`;
   }
 
   async function runWeeklyPdf({ projectLabel, semaineDebut, semaineFin, chefChantier, summaries, print = false }) {
@@ -544,10 +538,16 @@ export default function Presence() {
 
   function handleGroupPdf(group, print = false) {
     const chefs = [...new Set(group.ouvriers.map((o) => o.chefChantier).filter(Boolean))];
+    let { semaineDebut, semaineFin } = group;
+    if (!semaineDebut || !semaineFin) {
+      const dates = group.ouvriers.flatMap((o) => o.lignes || []).map((l) => l.date).filter(Boolean).sort();
+      semaineDebut = dates[0] || '';
+      semaineFin = dates[dates.length - 1] || semaineDebut;
+    }
     runWeeklyPdf({
       projectLabel: resolveProjectLabel(group),
-      semaineDebut: group.semaineDebut,
-      semaineFin: group.semaineFin,
+      semaineDebut,
+      semaineFin,
       chefChantier: chefs.join(' · '),
       summaries: group.ouvriers,
       print,
@@ -569,7 +569,7 @@ export default function Presence() {
       <div className="page-header flex-between">
         <div>
           <h1 className="page-title">Presence ouvriers</h1>
-          <p className="page-subtitle">Vue récapitulative par ouvrier et semaine — détail journalier disponible</p>
+          <p className="page-subtitle">Une ligne par ouvrier — dates et détail journalier dans « Détail »</p>
         </div>
         <button className="btn btn-primary" onClick={openCreate} disabled={loading || saving}>
           <Plus size={15} /> Ajouter une presence
@@ -674,7 +674,7 @@ export default function Presence() {
         </div>
       ) : (
         summaryGroups.map((group) => (
-          <div key={`${group.projectId}|${group.semaineDebut}`} className="card" style={{ marginBottom: 16 }}>
+          <div key={groupKey(group)} className="card" style={{ marginBottom: 16 }}>
             <div style={{ marginBottom: 16, paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>
               <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
                 <div>
@@ -683,7 +683,7 @@ export default function Presence() {
                     {resolveProjectLabel(group)}
                   </div>
                   <div style={{ fontSize: '0.83rem', color: 'var(--text-3)' }}>
-                    {fmtWeekRange(group.semaineDebut, group.semaineFin)} · {group.ouvriers.length} ouvrier{group.ouvriers.length > 1 ? 's' : ''}
+                    {filterSemaine ? fmtWeekRange(group.semaineDebut, group.semaineFin) : 'Toutes les semaines'} · {group.ouvriers.length} ouvrier{group.ouvriers.length > 1 ? 's' : ''}
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -700,7 +700,7 @@ export default function Presence() {
               <table>
                 <thead>
                   <tr>
-                    <th>Ouvrier</th><th>Projet / chantier</th><th>Chef chantier</th><th>Période</th>
+                    <th>Ouvrier</th><th>Projet / chantier</th><th>Chef chantier</th>
                     <th>Présences</th><th>H. travaillées</th><th>Retard</th><th>Équiv. jours</th><th>Statut</th><th>Actions</th>
                   </tr>
                 </thead>
@@ -718,7 +718,6 @@ export default function Presence() {
                       </td>
                       <td data-label="Projet / chantier">{s.projet || '—'}</td>
                       <td data-label="Chef chantier">{s.chefChantier || '—'}</td>
-                      <td data-label="Période" style={{ fontSize: '0.82rem', color: 'var(--text-2)' }}>{fmtWeekRange(s.semaineDebut, s.semaineFin)}</td>
                       <td data-label="Présences">{s.nbPresences ?? s.lignes?.length ?? 0}</td>
                       <td data-label="H. travaillées">{fmtHours(s.totalHeures)}</td>
                       <td data-label="Retard" style={{ color: s.totalRetard > 0 ? '#E65100' : 'var(--text-3)' }}>{s.totalRetard > 0 ? fmtHours(s.totalRetard) : '—'}</td>
@@ -780,7 +779,7 @@ export default function Presence() {
               style={{ ...INPUT_S(false), marginBottom: 20 }}
             >
               {pdfCandidates.map((g) => (
-                <option key={`${g.projectId}|${g.semaineDebut}`} value={`${g.projectId}|${g.semaineDebut}`}>{groupPdfLabel(g)}</option>
+                <option key={groupKey(g)} value={groupKey(g)}>{groupPdfLabel(g)}</option>
               ))}
             </select>
             <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
