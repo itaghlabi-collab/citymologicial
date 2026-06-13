@@ -237,7 +237,7 @@ export default function Presence() {
   const [filterDate, setFilterDate] = useState('');
   const [filterStatut, setFilterStatut] = useState('');
   const [filterChefId, setFilterChefId] = useState('');
-  const [filterSemaine, setFilterSemaine] = useState(currentWeekStart());
+  const [filterSemaine, setFilterSemaine] = useState('');
   const [pdfLoading, setPdfLoading] = useState(false);
   const [showPdfModal, setShowPdfModal] = useState(false);
   const [pdfGroupKey, setPdfGroupKey] = useState('');
@@ -372,6 +372,12 @@ export default function Presence() {
 
     setShowModal(false);
     setEditId(null);
+
+    const addedWeek = weekStartMonday(form.date);
+    setFilterSemaine(addedWeek);
+    if (form.projectId) setFilterProjectId(form.projectId);
+    setFilterDate('');
+
     syncPayrollAfterAttendanceChange().catch(() => {});
   }
 
@@ -402,6 +408,11 @@ export default function Presence() {
     [records, filterOuvrier, filterProjectId, filterChefId, filterDate, filterStatut, filterAttendanceRecords],
   );
 
+  const weekScopedRecords = useMemo(() => {
+    if (!filterSemaine) return filtered;
+    return filtered.filter((r) => r.date && weekStartMonday(r.date) === filterSemaine);
+  }, [filtered, filterSemaine]);
+
   const summaryGroups = useMemo(
     () => groupAttendanceSummariesByProjectWeek(filtered, {
       weekFilter: filterSemaine,
@@ -423,7 +434,7 @@ export default function Presence() {
     [summaryGroups],
   );
 
-  const stats = useMemo(() => computeAttendanceStats(filtered), [filtered, computeAttendanceStats]);
+  const stats = useMemo(() => computeAttendanceStats(weekScopedRecords), [weekScopedRecords, computeAttendanceStats]);
 
   const formWorkPreview = useMemo(
     () => computeAttendanceWorkMetrics(form),
@@ -644,8 +655,19 @@ export default function Presence() {
           <EmptyState
             icon={<CalendarOff size={22} style={{ color: 'var(--text-3)' }} />}
             title={records.length === 0 ? "Aucune presence enregistree" : "Aucun resultat pour ces filtres"}
-            sub={records.length === 0 ? "Ajoutez la premiere feuille de presence via le bouton ci-dessus" : "Modifiez vos criteres de recherche"}
+            sub={records.length === 0
+              ? "Ajoutez la premiere feuille de presence via le bouton ci-dessus"
+              : filterSemaine
+                ? `Aucune presence pour la semaine selectionnee — essayez « Toutes les semaines » ou une autre periode.`
+                : "Modifiez vos criteres de recherche"}
           />
+          {records.length > 0 && filterSemaine && (
+            <div style={{ textAlign: 'center', marginTop: 12 }}>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setFilterSemaine('')}>
+                Afficher toutes les semaines
+              </button>
+            </div>
+          )}
         </div>
       ) : (
         summaryGroups.map((group) => (

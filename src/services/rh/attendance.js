@@ -106,7 +106,7 @@ export function normalizeAttendance(row) {
   return enrichAttendanceMetrics({
     id: row.id,
     workerId: row.worker_id || '',
-    ouvrier: workerFullName(w) || row.ouvrier_label || '—',
+    ouvrier: workerFullName(w) || row.ouvrier_label || row.ouvrier || '—',
     projectId: row.project_id ? String(row.project_id) : (w?.project_id ? String(w.project_id) : ''),
     workerProjectId: w?.project_id ? String(w.project_id) : '',
     projet: projetNom,
@@ -549,6 +549,19 @@ export function filterAttendanceForWorkerWeek(records, { workerId, projectId, se
   }).sort((a, b) => (a.date || '').localeCompare(b.date || ''));
 }
 
+/** Identifiant projet pour le regroupement (UUID ou fallback chantier). */
+export function resolveAttendanceProjectKey(r) {
+  const pid = r.projectId || r.workerProjectId || '';
+  if (pid) {
+    return { projectId: String(pid), projet: (r.projet || '').trim() || '—' };
+  }
+  const label = (r.projet || r.chantier || '').trim();
+  if (label) {
+    return { projectId: `chantier:${label.toLowerCase()}`, projet: label };
+  }
+  return null;
+}
+
 /** Résumé agrégé par ouvrier (projet × semaine × ouvrier). */
 export function groupAttendanceByProjectWeekWorker(records, options = {}) {
   const { weekFilter = '', projectIdFilter = '', search = '' } = options;
@@ -556,9 +569,18 @@ export function groupAttendanceByProjectWeekWorker(records, options = {}) {
 
   for (const r of records || []) {
     if (!r.workerId || !r.date) continue;
-    const pid = r.projectId || r.workerProjectId || '';
-    if (!pid) continue;
-    if (projectIdFilter && String(pid) !== String(projectIdFilter)) continue;
+
+    const projectKey = resolveAttendanceProjectKey(r);
+    if (!projectKey) continue;
+
+    const { projectId: pid, projet: projetLabel } = projectKey;
+    if (projectIdFilter) {
+      const fp = String(projectIdFilter);
+      const match = String(r.projectId) === fp
+        || String(r.workerProjectId) === fp
+        || String(pid) === fp;
+      if (!match) continue;
+    }
     if (search && !(r.ouvrier || '').toLowerCase().includes(search.toLowerCase())) continue;
 
     const weekStart = weekStartMonday(r.date);
@@ -570,8 +592,8 @@ export function groupAttendanceByProjectWeekWorker(records, options = {}) {
         key,
         workerId: r.workerId,
         ouvrier: r.ouvrier || '—',
-        projectId: String(pid),
-        projet: r.projet || '—',
+        projectId: pid,
+        projet: projetLabel || r.projet || '—',
         semaineDebut: weekStart,
         semaineFin: weekEndSunday(weekStart),
         chefChantier: '',
