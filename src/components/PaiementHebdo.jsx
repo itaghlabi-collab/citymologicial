@@ -14,7 +14,7 @@ import {
 } from '../services/rh/workerPayroll';
 import { exportWorkerPaymentPdf } from '../services/rh/workerPaymentPdf';
 import { filterAttendanceForWorkerWeek } from '../services/rh/attendance';
-import AttendanceDailyDetailTable from './rh/AttendanceDailyDetailTable';
+import WorkerPaymentDetailModal from './rh/WorkerPaymentDetailModal';
 import { workerFullName } from '../services/rh/attendance';
 
 function fmtMAD(n) {
@@ -102,6 +102,7 @@ export default function PaiementHebdo() {
   const [editId, setEditId] = useState(null);
   const [editRecord, setEditRecord] = useState(null);
   const [detailId, setDetailId] = useState(null);
+  const [detailChefChantier, setDetailChefChantier] = useState('');
   const [form, setForm] = useState(EMPTY_BATCH);
   const [editForm, setEditForm] = useState({});
   const [errors, setErrors] = useState({});
@@ -242,8 +243,9 @@ export default function PaiementHebdo() {
     setShowModal(true);
   }
 
-  function openDetail(record) {
+  function openDetail(record, chefChantier = '') {
     setDetailId(record.id);
+    setDetailChefChantier(chefChantier);
   }
 
   async function handleWorkerPdf(record, print = false) {
@@ -525,7 +527,7 @@ export default function PaiementHebdo() {
                       <td data-label="Statut"><span className={`badge ${statutBadgeClass(p.statut)}`}>{p.statut}</span></td>
                       <td data-label="Actions" className="payment-actions-cell">
                         <div className="payment-row-actions">
-                          <button type="button" className="btn btn-secondary btn-sm" onClick={() => openDetail(p)}><Eye size={13} /> Détail</button>
+                          <button type="button" className="btn btn-secondary btn-sm" onClick={() => openDetail(p, group.chefChantier)}><Eye size={13} /> Détail</button>
                           {p.statut === 'En attente' && (
                             <button type="button" className="btn btn-sm" style={{ background: '#E8F5E9', color: '#2E7D32', border: 'none' }} onClick={() => markPaid(p.id).then((r) => notify(r.success ? 'success' : 'error', r.success ? 'Payé.' : r.error))}>Payer</button>
                           )}
@@ -702,40 +704,14 @@ export default function PaiementHebdo() {
       )}
 
       {detailRecord && (
-        <div className="rh-ext-modal-overlay">
-          <div className="card rh-ext-modal-box rh-ext-modal-box--lg">
-            <div className="flex-between" style={{ marginBottom: 16 }}>
-              <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.05rem', margin: 0 }}>Détail paiement — {detailRecord.ouvrier}</h2>
-              <button type="button" onClick={() => setDetailId(null)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10, marginBottom: 16, padding: 12, background: '#F8F9FA', borderRadius: 8, fontSize: '0.84rem' }}>
-              <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Projet</span><div style={{ fontWeight: 700 }}>{detailRecord.projet || '—'}</div></div>
-              <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Semaine</span><div style={{ fontWeight: 700 }}>{fmtWeekRange(detailRecord.semaineDebut, detailRecord.semaineFin)}</div></div>
-              <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Jours travaillés</span><div style={{ fontWeight: 700 }}>{detailRecord.nbJoursTravailles ?? '—'}</div></div>
-              <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>H. travaillées</span><div style={{ fontWeight: 700 }}>{fmtHours(detailRecord.heuresNormales)}</div></div>
-              <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Retard</span><div style={{ fontWeight: 700, color: (detailRecord.totalRetard || 0) > 0 ? '#E65100' : 'inherit' }}>{detailRecord.totalRetard > 0 ? fmtHours(detailRecord.totalRetard) : '—'}</div></div>
-              <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Équiv. jours</span><div style={{ fontWeight: 700 }}>{fmtDayEquiv(detailRecord.joursPaies)} j</div></div>
-              <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Tarif/j</span><div style={{ fontWeight: 700 }}>{fmtMAD(detailRecord.tarifJournalier)}</div></div>
-              <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Net à payer</span><div style={{ fontWeight: 800, color: 'var(--red)' }}>{fmtMAD(detailRecord.total)}</div></div>
-              <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Statut</span><div style={{ fontWeight: 700 }}>{detailRecord.statut}</div></div>
-            </div>
-            {(detailRecord.heuresSup > 0 || detailRecord.avances > 0 || detailRecord.retenues > 0) && (
-              <div style={{ display: 'grid', gap: 4, fontSize: '0.85rem', marginBottom: 16 }}>
-                {detailRecord.heuresSup > 0 && <div>H. sup : {detailRecord.heuresSup} h · {fmtMAD(detailRecord.montantSup)}</div>}
-                {detailRecord.avances > 0 && <div style={{ color: '#E65100' }}>Avances : {fmtMAD(detailRecord.avances)}</div>}
-                {detailRecord.retenues > 0 && <div style={{ color: '#C62828' }}>Retenues : {fmtMAD(detailRecord.retenues)}</div>}
-                <div>Brut : {fmtMAD(detailRecord.montantBrut)}</div>
-              </div>
-            )}
-            <div style={{ fontSize: '0.82rem', fontWeight: 700, marginBottom: 8 }}>Présences jour par jour</div>
-            <AttendanceDailyDetailTable lignes={detailRecord.presenceLignes || []} showActions={false} />
-            <div className="rh-ext-detail-header-actions" style={{ marginTop: 16 }}>
-              <button type="button" className="btn btn-secondary" onClick={() => { setDetailId(null); openEdit(detailRecord); }}>Modifier ajustements</button>
-              <button type="button" className="btn btn-secondary" onClick={() => handleWorkerPdf(detailRecord, false)}><FileDown size={14} /> PDF</button>
-              <button type="button" className="btn btn-secondary" onClick={() => handleWorkerPdf(detailRecord, true)}><Printer size={14} /> Imprimer</button>
-            </div>
-          </div>
-        </div>
+        <WorkerPaymentDetailModal
+          record={detailRecord}
+          chefChantierFallback={detailChefChantier}
+          onClose={() => { setDetailId(null); setDetailChefChantier(''); }}
+          onEdit={() => { setDetailId(null); openEdit(detailRecord); }}
+          onPdf={() => handleWorkerPdf(detailRecord, false)}
+          onPrint={() => handleWorkerPdf(detailRecord, true)}
+        />
       )}
     </div>
   );

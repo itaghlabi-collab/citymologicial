@@ -14,6 +14,8 @@ function fmtDayEquiv(n) {
   return Number(n || 0).toLocaleString('fr-MA', { minimumFractionDigits: 0, maximumFractionDigits: 3 });
 }
 
+const JOURS = ['Dim.', 'Lun.', 'Mar.', 'Mer.', 'Jeu.', 'Ven.', 'Sam.'];
+
 function fmtDate(iso) {
   if (!iso) return '—';
   try {
@@ -23,11 +25,22 @@ function fmtDate(iso) {
   }
 }
 
+function fmtJour(iso) {
+  if (!iso) return '—';
+  try {
+    return JOURS[new Date(`${iso.slice(0, 10)}T12:00:00`).getDay()];
+  } catch {
+    return '—';
+  }
+}
+
 export default function AttendanceDailyDetailTable({
   lignes = [],
   onEdit,
   onDelete,
   showActions = true,
+  showJour = false,
+  striped = false,
 }) {
   if (!lignes.length) {
     return (
@@ -38,11 +51,12 @@ export default function AttendanceDailyDetailTable({
   }
 
   return (
-    <div className="table-wrap">
+    <div className={`table-wrap${striped ? ' rh-attendance-table--striped' : ''}`}>
       <table>
         <thead>
           <tr>
             <th>Date</th>
+            {showJour && <th>Jour</th>}
             <th>Entrée</th>
             <th>Sortie</th>
             <th>H. travaillées</th>
@@ -56,7 +70,8 @@ export default function AttendanceDailyDetailTable({
         <tbody>
           {lignes.map((r) => (
             <tr key={r.id || `${r.date}-${r.heureEntree}`}>
-              <td data-label="Date">{fmtDate(r.date)}</td>
+              <td data-label="Date" style={{ fontWeight: 600 }}>{fmtDate(r.date)}</td>
+              {showJour && <td data-label="Jour" style={{ color: 'var(--text-3)', fontSize: '0.82rem' }}>{fmtJour(r.date)}</td>}
               <td data-label="Entrée">{r.heureEntree || '—'}</td>
               <td data-label="Sortie">{r.heureSortie || '—'}</td>
               <td data-label="H. travaillées">{r.heuresTravaillees > 0 ? fmtHours(r.heuresTravaillees) : '—'}</td>
@@ -67,7 +82,7 @@ export default function AttendanceDailyDetailTable({
               <td data-label="Statut">
                 <span className={`badge ${STATUS_BADGE[r.statut] || 'badge-grey'}`}>{r.statut}</span>
               </td>
-              <td data-label="Notes" style={{ color: 'var(--text-3)', fontSize: '0.82rem' }}>{r.notes || '—'}</td>
+              <td data-label="Notes" style={{ color: 'var(--text-3)', fontSize: '0.82rem', maxWidth: 160 }}>{r.notes || '—'}</td>
               {showActions && (
                 <td data-label="Actions">
                   <div style={{ display: 'flex', gap: 6 }}>

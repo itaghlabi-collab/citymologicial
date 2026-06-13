@@ -1865,6 +1865,50 @@ tbody tr:last-child td { border-bottom: none; }
 .rh-ext-modal-box--sm { max-width: 440px; }
 .rh-ext-modal-box--md { max-width: 560px; }
 .rh-ext-modal-box--lg { max-width: 680px; }
+.rh-ext-modal-box--xl { max-width: 900px; }
+
+.rh-pay-detail-header {
+  position: relative;
+  overflow: hidden;
+  border: 1.5px solid var(--border) !important;
+  box-shadow: var(--shadow);
+}
+
+.rh-pay-detail-header::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 3px;
+  background: var(--red);
+}
+
+.rh-pay-detail-kpi-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+.rh-attendance-table--striped tbody tr:nth-child(even) {
+  background: var(--surface-2, #F8F9FA);
+}
+
+.rh-attendance-table--striped tbody tr:hover {
+  background: var(--red-light, #FFF5F5);
+}
+
+@media (max-width: 768px) {
+  .rh-pay-detail-kpi-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+@media (max-width: 480px) {
+  .rh-pay-detail-kpi-grid {
+    grid-template-columns: 1fr;
+  }
+}
 
 .rh-ext-actions {
   display: flex;
