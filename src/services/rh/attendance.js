@@ -351,6 +351,74 @@ export function findSheetGroupForRecord(groups, record) {
   ));
 }
 
+/** Poids d'une journée selon le statut de présence */
+export function attendanceDayWeight(statutUi) {
+  switch (statutUi) {
+    case 'Present':
+    case 'Retard':
+      return 1;
+    case 'Demi-journee':
+      return 0.5;
+    default:
+      return 0;
+  }
+}
+
+/** Compte les jours travaillés depuis des enregistrements de présence déjà chargés. */
+export function countWorkerPaidDaysFromRecords(records, workerId, projectId, weekStart, weekEnd) {
+  const ws = weekStart;
+  const we = weekEnd;
+  if (!ws || !we || !workerId) return 0;
+
+  return round2((records || []).reduce((sum, r) => {
+    if (String(r.workerId) !== String(workerId)) return sum;
+    if (projectId) {
+      const pid = String(projectId);
+      const match = String(r.projectId) === pid || String(r.workerProjectId) === pid;
+      if (!match) return sum;
+    }
+    const d = (r.date || '').slice(0, 10);
+    if (!d || d < ws || d > we) return sum;
+    return sum + attendanceDayWeight(r.statut);
+  }, 0));
+}
+
+function round2(n) {
+  return Math.round((Number(n) || 0) * 100) / 100;
+}
+
+/** Compte les jours travaillés pour un ouvrier sur une semaine (requête directe). */
+export async function countWorkerPaidDays(workerId, projectId, weekStart, weekEnd) {
+  await getAuthUserId();
+  let query = getSupabase()
+    .from(TABLE)
+    .select('worker_id, project_id, date, statut, workers ( project_id )')
+    .eq('worker_id', workerId)
+    .gte('date', weekStart)
+    .lte('date', weekEnd);
+
+  if (projectId) {
+    query = query.eq('project_id', projectId);
+  }
+
+  const { data, error } = await query;
+  if (error) {
+    console.error('[CITYMO] attendance count days', error);
+    throw error;
+  }
+
+  return round2((data || []).reduce((sum, row) => {
+    if (projectId) {
+      const pid = String(projectId);
+      const rowPid = row.project_id ? String(row.project_id) : '';
+      const workerPid = row.workers?.project_id ? String(row.workers.project_id) : '';
+      if (rowPid !== pid && workerPid !== pid) return sum;
+    }
+    const statut = DB_TO_UI[row.statut] || 'Absent';
+    return sum + attendanceDayWeight(statut);
+  }, 0));
+}
+
 export function collectChantierOptions(workers, records) {
   const set = new Set();
   (workers || []).forEach((w) => { if (w.chantier?.trim()) set.add(w.chantier.trim()); });

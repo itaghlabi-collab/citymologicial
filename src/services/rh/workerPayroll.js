@@ -1,9 +1,9 @@
 /**
- * workerPayroll.js — Paiement hebdomadaire ouvriers
+ * workerPayroll.js — Paiement hebdomadaire ouvriers (tarif journalier)
  */
 import { getSupabase } from '../../lib/supabase';
 import { workerFullName } from './attendance';
-import { workerTarifHoraire, WORKER_HOURS_PER_DAY } from './workers';
+import { workerTarifHoraire, workerTarifJournalier, WORKER_HOURS_PER_DAY } from './workers';
 
 const TABLE = 'payroll';
 
@@ -53,12 +53,23 @@ export function weekEndSunday(weekStart) {
   return d.toISOString().slice(0, 10);
 }
 
-/** Calcul complet d'une ligne ouvrier */
+/** Calcule tarif journalier / horaire cohérents (référence = journalier). */
+export function resolveWorkerRates(line = {}) {
+  const tarifJournalier = Number(line.tarifJournalier) > 0
+    ? round2(line.tarifJournalier)
+    : round2((Number(line.tarifHoraire) || 0) * WORKER_HOURS_PER_DAY);
+  const tarifHoraire = Number(line.tarifHoraire) > 0
+    ? round2(line.tarifHoraire)
+    : round2(tarifJournalier / WORKER_HOURS_PER_DAY);
+  return { tarifJournalier, tarifHoraire };
+}
+
+/** Calcul complet d'une ligne ouvrier — base : jours × tarif journalier */
 export function calcWorkerPayrollTotals(line) {
   const joursPaies = Number(line.joursPaies) || 0;
-  const tarifHoraire = Number(line.tarifHoraire) || 0;
+  const { tarifJournalier, tarifHoraire } = resolveWorkerRates(line);
   const heuresNormales = round2(joursPaies * WORKER_HOURS_PER_DAY);
-  const montantNormales = round2(heuresNormales * tarifHoraire);
+  const montantNormales = round2(joursPaies * tarifJournalier);
   const heuresSup = Number(line.heuresSup) || 0;
   const tarifSup = Number(line.tarifSup) || round2(tarifHoraire * 1.25);
   const montantSup = round2(heuresSup * tarifSup);
@@ -70,9 +81,10 @@ export function calcWorkerPayrollTotals(line) {
     joursPaies,
     heuresNormales,
     tarifHoraire,
+    tarifJournalier,
+    montantNormales,
     heuresSup,
     tarifSup,
-    montantNormales,
     montantSup,
     avances,
     retenues,
@@ -87,7 +99,8 @@ export function normalizeWorkerPayroll(row) {
   const w = row.workers;
   const totals = calcWorkerPayrollTotals({
     joursPaies: row.jours_travailles,
-    tarifHoraire: row.tarif_horaire || round2(Number(row.tarif_journalier) / WORKER_HOURS_PER_DAY),
+    tarifJournalier: row.tarif_journalier,
+    tarifHoraire: row.tarif_horaire,
     heuresSup: row.heures_sup,
     tarifSup: row.tarif_heures_sup,
     avances: row.avances,
@@ -107,6 +120,8 @@ export function normalizeWorkerPayroll(row) {
     joursPaies: totals.joursPaies,
     heuresNormales: totals.heuresNormales,
     tarifHoraire: totals.tarifHoraire,
+    tarifJournalier: totals.tarifJournalier,
+    montantNormales: totals.montantNormales,
     heuresSup: totals.heuresSup,
     tarifSup: totals.tarifSup,
     montantSup: totals.montantSup,
@@ -138,7 +153,7 @@ export function toWorkerPayrollRow(line, batchMeta) {
     jours_travailles: totals.joursPaies,
     heures_normales: totals.heuresNormales,
     tarif_horaire: totals.tarifHoraire,
-    tarif_journalier: round2(totals.tarifHoraire * WORKER_HOURS_PER_DAY),
+    tarif_journalier: totals.tarifJournalier,
     heures_sup: totals.heuresSup,
     tarif_heures_sup: totals.tarifSup,
     montant_heures_sup: totals.montantSup,
@@ -225,7 +240,7 @@ export async function updateWorkerPayroll(id, form) {
     jours_travailles: totals.joursPaies,
     heures_normales: totals.heuresNormales,
     tarif_horaire: totals.tarifHoraire,
-    tarif_journalier: round2(totals.tarifHoraire * WORKER_HOURS_PER_DAY),
+    tarif_journalier: totals.tarifJournalier,
     heures_sup: totals.heuresSup,
     tarif_heures_sup: totals.tarifSup,
     montant_heures_sup: totals.montantSup,
@@ -313,19 +328,28 @@ export function collectPayrollChantiers(projects, records) {
   return [...set].sort((a, b) => a.localeCompare(b, 'fr'));
 }
 
-export function buildWorkerPayrollLine(worker) {
+/** Prépare une ligne de paiement à partir de l'ouvrier + présences / heures sup. */
+export function buildWorkerPayrollLine(worker, presenceData = {}) {
   const tarifH = workerTarifHoraire(worker);
+  const tarifJ = workerTarifJournalier(worker);
+  const heuresSup = presenceData.heuresSup ?? '';
+  const tarifSup = presenceData.avgTarifSup != null
+    ? round2(presenceData.avgTarifSup)
+    : round2(tarifH * 1.25);
+
   return {
     workerId: worker.id,
-    joursPaies: '',
-    heuresSup: '',
+    joursPaies: presenceData.joursPaies ?? '',
+    heuresSup,
     tarifHoraire: tarifH,
-    tarifSup: round2(tarifH * 1.25),
+    tarifJournalier: tarifJ,
+    tarifSup,
     avances: '',
     retenues: '',
     fonction: worker.fonction || '',
     fullName: workerFullName(worker),
+    fromPresence: presenceData.fromPresence ?? false,
   };
 }
 
-export { workerTarifHoraire, WORKER_HOURS_PER_DAY };
+export { workerTarifHoraire, workerTarifJournalier, WORKER_HOURS_PER_DAY };

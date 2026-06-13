@@ -2,7 +2,7 @@ import {
   Banknote, CheckCircle, Filter, Search, Users, TrendingUp, Plus, Trash2, Loader2, X,
   FileDown, Printer,
 } from 'lucide-react';
-import { useState, useRef, useMemo } from 'react';
+import { useState, useRef, useMemo, useEffect } from 'react';
 import { useWorkerPayroll } from '../hooks/useWorkerPayroll';
 import {
   calcWorkerPayrollTotals,
@@ -10,12 +10,10 @@ import {
   buildWorkerPayrollLine,
   weekStartMonday,
   weekEndSunday,
-  WORKER_HOURS_PER_DAY,
 } from '../services/rh/workerPayroll';
 import { PAYMENT_METHODS } from '../services/rh/subcontractorConstants';
 import { exportWorkerPaymentPdf } from '../services/rh/workerPaymentPdf';
 import { workerFullName } from '../services/rh/attendance';
-import PaiementSousTraitantsSection from './PaiementSousTraitantsSection';
 
 function fmtMAD(n) {
   return Number(n).toLocaleString('fr-MA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' MAD';
@@ -56,6 +54,7 @@ function lineFromSelection(workerId, sel) {
     workerId,
     joursPaies: sel.joursPaies,
     heuresSup: sel.heuresSup,
+    tarifJournalier: sel.tarifJournalier,
     tarifHoraire: sel.tarifHoraire,
     tarifSup: sel.tarifSup,
     avances: sel.avances,
@@ -67,6 +66,7 @@ export default function PaiementHebdo() {
   const {
     records, projects, workersByProject, loading, saving, error, configured, load,
     createBatch, update, markPaid, remove, filterWorkerPayroll, computePayrollStats, chantiers,
+    computeLineFromPresence,
   } = useWorkerPayroll();
 
   const [search, setSearch] = useState('');
@@ -119,13 +119,17 @@ export default function PaiementHebdo() {
     setForm((p) => ({ ...p, projectId, projet: pr?.nom || '', selected: {} }));
   }
 
+  function enrichLineFromPresence(worker, projectId, projet, semaineDebut) {
+    return computeLineFromPresence(worker, projectId, semaineDebut, projet);
+  }
+
   function toggleWorker(worker) {
     setForm((p) => {
       const sel = { ...p.selected };
       if (sel[worker.id]?.checked) {
         delete sel[worker.id];
       } else {
-        const line = buildWorkerPayrollLine(worker);
+        const line = enrichLineFromPresence(worker, p.projectId, p.projet, p.semaineDebut);
         sel[worker.id] = { checked: true, ...line };
       }
       return { ...p, selected: sel };
@@ -137,13 +141,36 @@ export default function PaiementHebdo() {
       setForm((p) => ({ ...p, selected: {} }));
       return;
     }
-    const sel = {};
-    projectWorkers.forEach((w) => {
-      const line = buildWorkerPayrollLine(w);
-      sel[w.id] = { checked: true, ...line };
+    setForm((p) => {
+      const sel = {};
+      workersByProject(p.projectId).forEach((w) => {
+        const line = enrichLineFromPresence(w, p.projectId, p.projet, p.semaineDebut);
+        sel[w.id] = { checked: true, ...line };
+      });
+      return { ...p, selected: sel };
     });
-    setForm((p) => ({ ...p, selected: sel }));
   }
+
+  useEffect(() => {
+    if (!form.projectId || !form.semaineDebut || editId) return;
+    setForm((p) => {
+      const keys = Object.keys(p.selected).filter((id) => p.selected[id]?.checked);
+      if (!keys.length) return p;
+      let changed = false;
+      const sel = { ...p.selected };
+      keys.forEach((workerId) => {
+        const w = workersByProject(p.projectId).find((x) => String(x.id) === workerId);
+        if (!w) return;
+        const line = computeLineFromPresence(w, p.projectId, p.semaineDebut, p.projet);
+        const prev = sel[workerId];
+        if (String(prev.joursPaies) !== String(line.joursPaies) || String(prev.heuresSup) !== String(line.heuresSup)) {
+          changed = true;
+          sel[workerId] = { ...prev, joursPaies: line.joursPaies, heuresSup: line.heuresSup, tarifSup: line.tarifSup, fromPresence: line.fromPresence };
+        }
+      });
+      return changed ? { ...p, selected: sel } : p;
+    });
+  }, [form.projectId, form.semaineDebut, form.projet, editId, computeLineFromPresence, workersByProject]);
 
   function setWorkerField(workerId, field, value) {
     setForm((p) => ({
@@ -170,6 +197,7 @@ export default function PaiementHebdo() {
       projet: record.projet || '',
       semaineDebut: record.semaineDebut || currentWeekStart(),
       joursPaies: String(record.joursPaies ?? ''),
+      tarifJournalier: String(record.tarifJournalier ?? ''),
       tarifHoraire: String(record.tarifHoraire ?? ''),
       heuresSup: String(record.heuresSup ?? ''),
       tarifSup: String(record.tarifSup ?? ''),
@@ -203,7 +231,7 @@ export default function PaiementHebdo() {
     if (!selectedLines.length) e.workers = 'Sélectionnez au moins un ouvrier';
     selectedLines.forEach((l) => {
       if (l.joursPaies === '' || Number(l.joursPaies) < 0) e[`j_${l.workerId}`] = 'Jours requis';
-      if (!l.tarifHoraire || Number(l.tarifHoraire) <= 0) e[`t_${l.workerId}`] = 'Tarif requis';
+      if (!l.tarifJournalier || Number(l.tarifJournalier) <= 0) e[`t_${l.workerId}`] = 'Tarif journalier requis';
     });
     return e;
   }
@@ -212,7 +240,7 @@ export default function PaiementHebdo() {
     const e = {};
     if (!editForm.semaineDebut) e.semaineDebut = 'Requis';
     if (editForm.joursPaies === '' || Number(editForm.joursPaies) < 0) e.joursPaies = 'Jours requis';
-    if (!editForm.tarifHoraire || Number(editForm.tarifHoraire) <= 0) e.tarifHoraire = 'Tarif requis';
+    if (!editForm.tarifJournalier || Number(editForm.tarifJournalier) <= 0) e.tarifJournalier = 'Tarif journalier requis';
     return e;
   }
 
@@ -271,7 +299,7 @@ export default function PaiementHebdo() {
       <div className="page-header flex-between">
         <div>
           <h1 className="page-title">Paiement hebdomadaire ouvriers</h1>
-          <p className="page-subtitle">Projet → ouvriers affectés → jours × 8h × tarif/h + heures sup − avances − retenues</p>
+          <p className="page-subtitle">Présences → jours travaillés × tarif journalier + heures sup − avances − retenues</p>
         </div>
         <button className="btn btn-primary" onClick={openCreate} disabled={loading || saving || !configured}>
           <Plus size={15} /> Nouveau paiement ouvrier
@@ -319,7 +347,7 @@ export default function PaiementHebdo() {
       <div className="card">
         <div className="card-title" style={{ marginBottom: 4 }}><Banknote size={16} /> Paiement hebdomadaire — Ouvriers</div>
         <p style={{ margin: '0 0 16px', fontSize: '0.83rem', color: 'var(--text-3)' }}>
-          Sélectionnez un projet, cochez les ouvriers affectés, saisissez jours / heures sup / avances / retenues
+          Les jours travaillés sont calculés automatiquement depuis les présences. Validation et suivi des paiements ouvriers uniquement.
         </p>
         {loading ? (
           <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-3)' }}><Loader2 size={28} style={{ animation: 'spin 1s linear infinite', margin: '0 auto 12px' }} />Chargement…</div>
@@ -330,8 +358,8 @@ export default function PaiementHebdo() {
             <table>
               <thead>
                 <tr>
-                  <th>Ouvrier</th><th>Semaine</th><th>Projet</th><th>Jours</th><th>H. sup</th>
-                  <th>Montant sup</th><th>Total net</th><th>Statut</th><th>Actions</th>
+                  <th>Ouvrier</th><th>Projet</th><th>Semaine</th><th>Jours</th><th>Tarif/j</th>
+                  <th>H. sup</th><th>Montant calc.</th><th>Avances</th><th>Retenues</th><th>Net à payer</th><th>Statut</th><th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -342,12 +370,15 @@ export default function PaiementHebdo() {
                         {p.ouvrier}
                       </button>
                     </td>
-                    <td data-label="Semaine">{p.semaineDebut ? new Date(p.semaineDebut).toLocaleDateString('fr-MA') : '—'}</td>
                     <td data-label="Projet">{p.projet || '—'}</td>
+                    <td data-label="Semaine">{p.semaineDebut ? new Date(p.semaineDebut).toLocaleDateString('fr-MA') : '—'}</td>
                     <td data-label="Jours">{p.joursPaies} j</td>
+                    <td data-label="Tarif/j">{fmtMAD(p.tarifJournalier)}</td>
                     <td data-label="H. sup">{p.heuresSup > 0 ? `${p.heuresSup} h` : '—'}</td>
-                    <td data-label="Montant sup">{p.montantSup > 0 ? fmtMAD(p.montantSup) : '—'}</td>
-                    <td data-label="Total net" style={{ fontWeight: 800, color: 'var(--red)' }}>{fmtMAD(p.total)}</td>
+                    <td data-label="Montant calc.">{fmtMAD(p.montantBrut)}</td>
+                    <td data-label="Avances" style={{ color: '#E65100' }}>{p.avances > 0 ? fmtMAD(p.avances) : '—'}</td>
+                    <td data-label="Retenues" style={{ color: '#C62828' }}>{p.retenues > 0 ? fmtMAD(p.retenues) : '—'}</td>
+                    <td data-label="Net à payer" style={{ fontWeight: 800, color: 'var(--red)' }}>{fmtMAD(p.total)}</td>
                     <td data-label="Statut"><span className={'badge ' + (p.statut === 'Payé' ? 'badge-green' : p.statut === 'En attente' ? 'badge-orange' : 'badge-red')}>{p.statut}</span></td>
                     <td data-label="Actions" className="payment-actions-cell">
                       <div className="payment-row-actions">
@@ -386,9 +417,10 @@ export default function PaiementHebdo() {
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                     <div><label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Jours travaillés *</label>
                       <input type="number" min="0" step="0.5" value={editForm.joursPaies} onChange={(e) => setEditForm((p) => ({ ...p, joursPaies: e.target.value }))} style={INPUT_S(errors.joursPaies)} />
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-3)', marginTop: 4 }}>{Number(editForm.joursPaies || 0) * WORKER_HOURS_PER_DAY} h normales</div></div>
-                    <div><label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Tarif horaire *</label>
-                      <input type="number" min="0" step="0.01" value={editForm.tarifHoraire} onChange={(e) => setEditForm((p) => ({ ...p, tarifHoraire: e.target.value }))} style={INPUT_S(errors.tarifHoraire)} /></div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-3)', marginTop: 4 }}>Calculé depuis les présences (modifiable)</div></div>
+                    <div><label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Tarif journalier *</label>
+                      <input type="number" min="0" step="0.01" value={editForm.tarifJournalier} onChange={(e) => setEditForm((p) => ({ ...p, tarifJournalier: e.target.value }))} style={INPUT_S(errors.tarifJournalier)} />
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-3)', marginTop: 4 }}>{fmtMAD(Number(editForm.tarifJournalier || 0) / 8)}/h équivalent</div></div>
                   </div>
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                     <div><label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Heures supplémentaires</label>
@@ -418,10 +450,11 @@ export default function PaiementHebdo() {
                   <div><label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Description / Observation</label>
                     <textarea rows={2} value={editForm.notes || ''} onChange={(e) => setEditForm((p) => ({ ...p, notes: e.target.value }))} style={{ ...INPUT_S(false), resize: 'vertical' }} /></div>
                   <div style={{ padding: 12, background: '#F8F9FA', borderRadius: 8, fontSize: '0.85rem' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>Montant brut</span><strong>{fmtMAD(editPreview.montantBrut)}</strong></div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>Jours × tarif journalier</span><strong>{fmtMAD(editPreview.montantNormales)}</strong></div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, color: '#E65100' }}><span>Avances déduites</span><strong>{fmtMAD(editPreview.avances)}</strong></div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, color: '#C62828' }}><span>Retenues déduites</span><strong>{fmtMAD(editPreview.retenues)}</strong></div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>Montant heures sup</span><strong>{fmtMAD(editPreview.montantSup)}</strong></div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>Montant brut</span><strong>{fmtMAD(editPreview.montantBrut)}</strong></div>
                     <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 6, borderTop: '1px solid var(--border)' }}><span style={{ fontWeight: 700 }}>Net à payer</span><strong style={{ color: 'var(--red)' }}>{fmtMAD(editPreview.montantNet)}</strong></div>
                   </div>
                 </div>
@@ -473,7 +506,10 @@ export default function PaiementHebdo() {
                                 <input type="checkbox" checked={!!sel?.checked} onChange={() => toggleWorker(w)} />
                                 <div style={{ flex: 1 }}>
                                   <div style={{ fontWeight: 700 }}>{workerFullName(w)}</div>
-                                  <div style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>{w.fonction || '—'} · Tarif/h : {fmtMAD(sel?.tarifHoraire ?? buildWorkerPayrollLine(w).tarifHoraire)}</div>
+                                  <div style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>
+                                    {w.fonction || '—'} · Tarif/j : {fmtMAD(sel?.tarifJournalier ?? buildWorkerPayrollLine(w).tarifJournalier)}
+                                    {sel?.fromPresence && <span style={{ color: '#2E7D32', marginLeft: 6 }}>· Présences</span>}
+                                  </div>
                                 </div>
                                 {totals && <div style={{ fontWeight: 800, color: 'var(--red)', fontSize: '0.9rem' }}>{fmtMAD(totals.montantNet)}</div>}
                               </label>
@@ -481,7 +517,9 @@ export default function PaiementHebdo() {
                                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 8, paddingLeft: 28 }}>
                                   <div><label style={{ fontSize: '0.72rem', fontWeight: 600 }}>Jours travaillés</label>
                                     <input type="number" min="0" step="0.5" value={sel.joursPaies ?? ''} onChange={(e) => setWorkerField(w.id, 'joursPaies', e.target.value)} style={{ ...INPUT_S(errors[`j_${w.id}`]), padding: '6px 8px', fontSize: '0.85rem' }} />
-                                    <div style={{ fontSize: '0.7rem', color: 'var(--text-3)' }}>{Number(sel.joursPaies || 0) * WORKER_HOURS_PER_DAY} h</div></div>
+                                    {sel.fromPresence && <div style={{ fontSize: '0.68rem', color: '#2E7D32' }}>Depuis présences</div>}</div>
+                                  <div><label style={{ fontSize: '0.72rem', fontWeight: 600 }}>Tarif journalier</label>
+                                    <input type="number" min="0" step="0.01" value={sel.tarifJournalier ?? ''} readOnly style={{ ...INPUT_S(false), padding: '6px 8px', fontSize: '0.85rem', background: '#F5F5F5' }} /></div>
                                   <div><label style={{ fontSize: '0.72rem', fontWeight: 600 }}>Heures sup</label>
                                     <input type="number" min="0" step="0.5" value={sel.heuresSup ?? ''} onChange={(e) => setWorkerField(w.id, 'heuresSup', e.target.value)} style={{ ...INPUT_S(false), padding: '6px 8px', fontSize: '0.85rem' }} /></div>
                                   <div><label style={{ fontSize: '0.72rem', fontWeight: 600 }}>Tarif h. sup</label>
@@ -532,8 +570,9 @@ export default function PaiementHebdo() {
               <div><strong>Référence :</strong> {detailRecord.reference || '—'}</div>
               <div><strong>Statut :</strong> {detailRecord.statut}</div>
               <div><strong>Mode :</strong> {detailRecord.paymentMethod || '—'}</div>
-              <div><strong>Jours / H. sup :</strong> {detailRecord.joursPaies} j · {detailRecord.heuresSup || 0} h sup</div>
-              <div><strong>Brut :</strong> {fmtMAD(detailRecord.montantBrut)}</div>
+              <div><strong>Jours / Tarif/j :</strong> {detailRecord.joursPaies} j · {fmtMAD(detailRecord.tarifJournalier)}/j</div>
+              <div><strong>H. sup :</strong> {detailRecord.heuresSup || 0} h · {fmtMAD(detailRecord.montantSup)}</div>
+              <div><strong>Montant calculé :</strong> {fmtMAD(detailRecord.montantBrut)}</div>
               <div><strong style={{ color: '#E65100' }}>Avances :</strong> {fmtMAD(detailRecord.avances)}</div>
               <div><strong style={{ color: '#C62828' }}>Retenues :</strong> {fmtMAD(detailRecord.retenues)}</div>
               <div><strong>Net à payer :</strong> <span style={{ color: 'var(--red)', fontWeight: 800 }}>{fmtMAD(detailRecord.total)}</span></div>
@@ -547,8 +586,6 @@ export default function PaiementHebdo() {
           </div>
         </div>
       )}
-
-      <PaiementSousTraitantsSection onNotify={notify} />
     </div>
   );
 }

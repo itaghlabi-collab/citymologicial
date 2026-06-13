@@ -107,6 +107,33 @@ async function getAuthUserId() {
   return user.id;
 }
 
+/** Somme des heures sup. non payées pour un ouvrier sur une période. */
+export function sumWorkerOvertimeFromRecords(records, workerId, weekStart, weekEnd, projectName = '') {
+  let totalHours = 0;
+  let totalMontant = 0;
+  const ws = weekStart;
+  const we = weekEnd;
+  if (!ws || !we || !workerId) {
+    return { heures: 0, avgTarif: null, montant: 0 };
+  }
+
+  (records || []).forEach((r) => {
+    if (String(r.workerId) !== String(workerId)) return;
+    const d = (r.date || '').slice(0, 10);
+    if (!d || d < ws || d > we) return;
+    if (projectName && r.projet && r.projet.trim() !== projectName.trim()) return;
+    if (r.statut === 'Paye') return;
+    const h = Number(r.heures) || 0;
+    totalHours += h;
+    totalMontant += Number(r.montant) || calcOvertimeAmount(h, r.tarif);
+  });
+
+  const heures = Math.round(totalHours * 100) / 100;
+  const montant = Math.round(totalMontant * 100) / 100;
+  const avgTarif = heures > 0 ? Math.round((montant / heures) * 100) / 100 : null;
+  return { heures, avgTarif, montant };
+}
+
 export async function listOvertime() {
   const { data, error } = await getSupabase()
     .from(TABLE)

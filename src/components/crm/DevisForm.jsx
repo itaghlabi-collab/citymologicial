@@ -66,9 +66,10 @@ function genRef() {
 function today() { return new Date().toISOString().slice(0, 10); }
 function addDays(n) { const d = new Date(); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); }
 
-const EMPTY_LIGNE = () => ({
+const EMPTY_LIGNE = (overrides = {}) => ({
   _id: Date.now() + Math.random(),
   type: 'article', // 'article' | 'titre' | 'sous_titre' | 'note'
+  ephemeral: false,
   designation: '',
   description: '',
   article_id: '',
@@ -78,7 +79,10 @@ const EMPTY_LIGNE = () => ({
   prix_ht: 0,
   remise: 0,
   tva: 20,
+  ...overrides,
 });
+
+const EMPTY_LIGNE_EPHEMERE = () => EMPTY_LIGNE({ ephemeral: true });
 
 const EMPTY_DEVIS = {
   reference: '',
@@ -124,9 +128,10 @@ function rowDragStyle(isDragging, isOver) {
 }
 
 function LigneRow({ ligne, idx, categories, articles, onChange, onDelete, onDuplicate, drag }) {
-  const [showDesc, setShowDesc] = useState(false);
-  const catArticles = articles.filter(a => !ligne.categorie_id || String(a.categorie_id) === String(ligne.categorie_id));
-  const isEphemeral = !ligne.article_id;
+  const [showDesc, setShowDesc] = useState(!!ligne.ephemeral);
+  const catArticles = ligne.categorie_id
+    ? articles.filter(a => String(a.categorie_id) === String(ligne.categorie_id))
+    : [];
   const sous_total_ht = Number(ligne.quantite) * Number(ligne.prix_ht) * (1 - Number(ligne.remise) / 100);
   const sous_total_ttc = sous_total_ht * (1 + Number(ligne.tva) / 100);
 
@@ -137,25 +142,18 @@ function LigneRow({ ligne, idx, categories, articles, onChange, onDelete, onDupl
       ...ligne,
       categorie_id: catId,
       article_id: '',
-      designation: '',
-      description: '',
+      designation: ligne.ephemeral ? ligne.designation : '',
+      description: ligne.ephemeral ? ligne.description : '',
     });
   }
 
   function onArticleChange(articleId) {
-    if (articleId === '__libre__') {
-      onChange({
-        ...ligne,
-        article_id: '',
-        designation: ligne.designation || '',
-      });
-      return;
-    }
     const art = articles.find(a => String(a.id) === String(articleId));
     if (art) {
       onChange({
         ...ligne,
         article_id: articleId,
+        ephemeral: false,
         categorie_id: art.categorie_id ? String(art.categorie_id) : ligne.categorie_id,
         designation: art.nom || '',
         description: art.description || '',
@@ -167,14 +165,6 @@ function LigneRow({ ligne, idx, categories, articles, onChange, onDelete, onDupl
     } else {
       setField('article_id', articleId);
     }
-  }
-
-  function onDesignationChange(val) {
-    onChange({
-      ...ligne,
-      designation: val,
-      article_id: '',
-    });
   }
 
   const dragRowProps = {
@@ -218,6 +208,67 @@ function LigneRow({ ligne, idx, categories, articles, onChange, onDelete, onDupl
     );
   }
 
+  if (ligne.ephemeral) {
+    return (
+      <tr {...dragRowProps} style={{ background: '#FFF8E1', ...dragRowProps.style }}>
+        <td style={{ padding: '8px 6px', width: 20, verticalAlign: 'top' }}>
+          <DragHandle {...handleProps} />
+        </td>
+        <td style={{ padding: '6px 6px', minWidth: 200 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <select value={ligne.categorie_id} onChange={e => onCategorieChange(e.target.value)} style={{ ...IS(false), fontSize: '0.78rem' }}>
+              <option value="">Catégorie...</option>
+              {categories.map(c => <option key={c.id} value={c.id}>{formatCategoryDisplayName(c.nom)}</option>)}
+            </select>
+            <input
+              value={ligne.designation}
+              onChange={e => setField('designation', e.target.value)}
+              placeholder="Ex : Démolition cloison BA13"
+              style={{ ...IS(false), fontSize: '0.82rem', borderColor: '#F57C00', background: '#FFFDE7' }}
+            />
+            <span style={{ fontSize: '0.68rem', color: '#E65100', fontWeight: 600 }}>Article éphémère — non enregistré au catalogue</span>
+            <textarea
+              value={ligne.description}
+              onChange={e => setField('description', e.target.value)}
+              placeholder="Description..."
+              rows={2}
+              style={{ ...IS(false), resize: 'vertical', fontSize: '0.78rem' }}
+            />
+          </div>
+        </td>
+        <td style={{ padding: '6px 5px', width: 70 }}>
+          <input type="number" min="0" step="0.01" value={ligne.quantite} onChange={e => setField('quantite', e.target.value)} style={{ ...IS(false), textAlign: 'center', fontSize: '0.85rem' }} />
+        </td>
+        <td style={{ padding: '6px 5px', width: 80 }}>
+          <select value={ligne.unite} onChange={e => setField('unite', e.target.value)} style={{ ...IS(false), fontSize: '0.82rem' }}>
+            {UNITES.map(u => <option key={u} value={u}>{u}</option>)}
+          </select>
+        </td>
+        <td style={{ padding: '6px 5px', width: 105 }}>
+          <input type="number" min="0" step="0.01" value={ligne.prix_ht} onChange={e => setField('prix_ht', e.target.value)} style={{ ...IS(false), textAlign: 'right', fontSize: '0.85rem' }} />
+        </td>
+        <td style={{ padding: '6px 5px', width: 65 }}>
+          <input type="number" min="0" max="100" step="1" value={ligne.remise} onChange={e => setField('remise', e.target.value)} style={{ ...IS(false), textAlign: 'center', fontSize: '0.85rem' }} />
+        </td>
+        <td style={{ padding: '6px 5px', width: 72 }}>
+          <select value={ligne.tva} onChange={e => setField('tva', e.target.value)} style={{ ...IS(false), fontSize: '0.82rem' }}>
+            {TVA_TAUX.map(t => <option key={t} value={t}>{t}%</option>)}
+          </select>
+        </td>
+        <td style={{ padding: '6px 8px', width: 110, textAlign: 'right' }}>
+          <div style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.88rem' }}>{fmtMAD(sous_total_ht.toFixed(2))}</div>
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>TTC: {fmtMAD(sous_total_ttc.toFixed(2))}</div>
+        </td>
+        <td style={{ padding: '6px 5px', width: 52 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
+            <button type="button" onClick={onDuplicate} title="Dupliquer" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: 3 }}><Copy size={12} /></button>
+            <button type="button" onClick={onDelete} title="Supprimer" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', padding: 3 }}><Trash2 size={12} /></button>
+          </div>
+        </td>
+      </tr>
+    );
+  }
+
   return (
     <>
       <tr {...dragRowProps}>
@@ -231,22 +282,16 @@ function LigneRow({ ligne, idx, categories, articles, onChange, onDelete, onDupl
               {categories.map(c => <option key={c.id} value={c.id}>{formatCategoryDisplayName(c.nom)}</option>)}
             </select>
             <select
-              value={ligne.article_id || (isEphemeral && ligne.designation ? '__libre__' : '')}
+              value={ligne.article_id}
               onChange={e => onArticleChange(e.target.value)}
-              style={{ ...IS(false), fontSize: '0.82rem' }}
+              disabled={!ligne.categorie_id}
+              style={{ ...IS(false), fontSize: '0.82rem', opacity: ligne.categorie_id ? 1 : 0.65 }}
             >
-              <option value="">Choisir dans le catalogue...</option>
-              <option value="__libre__">Saisie libre (article éphémère)</option>
+              <option value="">{ligne.categorie_id ? 'Choisir un article...' : 'Sélectionnez d\'abord une catégorie'}</option>
               {catArticles.map(a => <option key={a.id} value={a.id}>{a.nom}</option>)}
             </select>
-            <input
-              value={ligne.designation}
-              onChange={e => onDesignationChange(e.target.value)}
-              placeholder={isEphemeral ? 'Ex : Démolition cloison BA13' : 'Désignation...'}
-              style={{ ...IS(false, isEphemeral && ligne.designation ? { borderColor: '#F57C00', background: '#FFFDE7' } : {}), fontSize: '0.82rem' }}
-            />
-            {isEphemeral && ligne.designation?.trim() && (
-              <span style={{ fontSize: '0.68rem', color: '#E65100', fontWeight: 600 }}>Article éphémère — non enregistré au catalogue</span>
+            {ligne.designation && (
+              <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-2)', padding: '4px 0' }}>{ligne.designation}</div>
             )}
             <button type="button" onClick={() => setShowDesc(s => !s)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', fontSize: '0.72rem', textAlign: 'left', padding: 0, display: 'flex', alignItems: 'center', gap: 3 }}>
               {showDesc ? <ChevronUp size={11} /> : <ChevronDown size={11} />} Description
@@ -297,7 +342,12 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
   const isEdit = !!devis;
   const [form, setForm] = useState(() => devis ? {
     ...EMPTY_DEVIS, ...devis,
-    lignes: devis.lignes?.length ? devis.lignes.map(l => ({ ...EMPTY_LIGNE(), ...l, _id: l._id || Date.now() + Math.random() })) : [EMPTY_LIGNE()],
+    lignes: devis.lignes?.length ? devis.lignes.map(l => ({
+      ...EMPTY_LIGNE(),
+      ...l,
+      ephemeral: l.ephemeral ?? (l.type === 'article' && !l.article_id && !!l.designation?.trim()),
+      _id: l._id || Date.now() + Math.random(),
+    })) : [EMPTY_LIGNE()],
   } : { ...EMPTY_DEVIS, reference: genRef() });
 
   const [clients, setClients] = useState([]);
@@ -331,7 +381,9 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
 
   /* Lignes CRUD */
   function addLigne(type = 'article') {
-    const l = { ...EMPTY_LIGNE(), type };
+    const l = type === 'article_ephemere'
+      ? EMPTY_LIGNE_EPHEMERE()
+      : { ...EMPTY_LIGNE(), type };
     setForm(p => ({ ...p, lignes: [...p.lignes, l] }));
   }
   function updateLigne(idx, data) {
@@ -596,6 +648,9 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
               <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
                 <button type="button" className="btn btn-ghost btn-sm" onClick={() => addLigne('article')} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
                   <Plus size={13} /> Article
+                </button>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => addLigne('article_ephemere')} style={{ display: 'flex', alignItems: 'center', gap: 5, color: '#E65100' }}>
+                  <Plus size={13} /> Article éphémère
                 </button>
                 <button type="button" className="btn btn-ghost btn-sm" onClick={() => addLigne('titre')} style={{ display: 'flex', alignItems: 'center', gap: 5, color: 'var(--text-2)' }}>
                   <Plus size={13} /> Titre section

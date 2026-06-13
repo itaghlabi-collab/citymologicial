@@ -26,6 +26,7 @@ export const ROUTES = {
   PRESENCE:           'presence',
   HEURES_SUP:         'heures-sup',
   PAIEMENT_HEBDO:     'paiement-hebdo',
+  SITUATION_SOUS_TRAITANTS: 'situation-sous-traitants',
   SOUS_TRAITANTS:     'sous-traitants',
 
   // Commercial / Marketing

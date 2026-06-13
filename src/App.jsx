@@ -13,6 +13,7 @@ import OuvriersListe from './components/OuvriersListe';
 import Presence from './components/Presence';
 import HeuresSupp from './components/HeuresSupp';
 import PaiementHebdo from './components/PaiementHebdo';
+import SituationSousTraitants from './components/SituationSousTraitants';
 import SousTraitants from './components/SousTraitants';
 import Clients from './components/crm/Clients';
 import Articles from './components/crm/Articles';
@@ -83,6 +84,7 @@ const NAV = [
       { id: 'presence',           label: 'Presence ouvriers',    icon: ClockIcon },
       { id: 'heures-sup',         label: 'Heures supplementaires', icon: BarChart3 },
       { id: 'paiement-hebdo',     label: 'Paiement hebdo. ouvriers', icon: Banknote },
+      { id: 'situation-sous-traitants', label: 'Situation sous-traitants', icon: ClipboardList },
       { id: 'sous-traitants',     label: 'Sous-traitants',       icon: Handshake },
     ],
   },
@@ -189,6 +191,7 @@ const MODULE_LABELS = {
   presence:            'Presence ouvriers',
   'heures-sup':        'Heures supplementaires',
   'paiement-hebdo':    'Paiement hebdo. ouvriers',
+  'situation-sous-traitants': 'Situation sous-traitants',
   'sous-traitants':    'Sous-traitants',
   prospects:           'Prospects',
   'devis-attente':     'Devis en attente',
@@ -252,6 +255,7 @@ function PageContent({ module }) {
     case 'presence':            return <Presence />;
     case 'heures-sup':          return <HeuresSupp />;
     case 'paiement-hebdo':      return <PaiementHebdo />;
+    case 'situation-sous-traitants': return <SituationSousTraitants />;
     case 'sous-traitants':      return <SousTraitants />;
     /* Commercial / Marketing */
     case 'prospects':           return <Prospects />;

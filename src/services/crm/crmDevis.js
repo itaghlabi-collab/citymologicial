@@ -109,13 +109,14 @@ function toDevisRow(form, totals) {
 
 function toLigneRow(ligne, devisId, ordre) {
   const total_ht = ligneTotalHt(ligne);
+  const isEphemeral = ligne.ephemeral && !ligne.article_id;
   return {
     devis_id: devisId,
     ordre,
     type: ligne.type || 'article',
     designation: ligne.designation?.trim() || null,
     description: ligne.description?.trim() || null,
-    article_id: ligne.article_id || null,
+    article_id: isEphemeral ? null : (ligne.article_id || null),
     categorie_id: ligne.categorie_id || null,
     quantite: Number(ligne.quantite) || 0,
     unite: ligne.unite || 'unite',
@@ -192,7 +193,11 @@ export async function getCrmDevisById(id) {
 async function upsertLignes(devisId, lignes) {
   await getSupabase().from(LIGNES).delete().eq('devis_id', devisId);
   const rows = (lignes || [])
-    .filter((l) => l.type !== 'article' || l.designation?.trim() || l.article_id)
+    .filter((l) => {
+      if (l.type !== 'article') return true;
+      if (l.ephemeral) return !!l.designation?.trim();
+      return !!l.article_id || !!l.designation?.trim();
+    })
     .map((l, i) => toLigneRow(l, devisId, i));
   if (rows.length === 0) return;
   const { error } = await getSupabase().from(LIGNES).insert(rows);

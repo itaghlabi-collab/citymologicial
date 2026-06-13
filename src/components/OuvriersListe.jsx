@@ -13,6 +13,7 @@ import { scanCIN, canUseCamera, getCameraBlockedReason, getCameraErrorMessage, g
 import { captureCINFromVideo, prepareImportedCINImage } from '../services/cinCapture';
 import { generateWorkerPdf } from '../services/rh/workerPdf';
 import { listProjects } from '../services/projects/projects';
+import { WORKER_HOURS_PER_DAY } from '../services/rh/workers';
 
 /* Exported for compatibility — starts empty, populated from API */
 export const SEED_WORKERS = [];
@@ -52,6 +53,8 @@ const EMPTY_FORM = {
 /* ── Helpers ── */
 function fmtMAD(n) { return Number(n).toLocaleString('fr-MA') + ' MAD'; }
 function fmtTarifHeure(n) { return Number(n).toLocaleString('fr-MA', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + ' MAD/h'; }
+function fmtTarifJour(n) { return Number(n).toLocaleString('fr-MA', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + ' MAD/j'; }
+function tarifJourFromHeure(h) { return Math.round(Number(h || 0) * WORKER_HOURS_PER_DAY * 100) / 100; }
 function fmtDate(d) { if (!d) return '—'; try { return new Date(d).toLocaleDateString('fr-MA', { day: '2-digit', month: '2-digit', year: 'numeric' }); } catch { return d; } }
 function initials(w) { return ((w.prenom?.[0] || '') + (w.nom?.[0] || '')).toUpperCase() || '?'; }
 function genBadge() { return 'CH-' + String(Math.floor(Math.random() * 9000) + 1000); }
@@ -980,7 +983,8 @@ function OuvrierDetail({ worker, onBack, onEdit, onDownloadPdf, pdfLoading }) {
               ['Statut', STATUT_CFG[worker.statut]?.label || worker.statut],
               ['Disponibilite', worker.disponibilite === 'oui' ? 'Disponible' : 'Non disponible'],
               ['Chantier affecte', worker.chantier],
-              ['Tarif/heure', fmtTarifHeure(worker.tarif)],
+              ['Tarif horaire', fmtTarifHeure(worker.tarif)],
+              ['Tarif journalier', fmtTarifJour(tarifJourFromHeure(worker.tarif))],
               ['Badge', worker.badge],
             ].map(([k, v]) => v ? (
               <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.83rem', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
@@ -1379,7 +1383,12 @@ function OuvrierModal({ worker, onClose, onSave, saving, projects = [] }) {
                   </div>
                   <div className="form-group">
                     <Label required>Tarif horaire (MAD/h)</Label>
-                    <input type="number" min="0" step="0.01" value={form.tarif} onChange={e => set('tarif', e.target.value)} placeholder="16.25" style={IS(errors.tarif)} />
+                    <input type="number" min="0" step="0.01" value={form.tarif} onChange={e => set('tarif', e.target.value)} placeholder="15.00" style={IS(errors.tarif)} />
+                    {form.tarif && !errors.tarif && (
+                      <div style={{ fontSize: '0.75rem', color: 'var(--text-3)', marginTop: 4 }}>
+                        Tarif journalier : {fmtTarifJour(tarifJourFromHeure(form.tarif))} (× {WORKER_HOURS_PER_DAY} h)
+                      </div>
+                    )}
                     {errors.tarif && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.tarif}</span>}
                   </div>
                   <div className="form-group">
@@ -1813,7 +1822,7 @@ export default function OuvriersListe({ onWorkersChange }) {
                     { label: 'Telephone',   field: 'telephone' },
                     { label: 'Fonction',    field: 'fonction' },
                     { label: 'Chantier',    field: 'chantier' },
-                    { label: 'Tarif/h',  field: 'tarif', align: 'right' },
+                    { label: 'Tarif/j',  field: 'tarif', align: 'right' },
                     { label: 'Statut',      field: 'statut' },
                     { label: 'Badge',       field: 'badge' },
                     { label: 'Actions',     field: null },
@@ -1865,8 +1874,9 @@ export default function OuvriersListe({ onWorkersChange }) {
                       </td>
 
                       {/* Tarif */}
-                      <td data-label="Tarif/h" style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'var(--font-head)', fontWeight: 800, color: 'var(--red)', whiteSpace: 'nowrap' }}>
-                        {fmtTarifHeure(w.tarif)}
+                      <td data-label="Tarif/j" style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'var(--font-head)', fontWeight: 800, color: 'var(--red)', whiteSpace: 'nowrap' }}>
+                        {fmtTarifJour(tarifJourFromHeure(w.tarif))}
+                        <div style={{ fontSize: '0.68rem', color: 'var(--text-3)', fontWeight: 500 }}>{fmtTarifHeure(w.tarif)}</div>
                       </td>
 
                       {/* Statut */}

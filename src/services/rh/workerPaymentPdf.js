@@ -2,7 +2,6 @@
  * workerPaymentPdf.js — Fiche de paiement ouvrier PDF
  */
 import { generatePaymentVoucherPdf, fmtDate, formatPdfMAD } from './paymentPdfShared';
-import { WORKER_HOURS_PER_DAY } from './workerPayroll';
 
 export async function exportWorkerPaymentPdf(record, { print = false } = {}) {
   const ref = record.reference || record.id?.slice(0, 8)?.toUpperCase() || '—';
@@ -19,7 +18,7 @@ export async function exportWorkerPaymentPdf(record, { print = false } = {}) {
   ];
 
   const detailRows = [
-    ['Jours travaillés', `${record.joursPaies} j (${record.heuresNormales || record.joursPaies * WORKER_HOURS_PER_DAY} h)`, formatPdfMAD(record.tarifHoraire) + '/h', formatPdfMAD((record.heuresNormales || 0) * (record.tarifHoraire || 0))],
+    ['Jours travaillés', `${record.joursPaies} j`, formatPdfMAD(record.tarifJournalier) + '/j', formatPdfMAD(record.montantNormales || (record.joursPaies * record.tarifJournalier))],
   ];
   if (Number(record.heuresSup) > 0) {
     detailRows.push(['Heures supplémentaires', `${record.heuresSup} h`, formatPdfMAD(record.tarifSup) + '/h', formatPdfMAD(record.montantSup)]);

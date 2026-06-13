@@ -31,7 +31,7 @@ function fmtDate(iso) {
   try { return new Date(iso).toLocaleDateString('fr-MA'); } catch { return iso; }
 }
 
-export default function PaiementSousTraitantsSection({ onNotify }) {
+export default function PaiementSousTraitantsSection({ onNotify, standalone = false }) {
   const [showModal, setShowModal] = useState(false);
   const [payments, setPayments] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -148,18 +148,18 @@ export default function PaiementSousTraitantsSection({ onNotify }) {
   const totalPaid = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
 
   return (
-    <div className="card" style={{ marginTop: 24 }}>
+    <div className="card" style={standalone ? {} : { marginTop: 24 }}>
       <div className="flex-between" style={{ marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
         <div>
           <div className="card-title" style={{ marginBottom: 4 }}>
-            <Handshake size={16} /> Paiement sous-traitant
+            <Handshake size={16} /> {standalone ? 'Situation sous-traitants' : 'Paiement sous-traitant'}
           </div>
           <p style={{ margin: 0, fontSize: '0.83rem', color: 'var(--text-3)' }}>
             Projet → sous-traitants → avances / retenues → montant net (mètre / tâche / service)
           </p>
         </div>
-        <button type="button" className="btn btn-secondary" onClick={openCreate}>
-          <Plus size={15} /> Ajouter paiement sous-traitant
+        <button type="button" className="btn btn-primary" onClick={openCreate}>
+          <Plus size={15} /> {standalone ? 'Nouveau paiement' : 'Ajouter paiement sous-traitant'}
         </button>
       </div>
 
