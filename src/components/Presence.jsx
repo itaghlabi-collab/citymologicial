@@ -1,4 +1,4 @@
-import { ClockIcon, Plus, X, Filter, CheckCircle, XCircle, CalendarOff, Pencil, Loader2, Search, Users, HardHat, Download, Eye, Printer, Building2 } from 'lucide-react';
+import { ClockIcon, Plus, X, Filter, CheckCircle, XCircle, CalendarOff, Pencil, Loader2, Search, Users, HardHat, Download, Eye, Printer } from 'lucide-react';
 import { useState, useRef, useMemo } from 'react';
 import { useAttendance } from '../hooks/useAttendance';
 import { generateAttendanceWeeklyPdf } from '../services/rh/attendanceSheetPdf';
@@ -421,6 +421,11 @@ export default function Presence() {
     [filtered, filterSemaine, filterProjectId, filterOuvrier],
   );
 
+  const recapRows = useMemo(
+    () => summaryGroups.flatMap((g) => g.ouvriers),
+    [summaryGroups],
+  );
+
   const weekOptions = useMemo(() => {
     const set = new Set(collectAttendanceWeeks(records));
     if (filterSemaine) set.add(filterSemaine);
@@ -428,10 +433,7 @@ export default function Presence() {
     return [...set].sort((a, b) => b.localeCompare(a));
   }, [records, filterSemaine]);
 
-  const summaryCount = useMemo(
-    () => summaryGroups.reduce((n, g) => n + g.ouvriers.length, 0),
-    [summaryGroups],
-  );
+  const summaryCount = useMemo(() => recapRows.length, [recapRows]);
 
   const stats = useMemo(() => computeAttendanceStats(filtered), [filtered, computeAttendanceStats]);
 
@@ -558,7 +560,7 @@ export default function Presence() {
       <div className="page-header flex-between">
         <div>
           <h1 className="page-title">Presence ouvriers</h1>
-          <p className="page-subtitle">Vue récapitulative par ouvrier et semaine — détail journalier disponible</p>
+          <p className="page-subtitle">Une ligne récapitulative par ouvrier — détail journalier dans « Détail »</p>
         </div>
         <button className="btn btn-primary" onClick={openCreate} disabled={loading || saving}>
           <Plus size={15} /> Ajouter une presence
@@ -649,7 +651,7 @@ export default function Presence() {
           <Loader2 size={28} style={{ animation: 'spin 1s linear infinite', margin: '0 auto 12px' }} />
           <div style={{ fontSize: '0.88rem' }}>Chargement des présences…</div>
         </div>
-      ) : summaryGroups.length === 0 ? (
+      ) : recapRows.length === 0 ? (
         <div className="card">
           <EmptyState
             icon={<CalendarOff size={22} style={{ color: 'var(--text-3)' }} />}
@@ -669,78 +671,60 @@ export default function Presence() {
           )}
         </div>
       ) : (
-        summaryGroups.map((group) => (
-          <div key={`${group.projectId}|${group.semaineDebut}`} className="card" style={{ marginBottom: 16 }}>
-            <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, marginBottom: 16, paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>
-              <div>
-                <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.05rem', marginBottom: 6 }}>
-                  <Building2 size={16} style={{ verticalAlign: -2, marginRight: 6 }} />
-                  {group.projet}
-                </div>
-                <div style={{ fontSize: '0.83rem', color: 'var(--text-3)' }}>
-                  Période : {fmtWeekRange(group.semaineDebut, group.semaineFin)} · {group.ouvriers.length} ouvrier{group.ouvriers.length > 1 ? 's' : ''}
-                </div>
-              </div>
-              <div className="rh-ext-detail-header-actions">
-                <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleGroupPdf(group, false)} disabled={pdfLoading}>
-                  <Download size={13} /> Télécharger PDF
-                </button>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleGroupPdf(group, true)} disabled={pdfLoading}>
-                  <Printer size={13} /> Imprimer
-                </button>
-              </div>
-            </div>
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Ouvrier</th><th>Projet / chantier</th><th>Chef chantier</th><th>Période</th>
-                    <th>Présences</th><th>H. travaillées</th><th>Retard</th><th>Équiv. jours</th><th>Statut</th><th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {group.ouvriers.map((s) => (
-                    <tr key={s.key}>
-                      <td data-label="Ouvrier">
-                        <button
-                          type="button"
-                          onClick={() => setDetailSummary(s)}
-                          style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontWeight: 700, color: 'var(--text)', textAlign: 'left', fontFamily: 'inherit', fontSize: 'inherit' }}
-                        >
-                          {s.ouvrier}
-                        </button>
-                      </td>
-                      <td data-label="Projet / chantier">{s.projet || group.projet || '—'}</td>
-                      <td data-label="Chef chantier">{s.chefChantier || '—'}</td>
-                      <td data-label="Période" style={{ fontSize: '0.82rem', color: 'var(--text-2)' }}>{fmtWeekRange(s.semaineDebut, s.semaineFin)}</td>
-                      <td data-label="Présences">{s.nbPresences ?? s.lignes?.length ?? 0}</td>
-                      <td data-label="H. travaillées">{fmtHours(s.totalHeures)}</td>
-                      <td data-label="Retard" style={{ color: s.totalRetard > 0 ? '#E65100' : 'var(--text-3)' }}>{s.totalRetard > 0 ? fmtHours(s.totalRetard) : '—'}</td>
-                      <td data-label="Équiv. jours" style={{ fontWeight: 600 }}>{fmtDayEquiv(s.joursEquivalent)}</td>
-                      <td data-label="Statut"><span className={'badge ' + (STATUS_BADGE[s.statutGlobal] || 'badge-grey')}>{s.statutGlobal}</span></td>
-                      <td data-label="Actions" className="payment-actions-cell">
-                        <div className="payment-row-actions">
-                          <button type="button" className="btn btn-secondary btn-sm" onClick={() => setDetailSummary(s)}>
-                            <Eye size={13} /> Détail
-                          </button>
-                          <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleModifySummary(s)}>
-                            <Pencil size={13} /> Modifier
-                          </button>
-                          <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleSummaryPdf(s, false)} disabled={pdfLoading}>
-                            <Download size={13} /> Télécharger
-                          </button>
-                          <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleSummaryPdf(s, true)} disabled={pdfLoading} title="Imprimer">
-                            <Printer size={13} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+        <div className="card">
+          <div style={{ fontSize: '0.83rem', color: 'var(--text-3)', marginBottom: 14 }}>
+            {recapRows.length} ouvrier{recapRows.length > 1 ? 's' : ''} — une ligne par ouvrier, projet et période
           </div>
-        ))
+          <div className="table-wrap">
+            <table>
+              <thead>
+                <tr>
+                  <th>Ouvrier</th><th>Projet / chantier</th><th>Chef chantier</th><th>Période</th>
+                  <th>Présences</th><th>H. travaillées</th><th>Retard</th><th>Équiv. jours</th><th>Statut</th><th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recapRows.map((s) => (
+                  <tr key={s.key}>
+                    <td data-label="Ouvrier">
+                      <button
+                        type="button"
+                        onClick={() => setDetailSummary(s)}
+                        style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontWeight: 700, color: 'var(--text)', textAlign: 'left', fontFamily: 'inherit', fontSize: 'inherit' }}
+                      >
+                        {s.ouvrier}
+                      </button>
+                    </td>
+                    <td data-label="Projet / chantier">{s.projet || '—'}</td>
+                    <td data-label="Chef chantier">{s.chefChantier || '—'}</td>
+                    <td data-label="Période" style={{ fontSize: '0.82rem', color: 'var(--text-2)' }}>{fmtWeekRange(s.semaineDebut, s.semaineFin)}</td>
+                    <td data-label="Présences">{s.nbPresences ?? s.lignes?.length ?? 0}</td>
+                    <td data-label="H. travaillées">{fmtHours(s.totalHeures)}</td>
+                    <td data-label="Retard" style={{ color: s.totalRetard > 0 ? '#E65100' : 'var(--text-3)' }}>{s.totalRetard > 0 ? fmtHours(s.totalRetard) : '—'}</td>
+                    <td data-label="Équiv. jours" style={{ fontWeight: 600 }}>{fmtDayEquiv(s.joursEquivalent)}</td>
+                    <td data-label="Statut"><span className={'badge ' + (STATUS_BADGE[s.statutGlobal] || 'badge-grey')}>{s.statutGlobal}</span></td>
+                    <td data-label="Actions" className="payment-actions-cell">
+                      <div className="payment-row-actions">
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => setDetailSummary(s)}>
+                          <Eye size={13} /> Détail
+                        </button>
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleModifySummary(s)}>
+                          <Pencil size={13} /> Modifier
+                        </button>
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleSummaryPdf(s, false)} disabled={pdfLoading}>
+                          <Download size={13} /> Télécharger
+                        </button>
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleSummaryPdf(s, true)} disabled={pdfLoading} title="Imprimer">
+                          <Printer size={13} />
+                        </button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
       )}
 
       {detailSummary && (
