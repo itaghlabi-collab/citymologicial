@@ -1,6 +1,6 @@
 import {
   Banknote, CheckCircle, Filter, Search, Users, TrendingUp, Plus, Trash2, Loader2, X,
-  FileDown, Printer,
+  FileDown, Printer, RefreshCw, Building2, Calendar,
 } from 'lucide-react';
 import { useState, useRef, useMemo, useEffect } from 'react';
 import { useWorkerPayroll } from '../hooks/useWorkerPayroll';
@@ -10,8 +10,8 @@ import {
   buildWorkerPayrollLine,
   weekStartMonday,
   weekEndSunday,
+  fmtWeekRange,
 } from '../services/rh/workerPayroll';
-import { PAYMENT_METHODS } from '../services/rh/subcontractorConstants';
 import { exportWorkerPaymentPdf } from '../services/rh/workerPaymentPdf';
 import { workerFullName } from '../services/rh/attendance';
 
@@ -40,6 +40,12 @@ const INPUT_S = (err) => ({
   borderRadius: 'var(--radius)', background: '#fff', boxSizing: 'border-box',
 });
 
+const READONLY_S = {
+  padding: '9px 12px', width: '100%', fontFamily: 'var(--font-body)', fontSize: '0.9rem',
+  border: '1.5px solid var(--border)', borderRadius: 'var(--radius)', background: '#F5F5F5',
+  boxSizing: 'border-box', color: 'var(--text-2)',
+};
+
 const EMPTY_BATCH = {
   projectId: '',
   projet: '',
@@ -62,18 +68,27 @@ function lineFromSelection(workerId, sel) {
   };
 }
 
+function statutBadgeClass(statut) {
+  if (statut === 'Payé') return 'badge-green';
+  if (statut === 'En attente') return 'badge-orange';
+  if (statut === 'Partiellement payé') return 'badge-blue';
+  return 'badge-red';
+}
+
 export default function PaiementHebdo() {
   const {
-    records, projects, workersByProject, loading, saving, error, configured, load,
-    createBatch, update, markPaid, remove, filterWorkerPayroll, computePayrollStats, chantiers,
-    computeLineFromPresence,
+    records, projects, workersByProject, loading, saving, syncing, error, configured, load,
+    createBatch, updateAdjustments, markPaid, remove, filterWorkerPayroll, computePayrollStats,
+    chantiers, weeks, computeLineFromPresence, groupPayrollByProjectWeek, syncFromPresence,
   } = useWorkerPayroll();
 
   const [search, setSearch] = useState('');
   const [filterProjet, setFilterProjet] = useState('');
   const [filterStatut, setFilterStatut] = useState('');
+  const [filterSemaine, setFilterSemaine] = useState(currentWeekStart());
   const [showModal, setShowModal] = useState(false);
   const [editId, setEditId] = useState(null);
+  const [editRecord, setEditRecord] = useState(null);
   const [detailId, setDetailId] = useState(null);
   const [form, setForm] = useState(EMPTY_BATCH);
   const [editForm, setEditForm] = useState({});
@@ -184,29 +199,23 @@ export default function PaiementHebdo() {
 
   function openCreate() {
     setEditId(null);
-    setForm({ ...EMPTY_BATCH, semaineDebut: currentWeekStart() });
+    setEditRecord(null);
+    setForm({ ...EMPTY_BATCH, semaineDebut: filterSemaine || currentWeekStart() });
     setErrors({});
     setShowModal(true);
   }
 
   function openEdit(record) {
     setEditId(record.id);
+    setEditRecord(record);
     setDetailId(null);
     setEditForm({
-      projectId: record.projectId || '',
-      projet: record.projet || '',
-      semaineDebut: record.semaineDebut || currentWeekStart(),
-      joursPaies: String(record.joursPaies ?? ''),
-      tarifJournalier: String(record.tarifJournalier ?? ''),
-      tarifHoraire: String(record.tarifHoraire ?? ''),
       heuresSup: String(record.heuresSup ?? ''),
       tarifSup: String(record.tarifSup ?? ''),
       avances: String(record.avances ?? ''),
       retenues: String(record.retenues ?? ''),
       statut: record.statut || 'En attente',
       notes: record.notes || '',
-      reference: record.reference || '',
-      paymentMethod: record.paymentMethod || '',
     });
     setErrors({});
     setShowModal(true);
@@ -224,6 +233,20 @@ export default function PaiementHebdo() {
     }
   }
 
+  async function handleSync() {
+    const result = await syncFromPresence();
+    if (!result.success) {
+      notify('error', result.error || 'Erreur synchronisation.');
+      return;
+    }
+    const { created = 0, updated = 0 } = result;
+    if (created + updated === 0) {
+      notify('success', 'Situations à jour — aucune modification.');
+    } else {
+      notify('success', `${created} créée(s), ${updated} mise(s) à jour depuis les présences.`);
+    }
+  }
+
   function validateBatch() {
     const e = {};
     if (!form.projectId) e.projectId = 'Requis';
@@ -236,28 +259,23 @@ export default function PaiementHebdo() {
     return e;
   }
 
-  function validateEdit() {
-    const e = {};
-    if (!editForm.semaineDebut) e.semaineDebut = 'Requis';
-    if (editForm.joursPaies === '' || Number(editForm.joursPaies) < 0) e.joursPaies = 'Jours requis';
-    if (!editForm.tarifJournalier || Number(editForm.tarifJournalier) <= 0) e.tarifJournalier = 'Tarif journalier requis';
-    return e;
-  }
-
   async function handleSubmit(ev) {
     ev.preventDefault();
-    if (editId) {
-      const errs = validateEdit();
-      if (Object.keys(errs).length) { setErrors(errs); return; }
-      const result = await update(editId, {
-        ...editForm,
-        semaineFin: weekEndSunday(editForm.semaineDebut),
+    if (editId && editRecord) {
+      const result = await updateAdjustments(editId, editRecord, {
+        heuresSup: editForm.heuresSup === '' ? 0 : Number(editForm.heuresSup),
+        tarifSup: editForm.tarifSup === '' ? undefined : Number(editForm.tarifSup),
+        avances: editForm.avances === '' ? 0 : Number(editForm.avances),
+        retenues: editForm.retenues === '' ? 0 : Number(editForm.retenues),
+        statut: editForm.statut,
+        notes: editForm.notes,
       });
       if (!result.success) { notify('error', result.error || 'Erreur.'); return; }
-      notify('success', 'Paiement modifié.');
+      notify('success', 'Ajustements enregistrés — net recalculé.');
     } else {
       const errs = validateBatch();
       if (Object.keys(errs).length) { setErrors(errs); return; }
+      const pr = projects.find((p) => String(p.id) === String(form.projectId));
       const result = await createBatch(
         {
           projectId: form.projectId,
@@ -266,11 +284,13 @@ export default function PaiementHebdo() {
           semaineFin: weekEndSunday(form.semaineDebut),
           statut: form.statut,
           notes: form.notes,
+          chefProjet: pr?.chef_projet || pr?.responsable || '',
+          chefChantier: pr?.chef_chantier || '',
         },
         selectedLines,
       );
       if (!result.success) { notify('error', result.error || 'Erreur.'); return; }
-      notify('success', `${result.count} paiement(s) ouvrier(s) — total ${fmtMAD(batchTotal)}`);
+      notify('success', `${result.count} paiement(s) manuel(s) — total ${fmtMAD(batchTotal)}`);
     }
     setShowModal(false);
   }
@@ -282,15 +302,36 @@ export default function PaiementHebdo() {
   }
 
   const filtered = useMemo(
-    () => filterWorkerPayroll(records, { search, projet: filterProjet, statut: filterStatut }),
-    [records, search, filterProjet, filterStatut, filterWorkerPayroll],
+    () => filterWorkerPayroll(records, {
+      search, projet: filterProjet, statut: filterStatut, semaine: filterSemaine,
+    }),
+    [records, search, filterProjet, filterStatut, filterSemaine, filterWorkerPayroll],
+  );
+
+  const situationGroups = useMemo(
+    () => groupPayrollByProjectWeek(filtered, filterSemaine),
+    [filtered, filterSemaine, groupPayrollByProjectWeek],
   );
 
   const stats = useMemo(() => computePayrollStats(filtered), [filtered, computePayrollStats]);
   const allSelected = projectWorkers.length > 0 && projectWorkers.every((w) => form.selected[w.id]?.checked);
-  const hasFilters = search || filterProjet || filterStatut;
-  const editPreview = calcWorkerPayrollTotals(editForm);
-  const detailRecord = detailId ? filtered.find((p) => p.id === detailId) : null;
+  const editPreview = editRecord ? calcWorkerPayrollTotals({
+    joursPaies: editRecord.joursPaies,
+    tarifJournalier: editRecord.tarifJournalier,
+    tarifHoraire: editRecord.tarifHoraire,
+    heuresSup: editForm.heuresSup,
+    tarifSup: editForm.tarifSup || editRecord.tarifSup,
+    avances: editForm.avances,
+    retenues: editForm.retenues,
+  }) : null;
+  const detailRecord = detailId ? records.find((p) => p.id === detailId) : null;
+
+  const weekOptions = useMemo(() => {
+    const set = new Set(weeks);
+    if (filterSemaine) set.add(filterSemaine);
+    set.add(currentWeekStart());
+    return [...set].sort((a, b) => b.localeCompare(a));
+  }, [weeks, filterSemaine]);
 
   return (
     <div className="animate-fade-in rh-ext-page">
@@ -299,11 +340,31 @@ export default function PaiementHebdo() {
       <div className="page-header flex-between">
         <div>
           <h1 className="page-title">Paiement hebdomadaire ouvriers</h1>
-          <p className="page-subtitle">Présences → jours travaillés × tarif journalier + heures sup − avances − retenues</p>
+          <p className="page-subtitle">
+            Situations générées automatiquement depuis les présences · jours × tarif journalier (horaire × 8)
+          </p>
         </div>
-        <button className="btn btn-primary" onClick={openCreate} disabled={loading || saving || !configured}>
-          <Plus size={15} /> Nouveau paiement ouvrier
-        </button>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={handleSync}
+            disabled={loading || syncing || !configured}
+            title="Recalculer depuis les présences"
+          >
+            {syncing ? <Loader2 size={15} style={{ animation: 'spin 1s linear infinite' }} /> : <RefreshCw size={15} />}
+            {' '}Synchroniser
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={openCreate}
+            disabled={loading || saving || !configured}
+            title="Cas exceptionnel ou correction manuelle"
+          >
+            <Plus size={15} /> Ajout manuel
+          </button>
+        </div>
       </div>
 
       {!configured && (
@@ -315,12 +376,12 @@ export default function PaiementHebdo() {
       {error && !loading && (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, background: '#FFEBEE', border: '1px solid #EF9A9A', borderRadius: 'var(--radius)', padding: '10px 16px', marginBottom: 16, fontSize: '0.85rem', color: '#C62828' }}>
           <span>{error}</span>
-          <button type="button" className="btn btn-secondary btn-sm" onClick={load}>Réessayer</button>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => load()}>Réessayer</button>
         </div>
       )}
 
       <div className="stat-grid rh-ext-stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(190px,1fr))' }}>
-        <div className="stat-card"><div className="stat-icon blue"><Banknote size={18} /></div><div className="stat-body"><div className="stat-value" style={{ fontSize: '1rem' }}>{loading ? '—' : fmtMAD(stats.totalAPayer)}</div><div className="stat-label">Total ouvriers</div></div></div>
+        <div className="stat-card"><div className="stat-icon blue"><Banknote size={18} /></div><div className="stat-body"><div className="stat-value" style={{ fontSize: '1rem' }}>{loading ? '—' : fmtMAD(stats.totalAPayer)}</div><div className="stat-label">Net semaine</div></div></div>
         <div className="stat-card"><div className="stat-icon green"><CheckCircle size={18} /></div><div className="stat-body"><div className="stat-value" style={{ fontSize: '1rem' }}>{loading ? '—' : fmtMAD(stats.totalPaye)}</div><div className="stat-label">Payé</div></div></div>
         <div className="stat-card"><div className="stat-icon orange"><TrendingUp size={18} /></div><div className="stat-body"><div className="stat-value" style={{ fontSize: '1rem' }}>{loading ? '—' : fmtMAD(stats.totalEnAttente)}</div><div className="stat-label">En attente</div></div></div>
         <div className="stat-card"><div className="stat-icon"><Users size={18} /></div><div className="stat-body"><div className="stat-value">{loading ? '—' : stats.count}</div><div className="stat-label">Lignes</div></div></div>
@@ -329,6 +390,14 @@ export default function PaiementHebdo() {
       <div className="card rh-ext-filter-card">
         <div className="rh-ext-filter-bar">
           <Filter size={14} style={{ color: 'var(--text-3)' }} />
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <Calendar size={14} style={{ color: 'var(--text-3)' }} />
+            <select value={filterSemaine} onChange={(e) => setFilterSemaine(weekStartMonday(e.target.value))} style={{ minWidth: 160 }}>
+              {weekOptions.map((w) => (
+                <option key={w} value={w}>Semaine du {new Date(`${w}T12:00:00`).toLocaleDateString('fr-MA')}</option>
+              ))}
+            </select>
+          </div>
           <div className="rh-ext-search-wrap">
             <Search size={13} style={{ position: 'absolute', left: 9, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
             <input type="search" placeholder="Rechercher un ouvrier..." value={search} onChange={(e) => setSearch(e.target.value)} />
@@ -344,84 +413,125 @@ export default function PaiementHebdo() {
         </div>
       </div>
 
-      <div className="card">
-        <div className="card-title" style={{ marginBottom: 4 }}><Banknote size={16} /> Paiement hebdomadaire — Ouvriers</div>
-        <p style={{ margin: '0 0 16px', fontSize: '0.83rem', color: 'var(--text-3)' }}>
-          Les jours travaillés sont calculés automatiquement depuis les présences. Validation et suivi des paiements ouvriers uniquement.
-        </p>
-        {loading ? (
-          <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-3)' }}><Loader2 size={28} style={{ animation: 'spin 1s linear infinite', margin: '0 auto 12px' }} />Chargement…</div>
-        ) : filtered.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-3)', fontSize: '0.88rem' }}>Aucun paiement ouvrier.</div>
-        ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Ouvrier</th><th>Projet</th><th>Semaine</th><th>Jours</th><th>Tarif/j</th>
-                  <th>H. sup</th><th>Montant calc.</th><th>Avances</th><th>Retenues</th><th>Net à payer</th><th>Statut</th><th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((p) => (
-                  <tr key={p.id}>
-                    <td data-label="Ouvrier" style={{ fontWeight: 600 }}>
-                      <button type="button" onClick={() => openDetail(p)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600, color: 'var(--text)', padding: 0, textDecoration: 'underline', textUnderlineOffset: 2 }}>
-                        {p.ouvrier}
-                      </button>
-                    </td>
-                    <td data-label="Projet">{p.projet || '—'}</td>
-                    <td data-label="Semaine">{p.semaineDebut ? new Date(p.semaineDebut).toLocaleDateString('fr-MA') : '—'}</td>
-                    <td data-label="Jours">{p.joursPaies} j</td>
-                    <td data-label="Tarif/j">{fmtMAD(p.tarifJournalier)}</td>
-                    <td data-label="H. sup">{p.heuresSup > 0 ? `${p.heuresSup} h` : '—'}</td>
-                    <td data-label="Montant calc.">{fmtMAD(p.montantBrut)}</td>
-                    <td data-label="Avances" style={{ color: '#E65100' }}>{p.avances > 0 ? fmtMAD(p.avances) : '—'}</td>
-                    <td data-label="Retenues" style={{ color: '#C62828' }}>{p.retenues > 0 ? fmtMAD(p.retenues) : '—'}</td>
-                    <td data-label="Net à payer" style={{ fontWeight: 800, color: 'var(--red)' }}>{fmtMAD(p.total)}</td>
-                    <td data-label="Statut"><span className={'badge ' + (p.statut === 'Payé' ? 'badge-green' : p.statut === 'En attente' ? 'badge-orange' : 'badge-red')}>{p.statut}</span></td>
-                    <td data-label="Actions" className="payment-actions-cell">
-                      <div className="payment-row-actions">
-                        {p.statut === 'En attente' && (
-                          <button type="button" className="btn btn-sm" style={{ background: '#E8F5E9', color: '#2E7D32', border: 'none' }} onClick={() => markPaid(p.id).then((r) => notify(r.success ? 'success' : 'error', r.success ? 'Payé.' : r.error))}>Payer</button>
-                        )}
-                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => openEdit(p)}>Modifier</button>
-                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleWorkerPdf(p, false)}><FileDown size={13} /> Télécharger PDF</button>
-                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleWorkerPdf(p, true)}><Printer size={13} /> Imprimer</button>
-                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleDelete(p.id)} title="Supprimer"><Trash2 size={13} style={{ color: 'var(--red)' }} /></button>
-                      </div>
-                    </td>
+      {loading ? (
+        <div className="card" style={{ textAlign: 'center', padding: 48, color: 'var(--text-3)' }}>
+          <Loader2 size={28} style={{ animation: 'spin 1s linear infinite', margin: '0 auto 12px' }} />
+          Chargement et synchronisation des présences…
+        </div>
+      ) : situationGroups.length === 0 ? (
+        <div className="card" style={{ textAlign: 'center', padding: 48, color: 'var(--text-3)' }}>
+          <Building2 size={32} style={{ margin: '0 auto 12px', opacity: 0.4 }} />
+          <p style={{ margin: '0 0 8px', fontWeight: 600 }}>Aucune situation pour cette semaine</p>
+          <p style={{ margin: '0 0 16px', fontSize: '0.85rem' }}>
+            Les paiements sont générés automatiquement dès qu&apos;une présence est enregistrée.
+          </p>
+          <button type="button" className="btn btn-secondary" onClick={handleSync} disabled={syncing}>
+            <RefreshCw size={14} /> Synchroniser depuis les présences
+          </button>
+        </div>
+      ) : (
+        situationGroups.map((group) => (
+          <div key={`${group.projectId}|${group.semaineDebut}`} className="card" style={{ marginBottom: 16 }}>
+            <div style={{ marginBottom: 16, paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
+                <div>
+                  <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.05rem', marginBottom: 6 }}>
+                    <Building2 size={16} style={{ verticalAlign: -2, marginRight: 6 }} />
+                    {group.projet}
+                  </div>
+                  <div style={{ fontSize: '0.83rem', color: 'var(--text-3)', display: 'flex', flexWrap: 'wrap', gap: '8px 20px' }}>
+                    {group.chefProjet && <span><strong>Chef de projet :</strong> {group.chefProjet}</span>}
+                    {group.chefChantier && <span><strong>Chef de chantier :</strong> {group.chefChantier}</span>}
+                    <span><strong>Semaine :</strong> {fmtWeekRange(group.semaineDebut, group.semaineFin)}</span>
+                  </div>
+                </div>
+                <div style={{ textAlign: 'right' }}>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>Total net chantier</div>
+                  <div style={{ fontWeight: 800, color: 'var(--red)', fontSize: '1.1rem' }}>{fmtMAD(group.totalNet)}</div>
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-3)' }}>Brut {fmtMAD(group.totalBrut)} · {group.lignes.length} ouvrier{group.lignes.length > 1 ? 's' : ''}</div>
+                </div>
+              </div>
+            </div>
+
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Ouvrier</th><th>Fonction</th><th>Jours</th><th>Tarif/j</th>
+                    <th>H. sup</th><th>Montant brut</th><th>Avances</th><th>Retenues</th>
+                    <th>Net à payer</th><th>Statut</th><th>Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {group.lignes.map((p) => (
+                    <tr key={p.id}>
+                      <td data-label="Ouvrier" style={{ fontWeight: 600 }}>
+                        <button type="button" onClick={() => openDetail(p)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600, color: 'var(--text)', padding: 0, textDecoration: 'underline', textUnderlineOffset: 2 }}>
+                          {p.ouvrier}
+                        </button>
+                        {p.autoGenerated && (
+                          <span style={{ display: 'block', fontSize: '0.68rem', color: '#2E7D32', fontWeight: 500 }}>Auto · présences</span>
+                        )}
+                      </td>
+                      <td data-label="Fonction">{p.fonction || '—'}</td>
+                      <td data-label="Jours">{p.joursPaies} j</td>
+                      <td data-label="Tarif/j">{fmtMAD(p.tarifJournalier)}</td>
+                      <td data-label="H. sup">{p.heuresSup > 0 ? `${p.heuresSup} h` : '—'}</td>
+                      <td data-label="Montant brut">{fmtMAD(p.montantBrut)}</td>
+                      <td data-label="Avances" style={{ color: '#E65100' }}>{p.avances > 0 ? fmtMAD(p.avances) : '—'}</td>
+                      <td data-label="Retenues" style={{ color: '#C62828' }}>{p.retenues > 0 ? fmtMAD(p.retenues) : '—'}</td>
+                      <td data-label="Net à payer" style={{ fontWeight: 800, color: 'var(--red)' }}>{fmtMAD(p.total)}</td>
+                      <td data-label="Statut"><span className={`badge ${statutBadgeClass(p.statut)}`}>{p.statut}</span></td>
+                      <td data-label="Actions" className="payment-actions-cell">
+                        <div className="payment-row-actions">
+                          {p.statut === 'En attente' && (
+                            <button type="button" className="btn btn-sm" style={{ background: '#E8F5E9', color: '#2E7D32', border: 'none' }} onClick={() => markPaid(p.id).then((r) => notify(r.success ? 'success' : 'error', r.success ? 'Payé.' : r.error))}>Payer</button>
+                          )}
+                          <button type="button" className="btn btn-secondary btn-sm" onClick={() => openEdit(p)}>Modifier</button>
+                          <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleWorkerPdf(p, false)}><FileDown size={13} /></button>
+                          <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleWorkerPdf(p, true)}><Printer size={13} /></button>
+                          {!p.autoGenerated && (
+                            <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleDelete(p.id)} title="Supprimer"><Trash2 size={13} style={{ color: 'var(--red)' }} /></button>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-        )}
-      </div>
+        ))
+      )}
 
       {showModal && (
         <div className="rh-ext-modal-overlay">
           <div className="card rh-ext-modal-box">
             <div className="flex-between" style={{ marginBottom: 16 }}>
               <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.05rem', margin: 0 }}>
-                {editId ? 'Modifier paiement ouvrier' : 'Paiement hebdomadaire ouvriers'}
+                {editId ? 'Ajuster le paiement' : 'Ajout manuel (exception)'}
               </h2>
               <button type="button" onClick={() => setShowModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
             </div>
 
             <form onSubmit={handleSubmit}>
-              {editId ? (
+              {editId && editRecord ? (
                 <div style={{ display: 'grid', gap: 14 }}>
-                  <div><label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Semaine (début) *</label>
-                    <input type="date" value={editForm.semaineDebut} onChange={(e) => setEditForm((p) => ({ ...p, semaineDebut: weekStartMonday(e.target.value) }))} style={INPUT_S(errors.semaineDebut)} /></div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                    <div><label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Jours travaillés *</label>
-                      <input type="number" min="0" step="0.5" value={editForm.joursPaies} onChange={(e) => setEditForm((p) => ({ ...p, joursPaies: e.target.value }))} style={INPUT_S(errors.joursPaies)} />
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-3)', marginTop: 4 }}>Calculé depuis les présences (modifiable)</div></div>
-                    <div><label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Tarif journalier *</label>
-                      <input type="number" min="0" step="0.01" value={editForm.tarifJournalier} onChange={(e) => setEditForm((p) => ({ ...p, tarifJournalier: e.target.value }))} style={INPUT_S(errors.tarifJournalier)} />
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-3)', marginTop: 4 }}>{fmtMAD(Number(editForm.tarifJournalier || 0) / 8)}/h équivalent</div></div>
+                  <div style={{ padding: 12, background: '#F8F9FA', borderRadius: 8, fontSize: '0.85rem' }}>
+                    <div><strong>{editRecord.ouvrier}</strong> · {editRecord.fonction || '—'}</div>
+                    <div style={{ color: 'var(--text-3)', marginTop: 4 }}>
+                      {editRecord.projet} · {fmtWeekRange(editRecord.semaineDebut, editRecord.semaineFin)}
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginTop: 10 }}>
+                      <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Jours travaillés</span><div style={{ fontWeight: 700 }}>{editRecord.joursPaies} j</div></div>
+                      <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Tarif journalier</span><div style={{ fontWeight: 700 }}>{fmtMAD(editRecord.tarifJournalier)}</div></div>
+                      <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Base normale</span><div style={{ fontWeight: 700 }}>{fmtMAD(editRecord.montantNormales)}</div></div>
+                    </div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-3)', marginTop: 8 }}>
+                      Calculé automatiquement depuis les présences — non modifiable ici.
+                    </div>
                   </div>
+
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                     <div><label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Heures supplémentaires</label>
                       <input type="number" min="0" step="0.5" value={editForm.heuresSup} onChange={(e) => setEditForm((p) => ({ ...p, heuresSup: e.target.value }))} style={INPUT_S(false)} /></div>
@@ -438,28 +548,25 @@ export default function PaiementHebdo() {
                     <select value={editForm.statut} onChange={(e) => setEditForm((p) => ({ ...p, statut: e.target.value }))} style={INPUT_S(false)}>
                       {PAYROLL_UI_STATUTS.map((s) => <option key={s} value={s}>{s}</option>)}
                     </select></div>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                    <div><label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Référence</label>
-                      <input value={editForm.reference || ''} onChange={(e) => setEditForm((p) => ({ ...p, reference: e.target.value }))} style={INPUT_S(false)} /></div>
-                    <div><label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Mode de paiement</label>
-                      <select value={editForm.paymentMethod || ''} onChange={(e) => setEditForm((p) => ({ ...p, paymentMethod: e.target.value }))} style={INPUT_S(false)}>
-                        <option value="">—</option>
-                        {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
-                      </select></div>
-                  </div>
-                  <div><label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Description / Observation</label>
+                  <div><label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Observation</label>
                     <textarea rows={2} value={editForm.notes || ''} onChange={(e) => setEditForm((p) => ({ ...p, notes: e.target.value }))} style={{ ...INPUT_S(false), resize: 'vertical' }} /></div>
-                  <div style={{ padding: 12, background: '#F8F9FA', borderRadius: 8, fontSize: '0.85rem' }}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>Jours × tarif journalier</span><strong>{fmtMAD(editPreview.montantNormales)}</strong></div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, color: '#E65100' }}><span>Avances déduites</span><strong>{fmtMAD(editPreview.avances)}</strong></div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, color: '#C62828' }}><span>Retenues déduites</span><strong>{fmtMAD(editPreview.retenues)}</strong></div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>Montant heures sup</span><strong>{fmtMAD(editPreview.montantSup)}</strong></div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>Montant brut</span><strong>{fmtMAD(editPreview.montantBrut)}</strong></div>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 6, borderTop: '1px solid var(--border)' }}><span style={{ fontWeight: 700 }}>Net à payer</span><strong style={{ color: 'var(--red)' }}>{fmtMAD(editPreview.montantNet)}</strong></div>
-                  </div>
+
+                  {editPreview && (
+                    <div style={{ padding: 12, background: '#F8F9FA', borderRadius: 8, fontSize: '0.85rem' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>Heures sup</span><strong>{fmtMAD(editPreview.montantSup)}</strong></div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}><span>Montant brut</span><strong>{fmtMAD(editPreview.montantBrut)}</strong></div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, color: '#E65100' }}><span>Avances</span><strong>{fmtMAD(editPreview.avances)}</strong></div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, color: '#C62828' }}><span>Retenues</span><strong>{fmtMAD(editPreview.retenues)}</strong></div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: 6, borderTop: '1px solid var(--border)' }}><span style={{ fontWeight: 700 }}>Net à payer</span><strong style={{ color: 'var(--red)' }}>{fmtMAD(editPreview.montantNet)}</strong></div>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <div style={{ display: 'grid', gap: 14 }}>
+                  <div style={{ padding: '10px 12px', background: '#FFF8E1', borderRadius: 8, fontSize: '0.82rem', color: '#F57F17' }}>
+                    Utilisez cet ajout uniquement pour un cas exceptionnel. Les situations normales sont générées automatiquement depuis les présences.
+                  </div>
+
                   <div>
                     <label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Projet / Chantier *</label>
                     <select value={form.projectId} onChange={(e) => handleProjectChange(e.target.value)} style={INPUT_S(errors.projectId)}>
@@ -484,7 +591,7 @@ export default function PaiementHebdo() {
 
                   <div>
                     <div className="flex-between" style={{ marginBottom: 8 }}>
-                      <label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Ouvriers affectés au projet *</label>
+                      <label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Ouvriers *</label>
                       {projectWorkers.length > 0 && (
                         <label style={{ fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
                           <input type="checkbox" checked={allSelected} onChange={(e) => toggleAll(e.target.checked)} /> Tout sélectionner
@@ -496,7 +603,7 @@ export default function PaiementHebdo() {
                     ) : projectWorkers.length === 0 ? (
                       <div style={{ padding: 12, background: '#FFF3E0', borderRadius: 8, color: '#E65100', fontSize: '0.85rem' }}>Aucun ouvrier affecté à ce projet.</div>
                     ) : (
-                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, maxHeight: 320, overflowY: 'auto' }}>
                         {projectWorkers.map((w) => {
                           const sel = form.selected[w.id];
                           const totals = sel?.checked ? calcWorkerPayrollTotals(lineFromSelection(w.id, sel)) : null;
@@ -515,15 +622,12 @@ export default function PaiementHebdo() {
                               </label>
                               {sel?.checked && (
                                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 8, paddingLeft: 28 }}>
-                                  <div><label style={{ fontSize: '0.72rem', fontWeight: 600 }}>Jours travaillés</label>
-                                    <input type="number" min="0" step="0.5" value={sel.joursPaies ?? ''} onChange={(e) => setWorkerField(w.id, 'joursPaies', e.target.value)} style={{ ...INPUT_S(errors[`j_${w.id}`]), padding: '6px 8px', fontSize: '0.85rem' }} />
-                                    {sel.fromPresence && <div style={{ fontSize: '0.68rem', color: '#2E7D32' }}>Depuis présences</div>}</div>
-                                  <div><label style={{ fontSize: '0.72rem', fontWeight: 600 }}>Tarif journalier</label>
-                                    <input type="number" min="0" step="0.01" value={sel.tarifJournalier ?? ''} readOnly style={{ ...INPUT_S(false), padding: '6px 8px', fontSize: '0.85rem', background: '#F5F5F5' }} /></div>
-                                  <div><label style={{ fontSize: '0.72rem', fontWeight: 600 }}>Heures sup</label>
+                                  <div><label style={{ fontSize: '0.72rem', fontWeight: 600 }}>Jours</label>
+                                    <input type="number" min="0" step="0.5" value={sel.joursPaies ?? ''} onChange={(e) => setWorkerField(w.id, 'joursPaies', e.target.value)} style={{ ...INPUT_S(errors[`j_${w.id}`]), padding: '6px 8px', fontSize: '0.85rem' }} /></div>
+                                  <div><label style={{ fontSize: '0.72rem', fontWeight: 600 }}>Tarif/j</label>
+                                    <input type="number" value={sel.tarifJournalier ?? ''} readOnly style={{ ...READONLY_S, padding: '6px 8px', fontSize: '0.85rem' }} /></div>
+                                  <div><label style={{ fontSize: '0.72rem', fontWeight: 600 }}>H. sup</label>
                                     <input type="number" min="0" step="0.5" value={sel.heuresSup ?? ''} onChange={(e) => setWorkerField(w.id, 'heuresSup', e.target.value)} style={{ ...INPUT_S(false), padding: '6px 8px', fontSize: '0.85rem' }} /></div>
-                                  <div><label style={{ fontSize: '0.72rem', fontWeight: 600 }}>Tarif h. sup</label>
-                                    <input type="number" min="0" step="0.01" value={sel.tarifSup ?? ''} onChange={(e) => setWorkerField(w.id, 'tarifSup', e.target.value)} style={{ ...INPUT_S(false), padding: '6px 8px', fontSize: '0.85rem' }} /></div>
                                   <div><label style={{ fontSize: '0.72rem', fontWeight: 600 }}>Avances</label>
                                     <input type="number" min="0" step="0.01" value={sel.avances ?? ''} onChange={(e) => setWorkerField(w.id, 'avances', e.target.value)} style={{ ...INPUT_S(false), padding: '6px 8px', fontSize: '0.85rem' }} /></div>
                                   <div><label style={{ fontSize: '0.72rem', fontWeight: 600 }}>Retenues</label>
@@ -540,8 +644,7 @@ export default function PaiementHebdo() {
 
                   {selectedLines.length > 0 && (
                     <div style={{ padding: '12px 14px', background: '#F8F9FA', borderRadius: 8, fontSize: '0.85rem' }}>
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6 }}><span>Montant heures supplémentaires</span><strong style={{ color: '#E65100' }}>{fmtMAD(batchMontantSup)}</strong></div>
-                      <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Total général ({selectedLines.length} ouvrier{selectedLines.length > 1 ? 's' : ''})</span><strong style={{ color: 'var(--red)', fontSize: '1.1rem' }}>{fmtMAD(batchTotal)}</strong></div>
+                      <div style={{ display: 'flex', justifyContent: 'space-between' }}><span>Total ({selectedLines.length} ouvrier{selectedLines.length > 1 ? 's' : ''})</span><strong style={{ color: 'var(--red)', fontSize: '1.1rem' }}>{fmtMAD(batchTotal)}</strong></div>
                     </div>
                   )}
                 </div>
@@ -564,15 +667,15 @@ export default function PaiementHebdo() {
               <button type="button" onClick={() => setDetailId(null)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
             </div>
             <div style={{ display: 'grid', gap: 8, fontSize: '0.88rem', marginBottom: 16 }}>
-              <div><strong>Ouvrier :</strong> {detailRecord.ouvrier}</div>
+              <div><strong>Ouvrier :</strong> {detailRecord.ouvrier} · {detailRecord.fonction || '—'}</div>
               <div><strong>Projet :</strong> {detailRecord.projet || '—'}</div>
-              <div><strong>Semaine :</strong> {detailRecord.semaineDebut ? new Date(detailRecord.semaineDebut).toLocaleDateString('fr-MA') : '—'}</div>
-              <div><strong>Référence :</strong> {detailRecord.reference || '—'}</div>
+              {detailRecord.chefProjet && <div><strong>Chef de projet :</strong> {detailRecord.chefProjet}</div>}
+              {detailRecord.chefChantier && <div><strong>Chef de chantier :</strong> {detailRecord.chefChantier}</div>}
+              <div><strong>Semaine :</strong> {fmtWeekRange(detailRecord.semaineDebut, detailRecord.semaineFin)}</div>
               <div><strong>Statut :</strong> {detailRecord.statut}</div>
-              <div><strong>Mode :</strong> {detailRecord.paymentMethod || '—'}</div>
-              <div><strong>Jours / Tarif/j :</strong> {detailRecord.joursPaies} j · {fmtMAD(detailRecord.tarifJournalier)}/j</div>
+              <div><strong>Jours / Tarif/j :</strong> {detailRecord.joursPaies} j · {fmtMAD(detailRecord.tarifJournalier)}/j ({fmtMAD(detailRecord.tarifHoraire)}/h × 8)</div>
               <div><strong>H. sup :</strong> {detailRecord.heuresSup || 0} h · {fmtMAD(detailRecord.montantSup)}</div>
-              <div><strong>Montant calculé :</strong> {fmtMAD(detailRecord.montantBrut)}</div>
+              <div><strong>Montant brut :</strong> {fmtMAD(detailRecord.montantBrut)}</div>
               <div><strong style={{ color: '#E65100' }}>Avances :</strong> {fmtMAD(detailRecord.avances)}</div>
               <div><strong style={{ color: '#C62828' }}>Retenues :</strong> {fmtMAD(detailRecord.retenues)}</div>
               <div><strong>Net à payer :</strong> <span style={{ color: 'var(--red)', fontWeight: 800 }}>{fmtMAD(detailRecord.total)}</span></div>
@@ -580,7 +683,7 @@ export default function PaiementHebdo() {
             </div>
             <div className="rh-ext-detail-header-actions">
               <button type="button" className="btn btn-secondary" onClick={() => { setDetailId(null); openEdit(detailRecord); }}>Modifier</button>
-              <button type="button" className="btn btn-secondary" onClick={() => handleWorkerPdf(detailRecord, false)}><FileDown size={14} /> Télécharger PDF</button>
+              <button type="button" className="btn btn-secondary" onClick={() => handleWorkerPdf(detailRecord, false)}><FileDown size={14} /> PDF</button>
               <button type="button" className="btn btn-secondary" onClick={() => handleWorkerPdf(detailRecord, true)}><Printer size={14} /> Imprimer</button>
             </div>
           </div>

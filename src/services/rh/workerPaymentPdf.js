@@ -7,6 +7,8 @@ export async function exportWorkerPaymentPdf(record, { print = false } = {}) {
   const ref = record.reference || record.id?.slice(0, 8)?.toUpperCase() || '—';
   const meta = [
     ['Projet / Chantier', record.projet || '—'],
+    ['Chef de projet', record.chefProjet || '—'],
+    ['Chef de chantier', record.chefChantier || '—'],
     ['Référence', ref],
     ['Ouvrier', record.ouvrier || '—'],
     ['Fonction', record.fonction || '—'],

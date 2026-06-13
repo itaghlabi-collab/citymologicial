@@ -11,12 +11,15 @@ import { listProjects } from '../services/projects/projects';
 import {
   listWorkerPayroll,
   createWorkerPayrollBatch,
-  updateWorkerPayroll,
+  updateWorkerPayrollAdjustments,
   updateWorkerPayrollStatut,
   deleteWorkerPayroll,
   filterWorkerPayroll,
   computePayrollStats,
   collectPayrollChantiers,
+  collectPayrollWeeks,
+  groupPayrollByProjectWeek,
+  syncWorkerPayrollFromAttendance,
   buildWorkerPayrollLine,
   weekEndSunday,
 } from '../services/rh/workerPayroll';
@@ -28,12 +31,26 @@ export function useWorkerPayroll() {
   const [attendance, setAttendance] = useState([]);
   const [overtime, setOvertime] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [syncing, setSyncing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
+  const [lastSync, setLastSync] = useState(null);
 
   const configured = isSupabaseConfigured();
 
-  const load = useCallback(async () => {
+  const runSync = useCallback(async (ctx) => {
+    if (!configured) return { created: 0, updated: 0 };
+    setSyncing(true);
+    try {
+      const result = await syncWorkerPayrollFromAttendance(ctx);
+      setLastSync(result);
+      return result;
+    } finally {
+      setSyncing(false);
+    }
+  }, [configured]);
+
+  const load = useCallback(async ({ skipSync = false } = {}) => {
     if (!configured) {
       setError('Supabase non configuré (.env)');
       setLoading(false);
@@ -42,25 +59,58 @@ export function useWorkerPayroll() {
     setLoading(true);
     setError(null);
     try {
-      const [rows, workerRows, projectRows, attRows, otRows] = await Promise.all([
-        listWorkerPayroll(),
+      const [workerRows, projectRows, attRows, otRows] = await Promise.all([
         listWorkers(),
         listProjects(),
         listAttendance().catch(() => []),
         listOvertime().catch(() => []),
       ]);
+
+      let rows = await listWorkerPayroll();
+
+      let syncResult = null;
+      if (!skipSync) {
+        syncResult = await runSync({
+          attendance: attRows,
+          workers: workerRows,
+          overtime: otRows,
+          projects: projectRows,
+          existingRecords: rows,
+        });
+        if (syncResult.created > 0 || syncResult.updated > 0) {
+          rows = await listWorkerPayroll();
+        }
+      }
+
       setRecords(rows);
       setWorkers(workerRows);
       setProjects(projectRows);
       setAttendance(attRows);
       setOvertime(otRows);
+      return syncResult;
     } catch (err) {
       console.error('[CITYMO] useWorkerPayroll load', err);
       setError(formatSupabaseError(err, 'Erreur de chargement des paiements.'));
     } finally {
       setLoading(false);
     }
-  }, [configured]);
+  }, [configured, runSync]);
+
+  const syncFromPresence = useCallback(async () => {
+    setError(null);
+    try {
+      const result = await load();
+      return {
+        success: true,
+        created: result?.created ?? 0,
+        updated: result?.updated ?? 0,
+      };
+    } catch (err) {
+      const msg = formatSupabaseError(err, 'Erreur synchronisation présences.');
+      setError(msg);
+      return { success: false, error: msg };
+    }
+  }, [load]);
 
   useEffect(() => {
     load();
@@ -70,6 +120,8 @@ export function useWorkerPayroll() {
     () => collectPayrollChantiers(projects, records),
     [projects, records],
   );
+
+  const weeks = useMemo(() => collectPayrollWeeks(records), [records]);
 
   const workersByProject = useCallback(
     (projectId) => {
@@ -89,7 +141,6 @@ export function useWorkerPayroll() {
     [workers],
   );
 
-  /** Calcule jours (présences) + heures sup pour une ligne ouvrier. */
   const computeLineFromPresence = useCallback((worker, projectId, weekStart, projectName = '') => {
     const semaineFin = weekEndSunday(weekStart);
     const joursPaies = countWorkerPaidDaysFromRecords(
@@ -120,7 +171,7 @@ export function useWorkerPayroll() {
     setError(null);
     try {
       const created = await createWorkerPayrollBatch(batchMeta, lines);
-      await load();
+      await load({ skipSync: true });
       return { success: true, count: created.length };
     } catch (err) {
       const msg = formatSupabaseError(err, 'Erreur enregistrement paiement.');
@@ -131,12 +182,12 @@ export function useWorkerPayroll() {
     }
   }, [load]);
 
-  const update = useCallback(async (id, form) => {
+  const updateAdjustments = useCallback(async (id, existing, adjustments) => {
     setSaving(true);
     setError(null);
     try {
-      await updateWorkerPayroll(id, form);
-      await load();
+      await updateWorkerPayrollAdjustments(id, existing, adjustments);
+      await load({ skipSync: true });
       return { success: true };
     } catch (err) {
       const msg = formatSupabaseError(err, 'Erreur modification paiement.');
@@ -151,7 +202,7 @@ export function useWorkerPayroll() {
     setError(null);
     try {
       await updateWorkerPayrollStatut(id, 'Payé');
-      await load();
+      await load({ skipSync: true });
       return { success: true };
     } catch (err) {
       const msg = formatSupabaseError(err, 'Erreur validation paiement.');
@@ -164,7 +215,7 @@ export function useWorkerPayroll() {
     setError(null);
     try {
       await deleteWorkerPayroll(id);
-      await load();
+      await load({ skipSync: true });
       return { success: true };
     } catch (err) {
       const msg = formatSupabaseError(err, 'Erreur suppression.');
@@ -179,15 +230,20 @@ export function useWorkerPayroll() {
     projects,
     workerOptions,
     chantiers,
+    weeks,
     workersByProject,
     computeLineFromPresence,
+    groupPayrollByProjectWeek,
     loading,
+    syncing,
     saving,
     error,
     configured,
+    lastSync,
     load,
+    syncFromPresence,
     createBatch,
-    update,
+    updateAdjustments,
     markPaid,
     remove,
     filterWorkerPayroll,

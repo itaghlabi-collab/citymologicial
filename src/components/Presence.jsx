@@ -2,6 +2,7 @@ import { ClockIcon, Plus, X, Filter, CheckCircle, XCircle, CalendarOff, Pencil, 
 import { useState, useRef, useMemo } from 'react';
 import { useAttendance } from '../hooks/useAttendance';
 import { generateAttendanceSheetPdf } from '../services/rh/attendanceSheetPdf';
+import { syncPayrollAfterAttendanceChange } from '../services/rh/workerPayroll';
 
 function EmptyState({ icon, title, sub }) {
   return (
@@ -314,11 +315,13 @@ export default function Presence() {
 
     setShowModal(false);
     setEditId(null);
+    syncPayrollAfterAttendanceChange().catch(() => {});
   }
 
   async function handleDelete(id) {
     const result = await remove(id);
     notify(result.success ? 'success' : 'error', result.success ? 'Enregistrement supprime.' : (result.error || 'Erreur.'));
+    if (result.success) syncPayrollAfterAttendanceChange().catch(() => {});
   }
 
   const filterWorkerOptions = useMemo(

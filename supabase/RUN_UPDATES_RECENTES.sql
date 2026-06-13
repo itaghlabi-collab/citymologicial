@@ -58,6 +58,11 @@ ALTER TABLE public.payroll ADD COLUMN IF NOT EXISTS batch_id UUID;
 ALTER TABLE public.payroll ADD COLUMN IF NOT EXISTS reference TEXT;
 ALTER TABLE public.payroll ADD COLUMN IF NOT EXISTS payment_method TEXT;
 
+-- Chef de projet / chantier + flag génération auto depuis présences
+ALTER TABLE public.payroll ADD COLUMN IF NOT EXISTS chef_chantier_nom TEXT;
+ALTER TABLE public.payroll ADD COLUMN IF NOT EXISTS chef_projet TEXT;
+ALTER TABLE public.payroll ADD COLUMN IF NOT EXISTS auto_generated BOOLEAN DEFAULT false;
+
 ALTER TABLE public.payroll ALTER COLUMN semaine_debut DROP NOT NULL;
 ALTER TABLE public.payroll ALTER COLUMN semaine_fin DROP NOT NULL;
 
