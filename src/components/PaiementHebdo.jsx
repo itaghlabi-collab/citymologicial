@@ -80,11 +80,34 @@ function lineFromSelection(workerId, sel) {
   };
 }
 
-function statutBadgeClass(statut) {
-  if (statut === 'Payé') return 'badge-green';
-  if (statut === 'En attente') return 'badge-orange';
-  if (statut === 'Partiellement payé') return 'badge-blue';
-  return 'badge-red';
+function statutSelectStyle(statut) {
+  const palette = {
+    'Payé': { bg: '#E8F5E9', color: '#2E7D32' },
+    'En attente': { bg: '#FFF3E0', color: '#E65100' },
+    'Partiellement payé': { bg: '#E3F2FD', color: '#1565C0' },
+    'Annulé': { bg: '#FFEBEE', color: '#C62828' },
+    Mixte: { bg: '#F5F5F5', color: '#616161' },
+  };
+  const c = palette[statut] || palette['En attente'];
+  return {
+    backgroundColor: c.bg,
+    color: c.color,
+    border: 'none',
+    borderRadius: 999,
+    padding: '5px 26px 5px 10px',
+    fontSize: '0.72rem',
+    fontWeight: 600,
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    minWidth: 130,
+    maxWidth: '100%',
+    appearance: 'none',
+    WebkitAppearance: 'none',
+    MozAppearance: 'none',
+    backgroundImage: `url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 24 24' fill='none' stroke='${encodeURIComponent(c.color)}' stroke-width='2.5'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E")`,
+    backgroundRepeat: 'no-repeat',
+    backgroundPosition: 'right 8px center',
+  };
 }
 
 export default function PaiementHebdo() {
@@ -114,6 +137,25 @@ export default function PaiementHebdo() {
     setToast({ type, msg });
     clearTimeout(toastRef.current);
     toastRef.current = setTimeout(() => setToast(null), 3000);
+  }
+
+  async function handleStatutChange(p, newStatut) {
+    if (newStatut === p.statut) return;
+    if (p.mergeAllWeeks && p.weeklyRecords?.length) {
+      for (const rec of p.weeklyRecords) {
+        if (!rec.id) continue;
+        const r = await updateAdjustments(rec.id, rec, { statut: newStatut });
+        if (!r.success) {
+          notify('error', r.error);
+          return;
+        }
+      }
+      notify('success', `Statut : ${newStatut}`);
+      return;
+    }
+    if (!p.id) return;
+    const r = await updateAdjustments(p.id, p, { statut: newStatut });
+    notify(r.success ? 'success' : 'error', r.success ? `Statut : ${newStatut}` : r.error);
   }
 
   const projectWorkers = useMemo(
@@ -540,7 +582,20 @@ export default function PaiementHebdo() {
                       <td data-label="Équiv. jours" style={{ fontWeight: 600 }}>{fmtDayEquiv(p.joursPaies)}</td>
                       <td data-label="Tarif/j">{fmtMAD(p.tarifJournalier)}</td>
                       <td data-label="Net à payer" style={{ fontWeight: 800, color: 'var(--red)' }}>{fmtMAD(p.total)}</td>
-                      <td data-label="Statut"><span className={`badge ${statutBadgeClass(p.statut)}`}>{p.statut}</span></td>
+                      <td data-label="Statut">
+                        <select
+                          value={PAYROLL_UI_STATUTS.includes(p.statut) ? p.statut : ''}
+                          onChange={(e) => handleStatutChange(p, e.target.value)}
+                          disabled={saving}
+                          style={statutSelectStyle(PAYROLL_UI_STATUTS.includes(p.statut) ? p.statut : 'En attente')}
+                          aria-label={`Statut paiement ${p.ouvrier}`}
+                        >
+                          {!PAYROLL_UI_STATUTS.includes(p.statut) && (
+                            <option value="" disabled>{p.statut}</option>
+                          )}
+                          {PAYROLL_UI_STATUTS.map((s) => <option key={s} value={s}>{s}</option>)}
+                        </select>
+                      </td>
                       <td data-label="Actions" className="payment-actions-cell">
                         <div className="payment-row-actions">
                           <button type="button" className="btn btn-secondary btn-sm" onClick={() => openDetail(p, group.chefChantier)}><Eye size={13} /> Détail</button>
