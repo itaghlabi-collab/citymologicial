@@ -1,7 +1,7 @@
 /**
  * FeuilleCaisse.jsx — Feuille de caisse mensuelle
  */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { Loader2, Plus, Download, FileSpreadsheet, Wallet, Edit2, Trash2, TrendingDown, RefreshCw, Bell, CheckCircle } from 'lucide-react';
 import { useFinanceTransactions } from '../../hooks/useFinanceTransactions';
 import { useAuth } from '../../hooks/useAuth';
@@ -11,7 +11,10 @@ import {
   runRhPaymentsCashBackfill,
 } from '../../services/finance/financeTransactions';
 import { canManageCash, isDGUser } from '../../services/finance/cashAccess';
-import { validateCashDay, getCashDailyValidation, todayIso } from '../../services/finance/cashDailyValidation';
+import {
+  validateCashPreviousDay, getPendingCashValidation,
+  todayIso, yesterdayIso, formatDateFr,
+} from '../../services/finance/cashDailyValidation';
 import { exportCashSheetPdf, CASH_SHEET_PDF_VERSION } from '../../services/finance/cashSheetPdf';
 import { exportCashSheetExcel } from '../../services/finance/cashSheetExport';
 import {
@@ -80,6 +83,23 @@ function TxForm({ initial, onSave, onCancel }) {
 
 const MOIS_LABELS = ['', 'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
 
+const TABLE_FILTERS = [
+  { id: 'today', label: "Aujourd'hui (J)" },
+  { id: 'yesterday', label: 'Hier (J-1)' },
+  { id: 'month', label: 'Tout le mois' },
+];
+
+function sumDayOps(list) {
+  let entrees = 0;
+  let sorties = 0;
+  (list || []).forEach((t) => {
+    if (t.statut === 'Annulé') return;
+    if (t.sens === 'entree') entrees += Number(t.montant) || 0;
+    else sorties += Number(t.montant) || 0;
+  });
+  return { entrees, sorties, net: entrees - sorties, count: list?.length || 0 };
+}
+
 export default function FeuilleCaisse() {
   const now = new Date();
   const { user } = useAuth();
@@ -91,25 +111,51 @@ export default function FeuilleCaisse() {
   const [editTx, setEditTx] = useState(null);
   const [showBalance, setShowBalance] = useState(false);
   const [balForm, setBalForm] = useState({ solde_initial: '', alimentation: '', notes: '' });
-  const [dailyValidation, setDailyValidation] = useState(null);
   const [validating, setValidating] = useState(false);
   const [backfilling, setBackfilling] = useState(false);
   const [toast, setToast] = useState('');
+  const [tableFilter, setTableFilter] = useState('today');
+  const [pendingValidation, setPendingValidation] = useState(null);
 
   const {
     records, balance, totals, loading, saving, error, configured, reload,
     saveTransaction, removeTransaction, saveBalance,
   } = useFinanceTransactions(year, month);
 
-  const todayStr = todayIso();
+  const todayStr = todayIso(now);
+  const yesterdayStr = yesterdayIso(now);
   const isCurrentMonth = year === now.getFullYear() && month === now.getMonth() + 1;
-  const todayLabel = now.toLocaleDateString('fr-MA', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  const todayLabel = formatDateFr(todayStr);
   const periodLabel = `${MOIS_LABELS[month] || month} ${year}`;
+
+  const sortedRecords = useMemo(
+    () => [...records].sort((a, b) => String(b.date).localeCompare(String(a.date))),
+    [records],
+  );
+
+  const displayedRecords = useMemo(() => {
+    if (tableFilter === 'today') return sortedRecords.filter((t) => t.date === todayStr);
+    if (tableFilter === 'yesterday') return sortedRecords.filter((t) => t.date === yesterdayStr);
+    return sortedRecords;
+  }, [sortedRecords, tableFilter, todayStr, yesterdayStr]);
+
+  const todayOps = useMemo(() => sumDayOps(sortedRecords.filter((t) => t.date === todayStr)), [sortedRecords, todayStr]);
+  const yesterdayOps = useMemo(() => sumDayOps(sortedRecords.filter((t) => t.date === yesterdayStr)), [sortedRecords, yesterdayStr]);
 
   useEffect(() => {
     if (!isDG) return;
-    getCashDailyValidation(todayIso()).then(setDailyValidation).catch(() => {});
-  }, [isDG, records.length]);
+    getPendingCashValidation(now)
+      .then(setPendingValidation)
+      .catch((err) => {
+        console.warn('[CITYMO] validation caisse J-1', err);
+        setPendingValidation(null);
+      });
+  }, [isDG, records.length, todayStr]);
+
+  useEffect(() => {
+    if (!isCurrentMonth) setTableFilter('month');
+    else setTableFilter('today');
+  }, [isCurrentMonth, year, month]);
 
   useEffect(() => {
     if (!configured) return undefined;
@@ -152,13 +198,19 @@ export default function FeuilleCaisse() {
   }
 
   async function handleValidateDay() {
+    if (!pendingValidation?.targetDate) return;
     setValidating(true);
     try {
-      const v = await validateCashDay(todayIso());
-      setDailyValidation(v);
-      notify('Caisse du jour validée.');
+      const v = await validateCashPreviousDay();
+      setPendingValidation({ ...pendingValidation, validation: v, needsValidation: false });
+      notify(`Caisse du ${formatDateFr(pendingValidation.targetDate)} (J-1) validée.`);
     } catch (err) {
-      notify(err?.message || 'Erreur validation.');
+      const msg = err?.message || 'Erreur validation.';
+      if (msg.includes('row-level security') || msg.includes('cash_daily_validations')) {
+        notify('Erreur Supabase RLS — exécutez supabase/RUN_FINANCE_TOUT_EN_UN.sql puis réessayez.');
+      } else {
+        notify(msg);
+      }
     } finally {
       setValidating(false);
     }
@@ -200,7 +252,8 @@ export default function FeuilleCaisse() {
         <div>
           <h1 className="page-title">FEUILLE DE CAISSE</h1>
           <p className="page-subtitle">
-            Journal central alimenté automatiquement — mois en cours par défaut.
+            Journal trésorerie — paiements validés affectés à la date de paiement (J).
+            Validation DG chaque matin sur <strong>J-1</strong>.
             {' '}Aujourd&apos;hui : <strong>{todayLabel}</strong>
           </p>
         </div>
@@ -241,10 +294,20 @@ export default function FeuilleCaisse() {
             {years.map((y) => <option key={y} value={y}>{y}</option>)}
           </select>
           <span style={{ fontSize: '0.82rem', color: 'var(--text-3)' }}>
-            Période affichée : <strong>{periodLabel}</strong>
+            Période KPI : <strong>{periodLabel}</strong>
             {isCurrentMonth ? ' (mois en cours)' : ''}
-            {!loading && records.length > 0 ? ` — ${records.length} opération(s)` : ''}
+            {!loading && records.length > 0 ? ` — ${records.length} op. ce mois` : ''}
           </span>
+          {isCurrentMonth && TABLE_FILTERS.map((f) => (
+            <button
+              key={f.id}
+              type="button"
+              className={`btn btn-sm ${tableFilter === f.id ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => setTableFilter(f.id)}
+            >
+              {f.label}
+            </button>
+          ))}
           {!isCurrentMonth && (
             <button
               type="button"
@@ -269,22 +332,46 @@ export default function FeuilleCaisse() {
         </div>
       )}
 
-      {isDG && !dailyValidation && (
+      {isDG && pendingValidation?.needsValidation && (
         <div className="card" style={{ marginBottom: 16, padding: '14px 18px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12, background: '#E3F2FD', border: '1px solid #90CAF9' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: '0.88rem' }}>
-            <Bell size={18} style={{ color: '#1565C0' }} />
-            <span><strong>Veuillez valider la caisse du jour.</strong> ({todayIso()})</span>
+          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: '0.88rem', maxWidth: 720 }}>
+            <Bell size={18} style={{ color: '#1565C0', flexShrink: 0, marginTop: 2 }} />
+            <span>
+              <strong>Validation caisse J-1 requise.</strong>
+              {' '}Veuillez valider la trésorerie du{' '}
+              <strong>{formatDateFr(pendingValidation.targetDate)}</strong>
+              {' '}(hier).
+              {yesterdayOps.count > 0 && (
+                <> — {yesterdayOps.count} opération(s) : sorties {formatMAD(yesterdayOps.sorties)}, entrées {formatMAD(yesterdayOps.entrees)}.</>
+              )}
+              {yesterdayOps.count === 0 && ' — Aucune opération enregistrée ce jour-là (validation de clôture).'}
+            </span>
           </div>
           <button type="button" className="btn btn-primary btn-sm" onClick={handleValidateDay} disabled={validating}>
             {validating ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <CheckCircle size={14} />}
-            {' '}Valider la journée
+            {' '}Valider J-1
           </button>
         </div>
       )}
 
-      {isDG && dailyValidation && (
+      {isDG && pendingValidation && !pendingValidation.needsValidation && (
         <div style={{ marginBottom: 16, fontSize: '0.82rem', color: '#2E7D32', display: 'flex', alignItems: 'center', gap: 6 }}>
-          <CheckCircle size={16} /> Caisse du {dailyValidation.date_validation} validée
+          <CheckCircle size={16} /> Caisse J-1 validée — {formatDateFr(pendingValidation.targetDate)}
+        </div>
+      )}
+
+      {isCurrentMonth && (
+        <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', marginBottom: 16, gap: 10 }}>
+          <div className="card" style={{ padding: '12px 16px' }}>
+            <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginBottom: 4 }}>Opérations aujourd&apos;hui (J)</div>
+            <div style={{ fontWeight: 700 }}>{todayOps.count} op.</div>
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>↓ {formatMAD(todayOps.sorties)} · ↑ {formatMAD(todayOps.entrees)}</div>
+          </div>
+          <div className="card" style={{ padding: '12px 16px' }}>
+            <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginBottom: 4 }}>Opérations hier (J-1)</div>
+            <div style={{ fontWeight: 700 }}>{yesterdayOps.count} op.</div>
+            <div style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>↓ {formatMAD(yesterdayOps.sorties)} · ↑ {formatMAD(yesterdayOps.entrees)}</div>
+          </div>
         </div>
       )}
 
@@ -298,16 +385,22 @@ export default function FeuilleCaisse() {
 
       {loading ? (
         <div style={{ textAlign: 'center', padding: 40 }}><Loader2 size={24} className="spin" /></div>
-      ) : records.length === 0 ? (
+      ) : displayedRecords.length === 0 ? (
         <div className="card">
           <EmptyState
             icon={<Wallet size={22} />}
-            title={`Aucune opération — ${periodLabel}`}
+            title={tableFilter === 'today'
+              ? `Aucune opération aujourd'hui — ${todayStr}`
+              : tableFilter === 'yesterday'
+                ? `Aucune opération hier — ${yesterdayStr}`
+                : `Aucune opération — ${periodLabel}`}
             sub={configured && !error
-              ? `Aucune opération pour ${periodLabel}. Validez un paiement ou une charge dans son module — la caisse se met à jour automatiquement.`
-              : 'Connectez-vous et vérifiez la configuration Supabase + les tables finance_transactions et cash_monthly_balances.'}
-            action="Ajouter opération"
-            onAction={() => setShowModal(true)}
+              ? tableFilter === 'month'
+                ? 'Les opérations du 02/06 etc. sont l\'historique du mois. Utilisez « Aujourd\'hui » pour le journal du jour. Validez un paiement ouvrier/sous-traitant → il apparaît à la date de paiement.'
+                : 'Validez un paiement dans Paiement hebdo ou Sous-traitants — la sortie s\'ajoute automatiquement à la date du paiement.'
+              : 'Connectez-vous et vérifiez la configuration Supabase.'}
+            action={canManage ? 'Alimentation manuelle' : undefined}
+            onAction={canManage ? () => setShowModal(true) : undefined}
           />
         </div>
       ) : (
@@ -327,16 +420,24 @@ export default function FeuilleCaisse() {
                 </tr>
               </thead>
               <tbody>
-                {records.map((t) => {
+                {displayedRecords.map((t) => {
                   const isAuto = isAutoGeneratedTransaction(t);
                   const badge = getSourceBadgeLabel(t);
-                  const isToday = isCurrentMonth && t.date === todayStr;
+                  const isToday = t.date === todayStr;
+                  const isYesterday = t.date === yesterdayStr;
                   return (
-                  <tr key={t.id} style={isToday ? { background: '#E8F5E9' } : undefined}>
+                  <tr key={t.id} style={
+                    isToday ? { background: '#E8F5E9' }
+                      : isYesterday ? { background: '#E3F2FD' }
+                        : undefined
+                  }>
                     <td data-label="Date">
                       {t.date}
                       {isToday && (
-                        <span className="badge badge-green" style={{ marginLeft: 6, fontSize: '0.65rem' }}>Aujourd&apos;hui</span>
+                        <span className="badge badge-green" style={{ marginLeft: 6, fontSize: '0.65rem' }}>J</span>
+                      )}
+                      {isYesterday && (
+                        <span className="badge badge-blue" style={{ marginLeft: 6, fontSize: '0.65rem' }}>J-1</span>
                       )}
                     </td>
                     <td data-label="Source">

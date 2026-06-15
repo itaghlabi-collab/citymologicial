@@ -15,12 +15,12 @@ export const FINANCE_SOURCE_TYPES = {
 };
 
 export const SOURCE_TYPE_LABELS = {
-  worker_weekly_payment: 'Auto — paiement ouvrier',
-  subcontractor_payment: 'Auto — sous-traitant',
-  charge: 'Auto — charge',
-  payment_order: 'Auto — ordre paiement',
-  customer_invoice_payment: 'Auto — facture client',
-  cash_funding: 'Manuel — alimentation caisse',
+  worker_weekly_payment: 'Paiement ouvrier',
+  subcontractor_payment: 'Paiement sous-traitant',
+  charge: 'Charge',
+  payment_order: 'Ordre paiement',
+  customer_invoice_payment: 'Facture client',
+  cash_funding: 'Alimentation caisse',
 };
 
 export const SOURCE_MODULE_LABELS = {
@@ -35,6 +35,46 @@ const PAID_CHARGE_STATUTS = ['Payé', 'Validé', 'Validée', 'Comptabilisée'];
 const PAID_ORDER_STATUTS = ['Payé', 'Exécuté', 'Comptabilisé'];
 const PAID_PAYROLL_STATUTS = ['Payé', 'Paye'];
 const PAID_SUBCONTRACTOR_STATUTS = ['paid', 'Payé', 'payé'];
+
+const CATEGORY_NAMES = {
+  WORKER: "Main d'œuvre",
+  SUBCONTRACTOR: 'Sous-traitance',
+};
+
+let categoryIdCache = null;
+
+function normalizeCategoryKey(name) {
+  return String(name || '').toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').trim();
+}
+
+async function getRhCategoryIds() {
+  if (categoryIdCache) return categoryIdCache;
+  const { data, error } = await getSupabase().from('finance_categories').select('id, nom');
+  if (error) {
+    console.warn('[CITYMO] finance_categories lookup', error);
+    categoryIdCache = { worker: null, subcontractor: null };
+    return categoryIdCache;
+  }
+  const byKey = {};
+  (data || []).forEach((row) => {
+    byKey[normalizeCategoryKey(row.nom)] = row.id;
+  });
+  categoryIdCache = {
+    worker: byKey[normalizeCategoryKey(CATEGORY_NAMES.WORKER)] || null,
+    subcontractor: byKey[normalizeCategoryKey(CATEGORY_NAMES.SUBCONTRACTOR)] || null,
+  };
+  return categoryIdCache;
+}
+
+export function resolveTransactionCategoryName(tx, catMap = {}) {
+  if (!tx) return 'Divers';
+  if (tx.category_id && catMap[tx.category_id]) return catMap[tx.category_id];
+  if (tx.source_type === FINANCE_SOURCE_TYPES.WORKER_WEEKLY_PAYMENT) return CATEGORY_NAMES.WORKER;
+  if (tx.source_type === FINANCE_SOURCE_TYPES.SUBCONTRACTOR_PAYMENT) return CATEGORY_NAMES.SUBCONTRACTOR;
+  if (tx.source_type === FINANCE_SOURCE_TYPES.CHARGE || tx.charge_id) return 'Charges';
+  if (tx.source_type === FINANCE_SOURCE_TYPES.PAYMENT_ORDER || tx.payment_order_id) return 'Ordres de paiement';
+  return 'Divers';
+}
 
 function asUuidOrNull(value) {
   if (!value) return null;
@@ -131,17 +171,18 @@ function buildTransactionRow(sourceType, entity) {
       };
     case FINANCE_SOURCE_TYPES.WORKER_WEEKLY_PAYMENT:
       return {
-        date_operation: entity.paymentDate || entity.semaineDebut || new Date().toISOString().slice(0, 10),
+        date_operation: entity.paymentDate || entity.datePaiement || new Date().toISOString().slice(0, 10),
         sens: 'sortie',
         type_operation: 'autre_sortie',
         contrepartie: entity.ouvrier || '',
-        description: `Paiement ouvrier — ${entity.projet || 'Chantier'} (${fmtWeekRangeLocal(entity.semaineDebut, entity.semaineFin)})`,
+        description: `Paiement hebdomadaire ouvrier — ${entity.projet || 'Chantier'} (${fmtWeekRangeLocal(entity.semaineDebut, entity.semaineFin)})`,
         montant: Number(entity.total ?? entity.montantNet) || 0,
         mode_paiement: mapPaymentMode(entity.paymentMethod),
         project_id: asUuidOrNull(entity.projectId),
         worker_id: asUuidOrNull(entity.workerId),
         ref_operation: entity.reference || null,
         source_module: 'rh',
+        category_id: entity.category_id || null,
       };
     case FINANCE_SOURCE_TYPES.SUBCONTRACTOR_PAYMENT:
       return {
@@ -155,6 +196,7 @@ function buildTransactionRow(sourceType, entity) {
         project_id: asUuidOrNull(entity.projectId),
         ref_operation: entity.reference || null,
         source_module: 'rh',
+        category_id: entity.category_id || null,
       };
     case FINANCE_SOURCE_TYPES.CUSTOMER_INVOICE_PAYMENT:
       return {
@@ -221,6 +263,14 @@ export async function syncFinanceTransaction(sourceType, sourceId, options = {})
   const built = buildTransactionRow(sourceType, entity);
   if (!built || !built.montant) {
     return { action: 'skipped', id: existing?.id || null, reason: 'montant_zero' };
+  }
+
+  const rhCats = await getRhCategoryIds();
+  if (sourceType === FINANCE_SOURCE_TYPES.WORKER_WEEKLY_PAYMENT && !built.category_id) {
+    built.category_id = rhCats.worker;
+  }
+  if (sourceType === FINANCE_SOURCE_TYPES.SUBCONTRACTOR_PAYMENT && !built.category_id) {
+    built.category_id = rhCats.subcontractor;
   }
 
   const row = {

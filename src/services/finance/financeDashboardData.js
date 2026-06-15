@@ -2,6 +2,7 @@
  * financeDashboardData.js — Agrégations tableau de bord Finance (Supabase)
  */
 import { computeCashTotals } from './financeTransactions';
+import { resolveTransactionCategoryName } from './financeSync';
 
 const SHORT_MONTHS = ['', 'Jan', 'Fév', 'Mar', 'Avr', 'Mai', 'Juin', 'Juil', 'Aoû', 'Sep', 'Oct', 'Nov', 'Déc'];
 
@@ -17,6 +18,9 @@ const CATEGORY_COLORS = {
   Fournitures: '#E65100',
   Formation: '#00838F',
   Divers: '#757575',
+  'Sous-traitance': '#7B1FA2',
+  'Ordres de paiement': '#5E35B1',
+  Charges: '#EF6C00',
 };
 
 export function prevMonth(year, month) {
@@ -72,12 +76,11 @@ export function buildCategoryBreakdown(charges, transactions, categories, year, 
     buckets[key] = (buckets[key] || 0) + (Number(c.montant) || 0);
   });
 
-  if (!monthCharges.length) {
-    monthSorties.forEach((t) => {
-      const key = (catMap[t.category_id] || 'Divers').trim() || 'Divers';
-      buckets[key] = (buckets[key] || 0) + (Number(t.montant) || 0);
-    });
-  }
+  monthSorties.forEach((t) => {
+    if (t.charge_id) return;
+    const key = resolveTransactionCategoryName(t, catMap);
+    buckets[key] = (buckets[key] || 0) + (Number(t.montant) || 0);
+  });
 
   const total = Object.values(buckets).reduce((s, v) => s + v, 0);
   return Object.entries(buckets)
@@ -93,24 +96,29 @@ export function buildCategoryBreakdown(charges, transactions, categories, year, 
 export function buildTopCharges(charges, transactions, categories, year, month, limit = 10) {
   const catMap = Object.fromEntries((categories || []).map((c) => [c.id, c.nom]));
   const monthCharges = (charges || []).filter((c) => inMonth(c.date, year, month));
+  const monthSorties = (transactions || []).filter(
+    (t) => inMonth(t.date, year, month) && t.sens === 'sortie' && t.statut !== 'Annulé' && !t.charge_id,
+  );
 
-  if (monthCharges.length) {
-    return monthCharges
-      .sort((a, b) => (Number(b.montant) || 0) - (Number(a.montant) || 0))
-      .slice(0, limit);
-  }
+  const fromCharges = monthCharges.map((c) => ({
+    id: c.id,
+    date: c.date,
+    categorie: c.categorie || catMap[c.category_id] || 'Charge',
+    libelle: c.libelle,
+    montant: c.montant,
+  }));
 
-  return (transactions || [])
-    .filter((t) => inMonth(t.date, year, month) && t.sens === 'sortie' && t.statut !== 'Annulé')
+  const fromTransactions = monthSorties.map((t) => ({
+    id: t.id,
+    date: t.date,
+    categorie: resolveTransactionCategoryName(t, catMap),
+    libelle: t.description,
+    montant: t.montant,
+  }));
+
+  return [...fromCharges, ...fromTransactions]
     .sort((a, b) => (Number(b.montant) || 0) - (Number(a.montant) || 0))
-    .slice(0, limit)
-    .map((t) => ({
-      id: t.id,
-      date: t.date,
-      categorie: catMap[t.category_id] || 'Caisse',
-      libelle: t.description,
-      montant: t.montant,
-    }));
+    .slice(0, limit);
 }
 
 export function buildRecentActivity(transactions, charges, orders, limit = 12) {

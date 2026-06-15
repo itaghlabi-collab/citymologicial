@@ -36,6 +36,13 @@ GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
 GRANT ALL ON public.finance_transactions TO anon, authenticated, service_role;
 GRANT ALL ON public.cash_daily_validations TO anon, authenticated, service_role;
 
+-- Catégorie Sous-traitance (pour cockpit + sync auto)
+INSERT INTO public.finance_categories (nom, description, statut)
+SELECT 'Sous-traitance', 'Paiements sous-traitants', 'Active'
+WHERE NOT EXISTS (
+  SELECT 1 FROM public.finance_categories WHERE lower(trim(nom)) = lower(trim('Sous-traitance'))
+);
+
 NOTIFY pgrst, 'reload schema';
 
 SELECT 'finance_rh_sync_complet OK — retournez dans Feuille de caisse → Actualiser' AS status;

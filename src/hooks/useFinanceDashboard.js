@@ -7,6 +7,7 @@ import {
   listFinanceTransactions,
   listFinanceTransactionsForYear,
   computeCashTotals,
+  runRhPaymentsCashBackfill,
 } from '../services/finance/financeTransactions';
 import {
   getCashMonthlyBalance,
@@ -52,6 +53,9 @@ export function useFinanceDashboard() {
     setLoading(true);
     setError(null);
     try {
+      await runRhPaymentsCashBackfill().catch((err) => {
+        console.warn('[CITYMO] dashboard backfill RH', err);
+      });
       const [
         charges,
         orders,

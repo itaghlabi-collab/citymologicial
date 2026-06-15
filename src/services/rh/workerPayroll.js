@@ -243,9 +243,10 @@ export async function updateWorkerPayroll(id, form) {
   const semaineDebut = form.semaineDebut || weekStartMonday(todayIso());
   const semaineFin = form.semaineFin || weekEndSunday(semaineDebut);
 
+  const statutDb = UI_TO_DB_STATUT[form.statut] || form.statut || 'En attente';
   const row = {
     project_id: form.projectId || null,
-    payment_date: semaineDebut,
+    payment_date: form.paymentDate || semaineDebut,
     semaine_debut: semaineDebut,
     semaine_fin: semaineFin,
     chantier: form.projet?.trim() || null,
@@ -260,7 +261,7 @@ export async function updateWorkerPayroll(id, form) {
     retenues: totals.retenues,
     montant_brut: totals.montantBrut,
     montant_net: totals.montantNet,
-    statut: UI_TO_DB_STATUT[form.statut] || 'En attente',
+    statut: statutDb,
     notes: form.notes?.trim() || null,
     reference: form.reference?.trim() || null,
     payment_method: form.paymentMethod?.trim() || null,
@@ -326,6 +327,9 @@ export async function backfillWorkerPayrollToCash() {
 
 export async function updateWorkerPayrollAdjustments(id, existing, adjustments = {}) {
   await getAuthUserId();
+  if (adjustments.statut != null && adjustments.statut !== existing.statut) {
+    return updateWorkerPayrollStatut(id, adjustments.statut);
+  }
   const merged = {
     projectId: existing.projectId,
     projet: existing.projet,
@@ -343,6 +347,7 @@ export async function updateWorkerPayrollAdjustments(id, existing, adjustments =
     notes: adjustments.notes ?? existing.notes,
     reference: existing.reference,
     paymentMethod: existing.paymentMethod,
+    paymentDate: existing.paymentDate,
   };
   return updateWorkerPayroll(id, merged);
 }
