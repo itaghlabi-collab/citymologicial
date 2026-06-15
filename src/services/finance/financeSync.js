@@ -34,7 +34,26 @@ export const SOURCE_MODULE_LABELS = {
 const PAID_CHARGE_STATUTS = ['Payé', 'Validé', 'Validée', 'Comptabilisée'];
 const PAID_ORDER_STATUTS = ['Payé', 'Exécuté', 'Comptabilisé'];
 const PAID_PAYROLL_STATUTS = ['Payé', 'Paye'];
-const PAID_SUBCONTRACTOR_STATUTS = ['paid', 'Payé'];
+const PAID_SUBCONTRACTOR_STATUTS = ['paid', 'Payé', 'payé'];
+
+function asUuidOrNull(value) {
+  if (!value) return null;
+  const s = String(value).trim();
+  if (!s) return null;
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)) return s;
+  return null;
+}
+
+function wrapSyncError(error) {
+  const msg = error?.message || String(error);
+  if (msg.includes('source_type') || msg.includes('source_id') || msg.includes('is_auto_generated')) {
+    const err = new Error('Base Supabase incomplète : exécutez supabase/RUN_FINANCE_SYNC_SOURCES.sql puis actualisez.');
+    err.code = 'SCHEMA';
+    err.cause = error;
+    throw err;
+  }
+  throw error;
+}
 
 function fmtWeekRangeLocal(debut, fin) {
   const d = debut ? new Date(`${debut}T12:00:00`).toLocaleDateString('fr-MA') : '—';
@@ -117,10 +136,10 @@ function buildTransactionRow(sourceType, entity) {
         type_operation: 'autre_sortie',
         contrepartie: entity.ouvrier || '',
         description: `Paiement ouvrier — ${entity.projet || 'Chantier'} (${fmtWeekRangeLocal(entity.semaineDebut, entity.semaineFin)})`,
-        montant: Number(entity.total) || 0,
+        montant: Number(entity.total ?? entity.montantNet) || 0,
         mode_paiement: mapPaymentMode(entity.paymentMethod),
-        project_id: entity.projectId || null,
-        worker_id: entity.workerId || null,
+        project_id: asUuidOrNull(entity.projectId),
+        worker_id: asUuidOrNull(entity.workerId),
         ref_operation: entity.reference || null,
         source_module: 'rh',
       };
@@ -131,9 +150,9 @@ function buildTransactionRow(sourceType, entity) {
         type_operation: 'autre_sortie',
         contrepartie: entity.subcontractorName || entity.contrepartie || 'Sous-traitant',
         description: entity.description || entity.designation || `Paiement sous-traitant — ${entity.projectName || ''}`.trim(),
-        montant: Number(entity.amount) || 0,
+        montant: Number(entity.amount ?? entity.montant) || 0,
         mode_paiement: mapPaymentMode(entity.paymentMethod),
-        project_id: entity.projectId || null,
+        project_id: asUuidOrNull(entity.projectId),
         ref_operation: entity.reference || null,
         source_module: 'rh',
       };
@@ -157,14 +176,19 @@ function buildTransactionRow(sourceType, entity) {
 }
 
 async function findExistingTransaction(sourceType, sourceId) {
-  const { data, error } = await getSupabase()
-    .from(TABLE)
-    .select('id')
-    .eq('source_type', sourceType)
-    .eq('source_id', sourceId)
-    .maybeSingle();
-  if (error) throw error;
-  return data;
+  try {
+    const { data, error } = await getSupabase()
+      .from(TABLE)
+      .select('id')
+      .eq('source_type', sourceType)
+      .eq('source_id', sourceId)
+      .maybeSingle();
+    if (error) throw error;
+    return data;
+  } catch (error) {
+    wrapSyncError(error);
+    return null;
+  }
 }
 
 /** Sync idempotent : créer / mettre à jour / annuler selon l'état source. */
@@ -195,7 +219,9 @@ export async function syncFinanceTransaction(sourceType, sourceId, options = {})
   }
 
   const built = buildTransactionRow(sourceType, entity);
-  if (!built || !built.montant) return null;
+  if (!built || !built.montant) {
+    return { action: 'skipped', id: existing?.id || null, reason: 'montant_zero' };
+  }
 
   const row = {
     ...built,
@@ -207,23 +233,28 @@ export async function syncFinanceTransaction(sourceType, sourceId, options = {})
     statut: 'Validé',
   };
 
-  if (existing?.id) {
-    const { error } = await getSupabase()
-      .from(TABLE)
-      .update(row)
-      .eq('id', existing.id);
-    if (error) throw error;
-    return { action: 'updated', id: existing.id };
-  }
+  try {
+    if (existing?.id) {
+      const { error } = await getSupabase()
+        .from(TABLE)
+        .update(row)
+        .eq('id', existing.id);
+      if (error) throw error;
+      return { action: 'updated', id: existing.id };
+    }
 
-  const uid = (await getSupabase().auth.getUser()).data?.user?.id;
-  const { data, error } = await getSupabase()
-    .from(TABLE)
-    .insert([{ ...row, created_by: uid }])
-    .select()
-    .single();
-  if (error) throw error;
-  return { action: 'created', id: data.id };
+    const uid = (await getSupabase().auth.getUser()).data?.user?.id;
+    const { data, error } = await getSupabase()
+      .from(TABLE)
+      .insert([{ ...row, created_by: uid }])
+      .select()
+      .single();
+    if (error) throw error;
+    return { action: 'created', id: data.id };
+  } catch (error) {
+    wrapSyncError(error);
+    return null;
+  }
 }
 
 /** Synchronise tous les paiements d'une facture CRM. */

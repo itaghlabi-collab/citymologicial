@@ -193,3 +193,14 @@ export async function syncPaymentOrderToTransaction(order) {
   if (!order?.id) return;
   return syncFinanceTransaction(FINANCE_SOURCE_TYPES.PAYMENT_ORDER, order.id, { entity: order });
 }
+
+/** Rattrapage RH → feuille de caisse (ouvriers + sous-traitants déjà payés). */
+export async function runRhPaymentsCashBackfill() {
+  const { backfillWorkerPayrollToCash } = await import('../rh/workerPayroll');
+  const { backfillSubcontractorPaymentsToCash } = await import('../rh/subcontractors');
+  const [payroll, subcontractor] = await Promise.all([
+    backfillWorkerPayrollToCash(),
+    backfillSubcontractorPaymentsToCash(),
+  ]);
+  return { payroll, subcontractor, total: payroll + subcontractor };
+}

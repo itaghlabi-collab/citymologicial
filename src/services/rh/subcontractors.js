@@ -253,11 +253,9 @@ async function getAuthUserId() {
 }
 
 async function syncSubcontractorPaymentToCash(payment, extra = {}) {
-  if (!payment?.id) return;
+  if (!payment?.id) return null;
   const entity = { ...payment, ...extra };
-  await syncFinanceTransaction(FINANCE_SOURCE_TYPES.SUBCONTRACTOR_PAYMENT, payment.id, { entity }).catch((err) => {
-    console.warn('[CITYMO] sync sous-traitant → caisse', err);
-  });
+  return syncFinanceTransaction(FINANCE_SOURCE_TYPES.SUBCONTRACTOR_PAYMENT, payment.id, { entity });
 }
 
 function aggregateSummaries(balances) {
@@ -671,6 +669,19 @@ export async function updateSubcontractorPayment(id, form, subcontractorId) {
   };
   await syncSubcontractorPaymentToCash(payment);
   return payment;
+}
+
+/** Rattrapage : synchronise tous les paiements sous-traitants vers la caisse. */
+export async function backfillSubcontractorPaymentsToCash() {
+  const rows = await listAllSubcontractorPayments(null);
+  let synced = 0;
+  for (const p of rows) {
+    if (!['paid', 'Payé', 'payé'].includes(p.status)) continue;
+    if (!Number(p.amount)) continue;
+    const r = await syncFinanceTransaction(FINANCE_SOURCE_TYPES.SUBCONTRACTOR_PAYMENT, p.id, { entity: p });
+    if (r?.action === 'created' || r?.action === 'updated') synced += 1;
+  }
+  return synced;
 }
 
 export async function listDocuments(subcontractorId) {

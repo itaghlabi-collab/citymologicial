@@ -44,4 +44,10 @@ CREATE TABLE IF NOT EXISTS public.cash_daily_validations (
 CREATE INDEX IF NOT EXISTS cash_daily_validations_date_idx
   ON public.cash_daily_validations (date_validation DESC);
 
+-- Droits app (évite "row-level security policy" à la validation DG)
+ALTER TABLE public.cash_daily_validations DISABLE ROW LEVEL SECURITY;
+GRANT ALL ON public.cash_daily_validations TO anon, authenticated, service_role;
+
+NOTIFY pgrst, 'reload schema';
+
 SELECT 'finance_sync_sources OK' AS status;

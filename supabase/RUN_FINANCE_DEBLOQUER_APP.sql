@@ -9,6 +9,7 @@ ALTER TABLE IF EXISTS public.finance_charges       DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS public.payment_orders        DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS public.finance_transactions  DISABLE ROW LEVEL SECURITY;
 ALTER TABLE IF EXISTS public.cash_monthly_balances DISABLE ROW LEVEL SECURITY;
+ALTER TABLE IF EXISTS public.cash_daily_validations DISABLE ROW LEVEL SECURITY;
 
 -- 2) Droits lecture/écriture pour l'app
 GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
@@ -17,6 +18,7 @@ GRANT ALL ON public.finance_charges       TO anon, authenticated, service_role;
 GRANT ALL ON public.payment_orders        TO anon, authenticated, service_role;
 GRANT ALL ON public.finance_transactions  TO anon, authenticated, service_role;
 GRANT ALL ON public.cash_monthly_balances TO anon, authenticated, service_role;
+GRANT ALL ON public.cash_daily_validations TO anon, authenticated, service_role;
 
 -- 3) Recharger le cache API Supabase
 NOTIFY pgrst, 'reload schema';
@@ -30,5 +32,5 @@ SELECT c.relname AS table_name,
 FROM pg_class c
 JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE n.nspname = 'public'
-  AND c.relname IN ('finance_categories','finance_transactions','cash_monthly_balances')
+  AND c.relname IN ('finance_categories','finance_transactions','cash_monthly_balances','cash_daily_validations')
 ORDER BY 1;

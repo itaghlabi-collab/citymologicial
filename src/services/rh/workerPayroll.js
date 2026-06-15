@@ -278,19 +278,21 @@ export async function updateWorkerPayroll(id, form) {
     throw error;
   }
   const normalized = normalizeWorkerPayroll(data);
-  await syncFinanceTransaction(FINANCE_SOURCE_TYPES.WORKER_WEEKLY_PAYMENT, id, { entity: normalized }).catch((err) => {
-    console.warn('[CITYMO] sync payroll → caisse', err);
-  });
+  await syncFinanceTransaction(FINANCE_SOURCE_TYPES.WORKER_WEEKLY_PAYMENT, id, { entity: normalized });
   return normalized;
 }
 
 export async function updateWorkerPayrollStatut(id, statutUi) {
   await getAuthUserId();
   const statut = UI_TO_DB_STATUT[statutUi] || statutUi;
+  const patch = { statut };
+  if (statutUi === 'Payé' || statut === 'Paye') {
+    patch.payment_date = todayIso();
+  }
 
   const { data, error } = await getSupabase()
     .from(TABLE)
-    .update({ statut })
+    .update(patch)
     .eq('id', id)
     .select(PAYROLL_SELECT)
     .single();
@@ -300,10 +302,26 @@ export async function updateWorkerPayrollStatut(id, statutUi) {
     throw error;
   }
   const normalized = normalizeWorkerPayroll(data);
-  await syncFinanceTransaction(FINANCE_SOURCE_TYPES.WORKER_WEEKLY_PAYMENT, id, { entity: normalized }).catch((err) => {
-    console.warn('[CITYMO] sync payroll → caisse', err);
-  });
+  const syncResult = await syncFinanceTransaction(FINANCE_SOURCE_TYPES.WORKER_WEEKLY_PAYMENT, id, { entity: normalized });
+  if (statutUi === 'Payé' && syncResult?.action === 'skipped') {
+    const err = new Error('Paiement enregistré mais montant nul — aucune ligne caisse créée.');
+    err.code = 'SYNC_SKIP';
+    throw err;
+  }
   return normalized;
+}
+
+/** Rattrapage : synchronise tous les paiements ouvriers déjà « Payé » vers la caisse. */
+export async function backfillWorkerPayrollToCash() {
+  const rows = await listWorkerPayroll();
+  let synced = 0;
+  for (const p of rows) {
+    if (p.statut !== 'Payé') continue;
+    if (!Number(p.total)) continue;
+    const r = await syncFinanceTransaction(FINANCE_SOURCE_TYPES.WORKER_WEEKLY_PAYMENT, p.id, { entity: p });
+    if (r?.action === 'created' || r?.action === 'updated') synced += 1;
+  }
+  return synced;
 }
 
 export async function updateWorkerPayrollAdjustments(id, existing, adjustments = {}) {

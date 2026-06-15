@@ -1,6 +1,9 @@
--- Sync automatique feuille de caisse ← modules source
--- source_type + source_id : clé idempotente (pas de doublon)
+-- =============================================================================
+-- CITYMO — Sync RH → Feuille de caisse (script complet à exécuter UNE FOIS)
+-- Supabase → SQL Editor → Run
+-- =============================================================================
 
+-- 1) Colonnes sync sur finance_transactions
 ALTER TABLE public.finance_transactions
   ADD COLUMN IF NOT EXISTS source_type text,
   ADD COLUMN IF NOT EXISTS source_id uuid,
@@ -13,26 +16,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS finance_transactions_source_unique
   ON public.finance_transactions (source_type, source_id)
   WHERE source_type IS NOT NULL AND source_id IS NOT NULL;
 
--- Rétro-compat : lignes charge / ordre déjà synchronisées
-UPDATE public.finance_transactions
-SET
-  source_type = 'charge',
-  source_id = charge_id,
-  source_module = 'finance',
-  is_auto_generated = true,
-  synced_at = COALESCE(updated_at, created_at, now())
-WHERE charge_id IS NOT NULL AND source_type IS NULL;
-
-UPDATE public.finance_transactions
-SET
-  source_type = 'payment_order',
-  source_id = payment_order_id,
-  source_module = 'finance',
-  is_auto_generated = true,
-  synced_at = COALESCE(updated_at, created_at, now())
-WHERE payment_order_id IS NOT NULL AND source_type IS NULL;
-
--- Validation journalière DG
+-- 2) Validation journalière DG
 CREATE TABLE IF NOT EXISTS public.cash_daily_validations (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   date_validation date NOT NULL UNIQUE,
@@ -44,8 +28,14 @@ CREATE TABLE IF NOT EXISTS public.cash_daily_validations (
 CREATE INDEX IF NOT EXISTS cash_daily_validations_date_idx
   ON public.cash_daily_validations (date_validation DESC);
 
+-- 3) Désactiver RLS + droits (obligatoire pour l'app)
+ALTER TABLE public.finance_transactions DISABLE ROW LEVEL SECURITY;
 ALTER TABLE public.cash_daily_validations DISABLE ROW LEVEL SECURITY;
+
+GRANT USAGE ON SCHEMA public TO anon, authenticated, service_role;
+GRANT ALL ON public.finance_transactions TO anon, authenticated, service_role;
 GRANT ALL ON public.cash_daily_validations TO anon, authenticated, service_role;
 
-COMMENT ON COLUMN public.finance_transactions.source_type IS
-  'worker_weekly_payment | subcontractor_payment | charge | payment_order | customer_invoice_payment | cash_funding';
+NOTIFY pgrst, 'reload schema';
+
+SELECT 'finance_rh_sync_complet OK — retournez dans Feuille de caisse → Actualiser' AS status;
