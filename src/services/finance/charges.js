@@ -3,6 +3,7 @@
  */
 import { getSupabase } from '../../lib/supabase';
 import { syncChargeToTransaction } from './financeTransactions';
+import { syncFinanceTransaction, FINANCE_SOURCE_TYPES } from './financeSync';
 
 const TABLE = 'finance_charges';
 
@@ -105,7 +106,10 @@ export async function updateFinanceCharge(id, form, categoryName) {
 
 export async function deleteFinanceCharge(id) {
   await requireUser();
-  await getSupabase().from('finance_transactions').delete().eq('charge_id', id);
+  await syncFinanceTransaction(FINANCE_SOURCE_TYPES.CHARGE, id, {
+    entity: { statut: 'Annulé', montant: 0 },
+    active: false,
+  }).catch(() => {});
   const { error } = await getSupabase().from(TABLE).delete().eq('id', id);
   if (error) throw error;
 }

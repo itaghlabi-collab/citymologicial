@@ -4,6 +4,7 @@
 import { getSupabase } from '../../lib/supabase';
 import { clientDisplayName } from './clients';
 import { getCrmDevisById } from './crmDevis';
+import { syncFacturePaymentsToCash } from '../finance/financeSync';
 
 const TABLE = 'crm_factures';
 const LIGNES = 'crm_facture_lignes';
@@ -399,12 +400,13 @@ async function upsertPaiements(factureId, paiements) {
   const rows = (paiements || [])
     .filter((p) => Number(p.montant) > 0)
     .map((p) => toPaiementRow(p, factureId));
-  if (rows.length === 0) return;
-  const { error } = await getSupabase().from(PAIEMENTS).insert(rows);
+  if (rows.length === 0) return [];
+  const { data, error } = await getSupabase().from(PAIEMENTS).insert(rows).select('*');
   if (error) {
     console.error('[CITYMO] crmFactures paiements insert', error, rows);
     throw error;
   }
+  return (data || []).map(normalizePaiement);
 }
 
 export async function createCrmFacture(form) {
@@ -425,7 +427,9 @@ export async function createCrmFacture(form) {
   }
   await upsertLignes(data.id, form.lignes || []);
   await upsertPaiements(data.id, form.paiements || []);
-  return getCrmFactureById(data.id);
+  const facture = await getCrmFactureById(data.id);
+  await syncFacturePaymentsToCash(facture).catch((err) => console.warn('[CITYMO] sync facture → caisse', err));
+  return facture;
 }
 
 export async function updateCrmFacture(id, form) {
@@ -444,7 +448,9 @@ export async function updateCrmFacture(id, form) {
   }
   await upsertLignes(id, form.lignes || []);
   await upsertPaiements(id, form.paiements || []);
-  return getCrmFactureById(id);
+  const facture = await getCrmFactureById(id);
+  await syncFacturePaymentsToCash(facture).catch((err) => console.warn('[CITYMO] sync facture → caisse', err));
+  return facture;
 }
 
 export async function deleteCrmFacture(id) {

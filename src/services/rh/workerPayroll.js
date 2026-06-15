@@ -6,6 +6,7 @@ import { workerFullName, listAttendance, computeAttendanceWorkMetrics, filterAtt
 import { listOvertime, sumWorkerOvertimeFromRecords } from './overtime';
 import { listWorkers, workerTarifHoraire, workerTarifJournalier, WORKER_HOURS_PER_DAY } from './workers';
 import { listProjects } from '../projects/projects';
+import { syncFinanceTransaction, FINANCE_SOURCE_TYPES } from '../finance/financeSync';
 
 const TABLE = 'payroll';
 
@@ -276,7 +277,11 @@ export async function updateWorkerPayroll(id, form) {
     console.error('[CITYMO] workerPayroll update', error, { id, row });
     throw error;
   }
-  return normalizeWorkerPayroll(data);
+  const normalized = normalizeWorkerPayroll(data);
+  await syncFinanceTransaction(FINANCE_SOURCE_TYPES.WORKER_WEEKLY_PAYMENT, id, { entity: normalized }).catch((err) => {
+    console.warn('[CITYMO] sync payroll → caisse', err);
+  });
+  return normalized;
 }
 
 export async function updateWorkerPayrollStatut(id, statutUi) {
@@ -294,7 +299,11 @@ export async function updateWorkerPayrollStatut(id, statutUi) {
     console.error('[CITYMO] workerPayroll statut', error, { id, statut });
     throw error;
   }
-  return normalizeWorkerPayroll(data);
+  const normalized = normalizeWorkerPayroll(data);
+  await syncFinanceTransaction(FINANCE_SOURCE_TYPES.WORKER_WEEKLY_PAYMENT, id, { entity: normalized }).catch((err) => {
+    console.warn('[CITYMO] sync payroll → caisse', err);
+  });
+  return normalized;
 }
 
 export async function updateWorkerPayrollAdjustments(id, existing, adjustments = {}) {
@@ -322,6 +331,10 @@ export async function updateWorkerPayrollAdjustments(id, existing, adjustments =
 
 export async function deleteWorkerPayroll(id) {
   await getAuthUserId();
+  await syncFinanceTransaction(FINANCE_SOURCE_TYPES.WORKER_WEEKLY_PAYMENT, id, {
+    entity: { statut: 'Annulé', total: 0 },
+    active: false,
+  }).catch(() => {});
   const { error } = await getSupabase().from(TABLE).delete().eq('id', id);
   if (error) {
     console.error('[CITYMO] workerPayroll delete', error, { id });

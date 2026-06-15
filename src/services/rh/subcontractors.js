@@ -2,6 +2,7 @@
  * subcontractors.js — Sous-traitants CRUD + affectations + prestations + paiements
  */
 import { getSupabase } from '../../lib/supabase';
+import { syncFinanceTransaction, FINANCE_SOURCE_TYPES } from '../finance/financeSync';
 
 const SUB_TABLE = 'subcontractors';
 const ASSIGN_TABLE = 'subcontractor_project_assignments';
@@ -249,6 +250,14 @@ async function getAuthUserId() {
     throw err;
   }
   return user.id;
+}
+
+async function syncSubcontractorPaymentToCash(payment, extra = {}) {
+  if (!payment?.id) return;
+  const entity = { ...payment, ...extra };
+  await syncFinanceTransaction(FINANCE_SOURCE_TYPES.SUBCONTRACTOR_PAYMENT, payment.id, { entity }).catch((err) => {
+    console.warn('[CITYMO] sync sous-traitant → caisse', err);
+  });
 }
 
 function aggregateSummaries(balances) {
@@ -592,10 +601,18 @@ export async function createPayment(subcontractorId, form) {
     err.code = 'VALIDATION';
     throw err;
   }
-  const { data, error } = await getSupabase().from(PAYMENT_TABLE).insert([row]).select('*').single();
+  const { data, error } = await getSupabase().from(PAYMENT_TABLE).insert([row]).select(`
+    *,
+    subcontractors ( prenom, nom, raison_sociale ),
+    projects ( nom )
+  `).single();
   if (error) throw error;
   const payment = normalizePayment(data);
   await applyAdjustmentsForPayment(payment);
+  await syncSubcontractorPaymentToCash(payment, {
+    subcontractorName: subcontractorFullName(data.subcontractors),
+    projectName: data.projects?.nom || '',
+  });
   return payment;
 }
 
@@ -613,10 +630,18 @@ export async function createPaymentBatch(projectId, sharedForm, lines) {
     assignmentId: line.assignmentId,
   }, line.subcontractorId));
 
-  const { data, error } = await getSupabase().from(PAYMENT_TABLE).insert(rows).select('*');
+  const { data, error } = await getSupabase().from(PAYMENT_TABLE).insert(rows).select(`
+    *,
+    subcontractors ( prenom, nom, raison_sociale ),
+    projects ( nom )
+  `);
   if (error) throw error;
   const payments = (data || []).map(normalizePayment);
   await Promise.all(payments.map(applyAdjustmentsForPayment));
+  await Promise.all((data || []).map((row, i) => syncSubcontractorPaymentToCash(payments[i], {
+    subcontractorName: subcontractorFullName(row.subcontractors),
+    projectName: row.projects?.nom || '',
+  })));
   return payments;
 }
 
@@ -639,11 +664,13 @@ export async function updateSubcontractorPayment(id, form, subcontractorId) {
     `)
     .single();
   if (error) throw error;
-  return {
+  const payment = {
     ...normalizePayment(data),
     subcontractorName: subcontractorFullName(data.subcontractors),
     projectName: data.projects?.nom || '',
   };
+  await syncSubcontractorPaymentToCash(payment);
+  return payment;
 }
 
 export async function listDocuments(subcontractorId) {
