@@ -10,7 +10,9 @@ import {
   FINANCE_SOURCE_TYPES,
   removeLinkedFinanceTransaction,
   removeLegacyWorkerWeeklyFinanceTransactions,
-  purgeAllLegacyWorkerWeeklyFinanceTransactions,
+  removeLegacyWorkerPaymentTypeRows,
+  purgePerPayrollIdWorkerFinanceRows,
+  purgeLegacyWorkerPaymentSourceType,
   isPayrollEntityPaid,
   syncFinanceTransaction,
 } from '../finance/financeSync';
@@ -63,13 +65,27 @@ export function weekEndSunday(weekStart) {
   return d.toISOString().slice(0, 10);
 }
 
-/** Date caisse pour un paiement ouvrier : fin de semaine travaillée, sauf date explicite. */
-export function resolveWorkerPaymentDate(row) {
+/** Date caisse RÉELLE — jamais semaine_fin / fin de période. */
+export function resolveWorkerCashPaymentDate(row) {
   if (!row) return todayIso();
-  const explicit = row.paymentDate || row.payment_date;
-  const semaineFin = row.semaineFin || row.semaine_fin || (row.semaineDebut || row.semaine_debut ? weekEndSunday(row.semaineDebut || row.semaine_debut) : '');
-  if (explicit && semaineFin && explicit <= semaineFin) return explicit;
-  return semaineFin || explicit || row.semaineDebut || row.semaine_debut || todayIso();
+  const paidAt = row.paidAt || row.paid_at;
+  if (paidAt) return String(paidAt).slice(0, 10);
+  const paymentDate = row.paymentDate || row.payment_date;
+  if (paymentDate) return String(paymentDate).slice(0, 10);
+  const updated = row.updated_at || row.updatedAt;
+  if (updated) return new Date(updated).toISOString().slice(0, 10);
+  return todayIso();
+}
+
+/** @deprecated Ne pas utiliser pour la caisse — conservé pour affichage RH uniquement. */
+export function resolveWorkerPaymentDate(row) {
+  return resolveWorkerCashPaymentDate(row);
+}
+
+/** Date caisse consolidée = la plus récente date de paiement réel du groupe. */
+export function resolveConsolidatedCashPaymentDate(rows) {
+  const dates = (rows || []).map(resolveWorkerCashPaymentDate).filter(Boolean).sort();
+  return dates[dates.length - 1] || todayIso();
 }
 
 /** Calcule tarif journalier / horaire cohérents (référence = journalier). */
@@ -138,7 +154,8 @@ export function normalizeWorkerPayroll(row) {
     projectId: row.project_id ? String(row.project_id) : '',
     semaineDebut: row.semaine_debut || '',
     semaineFin: row.semaine_fin || '',
-    paymentDate: row.payment_date || row.semaine_fin || row.semaine_debut || '',
+    paidAt: row.paid_at || null,
+    paymentDate: row.payment_date || '',
     joursPaies: totals.joursPaies,
     heuresNormales: totals.heuresNormales,
     tarifHoraire: totals.tarifHoraire,
@@ -219,9 +236,9 @@ export async function listWorkerPayroll() {
   return (data || []).map(normalizeWorkerPayroll);
 }
 
-/** UUID stable pour source_id caisse : une clé par ouvrier × projet. */
+/** UUID stable = source_id unique par ouvrier × projet (anti-doublon caisse). */
 export async function workerPaymentSourceId(workerId, projectId) {
-  const seed = `citymo:worker_payment:${workerId}:${projectId || 'none'}`;
+  const seed = `citymo:worker_weekly_payment:${workerId}:${projectId || 'none'}`;
   if (typeof crypto !== 'undefined' && crypto.subtle?.digest) {
     const buf = new TextEncoder().encode(seed);
     const hash = await crypto.subtle.digest('SHA-256', buf);
@@ -251,16 +268,19 @@ function buildConsolidatedWorkerPaymentEntity(rows, totalNet) {
   const sorted = [...rows].sort((a, b) => (a.semaineDebut || '').localeCompare(b.semaineDebut || ''));
   const first = sorted[0];
   const last = sorted[sorted.length - 1];
-  const payDates = sorted.map((p) => p.paymentDate || resolveWorkerPaymentDate(p)).filter(Boolean).sort();
-  const paymentDay = payDates[payDates.length - 1] || todayIso();
+  const paymentDay = resolveConsolidatedCashPaymentDate(sorted);
   return {
     workerId: first.workerId,
     projectId: first.projectId,
     ouvrier: first.ouvrier,
     projet: first.projet,
-    total: totalNet,
+    paid_amount: totalNet,
+    net_to_pay: totalNet,
     montantNet: totalNet,
+    total: totalNet,
+    montant_net: totalNet,
     paymentDate: paymentDay,
+    paidAt: sorted.map((p) => p.paidAt).filter(Boolean).sort().pop() || null,
     semaineDebut: first.semaineDebut,
     semaineFin: last.semaineFin || first.semaineFin,
     statut: 'Payé',
@@ -270,19 +290,22 @@ function buildConsolidatedWorkerPaymentEntity(rows, totalNet) {
 }
 
 /**
- * Sync caisse : UNE ligne par ouvrier × projet, uniquement si TOUTES les semaines sont Payé.
- * Montant = somme des montant_net (jamais lignes intermédiaires / présences).
+ * Sync caisse DÉFINITIF : UNE ligne finance_transactions par ouvrier × projet.
+ * - Lit uniquement public.payroll (consolidé si toutes semaines Payé)
+ * - Montant = somme montant_net
+ * - Date = paid_at > payment_date > updated_at > aujourd'hui
+ * - source_type = worker_weekly_payment, source_id = UUID stable
  */
 export async function syncWorkerPaymentGroup(workerId, projectId, options = {}) {
   if (!workerId) return { action: 'none', id: null };
   const allRecords = options.allRecords || await listWorkerPayroll();
   const rows = filterPayrollForWorkerProject(allRecords, workerId, projectId);
   const payrollIds = rows.map((p) => p.id).filter(Boolean);
+  const sourceId = await workerPaymentSourceId(workerId, projectId);
+  const sourceType = FINANCE_SOURCE_TYPES.WORKER_WEEKLY_PAYMENT;
 
   await removeLegacyWorkerWeeklyFinanceTransactions(payrollIds);
-
-  const sourceId = await workerPaymentSourceId(workerId, projectId);
-  const sourceType = FINANCE_SOURCE_TYPES.WORKER_PAYMENT;
+  await removeLegacyWorkerPaymentTypeRows(sourceId);
 
   const activeRows = rows.filter((p) => p.statut !== 'Annulé');
   if (!activeRows.length) {
@@ -300,8 +323,7 @@ export async function syncWorkerPaymentGroup(workerId, projectId, options = {}) 
   }
 
   const entity = buildConsolidatedWorkerPaymentEntity(activeRows, totalNet);
-  const syncResult = await syncFinanceTransaction(sourceType, sourceId, { entity });
-  return syncResult;
+  return syncFinanceTransaction(sourceType, sourceId, { entity });
 }
 
 export async function createWorkerPayrollBatch(batchMeta, lines) {
@@ -397,9 +419,13 @@ export async function updateWorkerPayrollStatut(id, statutUi) {
   await getAuthUserId();
   const statut = UI_TO_DB_STATUT[statutUi] || statutUi;
   const patch = { statut };
+  const nowIso = new Date().toISOString();
 
   if (statutUi === 'Payé' || statut === 'Paye') {
     patch.payment_date = todayIso();
+    patch.paid_at = nowIso;
+  } else {
+    patch.paid_at = null;
   }
 
   const { data, error } = await getSupabase()
@@ -423,26 +449,15 @@ export async function updateWorkerPayrollStatut(id, statutUi) {
   return normalized;
 }
 
-/** Réaligne payment_date sur semaine_fin pour paiements passés marqués Payé le même jour. */
+/** @deprecated Ne plus réaligner sur semaine_fin — date caisse = jour réel du paiement. */
 export async function alignPaidPayrollPaymentDates() {
-  const rows = await listWorkerPayroll();
-  let fixed = 0;
-  for (const p of rows) {
-    if (p.statut !== 'Payé') continue;
-    const ideal = p.semaineFin || (p.semaineDebut ? weekEndSunday(p.semaineDebut) : '');
-    if (!ideal || p.paymentDate === ideal) continue;
-    const { error } = await getSupabase()
-      .from(TABLE)
-      .update({ payment_date: ideal })
-      .eq('id', p.id);
-    if (!error) fixed += 1;
-  }
-  return fixed;
+  return 0;
 }
 
-/** Réconciliation : chaque paiement ouvrier (ouvrier × projet) → une ligne caisse si tout est Payé. */
+/** Réconciliation : une ligne caisse par ouvrier × projet si tout Payé. */
 export async function backfillWorkerPayrollToCash() {
-  const legacyPurge = await purgeAllLegacyWorkerWeeklyFinanceTransactions();
+  const legacyPerPayroll = await purgePerPayrollIdWorkerFinanceRows();
+  const legacyPaymentType = await purgeLegacyWorkerPaymentSourceType();
   const rows = await listWorkerPayroll();
   const groups = new Map();
   for (const p of rows) {
@@ -450,7 +465,7 @@ export async function backfillWorkerPayrollToCash() {
     if (!groups.has(key)) groups.set(key, { workerId: p.workerId, projectId: p.projectId });
   }
   let synced = 0;
-  let removed = legacyPurge?.count || 0;
+  let removed = (legacyPerPayroll?.count || 0) + (legacyPaymentType?.count || 0);
   const errors = [];
   for (const { workerId, projectId } of groups.values()) {
     try {

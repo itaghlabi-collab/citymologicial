@@ -140,6 +140,10 @@ function wrapSyncError(error) {
   throw error;
 }
 
+function todayIsoLocal() {
+  return new Date().toISOString().slice(0, 10);
+}
+
 function fmtWeekRangeLocal(debut, fin) {
   const d = debut ? new Date(`${debut}T12:00:00`).toLocaleDateString('fr-MA') : '—';
   const f = fin ? new Date(`${fin}T12:00:00`).toLocaleDateString('fr-MA') : '—';
@@ -218,25 +222,24 @@ function buildTransactionRow(sourceType, entity) {
     case FINANCE_SOURCE_TYPES.WORKER_PAYMENT:
     case FINANCE_SOURCE_TYPES.WORKER_WEEKLY_PAYMENT: {
       const payDate = entity.paymentDate || entity.datePaiement
-        || entity.semaineFin
-        || (entity.semaineDebut ? (() => {
-          const d = new Date(`${entity.semaineDebut}T12:00:00`);
-          d.setDate(d.getDate() + 6);
-          return d.toISOString().slice(0, 10);
-        })() : null)
-        || entity.semaineDebut
-        || new Date().toISOString().slice(0, 10);
+        || (entity.paidAt ? String(entity.paidAt).slice(0, 10) : null)
+        || (entity.paid_at ? String(entity.paid_at).slice(0, 10) : null)
+        || todayIsoLocal();
       const weekLabel = entity.semaineDebut && entity.semaineFin
         ? fmtWeekRangeLocal(entity.semaineDebut, entity.semaineFin)
         : '';
       const descBase = `Paiement ouvrier — ${entity.projet || 'Chantier'}`;
+      const montant = Number(
+        entity.paid_amount ?? entity.net_to_pay ?? entity.net_amount
+        ?? entity.total ?? entity.montantNet ?? entity.montant_net,
+      ) || 0;
       return {
         date_operation: payDate,
         sens: 'sortie',
         type_operation: 'autre_sortie',
         contrepartie: entity.ouvrier || '',
         description: weekLabel ? `${descBase} (${weekLabel})` : descBase,
-        montant: Number(entity.total ?? entity.montantNet ?? entity.montant_net) || 0,
+        montant,
         mode_paiement: mapPaymentMode(entity.paymentMethod),
         project_id: asUuidOrNull(entity.projectId),
         worker_id: asUuidOrNull(entity.workerId),
@@ -294,13 +297,56 @@ async function findExistingTransaction(sourceType, sourceId) {
   }
 }
 
-/** Supprime TOUTES les lignes caisse hebdo obsolètes (source worker_weekly_payment). */
+/** Supprime lignes caisse où source_id = payroll.id (bug : une ligne / semaine). */
+export async function purgePerPayrollIdWorkerFinanceRows() {
+  try {
+    const { data: payrollRows } = await getSupabase().from('payroll').select('id');
+    const ids = (payrollRows || []).map((r) => r.id).filter(Boolean);
+    if (!ids.length) return { action: 'none', count: 0 };
+    const { data, error } = await getSupabase()
+      .from(TABLE)
+      .delete()
+      .in('source_type', [FINANCE_SOURCE_TYPES.WORKER_WEEKLY_PAYMENT, FINANCE_SOURCE_TYPES.WORKER_PAYMENT])
+      .in('source_id', ids)
+      .select('id');
+    if (error) throw error;
+    return { action: 'deleted', count: (data || []).length };
+  } catch (error) {
+    wrapSyncError(error);
+    return { action: 'none', count: 0 };
+  }
+}
+
+/** @deprecated Utiliser purgePerPayrollIdWorkerFinanceRows — ne supprime plus toutes les lignes. */
 export async function purgeAllLegacyWorkerWeeklyFinanceTransactions() {
+  return purgePerPayrollIdWorkerFinanceRows();
+}
+
+/** Supprime toutes les lignes source_type worker_payment (ancien format consolidé). */
+export async function purgeLegacyWorkerPaymentSourceType() {
   try {
     const { data, error } = await getSupabase()
       .from(TABLE)
       .delete()
-      .eq('source_type', FINANCE_SOURCE_TYPES.WORKER_WEEKLY_PAYMENT)
+      .eq('source_type', FINANCE_SOURCE_TYPES.WORKER_PAYMENT)
+      .select('id');
+    if (error) throw error;
+    return { action: 'deleted', count: (data || []).length };
+  } catch (error) {
+    wrapSyncError(error);
+    return { action: 'none', count: 0 };
+  }
+}
+
+/** Supprime ancienne ligne worker_payment pour un source_id consolidé. */
+export async function removeLegacyWorkerPaymentTypeRows(consolidatedSourceId) {
+  if (!consolidatedSourceId) return { action: 'none', count: 0 };
+  try {
+    const { data, error } = await getSupabase()
+      .from(TABLE)
+      .delete()
+      .eq('source_type', FINANCE_SOURCE_TYPES.WORKER_PAYMENT)
+      .eq('source_id', consolidatedSourceId)
       .select('id');
     if (error) throw error;
     return { action: 'deleted', count: (data || []).length };
