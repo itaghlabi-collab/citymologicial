@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useAuth } from './hooks/useAuth';
 import './App.css';
+import NotificationCenter from './components/notifications/NotificationCenter';
 
 import Dashboard from './components/Dashboard';
 import RH from './components/RH';
@@ -53,7 +54,7 @@ import {
   ClipboardList, ShoppingCart, UserCog, Scale, FileCheck,
   Boxes, Package, ArrowUpDown,
   ShieldCheck, Database,
-  Bell, Search, Menu, ChevronRight, X as XIcon
+  Search, Menu, ChevronRight, X as XIcon
 } from 'lucide-react';
 
 /* =============================================
@@ -487,7 +488,7 @@ function Sidebar({ active, onNavigate, collapsed, mobileOpen, onMobileClose, use
 /* =============================================
    HEADER
    ============================================= */
-function Header({ module, onToggleSidebar, user, onLogout }) {
+function Header({ module, onToggleSidebar, user, onLogout, onNavigate }) {
   return (
     <header className="header">
       <button className="header-toggle" onClick={onToggleSidebar}>
@@ -499,13 +500,10 @@ function Header({ module, onToggleSidebar, user, onLogout }) {
         <span className="header-module">{MODULE_LABELS[module] || 'Tableau de Bord'}</span>
       </div>
       <div className="header-right">
-        <button className="icon-btn">
+        <button type="button" className="icon-btn" aria-label="Rechercher">
           <Search size={18} />
         </button>
-        <button className="icon-btn">
-          <Bell size={18} />
-          <span className="notif-badge" />
-        </button>
+        <NotificationCenter user={user} onNavigate={onNavigate} />
         <div className="header-avatar" title={user.nom} onClick={onLogout} style={{ cursor: 'pointer' }}>
           {user.initiales || user.nom.split(' ').map(n => n[0]).slice(0, 2).join('')}
         </div>
@@ -579,6 +577,7 @@ export default function App() {
           onToggleSidebar={toggleSidebar}
           user={user}
           onLogout={logout}
+          onNavigate={setModule}
         />
         <main className="page-content">
           <PageContent module={module} />

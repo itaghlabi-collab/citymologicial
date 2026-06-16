@@ -109,7 +109,11 @@ export async function createInternalTask(form) {
     .select('*')
     .single();
   if (error) throw error;
-  return normalizeInternalTask(data);
+  const task = normalizeInternalTask(data);
+  import('../notifications/notificationEvents').then(({ notifyTaskCreated }) => {
+    notifyTaskCreated(task).catch(() => {});
+  });
+  return task;
 }
 
 export async function updateInternalTask(id, form) {
@@ -143,7 +147,13 @@ export async function setInternalTaskStatut(id, statut) {
     err.code = 'VALIDATION';
     throw err;
   }
-  return patchInternalTask(id, { statut });
+  const task = await patchInternalTask(id, { statut });
+  if (statut === 'terminee') {
+    import('../notifications/notificationEvents').then(({ notifyTaskCompleted }) => {
+      notifyTaskCompleted(task).catch(() => {});
+    });
+  }
+  return task;
 }
 
 export async function setInternalTaskDgPush(id, enabled, userId, dgNote) {
@@ -159,7 +169,13 @@ export async function setInternalTaskDgPush(id, enabled, userId, dgNote) {
       patch.priorite = 'urgente';
     }
   }
-  return patchInternalTask(id, patch);
+  const task = await patchInternalTask(id, patch);
+  if (enabled) {
+    import('../notifications/notificationEvents').then(({ notifyTaskDgUrgent }) => {
+      notifyTaskDgUrgent(task).catch(() => {});
+    });
+  }
+  return task;
 }
 
 export async function deleteInternalTask(id) {

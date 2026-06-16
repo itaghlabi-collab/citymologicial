@@ -140,7 +140,10 @@ export async function createLeave(form, meta) {
   const created = normalizeLeave(data);
 
   notifySuperAdminLeaveRequest(created).catch((notifyErr) => {
-    console.warn('[CITYMO] notify leave failed', notifyErr);
+    console.warn('[CITYMO] notify leave email failed', notifyErr);
+  });
+  import('../notifications/notificationEvents').then(({ notifyLeaveCreated }) => {
+    notifyLeaveCreated(created).catch(() => {});
   });
 
   return created;
@@ -177,7 +180,11 @@ export async function updateLeaveStatut(id, statut) {
     console.error('[CITYMO] leaves update statut', error, { id, statut });
     throw error;
   }
-  return normalizeLeave(data);
+  const updated = normalizeLeave(data);
+  import('../notifications/notificationEvents').then(({ notifyLeaveStatusChanged }) => {
+    notifyLeaveStatusChanged(updated, statut).catch(() => {});
+  });
+  return updated;
 }
 
 export async function deleteLeave(id) {
