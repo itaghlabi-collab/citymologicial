@@ -14,7 +14,7 @@ import { canManageCash, isDGUser } from '../../services/finance/cashAccess';
 import { isSuperAdmin } from '../../services/rh/isSuperAdmin';
 import {
   validateCashDay, getCashDailyValidation, unlockCashDay,
-  todayIso, formatDateFr,
+  getPendingCashValidation, todayIso, yesterdayIso, formatDateFr,
 } from '../../services/finance/cashDailyValidation';
 import { computeDailyCashTotals, formatDateShortFr } from '../../services/finance/cashDayTotals';
 import { auditRhFinanceSync } from '../../services/finance/financeDiagnostics';
@@ -34,6 +34,12 @@ const MOIS_OPTS = [
 ];
 
 const MOIS_LABELS = ['', 'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre'];
+
+const TABLE_FILTERS = [
+  { id: 'today', label: "Aujourd'hui (J)" },
+  { id: 'yesterday', label: 'Hier (J-1)' },
+  { id: 'month', label: 'Vue mois' },
+];
 
 const EMPTY_TX = {
   date: '', sens: 'entree', type_operation: 'alimentation_caisse',
@@ -94,8 +100,7 @@ export default function FeuilleCaisse() {
   const isDG = isDGUser(user);
   const superAdmin = isSuperAdmin(user);
 
-  const [viewMode, setViewMode] = useState('day');
-  const [selectedDate, setSelectedDate] = useState(todayIso(now));
+  const [tableFilter, setTableFilter] = useState('today');
   const [year, setYear] = useState(now.getFullYear());
   const [month, setMonth] = useState(now.getMonth() + 1);
   const [showModal, setShowModal] = useState(false);
@@ -107,6 +112,7 @@ export default function FeuilleCaisse() {
   const [backfilling, setBackfilling] = useState(false);
   const [toast, setToast] = useState('');
   const [dayValidation, setDayValidation] = useState(null);
+  const [pendingJ1Validation, setPendingJ1Validation] = useState(null);
   const [rhAudit, setRhAudit] = useState(null);
 
   const {
@@ -115,33 +121,28 @@ export default function FeuilleCaisse() {
   } = useFinanceTransactions(year, month);
 
   const todayStr = todayIso(now);
+  const yesterdayStr = yesterdayIso(now);
+  const isCurrentMonth = year === now.getFullYear() && month === now.getMonth() + 1;
   const periodLabel = `${MOIS_LABELS[month] || month} ${year}`;
-  const viewTitle = viewMode === 'day'
-    ? `Vue journalière — ${formatDateShortFr(selectedDate)}`
-    : `Vue mensuelle — ${periodLabel}`;
+  const viewMode = tableFilter === 'month' ? 'month' : 'day';
+  const selectedDate = tableFilter === 'yesterday' ? yesterdayStr : todayStr;
+  const filterLabel = tableFilter === 'today'
+    ? `Aujourd'hui (J) — ${formatDateShortFr(todayStr)}`
+    : tableFilter === 'yesterday'
+      ? `Hier (J-1) — ${formatDateShortFr(yesterdayStr)}`
+      : `Vue mois — ${periodLabel}`;
+
+  function selectTableFilter(id) {
+    if (id === 'today' || id === 'yesterday') {
+      setYear(now.getFullYear());
+      setMonth(now.getMonth() + 1);
+    }
+    setTableFilter(id);
+  }
 
   useEffect(() => {
-    if (viewMode !== 'day') return;
-    const [y, m] = selectedDate.split('-').map(Number);
-    if (y !== year || m !== month) {
-      setYear(y);
-      setMonth(m);
-    }
-  }, [selectedDate, viewMode, year, month]);
-
-  function switchViewMode(mode) {
-    if (mode === 'day') {
-      const [sy, sm] = selectedDate.split('-').map(Number);
-      if (sy !== year || sm !== month) {
-        if (year === now.getFullYear() && month === now.getMonth() + 1) {
-          setSelectedDate(todayStr);
-        } else {
-          setSelectedDate(`${year}-${String(month).padStart(2, '0')}-01`);
-        }
-      }
-    }
-    setViewMode(mode);
-  }
+    if (!isCurrentMonth && tableFilter !== 'month') setTableFilter('month');
+  }, [isCurrentMonth, year, month, tableFilter]);
 
   const sortedRecords = useMemo(
     () => [...records].sort((a, b) => String(b.date).localeCompare(String(a.date))),
@@ -149,36 +150,52 @@ export default function FeuilleCaisse() {
   );
 
   const displayedRecords = useMemo(() => {
-    if (viewMode === 'day') return sortedRecords.filter((t) => t.date === selectedDate);
+    if (tableFilter === 'today') return sortedRecords.filter((t) => t.date === todayStr);
+    if (tableFilter === 'yesterday') return sortedRecords.filter((t) => t.date === yesterdayStr);
     return sortedRecords;
-  }, [sortedRecords, viewMode, selectedDate]);
+  }, [sortedRecords, tableFilter, todayStr, yesterdayStr]);
 
+  const activeDayDate = viewMode === 'day' ? selectedDate : null;
   const dailyTotals = useMemo(
-    () => computeDailyCashTotals(records, balance, selectedDate),
-    [records, balance, selectedDate],
+    () => (activeDayDate ? computeDailyCashTotals(records, balance, activeDayDate) : null),
+    [records, balance, activeDayDate],
   );
+
+  const dayKpiLabel = tableFilter === 'yesterday' ? 'de la veille' : 'du jour';
 
   const isDayValidated = Boolean(dayValidation?.review_date);
 
-  const canEditDay = !isDayValidated || superAdmin;
+  const canEditDay = viewMode === 'month' || !isDayValidated || superAdmin;
+
+  const showValidationBlock = viewMode === 'day' && (isDG || superAdmin);
 
   useEffect(() => {
-    if (!isDG && !superAdmin) return;
+    if (viewMode !== 'day' || (!isDG && !superAdmin)) {
+      setDayValidation(null);
+      return;
+    }
     getCashDailyValidation(selectedDate)
       .then(setDayValidation)
       .catch((err) => {
         console.warn('[CITYMO] validation caisse jour', err);
         setDayValidation(null);
       });
-  }, [isDG, superAdmin, selectedDate, records.length]);
+  }, [viewMode, isDG, superAdmin, selectedDate, records.length]);
 
   useEffect(() => {
-    if (viewMode !== 'day' || isDayValidated || (!isDG && !superAdmin)) return;
+    if (viewMode !== 'day' || isDayValidated || (!isDG && !superAdmin) || !dailyTotals) return;
     notifyCashReviewPending({
       reviewDate: selectedDate,
       opsCount: dailyTotals.dayCount,
     }).catch(() => {});
-  }, [viewMode, isDayValidated, isDG, superAdmin, selectedDate, dailyTotals.dayCount]);
+  }, [viewMode, isDayValidated, isDG, superAdmin, selectedDate, dailyTotals?.dayCount]);
+
+  useEffect(() => {
+    if (!isDG && !superAdmin) return;
+    getPendingCashValidation(now)
+      .then(setPendingJ1Validation)
+      .catch(() => setPendingJ1Validation(null));
+  }, [isDG, superAdmin, records.length]);
 
   useEffect(() => {
     if (!configured) return undefined;
@@ -244,12 +261,19 @@ export default function FeuilleCaisse() {
     }
   }
 
+  function isTxDayLocked(txDate) {
+    if (!txDate || superAdmin) return false;
+    if (viewMode === 'month') return false;
+    if (txDate !== selectedDate) return false;
+    return isDayValidated;
+  }
+
   function tryEditTx(t) {
     if (isAutoGeneratedTransaction(t)) {
       notify(getSourceModuleMessage(t));
       return;
     }
-    if (t.date === selectedDate && isDayValidated && !superAdmin) {
+    if (isTxDayLocked(t.date)) {
       notify('Journée validée — modification impossible. Contactez le Super Admin.');
       return;
     }
@@ -258,7 +282,7 @@ export default function FeuilleCaisse() {
   }
 
   async function tryRemoveTx(t) {
-    if (t.date === selectedDate && isDayValidated && !superAdmin) {
+    if (isTxDayLocked(t.date)) {
       notify('Journée validée — suppression impossible. Contactez le Super Admin.');
       return;
     }
@@ -266,16 +290,22 @@ export default function FeuilleCaisse() {
   }
 
   async function handleValidateDay() {
+    const dateToValidate = activeDayDate;
+    if (!dateToValidate) return;
     setValidating(true);
     try {
-      const v = await validateCashDay(selectedDate);
+      const v = await validateCashDay(dateToValidate);
       setDayValidation(v);
-      notify(`Caisse du ${formatDateFr(selectedDate)} validée.`);
+      if (dateToValidate === yesterdayStr) {
+        setPendingJ1Validation((p) => (p ? { ...p, validation: v, needsValidation: false } : p));
+      }
+      notify(`Caisse du ${formatDateFr(dateToValidate)} validée.`);
+      const totals = computeDailyCashTotals(records, balance, dateToValidate);
       notifyCashReviewCompleted({
-        reviewDate: selectedDate,
-        entrees: dailyTotals.entreesJour,
-        sorties: dailyTotals.sortiesJour,
-        soldeFin: dailyTotals.soldeFinJournee,
+        reviewDate: dateToValidate,
+        entrees: totals.entreesJour,
+        sorties: totals.sortiesJour,
+        soldeFin: totals.soldeFinJournee,
       }).catch(() => {});
     } catch (err) {
       const msg = err?.message || 'Erreur validation.';
@@ -313,7 +343,7 @@ export default function FeuilleCaisse() {
   }
 
   async function handleSaveTx(data) {
-    if (data.date === selectedDate && isDayValidated && !superAdmin) {
+    if (isTxDayLocked(data.date)) {
       notify('Journée validée — enregistrement impossible.');
       return;
     }
@@ -334,15 +364,13 @@ export default function FeuilleCaisse() {
     if (res.success) setShowBalance(false);
   }
 
-  function goToday() {
-    setSelectedDate(todayStr);
-    setViewMode('day');
-  }
-
   const years = [];
   for (let y = now.getFullYear() - 2; y <= now.getFullYear() + 1; y++) years.push(y);
 
-  const showValidationBlock = viewMode === 'day' && (isDG || superAdmin);
+  const showJ1ValidationBanner = (isDG || superAdmin)
+    && pendingJ1Validation?.needsValidation
+    && viewMode === 'day'
+    && tableFilter === 'yesterday';
 
   return (
     <div className="animate-fade-in">
@@ -351,25 +379,24 @@ export default function FeuilleCaisse() {
           <h1 className="page-title">FEUILLE DE CAISSE</h1>
           <p className="page-subtitle">
             Journal trésorerie — paiements validés à la date réelle du paiement.
-            {' '}<strong>{viewTitle}</strong>
+            {viewMode === 'day'
+              ? <> Validation DG : <strong>{formatDateShortFr(selectedDate)}</strong>.</>
+              : <> Synthèse mensuelle — <strong>{periodLabel}</strong>.</>}
+            {' '}<strong>{filterLabel}</strong>
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          {viewMode === 'month' && (
-            <>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => exportCashSheetExcel({ year, month, transactions: records, totals })}>
-                <FileSpreadsheet size={14} /> Excel
-              </button>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                onClick={() => exportCashSheetPdf({ year, month, transactions: records, totals, balance })}
-                title={`Export PDF CITYMO v${CASH_SHEET_PDF_VERSION}`}
-              >
-                <Download size={14} /> PDF
-              </button>
-            </>
-          )}
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => exportCashSheetExcel({ year, month, transactions: records, totals })}>
+            <FileSpreadsheet size={14} /> Excel
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            onClick={() => exportCashSheetPdf({ year, month, transactions: records, totals, balance })}
+            title={`Export PDF CITYMO v${CASH_SHEET_PDF_VERSION}`}
+          >
+            <Download size={14} /> PDF
+          </button>
           {canManage && (
             <button type="button" className="btn btn-secondary btn-sm" onClick={openBalanceModal}>
               <Wallet size={14} /> Solde initial
@@ -388,51 +415,48 @@ export default function FeuilleCaisse() {
 
       <div className="card" style={{ marginBottom: 16, padding: '14px 20px' }}>
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-          <div style={{ display: 'flex', gap: 6 }}>
-            <button
-              type="button"
-              className={`btn btn-sm ${viewMode === 'day' ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => switchViewMode('day')}
-            >
-              <Calendar size={14} /> Vue jour
-            </button>
-            <button
-              type="button"
-              className={`btn btn-sm ${viewMode === 'month' ? 'btn-primary' : 'btn-secondary'}`}
-              onClick={() => switchViewMode('month')}
-            >
-              Vue mois
-            </button>
-          </div>
-
-          {viewMode === 'day' ? (
-            <>
-              <input
-                type="date"
-                value={selectedDate}
-                onChange={(e) => setSelectedDate(e.target.value)}
-                style={{ ...INPUT_STYLE, maxWidth: 170 }}
-              />
-              <button type="button" className="btn btn-secondary btn-sm" onClick={goToday}>
-                Aujourd&apos;hui
-              </button>
-            </>
-          ) : (
-            <>
-              <select value={month} onChange={(e) => setMonth(Number(e.target.value))} style={{ ...SELECT_STYLE, maxWidth: 160 }}>
-                {MOIS_OPTS.map((m) => <option key={m.v} value={m.v}>{m.l}</option>)}
-              </select>
-              <select value={year} onChange={(e) => setYear(Number(e.target.value))} style={{ ...SELECT_STYLE, maxWidth: 120 }}>
-                {years.map((y) => <option key={y} value={y}>{y}</option>)}
-              </select>
-            </>
-          )}
-
+          <select value={month} onChange={(e) => setMonth(Number(e.target.value))} style={{ ...SELECT_STYLE, maxWidth: 160 }}>
+            {MOIS_OPTS.map((m) => <option key={m.v} value={m.v}>{m.l}</option>)}
+          </select>
+          <select value={year} onChange={(e) => setYear(Number(e.target.value))} style={{ ...SELECT_STYLE, maxWidth: 120 }}>
+            {years.map((y) => <option key={y} value={y}>{y}</option>)}
+          </select>
           <span style={{ fontSize: '0.82rem', color: 'var(--text-3)' }}>
-            {viewMode === 'day'
-              ? `${dailyTotals.dayCount} op. ce jour`
-              : `${records.length} op. — ${periodLabel}`}
+            Période : <strong>{periodLabel}</strong>
+            {isCurrentMonth ? ' (mois en cours)' : ''}
+            {!loading && records.length > 0 ? ` — ${records.length} op. ce mois` : ''}
           </span>
+          {TABLE_FILTERS.map((f) => (
+            <button
+              key={f.id}
+              type="button"
+              className={`btn btn-sm ${tableFilter === f.id ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => selectTableFilter(f.id)}
+              disabled={!isCurrentMonth && f.id !== 'month'}
+              title={!isCurrentMonth && f.id !== 'month' ? 'J et J-1 disponibles sur le mois en cours' : undefined}
+            >
+              {f.label}
+            </button>
+          ))}
+          {!isCurrentMonth && (
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => { setYear(now.getFullYear()); setMonth(now.getMonth() + 1); setTableFilter('today'); }}
+            >
+              Revenir au mois en cours
+            </button>
+          )}
+          {viewMode === 'day' && dailyTotals && (
+            <span style={{ fontSize: '0.82rem', color: 'var(--text-3)' }}>
+              {dailyTotals.dayCount} op. {dayKpiLabel}
+            </span>
+          )}
+          {viewMode === 'month' && (
+            <span style={{ fontSize: '0.82rem', color: 'var(--text-3)' }}>
+              {displayedRecords.length} op. sur le mois
+            </span>
+          )}
         </div>
       </div>
 
@@ -462,12 +486,18 @@ export default function FeuilleCaisse() {
         </div>
       )}
 
-      {showValidationBlock && !isDayValidated && (
+      {showJ1ValidationBanner && !isDayValidated && (
+        <div className="card" style={{ marginBottom: 16, padding: '12px 16px', fontSize: '0.86rem', background: '#FFF3E0', border: '1px solid #FFB74D', color: '#E65100' }}>
+          <strong>Validation J-1 en attente</strong> — clôturez la caisse d&apos;hier ({formatDateShortFr(yesterdayStr)}).
+        </div>
+      )}
+
+      {showValidationBlock && !isDayValidated && dailyTotals && (
         <div className="card" style={{ marginBottom: 16, padding: '14px 18px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12, background: '#E3F2FD', border: '1px solid #90CAF9' }}>
           <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: '0.88rem', maxWidth: 720 }}>
             <Bell size={18} style={{ color: '#1565C0', flexShrink: 0, marginTop: 2 }} />
             <span>
-              <strong>Validation caisse requise.</strong>
+              <strong>Validation caisse {tableFilter === 'yesterday' ? 'J-1' : 'J'} requise.</strong>
               {' '}Veuillez valider la caisse du{' '}
               <strong>{formatDateFr(selectedDate)}</strong>.
               {dailyTotals.dayCount > 0 && (
@@ -478,7 +508,7 @@ export default function FeuilleCaisse() {
           </div>
           <button type="button" className="btn btn-primary btn-sm" onClick={handleValidateDay} disabled={validating}>
             {validating ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <CheckCircle size={14} />}
-            {' '}Valider la journée
+            {' '}Valider {tableFilter === 'yesterday' ? 'J-1' : 'J'}
           </button>
         </div>
       )}
@@ -504,14 +534,14 @@ export default function FeuilleCaisse() {
         </div>
       )}
 
-      {viewMode === 'day' ? (
+      {viewMode === 'day' && dailyTotals ? (
         <div className="stat-grid finance-kpi-grid" style={{ marginBottom: 20 }}>
-          <KpiCard icon={<Wallet size={17} />} label="Solde début journée" value={formatMAD(dailyTotals.soldeDebutJournee)} color="grey" sub="solde cumulé avant cette date" />
-          <KpiCard icon={<Plus size={17} />} label="Entrées du jour" value={formatMAD(dailyTotals.entreesJour)} color="green" />
-          <KpiCard icon={<TrendingDown size={17} />} label="Sorties du jour" value={formatMAD(dailyTotals.sortiesJour)} color="red" />
-          <KpiCard icon={<Wallet size={17} />} label="Solde fin journée" value={formatMAD(dailyTotals.soldeFinJournee)} color="blue" sub="début + entrées − sorties" />
+          <KpiCard icon={<Wallet size={17} />} label={`Solde début ${dayKpiLabel}`} value={formatMAD(dailyTotals.soldeDebutJournee)} color="grey" sub="solde cumulé avant cette date" />
+          <KpiCard icon={<Plus size={17} />} label={`Entrées ${dayKpiLabel}`} value={formatMAD(dailyTotals.entreesJour)} color="green" />
+          <KpiCard icon={<TrendingDown size={17} />} label={`Sorties ${dayKpiLabel}`} value={formatMAD(dailyTotals.sortiesJour)} color="red" />
+          <KpiCard icon={<Wallet size={17} />} label={`Solde fin ${dayKpiLabel}`} value={formatMAD(dailyTotals.soldeFinJournee)} color="blue" sub="début + entrées − sorties" />
         </div>
-      ) : (
+      ) : viewMode === 'month' ? (
         <div className="stat-grid finance-kpi-grid" style={{ marginBottom: 20 }}>
           <KpiCard icon={<Wallet size={17} />} label="Solde initial" value={formatMAD(totals.soldeInitial)} color="grey" />
           <KpiCard icon={<Plus size={17} />} label="Alimentation" value={formatMAD(totals.alimentation)} color="purple" />
@@ -519,7 +549,7 @@ export default function FeuilleCaisse() {
           <KpiCard icon={<TrendingDown size={17} />} label="Total sorties" value={formatMAD(totals.totalSorties)} color="red" />
           <KpiCard icon={<Wallet size={17} />} label="Solde caisse du mois" value={formatMAD(totals.soldeMois)} color="blue" sub="solde_initial + alimentation + entrées − sorties" />
         </div>
-      )}
+      ) : null}
 
       {loading ? (
         <div style={{ textAlign: 'center', padding: 40 }}><Loader2 size={24} className="spin" /></div>
@@ -560,7 +590,7 @@ export default function FeuilleCaisse() {
                   const isAuto = isAutoGeneratedTransaction(t);
                   const badge = getSourceBadgeLabel(t);
                   const isSelectedDay = viewMode === 'day' && t.date === selectedDate;
-                  const rowLocked = isSelectedDay && isDayValidated && !superAdmin;
+                  const rowLocked = isSelectedDay && isDayValidated && !superAdmin && viewMode === 'day';
                   return (
                   <tr key={t.id} style={isSelectedDay ? { background: '#E8F5E9' } : undefined}>
                     <td data-label="Date">
