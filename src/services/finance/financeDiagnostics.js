@@ -115,39 +115,11 @@ export async function auditRhFinanceSync() {
     if (paidPayrollIds.size > 0) {
       const { data: workerTxs } = await client
         .from('finance_transactions')
-        .select('source_id, worker_id')
+        .select('source_id')
         .in('source_type', ['worker_payment', 'worker_weekly_payment'])
         .neq('statut', 'Annulé');
-      const syncedWorkerIds = new Set((workerTxs || []).map((t) => t.worker_id).filter(Boolean));
-      const { data: paidGroups } = await client
-        .from('payroll')
-        .select('worker_id, project_id')
-        .in('statut', ['Paye', 'Payé'])
-        .gt('montant_net', 0);
-      const groupKeys = new Set();
-      const allGroups = new Map();
-      (paidGroups || []).forEach((p) => {
-        const key = `${p.worker_id}|${p.project_id || ''}`;
-        allGroups.set(key, p.worker_id);
-      });
-      for (const key of allGroups.keys()) {
-        const [workerId, projectId] = key.split('|');
-        const { data: groupRows } = await client
-          .from('payroll')
-          .select('statut, auto_generated')
-          .eq('worker_id', workerId)
-          .eq('project_id', projectId || null);
-        const active = (groupRows || []).filter((r) => r.statut !== 'Annule' && r.statut !== 'Annulé');
-        const paidRows = active.filter((r) => r.statut === 'Paye' || r.statut === 'Payé');
-        const blocking = active.some(
-          (r) => r.statut !== 'Paye' && r.statut !== 'Payé'
-            && !(r.auto_generated && r.statut === 'En attente'),
-        );
-        if (paidRows.length && !blocking) {
-          groupKeys.add(workerId);
-        }
-      }
-      result.missingWorker = [...groupKeys].filter((wid) => !syncedWorkerIds.has(wid)).length;
+      const syncedPayrollIds = new Set((workerTxs || []).map((t) => t.source_id).filter(Boolean));
+      result.missingWorker = [...paidPayrollIds].filter((id) => !syncedPayrollIds.has(id)).length;
     }
 
     if (paidSubIds.size > 0) {

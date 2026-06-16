@@ -1,6 +1,6 @@
 /**
  * cashSheetDisplay.js — Présentation feuille de caisse
- * Regroupe les paiements ouvriers : 1 ligne récap par ouvrier × projet.
+ * worker_weekly_payment : 1 ligne DB = 1 ligne affichée (par semaine payée).
  */
 
 const WORKER_SOURCES = new Set(['worker_payment', 'worker_weekly_payment']);
@@ -53,17 +53,11 @@ function groupKey(t) {
   return `${t.worker_id || t.contrepartie || ''}|${t.project_id || ''}`;
 }
 
-function mergeWorkerPaymentGroup(rows) {
+function mergeLegacyWorkerPaymentGroup(rows) {
   if (!rows?.length) return [];
 
   const paymentRow = rows.find((r) => r.source_type === 'worker_payment');
-  const weeklyRows = rows.filter((r) => r.source_type === 'worker_weekly_payment');
-
-  if (paymentRow && weeklyRows.length === 0) {
-    return [{ ...paymentRow, isRecap: true }];
-  }
-
-  if (paymentRow && weeklyRows.length > 0) {
+  if (paymentRow) {
     return [{ ...paymentRow, isRecap: true }];
   }
 
@@ -90,28 +84,32 @@ function mergeWorkerPaymentGroup(rows) {
   }];
 }
 
-/** Une ligne récap par ouvrier — fusionne worker_weekly_payment legacy si présent. */
+/** Affiche chaque paiement hebdo tel quel ; fusionne uniquement l'ancien format worker_payment. */
 export function consolidateCashSheetTransactions(transactions) {
   const active = (transactions || []).filter((t) => t.statut !== 'Annulé');
   const others = [];
-  const groups = new Map();
+  const legacyGroups = new Map();
 
   for (const t of active) {
-    if (!WORKER_SOURCES.has(t.source_type)) {
+    if (t.source_type === 'worker_weekly_payment') {
       others.push(t);
       continue;
     }
-    const key = groupKey(t);
-    if (!groups.has(key)) groups.set(key, []);
-    groups.get(key).push(t);
+    if (t.source_type === 'worker_payment') {
+      const key = groupKey(t);
+      if (!legacyGroups.has(key)) legacyGroups.set(key, []);
+      legacyGroups.get(key).push(t);
+      continue;
+    }
+    others.push(t);
   }
 
-  const mergedWorkers = [];
-  for (const rows of groups.values()) {
-    mergedWorkers.push(...mergeWorkerPaymentGroup(rows));
+  const mergedLegacy = [];
+  for (const rows of legacyGroups.values()) {
+    mergedLegacy.push(...mergeLegacyWorkerPaymentGroup(rows));
   }
 
-  return [...others, ...mergedWorkers].sort((a, b) => String(b.date).localeCompare(String(a.date)));
+  return [...others, ...mergedLegacy].sort((a, b) => String(b.date).localeCompare(String(a.date)));
 }
 
 export function isWorkerPaymentRecap(t) {

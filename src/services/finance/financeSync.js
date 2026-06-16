@@ -321,7 +321,34 @@ async function findExistingTransaction(sourceType, sourceId) {
   return data;
 }
 
-/** Supprime lignes caisse où source_id = payroll.id (bug : une ligne / semaine). */
+/** Supprime lignes consolidées (source_id = hash ouvrier×projet, pas payroll.id). */
+export async function purgeConsolidatedWorkerFinanceRows() {
+  try {
+    const { data: payrollRows } = await getSupabase().from('payroll').select('id');
+    const payrollIds = new Set((payrollRows || []).map((r) => r.id).filter(Boolean));
+    const { data: txs, error: listErr } = await getSupabase()
+      .from(TABLE)
+      .select('id, source_id')
+      .eq('source_type', FINANCE_SOURCE_TYPES.WORKER_WEEKLY_PAYMENT);
+    if (listErr) throw listErr;
+    const orphanIds = (txs || [])
+      .filter((t) => t.source_id && !payrollIds.has(t.source_id))
+      .map((t) => t.id);
+    if (!orphanIds.length) return { action: 'none', count: 0 };
+    const { data, error } = await getSupabase()
+      .from(TABLE)
+      .delete()
+      .in('id', orphanIds)
+      .select('id');
+    if (error) throw error;
+    return { action: 'deleted', count: (data || []).length };
+  } catch (error) {
+    wrapSyncError(error);
+    return { action: 'none', count: 0 };
+  }
+}
+
+/** @deprecated Ancien modèle — ne pas appeler en sync normale (source_id = payroll.id). */
 export async function purgePerPayrollIdWorkerFinanceRows() {
   try {
     const { data: payrollRows } = await getSupabase().from('payroll').select('id');
