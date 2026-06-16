@@ -348,7 +348,7 @@ export async function purgeConsolidatedWorkerFinanceRows() {
   }
 }
 
-/** @deprecated Ancien modèle — ne pas appeler en sync normale (source_id = payroll.id). */
+/** Supprime lignes caisse par semaine (source_id = payroll.id) — modèle abandonné. */
 export async function purgePerPayrollIdWorkerFinanceRows() {
   try {
     const { data: payrollRows } = await getSupabase().from('payroll').select('id');
