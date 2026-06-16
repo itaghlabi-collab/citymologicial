@@ -477,7 +477,12 @@ export async function backfillWorkerPayrollToCash() {
       errors.push({ workerId, projectId, message: err?.message || String(err) });
     }
   }
-  return { synced, removed, legacyPurged: legacyPurge?.count || 0, errors };
+  return {
+    synced,
+    removed,
+    legacyPurged: (legacyPerPayroll?.count || 0) + (legacyPaymentType?.count || 0),
+    errors,
+  };
 }
 
 export async function updateWorkerPayrollAdjustments(id, existing, adjustments = {}) {

@@ -253,12 +253,12 @@ export default function FeuilleCaisse() {
       } else if ((audit.missingWorker || 0) + (audit.missingSubcontractor || 0) > 0) {
         notify(`${audit.missingWorker} ouvrier(s) et ${audit.missingSubcontractor} sous-traitant(s) payés sans ligne caisse — vérifiez les statuts « Payé ».`);
       } else if (r.errors?.length) {
-        notify(`${r.errors.length} erreur(s) de synchronisation.`);
+        notify(`${r.errors.length} erreur(s) sync : ${r.errors[0]?.message || 'voir console'}`);
       }
     } catch (err) {
       const msg = err?.message || 'Erreur synchronisation paiements RH.';
-      if (err?.code === 'SCHEMA' || msg.includes('source_type')) {
-        notify('Exécutez supabase/RUN_FINANCE_TOUT_EN_UN.sql dans Supabase SQL Editor, puis Actualiser.');
+      if (err?.code === 'SCHEMA' || err?.code === 'RLS' || msg.includes('source_type') || msg.includes('row-level security')) {
+        notify('Exécutez supabase/RUN_SUPABASE_A_EXECUTER.sql dans Supabase SQL Editor, puis Actualiser.');
       } else {
         notify(msg);
       }
@@ -316,7 +316,7 @@ export default function FeuilleCaisse() {
     } catch (err) {
       const msg = err?.message || 'Erreur validation.';
       if (msg.includes('row-level security') || msg.includes('daily_cash_reviews') || msg.includes('cash_daily_validations')) {
-        notify('Erreur Supabase RLS — exécutez supabase/RUN_FINANCE_TOUT_EN_UN.sql puis réessayez.');
+        notify('Erreur Supabase RLS — exécutez supabase/RUN_SUPABASE_A_EXECUTER.sql puis réessayez.');
       } else {
         notify(msg);
       }

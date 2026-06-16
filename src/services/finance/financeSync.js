@@ -132,8 +132,14 @@ function asUuidOrNull(value) {
 function wrapSyncError(error) {
   const msg = error?.message || String(error);
   if (msg.includes('source_type') || msg.includes('source_id') || msg.includes('is_auto_generated')) {
-    const err = new Error('Base Supabase incomplète : exécutez supabase/RUN_FINANCE_SYNC_SOURCES.sql puis actualisez.');
+    const err = new Error('Base Supabase incomplète : exécutez supabase/RUN_SUPABASE_A_EXECUTER.sql puis actualisez.');
     err.code = 'SCHEMA';
+    err.cause = error;
+    throw err;
+  }
+  if (msg.includes('row-level security') || msg.includes('42501') || error?.code === '42501') {
+    const err = new Error('RLS Supabase bloque l\'écriture — exécutez supabase/RUN_SUPABASE_A_EXECUTER.sql dans SQL Editor.');
+    err.code = 'RLS';
     err.cause = error;
     throw err;
   }
