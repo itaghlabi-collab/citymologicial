@@ -671,17 +671,23 @@ export async function updateSubcontractorPayment(id, form, subcontractorId) {
   return payment;
 }
 
-/** Rattrapage : synchronise tous les paiements sous-traitants vers la caisse. */
+/** Réconciliation : chaque paiement sous-traitant → créer / mettre à jour / supprimer la ligne caisse. */
 export async function backfillSubcontractorPaymentsToCash() {
   const rows = await listAllSubcontractorPayments(null);
   let synced = 0;
+  let removed = 0;
+  const errors = [];
   for (const p of rows) {
-    if (!['paid', 'Payé', 'payé'].includes(p.status)) continue;
-    if (!Number(p.amount)) continue;
-    const r = await syncFinanceTransaction(FINANCE_SOURCE_TYPES.SUBCONTRACTOR_PAYMENT, p.id, { entity: p });
-    if (r?.action === 'created' || r?.action === 'updated') synced += 1;
+    try {
+      const r = await syncFinanceTransaction(FINANCE_SOURCE_TYPES.SUBCONTRACTOR_PAYMENT, p.id, { entity: p });
+      if (r?.action === 'created' || r?.action === 'updated') synced += 1;
+      if (r?.action === 'deleted') removed += 1;
+    } catch (err) {
+      if (err?.code === 'SCHEMA') throw err;
+      errors.push({ id: p.id, message: err?.message || String(err) });
+    }
   }
-  return synced;
+  return { synced, removed, errors };
 }
 
 export async function listDocuments(subcontractorId) {

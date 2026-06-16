@@ -55,6 +55,7 @@ export function useFinanceDashboard() {
     try {
       await runRhPaymentsCashBackfill().catch((err) => {
         console.warn('[CITYMO] dashboard backfill RH', err);
+        if (err?.code === 'SCHEMA') throw err;
       });
       const [
         charges,
@@ -131,7 +132,7 @@ export function useFinanceDashboard() {
         categoryBreakdown: buildCategoryBreakdown(charges, monthTxs, categories, year, month),
         topCharges: buildTopCharges(charges, monthTxs, categories, year, month),
         recentActivity: buildRecentActivity(yearTxs, charges, orders),
-        projectIndicators: buildProjectIndicators(projects, charges),
+        projectIndicators: buildProjectIndicators(projects, charges, monthTxs),
         forecast: buildForecast({
           soldeActuel: totals.soldeMois,
           totalEntrees: totals.totalEntrees,

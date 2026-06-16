@@ -1,5 +1,5 @@
 /**
- * financeDiagnostics.js — Diagnostic lecture Supabase Finance
+ * financeDiagnostics.js — Diagnostic lecture Supabase Finance + audit sync RH
  */
 import { getSupabase, isSupabaseConfigured } from '../../lib/supabase';
 import { ENV } from '../../config/env';
@@ -55,6 +55,111 @@ export async function diagnoseFinanceAccess() {
 
   if (import.meta.env.DEV || result.error || result.categoriesCount === 0) {
     console.info('[CITYMO Finance] Supabase diagnostic', result);
+  }
+
+  return result;
+}
+
+/** Audit : paiements RH payés vs lignes finance_transactions auto. */
+export async function auditRhFinanceSync() {
+  const result = {
+    schemaOk: false,
+    payrollPaid: 0,
+    subcontractorPaid: 0,
+    workerTxCount: 0,
+    subcontractorTxCount: 0,
+    missingWorker: 0,
+    missingSubcontractor: 0,
+    error: null,
+    hint: null,
+  };
+
+  if (!isSupabaseConfigured()) {
+    result.error = 'Supabase non configuré';
+    return result;
+  }
+
+  const client = getSupabase();
+
+  try {
+    const probe = await client.from('finance_transactions').select('source_type, source_id, is_auto_generated').limit(1);
+    if (probe.error) {
+      result.error = probe.error.message;
+      if (probe.error.message?.includes('source_type') || probe.error.message?.includes('is_auto_generated')) {
+        result.hint = 'Exécutez supabase/RUN_FINANCE_TOUT_EN_UN.sql dans Supabase SQL Editor';
+      }
+      return result;
+    }
+    result.schemaOk = true;
+
+    const [payrollRes, subRes, workerTxRes, subTxRes] = await Promise.all([
+      client.from('payroll').select('id, montant_net').in('statut', ['Paye', 'Payé']).gt('montant_net', 0),
+      client.from('subcontractor_payments').select('id, amount').eq('status', 'paid').gt('amount', 0),
+      client.from('finance_transactions').select('id', { count: 'exact', head: true })
+        .in('source_type', ['worker_payment', 'worker_weekly_payment']).neq('statut', 'Annulé'),
+      client.from('finance_transactions').select('id', { count: 'exact', head: true })
+        .eq('source_type', 'subcontractor_payment').neq('statut', 'Annulé'),
+    ]);
+
+    if (payrollRes.error) throw payrollRes.error;
+    if (subRes.error) throw subRes.error;
+
+    result.payrollPaid = payrollRes.data?.length || 0;
+    result.subcontractorPaid = subRes.data?.length || 0;
+    result.workerTxCount = workerTxRes.count ?? 0;
+    result.subcontractorTxCount = subTxRes.count ?? 0;
+
+    const paidPayrollIds = new Set((payrollRes.data || []).map((r) => r.id));
+    const paidSubIds = new Set((subRes.data || []).map((r) => r.id));
+
+    if (paidPayrollIds.size > 0) {
+      const { data: workerTxs } = await client
+        .from('finance_transactions')
+        .select('source_id, worker_id')
+        .in('source_type', ['worker_payment', 'worker_weekly_payment'])
+        .neq('statut', 'Annulé');
+      const syncedWorkerIds = new Set((workerTxs || []).map((t) => t.worker_id).filter(Boolean));
+      const { data: paidGroups } = await client
+        .from('payroll')
+        .select('worker_id, project_id')
+        .in('statut', ['Paye', 'Payé'])
+        .gt('montant_net', 0);
+      const groupKeys = new Set();
+      const allGroups = new Map();
+      (paidGroups || []).forEach((p) => {
+        const key = `${p.worker_id}|${p.project_id || ''}`;
+        allGroups.set(key, p.worker_id);
+      });
+      for (const key of allGroups.keys()) {
+        const [workerId, projectId] = key.split('|');
+        const { data: groupRows } = await client
+          .from('payroll')
+          .select('statut')
+          .eq('worker_id', workerId)
+          .eq('project_id', projectId || null);
+        const active = (groupRows || []).filter((r) => r.statut !== 'Annule' && r.statut !== 'Annulé');
+        if (active.length && active.every((r) => r.statut === 'Paye' || r.statut === 'Payé')) {
+          groupKeys.add(workerId);
+        }
+      }
+      result.missingWorker = [...groupKeys].filter((wid) => !syncedWorkerIds.has(wid)).length;
+    }
+
+    if (paidSubIds.size > 0) {
+      const { data: subTxs } = await client
+        .from('finance_transactions')
+        .select('source_id')
+        .eq('source_type', 'subcontractor_payment')
+        .neq('statut', 'Annulé');
+      const syncedIds = new Set((subTxs || []).map((t) => t.source_id));
+      result.missingSubcontractor = [...paidSubIds].filter((id) => !syncedIds.has(id)).length;
+    }
+
+    if (result.missingWorker > 0 || result.missingSubcontractor > 0) {
+      result.hint = 'Cliquez « Actualiser » sur la Feuille de caisse ou exécutez supabase/RUN_FINANCE_RH_BACKFILL.sql';
+    }
+  } catch (err) {
+    result.error = err?.message || String(err);
   }
 
   return result;

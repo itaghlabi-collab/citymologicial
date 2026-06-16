@@ -1,17 +1,17 @@
 /**
- * cashDailyValidation.js — Validation journalière caisse (DG) — logique J-1
- * Chaque matin le DG valide la caisse de la veille (J-1).
+ * cashDailyValidation.js — Validation journalière caisse (DG)
+ * Table : daily_cash_reviews (review_date) — rétro-compat cash_daily_validations
  */
 import { getSupabase } from '../../lib/supabase';
 import { requireSupabaseUserId } from '../supabase/requireUser';
 
-const TABLE = 'cash_daily_validations';
+const TABLE = 'daily_cash_reviews';
+const LEGACY_TABLE = 'cash_daily_validations';
 
 export function todayIso(ref = new Date()) {
   return toIsoDate(ref);
 }
 
-/** Date calendaire J-1 (veille). */
 export function yesterdayIso(ref = new Date()) {
   const d = new Date(ref);
   d.setDate(d.getDate() - 1);
@@ -32,58 +32,107 @@ export function formatDateFr(iso) {
   });
 }
 
-/** Date à valider : toujours J-1 (pas le jour en cours). */
-export function getValidationTargetDate(ref = new Date()) {
-  return yesterdayIso(ref);
+function normalizeReview(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    review_date: row.review_date || row.date_validation,
+    validated_by: row.validated_by,
+    validated_at: row.validated_at,
+    notes: row.notes,
+  };
 }
 
-export async function getCashDailyValidation(dateIso) {
+async function readReview(dateIso) {
   const { data, error } = await getSupabase()
     .from(TABLE)
     .select('*')
-    .eq('date_validation', dateIso)
+    .eq('review_date', dateIso)
     .maybeSingle();
-  if (error) throw error;
-  return data;
+  if (!error) return normalizeReview(data);
+  if (error?.code === 'PGRST205' || error?.message?.includes('daily_cash_reviews')) {
+    const legacy = await getSupabase()
+      .from(LEGACY_TABLE)
+      .select('*')
+      .eq('date_validation', dateIso)
+      .maybeSingle();
+    if (legacy.error) throw legacy.error;
+    return normalizeReview(legacy.data);
+  }
+  throw error;
 }
 
+export async function getCashDailyValidation(dateIso) {
+  return readReview(dateIso);
+}
+
+/** @deprecated use getCashDailyValidation(selectedDate) */
 export async function getPendingCashValidation(ref = new Date()) {
-  const targetDate = getValidationTargetDate(ref);
+  const targetDate = yesterdayIso(ref);
   const validation = await getCashDailyValidation(targetDate);
-  return {
-    targetDate,
-    validation,
-    needsValidation: !validation,
-  };
+  return { targetDate, validation, needsValidation: !validation };
 }
 
 export async function listRecentCashValidations(limit = 14) {
   const { data, error } = await getSupabase()
     .from(TABLE)
     .select('*')
-    .order('date_validation', { ascending: false })
+    .order('review_date', { ascending: false })
     .limit(limit);
-  if (error) throw error;
-  return data || [];
+  if (error) {
+    const legacy = await getSupabase()
+      .from(LEGACY_TABLE)
+      .select('*')
+      .order('date_validation', { ascending: false })
+      .limit(limit);
+    if (legacy.error) throw legacy.error;
+    return (legacy.data || []).map(normalizeReview);
+  }
+  return (data || []).map(normalizeReview);
 }
 
 export async function validateCashDay(dateIso, notes = '') {
   const uid = await requireSupabaseUserId();
+  const row = {
+    review_date: dateIso,
+    validated_by: uid,
+    validated_at: new Date().toISOString(),
+    notes: notes?.trim() || null,
+  };
   const { data, error } = await getSupabase()
     .from(TABLE)
-    .upsert({
-      date_validation: dateIso,
-      validated_by: uid,
-      validated_at: new Date().toISOString(),
-      notes: notes?.trim() || null,
-    }, { onConflict: 'date_validation' })
+    .upsert(row, { onConflict: 'review_date' })
     .select()
     .single();
-  if (error) throw error;
-  return data;
+  if (error) {
+    const legacyRow = {
+      date_validation: dateIso,
+      validated_by: uid,
+      validated_at: row.validated_at,
+      notes: row.notes,
+    };
+    const legacy = await getSupabase()
+      .from(LEGACY_TABLE)
+      .upsert(legacyRow, { onConflict: 'date_validation' })
+      .select()
+      .single();
+    if (legacy.error) throw legacy.error;
+    return normalizeReview(legacy.data);
+  }
+  return normalizeReview(data);
 }
 
-/** Valide la caisse J-1 (usage standard DG). */
+export async function unlockCashDay(dateIso) {
+  await requireSupabaseUserId();
+  const { error } = await getSupabase().from(TABLE).delete().eq('review_date', dateIso);
+  if (error) {
+    const legacy = await getSupabase().from(LEGACY_TABLE).delete().eq('date_validation', dateIso);
+    if (legacy.error) throw legacy.error;
+    return;
+  }
+}
+
+/** @deprecated */
 export async function validateCashPreviousDay(notes = '') {
-  return validateCashDay(getValidationTargetDate(), notes);
+  return validateCashDay(yesterdayIso(), notes);
 }

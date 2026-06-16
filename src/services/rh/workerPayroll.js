@@ -6,7 +6,14 @@ import { workerFullName, listAttendance, computeAttendanceWorkMetrics, filterAtt
 import { listOvertime, sumWorkerOvertimeFromRecords } from './overtime';
 import { listWorkers, workerTarifHoraire, workerTarifJournalier, WORKER_HOURS_PER_DAY } from './workers';
 import { listProjects } from '../projects/projects';
-import { syncFinanceTransaction, FINANCE_SOURCE_TYPES } from '../finance/financeSync';
+import {
+  FINANCE_SOURCE_TYPES,
+  removeLinkedFinanceTransaction,
+  removeLegacyWorkerWeeklyFinanceTransactions,
+  purgeAllLegacyWorkerWeeklyFinanceTransactions,
+  isPayrollEntityPaid,
+  syncFinanceTransaction,
+} from '../finance/financeSync';
 
 const TABLE = 'payroll';
 
@@ -54,6 +61,15 @@ export function weekEndSunday(weekStart) {
   const d = new Date(`${weekStart}T12:00:00`);
   d.setDate(d.getDate() + 6);
   return d.toISOString().slice(0, 10);
+}
+
+/** Date caisse pour un paiement ouvrier : fin de semaine travaillée, sauf date explicite. */
+export function resolveWorkerPaymentDate(row) {
+  if (!row) return todayIso();
+  const explicit = row.paymentDate || row.payment_date;
+  const semaineFin = row.semaineFin || row.semaine_fin || (row.semaineDebut || row.semaine_debut ? weekEndSunday(row.semaineDebut || row.semaine_debut) : '');
+  if (explicit && semaineFin && explicit <= semaineFin) return explicit;
+  return semaineFin || explicit || row.semaineDebut || row.semaine_debut || todayIso();
 }
 
 /** Calcule tarif journalier / horaire cohérents (référence = journalier). */
@@ -122,7 +138,7 @@ export function normalizeWorkerPayroll(row) {
     projectId: row.project_id ? String(row.project_id) : '',
     semaineDebut: row.semaine_debut || '',
     semaineFin: row.semaine_fin || '',
-    paymentDate: row.payment_date || row.semaine_debut || '',
+    paymentDate: row.payment_date || row.semaine_fin || row.semaine_debut || '',
     joursPaies: totals.joursPaies,
     heuresNormales: totals.heuresNormales,
     tarifHoraire: totals.tarifHoraire,
@@ -203,6 +219,90 @@ export async function listWorkerPayroll() {
   return (data || []).map(normalizeWorkerPayroll);
 }
 
+/** UUID stable pour source_id caisse : une clé par ouvrier × projet. */
+export async function workerPaymentSourceId(workerId, projectId) {
+  const seed = `citymo:worker_payment:${workerId}:${projectId || 'none'}`;
+  if (typeof crypto !== 'undefined' && crypto.subtle?.digest) {
+    const buf = new TextEncoder().encode(seed);
+    const hash = await crypto.subtle.digest('SHA-256', buf);
+    const bytes = new Uint8Array(hash.slice(0, 16));
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    const hex = [...bytes].map((b) => b.toString(16).padStart(2, '0')).join('');
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
+  }
+  let h = 0;
+  for (let i = 0; i < seed.length; i += 1) {
+    h = ((h << 5) - h) + seed.charCodeAt(i);
+    h |= 0;
+  }
+  const hex = Math.abs(h).toString(16).padStart(32, '0').slice(0, 32);
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-a${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
+}
+
+function filterPayrollForWorkerProject(records, workerId, projectId) {
+  return (records || []).filter(
+    (p) => String(p.workerId) === String(workerId)
+      && String(p.projectId || '') === String(projectId || ''),
+  );
+}
+
+function buildConsolidatedWorkerPaymentEntity(rows, totalNet) {
+  const sorted = [...rows].sort((a, b) => (a.semaineDebut || '').localeCompare(b.semaineDebut || ''));
+  const first = sorted[0];
+  const last = sorted[sorted.length - 1];
+  const payDates = sorted.map((p) => resolveWorkerPaymentDate(p)).filter(Boolean).sort();
+  return {
+    workerId: first.workerId,
+    projectId: first.projectId,
+    ouvrier: first.ouvrier,
+    projet: first.projet,
+    total: totalNet,
+    montantNet: totalNet,
+    paymentDate: payDates[payDates.length - 1] || resolveWorkerPaymentDate(first),
+    semaineDebut: first.semaineDebut,
+    semaineFin: last.semaineFin || first.semaineFin,
+    statut: 'Payé',
+    reference: first.reference,
+    paymentMethod: first.paymentMethod,
+  };
+}
+
+/**
+ * Sync caisse : UNE ligne par ouvrier × projet, uniquement si TOUTES les semaines sont Payé.
+ * Montant = somme des montant_net (jamais lignes intermédiaires / présences).
+ */
+export async function syncWorkerPaymentGroup(workerId, projectId, options = {}) {
+  if (!workerId) return { action: 'none', id: null };
+  const allRecords = options.allRecords || await listWorkerPayroll();
+  const rows = filterPayrollForWorkerProject(allRecords, workerId, projectId);
+  const payrollIds = rows.map((p) => p.id).filter(Boolean);
+
+  await removeLegacyWorkerWeeklyFinanceTransactions(payrollIds);
+
+  const sourceId = await workerPaymentSourceId(workerId, projectId);
+  const sourceType = FINANCE_SOURCE_TYPES.WORKER_PAYMENT;
+
+  const activeRows = rows.filter((p) => p.statut !== 'Annulé');
+  if (!activeRows.length) {
+    return removeLinkedFinanceTransaction(sourceType, sourceId);
+  }
+
+  const allPaid = activeRows.every((p) => isPayrollEntityPaid(p));
+  if (!allPaid) {
+    return removeLinkedFinanceTransaction(sourceType, sourceId);
+  }
+
+  const totalNet = round2(activeRows.reduce((s, p) => s + (Number(p.total) || 0), 0));
+  if (totalNet <= 0) {
+    return removeLinkedFinanceTransaction(sourceType, sourceId);
+  }
+
+  const entity = buildConsolidatedWorkerPaymentEntity(activeRows, totalNet);
+  const syncResult = await syncFinanceTransaction(sourceType, sourceId, { entity });
+  return syncResult;
+}
+
 export async function createWorkerPayrollBatch(batchMeta, lines) {
   await getAuthUserId();
   if (!batchMeta?.projectId) {
@@ -234,7 +334,16 @@ export async function createWorkerPayrollBatch(batchMeta, lines) {
     console.error('[CITYMO] workerPayroll batch insert', error, rows);
     throw error;
   }
-  return (data || []).map(normalizeWorkerPayroll);
+  const created = (data || []).map(normalizeWorkerPayroll);
+  const allRecords = await listWorkerPayroll();
+  const synced = new Set();
+  for (const p of created) {
+    const key = `${p.workerId}|${p.projectId}`;
+    if (synced.has(key)) continue;
+    synced.add(key);
+    await syncWorkerPaymentGroup(p.workerId, p.projectId, { allRecords });
+  }
+  return created;
 }
 
 export async function updateWorkerPayroll(id, form) {
@@ -279,7 +388,7 @@ export async function updateWorkerPayroll(id, form) {
     throw error;
   }
   const normalized = normalizeWorkerPayroll(data);
-  await syncFinanceTransaction(FINANCE_SOURCE_TYPES.WORKER_WEEKLY_PAYMENT, id, { entity: normalized });
+  await syncWorkerPaymentGroup(normalized.workerId, normalized.projectId);
   return normalized;
 }
 
@@ -287,8 +396,19 @@ export async function updateWorkerPayrollStatut(id, statutUi) {
   await getAuthUserId();
   const statut = UI_TO_DB_STATUT[statutUi] || statutUi;
   const patch = { statut };
+
   if (statutUi === 'Payé' || statut === 'Paye') {
-    patch.payment_date = todayIso();
+    const { data: current } = await getSupabase()
+      .from(TABLE)
+      .select('payment_date, semaine_fin, semaine_debut')
+      .eq('id', id)
+      .maybeSingle();
+    if (!current?.payment_date) {
+      patch.payment_date = current?.semaine_fin
+        || (current?.semaine_debut ? weekEndSunday(current.semaine_debut) : null)
+        || current?.semaine_debut
+        || todayIso();
+    }
   }
 
   const { data, error } = await getSupabase()
@@ -303,8 +423,8 @@ export async function updateWorkerPayrollStatut(id, statutUi) {
     throw error;
   }
   const normalized = normalizeWorkerPayroll(data);
-  const syncResult = await syncFinanceTransaction(FINANCE_SOURCE_TYPES.WORKER_WEEKLY_PAYMENT, id, { entity: normalized });
-  if (statutUi === 'Payé' && syncResult?.action === 'skipped') {
+  const syncResult = await syncWorkerPaymentGroup(normalized.workerId, normalized.projectId);
+  if ((statutUi === 'Payé' || statut === 'Paye') && syncResult?.action === 'skipped') {
     const err = new Error('Paiement enregistré mais montant nul — aucune ligne caisse créée.');
     err.code = 'SYNC_SKIP';
     throw err;
@@ -312,17 +432,47 @@ export async function updateWorkerPayrollStatut(id, statutUi) {
   return normalized;
 }
 
-/** Rattrapage : synchronise tous les paiements ouvriers déjà « Payé » vers la caisse. */
-export async function backfillWorkerPayrollToCash() {
+/** Réaligne payment_date sur semaine_fin pour paiements passés marqués Payé le même jour. */
+export async function alignPaidPayrollPaymentDates() {
   const rows = await listWorkerPayroll();
-  let synced = 0;
+  let fixed = 0;
   for (const p of rows) {
     if (p.statut !== 'Payé') continue;
-    if (!Number(p.total)) continue;
-    const r = await syncFinanceTransaction(FINANCE_SOURCE_TYPES.WORKER_WEEKLY_PAYMENT, p.id, { entity: p });
-    if (r?.action === 'created' || r?.action === 'updated') synced += 1;
+    const ideal = p.semaineFin || (p.semaineDebut ? weekEndSunday(p.semaineDebut) : '');
+    if (!ideal || p.paymentDate === ideal) continue;
+    const { error } = await getSupabase()
+      .from(TABLE)
+      .update({ payment_date: ideal })
+      .eq('id', p.id);
+    if (!error) fixed += 1;
   }
-  return synced;
+  return fixed;
+}
+
+/** Réconciliation : chaque paiement ouvrier (ouvrier × projet) → une ligne caisse si tout est Payé. */
+export async function backfillWorkerPayrollToCash() {
+  const legacyPurge = await purgeAllLegacyWorkerWeeklyFinanceTransactions();
+  await alignPaidPayrollPaymentDates();
+  const rows = await listWorkerPayroll();
+  const groups = new Map();
+  for (const p of rows) {
+    const key = `${p.workerId}|${p.projectId}`;
+    if (!groups.has(key)) groups.set(key, { workerId: p.workerId, projectId: p.projectId });
+  }
+  let synced = 0;
+  let removed = legacyPurge?.count || 0;
+  const errors = [];
+  for (const { workerId, projectId } of groups.values()) {
+    try {
+      const r = await syncWorkerPaymentGroup(workerId, projectId, { allRecords: rows });
+      if (r?.action === 'created' || r?.action === 'updated') synced += 1;
+      if (r?.action === 'deleted') removed += 1;
+    } catch (err) {
+      if (err?.code === 'SCHEMA') throw err;
+      errors.push({ workerId, projectId, message: err?.message || String(err) });
+    }
+  }
+  return { synced, removed, legacyPurged: legacyPurge?.count || 0, errors };
 }
 
 export async function updateWorkerPayrollAdjustments(id, existing, adjustments = {}) {
@@ -354,14 +504,19 @@ export async function updateWorkerPayrollAdjustments(id, existing, adjustments =
 
 export async function deleteWorkerPayroll(id) {
   await getAuthUserId();
-  await syncFinanceTransaction(FINANCE_SOURCE_TYPES.WORKER_WEEKLY_PAYMENT, id, {
-    entity: { statut: 'Annulé', total: 0 },
-    active: false,
-  }).catch(() => {});
+  const { data: row } = await getSupabase()
+    .from(TABLE)
+    .select('worker_id, project_id')
+    .eq('id', id)
+    .maybeSingle();
+  await removeLinkedFinanceTransaction(FINANCE_SOURCE_TYPES.WORKER_WEEKLY_PAYMENT, id).catch(() => {});
   const { error } = await getSupabase().from(TABLE).delete().eq('id', id);
   if (error) {
     console.error('[CITYMO] workerPayroll delete', error, { id });
     throw error;
+  }
+  if (row?.worker_id) {
+    await syncWorkerPaymentGroup(row.worker_id, row.project_id || '');
   }
 }
 

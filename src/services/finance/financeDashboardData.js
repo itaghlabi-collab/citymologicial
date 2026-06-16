@@ -166,12 +166,18 @@ export function buildRecentActivity(transactions, charges, orders, limit = 12) {
     .slice(0, limit);
 }
 
-export function buildProjectIndicators(projects, charges) {
+export function buildProjectIndicators(projects, charges, transactions = []) {
   const spentByProject = {};
   (charges || []).forEach((c) => {
     const key = c.project_id || c.projet_lie;
     if (!key) return;
     spentByProject[key] = (spentByProject[key] || 0) + (Number(c.montant) || 0);
+  });
+  (transactions || []).forEach((t) => {
+    if (t.statut === 'Annulé' || t.sens !== 'sortie') return;
+    const key = t.project_id;
+    if (!key) return;
+    spentByProject[key] = (spentByProject[key] || 0) + (Number(t.montant) || 0);
   });
 
   return (projects || [])

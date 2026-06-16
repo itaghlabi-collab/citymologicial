@@ -6,6 +6,9 @@ import { getSupabase } from '../../lib/supabase';
 const TABLE = 'finance_transactions';
 
 export const FINANCE_SOURCE_TYPES = {
+  /** Paiement ouvrier validé (une ligne caisse par ouvrier × projet, montant net consolidé). */
+  WORKER_PAYMENT: 'worker_payment',
+  /** @deprecated Lignes hebdo — supprimées au profit de worker_payment. */
   WORKER_WEEKLY_PAYMENT: 'worker_weekly_payment',
   SUBCONTRACTOR_PAYMENT: 'subcontractor_payment',
   CHARGE: 'charge',
@@ -15,6 +18,7 @@ export const FINANCE_SOURCE_TYPES = {
 };
 
 export const SOURCE_TYPE_LABELS = {
+  worker_payment: 'Paiement ouvrier',
   worker_weekly_payment: 'Paiement ouvrier',
   subcontractor_payment: 'Paiement sous-traitant',
   charge: 'Charge',
@@ -24,6 +28,7 @@ export const SOURCE_TYPE_LABELS = {
 };
 
 export const SOURCE_MODULE_LABELS = {
+  worker_payment: 'Paiement hebdomadaire',
   worker_weekly_payment: 'Paiement hebdomadaire',
   subcontractor_payment: 'Paiement sous-traitants',
   charge: 'Charges',
@@ -34,7 +39,27 @@ export const SOURCE_MODULE_LABELS = {
 const PAID_CHARGE_STATUTS = ['Payé', 'Validé', 'Validée', 'Comptabilisée'];
 const PAID_ORDER_STATUTS = ['Payé', 'Exécuté', 'Comptabilisé'];
 const PAID_PAYROLL_STATUTS = ['Payé', 'Paye'];
-const PAID_SUBCONTRACTOR_STATUTS = ['paid', 'Payé', 'payé'];
+const PAID_SUBCONTRACTOR_STATUTS = ['paid'];
+
+/** Uniquement statut PAYÉ — pas En attente, Validé, Annulé, Partiel. */
+export function isPayrollEntityPaid(entity) {
+  if (!entity) return false;
+  const s = String(entity.statut ?? entity.statut_db ?? '').trim();
+  return PAID_PAYROLL_STATUTS.includes(s);
+}
+
+/** Uniquement status paid — pas pending, partial, cancelled. */
+export function isSubcontractorEntityPaid(entity) {
+  if (!entity) return false;
+  const s = String(entity.status ?? entity.statut ?? '').trim().toLowerCase();
+  return PAID_SUBCONTRACTOR_STATUTS.includes(s);
+}
+
+function isRhPaymentSourceType(sourceType) {
+  return sourceType === FINANCE_SOURCE_TYPES.WORKER_PAYMENT
+    || sourceType === FINANCE_SOURCE_TYPES.WORKER_WEEKLY_PAYMENT
+    || sourceType === FINANCE_SOURCE_TYPES.SUBCONTRACTOR_PAYMENT;
+}
 
 const CATEGORY_NAMES = {
   WORKER: "Main d'œuvre",
@@ -66,10 +91,30 @@ async function getRhCategoryIds() {
   return categoryIdCache;
 }
 
+async function ensureRhFinanceCategories() {
+  const cats = await getRhCategoryIds();
+  const missing = [];
+  if (!cats.worker) {
+    missing.push({ nom: CATEGORY_NAMES.WORKER, description: 'Paiements ouvriers hebdomadaires', statut: 'Active' });
+  }
+  if (!cats.subcontractor) {
+    missing.push({ nom: CATEGORY_NAMES.SUBCONTRACTOR, description: 'Paiements sous-traitants', statut: 'Active' });
+  }
+  if (!missing.length) return cats;
+  const { error } = await getSupabase().from('finance_categories').insert(missing);
+  if (error) {
+    console.warn('[CITYMO] ensureRhFinanceCategories', error);
+    return cats;
+  }
+  categoryIdCache = null;
+  return getRhCategoryIds();
+}
+
 export function resolveTransactionCategoryName(tx, catMap = {}) {
   if (!tx) return 'Divers';
   if (tx.category_id && catMap[tx.category_id]) return catMap[tx.category_id];
-  if (tx.source_type === FINANCE_SOURCE_TYPES.WORKER_WEEKLY_PAYMENT) return CATEGORY_NAMES.WORKER;
+  if (tx.source_type === FINANCE_SOURCE_TYPES.WORKER_PAYMENT
+    || tx.source_type === FINANCE_SOURCE_TYPES.WORKER_WEEKLY_PAYMENT) return CATEGORY_NAMES.WORKER;
   if (tx.source_type === FINANCE_SOURCE_TYPES.SUBCONTRACTOR_PAYMENT) return CATEGORY_NAMES.SUBCONTRACTOR;
   if (tx.source_type === FINANCE_SOURCE_TYPES.CHARGE || tx.charge_id) return 'Charges';
   if (tx.source_type === FINANCE_SOURCE_TYPES.PAYMENT_ORDER || tx.payment_order_id) return 'Ordres de paiement';
@@ -117,10 +162,11 @@ function isSourceActive(sourceType, entity) {
       return PAID_CHARGE_STATUTS.includes(entity.statut);
     case FINANCE_SOURCE_TYPES.PAYMENT_ORDER:
       return PAID_ORDER_STATUTS.includes(entity.statut);
+    case FINANCE_SOURCE_TYPES.WORKER_PAYMENT:
     case FINANCE_SOURCE_TYPES.WORKER_WEEKLY_PAYMENT:
-      return PAID_PAYROLL_STATUTS.includes(entity.statut);
+      return isPayrollEntityPaid(entity);
     case FINANCE_SOURCE_TYPES.SUBCONTRACTOR_PAYMENT:
-      return PAID_SUBCONTRACTOR_STATUTS.includes(entity.status);
+      return isSubcontractorEntityPaid(entity);
     case FINANCE_SOURCE_TYPES.CUSTOMER_INVOICE_PAYMENT:
       return Number(entity.montant) > 0;
     default:
@@ -169,14 +215,28 @@ function buildTransactionRow(sourceType, entity) {
         ref_operation: entity.ref || entity.ref_ordre || null,
         source_module: 'finance',
       };
-    case FINANCE_SOURCE_TYPES.WORKER_WEEKLY_PAYMENT:
+    case FINANCE_SOURCE_TYPES.WORKER_PAYMENT:
+    case FINANCE_SOURCE_TYPES.WORKER_WEEKLY_PAYMENT: {
+      const payDate = entity.paymentDate || entity.datePaiement
+        || entity.semaineFin
+        || (entity.semaineDebut ? (() => {
+          const d = new Date(`${entity.semaineDebut}T12:00:00`);
+          d.setDate(d.getDate() + 6);
+          return d.toISOString().slice(0, 10);
+        })() : null)
+        || entity.semaineDebut
+        || new Date().toISOString().slice(0, 10);
+      const weekLabel = entity.semaineDebut && entity.semaineFin
+        ? fmtWeekRangeLocal(entity.semaineDebut, entity.semaineFin)
+        : '';
+      const descBase = `Paiement ouvrier — ${entity.projet || 'Chantier'}`;
       return {
-        date_operation: entity.paymentDate || entity.datePaiement || new Date().toISOString().slice(0, 10),
+        date_operation: payDate,
         sens: 'sortie',
         type_operation: 'autre_sortie',
         contrepartie: entity.ouvrier || '',
-        description: `Paiement hebdomadaire ouvrier — ${entity.projet || 'Chantier'} (${fmtWeekRangeLocal(entity.semaineDebut, entity.semaineFin)})`,
-        montant: Number(entity.total ?? entity.montantNet) || 0,
+        description: weekLabel ? `${descBase} (${weekLabel})` : descBase,
+        montant: Number(entity.total ?? entity.montantNet ?? entity.montant_net) || 0,
         mode_paiement: mapPaymentMode(entity.paymentMethod),
         project_id: asUuidOrNull(entity.projectId),
         worker_id: asUuidOrNull(entity.workerId),
@@ -184,6 +244,7 @@ function buildTransactionRow(sourceType, entity) {
         source_module: 'rh',
         category_id: entity.category_id || null,
       };
+    }
     case FINANCE_SOURCE_TYPES.SUBCONTRACTOR_PAYMENT:
       return {
         date_operation: entity.paymentDate || new Date().toISOString().slice(0, 10),
@@ -221,7 +282,7 @@ async function findExistingTransaction(sourceType, sourceId) {
   try {
     const { data, error } = await getSupabase()
       .from(TABLE)
-      .select('id')
+      .select('id, statut')
       .eq('source_type', sourceType)
       .eq('source_id', sourceId)
       .maybeSingle();
@@ -233,7 +294,90 @@ async function findExistingTransaction(sourceType, sourceId) {
   }
 }
 
-/** Sync idempotent : créer / mettre à jour / annuler selon l'état source. */
+/** Supprime TOUTES les lignes caisse hebdo obsolètes (source worker_weekly_payment). */
+export async function purgeAllLegacyWorkerWeeklyFinanceTransactions() {
+  try {
+    const { data, error } = await getSupabase()
+      .from(TABLE)
+      .delete()
+      .eq('source_type', FINANCE_SOURCE_TYPES.WORKER_WEEKLY_PAYMENT)
+      .select('id');
+    if (error) throw error;
+    return { action: 'deleted', count: (data || []).length };
+  } catch (error) {
+    wrapSyncError(error);
+    return { action: 'none', count: 0 };
+  }
+}
+
+/** Supprime les lignes hebdo liées à des payroll ids précis. */
+export async function removeLegacyWorkerWeeklyFinanceTransactions(payrollIds = []) {
+  const ids = (payrollIds || []).filter(Boolean);
+  if (!ids.length) return { action: 'none', count: 0 };
+  try {
+    const { data, error } = await getSupabase()
+      .from(TABLE)
+      .delete()
+      .eq('source_type', FINANCE_SOURCE_TYPES.WORKER_WEEKLY_PAYMENT)
+      .in('source_id', ids)
+      .select('id');
+    if (error) throw error;
+    return { action: 'deleted', count: (data || []).length };
+  } catch (error) {
+    wrapSyncError(error);
+    return { action: 'none', count: 0 };
+  }
+}
+
+/** Supprime la transaction caisse auto liée (source_type + source_id). Ne touche pas au paiement RH. */
+export async function removeLinkedFinanceTransaction(sourceType, sourceId) {
+  if (!sourceType || !sourceId) return null;
+  try {
+    const { data, error } = await getSupabase()
+      .from(TABLE)
+      .delete()
+      .eq('source_type', sourceType)
+      .eq('source_id', sourceId)
+      .select('id')
+      .maybeSingle();
+    if (error) throw error;
+    return data?.id ? { action: 'deleted', id: data.id } : { action: 'none', id: null };
+  } catch (error) {
+    wrapSyncError(error);
+    return null;
+  }
+}
+
+const PAYMENT_NOTIFY_TYPES = new Set([
+  FINANCE_SOURCE_TYPES.WORKER_PAYMENT,
+  FINANCE_SOURCE_TYPES.WORKER_WEEKLY_PAYMENT,
+  FINANCE_SOURCE_TYPES.SUBCONTRACTOR_PAYMENT,
+  FINANCE_SOURCE_TYPES.PAYMENT_ORDER,
+  FINANCE_SOURCE_TYPES.CHARGE,
+]);
+
+async function maybeNotifyPaymentCreated(sourceType, sourceId, entity, built, result) {
+  if (!result || result.action !== 'created') return;
+  if (!PAYMENT_NOTIFY_TYPES.has(sourceType)) return;
+  try {
+    const { notifyPaymentRealized } = await import('../notifications/notificationEvents');
+    await notifyPaymentRealized({
+      sourceType,
+      sourceId,
+      entity,
+      montant: built?.montant,
+      beneficiaire: built?.contrepartie,
+    });
+  } catch (err) {
+    console.warn('[CITYMO] notify payment', err);
+  }
+}
+
+/**
+ * Sync idempotent paiements RH → caisse :
+ * - PAYÉ → créer / mettre à jour (montant, date, projet)
+ * - autre statut → supprimer la transaction finance liée (pas le paiement RH)
+ */
 export async function syncFinanceTransaction(sourceType, sourceId, options = {}) {
   if (!sourceType || !sourceId) return null;
   const entity = options.entity;
@@ -244,10 +388,17 @@ export async function syncFinanceTransaction(sourceType, sourceId, options = {})
 
   const active = options.active ?? isSourceActive(sourceType, entity);
   const existing = await findExistingTransaction(sourceType, sourceId);
-  const now = new Date().toISOString();
+  const rhPayment = isRhPaymentSourceType(sourceType);
 
   if (!active) {
+    if (rhPayment) {
+      if (existing?.id) {
+        return removeLinkedFinanceTransaction(sourceType, sourceId);
+      }
+      return { action: 'none', id: null };
+    }
     if (existing?.id) {
+      const now = new Date().toISOString();
       await getSupabase()
         .from(TABLE)
         .update({
@@ -262,17 +413,22 @@ export async function syncFinanceTransaction(sourceType, sourceId, options = {})
 
   const built = buildTransactionRow(sourceType, entity);
   if (!built || !built.montant) {
+    if (rhPayment && existing?.id) {
+      return removeLinkedFinanceTransaction(sourceType, sourceId);
+    }
     return { action: 'skipped', id: existing?.id || null, reason: 'montant_zero' };
   }
 
-  const rhCats = await getRhCategoryIds();
-  if (sourceType === FINANCE_SOURCE_TYPES.WORKER_WEEKLY_PAYMENT && !built.category_id) {
+  const rhCats = await ensureRhFinanceCategories();
+  if ((sourceType === FINANCE_SOURCE_TYPES.WORKER_PAYMENT
+    || sourceType === FINANCE_SOURCE_TYPES.WORKER_WEEKLY_PAYMENT) && !built.category_id) {
     built.category_id = rhCats.worker;
   }
   if (sourceType === FINANCE_SOURCE_TYPES.SUBCONTRACTOR_PAYMENT && !built.category_id) {
     built.category_id = rhCats.subcontractor;
   }
 
+  const now = new Date().toISOString();
   const row = {
     ...built,
     source_type: sourceType,
@@ -300,7 +456,9 @@ export async function syncFinanceTransaction(sourceType, sourceId, options = {})
       .select()
       .single();
     if (error) throw error;
-    return { action: 'created', id: data.id };
+    const result = { action: 'created', id: data.id };
+    await maybeNotifyPaymentCreated(sourceType, sourceId, entity, built, result);
+    return result;
   } catch (error) {
     wrapSyncError(error);
     return null;
