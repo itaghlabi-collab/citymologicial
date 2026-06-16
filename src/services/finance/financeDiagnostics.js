@@ -134,11 +134,16 @@ export async function auditRhFinanceSync() {
         const [workerId, projectId] = key.split('|');
         const { data: groupRows } = await client
           .from('payroll')
-          .select('statut')
+          .select('statut, auto_generated')
           .eq('worker_id', workerId)
           .eq('project_id', projectId || null);
         const active = (groupRows || []).filter((r) => r.statut !== 'Annule' && r.statut !== 'Annulé');
-        if (active.length && active.every((r) => r.statut === 'Paye' || r.statut === 'Payé')) {
+        const paidRows = active.filter((r) => r.statut === 'Paye' || r.statut === 'Payé');
+        const blocking = active.some(
+          (r) => r.statut !== 'Paye' && r.statut !== 'Payé'
+            && !(r.auto_generated && r.statut === 'En attente'),
+        );
+        if (paidRows.length && !blocking) {
           groupKeys.add(workerId);
         }
       }
@@ -156,7 +161,7 @@ export async function auditRhFinanceSync() {
     }
 
     if (result.missingWorker > 0 || result.missingSubcontractor > 0) {
-      result.hint = 'Cliquez « Actualiser » sur la Feuille de caisse ou exécutez supabase/RUN_FINANCE_RH_BACKFILL.sql';
+      result.hint = 'Cliquez « Actualiser » sur la Feuille de caisse';
     }
   } catch (err) {
     result.error = err?.message || String(err);

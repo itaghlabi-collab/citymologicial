@@ -10,6 +10,7 @@ import {
   buildWorkerPayrollLine,
   weekStartMonday,
   weekEndSunday,
+  todayIso,
   fmtWeekRange,
   enrichPayrollWithAttendance,
 } from '../services/rh/workerPayroll';
@@ -57,10 +58,16 @@ const READONLY_S = {
   boxSizing: 'border-box', color: 'var(--text-2)',
 };
 
+function fmtDateFr(iso) {
+  if (!iso) return '—';
+  return new Date(`${iso}T12:00:00`).toLocaleDateString('fr-MA');
+}
+
 const EMPTY_BATCH = {
   projectId: '',
   projet: '',
   semaineDebut: currentWeekStart(),
+  paymentDate: todayIso(),
   statut: 'En attente',
   notes: '',
   selected: {},
@@ -141,10 +148,18 @@ export default function PaiementHebdo() {
 
   async function handleStatutChange(p, newStatut) {
     if (newStatut === p.statut) return;
+    const payDate = newStatut === 'Payé'
+      ? (p.paymentDate || todayIso())
+      : undefined;
     if (p.mergeAllWeeks && p.weeklyRecords?.length) {
       for (const rec of p.weeklyRecords) {
         if (!rec.id) continue;
-        const r = await updateAdjustments(rec.id, rec, { statut: newStatut });
+        const r = await updateAdjustments(rec.id, rec, {
+          statut: newStatut,
+          paymentDate: newStatut === 'Payé'
+            ? (payDate || todayIso())
+            : undefined,
+        });
         if (!r.success) {
           notify('error', r.error);
           return;
@@ -154,8 +169,27 @@ export default function PaiementHebdo() {
       return;
     }
     if (!p.id) return;
-    const r = await updateAdjustments(p.id, p, { statut: newStatut });
+    const r = await updateAdjustments(p.id, p, { statut: newStatut, paymentDate: payDate });
     notify(r.success ? 'success' : 'error', r.success ? `Statut : ${newStatut}` : r.error);
+  }
+
+  async function handlePaymentDateChange(p, newDate) {
+    if (!newDate) return;
+    if (p.mergeAllWeeks && p.weeklyRecords?.length) {
+      for (const rec of p.weeklyRecords) {
+        if (!rec.id) continue;
+        const r = await updateAdjustments(rec.id, rec, { paymentDate: newDate });
+        if (!r.success) {
+          notify('error', r.error);
+          return;
+        }
+      }
+      notify('success', 'Date de paiement mise à jour.');
+      return;
+    }
+    if (!p.id) return;
+    const r = await updateAdjustments(p.id, p, { paymentDate: newDate });
+    notify(r.success ? 'success' : 'error', r.success ? 'Date de paiement mise à jour.' : r.error);
   }
 
   const projectWorkers = useMemo(
@@ -265,7 +299,12 @@ export default function PaiementHebdo() {
   function openCreate() {
     setEditId(null);
     setEditRecord(null);
-    setForm({ ...EMPTY_BATCH, semaineDebut: filterSemaine || currentWeekStart() });
+    const semaine = filterSemaine || currentWeekStart();
+    setForm({
+      ...EMPTY_BATCH,
+      semaineDebut: semaine,
+      paymentDate: todayIso(),
+    });
     setErrors({});
     setShowModal(true);
   }
@@ -280,6 +319,7 @@ export default function PaiementHebdo() {
       avances: String(record.avances ?? ''),
       retenues: String(record.retenues ?? ''),
       statut: record.statut || 'En attente',
+      paymentDate: record.paymentDate || todayIso(),
       notes: record.notes || '',
     });
     setErrors({});
@@ -327,6 +367,7 @@ export default function PaiementHebdo() {
     const e = {};
     if (!form.projectId) e.projectId = 'Requis';
     if (!form.semaineDebut) e.semaineDebut = 'Requis';
+    if (!form.paymentDate) e.paymentDate = 'Requis';
     if (!selectedLines.length) e.workers = 'Sélectionnez au moins un ouvrier';
     selectedLines.forEach((l) => {
       if (l.joursPaies === '' || Number(l.joursPaies) < 0) e[`j_${l.workerId}`] = 'Jours requis';
@@ -344,6 +385,7 @@ export default function PaiementHebdo() {
         avances: editForm.avances === '' ? 0 : Number(editForm.avances),
         retenues: editForm.retenues === '' ? 0 : Number(editForm.retenues),
         statut: editForm.statut,
+        paymentDate: editForm.statut === 'Payé' ? (editForm.paymentDate || todayIso()) : editForm.paymentDate,
         notes: editForm.notes,
       });
       if (!result.success) { notify('error', result.error || 'Erreur.'); return; }
@@ -358,6 +400,7 @@ export default function PaiementHebdo() {
           projet: form.projet,
           semaineDebut: form.semaineDebut,
           semaineFin: weekEndSunday(form.semaineDebut),
+          paymentDate: form.paymentDate || todayIso(),
           statut: form.statut,
           notes: form.notes,
           chefProjet: pr?.chef_projet || pr?.responsable || '',
@@ -437,6 +480,12 @@ export default function PaiementHebdo() {
     return [...set].sort((a, b) => b.localeCompare(a));
   }, [weeks, filterSemaine, attendance]);
 
+  const formWeekOptions = useMemo(() => {
+    const set = new Set(weekOptions);
+    if (form.semaineDebut) set.add(form.semaineDebut);
+    return [...set].sort((a, b) => b.localeCompare(a));
+  }, [weekOptions, form.semaineDebut]);
+
   return (
     <div className="animate-fade-in rh-ext-page">
       <Toast toast={toast} />
@@ -444,7 +493,10 @@ export default function PaiementHebdo() {
       <div className="page-header flex-between">
         <div>
           <h1 className="page-title">Paiement hebdomadaire ouvriers</h1>
-          <p className="page-subtitle">Une ligne par ouvrier — détail journalier et récap financier dans « Détail »</p>
+          <p className="page-subtitle">
+            Flux normal : synchroniser les présences puis <strong>Payer</strong>.
+            Correction manuelle uniquement en cas d&apos;erreur de saisie par le chef de chantier.
+          </p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button
@@ -459,15 +511,24 @@ export default function PaiementHebdo() {
           </button>
           <button
             type="button"
-            className="btn btn-secondary"
+            className="btn btn-ghost btn-sm"
             onClick={openCreate}
             disabled={loading || saving || !configured}
-            title="Cas exceptionnel ou correction manuelle"
+            title="Uniquement si erreur de présence — ouvrier oublié, mauvaise semaine, etc."
+            style={{ border: '1.5px dashed var(--border)', color: 'var(--text-3)', fontSize: '0.82rem' }}
           >
-            <Plus size={15} /> Ajout manuel
+            <Plus size={14} /> Correction exceptionnelle
           </button>
         </div>
       </div>
+
+      {!loading && configured && (
+        <div style={{ background: '#E3F2FD', border: '1px solid #90CAF9', borderRadius: 'var(--radius)', padding: '10px 16px', marginBottom: 16, fontSize: '0.84rem', color: '#1565C0' }}>
+          <strong>Comment ça marche :</strong> les lignes viennent des <em>présences</em> (bouton Synchroniser).
+          Pour payer : statut <strong>Payé</strong> ou bouton <strong>Payer</strong> (date caisse = aujourd&apos;hui).
+          Utilisez <strong>Correction exceptionnelle</strong> ou <strong>Ajuster</strong> seulement si le chef de chantier s&apos;est trompé à la saisie.
+        </div>
+      )}
 
       {!configured && (
         <div style={{ background: '#FFF3E0', border: '1px solid #FFB74D', borderRadius: 'var(--radius)', padding: '10px 16px', marginBottom: 16, fontSize: '0.85rem', color: '#E65100' }}>
@@ -559,7 +620,8 @@ export default function PaiementHebdo() {
                 <thead>
                   <tr>
                     <th>Ouvrier</th><th>Projet / chantier</th><th>Chef chantier</th><th>Présences</th>
-                    <th>H. travaillées</th><th>Retard</th><th>Équiv. jours</th><th>Tarif/j</th><th>Net à payer</th><th>Statut</th><th>Actions</th>
+                    <th>H. travaillées</th><th>Retard</th><th>Équiv. jours</th><th>Tarif/j</th><th>Net à payer</th>
+                    <th>Date paiement</th><th>Statut</th><th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -582,6 +644,13 @@ export default function PaiementHebdo() {
                       <td data-label="Équiv. jours" style={{ fontWeight: 600 }}>{fmtDayEquiv(p.joursPaies)}</td>
                       <td data-label="Tarif/j">{fmtMAD(p.tarifJournalier)}</td>
                       <td data-label="Net à payer" style={{ fontWeight: 800, color: 'var(--red)' }}>{fmtMAD(p.total)}</td>
+                      <td data-label="Date paiement">
+                        {p.statut === 'Payé' ? (
+                          <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>{fmtDateFr(p.paymentDate || todayIso())}</span>
+                        ) : (
+                          <span style={{ color: 'var(--text-3)', fontSize: '0.78rem' }} title="Date fixée au paiement (aujourd'hui par défaut)">À la validation</span>
+                        )}
+                      </td>
                       <td data-label="Statut">
                         <select
                           value={PAYROLL_UI_STATUTS.includes(p.statut) ? p.statut : ''}
@@ -600,10 +669,17 @@ export default function PaiementHebdo() {
                         <div className="payment-row-actions">
                           <button type="button" className="btn btn-secondary btn-sm" onClick={() => openDetail(p, group.chefChantier)}><Eye size={13} /> Détail</button>
                           {!p.mergeAllWeeks && p.statut === 'En attente' && (
-                            <button type="button" className="btn btn-sm" style={{ background: '#E8F5E9', color: '#2E7D32', border: 'none' }} onClick={() => markPaid(p.id).then((r) => notify(r.success ? 'success' : 'error', r.success ? 'Payé.' : r.error))}>Payer</button>
+                            <button type="button" className="btn btn-sm" style={{ background: '#E8F5E9', color: '#2E7D32', border: 'none' }} onClick={() => markPaid(p.id, { paymentDate: p.paymentDate || todayIso() }).then((r) => notify(r.success ? 'success' : 'error', r.success ? 'Payé.' : r.error))}>Payer</button>
                           )}
-                          {!p.mergeAllWeeks && (
-                            <button type="button" className="btn btn-secondary btn-sm" onClick={() => openEdit(p)}>Modifier</button>
+                          {(!p.mergeAllWeeks || p.statut === 'Payé') && (
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              onClick={() => openEdit(p)}
+                              title="Ajustement ou correction (date caisse, heures sup, avances…)"
+                            >
+                              {p.autoGenerated ? 'Ajuster' : 'Corriger'}
+                            </button>
                           )}
                           <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleWorkerPdf(p, false)}><FileDown size={13} /></button>
                           <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleWorkerPdf(p, true)}><Printer size={13} /></button>
@@ -626,7 +702,9 @@ export default function PaiementHebdo() {
           <div className="card rh-ext-modal-box">
             <div className="flex-between" style={{ marginBottom: 16 }}>
               <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.05rem', margin: 0 }}>
-                {editId ? 'Ajuster le paiement' : 'Ajout manuel (exception)'}
+                {editId
+                  ? (editRecord?.autoGenerated ? 'Ajuster le paiement' : 'Correction saisie manuelle')
+                  : 'Correction exceptionnelle (erreur présence)'}
               </h2>
               <button type="button" onClick={() => setShowModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
             </div>
@@ -661,10 +739,39 @@ export default function PaiementHebdo() {
                     <div><label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Retenues</label>
                       <input type="number" min="0" step="0.01" value={editForm.retenues} onChange={(e) => setEditForm((p) => ({ ...p, retenues: e.target.value }))} style={INPUT_S(false)} /></div>
                   </div>
-                  <div><label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Statut</label>
-                    <select value={editForm.statut} onChange={(e) => setEditForm((p) => ({ ...p, statut: e.target.value }))} style={INPUT_S(false)}>
-                      {PAYROLL_UI_STATUTS.map((s) => <option key={s} value={s}>{s}</option>)}
-                    </select></div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                    <div><label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Statut</label>
+                      <select
+                        value={editForm.statut}
+                        onChange={(e) => setEditForm((p) => ({ ...p, statut: e.target.value }))}
+                        style={INPUT_S(false)}
+                      >
+                        {PAYROLL_UI_STATUTS.map((s) => <option key={s} value={s}>{s}</option>)}
+                      </select></div>
+                    <div>
+                      <label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Période RH</label>
+                      <div style={{ ...READONLY_S, marginTop: 0 }}>
+                        {fmtWeekRange(editRecord.semaineDebut, editRecord.semaineFin)}
+                      </div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 4 }}>Semaine travaillée — non modifiable ici</div>
+                    </div>
+                  </div>
+
+                  <div style={{ padding: '12px 14px', background: '#E8F5E9', borderRadius: 8, border: '2px solid #66BB6A' }}>
+                    <label style={{ fontSize: '0.88rem', fontWeight: 700, color: '#2E7D32', display: 'block', marginBottom: 8 }}>
+                      Date de paiement (feuille de caisse) *
+                    </label>
+                    <input
+                      type="date"
+                      value={editForm.paymentDate || todayIso()}
+                      onChange={(e) => setEditForm((p) => ({ ...p, paymentDate: e.target.value }))}
+                      style={{ ...INPUT_S(false), maxWidth: 220, borderColor: '#66BB6A' }}
+                      required
+                    />
+                    <div style={{ fontSize: '0.78rem', color: '#388E3C', marginTop: 6 }}>
+                      À modifier ici si le paiement n&apos;a pas lieu aujourd&apos;hui (ex. payé le 16/06).
+                    </div>
+                  </div>
                   <div><label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Observation</label>
                     <textarea rows={2} value={editForm.notes || ''} onChange={(e) => setEditForm((p) => ({ ...p, notes: e.target.value }))} style={{ ...INPUT_S(false), resize: 'vertical' }} /></div>
 
@@ -681,7 +788,7 @@ export default function PaiementHebdo() {
               ) : (
                 <div style={{ display: 'grid', gap: 14 }}>
                   <div style={{ padding: '10px 12px', background: '#FFF8E1', borderRadius: 8, fontSize: '0.82rem', color: '#F57F17' }}>
-                    Utilisez cet ajout uniquement pour un cas exceptionnel. Les situations normales sont générées automatiquement depuis les présences.
+                    <strong>Erreur de présence uniquement.</strong> Si le chef de chantier a oublié un ouvrier, mal saisi les jours ou la mauvaise semaine — pas pour le flux normal (utilisez Synchroniser).
                   </div>
 
                   <div>
@@ -693,14 +800,47 @@ export default function PaiementHebdo() {
                     {errors.projectId && <div style={{ color: 'var(--red)', fontSize: '0.78rem' }}>{errors.projectId}</div>}
                   </div>
 
+                  <div style={{ padding: '12px 14px', background: '#E8F5E9', borderRadius: 8, border: '2px solid #66BB6A' }}>
+                    <label style={{ fontSize: '0.88rem', fontWeight: 700, color: '#2E7D32', display: 'block', marginBottom: 8 }}>
+                      Date de paiement (feuille de caisse) *
+                    </label>
+                    <input
+                      type="date"
+                      value={form.paymentDate || todayIso()}
+                      onChange={(e) => setForm((p) => ({ ...p, paymentDate: e.target.value }))}
+                      style={{ ...INPUT_S(errors.paymentDate), maxWidth: 220, borderColor: errors.paymentDate ? 'var(--red)' : '#66BB6A' }}
+                      required
+                    />
+                    <div style={{ fontSize: '0.78rem', color: '#388E3C', marginTop: 6 }}>
+                      Jour du paiement en caisse — à renseigner si différent d&apos;aujourd&apos;hui.
+                    </div>
+                    {errors.paymentDate && <div style={{ color: 'var(--red)', fontSize: '0.78rem', marginTop: 4 }}>{errors.paymentDate}</div>}
+                  </div>
+
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                     <div>
-                      <label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Semaine (début) *</label>
-                      <input type="date" value={form.semaineDebut} onChange={(e) => setForm((p) => ({ ...p, semaineDebut: weekStartMonday(e.target.value) }))} style={INPUT_S(errors.semaineDebut)} />
+                      <label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Semaine travaillée (RH) *</label>
+                      <select
+                        value={form.semaineDebut}
+                        onChange={(e) => setForm((p) => ({ ...p, semaineDebut: e.target.value }))}
+                        style={INPUT_S(errors.semaineDebut)}
+                      >
+                        {formWeekOptions.map((w) => (
+                          <option key={w} value={w}>
+                            {fmtWeekRange(w, weekEndSunday(w))}
+                          </option>
+                        ))}
+                      </select>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 4 }}>Période de travail — toujours un lundi → dimanche</div>
+                      {errors.semaineDebut && <div style={{ color: 'var(--red)', fontSize: '0.78rem' }}>{errors.semaineDebut}</div>}
                     </div>
                     <div>
                       <label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Statut</label>
-                      <select value={form.statut} onChange={(e) => setForm((p) => ({ ...p, statut: e.target.value }))} style={INPUT_S(false)}>
+                      <select
+                        value={form.statut}
+                        onChange={(e) => setForm((p) => ({ ...p, statut: e.target.value }))}
+                        style={INPUT_S(false)}
+                      >
                         {PAYROLL_UI_STATUTS.map((s) => <option key={s} value={s}>{s}</option>)}
                       </select>
                     </div>

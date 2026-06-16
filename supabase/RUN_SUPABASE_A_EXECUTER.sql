@@ -104,22 +104,15 @@ SET
 WHERE statut IN ('Paye', 'Payé')
   AND (paid_at IS NULL OR payment_date IS NULL OR payment_date = semaine_fin);
 
--- ═══ 4) Nettoyage lignes caisse incorrectes ═══
+-- ═══ 4) Nettoyage lignes caisse incorrectes (conservateur — ne supprime pas les lignes consolidées OK) ═══
+-- Uniquement : anciennes lignes où source_id = id payroll (bug 1 ligne/semaine)
 DELETE FROM public.finance_transactions t
 WHERE t.source_type IN ('worker_weekly_payment', 'worker_payment')
   AND EXISTS (SELECT 1 FROM public.payroll p WHERE p.id = t.source_id);
 
 DELETE FROM public.finance_transactions WHERE source_type = 'worker_payment';
 
-DELETE FROM public.finance_transactions t
-WHERE t.source_type = 'worker_weekly_payment'
-  AND t.worker_id IS NOT NULL
-  AND EXISTS (
-    SELECT 1 FROM public.payroll p
-    WHERE p.worker_id = t.worker_id
-      AND COALESCE(p.project_id::text, '') = COALESCE(t.project_id::text, '')
-      AND p.statut NOT IN ('Paye', 'Payé', 'Annule', 'Annulé')
-  );
+-- Ne PAS supprimer les lignes consolidées worker_weekly_payment ici (le backfill §6 les met à jour)
 
 DELETE FROM public.finance_transactions t
 USING public.subcontractor_payments sp
@@ -156,6 +149,8 @@ END;
 $$;
 
 -- ═══ 6) BACKFILL SQL direct ouvriers Payé → feuille de caisse ═══
+-- (UPDATE + INSERT — pas de ON CONFLICT : index partiel incompatible avec 42P10)
+
 WITH payroll_active AS (
   SELECT *
   FROM public.payroll
@@ -166,14 +161,17 @@ groups AS (
   SELECT
     p.worker_id,
     p.project_id,
-    ROUND(SUM(COALESCE(p.montant_net, 0))::numeric, 2) AS total_net,
-    MAX(COALESCE(
+    ROUND(SUM(CASE WHEN p.statut IN ('Paye', 'Payé') THEN COALESCE(p.montant_net, 0) ELSE 0 END)::numeric, 2) AS total_net,
+    MAX(CASE WHEN p.statut IN ('Paye', 'Payé') THEN COALESCE(
       DATE(p.paid_at),
       NULLIF(p.payment_date, p.semaine_fin),
       DATE(p.updated_at),
       CURRENT_DATE
-    )) AS pay_date,
-    BOOL_AND(p.statut IN ('Paye', 'Payé')) AS all_paid,
+    ) END) AS pay_date,
+    BOOL_OR(
+      p.statut NOT IN ('Paye', 'Payé', 'Annule', 'Annulé')
+      AND NOT (COALESCE(p.auto_generated, false) = true AND p.statut = 'En attente')
+    ) AS has_blocking_unpaid,
     MAX(NULLIF(trim(p.chantier), '')) AS chantier
   FROM payroll_active p
   GROUP BY p.worker_id, p.project_id
@@ -182,11 +180,28 @@ eligible AS (
   SELECT
     g.*,
     TRIM(w.prenom || ' ' || w.nom) AS ouvrier_nom,
-    COALESCE(g.chantier, pr.nom, 'Chantier') AS projet_nom
+    COALESCE(g.chantier, pr.nom, 'Chantier') AS projet_nom,
+    public.citymo_worker_payment_source_id(g.worker_id, g.project_id) AS source_id
   FROM groups g
   JOIN public.workers w ON w.id = g.worker_id
   LEFT JOIN public.projects pr ON pr.id = g.project_id
-  WHERE g.all_paid AND g.total_net > 0
+  WHERE g.total_net > 0 AND NOT g.has_blocking_unpaid
+),
+updated AS (
+  UPDATE public.finance_transactions ft
+  SET
+    date_operation = e.pay_date,
+    montant = e.total_net,
+    contrepartie = e.ouvrier_nom,
+    description = 'Paiement ouvrier — ' || e.projet_nom,
+    project_id = e.project_id,
+    worker_id = e.worker_id,
+    synced_at = now(),
+    statut = 'Validé'
+  FROM eligible e
+  WHERE ft.source_type = 'worker_weekly_payment'
+    AND ft.source_id = e.source_id
+  RETURNING ft.id
 )
 INSERT INTO public.finance_transactions (
   date_operation, sens, type_operation, contrepartie, description, montant,
@@ -208,23 +223,18 @@ SELECT
   e.worker_id,
   NULL,
   'worker_weekly_payment',
-  public.citymo_worker_payment_source_id(e.worker_id, e.project_id),
+  e.source_id,
   'rh',
   true,
   'pending',
   'Validé',
   now()
 FROM eligible e
-ON CONFLICT (source_type, source_id)
-DO UPDATE SET
-  date_operation = EXCLUDED.date_operation,
-  montant = EXCLUDED.montant,
-  contrepartie = EXCLUDED.contrepartie,
-  description = EXCLUDED.description,
-  project_id = EXCLUDED.project_id,
-  worker_id = EXCLUDED.worker_id,
-  synced_at = now(),
-  statut = 'Validé';
+WHERE NOT EXISTS (
+  SELECT 1 FROM public.finance_transactions ft
+  WHERE ft.source_type = 'worker_weekly_payment'
+    AND ft.source_id = e.source_id
+);
 
 -- Sous-traitants payés
 INSERT INTO public.finance_transactions (

@@ -206,10 +206,13 @@ export function useWorkerPayroll() {
     }
   }, [load]);
 
-  const markPaid = useCallback(async (id) => {
+  const markPaid = useCallback(async (id, options = {}) => {
     setError(null);
     try {
-      await updateWorkerPayrollStatut(id, 'Payé');
+      await updateWorkerPayrollStatut(id, 'Payé', {
+        paymentDate: options.paymentDate,
+        semaineDebut: options.semaineDebut,
+      });
       await load({ skipSync: true });
       return { success: true };
     } catch (err) {
