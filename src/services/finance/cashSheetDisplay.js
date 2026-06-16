@@ -1,0 +1,119 @@
+/**
+ * cashSheetDisplay.js — Présentation feuille de caisse
+ * Regroupe les paiements ouvriers : 1 ligne récap par ouvrier × projet.
+ */
+
+const WORKER_SOURCES = new Set(['worker_payment', 'worker_weekly_payment']);
+
+function round2(n) {
+  return Math.round((Number(n) || 0) * 100) / 100;
+}
+
+function extractProjet(description = '') {
+  const m = String(description).match(/—\s*([^(]+?)(?:\s*\(|$)/);
+  return m?.[1]?.trim() || 'Chantier';
+}
+
+function extractDateRange(description = '') {
+  const m = String(description).match(/\((\d{2}\/\d{2}\/\d{4})\s*-\s*(\d{2}\/\d{2}\/\d{4})\)/);
+  if (m) return { from: m[1], to: m[2] };
+  return null;
+}
+
+function mergeDateRanges(rows) {
+  let minIso = '';
+  let maxIso = '';
+  for (const r of rows) {
+    const range = extractDateRange(r.description);
+    if (!range) continue;
+    const fromIso = frToIso(range.from);
+    const toIso = frToIso(range.to);
+    if (fromIso && (!minIso || fromIso < minIso)) minIso = fromIso;
+    if (toIso && (!maxIso || toIso > maxIso)) maxIso = toIso;
+  }
+  if (minIso && maxIso) {
+    return `${isoToFr(minIso)} - ${isoToFr(maxIso)}`;
+  }
+  return '';
+}
+
+function frToIso(fr) {
+  const p = String(fr || '').split('/');
+  if (p.length !== 3) return '';
+  return `${p[2]}-${p[1]}-${p[0]}`;
+}
+
+function isoToFr(iso) {
+  if (!iso) return '';
+  const [y, m, d] = iso.split('-');
+  return `${d}/${m}/${y}`;
+}
+
+function groupKey(t) {
+  return `${t.worker_id || t.contrepartie || ''}|${t.project_id || ''}`;
+}
+
+function mergeWorkerPaymentGroup(rows) {
+  if (!rows?.length) return [];
+
+  const paymentRow = rows.find((r) => r.source_type === 'worker_payment');
+  const weeklyRows = rows.filter((r) => r.source_type === 'worker_weekly_payment');
+
+  if (paymentRow && weeklyRows.length === 0) {
+    return [{ ...paymentRow, isRecap: true }];
+  }
+
+  if (paymentRow && weeklyRows.length > 0) {
+    return [{ ...paymentRow, isRecap: true }];
+  }
+
+  const sorted = [...rows].sort((a, b) => String(a.date).localeCompare(b.date));
+  const primary = sorted[sorted.length - 1];
+  const montant = round2(rows.reduce((s, r) => s + (Number(r.montant) || 0), 0));
+  const opDate = sorted.map((r) => r.date).filter(Boolean).sort().pop() || primary.date;
+  const projet = extractProjet(primary.description);
+  const period = mergeDateRanges(rows);
+
+  return [{
+    ...primary,
+    id: `recap-worker-${groupKey(primary)}`,
+    date: opDate,
+    montant,
+    sens: 'sortie',
+    source_type: 'worker_payment',
+    description: period
+      ? `Paiement ouvrier — ${projet} (${period})`
+      : `Paiement ouvrier — ${projet}`,
+    isRecap: true,
+    is_auto_generated: true,
+    _mergedIds: rows.map((r) => r.id),
+  }];
+}
+
+/** Une ligne récap par ouvrier — fusionne worker_weekly_payment legacy si présent. */
+export function consolidateCashSheetTransactions(transactions) {
+  const active = (transactions || []).filter((t) => t.statut !== 'Annulé');
+  const others = [];
+  const groups = new Map();
+
+  for (const t of active) {
+    if (!WORKER_SOURCES.has(t.source_type)) {
+      others.push(t);
+      continue;
+    }
+    const key = groupKey(t);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(t);
+  }
+
+  const mergedWorkers = [];
+  for (const rows of groups.values()) {
+    mergedWorkers.push(...mergeWorkerPaymentGroup(rows));
+  }
+
+  return [...others, ...mergedWorkers].sort((a, b) => String(b.date).localeCompare(String(a.date)));
+}
+
+export function isWorkerPaymentRecap(t) {
+  return Boolean(t?.isRecap || WORKER_SOURCES.has(t?.source_type));
+}

@@ -251,7 +251,8 @@ function buildConsolidatedWorkerPaymentEntity(rows, totalNet) {
   const sorted = [...rows].sort((a, b) => (a.semaineDebut || '').localeCompare(b.semaineDebut || ''));
   const first = sorted[0];
   const last = sorted[sorted.length - 1];
-  const payDates = sorted.map((p) => resolveWorkerPaymentDate(p)).filter(Boolean).sort();
+  const payDates = sorted.map((p) => p.paymentDate || resolveWorkerPaymentDate(p)).filter(Boolean).sort();
+  const paymentDay = payDates[payDates.length - 1] || todayIso();
   return {
     workerId: first.workerId,
     projectId: first.projectId,
@@ -259,7 +260,7 @@ function buildConsolidatedWorkerPaymentEntity(rows, totalNet) {
     projet: first.projet,
     total: totalNet,
     montantNet: totalNet,
-    paymentDate: payDates[payDates.length - 1] || resolveWorkerPaymentDate(first),
+    paymentDate: paymentDay,
     semaineDebut: first.semaineDebut,
     semaineFin: last.semaineFin || first.semaineFin,
     statut: 'Payé',
@@ -398,17 +399,7 @@ export async function updateWorkerPayrollStatut(id, statutUi) {
   const patch = { statut };
 
   if (statutUi === 'Payé' || statut === 'Paye') {
-    const { data: current } = await getSupabase()
-      .from(TABLE)
-      .select('payment_date, semaine_fin, semaine_debut')
-      .eq('id', id)
-      .maybeSingle();
-    if (!current?.payment_date) {
-      patch.payment_date = current?.semaine_fin
-        || (current?.semaine_debut ? weekEndSunday(current.semaine_debut) : null)
-        || current?.semaine_debut
-        || todayIso();
-    }
+    patch.payment_date = todayIso();
   }
 
   const { data, error } = await getSupabase()
@@ -452,7 +443,6 @@ export async function alignPaidPayrollPaymentDates() {
 /** Réconciliation : chaque paiement ouvrier (ouvrier × projet) → une ligne caisse si tout est Payé. */
 export async function backfillWorkerPayrollToCash() {
   const legacyPurge = await purgeAllLegacyWorkerWeeklyFinanceTransactions();
-  await alignPaidPayrollPaymentDates();
   const rows = await listWorkerPayroll();
   const groups = new Map();
   for (const p of rows) {
