@@ -14,6 +14,9 @@ import {
   filterCrmDevis,
   computeCrmDevisStats,
   generateCrmDevisReference,
+  updateCrmDevisStatut,
+  convertCrmDevisToProject,
+  listDevisIdsWithProjects,
 } from '../services/crm/crmDevis';
 
 export function useCrmDevis() {
@@ -119,6 +122,46 @@ export function useCrmDevis() {
     }
   }, []);
 
+  const updateStatut = useCallback(async (id, statut, patch = {}) => {
+    setSaving(true);
+    setError(null);
+    try {
+      const data = await updateCrmDevisStatut(id, statut, patch);
+      await load();
+      return { success: true, data };
+    } catch (err) {
+      const msg = formatSupabaseError(err, 'Erreur mise à jour statut.');
+      setError(msg);
+      return { success: false, error: msg };
+    } finally {
+      setSaving(false);
+    }
+  }, [load]);
+
+  const convertToProject = useCallback(async (id) => {
+    setSaving(true);
+    setError(null);
+    try {
+      const data = await convertCrmDevisToProject(id);
+      await load();
+      return { success: true, data };
+    } catch (err) {
+      const msg = formatSupabaseError(err, 'Erreur conversion en projet.');
+      setError(msg);
+      return { success: false, error: msg };
+    } finally {
+      setSaving(false);
+    }
+  }, [load]);
+
+  const fetchConvertedIds = useCallback(async () => {
+    try {
+      return await listDevisIdsWithProjects();
+    } catch {
+      return new Set();
+    }
+  }, []);
+
   return {
     records,
     loading,
@@ -131,6 +174,9 @@ export function useCrmDevis() {
     remove,
     duplicate,
     fetchOne,
+    updateStatut,
+    convertToProject,
+    fetchConvertedIds,
     filterCrmDevis,
     computeCrmDevisStats,
     generateCrmDevisReference,

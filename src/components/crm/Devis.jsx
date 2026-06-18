@@ -1,15 +1,17 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import {
-  Plus, Search, Filter, Eye, Edit2, Copy, Trash2,
+  Plus, Search,
   FileText, Send, CheckCircle, TrendingUp, Clock,
   XCircle, AlertCircle, ChevronLeft, ChevronRight,
-  RefreshCw, ArrowUpDown, MoreHorizontal, Download
+  RefreshCw, ArrowUpDown, FolderKanban,
 } from 'lucide-react';
 import { useCrmDevis } from '../../hooks/useCrmDevis';
 import { listCategories } from '../../services/crm/categories';
 import { formatCategoryDisplayName } from '../../utils/crm/categoryDisplay';
 import { generateDevisPdf } from '../../services/crm/devisPdf';
 import DevisForm from './DevisForm';
+import DevisPreviewModal from './DevisPreviewModal';
+import DevisActionsMenu from './DevisActionsMenu';
 
 /* ── Helpers ── */
 function fmtMAD(v) {
@@ -33,10 +35,11 @@ function isExpiringSoon(dateStr) {
 const STATUT_CONFIG = {
   brouillon:  { label: 'Brouillon',   cls: 'badge-grey',   icon: FileText },
   envoye:     { label: 'Envoye',      cls: 'badge-blue',   icon: Send },
-  valide:     { label: 'Valide',      cls: 'badge-green',  icon: CheckCircle },
+  valide:     { label: 'Approuve',    cls: 'badge-green',  icon: CheckCircle },
   refuse:     { label: 'Refuse',      cls: 'badge-red',    icon: XCircle },
   expire:     { label: 'Expire',      cls: 'badge-orange', icon: AlertCircle },
   en_attente: { label: 'En attente',  cls: 'badge-orange', icon: Clock },
+  converti:   { label: 'Converti',    cls: 'badge-orange', icon: FolderKanban },
 };
 
 function StatutBadge({ statut }) {
@@ -116,6 +119,9 @@ export default function Devis() {
     remove,
     duplicate,
     fetchOne,
+    updateStatut,
+    convertToProject,
+    fetchConvertedIds,
     filterCrmDevis,
     computeCrmDevisStats,
   } = useCrmDevis();
@@ -123,6 +129,8 @@ export default function Devis() {
   const [view, setView] = useState('list');
   const [editingDevis, setEditingDevis] = useState(null);
   const [pdfLoadingId, setPdfLoadingId] = useState(null);
+  const [previewDevis, setPreviewDevis] = useState(null);
+  const [convertedIds, setConvertedIds] = useState(() => new Set());
 
   /* Filters */
   const [search, setSearch] = useState('');
@@ -142,6 +150,11 @@ export default function Devis() {
   }
 
   /* Load handled by hook */
+
+  useEffect(() => {
+    if (!configured || loading) return;
+    fetchConvertedIds().then(setConvertedIds);
+  }, [configured, loading, devis.length, fetchConvertedIds]);
 
   /* Derived lists */
   const commerciaux = [...new Set(devis.map(d => d.commercial).filter(Boolean))];
@@ -223,6 +236,99 @@ export default function Devis() {
     }
   }
 
+  async function handlePreview(d) {
+    try {
+      const full = await fetchOne(d.id);
+      setPreviewDevis(full);
+    } catch (err) {
+      showToast(err.message || 'Impossible de charger l\'aperçu.', 'error');
+    }
+  }
+
+  async function handleApprove(d) {
+    if (!window.confirm(`Approuver le devis ${d.reference} ?`)) return;
+    const result = await updateStatut(d.id, 'valide');
+    showToast(result.success ? 'Devis approuve.' : (result.error || 'Erreur.'), result.success ? 'success' : 'error');
+  }
+
+  async function handleRefuse(d) {
+    if (!window.confirm(`Refuser le devis ${d.reference} ?`)) return;
+    const motif = window.prompt('Motif du refus (optionnel) :');
+    if (motif === null) return;
+    const patch = motif.trim()
+      ? { notes_internes: `${d.notes_internes ? `${d.notes_internes}\n` : ''}[Refus] ${motif.trim()}` }
+      : {};
+    const result = await updateStatut(d.id, 'refuse', patch);
+    showToast(result.success ? 'Devis refuse.' : (result.error || 'Erreur.'), result.success ? 'success' : 'error');
+  }
+
+  async function handleConvert(d) {
+    if (convertedIds.has(String(d.id)) || d.statut === 'converti') {
+      showToast('Ce devis est deja converti en projet.', 'error');
+      return;
+    }
+    if (d.statut === 'refuse') {
+      if (!window.confirm('Ce devis est refuse. Conversion exceptionnelle — continuer ?')) return;
+    } else if (d.statut === 'brouillon') {
+      if (!window.confirm(`Convertir ce devis brouillon (${d.reference}) en projet ?`)) return;
+    } else if (d.statut === 'valide') {
+      if (!window.confirm(`Creer un projet a partir du devis ${d.reference} ?`)) return;
+    } else if (!window.confirm(`Convertir le devis ${d.reference} en projet ?`)) return;
+
+    const result = await convertToProject(d.id);
+    if (result.success) {
+      const ref = result.data?.project?.ref || result.data?.project?.nom || 'projet';
+      showToast(`Projet cree : ${ref}`);
+      fetchConvertedIds().then(setConvertedIds);
+    } else {
+      showToast(result.error || 'Erreur conversion.', 'error');
+    }
+  }
+
+  async function handleStatutChange(d, statut) {
+    if (statut === d.statut) return;
+    if (statut === 'valide') {
+      if (!window.confirm(`Approuver le devis ${d.reference} ?`)) return;
+    } else if (statut === 'refuse') {
+      if (!window.confirm(`Refuser le devis ${d.reference} ?`)) return;
+      const motif = window.prompt('Motif du refus (optionnel) :');
+      if (motif === null) return;
+      const patch = motif.trim()
+        ? { notes_internes: `${d.notes_internes ? `${d.notes_internes}\n` : ''}[Refus] ${motif.trim()}` }
+        : {};
+      const result = await updateStatut(d.id, statut, patch);
+      showToast(result.success ? 'Statut mis a jour.' : (result.error || 'Erreur.'), result.success ? 'success' : 'error');
+      return;
+    } else if (statut === 'converti') {
+      if (!window.confirm(`Marquer le devis ${d.reference} comme converti en projet ?`)) return;
+    }
+    const result = await updateStatut(d.id, statut);
+    showToast(result.success ? 'Statut mis a jour.' : (result.error || 'Erreur.'), result.success ? 'success' : 'error');
+  }
+
+  function isDevisConverted(d) {
+    return convertedIds.has(String(d.id)) || d.statut === 'converti';
+  }
+
+  function renderActionsMenu(d) {
+    return (
+      <DevisActionsMenu
+        devis={d}
+        isConverted={isDevisConverted(d)}
+        pdfLoading={pdfLoadingId === d.id}
+        onPreview={() => handlePreview(d)}
+        onPdf={() => handlePdf(d)}
+        onConvert={() => handleConvert(d)}
+        onApprove={() => handleApprove(d)}
+        onRefuse={() => handleRefuse(d)}
+        onEdit={() => openEdit(d)}
+        onDuplicate={() => handleDuplicate(d)}
+        onDelete={() => handleDelete(d.id)}
+        onStatutChange={(statut) => handleStatutChange(d, statut)}
+      />
+    );
+  }
+
   /* ── Form view ── */
   if (view === 'form') {
     return (
@@ -241,6 +347,9 @@ export default function Devis() {
   return (
     <div className="animate-fade-in crm-module crm-module--devis">
       <Toast toast={toast} />
+      {previewDevis && (
+        <DevisPreviewModal devis={previewDevis} onClose={() => setPreviewDevis(null)} />
+      )}
 
       {/* Page header */}
       <div className="page-header" style={{ marginBottom: 20 }}>
@@ -426,24 +535,7 @@ export default function Devis() {
 
                       {/* Actions */}
                       <td style={{ padding: '10px 10px', whiteSpace: 'nowrap' }}>
-                        <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-                          <button title="PDF" onClick={() => handlePdf(d)} disabled={pdfLoadingId === d.id}
-                            className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }}>
-                            <Download size={13} />
-                          </button>
-                          <button title="Modifier" onClick={() => openEdit(d)}
-                            className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }}>
-                            <Edit2 size={13} />
-                          </button>
-                          <button title="Dupliquer" onClick={() => handleDuplicate(d)}
-                            className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }}>
-                            <Copy size={13} />
-                          </button>
-                          <button title="Supprimer" onClick={() => handleDelete(d.id)}
-                            className="btn btn-ghost btn-sm" style={{ padding: '4px 7px', color: 'var(--red)' }}>
-                            <Trash2 size={13} />
-                          </button>
-                        </div>
+                        {renderActionsMenu(d)}
                       </td>
                     </tr>
                   );
@@ -476,14 +568,7 @@ export default function Devis() {
                       <span className="crm-doc-amount-sub">TTC · HT {fmtMAD(d.total_ht)}</span>
                     </div>
                     <div className="crm-doc-actions">
-                      <button type="button" title="PDF" onClick={() => handlePdf(d)} disabled={pdfLoadingId === d.id}
-                        className="btn btn-ghost btn-sm crm-icon-btn"><Download size={14} /></button>
-                      <button type="button" title="Modifier" onClick={() => openEdit(d)}
-                        className="btn btn-ghost btn-sm crm-icon-btn"><Edit2 size={14} /></button>
-                      <button type="button" title="Dupliquer" onClick={() => handleDuplicate(d)}
-                        className="btn btn-ghost btn-sm crm-icon-btn"><Copy size={14} /></button>
-                      <button type="button" title="Supprimer" onClick={() => handleDelete(d.id)}
-                        className="btn btn-ghost btn-sm crm-icon-btn"><Trash2 size={14} style={{ color: 'var(--red)' }} /></button>
+                      {renderActionsMenu(d)}
                     </div>
                   </div>
                 </div>

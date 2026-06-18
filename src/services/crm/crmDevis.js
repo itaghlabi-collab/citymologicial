@@ -7,7 +7,7 @@ import { clientDisplayName } from './clients';
 const TABLE = 'crm_devis';
 const LIGNES = 'crm_devis_lignes';
 
-export const CRM_DEVIS_STATUTS = ['brouillon', 'envoye', 'valide', 'refuse', 'expire', 'en_attente'];
+export const CRM_DEVIS_STATUTS = ['brouillon', 'envoye', 'valide', 'refuse', 'expire', 'en_attente', 'converti'];
 
 const DEVIS_SELECT = `
   *,
@@ -250,6 +250,73 @@ export async function deleteCrmDevis(id) {
     console.error('[CITYMO] crmDevis delete', error, { id });
     throw error;
   }
+}
+
+export async function updateCrmDevisStatut(id, statut, patch = {}) {
+  await getAuthUserId();
+  if (!CRM_DEVIS_STATUTS.includes(statut)) {
+    throw new Error('Statut invalide.');
+  }
+  const { error } = await getSupabase()
+    .from(TABLE)
+    .update({ statut, ...patch })
+    .eq('id', id);
+  if (error) {
+    console.error('[CITYMO] crmDevis statut', error, { id, statut });
+    throw error;
+  }
+  return getCrmDevisById(id);
+}
+
+export async function isDevisLinkedToProject(devisId) {
+  const { data, error } = await getSupabase()
+    .from('projects')
+    .select('id')
+    .eq('devis_id', devisId)
+    .maybeSingle();
+  if (error) throw error;
+  return !!data;
+}
+
+export async function listDevisIdsWithProjects() {
+  const { data, error } = await getSupabase()
+    .from('projects')
+    .select('devis_id')
+    .not('devis_id', 'is', null);
+  if (error) throw error;
+  return new Set((data || []).map((r) => String(r.devis_id)));
+}
+
+export async function convertCrmDevisToProject(devisId) {
+  const devis = await getCrmDevisById(devisId);
+  if (await isDevisLinkedToProject(devisId)) {
+    throw new Error('Ce devis est déjà converti en projet.');
+  }
+  const { createProject } = await import('../projects/projects');
+  const lignesTxt = (devis.lignes || [])
+    .filter((l) => l.type === 'article')
+    .map((l) => `• ${l.designation} — ${l.quantite} ${l.unite} × ${Number(l.prix_ht).toLocaleString('fr-MA')} MAD`)
+    .join('\n');
+  const project = await createProject({
+    nom: devis.titre || `Projet ${devis.reference}`,
+    client_id: devis.client_id,
+    client_nom: devis.client_nom,
+    type_projet: devis.type_projet,
+    budget_estime: devis.total_ttc,
+    devis_id: devis.id,
+    devis_reference: devis.reference,
+    responsable: devis.commercial,
+    description: lignesTxt || null,
+    observations: `Créé depuis devis ${devis.reference}`,
+    statut: 'brouillon',
+    date_debut: new Date().toISOString().slice(0, 10),
+  });
+  try {
+    await updateCrmDevisStatut(devisId, 'converti');
+  } catch (err) {
+    console.warn('[CITYMO] crmDevis converti statut', err);
+  }
+  return { project, devis };
 }
 
 export async function duplicateCrmDevis(id) {
