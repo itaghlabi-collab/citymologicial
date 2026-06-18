@@ -219,10 +219,12 @@ function buildPdfRows(devis, catMap) {
     const catKey = l.categorie_id ? String(l.categorie_id) : '__none__';
     if (catKey !== currentCat) {
       currentCat = catKey;
-      const label = catKey === '__none__'
-        ? 'SANS CATÉGORIE'
-        : formatCategoryDisplayName(catMap[catKey] || 'SANS CATÉGORIE');
-      rows.push({ kind: 'section', text: label });
+      if (catKey !== '__none__') {
+        rows.push({
+          kind: 'section',
+          text: formatCategoryDisplayName(catMap[catKey] || 'SANS CATÉGORIE'),
+        });
+      }
     }
 
     num += 1;
