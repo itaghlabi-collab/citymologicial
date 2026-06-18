@@ -10,6 +10,7 @@ import { listCategories } from '../../services/crm/categories';
 import { generateCrmDevisReference } from '../../services/crm/crmDevis';
 import { generateDevisPdf } from '../../services/crm/devisPdf';
 import { formatCategoryDisplayName } from '../../utils/crm/categoryDisplay';
+import { enrichLignesDescriptions, resolveLigneDescription } from '../../utils/crm/devisLineDescription';
 import { TYPE_PROJET_VALUES, TYPE_PROJET_LABEL } from '../../constants/commercial';
 
 const CITYMO_LOGO = 'https://i.ibb.co/N6SbC06M/logopng.png';
@@ -128,9 +129,14 @@ const EMPTY_DEVIS = {
   lignes: [],
 };
 
-function draftToLigne(draft) {
+function draftToLigne(draft, articles = []) {
   if (draft.mode === 'titre') {
     return EMPTY_LIGNE({ type: 'titre', designation: draft.designation.trim() });
+  }
+  let description = draft.description?.trim() || '';
+  if (!description && draft.mode === 'article' && draft.article_id) {
+    const art = articles.find((a) => String(a.id) === String(draft.article_id));
+    description = art?.description?.trim() || '';
   }
   return EMPTY_LIGNE({
     type: 'article',
@@ -138,7 +144,7 @@ function draftToLigne(draft) {
     categorie_id: draft.mode === 'hors_catalogue' ? '' : draft.categorie_id,
     article_id: draft.mode === 'hors_catalogue' ? '' : draft.article_id,
     designation: draft.designation.trim(),
-    description: draft.description?.trim() || '',
+    description,
     quantite: Number(draft.quantite) || 1,
     unite: draft.unite || 'unite',
     prix_ht: Number(draft.prix_ht) || 0,
@@ -147,7 +153,7 @@ function draftToLigne(draft) {
   });
 }
 
-function ligneToDraft(ligne) {
+function ligneToDraft(ligne, articles = []) {
   if (ligne.type === 'titre') {
     return { ...EMPTY_DRAFT(), mode: 'titre', designation: ligne.designation || '' };
   }
@@ -157,7 +163,7 @@ function ligneToDraft(ligne) {
     categorie_id: ligne.categorie_id || '',
     article_id: ligne.article_id || '',
     designation: ligne.designation || '',
-    description: ligne.description || '',
+    description: resolveLigneDescription(ligne, articles),
     quantite: ligne.quantite ?? 1,
     unite: ligne.unite || 'unite',
     prix_ht: ligne.prix_ht ?? 0,
@@ -438,7 +444,7 @@ function DevisDocumentHeader({ form, selectedClient, isEdit, onFieldChange, erro
 }
 
 /* ── Ligne affichée (lecture seule) ── */
-function DevisLineDisplay({ ligne, lineNum, idx, onDelete, onDuplicate, onEdit, drag }) {
+function DevisLineDisplay({ ligne, lineNum, idx, articles, onDelete, onDuplicate, onEdit, drag }) {
   const dragProps = {
     style: rowDragStyle(drag.isDragging, drag.isOver),
     onDragOver: (e) => { e.preventDefault(); drag.onDragOver(idx); },
@@ -487,6 +493,7 @@ function DevisLineDisplay({ ligne, lineNum, idx, onDelete, onDuplicate, onEdit, 
   }
 
   const ht = ligneSousTotalHt(ligne);
+  const description = resolveLigneDescription(ligne, articles);
 
   return (
     <tr {...dragProps} style={{ ...dragProps.style, background: ligne.ephemeral ? '#FFFBF0' : '#fff' }}>
@@ -497,8 +504,8 @@ function DevisLineDisplay({ ligne, lineNum, idx, onDelete, onDuplicate, onEdit, 
         {ligne.ephemeral && (
           <span style={{ fontSize: '0.68rem', color: '#E65100', fontWeight: 600, background: '#FFF3E0', padding: '2px 6px', borderRadius: 4 }}>Hors catalogue</span>
         )}
-        {ligne.description && (
-          <div style={{ fontSize: '0.78rem', color: 'var(--text-3)', marginTop: 6, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{ligne.description}</div>
+        {description && (
+          <div style={{ fontSize: '0.78rem', color: 'var(--text-3)', marginTop: 6, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{description}</div>
         )}
       </td>
       <td style={{ padding: '10px 8px', textAlign: 'center', verticalAlign: 'top', fontSize: '0.88rem' }}>{ligne.quantite}</td>
@@ -510,7 +517,7 @@ function DevisLineDisplay({ ligne, lineNum, idx, onDelete, onDuplicate, onEdit, 
   );
 }
 
-function DevisLineCard({ ligne, lineNum, idx, onDelete, onDuplicate, onEdit }) {
+function DevisLineCard({ ligne, lineNum, idx, articles, onDelete, onDuplicate, onEdit }) {
   if (ligne.type === 'titre') {
     return (
       <div className="devis-line-card devis-line-card--titre">
@@ -524,6 +531,7 @@ function DevisLineCard({ ligne, lineNum, idx, onDelete, onDuplicate, onEdit }) {
   }
   if (ligne.type !== 'article') return null;
   const ht = ligneSousTotalHt(ligne);
+  const description = resolveLigneDescription(ligne, articles);
   return (
     <div className="devis-line-card" style={{ background: ligne.ephemeral ? '#FFFBF0' : '#fff' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
@@ -531,7 +539,7 @@ function DevisLineCard({ ligne, lineNum, idx, onDelete, onDuplicate, onEdit }) {
         {ligne.ephemeral && <span style={{ fontSize: '0.68rem', color: '#E65100', fontWeight: 600 }}>Hors catalogue</span>}
       </div>
       <div style={{ fontWeight: 700, marginBottom: 6 }}>{ligne.designation}</div>
-      {ligne.description && <div style={{ fontSize: '0.8rem', color: 'var(--text-3)', marginBottom: 8 }}>{ligne.description}</div>}
+      {description && <div style={{ fontSize: '0.8rem', color: 'var(--text-3)', marginBottom: 8, whiteSpace: 'pre-wrap' }}>{description}</div>}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, fontSize: '0.82rem', marginBottom: 10 }}>
         <div><span style={{ color: 'var(--text-3)' }}>Qté </span><strong>{ligne.quantite} {ligne.unite}</strong></div>
         <div><span style={{ color: 'var(--text-3)' }}>PU </span><strong>{fmtMAD(ligne.prix_ht)}</strong></div>
@@ -641,11 +649,11 @@ function LigneComposer({ draft, setDraft, categories, articles, onOk, onClear, o
           <div style={{ marginBottom: 12 }}>
             <Label>Description</Label>
             <textarea
-              rows={2}
+              rows={Math.min(8, Math.max(2, (draft.description || '').split('\n').length))}
               value={draft.description}
               onChange={(e) => setF('description', e.target.value)}
               placeholder="Description détaillée…"
-              style={{ ...IS(false), resize: 'vertical' }}
+              style={{ ...IS(false), resize: 'vertical', minHeight: 56 }}
             />
           </div>
 
@@ -767,7 +775,7 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
   }
 
   function startEditLine(idx) {
-    setDraft(ligneToDraft(form.lignes[idx]));
+    setDraft(ligneToDraft(form.lignes[idx], articles));
     setEditingIdx(idx);
     setDraftError('');
   }
@@ -794,7 +802,7 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
   function commitDraft() {
     const err = validateDraft();
     if (err) { setDraftError(err); return; }
-    const ligne = draftToLigne(draft);
+    const ligne = draftToLigne(draft, articles);
     if (editingIdx != null) {
       setForm((p) => {
         const ls = [...p.lignes];
@@ -862,7 +870,7 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
         total_ht: totalHT,
         total_tva: totalTVA,
         total_ttc: totalTTC,
-        lignes: form.lignes,
+        lignes: enrichLignesDescriptions(form.lignes, articles),
       };
       const result = await onSaved(payload, isEdit);
       if (result && result.success === false) {
@@ -887,6 +895,7 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
         total_ht: totalHT,
         total_tva: totalTVA,
         total_ttc: totalTTC,
+        lignes: enrichLignesDescriptions(form.lignes, articles),
       }, catMap);
     } catch (err) {
       setApiError(err.message || 'Erreur génération PDF.');
@@ -1003,6 +1012,7 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
                               ligne={ligne}
                               lineNum={lineNum}
                               idx={idx}
+                              articles={articles}
                               onDelete={deleteLigne}
                               onDuplicate={duplicateLigne}
                               onEdit={startEditLine}
@@ -1029,6 +1039,7 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
                             ligne={ligne}
                             lineNum={lineNum}
                             idx={idx}
+                            articles={articles}
                             onDelete={deleteLigne}
                             onDuplicate={duplicateLigne}
                             onEdit={startEditLine}

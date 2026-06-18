@@ -67,8 +67,14 @@ export function formatSupabaseError(error, fallback = 'Une erreur est survenue.'
   if (code === '42P01' || (message.includes('clients') && !message.includes('prospects'))) {
     return 'Table clients absente — exécutez supabase/migrations/20260526000000_clients.sql';
   }
-  if (code === '42P01' || message.includes('articles')) {
+  if ((code === '42703' || code === 'PGRST204') && message.includes('articles') && message.includes('description')) {
+    return 'Colonne description absente — exécutez supabase/migrations/20260618130000_articles_description.sql dans Supabase SQL Editor.';
+  }
+  if (code === '42P01' || (message.includes('relation') && message.includes('articles'))) {
     return 'Table articles absente — exécutez supabase/migrations/20260526020000_articles.sql';
+  }
+  if (message.includes('articles') && (message.includes('column') || message.includes('colonne'))) {
+    return 'Schéma articles incomplet — exécutez les migrations articles dans Supabase SQL Editor.';
   }
   if (code === '42P01' || message.includes('categories')) {
     return 'Table categories absente — exécutez supabase/migrations/20260526010000_categories.sql';

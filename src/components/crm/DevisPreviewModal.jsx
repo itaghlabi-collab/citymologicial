@@ -1,5 +1,7 @@
 import { X, FileText } from 'lucide-react';
 
+import { resolveLigneDescription } from '../../utils/crm/devisLineDescription';
+
 function fmtMAD(v) {
   const n = Number(v);
   if (Number.isNaN(n)) return '0,00 MAD';
@@ -15,7 +17,7 @@ function fmtDate(d) {
   }
 }
 
-export default function DevisPreviewModal({ devis, onClose }) {
+export default function DevisPreviewModal({ devis, articles = [], onClose }) {
   if (!devis) return null;
 
   const clientNom = devis.client_nom
@@ -74,6 +76,7 @@ export default function DevisPreviewModal({ devis, onClose }) {
                   if (l.type !== 'article') return null;
                   articleNum += 1;
                   const ht = Number(l.quantite) * Number(l.prix_ht) * (1 - Number(l.remise || 0) / 100);
+                  const description = resolveLigneDescription(l, articles);
                   return (
                     <div key={l._id || l.id || i} className="crm-devis-preview-line">
                       <div className="crm-devis-preview-line-head">
@@ -83,8 +86,8 @@ export default function DevisPreviewModal({ devis, onClose }) {
                       <div className="crm-devis-preview-line-meta">
                         {l.quantite} {l.unite} × {fmtMAD(l.prix_ht)}
                       </div>
-                      {l.description && (
-                        <div className="crm-devis-preview-line-desc">{l.description}</div>
+                      {description && (
+                        <div className="crm-devis-preview-line-desc">{description}</div>
                       )}
                     </div>
                   );

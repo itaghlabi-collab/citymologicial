@@ -9,6 +9,8 @@ import { useCrmDevis } from '../../hooks/useCrmDevis';
 import { listCategories } from '../../services/crm/categories';
 import { formatCategoryDisplayName } from '../../utils/crm/categoryDisplay';
 import { generateDevisPdf } from '../../services/crm/devisPdf';
+import { listArticles } from '../../services/crm/articles';
+import { enrichLignesDescriptions } from '../../utils/crm/devisLineDescription';
 import DevisForm from './DevisForm';
 import DevisPreviewModal from './DevisPreviewModal';
 import DevisActionsMenu from './DevisActionsMenu';
@@ -130,6 +132,7 @@ export default function Devis() {
   const [editingDevis, setEditingDevis] = useState(null);
   const [pdfLoadingId, setPdfLoadingId] = useState(null);
   const [previewDevis, setPreviewDevis] = useState(null);
+  const [previewArticles, setPreviewArticles] = useState([]);
   const [convertedIds, setConvertedIds] = useState(() => new Set());
 
   /* Filters */
@@ -225,10 +228,16 @@ export default function Devis() {
   async function handlePdf(d) {
     setPdfLoadingId(d.id);
     try {
-      const full = await fetchOne(d.id);
-      const cats = await listCategories();
+      const [full, cats, articles] = await Promise.all([
+        fetchOne(d.id),
+        listCategories(),
+        listArticles(),
+      ]);
       const catMap = Object.fromEntries(cats.map(c => [String(c.id), formatCategoryDisplayName(c.nom)]));
-      await generateDevisPdf(full, catMap);
+      await generateDevisPdf({
+        ...full,
+        lignes: enrichLignesDescriptions(full.lignes, articles),
+      }, catMap);
     } catch (err) {
       showToast(err.message || 'Erreur generation PDF.', 'error');
     } finally {
@@ -238,8 +247,9 @@ export default function Devis() {
 
   async function handlePreview(d) {
     try {
-      const full = await fetchOne(d.id);
+      const [full, articles] = await Promise.all([fetchOne(d.id), listArticles()]);
       setPreviewDevis(full);
+      setPreviewArticles(articles || []);
     } catch (err) {
       showToast(err.message || 'Impossible de charger l\'aperçu.', 'error');
     }
@@ -348,7 +358,11 @@ export default function Devis() {
     <div className="animate-fade-in crm-module crm-module--devis">
       <Toast toast={toast} />
       {previewDevis && (
-        <DevisPreviewModal devis={previewDevis} onClose={() => setPreviewDevis(null)} />
+        <DevisPreviewModal
+          devis={previewDevis}
+          articles={previewArticles}
+          onClose={() => { setPreviewDevis(null); setPreviewArticles([]); }}
+        />
       )}
 
       {/* Page header */}
