@@ -126,6 +126,62 @@ function fmtNum(n) {
   return `${sign}${grouped},${decPart}`;
 }
 
+const FR_UNITS = ['zéro', 'un', 'deux', 'trois', 'quatre', 'cinq', 'six', 'sept', 'huit', 'neuf', 'dix', 'onze', 'douze', 'treize', 'quatorze', 'quinze', 'seize'];
+
+function underHundred(n) {
+  if (n < 17) return FR_UNITS[n];
+  if (n < 20) return `dix-${FR_UNITS[n - 10]}`;
+  if (n < 70) {
+    const ten = Math.floor(n / 10);
+    const unit = n % 10;
+    const tens = ['', '', 'vingt', 'trente', 'quarante', 'cinquante', 'soixante'][ten];
+    if (unit === 0) return tens;
+    if (unit === 1) return `${tens} et un`;
+    return `${tens}-${underHundred(unit)}`;
+  }
+  if (n < 80) return `soixante-${underHundred(n - 60)}`;
+  const unit = n - 80;
+  if (unit === 0) return 'quatre-vingts';
+  return `quatre-vingt-${underHundred(unit)}`;
+}
+
+function underThousand(n) {
+  if (n < 100) return underHundred(n);
+  const h = Math.floor(n / 100);
+  const r = n % 100;
+  let s = h === 1 ? 'cent' : `${underHundred(h)} cent`;
+  if (r === 0 && h > 1) s += 's';
+  else if (r > 0) s += ` ${underHundred(r)}`;
+  return s;
+}
+
+function integerToFrench(n) {
+  if (n === 0) return 'zéro';
+  const millions = Math.floor(n / 1_000_000);
+  const thousands = Math.floor((n % 1_000_000) / 1000);
+  const rest = n % 1000;
+  const parts = [];
+  if (millions > 0) parts.push(millions === 1 ? 'un million' : `${integerToFrench(millions)} millions`);
+  if (thousands > 0) parts.push(thousands === 1 ? 'mille' : `${underThousand(thousands)} mille`);
+  if (rest > 0 || parts.length === 0) parts.push(underThousand(rest));
+  return parts.join(' ');
+}
+
+function amountToFrenchWords(amount) {
+  const centsTotal = Math.round((Number(amount) || 0) * 100);
+  const dirhams = Math.floor(centsTotal / 100);
+  const centimes = centsTotal % 100;
+  let text = `${integerToFrench(dirhams)} dirham${dirhams > 1 ? 's' : ''}`;
+  if (centimes > 0) {
+    text += ` et ${integerToFrench(centimes)} centime${centimes > 1 ? 's' : ''}`;
+  }
+  return text;
+}
+
+function buildArreteText(totalTtc) {
+  return `Arrêté le présent devis à la somme de ${amountToFrenchWords(totalTtc)} TTC.`;
+}
+
 function textRight(doc, text, rightX, y) {
   doc.text(String(text), rightX, y, { align: 'right' });
 }
@@ -412,7 +468,7 @@ export async function generateDevisPdf(devis, catMap = {}) {
     doc.setFontSize(9);
     doc.setTextColor(...TEXT);
     doc.text('Conditions générales de vente', M, startY);
-    let cy = startY + 5;
+    let cy = startY + 6;
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7.5);
     doc.setTextColor(...MUTED);
@@ -428,7 +484,29 @@ export async function generateDevisPdf(devis, catMap = {}) {
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7.5);
     const condLines = doc.splitTextToSize(conditionsText, CONTENT_W);
-    return 5 + condLines.length * 3.5 + 8;
+    return 6 + condLines.length * 3.5 + 8;
+  };
+
+  const arreteText = buildArreteText(devis.total_ttc);
+
+  const drawArreteBlock = (startY) => {
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(8.5);
+    doc.setTextColor(...TEXT);
+    const lines = doc.splitTextToSize(arreteText, CONTENT_W);
+    let cy = startY;
+    lines.forEach((line) => {
+      doc.text(line, M, cy);
+      cy += 4.2;
+    });
+    return cy + 4;
+  };
+
+  const measureArreteHeight = () => {
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(8.5);
+    const lines = doc.splitTextToSize(arreteText, CONTENT_W);
+    return lines.length * 4.2 + 8;
   };
 
   /* ── Page 1 header (inchangé) ── */
@@ -481,8 +559,15 @@ export async function generateDevisPdf(devis, catMap = {}) {
   }
   if (client.ice) {
     doc.text(`ICE : ${client.ice}`, clientX + CLIENT_W, clientY, { align: 'right' });
-    clientY += 3;
+    clientY += 3.5;
   }
+
+  doc.setFontSize(7.5);
+  doc.setTextColor(...TEXT);
+  doc.text(`Date : ${fmtDate(devis.date_creation)}`, clientX + CLIENT_W, clientY, { align: 'right' });
+  clientY += 3.5;
+  doc.text(`Valable jusqu'au : ${fmtDate(devis.date_validite)}`, clientX + CLIENT_W, clientY, { align: 'right' });
+  clientY += 3.5;
 
   y = Math.max(infoY, clientY) + 6;
 
@@ -497,8 +582,6 @@ export async function generateDevisPdf(devis, catMap = {}) {
   y += 7.5;
 
   const infoFields = [
-    ['Date', fmtDate(devis.date_creation)],
-    ['Valable jusqu\'au', fmtDate(devis.date_validite)],
     ['Intitulé', (devis.titre || '—').toUpperCase()],
     ['Réalisé par', (devis.commercial || '—').toUpperCase()],
   ];
@@ -566,6 +649,14 @@ export async function generateDevisPdf(devis, catMap = {}) {
 
   ensureSpace(TOTAL_ROW_H * 3);
   y = drawTotalsBlock(y);
+
+  y += 12;
+
+  const arreteH = measureArreteHeight();
+  ensureSpace(arreteH);
+  y = drawArreteBlock(y);
+
+  y += 10;
 
   const condH = measureConditionsHeight();
   ensureSpace(condH);

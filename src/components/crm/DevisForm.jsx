@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ChevronLeft, Trash2, Copy, AlertCircle,
   FileText, GripVertical, X, Download, Pencil,
@@ -200,19 +201,45 @@ function clientMatchesQuery(c, rawQuery) {
 
 function ClientSearchSelect({ clients, value, onChange, error }) {
   const wrapRef = useRef(null);
+  const dropdownRef = useRef(null);
   const inputRef = useRef(null);
   const [query, setQuery] = useState('');
   const [open, setOpen] = useState(false);
+  const [dropdownRect, setDropdownRect] = useState(null);
 
   const selected = clients.find((c) => String(c.id) === String(value));
+
+  const updateDropdownRect = () => {
+    if (!wrapRef.current) return;
+    const r = wrapRef.current.getBoundingClientRect();
+    setDropdownRect({
+      top: r.bottom + 4,
+      left: r.left,
+      width: r.width,
+    });
+  };
 
   useEffect(() => {
     if (!open) setQuery(selected ? clientLabel(selected) : '');
   }, [selected, value, open]);
 
   useEffect(() => {
+    if (!open) return undefined;
+    updateDropdownRect();
+    const onReposition = () => updateDropdownRect();
+    window.addEventListener('scroll', onReposition, true);
+    window.addEventListener('resize', onReposition);
+    return () => {
+      window.removeEventListener('scroll', onReposition, true);
+      window.removeEventListener('resize', onReposition);
+    };
+  }, [open, query]);
+
+  useEffect(() => {
     function onDocClick(e) {
-      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+      if (wrapRef.current?.contains(e.target)) return;
+      if (dropdownRef.current?.contains(e.target)) return;
+      setOpen(false);
     }
     document.addEventListener('mousedown', onDocClick);
     return () => document.removeEventListener('mousedown', onDocClick);
@@ -235,6 +262,53 @@ function ClientSearchSelect({ clients, value, onChange, error }) {
     inputRef.current?.focus();
   }
 
+  const dropdown = open && dropdownRect && createPortal(
+    <div
+      ref={dropdownRef}
+      style={{
+        position: 'fixed',
+        top: dropdownRect.top,
+        left: dropdownRect.left,
+        width: dropdownRect.width,
+        zIndex: 10000,
+        background: '#fff',
+        border: '1.5px solid var(--border)',
+        borderRadius: 8,
+        boxShadow: '0 12px 32px rgba(0,0,0,0.14)',
+        maxHeight: 260,
+        overflowY: 'auto',
+      }}
+    >
+      {filtered.length === 0 ? (
+        <div style={{ padding: '12px 14px', fontSize: '0.85rem', color: 'var(--text-3)' }}>Aucun client trouvé</div>
+      ) : filtered.map((c) => {
+        const nom = clientLabel(c);
+        const active = String(c.id) === String(value);
+        return (
+          <button
+            key={c.id}
+            type="button"
+            onClick={() => pick(c)}
+            style={{
+              display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px',
+              border: 'none', background: active ? '#FFF5F5' : '#fff', cursor: 'pointer',
+              fontSize: '0.86rem', borderBottom: '1px solid var(--border)',
+              color: 'var(--text)',
+            }}
+          >
+            <div style={{ fontWeight: 700 }}>{nom}</div>
+            {(c.email || c.ice) && (
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-3)', marginTop: 2 }}>
+                {[c.email, c.ice ? `ICE ${c.ice}` : ''].filter(Boolean).join(' · ')}
+              </div>
+            )}
+          </button>
+        );
+      })}
+    </div>,
+    document.body,
+  );
+
   return (
     <div ref={wrapRef} style={{ position: 'relative' }}>
       <div style={{ position: 'relative' }}>
@@ -247,7 +321,10 @@ function ClientSearchSelect({ clients, value, onChange, error }) {
             setOpen(true);
             if (!e.target.value.trim()) onChange('');
           }}
-          onFocus={() => setOpen(true)}
+          onFocus={() => {
+            setOpen(true);
+            updateDropdownRect();
+          }}
           placeholder="Rechercher un client…"
           autoComplete="off"
           style={IS(error)}
@@ -263,41 +340,7 @@ function ClientSearchSelect({ clients, value, onChange, error }) {
           </button>
         )}
       </div>
-      {open && (
-        <div style={{
-          position: 'absolute', zIndex: 50, top: '100%', left: 0, right: 0, marginTop: 4,
-          background: '#fff', border: '1.5px solid var(--border)', borderRadius: 8,
-          boxShadow: '0 8px 24px rgba(0,0,0,0.1)', maxHeight: 220, overflowY: 'auto',
-        }}
-        >
-          {filtered.length === 0 ? (
-            <div style={{ padding: '12px 14px', fontSize: '0.85rem', color: 'var(--text-3)' }}>Aucun client trouvé</div>
-          ) : filtered.map((c) => {
-            const nom = clientLabel(c);
-            const active = String(c.id) === String(value);
-            return (
-              <button
-                key={c.id}
-                type="button"
-                onClick={() => pick(c)}
-                style={{
-                  display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px',
-                  border: 'none', background: active ? '#FFF5F5' : '#fff', cursor: 'pointer',
-                  fontSize: '0.86rem', borderBottom: '1px solid var(--border)',
-                  color: 'var(--text)',
-                }}
-              >
-                <div style={{ fontWeight: 700 }}>{nom}</div>
-                {(c.email || c.ice) && (
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-3)', marginTop: 2 }}>
-                    {[c.email, c.ice ? `ICE ${c.ice}` : ''].filter(Boolean).join(' · ')}
-                  </div>
-                )}
-              </button>
-            );
-          })}
-        </div>
-      )}
+      {dropdown}
     </div>
   );
 }
@@ -309,7 +352,7 @@ function DevisDocumentHeader({ form, selectedClient, isEdit, onFieldChange, erro
     : '';
 
   return (
-    <div className="devis-doc-header card" style={{ padding: 0, overflow: 'hidden', marginBottom: 16 }}>
+    <div className="devis-doc-header card" style={{ padding: 0, overflow: 'visible', marginBottom: 16 }}>
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 0, borderBottom: '1px solid var(--border)' }}>
         <div style={{ padding: '24px 28px', borderRight: '1px solid var(--border)', background: '#FAFAFA' }}>
           <img src={CITYMO_LOGO} alt="CITYMO" style={{ height: 48, objectFit: 'contain', marginBottom: 14 }} />
