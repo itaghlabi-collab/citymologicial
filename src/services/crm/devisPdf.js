@@ -407,6 +407,30 @@ export async function generateDevisPdf(devis, catMap = {}) {
     return startY + Math.max(lines.length * 3.2 + 3, 8);
   };
 
+  const drawConditionsBlock = (startY) => {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(...TEXT);
+    doc.text('Conditions générales de vente', M, startY);
+    let cy = startY + 5;
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    doc.setTextColor(...MUTED);
+    const condLines = doc.splitTextToSize(conditionsText, CONTENT_W);
+    condLines.forEach((line) => {
+      doc.text(line, M, cy);
+      cy += 3.5;
+    });
+    return cy + 4;
+  };
+
+  const measureConditionsHeight = () => {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(7.5);
+    const condLines = doc.splitTextToSize(conditionsText, CONTENT_W);
+    return 5 + condLines.length * 3.5 + 8;
+  };
+
   /* ── Page 1 header (inchangé) ── */
   const headerTop = M;
 
@@ -422,12 +446,12 @@ export async function generateDevisPdf(devis, catMap = {}) {
     : { width: LOGO_MAX_W, height: 14 };
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(6.5);
+  doc.setFontSize(7.5);
   doc.setTextColor(...MUTED);
   let infoY = headerTop + logoSize.height + 2;
   [COMPANY.address, COMPANY.phone, COMPANY.email, COMPANY.legal, COMPANY.patente, COMPANY.fiscal].forEach((line) => {
     doc.text(line, M, infoY);
-    infoY += 3;
+    infoY += 3.3;
   });
 
   const clientX = PAGE_W - M - CLIENT_W;
@@ -463,14 +487,14 @@ export async function generateDevisPdf(devis, catMap = {}) {
   y = Math.max(infoY, clientY) + 6;
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(15);
+  doc.setFontSize(16.5);
   doc.setTextColor(0, 0, 0);
   doc.text(`DEVIS ${devis.reference || ''}`, M, y);
-  y += 3;
+  y += 3.5;
   doc.setDrawColor(...RED);
   doc.setLineWidth(0.9);
   doc.line(M, y, PAGE_W - M, y);
-  y += 7;
+  y += 7.5;
 
   const infoFields = [
     ['Date', fmtDate(devis.date_creation)],
@@ -479,30 +503,19 @@ export async function generateDevisPdf(devis, catMap = {}) {
     ['Réalisé par', (devis.commercial || '—').toUpperCase()],
   ];
 
-  doc.setFontSize(8);
+  doc.setFontSize(9);
   infoFields.forEach(([label, value]) => {
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(...TEXT);
     doc.text(`${label} :`, M, y);
     const valueLines = doc.splitTextToSize(String(value), CONTENT_W - 32);
     valueLines.forEach((line, i) => {
-      doc.text(line, M + 30, y + i * 4);
+      doc.text(line, M + 30, y + i * 4.2);
     });
-    y += Math.max(valueLines.length * 4, 5);
+    y += Math.max(valueLines.length * 4.2, 5.5);
   });
 
-  doc.setFont('helvetica', 'bold');
-  doc.text('Conditions de vente', M, y);
   y += 4;
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7);
-  doc.setTextColor(...MUTED);
-  const condLines = doc.splitTextToSize(conditionsText, CONTENT_W);
-  condLines.forEach((line) => {
-    doc.text(line, M, y);
-    y += 3.2;
-  });
-  y += 5;
 
   /* ── Corps : tableau devis ── */
   let tableHeaderOnPage = false;
@@ -553,6 +566,10 @@ export async function generateDevisPdf(devis, catMap = {}) {
 
   ensureSpace(TOTAL_ROW_H * 3);
   y = drawTotalsBlock(y);
+
+  const condH = measureConditionsHeight();
+  ensureSpace(condH);
+  y = drawConditionsBlock(y);
 
   const totalPages = doc.internal.getNumberOfPages();
   for (let p = 1; p <= totalPages; p++) {

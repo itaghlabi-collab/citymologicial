@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import {
   ChevronLeft, Trash2, Copy, AlertCircle,
   FileText, GripVertical, X, Download, Pencil,
@@ -185,6 +185,123 @@ function rowDragStyle(isDragging, isOver) {
   return {};
 }
 
+function clientLabel(c) {
+  return [c?.prenom, c?.nom].filter(Boolean).join(' ') || c?.nom || '';
+}
+
+function clientMatchesQuery(c, rawQuery) {
+  const q = rawQuery.trim().toLowerCase();
+  if (!q) return true;
+  const tokens = [
+    c.nom, c.prenom, clientLabel(c), c.email, c.ice, c.telephone, c.ville,
+  ].filter(Boolean).map((s) => String(s).toLowerCase());
+  return tokens.some((t) => t.startsWith(q) || t.split(/\s+/).some((w) => w.startsWith(q)));
+}
+
+function ClientSearchSelect({ clients, value, onChange, error }) {
+  const wrapRef = useRef(null);
+  const inputRef = useRef(null);
+  const [query, setQuery] = useState('');
+  const [open, setOpen] = useState(false);
+
+  const selected = clients.find((c) => String(c.id) === String(value));
+
+  useEffect(() => {
+    if (!open) setQuery(selected ? clientLabel(selected) : '');
+  }, [selected, value, open]);
+
+  useEffect(() => {
+    function onDocClick(e) {
+      if (wrapRef.current && !wrapRef.current.contains(e.target)) setOpen(false);
+    }
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, []);
+
+  const filtered = clients
+    .filter((c) => clientMatchesQuery(c, query))
+    .slice(0, 25);
+
+  function pick(client) {
+    onChange(String(client.id));
+    setQuery(clientLabel(client));
+    setOpen(false);
+  }
+
+  function clear() {
+    onChange('');
+    setQuery('');
+    setOpen(false);
+    inputRef.current?.focus();
+  }
+
+  return (
+    <div ref={wrapRef} style={{ position: 'relative' }}>
+      <div style={{ position: 'relative' }}>
+        <input
+          ref={inputRef}
+          type="text"
+          value={query}
+          onChange={(e) => {
+            setQuery(e.target.value);
+            setOpen(true);
+            if (!e.target.value.trim()) onChange('');
+          }}
+          onFocus={() => setOpen(true)}
+          placeholder="Rechercher un client…"
+          autoComplete="off"
+          style={IS(error)}
+        />
+        {value && (
+          <button
+            type="button"
+            onClick={clear}
+            title="Effacer"
+            style={{ position: 'absolute', right: 8, top: '50%', transform: 'translateY(-50%)', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: 2, display: 'flex' }}
+          >
+            <X size={14} />
+          </button>
+        )}
+      </div>
+      {open && (
+        <div style={{
+          position: 'absolute', zIndex: 50, top: '100%', left: 0, right: 0, marginTop: 4,
+          background: '#fff', border: '1.5px solid var(--border)', borderRadius: 8,
+          boxShadow: '0 8px 24px rgba(0,0,0,0.1)', maxHeight: 220, overflowY: 'auto',
+        }}
+        >
+          {filtered.length === 0 ? (
+            <div style={{ padding: '12px 14px', fontSize: '0.85rem', color: 'var(--text-3)' }}>Aucun client trouvé</div>
+          ) : filtered.map((c) => {
+            const nom = clientLabel(c);
+            const active = String(c.id) === String(value);
+            return (
+              <button
+                key={c.id}
+                type="button"
+                onClick={() => pick(c)}
+                style={{
+                  display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px',
+                  border: 'none', background: active ? '#FFF5F5' : '#fff', cursor: 'pointer',
+                  fontSize: '0.86rem', borderBottom: '1px solid var(--border)',
+                  color: 'var(--text)',
+                }}
+              >
+                <div style={{ fontWeight: 700 }}>{nom}</div>
+                {(c.email || c.ice) && (
+                  <div style={{ fontSize: '0.75rem', color: 'var(--text-3)', marginTop: 2 }}>
+                    {[c.email, c.ice ? `ICE ${c.ice}` : ''].filter(Boolean).join(' · ')}
+                  </div>
+                )}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 /* ── En-tête document devis ── */
 function DevisDocumentHeader({ form, selectedClient, isEdit, onFieldChange, errors }) {
   const clientName = selectedClient
@@ -196,7 +313,7 @@ function DevisDocumentHeader({ form, selectedClient, isEdit, onFieldChange, erro
       <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 0, borderBottom: '1px solid var(--border)' }}>
         <div style={{ padding: '24px 28px', borderRight: '1px solid var(--border)', background: '#FAFAFA' }}>
           <img src={CITYMO_LOGO} alt="CITYMO" style={{ height: 48, objectFit: 'contain', marginBottom: 14 }} />
-          <div style={{ fontSize: '0.82rem', color: 'var(--text-2)', lineHeight: 1.7 }}>
+          <div style={{ fontSize: '0.92rem', color: 'var(--text-2)', lineHeight: 1.75 }}>
             <div>{CITYMO_COMPANY.address}</div>
             <div>{CITYMO_COMPANY.email}</div>
             <div>{CITYMO_COMPANY.phone}</div>
@@ -205,18 +322,18 @@ function DevisDocumentHeader({ form, selectedClient, isEdit, onFieldChange, erro
         </div>
         <div style={{ padding: '24px 28px', background: '#fff' }}>
           <div style={{ fontFamily: 'var(--font-head)', fontWeight: 900, fontSize: '1.75rem', color: 'var(--red)', letterSpacing: '0.04em', marginBottom: 16 }}>DEVIS</div>
-          <div style={{ display: 'grid', gap: 8, fontSize: '0.85rem' }}>
+          <div style={{ display: 'grid', gap: 10, fontSize: '0.95rem' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
               <span style={{ color: 'var(--text-3)', fontWeight: 600 }}>N° devis</span>
-              <span style={{ fontWeight: 700 }}>{form.reference || '—'}</span>
+              <span style={{ fontWeight: 800, fontSize: '1.02rem' }}>{form.reference || '—'}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
               <span style={{ color: 'var(--text-3)', fontWeight: 600 }}>Date proposition</span>
-              <span>{fmtDateFr(form.date_creation)}</span>
+              <span style={{ fontWeight: 600 }}>{fmtDateFr(form.date_creation)}</span>
             </div>
             <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
               <span style={{ color: 'var(--text-3)', fontWeight: 600 }}>Validité</span>
-              <span>{fmtDateFr(form.date_validite)}</span>
+              <span style={{ fontWeight: 600 }}>{fmtDateFr(form.date_validite)}</span>
             </div>
             {form.commercial && (
               <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
@@ -243,13 +360,12 @@ function DevisDocumentHeader({ form, selectedClient, isEdit, onFieldChange, erro
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
           <div>
             <Label required>Client</Label>
-            <select value={form.client_id} onChange={(e) => onFieldChange('client_id', e.target.value)} style={IS(errors.client_id)}>
-              <option value="">Choisir un client…</option>
-              {(form._clients || []).map((c) => {
-                const nom = [c.prenom, c.nom].filter(Boolean).join(' ') || c.nom || '';
-                return <option key={c.id} value={c.id}>{nom}</option>;
-              })}
-            </select>
+            <ClientSearchSelect
+              clients={form._clients || []}
+              value={form.client_id}
+              onChange={(id) => onFieldChange('client_id', id)}
+              error={errors.client_id}
+            />
             {errors.client_id && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.client_id}</span>}
           </div>
           <div>
