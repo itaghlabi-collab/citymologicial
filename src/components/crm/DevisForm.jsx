@@ -5,7 +5,7 @@ import {
   FileText, GripVertical, X, Download, Pencil,
 } from 'lucide-react';
 import { listClients } from '../../services/crm/clients';
-import { listArticles } from '../../services/crm/articles';
+import { listArticles, getArticleById } from '../../services/crm/articles';
 import { listCategories } from '../../services/crm/categories';
 import { generateCrmDevisReference } from '../../services/crm/crmDevis';
 import { generateDevisPdf } from '../../services/crm/devisPdf';
@@ -443,6 +443,18 @@ function DevisDocumentHeader({ form, selectedClient, isEdit, onFieldChange, erro
   );
 }
 
+/* ── Description ligne (titre gras + détail multi-lignes) ── */
+function LigneDescriptionText({ description }) {
+  if (!description?.trim()) return null;
+  return (
+    <div style={{ fontSize: '0.76rem', color: 'var(--text-2)', marginTop: 6, lineHeight: 1.55, fontWeight: 400 }}>
+      {description.split('\n').map((line, i) => (
+        <div key={i}>{line || '\u00A0'}</div>
+      ))}
+    </div>
+  );
+}
+
 /* ── Ligne affichée (lecture seule) ── */
 function DevisLineDisplay({ ligne, lineNum, idx, articles, onDelete, onDuplicate, onEdit, drag }) {
   const dragProps = {
@@ -504,9 +516,7 @@ function DevisLineDisplay({ ligne, lineNum, idx, articles, onDelete, onDuplicate
         {ligne.ephemeral && (
           <span style={{ fontSize: '0.68rem', color: '#E65100', fontWeight: 600, background: '#FFF3E0', padding: '2px 6px', borderRadius: 4 }}>Hors catalogue</span>
         )}
-        {description && (
-          <div style={{ fontSize: '0.78rem', color: 'var(--text-3)', marginTop: 6, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{description}</div>
-        )}
+        <LigneDescriptionText description={description} />
       </td>
       <td style={{ padding: '10px 8px', textAlign: 'center', verticalAlign: 'top', fontSize: '0.88rem' }}>{ligne.quantite}</td>
       <td style={{ padding: '10px 8px', verticalAlign: 'top', fontSize: '0.82rem', color: 'var(--text-2)' }}>{ligne.unite}</td>
@@ -539,7 +549,7 @@ function DevisLineCard({ ligne, lineNum, idx, articles, onDelete, onDuplicate, o
         {ligne.ephemeral && <span style={{ fontSize: '0.68rem', color: '#E65100', fontWeight: 600 }}>Hors catalogue</span>}
       </div>
       <div style={{ fontWeight: 700, marginBottom: 6 }}>{ligne.designation}</div>
-      {description && <div style={{ fontSize: '0.8rem', color: 'var(--text-3)', marginBottom: 8, whiteSpace: 'pre-wrap' }}>{description}</div>}
+      <LigneDescriptionText description={description} />
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, fontSize: '0.82rem', marginBottom: 10 }}>
         <div><span style={{ color: 'var(--text-3)' }}>Qté </span><strong>{ligne.quantite} {ligne.unite}</strong></div>
         <div><span style={{ color: 'var(--text-3)' }}>PU </span><strong>{fmtMAD(ligne.prix_ht)}</strong></div>
@@ -555,7 +565,7 @@ function DevisLineCard({ ligne, lineNum, idx, articles, onDelete, onDuplicate, o
 }
 
 /* ── Composer ajout ligne ── */
-function LigneComposer({ draft, setDraft, categories, articles, onOk, onClear, onAddTitre, editingIdx, draftError }) {
+function LigneComposer({ draft, setDraft, categories, articles, onArticleSelect, onOk, onClear, onAddTitre, editingIdx, draftError }) {
   const catArticles = draft.categorie_id
     ? articles.filter((a) => String(a.categorie_id) === String(draft.categorie_id))
     : [];
@@ -567,23 +577,7 @@ function LigneComposer({ draft, setDraft, categories, articles, onOk, onClear, o
   }
 
   function onArticleChange(articleId) {
-    const art = articles.find((a) => String(a.id) === String(articleId));
-    if (art) {
-      setDraft((p) => ({
-        ...p,
-        mode: 'article',
-        article_id: articleId,
-        categorie_id: art.categorie_id ? String(art.categorie_id) : p.categorie_id,
-        designation: art.nom || '',
-        description: art.description || '',
-        unite: art.unite || 'unite',
-        prix_ht: art.prix_ht ?? art.prix ?? 0,
-        remise: art.remise ?? 0,
-        tva: art.tva ?? 20,
-      }));
-    } else {
-      setF('article_id', articleId);
-    }
+    onArticleSelect?.(articleId);
   }
 
   const isTitre = draft.mode === 'titre';
@@ -756,6 +750,16 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
     }
   }, [isEdit]);
 
+  useEffect(() => {
+    if (!articles.length) return;
+    setForm((p) => {
+      const enriched = enrichLignesDescriptions(p.lignes, articles);
+      const changed = enriched.some((l, i) => (l.description || '') !== (p.lignes[i]?.description || ''));
+      if (!changed) return p;
+      return { ...p, lignes: enriched };
+    });
+  }, [articles]);
+
   function setField(k, v) { setForm((p) => ({ ...p, [k]: v })); }
 
   const selectedClient = clients.find((c) => String(c.id) === String(form.client_id));
@@ -778,6 +782,73 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
     setDraft(ligneToDraft(form.lignes[idx], articles));
     setEditingIdx(idx);
     setDraftError('');
+    const ligne = form.lignes[idx];
+    if (ligne?.article_id) {
+      getArticleById(ligne.article_id).then((fresh) => {
+        if (!fresh) return;
+        setArticles((prev) => {
+          const i = prev.findIndex((a) => String(a.id) === String(fresh.id));
+          if (i < 0) return [...prev, fresh];
+          const next = [...prev];
+          next[i] = fresh;
+          return next;
+        });
+        setDraft((p) => {
+          if (String(p.article_id) !== String(fresh.id)) return p;
+          const desc = p.description?.trim() || fresh.description?.trim() || '';
+          return desc === (p.description || '') ? p : { ...p, description: desc };
+        });
+      }).catch(() => {});
+    }
+  }
+
+  async function handleArticleSelect(articleId) {
+    if (!articleId) {
+      setDraft((p) => ({ ...p, article_id: '' }));
+      return;
+    }
+    const art = articles.find((a) => String(a.id) === String(articleId));
+    if (art) {
+      setDraft((p) => ({
+        ...p,
+        mode: 'article',
+        article_id: articleId,
+        categorie_id: art.categorie_id ? String(art.categorie_id) : p.categorie_id,
+        designation: art.nom || '',
+        description: art.description || '',
+        unite: art.unite || 'unite',
+        prix_ht: art.prix_ht ?? art.prix ?? 0,
+        remise: art.remise ?? 0,
+        tva: art.tva ?? 20,
+      }));
+    } else {
+      setDraft((p) => ({ ...p, article_id: articleId }));
+    }
+    try {
+      const fresh = await getArticleById(articleId);
+      if (!fresh) return;
+      setArticles((prev) => {
+        const i = prev.findIndex((a) => String(a.id) === String(articleId));
+        if (i < 0) return [...prev, fresh];
+        const next = [...prev];
+        next[i] = fresh;
+        return next;
+      });
+      setDraft((p) => {
+        if (String(p.article_id) !== String(articleId)) return p;
+        return {
+          ...p,
+          designation: fresh.nom || p.designation,
+          description: fresh.description?.trim() ? fresh.description : p.description,
+          unite: fresh.unite || p.unite,
+          prix_ht: fresh.prix_ht ?? p.prix_ht,
+          remise: fresh.remise ?? p.remise,
+          tva: fresh.tva ?? p.tva,
+        };
+      });
+    } catch {
+      /* cache local suffit */
+    }
   }
 
   function resetDraft() {
@@ -802,7 +873,7 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
   function commitDraft() {
     const err = validateDraft();
     if (err) { setDraftError(err); return; }
-    const ligne = draftToLigne(draft, articles);
+    const ligne = enrichLignesDescriptions([draftToLigne(draft, articles)], articles)[0];
     if (editingIdx != null) {
       setForm((p) => {
         const ls = [...p.lignes];
@@ -1074,6 +1145,7 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
                 setDraft={setDraft}
                 categories={categories}
                 articles={articles}
+                onArticleSelect={handleArticleSelect}
                 onOk={commitDraft}
                 onClear={resetDraft}
                 onAddTitre={() => { setDraft({ ...EMPTY_DRAFT(), mode: 'titre' }); setDraftError(''); }}

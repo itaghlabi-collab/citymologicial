@@ -100,6 +100,21 @@ export async function listArticles() {
   return (data || []).map(normalizeArticle);
 }
 
+export async function getArticleById(id) {
+  if (!id) return null;
+  await getAuthUserId();
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .select('*')
+    .eq('id', id)
+    .single();
+  if (error) {
+    console.error('[CITYMO] articles get', error, { id });
+    throw error;
+  }
+  return normalizeArticle(data);
+}
+
 /** Attribue les références manquantes aux articles existants. */
 export async function backfillMissingArticleReferences() {
   await getAuthUserId();

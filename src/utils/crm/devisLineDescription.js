@@ -5,9 +5,16 @@
 export function resolveLigneDescription(ligne, articles = []) {
   const stored = ligne?.description?.trim();
   if (stored) return stored;
-  if (!ligne?.article_id) return '';
-  const art = articles.find((a) => String(a.id) === String(ligne.article_id));
-  return art?.description?.trim() || '';
+  if (ligne?.article_id) {
+    const art = articles.find((a) => String(a.id) === String(ligne.article_id));
+    if (art?.description?.trim()) return art.description.trim();
+  }
+  if (ligne?.designation?.trim()) {
+    const nom = ligne.designation.trim().toLowerCase();
+    const art = articles.find((a) => (a.nom || '').trim().toLowerCase() === nom);
+    if (art?.description?.trim()) return art.description.trim();
+  }
+  return '';
 }
 
 export function enrichLignesDescriptions(lignes, articles = []) {
