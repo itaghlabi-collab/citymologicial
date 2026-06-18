@@ -46,6 +46,7 @@ export function toArticleRow(form) {
       ? form.categorie_id
       : null,
     reference: form.reference?.trim() || null,
+    description: form.description?.trim() || null,
   };
 }
 
@@ -208,6 +209,7 @@ export async function duplicateArticle(id) {
     statut: row.statut || 'actif',
     categorie_id: row.categorie_id,
     reference,
+    description: row.description || null,
   };
 
   const { data, error } = await getSupabase()
