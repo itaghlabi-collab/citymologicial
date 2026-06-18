@@ -3,6 +3,7 @@
  */
 import { getSupabase, isSupabaseConfigured } from '../../lib/supabase';
 import { ENV } from '../../config/env';
+import { auditWorkerPayrollCashSync } from '../rh/workerPayroll';
 
 export async function diagnoseFinanceAccess() {
   const result = {
@@ -60,7 +61,7 @@ export async function diagnoseFinanceAccess() {
   return result;
 }
 
-/** Audit : paiements RH payés vs lignes finance_transactions auto. */
+/** Audit : paiements RH payés vs lignes finance_transactions (montant + date exacts). */
 export async function auditRhFinanceSync() {
   const result = {
     schemaOk: false,
@@ -92,36 +93,22 @@ export async function auditRhFinanceSync() {
     }
     result.schemaOk = true;
 
-    const [payrollRes, subRes, workerTxRes, subTxRes] = await Promise.all([
-      client.from('payroll').select('id, montant_net').in('statut', ['Paye', 'Payé']).gt('montant_net', 0),
+    const [workerAudit, subRes, subTxRes] = await Promise.all([
+      auditWorkerPayrollCashSync(client),
       client.from('subcontractor_payments').select('id, amount').eq('status', 'paid').gt('amount', 0),
-      client.from('finance_transactions').select('id', { count: 'exact', head: true })
-        .in('source_type', ['worker_payment', 'worker_weekly_payment']).neq('statut', 'Annulé'),
       client.from('finance_transactions').select('id', { count: 'exact', head: true })
         .eq('source_type', 'subcontractor_payment').neq('statut', 'Annulé'),
     ]);
 
-    if (payrollRes.error) throw payrollRes.error;
     if (subRes.error) throw subRes.error;
 
-    result.payrollPaid = payrollRes.data?.length || 0;
+    result.payrollPaid = workerAudit.expectedGroups;
+    result.workerTxCount = workerAudit.workerTxCount;
+    result.missingWorker = workerAudit.missingOrWrong;
     result.subcontractorPaid = subRes.data?.length || 0;
-    result.workerTxCount = workerTxRes.count ?? 0;
     result.subcontractorTxCount = subTxRes.count ?? 0;
 
-    const paidPayrollIds = new Set((payrollRes.data || []).map((r) => r.id));
     const paidSubIds = new Set((subRes.data || []).map((r) => r.id));
-
-    if (paidPayrollIds.size > 0) {
-      const { data: workerTxs } = await client
-        .from('finance_transactions')
-        .select('source_id')
-        .in('source_type', ['worker_payment', 'worker_weekly_payment'])
-        .neq('statut', 'Annulé');
-      const syncedPayrollIds = new Set((workerTxs || []).map((t) => t.source_id).filter(Boolean));
-      result.missingWorker = [...paidPayrollIds].filter((id) => !syncedPayrollIds.has(id)).length;
-    }
-
     if (paidSubIds.size > 0) {
       const { data: subTxs } = await client
         .from('finance_transactions')

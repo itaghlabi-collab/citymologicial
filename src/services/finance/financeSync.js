@@ -204,10 +204,7 @@ function resolveWorkerSyncDate(entity) {
 }
 
 function resolveWorkerSyncMontant(entity) {
-  return Number(
-    entity?.paid_amount ?? entity?.net_to_pay ?? entity?.net_amount ?? entity?.total_net
-    ?? entity?.total ?? entity?.montantNet ?? entity?.montant_net,
-  ) || 0;
+  return Number(entity?.net_to_pay ?? entity?.paid_amount ?? entity?.total ?? entity?.montant_net) || 0;
 }
 
 function buildTransactionRow(sourceType, entity) {
