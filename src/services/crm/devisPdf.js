@@ -467,26 +467,19 @@ export async function generateDevisPdf(devis, catMap = {}) {
 
   const drawConditionsBlock = (startY) => {
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9);
+    doc.setFontSize(8);
     doc.setTextColor(...TEXT);
-    doc.text('Conditions générales de vente', M, startY);
-    let cy = startY + 6;
+    doc.text('Conditions de vente', M, startY);
+    let cy = startY + 4;
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(7.5);
+    doc.setFontSize(7);
     doc.setTextColor(...MUTED);
     const condLines = doc.splitTextToSize(conditionsText, CONTENT_W);
     condLines.forEach((line) => {
       doc.text(line, M, cy);
-      cy += 3.5;
+      cy += 3.2;
     });
-    return cy + 4;
-  };
-
-  const measureConditionsHeight = () => {
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(7.5);
-    const condLines = doc.splitTextToSize(conditionsText, CONTENT_W);
-    return 6 + condLines.length * 3.5 + 8;
+    return cy + 5;
   };
 
   const arreteText = buildArreteText(devis.total_ttc);
@@ -526,12 +519,12 @@ export async function generateDevisPdf(devis, catMap = {}) {
     : { width: LOGO_MAX_W, height: 14 };
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7.5);
+  doc.setFontSize(6.5);
   doc.setTextColor(...MUTED);
   let infoY = headerTop + logoSize.height + 2;
   [COMPANY.address, COMPANY.phone, COMPANY.email, COMPANY.legal, COMPANY.patente, COMPANY.fiscal].forEach((line) => {
     doc.text(line, M, infoY);
-    infoY += 3.3;
+    infoY += 3;
   });
 
   const clientX = PAGE_W - M - CLIENT_W;
@@ -561,46 +554,41 @@ export async function generateDevisPdf(devis, catMap = {}) {
   }
   if (client.ice) {
     doc.text(`ICE : ${client.ice}`, clientX + CLIENT_W, clientY, { align: 'right' });
-    clientY += 3.5;
+    clientY += 3;
   }
-
-  doc.setFontSize(7.5);
-  doc.setTextColor(...TEXT);
-  doc.text(`Date : ${fmtDate(devis.date_creation)}`, clientX + CLIENT_W, clientY, { align: 'right' });
-  clientY += 3.5;
-  doc.text(`Valable jusqu'au : ${fmtDate(devis.date_validite)}`, clientX + CLIENT_W, clientY, { align: 'right' });
-  clientY += 3.5;
 
   y = Math.max(infoY, clientY) + 6;
 
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(16.5);
+  doc.setFontSize(15);
   doc.setTextColor(0, 0, 0);
   doc.text(`DEVIS ${devis.reference || ''}`, M, y);
-  y += 3.5;
+  y += 3;
   doc.setDrawColor(...RED);
   doc.setLineWidth(0.9);
   doc.line(M, y, PAGE_W - M, y);
-  y += 7.5;
+  y += 7;
 
   const infoFields = [
+    ['Date', fmtDate(devis.date_creation)],
+    ['Valable jusqu\'au', fmtDate(devis.date_validite)],
     ['Intitulé', (devis.titre || '—').toUpperCase()],
     ['Réalisé par', (devis.commercial || '—').toUpperCase()],
   ];
 
-  doc.setFontSize(9);
+  doc.setFontSize(8);
   infoFields.forEach(([label, value]) => {
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(...TEXT);
     doc.text(`${label} :`, M, y);
     const valueLines = doc.splitTextToSize(String(value), CONTENT_W - 32);
     valueLines.forEach((line, i) => {
-      doc.text(line, M + 30, y + i * 4.2);
+      doc.text(line, M + 30, y + i * 4);
     });
-    y += Math.max(valueLines.length * 4.2, 5.5);
+    y += Math.max(valueLines.length * 4, 5);
   });
 
-  y += 4;
+  y = drawConditionsBlock(y);
 
   /* ── Corps : tableau devis ── */
   let tableHeaderOnPage = false;
@@ -657,12 +645,6 @@ export async function generateDevisPdf(devis, catMap = {}) {
   const arreteH = measureArreteHeight();
   ensureSpace(arreteH);
   y = drawArreteBlock(y);
-
-  y += 10;
-
-  const condH = measureConditionsHeight();
-  ensureSpace(condH);
-  y = drawConditionsBlock(y);
 
   const totalPages = doc.internal.getNumberOfPages();
   for (let p = 1; p <= totalPages; p++) {
