@@ -7,7 +7,7 @@
 DELETE FROM public.finance_transactions ft
 USING public.payroll p
 WHERE ft.source_type IN ('worker_weekly_payment', 'worker_payment')
-  AND ft.source_id = p.id::text
+  AND ft.source_id = p.id
   AND ft.statut <> 'Annulé';
 
 -- 2) Ancien type worker_payment

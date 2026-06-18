@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import {
-  ChevronLeft, Plus, Trash2, Copy, AlertCircle,
-  FileText, Package, ChevronDown, ChevronUp, GripVertical, X, Download
+  ChevronLeft, Trash2, Copy, AlertCircle,
+  FileText, GripVertical, X, Download, Pencil,
 } from 'lucide-react';
 import { listClients } from '../../services/crm/clients';
 import { listArticles } from '../../services/crm/articles';
@@ -11,11 +11,32 @@ import { generateDevisPdf } from '../../services/crm/devisPdf';
 import { formatCategoryDisplayName } from '../../utils/crm/categoryDisplay';
 import { TYPE_PROJET_VALUES, TYPE_PROJET_LABEL } from '../../constants/commercial';
 
-/* ── Helpers ── */
+const CITYMO_LOGO = 'https://i.ibb.co/N6SbC06M/logopng.png';
+const CITYMO_COMPANY = {
+  address: '228 Bd Mohammed V, Casablanca 20000',
+  email: 'contact@citymo.ma',
+  phone: 'Tél : +212 52 231 0043',
+  ice: 'ICE : 002023116000060',
+};
+
+const UNITES = ['unite', 'm2', 'ml', 'm3', 'm', 'forfait', 'heure', 'jour', 'pack'];
+const TVA_TAUX = [0, 7, 10, 14, 20];
+const STATUTS = ['brouillon', 'envoye', 'valide', 'refuse', 'expire', 'en_attente'];
+const STATUT_LABEL = {
+  brouillon: 'Brouillon', envoye: 'Envoyé', valide: 'Validé', refuse: 'Refusé',
+  expire: 'Expiré', en_attente: 'En attente',
+};
+const MODALITES = ['30 jours net', '60 jours net', 'Comptant', 'A la commande', '50% avance / 50% livraison', 'Sur devis'];
+
 function fmtMAD(v) {
   const n = Number(v);
-  if (isNaN(n)) return '0 MAD';
-  return n.toLocaleString('fr-MA') + ' MAD';
+  if (Number.isNaN(n)) return '0,00 MAD';
+  return n.toLocaleString('fr-MA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' MAD';
+}
+
+function fmtDateFr(iso) {
+  if (!iso) return '—';
+  return new Date(`${iso}T12:00:00`).toLocaleDateString('fr-MA');
 }
 
 function IS(err, extra = {}) {
@@ -43,24 +64,14 @@ function Label({ children, required }) {
   );
 }
 
-function SectionTitle({ children }) {
-  return (
-    <div style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 14, paddingBottom: 8, borderBottom: '1px solid var(--border)' }}>
-      {children}
-    </div>
-  );
+function ligneSousTotalHt(l) {
+  if (l.type !== 'article') return 0;
+  return Number(l.quantite) * Number(l.prix_ht) * (1 - Number(l.remise) / 100);
 }
-
-/* ── Constants ── */
-const UNITES = ['unite', 'm2', 'ml', 'm3', 'm', 'forfait', 'heure', 'jour', 'pack'];
-const TVA_TAUX = [0, 7, 10, 14, 20];
-const STATUTS = ['brouillon', 'envoye', 'valide', 'refuse', 'expire', 'en_attente'];
-const STATUT_LABEL = { brouillon: 'Brouillon', envoye: 'Envoye', valide: 'Valide', refuse: 'Refuse', expire: 'Expire', en_attente: 'En attente' };
-const MODALITES = ['30 jours net', '60 jours net', 'Comptant', 'A la commande', '50% avance / 50% livraison', 'Sur devis'];
 
 function genRef() {
   const d = new Date();
-  return 'DV-' + d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(Math.floor(Math.random() * 9000) + 1000);
+  return `DV-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}-${String(Math.floor(Math.random() * 9000) + 1000)}`;
 }
 
 function today() { return new Date().toISOString().slice(0, 10); }
@@ -68,7 +79,7 @@ function addDays(n) { const d = new Date(); d.setDate(d.getDate() + n); return d
 
 const EMPTY_LIGNE = (overrides = {}) => ({
   _id: Date.now() + Math.random(),
-  type: 'article', // 'article' | 'titre' | 'sous_titre' | 'note'
+  type: 'article',
   ephemeral: false,
   designation: '',
   description: '',
@@ -82,7 +93,24 @@ const EMPTY_LIGNE = (overrides = {}) => ({
   ...overrides,
 });
 
-const EMPTY_LIGNE_EPHEMERE = () => EMPTY_LIGNE({ ephemeral: true });
+const EMPTY_DRAFT = () => ({
+  mode: 'article',
+  categorie_id: '',
+  article_id: '',
+  designation: '',
+  description: '',
+  quantite: 1,
+  unite: 'unite',
+  prix_ht: 0,
+  remise: 0,
+  tva: 20,
+});
+
+const DEFAULT_CONDITIONS = [
+  '• Les prix sont exprimés en MAD',
+  '• Paiement selon les modalités convenues au contrat.',
+  '• Nos prestations se limitent aux services proposés dans notre offre commerciale tous travaux supplémentaires seront soumis à un devis complémentaire.',
+].join('\n');
 
 const EMPTY_DEVIS = {
   reference: '',
@@ -94,28 +122,58 @@ const EMPTY_DEVIS = {
   type_projet: '',
   client_id: '',
   modalites_paiement: '30 jours net',
-  conditions: '',
+  conditions: DEFAULT_CONDITIONS,
   notes_internes: '',
-  lignes: [EMPTY_LIGNE()],
+  lignes: [],
 };
 
-/* ── Spinner ── */
+function draftToLigne(draft) {
+  if (draft.mode === 'titre') {
+    return EMPTY_LIGNE({ type: 'titre', designation: draft.designation.trim() });
+  }
+  return EMPTY_LIGNE({
+    type: 'article',
+    ephemeral: draft.mode === 'hors_catalogue',
+    categorie_id: draft.mode === 'hors_catalogue' ? '' : draft.categorie_id,
+    article_id: draft.mode === 'hors_catalogue' ? '' : draft.article_id,
+    designation: draft.designation.trim(),
+    description: draft.description?.trim() || '',
+    quantite: Number(draft.quantite) || 1,
+    unite: draft.unite || 'unite',
+    prix_ht: Number(draft.prix_ht) || 0,
+    remise: Number(draft.remise) || 0,
+    tva: Number(draft.tva) ?? 20,
+  });
+}
+
+function ligneToDraft(ligne) {
+  if (ligne.type === 'titre') {
+    return { ...EMPTY_DRAFT(), mode: 'titre', designation: ligne.designation || '' };
+  }
+  return {
+    ...EMPTY_DRAFT(),
+    mode: ligne.ephemeral ? 'hors_catalogue' : 'article',
+    categorie_id: ligne.categorie_id || '',
+    article_id: ligne.article_id || '',
+    designation: ligne.designation || '',
+    description: ligne.description || '',
+    quantite: ligne.quantite ?? 1,
+    unite: ligne.unite || 'unite',
+    prix_ht: ligne.prix_ht ?? 0,
+    remise: ligne.remise ?? 0,
+    tva: ligne.tva ?? 20,
+  };
+}
+
 function Spinner() {
   return (
     <div style={{ display: 'inline-block', width: 16, height: 16, border: '2px solid rgba(255,255,255,0.35)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
   );
 }
 
-/* ── Ligne article row ── */
 function DragHandle({ onDragStart, onDragEnd }) {
   return (
-    <span
-      draggable
-      onDragStart={onDragStart}
-      onDragEnd={onDragEnd}
-      title="Glisser pour réorganiser"
-      style={{ cursor: 'grab', display: 'inline-flex', alignItems: 'center', touchAction: 'none' }}
-    >
+    <span draggable onDragStart={onDragStart} onDragEnd={onDragEnd} title="Glisser pour réorganiser" style={{ cursor: 'grab', display: 'inline-flex', alignItems: 'center', touchAction: 'none' }}>
       <GripVertical size={13} style={{ color: 'var(--text-3)' }} />
     </span>
   );
@@ -127,66 +185,128 @@ function rowDragStyle(isDragging, isOver) {
   return {};
 }
 
-function LigneRow({ ligne, idx, categories, articles, onChange, onDelete, onDuplicate, drag }) {
-  const [showDesc, setShowDesc] = useState(!!ligne.ephemeral);
-  const catArticles = ligne.categorie_id
-    ? articles.filter(a => String(a.categorie_id) === String(ligne.categorie_id))
-    : [];
-  const sous_total_ht = Number(ligne.quantite) * Number(ligne.prix_ht) * (1 - Number(ligne.remise) / 100);
-  const sous_total_ttc = sous_total_ht * (1 + Number(ligne.tva) / 100);
+/* ── En-tête document devis ── */
+function DevisDocumentHeader({ form, selectedClient, isEdit, onFieldChange, errors }) {
+  const clientName = selectedClient
+    ? [selectedClient.prenom, selectedClient.nom].filter(Boolean).join(' ') || selectedClient.nom
+    : '';
 
-  function setField(k, v) { onChange({ ...ligne, [k]: v }); }
+  return (
+    <div className="devis-doc-header card" style={{ padding: 0, overflow: 'hidden', marginBottom: 16 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 0, borderBottom: '1px solid var(--border)' }}>
+        <div style={{ padding: '24px 28px', borderRight: '1px solid var(--border)', background: '#FAFAFA' }}>
+          <img src={CITYMO_LOGO} alt="CITYMO" style={{ height: 48, objectFit: 'contain', marginBottom: 14 }} />
+          <div style={{ fontSize: '0.82rem', color: 'var(--text-2)', lineHeight: 1.7 }}>
+            <div>{CITYMO_COMPANY.address}</div>
+            <div>{CITYMO_COMPANY.email}</div>
+            <div>{CITYMO_COMPANY.phone}</div>
+            <div style={{ fontWeight: 600, marginTop: 4 }}>{CITYMO_COMPANY.ice}</div>
+          </div>
+        </div>
+        <div style={{ padding: '24px 28px', background: '#fff' }}>
+          <div style={{ fontFamily: 'var(--font-head)', fontWeight: 900, fontSize: '1.75rem', color: 'var(--red)', letterSpacing: '0.04em', marginBottom: 16 }}>DEVIS</div>
+          <div style={{ display: 'grid', gap: 8, fontSize: '0.85rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+              <span style={{ color: 'var(--text-3)', fontWeight: 600 }}>N° devis</span>
+              <span style={{ fontWeight: 700 }}>{form.reference || '—'}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+              <span style={{ color: 'var(--text-3)', fontWeight: 600 }}>Date proposition</span>
+              <span>{fmtDateFr(form.date_creation)}</span>
+            </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+              <span style={{ color: 'var(--text-3)', fontWeight: 600 }}>Validité</span>
+              <span>{fmtDateFr(form.date_validite)}</span>
+            </div>
+            {form.commercial && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+                <span style={{ color: 'var(--text-3)', fontWeight: 600 }}>Commercial</span>
+                <span>{form.commercial}</span>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
 
-  function onCategorieChange(catId) {
-    onChange({
-      ...ligne,
-      categorie_id: catId,
-      article_id: '',
-      designation: ligne.ephemeral ? ligne.designation : '',
-      description: ligne.ephemeral ? ligne.description : '',
-    });
-  }
+      <div style={{ padding: '20px 28px', display: 'grid', gap: 16 }}>
+        <div>
+          <Label required>Titre du devis</Label>
+          <input
+            value={form.titre}
+            onChange={(e) => onFieldChange('titre', e.target.value)}
+            placeholder="Ex : Aménagement villa — phase 1"
+            style={{ ...IS(errors.titre), fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '1rem' }}
+          />
+          {errors.titre && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.titre}</span>}
+        </div>
 
-  function onArticleChange(articleId) {
-    const art = articles.find(a => String(a.id) === String(articleId));
-    if (art) {
-      onChange({
-        ...ligne,
-        article_id: articleId,
-        ephemeral: false,
-        categorie_id: art.categorie_id ? String(art.categorie_id) : ligne.categorie_id,
-        designation: art.nom || '',
-        description: art.description || '',
-        unite: art.unite || 'unite',
-        prix_ht: art.prix_ht ?? art.prix ?? 0,
-        remise: art.remise ?? 0,
-        tva: art.tva ?? 20,
-      });
-    } else {
-      setField('article_id', articleId);
-    }
-  }
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+          <div>
+            <Label required>Client</Label>
+            <select value={form.client_id} onChange={(e) => onFieldChange('client_id', e.target.value)} style={IS(errors.client_id)}>
+              <option value="">Choisir un client…</option>
+              {(form._clients || []).map((c) => {
+                const nom = [c.prenom, c.nom].filter(Boolean).join(' ') || c.nom || '';
+                return <option key={c.id} value={c.id}>{nom}</option>;
+              })}
+            </select>
+            {errors.client_id && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.client_id}</span>}
+          </div>
+          <div>
+            <Label>Statut</Label>
+            <select value={form.statut} onChange={(e) => onFieldChange('statut', e.target.value)} style={IS(false)}>
+              {STATUTS.map((s) => <option key={s} value={s}>{STATUT_LABEL[s]}</option>)}
+            </select>
+          </div>
+        </div>
 
-  const dragRowProps = {
+        {selectedClient && (
+          <div style={{ background: 'var(--red)', color: '#fff', borderRadius: 8, padding: '14px 18px' }}>
+            <div style={{ fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', opacity: 0.85, marginBottom: 6 }}>Client</div>
+            <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.05rem', marginBottom: 8 }}>{clientName}</div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: '4px 16px', fontSize: '0.82rem', opacity: 0.95 }}>
+              {selectedClient.email && <div>{selectedClient.email}</div>}
+              {selectedClient.telephone && <div>{selectedClient.telephone}</div>}
+              {selectedClient.ice && <div>ICE : {selectedClient.ice}</div>}
+              {selectedClient.adresse && <div>{selectedClient.adresse}</div>}
+              {selectedClient.ville && <div>{selectedClient.ville}</div>}
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/* ── Ligne affichée (lecture seule) ── */
+function DevisLineDisplay({ ligne, lineNum, idx, onDelete, onDuplicate, onEdit, drag }) {
+  const dragProps = {
     style: rowDragStyle(drag.isDragging, drag.isOver),
     onDragOver: (e) => { e.preventDefault(); drag.onDragOver(idx); },
     onDrop: (e) => { e.preventDefault(); drag.onDrop(idx); },
   };
-
   const handleProps = {
     onDragStart: (e) => drag.onDragStart(e, idx),
     onDragEnd: drag.onDragEnd,
   };
+  const actions = (
+    <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+      <button type="button" onClick={() => onEdit(idx)} title="Modifier" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: 4 }}><Pencil size={13} /></button>
+      <button type="button" onClick={() => onDuplicate(idx)} title="Dupliquer" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: 4 }}><Copy size={13} /></button>
+      <button type="button" onClick={() => onDelete(idx)} title="Supprimer" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', padding: 4 }}><Trash2 size={13} /></button>
+    </div>
+  );
 
   if (ligne.type === 'titre') {
     return (
-      <tr {...dragRowProps} style={{ background: '#F5F6F8', ...dragRowProps.style }}>
-        <td colSpan={9} style={{ padding: '8px 10px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <tr {...dragProps} className="devis-line-titre">
+        <td colSpan={8} style={{ padding: '12px 14px', background: 'linear-gradient(90deg, #F5F5F5 0%, #FAFAFA 100%)', borderTop: '2px solid var(--red)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
             <DragHandle {...handleProps} />
-            <input value={ligne.designation} onChange={e => setField('designation', e.target.value)} placeholder="Titre de section..." style={{ ...IS(false), fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.92rem', flex: 1 }} />
-            <span style={{ fontSize: '0.72rem', color: 'var(--text-3)', background: 'var(--border)', borderRadius: 4, padding: '2px 6px', flexShrink: 0 }}>Titre</span>
-            <button type="button" onClick={onDelete} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: 3, flexShrink: 0 }}><X size={13} /></button>
+            <span style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '0.95rem', color: 'var(--red)', textTransform: 'uppercase', letterSpacing: '0.06em', flex: 1 }}>
+              {ligne.designation || 'Section'}
+            </span>
+            {actions}
           </div>
         </td>
       </tr>
@@ -195,160 +315,253 @@ function LigneRow({ ligne, idx, categories, articles, onChange, onDelete, onDupl
 
   if (ligne.type === 'note') {
     return (
-      <tr {...dragRowProps} style={{ background: '#FFFDE7', ...dragRowProps.style }}>
-        <td colSpan={9} style={{ padding: '8px 10px' }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 8 }}>
+      <tr {...dragProps}>
+        <td colSpan={8} style={{ padding: '10px 14px', background: '#FFFDE7' }}>
+          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
             <DragHandle {...handleProps} />
-            <textarea value={ligne.designation} onChange={e => setField('designation', e.target.value)} placeholder="Note ou commentaire..." rows={2} style={{ ...IS(false), resize: 'vertical', flex: 1, fontSize: '0.82rem', background: 'transparent' }} />
-            <span style={{ fontSize: '0.72rem', color: '#F57C00', background: '#FFF3E0', borderRadius: 4, padding: '2px 6px', flexShrink: 0 }}>Note</span>
-            <button type="button" onClick={onDelete} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: 3, flexShrink: 0, marginTop: 2 }}><X size={13} /></button>
+            <div style={{ flex: 1, fontSize: '0.85rem', color: 'var(--text-2)', fontStyle: 'italic' }}>{ligne.designation}</div>
+            {actions}
           </div>
         </td>
       </tr>
     );
   }
 
-  if (ligne.ephemeral) {
-    return (
-      <tr {...dragRowProps} style={{ background: '#FFF8E1', ...dragRowProps.style }}>
-        <td style={{ padding: '8px 6px', width: 20, verticalAlign: 'top' }}>
-          <DragHandle {...handleProps} />
-        </td>
-        <td style={{ padding: '6px 6px', minWidth: 200 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <select value={ligne.categorie_id} onChange={e => onCategorieChange(e.target.value)} style={{ ...IS(false), fontSize: '0.78rem' }}>
-              <option value="">Catégorie...</option>
-              {categories.map(c => <option key={c.id} value={c.id}>{formatCategoryDisplayName(c.nom)}</option>)}
-            </select>
-            <input
-              value={ligne.designation}
-              onChange={e => setField('designation', e.target.value)}
-              placeholder="Ex : Démolition cloison BA13"
-              style={{ ...IS(false), fontSize: '0.82rem', borderColor: '#F57C00', background: '#FFFDE7' }}
-            />
-            <span style={{ fontSize: '0.68rem', color: '#E65100', fontWeight: 600 }}>Article éphémère — non enregistré au catalogue</span>
-            <textarea
-              value={ligne.description}
-              onChange={e => setField('description', e.target.value)}
-              placeholder="Description..."
-              rows={2}
-              style={{ ...IS(false), resize: 'vertical', fontSize: '0.78rem' }}
-            />
-          </div>
-        </td>
-        <td style={{ padding: '6px 5px', width: 70 }}>
-          <input type="number" min="0" step="0.01" value={ligne.quantite} onChange={e => setField('quantite', e.target.value)} style={{ ...IS(false), textAlign: 'center', fontSize: '0.85rem' }} />
-        </td>
-        <td style={{ padding: '6px 5px', width: 80 }}>
-          <select value={ligne.unite} onChange={e => setField('unite', e.target.value)} style={{ ...IS(false), fontSize: '0.82rem' }}>
-            {UNITES.map(u => <option key={u} value={u}>{u}</option>)}
-          </select>
-        </td>
-        <td style={{ padding: '6px 5px', width: 105 }}>
-          <input type="number" min="0" step="0.01" value={ligne.prix_ht} onChange={e => setField('prix_ht', e.target.value)} style={{ ...IS(false), textAlign: 'right', fontSize: '0.85rem' }} />
-        </td>
-        <td style={{ padding: '6px 5px', width: 65 }}>
-          <input type="number" min="0" max="100" step="1" value={ligne.remise} onChange={e => setField('remise', e.target.value)} style={{ ...IS(false), textAlign: 'center', fontSize: '0.85rem' }} />
-        </td>
-        <td style={{ padding: '6px 5px', width: 72 }}>
-          <select value={ligne.tva} onChange={e => setField('tva', e.target.value)} style={{ ...IS(false), fontSize: '0.82rem' }}>
-            {TVA_TAUX.map(t => <option key={t} value={t}>{t}%</option>)}
-          </select>
-        </td>
-        <td style={{ padding: '6px 8px', width: 110, textAlign: 'right' }}>
-          <div style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.88rem' }}>{fmtMAD(sous_total_ht.toFixed(2))}</div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>TTC: {fmtMAD(sous_total_ttc.toFixed(2))}</div>
-        </td>
-        <td style={{ padding: '6px 5px', width: 52 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-            <button type="button" onClick={onDuplicate} title="Dupliquer" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: 3 }}><Copy size={12} /></button>
-            <button type="button" onClick={onDelete} title="Supprimer" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', padding: 3 }}><Trash2 size={12} /></button>
-          </div>
-        </td>
-      </tr>
-    );
-  }
+  const ht = ligneSousTotalHt(ligne);
 
   return (
-    <>
-      <tr {...dragRowProps}>
-        <td style={{ padding: '8px 6px', width: 20, verticalAlign: 'top' }}>
-          <DragHandle {...handleProps} />
-        </td>
-        <td style={{ padding: '6px 6px', minWidth: 200 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <select value={ligne.categorie_id} onChange={e => onCategorieChange(e.target.value)} style={{ ...IS(false), fontSize: '0.78rem', flex: 1, minWidth: 0 }}>
-              <option value="">Catégorie...</option>
-              {categories.map(c => <option key={c.id} value={c.id}>{formatCategoryDisplayName(c.nom)}</option>)}
-            </select>
-            <select
-              value={ligne.article_id}
-              onChange={e => onArticleChange(e.target.value)}
-              disabled={!ligne.categorie_id}
-              style={{ ...IS(false), fontSize: '0.82rem', opacity: ligne.categorie_id ? 1 : 0.65 }}
-            >
-              <option value="">{ligne.categorie_id ? 'Choisir un article...' : 'Sélectionnez d\'abord une catégorie'}</option>
-              {catArticles.map(a => <option key={a.id} value={a.id}>{a.nom}</option>)}
-            </select>
-            {ligne.designation && (
-              <div style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-2)', padding: '4px 0' }}>{ligne.designation}</div>
-            )}
-            <button type="button" onClick={() => setShowDesc(s => !s)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', fontSize: '0.72rem', textAlign: 'left', padding: 0, display: 'flex', alignItems: 'center', gap: 3 }}>
-              {showDesc ? <ChevronUp size={11} /> : <ChevronDown size={11} />} Description
-            </button>
-            {showDesc && (
-              <textarea value={ligne.description} onChange={e => setField('description', e.target.value)} placeholder="Description technique..." rows={2} style={{ ...IS(false), resize: 'vertical', fontSize: '0.78rem' }} />
-            )}
+    <tr {...dragProps} style={{ ...dragProps.style, background: ligne.ephemeral ? '#FFFBF0' : '#fff' }}>
+      <td style={{ padding: '10px 6px', width: 28, verticalAlign: 'top' }}><DragHandle {...handleProps} /></td>
+      <td style={{ padding: '10px 8px', width: 36, fontWeight: 700, color: 'var(--text-3)', fontSize: '0.82rem', verticalAlign: 'top' }}>{lineNum}</td>
+      <td style={{ padding: '10px 8px', minWidth: 200, verticalAlign: 'top' }}>
+        <div style={{ fontWeight: 700, fontSize: '0.9rem', marginBottom: 4 }}>{ligne.designation || '—'}</div>
+        {ligne.ephemeral && (
+          <span style={{ fontSize: '0.68rem', color: '#E65100', fontWeight: 600, background: '#FFF3E0', padding: '2px 6px', borderRadius: 4 }}>Hors catalogue</span>
+        )}
+        {ligne.description && (
+          <div style={{ fontSize: '0.78rem', color: 'var(--text-3)', marginTop: 6, lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>{ligne.description}</div>
+        )}
+      </td>
+      <td style={{ padding: '10px 8px', textAlign: 'center', verticalAlign: 'top', fontSize: '0.88rem' }}>{ligne.quantite}</td>
+      <td style={{ padding: '10px 8px', verticalAlign: 'top', fontSize: '0.82rem', color: 'var(--text-2)' }}>{ligne.unite}</td>
+      <td style={{ padding: '10px 8px', textAlign: 'right', verticalAlign: 'top', fontSize: '0.88rem' }}>{fmtMAD(ligne.prix_ht)}</td>
+      <td style={{ padding: '10px 8px', textAlign: 'right', verticalAlign: 'top', fontFamily: 'var(--font-head)', fontWeight: 700 }}>{fmtMAD(ht)}</td>
+      <td style={{ padding: '10px 8px', verticalAlign: 'top' }}>{actions}</td>
+    </tr>
+  );
+}
+
+function DevisLineCard({ ligne, lineNum, idx, onDelete, onDuplicate, onEdit }) {
+  if (ligne.type === 'titre') {
+    return (
+      <div className="devis-line-card devis-line-card--titre">
+        <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, color: 'var(--red)', textTransform: 'uppercase' }}>{ligne.designation}</div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>{[
+          <button key="e" type="button" className="btn btn-ghost btn-sm" onClick={() => onEdit(idx)}>Modifier</button>,
+          <button key="d" type="button" className="btn btn-ghost btn-sm" onClick={() => onDelete(idx)} style={{ color: 'var(--red)' }}>Supprimer</button>,
+        ]}</div>
+      </div>
+    );
+  }
+  if (ligne.type !== 'article') return null;
+  const ht = ligneSousTotalHt(ligne);
+  return (
+    <div className="devis-line-card" style={{ background: ligne.ephemeral ? '#FFFBF0' : '#fff' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, marginBottom: 8 }}>
+        <span style={{ fontWeight: 800, color: 'var(--text-3)', fontSize: '0.8rem' }}>#{lineNum}</span>
+        {ligne.ephemeral && <span style={{ fontSize: '0.68rem', color: '#E65100', fontWeight: 600 }}>Hors catalogue</span>}
+      </div>
+      <div style={{ fontWeight: 700, marginBottom: 6 }}>{ligne.designation}</div>
+      {ligne.description && <div style={{ fontSize: '0.8rem', color: 'var(--text-3)', marginBottom: 8 }}>{ligne.description}</div>}
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, fontSize: '0.82rem', marginBottom: 10 }}>
+        <div><span style={{ color: 'var(--text-3)' }}>Qté </span><strong>{ligne.quantite} {ligne.unite}</strong></div>
+        <div><span style={{ color: 'var(--text-3)' }}>PU </span><strong>{fmtMAD(ligne.prix_ht)}</strong></div>
+      </div>
+      <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, color: 'var(--red)', marginBottom: 10 }}>{fmtMAD(ht)}</div>
+      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => onEdit(idx)}>Modifier</button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => onDuplicate(idx)}>Dupliquer</button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => onDelete(idx)} style={{ color: 'var(--red)' }}>Supprimer</button>
+      </div>
+    </div>
+  );
+}
+
+/* ── Composer ajout ligne ── */
+function LigneComposer({ draft, setDraft, categories, articles, onOk, onClear, onAddTitre, editingIdx, draftError }) {
+  const catArticles = draft.categorie_id
+    ? articles.filter((a) => String(a.categorie_id) === String(draft.categorie_id))
+    : [];
+
+  function setF(k, v) { setDraft((p) => ({ ...p, [k]: v })); }
+
+  function onCategorieChange(catId) {
+    setDraft((p) => ({ ...p, categorie_id: catId, article_id: '', designation: '', description: '' }));
+  }
+
+  function onArticleChange(articleId) {
+    const art = articles.find((a) => String(a.id) === String(articleId));
+    if (art) {
+      setDraft((p) => ({
+        ...p,
+        mode: 'article',
+        article_id: articleId,
+        categorie_id: art.categorie_id ? String(art.categorie_id) : p.categorie_id,
+        designation: art.nom || '',
+        description: art.description || '',
+        unite: art.unite || 'unite',
+        prix_ht: art.prix_ht ?? art.prix ?? 0,
+        remise: art.remise ?? 0,
+        tva: art.tva ?? 20,
+      }));
+    } else {
+      setF('article_id', articleId);
+    }
+  }
+
+  const isTitre = draft.mode === 'titre';
+  const isHorsCatalogue = draft.mode === 'hors_catalogue';
+
+  return (
+    <div className="devis-composer" style={{ marginTop: 16, padding: '18px 20px', background: '#F8F9FA', borderRadius: 10, border: '1.5px solid var(--border)' }}>
+      <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '0.88rem', marginBottom: 14, color: 'var(--text)' }}>
+        {editingIdx != null ? 'Modifier la ligne' : 'Ajouter une ligne'}
+      </div>
+
+      {draftError && (
+        <div style={{ color: 'var(--red)', fontSize: '0.8rem', marginBottom: 10 }}>{draftError}</div>
+      )}
+
+      {isTitre ? (
+        <div style={{ marginBottom: 14 }}>
+          <Label required>Titre de section</Label>
+          <input
+            value={draft.designation}
+            onChange={(e) => setF('designation', e.target.value)}
+            placeholder="Ex : GROS ŒUVRE, PEINTURE…"
+            style={{ ...IS(false), fontFamily: 'var(--font-head)', fontWeight: 700 }}
+          />
+        </div>
+      ) : (
+        <>
+          {!isHorsCatalogue && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12, marginBottom: 12 }}>
+              <div>
+                <Label>Catégorie</Label>
+                <select value={draft.categorie_id} onChange={(e) => onCategorieChange(e.target.value)} style={IS(false)}>
+                  <option value="">Choisir…</option>
+                  {categories.map((c) => <option key={c.id} value={c.id}>{formatCategoryDisplayName(c.nom)}</option>)}
+                </select>
+              </div>
+              <div>
+                <Label>Article</Label>
+                <select
+                  value={draft.article_id}
+                  onChange={(e) => onArticleChange(e.target.value)}
+                  disabled={!draft.categorie_id}
+                  style={{ ...IS(false), opacity: draft.categorie_id ? 1 : 0.6 }}
+                >
+                  <option value="">{draft.categorie_id ? 'Choisir…' : 'Catégorie d\'abord'}</option>
+                  {catArticles.map((a) => <option key={a.id} value={a.id}>{a.nom}</option>)}
+                </select>
+              </div>
+            </div>
+          )}
+
+          <div style={{ marginBottom: 12 }}>
+            <Label required>{isHorsCatalogue ? 'Désignation' : 'Désignation'}</Label>
+            <input
+              value={draft.designation}
+              onChange={(e) => setF('designation', e.target.value)}
+              placeholder={isHorsCatalogue ? 'Ex : Démolition cloison BA13' : 'Nom de la ligne'}
+              style={IS(false)}
+              readOnly={!isHorsCatalogue && !!draft.article_id}
+            />
           </div>
-        </td>
-        <td style={{ padding: '6px 5px', width: 70 }}>
-          <input type="number" min="0" step="0.01" value={ligne.quantite} onChange={e => setField('quantite', e.target.value)} style={{ ...IS(false), textAlign: 'center', fontSize: '0.85rem' }} />
-        </td>
-        <td style={{ padding: '6px 5px', width: 80 }}>
-          <select value={ligne.unite} onChange={e => setField('unite', e.target.value)} style={{ ...IS(false), fontSize: '0.82rem' }}>
-            {UNITES.map(u => <option key={u} value={u}>{u}</option>)}
-          </select>
-        </td>
-        <td style={{ padding: '6px 5px', width: 105 }}>
-          <input type="number" min="0" step="0.01" value={ligne.prix_ht} onChange={e => setField('prix_ht', e.target.value)} style={{ ...IS(false), textAlign: 'right', fontSize: '0.85rem' }} />
-        </td>
-        <td style={{ padding: '6px 5px', width: 65 }}>
-          <input type="number" min="0" max="100" step="1" value={ligne.remise} onChange={e => setField('remise', e.target.value)} style={{ ...IS(false), textAlign: 'center', fontSize: '0.85rem' }} />
-        </td>
-        <td style={{ padding: '6px 5px', width: 72 }}>
-          <select value={ligne.tva} onChange={e => setField('tva', e.target.value)} style={{ ...IS(false), fontSize: '0.82rem' }}>
-            {TVA_TAUX.map(t => <option key={t} value={t}>{t}%</option>)}
-          </select>
-        </td>
-        <td style={{ padding: '6px 8px', width: 110, textAlign: 'right' }}>
-          <div style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.88rem' }}>{fmtMAD(sous_total_ht.toFixed(2))}</div>
-          <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>TTC: {fmtMAD(sous_total_ttc.toFixed(2))}</div>
-        </td>
-        <td style={{ padding: '6px 5px', width: 52 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-            <button type="button" onClick={onDuplicate} title="Dupliquer" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: 3 }}><Copy size={12} /></button>
-            <button type="button" onClick={onDelete} title="Supprimer" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', padding: 3 }}><Trash2 size={12} /></button>
+
+          <div style={{ marginBottom: 12 }}>
+            <Label>Description</Label>
+            <textarea
+              rows={2}
+              value={draft.description}
+              onChange={(e) => setF('description', e.target.value)}
+              placeholder="Description détaillée…"
+              style={{ ...IS(false), resize: 'vertical' }}
+            />
           </div>
-        </td>
-      </tr>
-    </>
+
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: 12, marginBottom: 12 }}>
+            <div>
+              <Label>Quantité</Label>
+              <input type="number" min="0" step="0.01" value={draft.quantite} onChange={(e) => setF('quantite', e.target.value)} style={IS(false)} />
+            </div>
+            <div>
+              <Label>Unité</Label>
+              <select value={draft.unite} onChange={(e) => setF('unite', e.target.value)} style={IS(false)}>
+                {UNITES.map((u) => <option key={u} value={u}>{u}</option>)}
+              </select>
+            </div>
+            <div>
+              <Label>Prix unitaire HT</Label>
+              <input type="number" min="0" step="0.01" value={draft.prix_ht} onChange={(e) => setF('prix_ht', e.target.value)} style={IS(false)} />
+            </div>
+            <div>
+              <Label>Remise %</Label>
+              <input type="number" min="0" max="100" value={draft.remise} onChange={(e) => setF('remise', e.target.value)} style={IS(false)} />
+            </div>
+            <div>
+              <Label>TVA %</Label>
+              <select value={draft.tva} onChange={(e) => setF('tva', e.target.value)} style={IS(false)}>
+                {TVA_TAUX.map((t) => <option key={t} value={t}>{t}%</option>)}
+              </select>
+            </div>
+          </div>
+        </>
+      )}
+
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
+        <button type="button" className="btn btn-primary" onClick={onOk} style={{ minWidth: 72, fontWeight: 800 }}>
+          OK
+        </button>
+        <button type="button" className="btn btn-ghost" onClick={onClear}>Effacer</button>
+        {!isTitre && (
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onAddTitre}>Ajouter Titre</button>
+        )}
+        {!isTitre && draft.mode !== 'hors_catalogue' && (
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDraft({ ...EMPTY_DRAFT(), mode: 'hors_catalogue' })} style={{ color: '#E65100' }}>
+            Article hors catalogue
+          </button>
+        )}
+        {!isTitre && draft.mode === 'hors_catalogue' && (
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDraft({ ...EMPTY_DRAFT(), mode: 'article' })}>
+            Article catalogue
+          </button>
+        )}
+        {isTitre && (
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDraft({ ...EMPTY_DRAFT(), mode: 'article' })}>
+            Ligne article
+          </button>
+        )}
+      </div>
+    </div>
   );
 }
 
 /* ════════════════════════════════════════════════
-   DEVIS FORM — MAIN COMPONENT
+   DEVIS FORM
    ════════════════════════════════════════════════ */
 export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
   const isEdit = !!devis;
-  const [form, setForm] = useState(() => devis ? {
-    ...EMPTY_DEVIS, ...devis,
-    lignes: devis.lignes?.length ? devis.lignes.map(l => ({
+  const [form, setForm] = useState(() => (devis ? {
+    ...EMPTY_DEVIS,
+    ...devis,
+    lignes: devis.lignes?.length ? devis.lignes.map((l) => ({
       ...EMPTY_LIGNE(),
       ...l,
       ephemeral: l.ephemeral ?? (l.type === 'article' && !l.article_id && !!l.designation?.trim()),
-      _id: l._id || Date.now() + Math.random(),
-    })) : [EMPTY_LIGNE()],
-  } : { ...EMPTY_DEVIS, reference: genRef() });
+      _id: l._id || `${Date.now()}-${Math.random()}`,
+    })) : [],
+  } : { ...EMPTY_DEVIS, reference: genRef() }));
 
   const [clients, setClients] = useState([]);
   const [articles, setArticles] = useState([]);
@@ -358,9 +571,11 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
   const [apiError, setApiError] = useState('');
   const [dragIdx, setDragIdx] = useState(null);
   const [overIdx, setOverIdx] = useState(null);
+  const [draft, setDraft] = useState(EMPTY_DRAFT);
+  const [editingIdx, setEditingIdx] = useState(null);
+  const [draftError, setDraftError] = useState('');
   const isSaving = saving || savingLocal;
 
-  /* Load reference data */
   useEffect(() => {
     Promise.all([listClients(), listArticles(), listCategories()]).then(([cl, ar, ca]) => {
       setClients(cl || []);
@@ -369,40 +584,73 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
     }).catch(() => {});
     if (!isEdit) {
       generateCrmDevisReference()
-        .then((ref) => setForm(p => ({ ...p, reference: ref })))
+        .then((ref) => setForm((p) => ({ ...p, reference: ref })))
         .catch(() => {});
     }
   }, [isEdit]);
 
-  function setField(k, v) { setForm(p => ({ ...p, [k]: v })); }
+  function setField(k, v) { setForm((p) => ({ ...p, [k]: v })); }
 
-  /* Selected client auto-fill */
-  const selectedClient = clients.find(c => String(c.id) === String(form.client_id));
+  const selectedClient = clients.find((c) => String(c.id) === String(form.client_id));
+  const formWithClients = { ...form, _clients: clients };
 
-  /* Lignes CRUD */
-  function addLigne(type = 'article') {
-    const l = type === 'article_ephemere'
-      ? EMPTY_LIGNE_EPHEMERE()
-      : { ...EMPTY_LIGNE(), type };
-    setForm(p => ({ ...p, lignes: [...p.lignes, l] }));
-  }
-  function updateLigne(idx, data) {
-    setForm(p => { const ls = [...p.lignes]; ls[idx] = data; return { ...p, lignes: ls }; });
-  }
   function deleteLigne(idx) {
-    setForm(p => ({ ...p, lignes: p.lignes.filter((_, i) => i !== idx) }));
+    setForm((p) => ({ ...p, lignes: p.lignes.filter((_, i) => i !== idx) }));
+    if (editingIdx === idx) { setEditingIdx(null); setDraft(EMPTY_DRAFT()); }
   }
+
   function duplicateLigne(idx) {
-    setForm(p => {
+    setForm((p) => {
       const ls = [...p.lignes];
       ls.splice(idx + 1, 0, { ...ls[idx], _id: Date.now() + Math.random() });
       return { ...p, lignes: ls };
     });
   }
 
+  function startEditLine(idx) {
+    setDraft(ligneToDraft(form.lignes[idx]));
+    setEditingIdx(idx);
+    setDraftError('');
+  }
+
+  function resetDraft() {
+    setDraft(EMPTY_DRAFT());
+    setEditingIdx(null);
+    setDraftError('');
+  }
+
+  function validateDraft() {
+    if (draft.mode === 'titre') {
+      if (!draft.designation?.trim()) return 'Titre requis';
+      return '';
+    }
+    if (!draft.designation?.trim()) return 'Désignation requise';
+    if (draft.mode === 'article' && !draft.article_id && !draft.designation?.trim()) {
+      return 'Sélectionnez un article ou saisissez une désignation';
+    }
+    if (Number(draft.quantite) <= 0) return 'Quantité invalide';
+    return '';
+  }
+
+  function commitDraft() {
+    const err = validateDraft();
+    if (err) { setDraftError(err); return; }
+    const ligne = draftToLigne(draft);
+    if (editingIdx != null) {
+      setForm((p) => {
+        const ls = [...p.lignes];
+        ls[editingIdx] = { ...ligne, _id: ls[editingIdx]._id };
+        return { ...p, lignes: ls };
+      });
+    } else {
+      setForm((p) => ({ ...p, lignes: [...p.lignes, ligne] }));
+    }
+    resetDraft();
+  }
+
   function reorderLignes(from, to) {
     if (from == null || to == null || from === to) return;
-    setForm(p => {
+    setForm((p) => {
       const ls = [...p.lignes];
       const [item] = ls.splice(from, 1);
       ls.splice(to, 0, item);
@@ -422,25 +670,20 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
       setDragIdx(null);
       setOverIdx(null);
     },
-    onDragEnd: () => {
-      setDragIdx(null);
-      setOverIdx(null);
-    },
+    onDragEnd: () => { setDragIdx(null); setOverIdx(null); },
     isDragging: (idx) => dragIdx === idx,
     isOver: (idx) => overIdx === idx && dragIdx !== idx,
   };
 
-  /* Totals */
-  const articleLignes = form.lignes.filter(l => l.type === 'article');
-  const totalHT = articleLignes.reduce((s, l) => s + Number(l.quantite) * Number(l.prix_ht) * (1 - Number(l.remise) / 100), 0);
-  const totalTVA = articleLignes.reduce((s, l) => {
-    const ht = Number(l.quantite) * Number(l.prix_ht) * (1 - Number(l.remise) / 100);
-    return s + ht * Number(l.tva) / 100;
-  }, 0);
+  const articleLignes = form.lignes.filter((l) => l.type === 'article');
+  const totalHT = articleLignes.reduce((s, l) => s + ligneSousTotalHt(l), 0);
+  const totalTVA = articleLignes.reduce((s, l) => s + ligneSousTotalHt(l) * (Number(l.tva) / 100), 0);
   const totalTTC = totalHT + totalTVA;
   const totalRemise = articleLignes.reduce((s, l) => s + Number(l.quantite) * Number(l.prix_ht) * (Number(l.remise) / 100), 0);
+  const totalBrut = articleLignes.reduce((s, l) => s + Number(l.quantite) * Number(l.prix_ht), 0);
 
-  /* Validate */
+  let articleLineNum = 0;
+
   function validate() {
     const e = {};
     if (!form.titre?.trim()) e.titre = 'Requis';
@@ -476,7 +719,7 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
   async function handlePdf() {
     if (!isEdit || !devis?.id) return;
     try {
-      const catMap = Object.fromEntries(categories.map(c => [String(c.id), formatCategoryDisplayName(c.nom)]));
+      const catMap = Object.fromEntries(categories.map((c) => [String(c.id), formatCategoryDisplayName(c.nom)]));
       await generateDevisPdf({
         ...form,
         id: devis.id,
@@ -487,30 +730,40 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
         total_ttc: totalTTC,
       }, catMap);
     } catch (err) {
-      setApiError(err.message || 'Erreur generation PDF.');
+      setApiError(err.message || 'Erreur génération PDF.');
     }
   }
 
   return (
-    <div className="animate-fade-in">
-      {/* Back */}
-      <button onClick={onBack} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-2)', fontSize: '0.875rem', fontWeight: 600, marginBottom: 16, padding: 0 }}>
+    <div className="animate-fade-in devis-form-page">
+      <style>{`
+        .devis-line-card { border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 10px; }
+        .devis-line-card--titre { background: #F5F5F5; border-left: 4px solid var(--red); }
+        .devis-lines-cards { display: none; }
+        .devis-doc-header { box-shadow: 0 2px 12px rgba(0,0,0,0.04); }
+        @media (max-width: 900px) {
+          .devis-form-grid { grid-template-columns: 1fr !important; }
+          .devis-doc-header > div:first-child { grid-template-columns: 1fr !important; }
+          .devis-doc-header > div:first-child > div:first-child { border-right: none !important; border-bottom: 1px solid var(--border); }
+          .devis-lines-table-wrap { display: none !important; }
+          .devis-lines-cards { display: block !important; }
+        }
+      `}</style>
+
+      <button type="button" onClick={onBack} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-2)', fontSize: '0.875rem', fontWeight: 600, marginBottom: 16, padding: 0 }}>
         <ChevronLeft size={16} /> Retour aux devis
       </button>
 
       <form onSubmit={handleSave}>
-        {/* Header */}
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 20, flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
           <div>
             <h1 className="page-title" style={{ marginBottom: 2 }}>{isEdit ? 'Modifier devis' : 'Nouveau devis'}</h1>
-            <p className="page-subtitle">
-              {isEdit ? form.reference : 'Reference : ' + form.reference}
-            </p>
+            <p className="page-subtitle">Prévisualisation professionnelle — les lignes s&apos;ajoutent via le bouton OK</p>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button type="button" className="btn btn-ghost" onClick={onBack}>Annuler</button>
             <button type="submit" className="btn btn-primary" disabled={isSaving} style={{ minWidth: 130 }}>
-              {isSaving ? <Spinner /> : <><FileText size={14} /> {isEdit ? 'Enregistrer' : 'Creer devis'}</>}
+              {isSaving ? <Spinner /> : <><FileText size={14} /> {isEdit ? 'Enregistrer' : 'Créer devis'}</>}
             </button>
           </div>
         </div>
@@ -521,234 +774,191 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
           </div>
         )}
 
-        {/* Grid 2-col layout */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 16, alignItems: 'start' }}>
-
-          {/* ── LEFT COLUMN ── */}
+        <div className="devis-form-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 16, alignItems: 'start' }}>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+            <DevisDocumentHeader
+              form={formWithClients}
+              selectedClient={selectedClient}
+              isEdit={isEdit}
+              onFieldChange={setField}
+              errors={errors}
+            />
 
-            {/* Section: Infos devis */}
-            <div className="card" style={{ padding: '20px 22px' }}>
-              <SectionTitle>Informations devis</SectionTitle>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-                  <Label required>Titre du devis</Label>
-                  <input value={form.titre} onChange={e => setField('titre', e.target.value)} placeholder="Ex : Amenagement villa Amrani — phase 1" style={IS(errors.titre)} />
-                  {errors.titre && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.titre}</span>}
+            <div className="card" style={{ padding: '16px 20px' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 12 }}>
+                <div>
+                  <Label>Référence</Label>
+                  <input value={form.reference} onChange={(e) => setField('reference', e.target.value)} style={IS(false)} />
                 </div>
-                <div className="form-group">
-                  <Label>Reference</Label>
-                  <input value={form.reference} onChange={e => setField('reference', e.target.value)} style={IS(false)} />
+                <div>
+                  <Label>Date création</Label>
+                  <input type="date" value={form.date_creation} onChange={(e) => setField('date_creation', e.target.value)} style={IS(false)} />
                 </div>
-                <div className="form-group">
-                  <Label>Statut</Label>
-                  <select value={form.statut} onChange={e => setField('statut', e.target.value)} style={IS(false)}>
-                    {STATUTS.map(s => <option key={s} value={s}>{STATUT_LABEL[s]}</option>)}
-                  </select>
+                <div>
+                  <Label>Date validité</Label>
+                  <input type="date" value={form.date_validite} onChange={(e) => setField('date_validite', e.target.value)} style={IS(false)} />
                 </div>
-                <div className="form-group">
-                  <Label>Date de creation</Label>
-                  <input type="date" value={form.date_creation} onChange={e => setField('date_creation', e.target.value)} style={IS(false)} />
-                </div>
-                <div className="form-group">
-                  <Label>Date de validite</Label>
-                  <input type="date" value={form.date_validite} onChange={e => setField('date_validite', e.target.value)} style={IS(false)} />
-                </div>
-                <div className="form-group">
+                <div>
                   <Label>Commercial</Label>
-                  <input type="text" value={form.commercial} onChange={e => setField('commercial', e.target.value)} placeholder="Nom du commercial" style={IS(false)} />
+                  <input value={form.commercial} onChange={(e) => setField('commercial', e.target.value)} style={IS(false)} />
                 </div>
-                <div className="form-group">
-                  <Label>Type de projet</Label>
-                  <select value={form.type_projet} onChange={e => setField('type_projet', e.target.value)} style={IS(false)}>
-                    <option value="">Choisir...</option>
-                    {TYPE_PROJET_VALUES.map(v => <option key={v} value={v}>{TYPE_PROJET_LABEL[v]}</option>)}
+                <div>
+                  <Label>Type projet</Label>
+                  <select value={form.type_projet} onChange={(e) => setField('type_projet', e.target.value)} style={IS(false)}>
+                    <option value="">—</option>
+                    {TYPE_PROJET_VALUES.map((v) => <option key={v} value={v}>{TYPE_PROJET_LABEL[v]}</option>)}
                   </select>
                 </div>
               </div>
             </div>
 
-            {/* Section: Client */}
             <div className="card" style={{ padding: '20px 22px' }}>
-              <SectionTitle>Client</SectionTitle>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                <div className="form-group">
-                  <Label required>Client</Label>
-                  <select value={form.client_id} onChange={e => setField('client_id', e.target.value)} style={IS(errors.client_id)}>
-                    <option value="">Choisir un client...</option>
-                    {clients.map(c => {
-                      const nom = [c.prenom, c.nom].filter(Boolean).join(' ') || c.nom || '';
-                      return <option key={c.id} value={c.id}>{nom}</option>;
-                    })}
-                  </select>
-                  {errors.client_id && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.client_id}</span>}
+              <div style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 14 }}>Lignes du devis</div>
+
+              {form.lignes.length === 0 ? (
+                <div style={{ textAlign: 'center', padding: '32px 16px', color: 'var(--text-3)', fontSize: '0.88rem', border: '1.5px dashed var(--border)', borderRadius: 8, marginBottom: 8 }}>
+                  Aucune ligne — utilisez le formulaire ci-dessous puis cliquez <strong>OK</strong>
                 </div>
-                {selectedClient && (
-                  <div style={{ background: 'var(--bg)', borderRadius: 8, padding: '12px 14px', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '6px 16px', fontSize: '0.82rem' }}>
-                    {[
-                      ['Societe / Nom', [selectedClient.prenom, selectedClient.nom].filter(Boolean).join(' ') || selectedClient.nom],
-                      ['Email', selectedClient.email],
-                      ['Telephone', selectedClient.telephone],
-                      ['ICE', selectedClient.ice],
-                      ['Ville', selectedClient.ville],
-                      ['Adresse', selectedClient.adresse],
-                    ].filter(([, v]) => v).map(([label, val]) => (
-                      <div key={label}>
-                        <span style={{ color: 'var(--text-3)', fontWeight: 600 }}>{label} : </span>
-                        <span style={{ color: 'var(--text-2)' }}>{val}</span>
-                      </div>
-                    ))}
+              ) : (
+                <>
+                  <div className="devis-lines-table-wrap" style={{ overflowX: 'auto', marginBottom: 12 }}>
+                    <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+                      <thead>
+                        <tr style={{ borderBottom: '2px solid var(--border)', background: '#FAFAFA' }}>
+                          <th style={{ width: 28 }} />
+                          <th style={{ width: 36, padding: '8px', fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-3)' }}>#</th>
+                          <th style={{ textAlign: 'left', padding: '8px', fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-3)' }}>Désignation</th>
+                          <th style={{ width: 56, padding: '8px', fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-3)' }}>Qté</th>
+                          <th style={{ width: 72, padding: '8px', fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-3)' }}>Unité</th>
+                          <th style={{ width: 100, textAlign: 'right', padding: '8px', fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-3)' }}>PU HT</th>
+                          <th style={{ width: 110, textAlign: 'right', padding: '8px', fontSize: '0.7rem', textTransform: 'uppercase', color: 'var(--text-3)' }}>Total HT</th>
+                          <th style={{ width: 90 }} />
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {form.lignes.map((ligne, idx) => {
+                          const lineNum = ligne.type === 'article' ? ++articleLineNum : null;
+                          return (
+                            <DevisLineDisplay
+                              key={ligne._id}
+                              ligne={ligne}
+                              lineNum={lineNum}
+                              idx={idx}
+                              onDelete={deleteLigne}
+                              onDuplicate={duplicateLigne}
+                              onEdit={startEditLine}
+                              drag={{
+                                ...dragHandlers,
+                                isDragging: dragHandlers.isDragging(idx),
+                                isOver: dragHandlers.isOver(idx),
+                              }}
+                            />
+                          );
+                        })}
+                      </tbody>
+                    </table>
                   </div>
-                )}
+
+                  <div className="devis-lines-cards">
+                    {(() => {
+                      let n = 0;
+                      return form.lignes.map((ligne, idx) => {
+                        const lineNum = ligne.type === 'article' ? ++n : null;
+                        return (
+                          <DevisLineCard
+                            key={ligne._id}
+                            ligne={ligne}
+                            lineNum={lineNum}
+                            idx={idx}
+                            onDelete={deleteLigne}
+                            onDuplicate={duplicateLigne}
+                            onEdit={startEditLine}
+                          />
+                        );
+                      });
+                    })()}
+                  </div>
+                </>
+              )}
+
+              <div style={{ marginTop: 16, paddingTop: 16, borderTop: '2px solid var(--border)' }}>
+                {[
+                  ['Total HT brut', fmtMAD(totalBrut)],
+                  ['Remises', `- ${fmtMAD(totalRemise)}`],
+                  ['Total HT net', fmtMAD(totalHT)],
+                  ['TVA', fmtMAD(totalTVA)],
+                ].map(([label, val]) => (
+                  <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', fontSize: '0.88rem', borderBottom: '1px solid var(--border)' }}>
+                    <span style={{ color: 'var(--text-2)' }}>{label}</span>
+                    <span style={{ fontWeight: 600, color: label === 'Remises' ? 'var(--red)' : 'var(--text)' }}>{val}</span>
+                  </div>
+                ))}
+                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 0 0', marginTop: 4 }}>
+                  <span style={{ fontFamily: 'var(--font-head)', fontWeight: 900, fontSize: '1rem' }}>TOTAL TTC</span>
+                  <span style={{ fontFamily: 'var(--font-head)', fontWeight: 900, fontSize: '1.15rem', color: 'var(--red)' }}>{fmtMAD(totalTTC)}</span>
+                </div>
               </div>
+
+              <LigneComposer
+                draft={draft}
+                setDraft={setDraft}
+                categories={categories}
+                articles={articles}
+                onOk={commitDraft}
+                onClear={resetDraft}
+                onAddTitre={() => { setDraft({ ...EMPTY_DRAFT(), mode: 'titre' }); setDraftError(''); }}
+                editingIdx={editingIdx}
+                draftError={draftError}
+              />
             </div>
 
-            {/* Section: Lignes devis */}
             <div className="card" style={{ padding: '20px 22px' }}>
-              <SectionTitle>Lignes du devis</SectionTitle>
-
-              <div style={{ overflowX: 'auto', marginBottom: 12 }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
-                  <thead>
-                    <tr style={{ borderBottom: '1.5px solid var(--border)' }}>
-                      <th style={{ width: 20, padding: '6px 5px' }} />
-                      <th style={{ textAlign: 'left', padding: '6px 6px', fontWeight: 700, fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--text-3)', letterSpacing: '0.06em' }}>Designation</th>
-                      <th style={{ textAlign: 'center', padding: '6px 5px', fontWeight: 700, fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--text-3)', width: 70 }}>Qte</th>
-                      <th style={{ textAlign: 'left', padding: '6px 5px', fontWeight: 700, fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--text-3)', width: 80 }}>Unite</th>
-                      <th style={{ textAlign: 'right', padding: '6px 5px', fontWeight: 700, fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--text-3)', width: 105 }}>Prix HT</th>
-                      <th style={{ textAlign: 'center', padding: '6px 5px', fontWeight: 700, fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--text-3)', width: 65 }}>Rem.</th>
-                      <th style={{ textAlign: 'center', padding: '6px 5px', fontWeight: 700, fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--text-3)', width: 72 }}>TVA</th>
-                      <th style={{ textAlign: 'right', padding: '6px 8px', fontWeight: 700, fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--text-3)', width: 110 }}>Total HT</th>
-                      <th style={{ width: 52, padding: '6px 5px' }} />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {form.lignes.map((ligne, idx) => (
-                      <LigneRow
-                        key={ligne._id}
-                        ligne={ligne}
-                        idx={idx}
-                        categories={categories}
-                        articles={articles}
-                        onChange={data => updateLigne(idx, data)}
-                        onDelete={() => deleteLigne(idx)}
-                        onDuplicate={() => duplicateLigne(idx)}
-                        drag={{
-                          ...dragHandlers,
-                          isDragging: dragHandlers.isDragging(idx),
-                          isOver: dragHandlers.isOver(idx),
-                        }}
-                      />
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-
-              {/* Add line buttons */}
-              <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => addLigne('article')} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-                  <Plus size={13} /> Article
-                </button>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => addLigne('article_ephemere')} style={{ display: 'flex', alignItems: 'center', gap: 5, color: '#E65100' }}>
-                  <Plus size={13} /> Article éphémère
-                </button>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => addLigne('titre')} style={{ display: 'flex', alignItems: 'center', gap: 5, color: 'var(--text-2)' }}>
-                  <Plus size={13} /> Titre section
-                </button>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => addLigne('note')} style={{ display: 'flex', alignItems: 'center', gap: 5, color: '#F57C00' }}>
-                  <Plus size={13} /> Note
-                </button>
-              </div>
-            </div>
-
-            {/* Section: Conditions */}
-            <div className="card" style={{ padding: '20px 22px' }}>
-              <SectionTitle>Conditions commerciales</SectionTitle>
+              <div style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 14 }}>Conditions commerciales</div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                <div className="form-group">
-                  <Label>Modalites de paiement</Label>
-                  <select value={form.modalites_paiement} onChange={e => setField('modalites_paiement', e.target.value)} style={IS(false)}>
-                    {MODALITES.map(m => <option key={m} value={m}>{m}</option>)}
+                <div>
+                  <Label>Modalités de paiement</Label>
+                  <select value={form.modalites_paiement} onChange={(e) => setField('modalites_paiement', e.target.value)} style={IS(false)}>
+                    {MODALITES.map((m) => <option key={m} value={m}>{m}</option>)}
                   </select>
                 </div>
-                <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-                  <Label>Conditions generales</Label>
-                  <textarea rows={3} value={form.conditions} onChange={e => setField('conditions', e.target.value)} placeholder="Conditions generales de vente, garanties, modalites de livraison..." style={{ ...IS(false), resize: 'vertical', lineHeight: 1.6 }} />
+                <div style={{ gridColumn: '1 / -1' }}>
+                  <Label>Conditions générales</Label>
+                  <textarea rows={3} value={form.conditions} onChange={(e) => setField('conditions', e.target.value)} style={{ ...IS(false), resize: 'vertical' }} />
                 </div>
-                <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                <div style={{ gridColumn: '1 / -1' }}>
                   <Label>Notes internes</Label>
-                  <textarea rows={2} value={form.notes_internes} onChange={e => setField('notes_internes', e.target.value)} placeholder="Notes internes (non visibles sur le PDF)..." style={{ ...IS(false, { background: '#FFFDE7' }), resize: 'vertical' }} />
+                  <textarea rows={2} value={form.notes_internes} onChange={(e) => setField('notes_internes', e.target.value)} style={{ ...IS(false, { background: '#FFFDE7' }), resize: 'vertical' }} />
                 </div>
               </div>
             </div>
           </div>
 
-          {/* ── RIGHT COLUMN ── */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16, position: 'sticky', top: 80 }}>
-
-            {/* Totaux */}
             <div className="card" style={{ padding: '20px 22px' }}>
-              <SectionTitle>Recapitulatif</SectionTitle>
+              <div style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 14 }}>Récapitulatif</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {[
-                  ['Total HT brut', fmtMAD(articleLignes.reduce((s, l) => s + Number(l.quantite) * Number(l.prix_ht), 0).toFixed(2))],
-                  ['Remises', '- ' + fmtMAD(totalRemise.toFixed(2))],
-                  ['Total HT net', fmtMAD(totalHT.toFixed(2))],
-                  ['TVA', fmtMAD(totalTVA.toFixed(2))],
+                  ['Lignes articles', String(articleLignes.length)],
+                  ['Total HT', fmtMAD(totalHT)],
+                  ['TVA', fmtMAD(totalTVA)],
+                  ['Total TTC', fmtMAD(totalTTC)],
                 ].map(([label, val], i) => (
-                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', padding: '5px 0', borderBottom: '1px solid var(--border)' }}>
+                  <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', padding: '5px 0', borderBottom: i < 3 ? '1px solid var(--border)' : 'none' }}>
                     <span style={{ color: 'var(--text-2)' }}>{label}</span>
-                    <span style={{ fontWeight: 600, color: label === 'Remises' ? 'var(--red)' : 'var(--text)' }}>{val}</span>
+                    <span style={{ fontWeight: i === 3 ? 800 : 600, color: i === 3 ? 'var(--red)' : 'var(--text)' }}>{val}</span>
                   </div>
                 ))}
-                <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0 0', marginTop: 4 }}>
-                  <span style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1rem', textTransform: 'uppercase' }}>Total TTC</span>
-                  <span style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.1rem', color: 'var(--red)' }}>{fmtMAD(totalTTC.toFixed(2))}</span>
-                </div>
               </div>
             </div>
-
-            {/* Lignes summary */}
             <div className="card" style={{ padding: '16px 18px' }}>
-              <SectionTitle>Resume</SectionTitle>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, fontSize: '0.82rem' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--text-2)' }}>Nombre de lignes</span>
-                  <span style={{ fontWeight: 700 }}>{articleLignes.length}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--text-2)' }}>Client</span>
-                  <span style={{ fontWeight: 600, color: selectedClient ? 'var(--text)' : 'var(--text-3)' }}>
-                    {selectedClient ? [selectedClient.prenom, selectedClient.nom].filter(Boolean).join(' ') || selectedClient.nom : '—'}
-                  </span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--text-2)' }}>Commercial</span>
-                  <span style={{ fontWeight: 600 }}>{form.commercial || '—'}</span>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span style={{ color: 'var(--text-2)' }}>Validite</span>
-                  <span style={{ fontWeight: 600 }}>{form.date_validite || '—'}</span>
-                </div>
-              </div>
-            </div>
-
-            {/* Actions */}
-            <div className="card" style={{ padding: '16px 18px' }}>
-              <SectionTitle>Actions</SectionTitle>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                <button type="submit" className="btn btn-primary" disabled={isSaving} style={{ justifyContent: 'center' }}>
-                  {isSaving ? <Spinner /> : <><FileText size={14} /> {isEdit ? 'Enregistrer' : 'Creer le devis'}</>}
+              <button type="submit" className="btn btn-primary" disabled={isSaving} style={{ width: '100%', justifyContent: 'center', marginBottom: 8 }}>
+                {isSaving ? <Spinner /> : <><FileText size={14} /> {isEdit ? 'Enregistrer' : 'Créer le devis'}</>}
+              </button>
+              {isEdit && (
+                <button type="button" className="btn btn-ghost" onClick={handlePdf} style={{ width: '100%', justifyContent: 'center', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Download size={14} /> Télécharger PDF
                 </button>
-                {isEdit && (
-                  <button type="button" className="btn btn-ghost" onClick={handlePdf} style={{ justifyContent: 'center', display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <Download size={14} /> Telecharger PDF
-                  </button>
-                )}
-                <button type="button" className="btn btn-ghost" onClick={onBack} style={{ justifyContent: 'center' }}>
-                  Annuler
-                </button>
-              </div>
+              )}
             </div>
           </div>
         </div>
