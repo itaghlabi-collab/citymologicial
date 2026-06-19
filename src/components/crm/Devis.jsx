@@ -9,6 +9,7 @@ import { useCrmDevis } from '../../hooks/useCrmDevis';
 import { listCategories } from '../../services/crm/categories';
 import { formatCategoryDisplayName } from '../../utils/crm/categoryDisplay';
 import { generateDevisPdf } from '../../services/crm/devisPdf';
+import { generateReceptionChecklistPdf } from '../../services/crm/receptionChecklistPdf';
 import { listArticles } from '../../services/crm/articles';
 import { enrichLignesDescriptions } from '../../utils/crm/devisLineDescription';
 import DevisForm from './DevisForm';
@@ -131,6 +132,7 @@ export default function Devis() {
   const [view, setView] = useState('list');
   const [editingDevis, setEditingDevis] = useState(null);
   const [pdfLoadingId, setPdfLoadingId] = useState(null);
+  const [checklistLoadingId, setChecklistLoadingId] = useState(null);
   const [previewDevis, setPreviewDevis] = useState(null);
   const [previewArticles, setPreviewArticles] = useState([]);
   const [convertedIds, setConvertedIds] = useState(() => new Set());
@@ -245,6 +247,26 @@ export default function Devis() {
     }
   }
 
+  async function handleReceptionChecklist(d) {
+    setChecklistLoadingId(d.id);
+    try {
+      const [full, cats, articles] = await Promise.all([
+        fetchOne(d.id),
+        listCategories(),
+        listArticles(),
+      ]);
+      const catMap = Object.fromEntries(cats.map((c) => [String(c.id), formatCategoryDisplayName(c.nom)]));
+      await generateReceptionChecklistPdf({
+        ...full,
+        lignes: enrichLignesDescriptions(full.lignes, articles),
+      }, catMap);
+    } catch (err) {
+      showToast(err.message || 'Erreur génération liste de réception.', 'error');
+    } finally {
+      setChecklistLoadingId(null);
+    }
+  }
+
   async function handlePreview(d) {
     try {
       const [full, articles] = await Promise.all([fetchOne(d.id), listArticles()]);
@@ -326,8 +348,10 @@ export default function Devis() {
         devis={d}
         isConverted={isDevisConverted(d)}
         pdfLoading={pdfLoadingId === d.id}
+        checklistLoading={checklistLoadingId === d.id}
         onPreview={() => handlePreview(d)}
         onPdf={() => handlePdf(d)}
+        onReceptionChecklist={() => handleReceptionChecklist(d)}
         onConvert={() => handleConvert(d)}
         onApprove={() => handleApprove(d)}
         onRefuse={() => handleRefuse(d)}

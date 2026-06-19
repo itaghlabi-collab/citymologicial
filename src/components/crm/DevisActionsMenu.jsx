@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
   MoreHorizontal, Eye, Download, FolderKanban, CheckCircle, XCircle,
-  Edit2, Copy, Trash2, ChevronRight,
+  Edit2, Copy, Trash2, ChevronRight, ClipboardCheck,
 } from 'lucide-react';
 
 const QUICK_STATUTS = [
@@ -32,8 +32,10 @@ export default function DevisActionsMenu({
   devis,
   isConverted,
   pdfLoading,
+  checklistLoading,
   onPreview,
   onPdf,
+  onReceptionChecklist,
   onConvert,
   onApprove,
   onRefuse,
@@ -99,6 +101,12 @@ export default function DevisActionsMenu({
     >
       <MenuItem icon={Eye} label="Aperçu" onClick={closeAnd(onPreview)} />
       <MenuItem icon={Download} label="Télécharger PDF" onClick={closeAnd(onPdf)} disabled={pdfLoading} />
+      <MenuItem
+        icon={ClipboardCheck}
+        label="Liste de réception"
+        onClick={closeAnd(onReceptionChecklist)}
+        disabled={checklistLoading}
+      />
       <MenuItem
         icon={FolderKanban}
         label={convertDisabled ? 'Convertir en projet (déjà converti)' : 'Convertir en projet'}

@@ -2,13 +2,14 @@ import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ChevronLeft, Trash2, Copy, AlertCircle,
-  FileText, GripVertical, X, Download, Pencil,
+  FileText, GripVertical, X, Download, Pencil, ClipboardCheck,
 } from 'lucide-react';
 import { listClients } from '../../services/crm/clients';
 import { listArticles, getArticleById } from '../../services/crm/articles';
 import { listCategories } from '../../services/crm/categories';
 import { generateCrmDevisReference } from '../../services/crm/crmDevis';
 import { generateDevisPdf } from '../../services/crm/devisPdf';
+import { generateReceptionChecklistPdf } from '../../services/crm/receptionChecklistPdf';
 import { formatCategoryDisplayName } from '../../utils/crm/categoryDisplay';
 import { enrichLignesDescriptions, resolveLigneDescription } from '../../utils/crm/devisLineDescription';
 import { TYPE_PROJET_VALUES, TYPE_PROJET_LABEL } from '../../constants/commercial';
@@ -973,6 +974,22 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
     }
   }
 
+  async function handleReceptionChecklist() {
+    if (!isEdit || !devis?.id) return;
+    try {
+      const catMap = Object.fromEntries(categories.map((c) => [String(c.id), formatCategoryDisplayName(c.nom)]));
+      await generateReceptionChecklistPdf({
+        ...form,
+        id: devis.id,
+        client: selectedClient,
+        client_nom: selectedClient ? [selectedClient.prenom, selectedClient.nom].filter(Boolean).join(' ') || selectedClient.nom : '',
+        lignes: enrichLignesDescriptions(form.lignes, articles),
+      }, catMap);
+    } catch (err) {
+      setApiError(err.message || 'Erreur génération liste de réception.');
+    }
+  }
+
   return (
     <div className="animate-fade-in devis-form-page">
       <style>{`
@@ -1197,9 +1214,14 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
                 {isSaving ? <Spinner /> : <><FileText size={14} /> {isEdit ? 'Enregistrer' : 'Créer le devis'}</>}
               </button>
               {isEdit && (
-                <button type="button" className="btn btn-ghost" onClick={handlePdf} style={{ width: '100%', justifyContent: 'center', display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <Download size={14} /> Télécharger PDF
-                </button>
+                <>
+                  <button type="button" className="btn btn-ghost" onClick={handlePdf} style={{ width: '100%', justifyContent: 'center', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+                    <Download size={14} /> Télécharger PDF
+                  </button>
+                  <button type="button" className="btn btn-ghost" onClick={handleReceptionChecklist} style={{ width: '100%', justifyContent: 'center', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <ClipboardCheck size={14} /> Liste de réception
+                  </button>
+                </>
               )}
             </div>
           </div>
