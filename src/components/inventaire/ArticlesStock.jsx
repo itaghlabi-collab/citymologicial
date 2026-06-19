@@ -423,12 +423,38 @@ export default function ArticlesStock({ onArticlesChange }) {
     if (res.success) { setDetailId(null); setHistoryId(null); }
   }
 
-  async function openHistory(id) {
+  const openHistory = useCallback((id) => {
     setHistoryId(id);
+  }, []);
+
+  useEffect(() => {
+    if (!historyId) {
+      setHistoryRows([]);
+      setHistoryLoading(false);
+      return undefined;
+    }
+
+    if (historyId === detailId && !detailMovementsLoading) {
+      setHistoryRows(detailMovements);
+      setHistoryLoading(false);
+      return undefined;
+    }
+
+    let cancelled = false;
     setHistoryLoading(true);
-    setHistoryRows(await getMovements(id));
-    setHistoryLoading(false);
-  }
+    getMovements(historyId)
+      .then((rows) => {
+        if (!cancelled) setHistoryRows(rows);
+      })
+      .catch(() => {
+        if (!cancelled) setHistoryRows([]);
+      })
+      .finally(() => {
+        setHistoryLoading(false);
+      });
+
+    return () => { cancelled = true; };
+  }, [historyId, detailId, detailMovements, detailMovementsLoading, getMovements]);
 
   useEffect(() => {
     if (!detailId) {
