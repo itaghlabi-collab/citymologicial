@@ -384,6 +384,7 @@ export default function ArticlesStock({ onArticlesChange }) {
   const {
     records: articles, loading, saving, error, success, configured,
     reload, save, archive, remove, getMovements, importCatalog,
+    removeDuplicates, findDuplicates,
   } = useStockArticles();
   const { records: categories } = useStockCategories();
 
@@ -471,6 +472,7 @@ export default function ArticlesStock({ onArticlesChange }) {
   const pageItems = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   const total = articles.length;
+  const duplicateInfo = useMemo(() => findDuplicates(articles), [articles, findDuplicates]);
   const stockFaible = articles.filter((x) => x.stock_minimum && x.stock_actuel <= x.stock_minimum).length;
   const articlesNeuf = articles.filter((x) => x.etat === 'Neuf').length;
   const articlesUsed = articles.filter((x) => x.etat === 'Utilisé').length;
@@ -525,6 +527,22 @@ export default function ArticlesStock({ onArticlesChange }) {
       {success && (
         <div className="card" style={{ marginBottom: 12, padding: 12, color: '#2E7D32', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: 8 }}>
           <CheckCircle2 size={16} /> {success}
+        </div>
+      )}
+      {duplicateInfo.count > 0 && (
+        <div className="card" style={{ marginBottom: 12, padding: 12, background: '#FFF3E0', border: '1px solid #FFB74D', fontSize: '0.85rem', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+          <span style={{ color: '#E65100' }}>
+            {duplicateInfo.count} article(s) en doublon détecté(s) (même code ou même désignation).
+          </span>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            disabled={saving}
+            onClick={removeDuplicates}
+          >
+            {saving ? <Loader2 size={14} className="cin-spin" /> : null}
+            Nettoyer les doublons
+          </button>
         </div>
       )}
 

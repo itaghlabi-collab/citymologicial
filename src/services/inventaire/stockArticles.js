@@ -10,6 +10,8 @@ const TABLE = 'stock_articles';
 const LEVELS = 'stock_levels';
 const MOVEMENTS = 'stock_movements';
 
+let catalogImportPromise = null;
+
 const STATUT_UI = {
   Active: 'Actif',
   Inactive: 'Inactif',
@@ -197,29 +199,70 @@ export async function listStockArticles() {
   return attachStockQuantities(normalized);
 }
 
-/** Importe les articles catalogue manquants (43 articles CITYMO). */
-export async function importStockArticlesCatalog() {
-  await requireSupabaseUserId();
-  const categories = await listStockCategories().catch(() => []);
-  const rows = buildSeedRows(categories);
-
-  const { data: existing, error: listErr } = await getSupabase()
-    .from(TABLE)
-    .select('reference');
-  if (listErr) throw listErr;
-
-  const existingRefs = new Set(
-    (existing || []).map((r) => String(r.reference || '').trim().toLowerCase()).filter(Boolean),
-  );
-  const toInsert = rows.filter((r) => !existingRefs.has(String(r.reference).trim().toLowerCase()));
-  if (!toInsert.length) return { seeded: 0, skipped: true };
-
-  const { error } = await getSupabase().from(TABLE).insert(toInsert);
-  if (error) throw error;
-  return { seeded: toInsert.length, skipped: false };
+/** Détecte les doublons (même référence ou même désignation). */
+export function findStockArticleDuplicates(articles = []) {
+  const byRef = new Map();
+  const byNom = new Map();
+  const dupIds = new Set();
+  for (const a of articles) {
+    const ref = String(a.reference || a.code || '').trim().toLowerCase();
+    const nom = String(a.nom || a.designation || '').trim().toLowerCase();
+    if (ref) {
+      if (byRef.has(ref)) {
+        dupIds.add(a.id);
+        dupIds.add(byRef.get(ref));
+      } else byRef.set(ref, a.id);
+    }
+    if (nom) {
+      if (byNom.has(nom)) {
+        dupIds.add(a.id);
+        dupIds.add(byNom.get(nom));
+      } else byNom.set(nom, a.id);
+    }
+  }
+  return { count: dupIds.size, ids: [...dupIds] };
 }
 
-/** @deprecated Utiliser importStockArticlesCatalog */
+/** Importe les articles catalogue manquants (43 articles CITYMO). Déduplication par code + désignation. */
+export async function importStockArticlesCatalog() {
+  if (catalogImportPromise) return catalogImportPromise;
+  catalogImportPromise = (async () => {
+    await requireSupabaseUserId();
+    const categories = await listStockCategories().catch(() => []);
+    const rows = buildSeedRows(categories);
+
+    const { data: existing, error: listErr } = await getSupabase()
+      .from(TABLE)
+      .select('reference, nom');
+    if (listErr) throw listErr;
+
+    const existingRefs = new Set(
+      (existing || []).map((r) => String(r.reference || '').trim().toLowerCase()).filter(Boolean),
+    );
+    const existingNoms = new Set(
+      (existing || []).map((r) => String(r.nom || '').trim().toLowerCase()).filter(Boolean),
+    );
+    const toInsert = rows.filter((r) => {
+      const ref = String(r.reference).trim().toLowerCase();
+      const nom = String(r.nom).trim().toLowerCase();
+      if (existingRefs.has(ref)) return false;
+      if (existingNoms.has(nom)) return false;
+      return true;
+    });
+    if (!toInsert.length) return { seeded: 0, skipped: true };
+
+    const { error } = await getSupabase().from(TABLE).insert(toInsert);
+    if (error) throw error;
+    return { seeded: toInsert.length, skipped: false };
+  })();
+  try {
+    return await catalogImportPromise;
+  } finally {
+    catalogImportPromise = null;
+  }
+}
+
+/** Import catalogue au premier chargement si table vide (déduplication stricte). */
 export async function seedStockArticlesIfEmpty() {
   const { count, error: countErr } = await getSupabase()
     .from(TABLE)
@@ -227,6 +270,45 @@ export async function seedStockArticlesIfEmpty() {
   if (countErr) throw countErr;
   if (count > 0) return { seeded: 0, skipped: true };
   return importStockArticlesCatalog();
+}
+
+/** Supprime les doublons en conservant l'enregistrement le plus ancien (référence ou désignation). */
+export async function dedupeStockArticles() {
+  await requireSupabaseUserId();
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .select('id, reference, nom, created_at')
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+
+  const keepIds = new Set();
+  const deleteIds = [];
+  const seenRef = new Map();
+  const seenNom = new Map();
+
+  for (const row of data || []) {
+    const ref = String(row.reference || '').trim().toLowerCase();
+    const nom = String(row.nom || '').trim().toLowerCase();
+    let isDup = false;
+    if (ref && seenRef.has(ref)) isDup = true;
+    if (nom && seenNom.has(nom)) isDup = true;
+    if (isDup) {
+      deleteIds.push(row.id);
+      continue;
+    }
+    keepIds.add(row.id);
+    if (ref) seenRef.set(ref, row.id);
+    if (nom) seenNom.set(nom, row.id);
+  }
+
+  if (!deleteIds.length) return { removed: 0 };
+
+  const { error: delErr } = await getSupabase()
+    .from(TABLE)
+    .delete()
+    .in('id', deleteIds);
+  if (delErr) throw delErr;
+  return { removed: deleteIds.length };
 }
 
 export async function getStockArticleById(id) {

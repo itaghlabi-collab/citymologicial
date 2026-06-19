@@ -11,6 +11,8 @@ import {
   listMovementsForArticle,
   seedStockArticlesIfEmpty,
   importStockArticlesCatalog,
+  dedupeStockArticles,
+  findStockArticleDuplicates,
 } from '../services/inventaire/stockArticles';
 
 export function useStockArticles() {
@@ -161,6 +163,28 @@ export function useStockArticles() {
     }
   }
 
+  async function removeDuplicates() {
+    setSaving(true);
+    setError(null);
+    setSuccess('');
+    try {
+      const res = await dedupeStockArticles();
+      await load();
+      if (res.removed > 0) {
+        setSuccess(`${res.removed} doublon(s) supprimé(s).`);
+      } else {
+        setSuccess('Aucun doublon détecté.');
+      }
+      return { success: true };
+    } catch (err) {
+      const msg = formatSupabaseError(err, 'Erreur lors du dédoublonnage.');
+      setError(msg);
+      return { success: false, error: msg };
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return {
     records,
     loading,
@@ -174,5 +198,7 @@ export function useStockArticles() {
     remove,
     getMovements,
     importCatalog,
+    removeDuplicates,
+    findDuplicates: findStockArticleDuplicates,
   };
 }
