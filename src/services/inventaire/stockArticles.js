@@ -3,6 +3,8 @@
  */
 import { getSupabase } from '../../lib/supabase';
 import { requireSupabaseUserId } from '../supabase/requireUser';
+import { buildSeedRows } from './stockArticlesSeed';
+import { listStockCategories } from './stockCategories';
 
 const TABLE = 'stock_articles';
 const LEVELS = 'stock_levels';
@@ -193,6 +195,38 @@ export async function listStockArticles() {
   if (error) throw error;
   const normalized = (data || []).map((r) => normalizeStockArticle(r)).filter(Boolean);
   return attachStockQuantities(normalized);
+}
+
+/** Importe les articles catalogue manquants (43 articles CITYMO). */
+export async function importStockArticlesCatalog() {
+  await requireSupabaseUserId();
+  const categories = await listStockCategories().catch(() => []);
+  const rows = buildSeedRows(categories);
+
+  const { data: existing, error: listErr } = await getSupabase()
+    .from(TABLE)
+    .select('reference');
+  if (listErr) throw listErr;
+
+  const existingRefs = new Set(
+    (existing || []).map((r) => String(r.reference || '').trim().toLowerCase()).filter(Boolean),
+  );
+  const toInsert = rows.filter((r) => !existingRefs.has(String(r.reference).trim().toLowerCase()));
+  if (!toInsert.length) return { seeded: 0, skipped: true };
+
+  const { error } = await getSupabase().from(TABLE).insert(toInsert);
+  if (error) throw error;
+  return { seeded: toInsert.length, skipped: false };
+}
+
+/** @deprecated Utiliser importStockArticlesCatalog */
+export async function seedStockArticlesIfEmpty() {
+  const { count, error: countErr } = await getSupabase()
+    .from(TABLE)
+    .select('id', { count: 'exact', head: true });
+  if (countErr) throw countErr;
+  if (count > 0) return { seeded: 0, skipped: true };
+  return importStockArticlesCatalog();
 }
 
 export async function getStockArticleById(id) {

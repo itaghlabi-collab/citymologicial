@@ -9,6 +9,8 @@ import {
   archiveStockArticle,
   deleteStockArticle,
   listMovementsForArticle,
+  seedStockArticlesIfEmpty,
+  importStockArticlesCatalog,
 } from '../services/inventaire/stockArticles';
 
 export function useStockArticles() {
@@ -33,7 +35,20 @@ export function useStockArticles() {
     setLoading(true);
     setError(null);
     try {
-      setRecords(await listStockArticles());
+      const seedRes = await seedStockArticlesIfEmpty().catch((err) => ({ error: err }));
+      if (seedRes?.error) {
+        console.warn('[CITYMO] seedStockArticlesIfEmpty', seedRes.error);
+      } else if (seedRes?.seeded > 0) {
+        setSuccess(`${seedRes.seeded} articles du catalogue importés.`);
+      }
+      const rows = await listStockArticles();
+      setRecords(rows);
+      if (seedRes?.error && !rows.length) {
+        setError(formatSupabaseError(
+          seedRes.error,
+          'Import automatique impossible — connectez-vous ou exécutez SEED_STOCK_ARTICLES_43.sql dans Supabase.',
+        ));
+      }
     } catch (err) {
       console.error('[CITYMO] useStockArticles', err);
       setError(formatSupabaseError(err, 'Erreur chargement articles de stock.'));
@@ -124,6 +139,28 @@ export function useStockArticles() {
     }
   }
 
+  async function importCatalog() {
+    setSaving(true);
+    setError(null);
+    setSuccess('');
+    try {
+      const res = await importStockArticlesCatalog();
+      await load();
+      if (res.seeded > 0) {
+        setSuccess(`${res.seeded} articles importés depuis le catalogue.`);
+      } else {
+        setSuccess('Le catalogue est déjà importé.');
+      }
+      return { success: true };
+    } catch (err) {
+      const msg = formatSupabaseError(err, 'Import catalogue impossible.');
+      setError(msg);
+      return { success: false, error: msg };
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return {
     records,
     loading,
@@ -136,5 +173,6 @@ export function useStockArticles() {
     archive,
     remove,
     getMovements,
+    importCatalog,
   };
 }

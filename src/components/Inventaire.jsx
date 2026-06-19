@@ -8,7 +8,7 @@ import ArticlesStock   from './inventaire/ArticlesStock.jsx';
 import Depots          from './inventaire/Depots.jsx';
 import BonsMouvements  from './inventaire/BonsMouvements.jsx';
 import Stocks          from './inventaire/Stocks.jsx';
-import { listStockArticles } from '../services/inventaire/stockArticles';
+import { listStockArticles, seedStockArticlesIfEmpty } from '../services/inventaire/stockArticles';
 import { listStockCategories } from '../services/inventaire/stockCategories';
 
 export default function Inventaire({ activeTab }) {
@@ -19,6 +19,7 @@ export default function Inventaire({ activeTab }) {
   const [depots, setDepots] = useState([]);
 
   useEffect(() => {
+    seedStockArticlesIfEmpty().catch(() => {});
     listStockArticles()
       .then((rows) => setArticles(rows || []))
       .catch(() => {});

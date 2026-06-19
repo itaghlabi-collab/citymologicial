@@ -367,7 +367,7 @@ function MobileArticleRow({ item, catName, locLabel, onView, onEdit, onArchive, 
 export default function ArticlesStock({ onArticlesChange }) {
   const {
     records: articles, loading, saving, error, success, configured,
-    reload, save, archive, remove, getMovements,
+    reload, save, archive, remove, getMovements, importCatalog,
   } = useStockArticles();
   const { records: categories } = useStockCategories();
 
@@ -499,7 +499,12 @@ export default function ArticlesStock({ onArticlesChange }) {
         </div>
       )}
       {error && (
-        <div className="card" style={{ marginBottom: 12, padding: 12, color: 'var(--red)', fontSize: '0.85rem' }}>{error}</div>
+        <div className="card" style={{ marginBottom: 12, padding: 12, color: 'var(--red)', fontSize: '0.85rem' }}>
+          {error}
+          <div style={{ marginTop: 8, fontSize: '0.8rem' }}>
+            Si l&apos;import échoue : exécutez <code>RUN_STOCK_CATEGORIES.sql</code>, puis <code>RUN_STOCK_ARTICLES_LEVELS.sql</code>, puis <code>SEED_STOCK_ARTICLES_43.sql</code> dans Supabase SQL Editor.
+          </div>
+        </div>
       )}
       {success && (
         <div className="card" style={{ marginBottom: 12, padding: 12, color: '#2E7D32', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: 8 }}>
@@ -579,10 +584,26 @@ export default function ArticlesStock({ onArticlesChange }) {
           <EmptyState
             icon={<Package size={24} />}
             title="Aucun article"
-            sub={configured ? 'Ajoutez vos premiers articles de stock' : 'Configurez Supabase puis exécutez RUN_STOCK_ARTICLES_LEVELS.sql'}
+            sub={configured
+              ? 'Importez le catalogue CITYMO (43 articles) ou ajoutez un article manuellement.'
+              : 'Configurez Supabase puis exécutez les scripts SQL.'}
             action="Ajouter article"
             onAction={() => { setEditItem(null); setShowModal(true); }}
           />
+          {configured && (
+            <div style={{ textAlign: 'center', paddingBottom: 28 }}>
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={saving}
+                onClick={importCatalog}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}
+              >
+                {saving ? <Loader2 size={14} className="cin-spin" /> : <Download size={14} />}
+                Importer le catalogue (43 articles)
+              </button>
+            </div>
+          )}
         </div>
       ) : (
         <>
