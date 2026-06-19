@@ -284,8 +284,8 @@ export default function BonMouvementForm({
             </select>
           </div>
           <div style={{ gridColumn: '1 / -1' }}>
-            <Label>Motif</Label>
-            <input value={form.motif} onChange={(e) => setField('motif', e.target.value)} placeholder="Motif (optionnel)..." style={IS(false)} />
+            <Label>Motif du mouvement</Label>
+            <input value={form.motif} onChange={(e) => setField('motif', e.target.value)} placeholder="Ex. réappro chantier, retour atelier… (optionnel)" style={IS(false)} />
           </div>
           <div style={{ gridColumn: '1 / -1' }}>
             <Label>Notes</Label>

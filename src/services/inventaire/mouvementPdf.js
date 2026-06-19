@@ -25,6 +25,10 @@ const COMPANY = {
   ice: 'ICE : 002023116000060',
 };
 
+// Logo source carré (~1:1) — containImage conserve le ratio (pas d'étirement)
+const LOGO_MAX_W = 30;
+const LOGO_MAX_H = 15;
+
 async function loadImage(url) {
   try {
     const res = await fetch(url, { mode: 'cors' });
@@ -39,6 +43,39 @@ async function loadImage(url) {
   } catch {
     return null;
   }
+}
+
+function getImageSize(dataUrl) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
+    img.onerror = () => resolve({ width: 1, height: 1 });
+    img.src = dataUrl;
+  });
+}
+
+async function loadImageWithSize(url) {
+  const dataUrl = await loadImage(url);
+  if (!dataUrl) return null;
+  const size = await getImageSize(dataUrl);
+  return { dataUrl, ...size };
+}
+
+function containImage(naturalW, naturalH, maxW, maxH) {
+  if (!naturalW || !naturalH) return { width: maxW, height: maxH };
+  const ratio = naturalW / naturalH;
+  let width = maxW;
+  let height = width / ratio;
+  if (height > maxH) {
+    height = maxH;
+    width = height * ratio;
+  }
+  return { width, height };
+}
+
+function imgFmt(dataUrl) {
+  if (!dataUrl?.includes('jpeg') && !dataUrl?.includes('jpg')) return 'PNG';
+  return 'JPEG';
 }
 
 function fmtDate(d) {
@@ -62,7 +99,7 @@ function drawBorderedBox(doc, x, y, w, h, fill = null) {
   doc.rect(x, y, w, h);
 }
 
-function drawHeader(doc, bon, logo) {
+function drawHeader(doc, bon, logoMeta) {
   const headerH = 48;
   const halfW = CONTENT_W / 2;
   const top = M;
@@ -76,14 +113,25 @@ function drawHeader(doc, bon, logo) {
   doc.line(M + halfW, top, M + halfW, top + headerH);
   doc.rect(M, top, CONTENT_W, headerH);
 
-  if (logo) {
-    try { doc.addImage(logo, 'PNG', M + 6, top + 7, 44, 16); } catch { /* skip */ }
+  let ly = top + 8;
+  if (logoMeta?.dataUrl) {
+    const logoSize = containImage(logoMeta.width, logoMeta.height, LOGO_MAX_W, LOGO_MAX_H);
+    try {
+      doc.addImage(
+        logoMeta.dataUrl,
+        imgFmt(logoMeta.dataUrl),
+        M + 6,
+        top + 7,
+        logoSize.width,
+        logoSize.height,
+      );
+    } catch { /* skip */ }
+    ly = top + 7 + logoSize.height + 4;
   }
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(9);
   doc.setTextColor(...MUTED);
-  let ly = top + 26;
   [COMPANY.address, COMPANY.email, COMPANY.phone, COMPANY.ice].forEach((line) => {
     doc.text(line, M + 6, ly);
     ly += 4.8;
@@ -155,18 +203,19 @@ function drawMetaGrid(doc, bon, startY) {
 function drawTextBlock(doc, label, value, startY) {
   if (!value?.trim()) return startY;
   const pad = 6;
+  const lines = doc.splitTextToSize(value.trim(), CONTENT_W - pad * 2);
+  const blockH = Math.max(20, 16 + lines.length * 5);
+
+  drawBorderedBox(doc, M, startY, CONTENT_W, blockH, WHITE);
+
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10);
-  doc.setTextColor(...TEXT);
-  doc.text(label, M + pad, startY + 8);
+  doc.setFontSize(8);
+  doc.setTextColor(...MUTED);
+  doc.text(label.toUpperCase(), M + pad, startY + 7);
 
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(10.5);
   doc.setTextColor(...TEXT);
-  const lines = doc.splitTextToSize(value.trim(), CONTENT_W - pad * 2);
-  const blockH = Math.max(16, 12 + lines.length * 5);
-
-  drawBorderedBox(doc, M, startY, CONTENT_W, blockH, WHITE);
   doc.text(lines, M + pad, startY + 14);
 
   return startY + blockH + 6;
@@ -288,12 +337,12 @@ function drawFooter(doc, bon, startY) {
 }
 
 export async function generateMouvementPdf(bon, articles = []) {
-  const logo = await loadImage(LOGO_URL);
+  const logoMeta = await loadImageWithSize(LOGO_URL);
   const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
 
-  let y = drawHeader(doc, bon, logo);
+  let y = drawHeader(doc, bon, logoMeta);
   y = drawMetaGrid(doc, bon, y);
-  y = drawTextBlock(doc, 'Motif', bon.motif, y);
+  y = drawTextBlock(doc, 'Motif du mouvement', bon.motif, y);
   y = drawTextBlock(doc, 'Notes', bon.note, y);
   y = drawArticlesTable(doc, bon, articles, y);
   drawFooter(doc, bon, y);
