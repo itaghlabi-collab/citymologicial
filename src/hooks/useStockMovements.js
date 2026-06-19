@@ -3,10 +3,10 @@ import { getSupabase, isSupabaseConfigured } from '../lib/supabase';
 import { formatSupabaseError } from '../services/supabase/formatError';
 import { useAuth } from './useAuth';
 import {
-  listStockMovements,
-  createStockMovement,
-  updateStockMovement,
-  deleteStockMovement,
+  listStockMovementBons,
+  saveStockMovementBon,
+  validateStockMovementBon,
+  deleteStockMovementBon,
 } from '../services/inventaire/stockMovements';
 import { listStockArticles } from '../services/inventaire/stockArticles';
 
@@ -42,7 +42,7 @@ export function useStockMovements({ onArticlesChange } = {}) {
     setLoading(true);
     setError(null);
     try {
-      const rows = await listStockMovements();
+      const rows = await listStockMovementBons();
       setRecords(rows);
     } catch (err) {
       console.error('[CITYMO] useStockMovements', err);
@@ -70,19 +70,19 @@ export function useStockMovements({ onArticlesChange } = {}) {
     return () => clearTimeout(t);
   }, [success]);
 
-  async function save(form, id) {
+  async function save(bon) {
     setSaving(true);
     setError(null);
     setSuccess('');
     try {
-      if (id) await updateStockMovement(id, form);
-      else await createStockMovement(form);
+      const saved = await saveStockMovementBon(bon);
       await load();
       await refreshArticles();
-      setSuccess(id ? 'Bon de mouvement modifié.' : 'Bon de mouvement créé.');
-      return { success: true };
+      const applied = saved?.applied || bon.statut === 'Validé';
+      setSuccess(applied ? 'Bon validé — stock mis à jour.' : 'Bon enregistré en brouillon.');
+      return { success: true, data: saved };
     } catch (err) {
-      const msg = formatSupabaseError(err, 'Erreur enregistrement du mouvement.');
+      const msg = formatSupabaseError(err, 'Erreur enregistrement du bon.');
       setError(msg);
       return { success: false, error: msg };
     } finally {
@@ -90,18 +90,37 @@ export function useStockMovements({ onArticlesChange } = {}) {
     }
   }
 
-  async function remove(id) {
+  async function validate(ref) {
     setSaving(true);
     setError(null);
     setSuccess('');
     try {
-      await deleteStockMovement(id);
+      const saved = await validateStockMovementBon(ref);
       await load();
       await refreshArticles();
-      setSuccess('Bon de mouvement supprimé.');
+      setSuccess('Bon validé — stock mis à jour.');
+      return { success: true, data: saved };
+    } catch (err) {
+      const msg = formatSupabaseError(err, 'Erreur validation du bon.');
+      setError(msg);
+      return { success: false, error: msg };
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function remove(ref) {
+    setSaving(true);
+    setError(null);
+    setSuccess('');
+    try {
+      await deleteStockMovementBon(ref);
+      await load();
+      await refreshArticles();
+      setSuccess('Bon supprimé.');
       return { success: true };
     } catch (err) {
-      const msg = formatSupabaseError(err, 'Erreur suppression du mouvement.');
+      const msg = formatSupabaseError(err, 'Erreur suppression du bon.');
       setError(msg);
       return { success: false, error: msg };
     } finally {
@@ -118,6 +137,7 @@ export function useStockMovements({ onArticlesChange } = {}) {
     configured,
     reload: load,
     save,
+    validate,
     remove,
   };
 }

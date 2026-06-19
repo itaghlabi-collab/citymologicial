@@ -1,5 +1,5 @@
 /**
- * stockMovements.js — Bons de mouvement (Supabase stock_movements + stock_levels)
+ * stockMovements.js — Bons de mouvement multi-lignes (Supabase stock_movements + stock_levels)
  */
 import { getSupabase } from '../../lib/supabase';
 import { requireSupabaseUserId } from '../supabase/requireUser';
@@ -55,30 +55,72 @@ export function normalizeStockMovement(row, article = null) {
     note: p.note || '',
     statut: p.statut || 'Brouillon',
     applied: !!p.applied,
+    ligne_notes: p.ligne_notes || '',
+    ligne_index: p.ligne_index ?? 0,
     created_at: row.created_at,
   };
 }
 
-function toMovementRow(form, uid) {
-  const payload = {
-    emplacement_source: (form.emplacement_source || '').trim(),
-    emplacement_destination: (form.emplacement_destination || '').trim(),
-    cree_par: (form.cree_par || '').trim(),
-    livreur: (form.livreur || '').trim(),
-    receptionnaire: (form.receptionnaire || '').trim(),
-    note: (form.note || '').trim(),
-    statut: form.statut || 'Brouillon',
-    applied: !!form.applied,
-  };
+export function normalizeBonFromRows(rows) {
+  if (!rows?.length) return null;
+  const items = rows.map((row) => normalizeStockMovement(row));
+  const first = items[0];
+  const lignes = items
+    .sort((a, b) => (a.ligne_index ?? 0) - (b.ligne_index ?? 0))
+    .map((m) => ({
+      id: m.id,
+      article_id: m.article_id,
+      article_code: m.article_code,
+      article_designation: m.article_designation,
+      quantite: m.quantite,
+      notes: m.ligne_notes || '',
+    }));
+
   return {
-    ref_mouvement: (form.ref || '').trim() || null,
-    type_mouvement: typeToDb(form.type_mouvement),
-    article_id: form.article_id || null,
+    ref: first.ref,
+    type_mouvement: first.type_mouvement,
+    emplacement_source: first.emplacement_source,
+    emplacement_destination: first.emplacement_destination,
+    date_creation: first.date_creation,
+    cree_par: first.cree_par,
+    livreur: first.livreur,
+    receptionnaire: first.receptionnaire,
+    motif: first.motif,
+    note: first.note,
+    statut: first.statut,
+    applied: items.every((m) => m.applied),
+    lignes,
+    quantite_totale: lignes.reduce((s, l) => s + (Number(l.quantite) || 0), 0),
+  };
+}
+
+function bonHeaderPayload(bon, statut, applied = false) {
+  return {
+    emplacement_source: (bon.emplacement_source || '').trim(),
+    emplacement_destination: (bon.emplacement_destination || '').trim(),
+    cree_par: (bon.cree_par || '').trim(),
+    livreur: (bon.livreur || '').trim(),
+    receptionnaire: (bon.receptionnaire || '').trim(),
+    note: (bon.note || '').trim(),
+    statut: statut || bon.statut || 'Brouillon',
+    applied,
+  };
+}
+
+function toMovementRowFromBon(bon, ligne, idx, uid, ref, statut, applied) {
+  return {
+    ref_mouvement: ref,
+    type_mouvement: typeToDb(bon.type_mouvement),
+    article_id: ligne.article_id || null,
     warehouse_id: null,
-    quantite: Number(form.quantite) || 0,
-    date_mouvement: form.date_creation || new Date().toISOString().slice(0, 10),
-    motif: (form.motif || '').trim() || null,
-    payload,
+    quantite: Number(ligne.quantite) || 0,
+    date_mouvement: bon.date_creation || new Date().toISOString().slice(0, 10),
+    motif: (bon.motif || '').trim() || null,
+    payload: {
+      ...bonHeaderPayload(bon, statut, applied),
+      ligne_notes: (ligne.notes || '').trim(),
+      ligne_index: idx,
+    },
     created_by: uid,
   };
 }
@@ -107,6 +149,38 @@ export async function listStockMovements() {
     .order('created_at', { ascending: false });
   if (error) throw error;
   return (data || []).map((row) => normalizeStockMovement(row));
+}
+
+export async function listStockMovementBons() {
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .select('*, stock_articles(reference, nom)')
+    .order('date_mouvement', { ascending: false })
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+
+  const byRef = new Map();
+  (data || []).forEach((row) => {
+    const ref = row.ref_mouvement || row.id;
+    if (!byRef.has(ref)) byRef.set(ref, []);
+    byRef.get(ref).push(row);
+  });
+
+  return Array.from(byRef.values())
+    .map(normalizeBonFromRows)
+    .filter(Boolean)
+    .sort((a, b) => String(b.date_creation).localeCompare(String(a.date_creation)));
+}
+
+export async function getStockMovementBon(ref) {
+  if (!ref) return null;
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .select('*, stock_articles(reference, nom)')
+    .eq('ref_mouvement', ref)
+    .order('created_at', { ascending: true });
+  if (error) throw error;
+  return normalizeBonFromRows(data || []);
 }
 
 async function findLevel(articleId, emplacement) {
@@ -193,123 +267,166 @@ async function applyMovementEffects(mvt, reverse = false) {
   }
 }
 
-function validateMovementForm(form) {
-  const type = form.type_mouvement;
+async function applyBonEffects(bon, reverse = false) {
+  for (const ligne of bon.lignes || []) {
+    await applyMovementEffects({
+      type_mouvement: bon.type_mouvement,
+      article_id: ligne.article_id,
+      quantite: ligne.quantite,
+      emplacement_source: bon.emplacement_source,
+      emplacement_destination: bon.emplacement_destination,
+    }, reverse);
+  }
+}
+
+function validateBonForm(bon) {
+  const type = bon.type_mouvement;
   const needsSource = ['Sortie', 'Transfert', 'Retour', 'Rebut'].includes(type);
   const needsDest = ['Entrée', 'Transfert', 'Retour'].includes(type);
-  if (!form.article_id) {
-    const err = new Error('Sélectionnez un article.');
+
+  if (!bon.lignes?.length) {
+    const err = new Error('Ajoutez au moins une ligne article.');
     err.code = 'VALIDATION';
     throw err;
   }
-  if (!form.quantite || Number(form.quantite) <= 0) {
-    const err = new Error('Quantité invalide.');
-    err.code = 'VALIDATION';
-    throw err;
-  }
-  if (needsSource && !(form.emplacement_source || '').trim()) {
+
+  bon.lignes.forEach((ligne, idx) => {
+    if (!ligne.article_id) {
+      const err = new Error(`Ligne ${idx + 1} : sélectionnez un article.`);
+      err.code = 'VALIDATION';
+      throw err;
+    }
+    if (!ligne.quantite || Number(ligne.quantite) <= 0) {
+      const err = new Error(`Ligne ${idx + 1} : quantité invalide.`);
+      err.code = 'VALIDATION';
+      throw err;
+    }
+  });
+
+  if (needsSource && !(bon.emplacement_source || '').trim()) {
     const err = new Error('Emplacement source requis.');
     err.code = 'VALIDATION';
     throw err;
   }
-  if (needsDest && !(form.emplacement_destination || '').trim()) {
+  if (needsDest && !(bon.emplacement_destination || '').trim()) {
     const err = new Error('Emplacement destination requis.');
     err.code = 'VALIDATION';
     throw err;
   }
-  if (type === 'Transfert' && form.emplacement_source === form.emplacement_destination) {
+  if (type === 'Transfert' && bon.emplacement_source === bon.emplacement_destination) {
     const err = new Error('Source et destination doivent être différentes.');
     err.code = 'VALIDATION';
     throw err;
   }
 }
 
-async function markApplied(id, payload) {
-  const { error } = await getSupabase()
-    .from(TABLE)
-    .update({ payload: { ...payload, applied: true } })
-    .eq('id', id);
+async function deleteBonRows(ref, reverseIfApplied = false) {
+  const bon = await getStockMovementBon(ref);
+  if (!bon) return;
+  if (reverseIfApplied && bon.applied) {
+    await applyBonEffects(bon, true);
+  }
+  const { error } = await getSupabase().from(TABLE).delete().eq('ref_mouvement', ref);
   if (error) throw error;
 }
 
-export async function createStockMovement(form) {
+async function markBonApplied(ref, statut) {
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .select('id, payload')
+    .eq('ref_mouvement', ref);
+  if (error) throw error;
+  await Promise.all((data || []).map((row) => getSupabase()
+    .from(TABLE)
+    .update({ payload: { ...(row.payload || {}), statut, applied: true } })
+    .eq('id', row.id)));
+}
+
+export async function saveStockMovementBon(bon) {
   const uid = await requireSupabaseUserId();
-  validateMovementForm(form);
+  validateBonForm(bon);
 
-  const row = toMovementRow(form, uid);
-  if (!row.ref_mouvement) row.ref_mouvement = await generateMovementRef();
+  const ref = (bon.ref || '').trim() || await generateMovementRef();
+  const existing = bon.ref ? await getStockMovementBon(bon.ref) : null;
+
+  if (existing?.applied) {
+    const err = new Error('Ce bon est déjà validé et ne peut plus être modifié.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+
+  if (existing) {
+    await deleteBonRows(bon.ref, false);
+  }
+
+  const applyNow = shouldApplyStock(bon.statut);
+  const rows = (bon.lignes || []).map((ligne, idx) => toMovementRowFromBon(
+    bon, ligne, idx, uid, ref, bon.statut, false,
+  ));
 
   const { data, error } = await getSupabase()
     .from(TABLE)
-    .insert([row])
-    .select('*, stock_articles(reference, nom)')
-    .single();
+    .insert(rows)
+    .select('*, stock_articles(reference, nom)');
   if (error) throw error;
 
-  const mvt = normalizeStockMovement(data);
-  if (shouldApplyStock(mvt.statut) && !mvt.applied) {
-    await applyMovementEffects(mvt);
-    await markApplied(mvt.id, data.payload || row.payload);
-    mvt.applied = true;
+  const savedBon = normalizeBonFromRows(data);
+  if (applyNow) {
+    await applyBonEffects(savedBon);
+    await markBonApplied(ref, bon.statut);
+    savedBon.applied = true;
   }
-  return mvt;
+  return savedBon;
 }
 
+export async function validateStockMovementBon(ref) {
+  await requireSupabaseUserId();
+  const bon = await getStockMovementBon(ref);
+  if (!bon) {
+    const err = new Error('Bon introuvable.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  if (bon.applied) {
+    const err = new Error('Bon déjà validé.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  validateBonForm(bon);
+  await applyBonEffects(bon);
+  await markBonApplied(ref, 'Validé');
+  return getStockMovementBon(ref);
+}
+
+export async function deleteStockMovementBon(ref) {
+  await requireSupabaseUserId();
+  await deleteBonRows(ref, true);
+}
+
+/** @deprecated single-line — use saveStockMovementBon */
+export async function createStockMovement(form) {
+  return saveStockMovementBon({
+    ...form,
+    lignes: [{ article_id: form.article_id, quantite: form.quantite, notes: '' }],
+  });
+}
+
+/** @deprecated single-line */
 export async function updateStockMovement(id, form) {
-  await requireSupabaseUserId();
-  validateMovementForm(form);
-
-  const { data: existing, error: fetchErr } = await getSupabase()
-    .from(TABLE)
-    .select('*, stock_articles(reference, nom)')
-    .eq('id', id)
-    .single();
-  if (fetchErr) throw fetchErr;
-
-  const prev = normalizeStockMovement(existing);
-  const row = toMovementRow({ ...form, ref: form.ref || prev.ref, applied: prev.applied }, existing.created_by);
-
-  const { data, error } = await getSupabase()
-    .from(TABLE)
-    .update({
-      type_mouvement: row.type_mouvement,
-      article_id: row.article_id,
-      quantite: row.quantite,
-      date_mouvement: row.date_mouvement,
-      motif: row.motif,
-      payload: row.payload,
-    })
-    .eq('id', id)
-    .select('*, stock_articles(reference, nom)')
-    .single();
+  const { data, error } = await getSupabase().from(TABLE).select('ref_mouvement').eq('id', id).single();
   if (error) throw error;
-
-  const mvt = normalizeStockMovement(data);
-  if (!prev.applied && shouldApplyStock(mvt.statut)) {
-    await applyMovementEffects(mvt);
-    await markApplied(mvt.id, data.payload || row.payload);
-    mvt.applied = true;
-  }
-  return mvt;
+  return saveStockMovementBon({
+    ...form,
+    ref: data.ref_mouvement,
+    lignes: [{ id, article_id: form.article_id, quantite: form.quantite, notes: '' }],
+  });
 }
 
+/** @deprecated — prefer deleteStockMovementBon */
 export async function deleteStockMovement(id) {
-  await requireSupabaseUserId();
-
-  const { data: existing, error: fetchErr } = await getSupabase()
-    .from(TABLE)
-    .select('*')
-    .eq('id', id)
-    .single();
-  if (fetchErr) throw fetchErr;
-
-  const prev = normalizeStockMovement(existing);
-  if (prev.applied) {
-    await applyMovementEffects(prev, true);
-  }
-
-  const { error } = await getSupabase().from(TABLE).delete().eq('id', id);
+  const { data, error } = await getSupabase().from(TABLE).select('ref_mouvement').eq('id', id).single();
   if (error) throw error;
+  await deleteStockMovementBon(data.ref_mouvement);
 }
 
 export function movementStockDelta(type, qty) {
