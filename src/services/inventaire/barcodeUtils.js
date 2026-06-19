@@ -27,7 +27,15 @@ export function renderBarcodeCanvas(value, options = {}) {
 }
 
 export function renderBarcodeDataUrl(value, options = {}) {
-  const canvas = renderBarcodeCanvas(value, options);
+  const scale = options.scale || 1;
+  const { scale: _s, ...barcodeOpts } = options;
+  const base = {
+    width: (barcodeOpts.width ?? 2) * scale,
+    height: (barcodeOpts.height ?? 56) * scale,
+    margin: (barcodeOpts.margin ?? 10) * scale,
+    ...barcodeOpts,
+  };
+  const canvas = renderBarcodeCanvas(value, base);
   return canvas ? canvas.toDataURL('image/png') : null;
 }
 

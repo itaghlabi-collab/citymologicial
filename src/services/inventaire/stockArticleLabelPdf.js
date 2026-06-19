@@ -1,200 +1,197 @@
 /**
- * stockArticleLabelPdf.js — Étiquettes code-barres CITYMO (unitaire, sélection, planche A4)
+ * stockArticleLabelPdf.js — Étiquettes compactes dépôt (désignation + code-barres + code)
  */
 import { jsPDF } from 'jspdf';
 import { getArticleBarcodeValue, renderBarcodeDataUrl } from './barcodeUtils';
 
-const LOGO_URL = 'https://i.ibb.co/N6SbC06M/logopng.png';
-const RED = [198, 40, 40];
-const TEXT = [33, 33, 33];
-const MUTED = [90, 90, 90];
-
-const LABEL_W = 100;
-const LABEL_H = 70;
-const M = 6;
+const TEXT = [0, 0, 0];
 const A4_W = 210;
 const A4_H = 297;
-const COLS = 2;
-const ROWS = 4;
 
-async function loadLogo() {
-  try {
-    const res = await fetch(LOGO_URL, { mode: 'cors' });
-    if (!res.ok) return null;
-    const blob = await res.blob();
-    return await new Promise((resolve) => {
-      const r = new FileReader();
-      r.onload = () => resolve(r.result);
-      r.onerror = () => resolve(null);
-      r.readAsDataURL(blob);
-    });
-  } catch {
-    return null;
+export const LABEL_FORMATS = {
+  small: { key: 'small', width: 50, height: 30, name: '50×30 mm' },
+  standard: { key: 'standard', width: 80, height: 50, name: '80×50 mm' },
+};
+
+const A4_GRID = {
+  standard: { cols: 2, rows: 5 },
+  small: { cols: 4, rows: 9 },
+};
+
+function resolveFormat(formatOrLegacy) {
+  if (formatOrLegacy && LABEL_FORMATS[formatOrLegacy]) return formatOrLegacy;
+  return 'standard';
+}
+
+function labelPad(formatKey) {
+  return formatKey === 'small' ? 1.5 : 2;
+}
+
+function barcodeRenderOpts(formatKey) {
+  if (formatKey === 'small') {
+    return { height: 72, width: 2.4, scale: 4, displayValue: false, margin: 1, textMargin: 0 };
   }
+  return { height: 110, width: 2.8, scale: 4, displayValue: false, margin: 2, textMargin: 0 };
 }
 
-function truncate(doc, text, maxW) {
-  const t = String(text || '').trim();
-  if (!t) return '—';
-  if (doc.getTextWidth(t) <= maxW) return t;
-  let s = t;
-  while (s.length > 1 && doc.getTextWidth(`${s}…`) > maxW) s = s.slice(0, -1);
-  return `${s}…`;
-}
-
-function drawLabelOnDoc(doc, x, y, article, categoryName, logoDataUrl) {
+function drawLabelOnDoc(doc, x, y, article, formatKey) {
+  const fmt = LABEL_FORMATS[formatKey] || LABEL_FORMATS.standard;
+  const { width: W, height: H } = fmt;
+  const pad = labelPad(formatKey);
+  const contentW = W - pad * 2;
   const code = getArticleBarcodeValue(article);
-  const contentW = LABEL_W - M * 2;
-  let ly = y + M + 2;
+  const designation = String(article.designation || article.nom || '—').trim();
 
-  doc.setDrawColor(190, 190, 190);
-  doc.setLineWidth(0.25);
-  doc.rect(x + 0.5, y + 0.5, LABEL_W - 1, LABEL_H - 1);
-
-  if (logoDataUrl) {
-    try {
-      doc.addImage(logoDataUrl, 'PNG', x + M, ly, 22, 8);
-      ly += 10;
-    } catch {
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(10);
-      doc.setTextColor(...RED);
-      doc.text('CITYMO', x + M, ly + 4);
-      ly += 8;
-    }
-  } else {
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(10);
-    doc.setTextColor(...RED);
-    doc.text('CITYMO', x + M, ly + 4);
-    ly += 8;
-  }
-
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8);
-  doc.setTextColor(...MUTED);
-  doc.text('Code :', x + M, ly);
   doc.setTextColor(...TEXT);
-  doc.text(code || '—', x + M + 14, ly);
-  ly += 5;
 
+  const desFontSize = formatKey === 'small' ? 5 : 7;
+  const maxDesLines = formatKey === 'small' ? 2 : 3;
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7);
-  doc.setTextColor(...MUTED);
-  doc.text('Désignation :', x + M, ly);
-  ly += 3.8;
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(...TEXT);
-  const desLines = doc.splitTextToSize(article.designation || article.nom || '—', contentW);
-  doc.text(desLines.slice(0, 2), x + M, ly);
-  ly += desLines.length > 1 ? 7 : 4;
-
-  const fields = [
-    ['Catégorie', categoryName || '—'],
-    ['État', article.etat || '—'],
-    ['Emplacement', article.emplacement || '—'],
-  ];
-  fields.forEach(([label, value]) => {
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(6.5);
-    doc.setTextColor(...MUTED);
-    doc.text(`${label} :`, x + M, ly);
-    doc.setFont('helvetica', 'normal');
-    doc.setTextColor(...TEXT);
-    doc.text(truncate(doc, value, contentW - 22), x + M + 22, ly);
-    ly += 4;
+  doc.setFontSize(desFontSize);
+  const desLines = doc.splitTextToSize(designation, contentW).slice(0, maxDesLines);
+  const lineH = desFontSize * 0.42;
+  let cy = y + pad + lineH;
+  desLines.forEach((line) => {
+    doc.text(line, x + W / 2, cy, { align: 'center' });
+    cy += lineH;
   });
 
-  const barcodeUrl = renderBarcodeDataUrl(code, { height: 36, width: 1.4, fontSize: 9, margin: 2 });
+  const codeFontSize = formatKey === 'small' ? 6.5 : 8.5;
+  const codeY = y + H - pad;
+  const barcodeTop = cy + (formatKey === 'small' ? 0.8 : 1.2);
+  const barcodeBottom = codeY - codeFontSize * 0.35 - 0.8;
+  const barcodeH = Math.max(formatKey === 'small' ? 10 : 14, barcodeBottom - barcodeTop);
+
+  const barcodeUrl = renderBarcodeDataUrl(code, barcodeRenderOpts(formatKey));
   if (barcodeUrl) {
+    const imgW = contentW * 0.96;
     try {
-      doc.addImage(barcodeUrl, 'PNG', x + M, y + LABEL_H - M - 16, contentW, 14);
+      doc.addImage(barcodeUrl, 'PNG', x + (W - imgW) / 2, barcodeTop, imgW, barcodeH);
     } catch { /* skip */ }
   }
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(codeFontSize);
+  doc.text(code || '—', x + W / 2, codeY, { align: 'center' });
 }
 
-function buildLabelMeta(article, getCategoryName) {
-  const catName = typeof getCategoryName === 'function'
-    ? getCategoryName(article)
-    : (getCategoryName || '');
-  return { article, categoryName: catName };
+function safeFilename(code) {
+  return (code || 'article').replace(/[^\w-]+/g, '-');
 }
 
-export async function downloadStockArticleLabel(article, categoryName = '') {
-  const logo = await loadLogo();
-  const doc = new jsPDF({ unit: 'mm', format: [LABEL_W, LABEL_H], orientation: 'portrait' });
-  drawLabelOnDoc(doc, 0, 0, article, categoryName, logo);
-  const safe = (getArticleBarcodeValue(article) || 'article').replace(/[^\w-]+/g, '-');
-  doc.save(`etiquette-${safe}.pdf`);
-}
-
-export async function downloadStockArticleLabels(articles = [], getCategoryName) {
-  if (!articles.length) return;
-  const logo = await loadLogo();
-  if (articles.length === 1) {
-    const { categoryName } = buildLabelMeta(articles[0], getCategoryName);
-    return downloadStockArticleLabel(articles[0], categoryName);
-  }
+function buildA4Doc(articles, formatKey) {
+  const fmt = LABEL_FORMATS[formatKey];
+  const grid = A4_GRID[formatKey] || A4_GRID.standard;
+  const perPage = grid.cols * grid.rows;
   const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+
+  const gapX = (A4_W - grid.cols * fmt.width) / (grid.cols + 1);
+  const gapY = (A4_H - grid.rows * fmt.height) / (grid.rows + 1);
+
   articles.forEach((article, idx) => {
-    if (idx > 0 && idx % (COLS * ROWS) === 0) doc.addPage();
-    const pageIdx = idx % (COLS * ROWS);
-    const col = pageIdx % COLS;
-    const row = Math.floor(pageIdx / COLS);
-    const marginX = (A4_W - COLS * LABEL_W) / (COLS + 1);
-    const marginY = (A4_H - ROWS * LABEL_H) / (ROWS + 1);
-    const x = marginX + col * (LABEL_W + marginX);
-    const y = marginY + row * (LABEL_H + marginY);
-    const { categoryName } = buildLabelMeta(article, getCategoryName);
-    drawLabelOnDoc(doc, x, y, article, categoryName, logo);
+    if (idx > 0 && idx % perPage === 0) doc.addPage();
+    const pageIdx = idx % perPage;
+    const col = pageIdx % grid.cols;
+    const row = Math.floor(pageIdx / grid.cols);
+    const lx = gapX + col * (fmt.width + gapX);
+    const ly = gapY + row * (fmt.height + gapY);
+    drawLabelOnDoc(doc, lx, ly, article, formatKey);
   });
-  doc.save(`etiquettes-articles-${articles.length}.pdf`);
+
+  return doc;
 }
 
-export async function downloadStockArticleLabelsA4(articles = [], getCategoryName) {
-  return downloadStockArticleLabels(articles, getCategoryName);
+/** Télécharge une étiquette unitaire (50×30 ou 80×50). */
+export function downloadStockArticleLabel(article, formatOrLegacy = 'standard') {
+  const formatKey = resolveFormat(formatOrLegacy);
+  const fmt = LABEL_FORMATS[formatKey];
+  const doc = new jsPDF({
+    unit: 'mm',
+    format: [fmt.width, fmt.height],
+    orientation: 'portrait',
+  });
+  drawLabelOnDoc(doc, 0, 0, article, formatKey);
+  doc.save(`etiquette-${formatKey}-${safeFilename(getArticleBarcodeValue(article))}.pdf`);
 }
 
-export async function printStockArticleLabel(article, categoryName = '') {
-  const code = getArticleBarcodeValue(article);
-  const barcodeUrl = renderBarcodeDataUrl(code, { height: 48, width: 2, fontSize: 12 });
-  const w = window.open('', '_blank', 'noopener,noreferrer,width=420,height=520');
-  if (!w) {
-    downloadStockArticleLabel(article, categoryName);
+/** Planche A4 multi-étiquettes. */
+export function downloadStockArticleLabelsA4(articles = [], formatOrLegacy = 'standard') {
+  if (!articles.length) return;
+  const formatKey = resolveFormat(formatOrLegacy);
+  if (articles.length === 1) {
+    const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+    const fmt = LABEL_FORMATS[formatKey];
+    drawLabelOnDoc(doc, 10, 10, articles[0], formatKey);
+    doc.save(`planche-a4-${formatKey}-${safeFilename(getArticleBarcodeValue(articles[0]))}.pdf`);
     return;
   }
+  const doc = buildA4Doc(articles, formatKey);
+  doc.save(`planche-a4-${formatKey}-${articles.length}-etiquettes.pdf`);
+}
+
+/** Sélection multiple → planche A4 (format standard par défaut). */
+export function downloadStockArticleLabels(articles = [], formatOrLegacy = 'standard') {
+  return downloadStockArticleLabelsA4(articles, formatOrLegacy);
+}
+
+function printHtml(article, formatKey) {
+  const fmt = LABEL_FORMATS[formatKey] || LABEL_FORMATS.standard;
+  const code = getArticleBarcodeValue(article);
+  const designation = String(article.designation || article.nom || '—').trim();
+  const barcodeUrl = renderBarcodeDataUrl(code, {
+    ...barcodeRenderOpts(formatKey),
+    scale: 3,
+  });
 
   const esc = (s) => String(s || '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;');
 
-  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>Étiquette ${esc(code)}</title>
+  const desSize = formatKey === 'small' ? '8px' : '11px';
+  const codeSize = formatKey === 'small' ? '9px' : '11px';
+
+  const w = window.open('', '_blank', 'noopener,noreferrer,width=420,height=520');
+  if (!w) return false;
+
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(code)}</title>
 <style>
-  @page { size: 100mm 70mm; margin: 4mm; }
-  body { font-family: Helvetica, Arial, sans-serif; margin: 0; padding: 8px; color: #212121; }
-  .brand img { height: 28px; margin-bottom: 6px; }
-  .field { font-size: 10px; margin-bottom: 3px; }
-  .field strong { color: #5a5a5a; font-weight: 700; }
-  img.barcode { max-width: 100%; height: auto; display: block; margin-top: 8px; }
+  @page { size: ${fmt.width}mm ${fmt.height}mm; margin: 1.5mm; }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 1.5mm; width: ${fmt.width}mm; min-height: ${fmt.height}mm;
+    font-family: Helvetica, Arial, sans-serif; color: #000;
+    display: flex; flex-direction: column; align-items: center; justify-content: space-between;
+    text-align: center;
+  }
+  .designation { font-weight: 800; font-size: ${desSize}; line-height: 1.2; width: 100%; }
+  .barcode-wrap { flex: 1; display: flex; align-items: center; justify-content: center; width: 100%; padding: 1mm 0; }
+  .barcode-wrap img { max-width: 96%; max-height: 100%; height: auto; image-rendering: pixelated; }
+  .code { font-weight: 800; font-size: ${codeSize}; letter-spacing: 0.06em; }
 </style></head><body>
-  <div class="brand"><img src="${LOGO_URL}" alt="CITYMO" onerror="this.outerHTML='<strong style=color:#c62828>CITYMO</strong>'" /></div>
-  <div class="field"><strong>Code :</strong> ${esc(code)}</div>
-  <div class="field"><strong>Désignation :</strong> ${esc(article.designation || article.nom)}</div>
-  <div class="field"><strong>Catégorie :</strong> ${esc(categoryName || '—')}</div>
-  <div class="field"><strong>État :</strong> ${esc(article.etat || '—')}</div>
-  <div class="field"><strong>Emplacement :</strong> ${esc(article.emplacement || '—')}</div>
-  ${barcodeUrl ? `<img class="barcode" src="${barcodeUrl}" alt="${esc(code)}" />` : ''}
-  <script>window.onload = function(){ window.focus(); window.print(); };</script>
+  <div class="designation">${esc(designation)}</div>
+  <div class="barcode-wrap">${barcodeUrl ? `<img src="${barcodeUrl}" alt="${esc(code)}" />` : ''}</div>
+  <div class="code">${esc(code)}</div>
+  <script>window.onload=function(){window.focus();window.print();};</script>
 </body></html>`);
   w.document.close();
+  return true;
 }
 
-export async function printStockArticleLabels(articles = [], getCategoryName) {
+/** Impression navigateur — étiquette unitaire. */
+export function printStockArticleLabel(article, formatOrLegacy = 'standard') {
+  const formatKey = resolveFormat(formatOrLegacy);
+  if (!printHtml(article, formatKey)) {
+    downloadStockArticleLabel(article, formatKey);
+  }
+}
+
+/** Impression / PDF pour sélection multiple. */
+export function printStockArticleLabels(articles = [], formatOrLegacy = 'standard') {
   if (!articles.length) return;
   if (articles.length === 1) {
-    const { article, categoryName } = buildLabelMeta(articles[0], getCategoryName);
-    return printStockArticleLabel(article, categoryName);
+    printStockArticleLabel(articles[0], formatOrLegacy);
+    return;
   }
-  await downloadStockArticleLabels(articles, getCategoryName);
+  downloadStockArticleLabelsA4(articles, formatOrLegacy);
 }

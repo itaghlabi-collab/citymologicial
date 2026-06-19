@@ -10,7 +10,7 @@ import {
 import { useStockArticles } from '../../hooks/useStockArticles';
 import { useStockCategories } from '../../hooks/useStockCategories';
 import { generateStockArticleCode } from '../../services/inventaire/stockArticles';
-import { downloadStockArticleLabel, printStockArticleLabel, downloadStockArticleLabels, printStockArticleLabels } from '../../services/inventaire/stockArticleLabelPdf';
+import { downloadStockArticleLabel, printStockArticleLabel, downloadStockArticleLabelsA4, LABEL_FORMATS } from '../../services/inventaire/stockArticleLabelPdf';
 import BarcodeModal from './BarcodeModal';
 import BarcodeScannerModal from './BarcodeScannerModal';
 import BarcodeDisplay from './BarcodeDisplay';
@@ -228,8 +228,8 @@ function DetailArticle({
         <span className={`badge ${stateBadge}`} style={{ fontSize: '0.72rem' }}>{article.current_state || 'Disponible'}</span>
         <span className={`badge ${article.etat === 'Neuf' ? 'badge-green' : article.etat === 'Utilisé' ? 'badge-blue' : 'badge-orange'}`} style={{ fontSize: '0.72rem' }}>{article.etat}</span>
         <button type="button" className="btn btn-ghost btn-sm" onClick={onBarcode}><Barcode size={13} /> Code-barres</button>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => downloadStockArticleLabel(article, catName)}><Download size={13} /> Étiquette</button>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => printStockArticleLabel(article, catName)}><Printer size={13} /> Imprimer</button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => downloadStockArticleLabel(article, 'standard')}><Download size={13} /> Étiquette</button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => printStockArticleLabel(article, 'standard')}><Printer size={13} /> Imprimer</button>
         <button type="button" className="btn btn-ghost btn-sm" onClick={onHistory}><History size={13} /> Historique</button>
         <button type="button" className="btn btn-secondary btn-sm" onClick={onEdit}><Edit2 size={13} /> Modifier</button>
         {article.statut !== 'Archivé' && (
@@ -326,7 +326,10 @@ function DetailArticle({
           <div className="card">
             <SectionTitle icon={<Barcode size={12} />}>Code-barres</SectionTitle>
             <div style={{ padding: '8px 4px', background: '#fff', borderRadius: 6, border: '1px solid var(--border)' }}>
-              <BarcodeDisplay article={article} height={48} width={1.8} />
+              <BarcodeDisplay article={article} height={48} width={2.2} displayValue={false} />
+              <div style={{ textAlign: 'center', fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '0.78rem', marginTop: 6, letterSpacing: '0.05em' }}>
+                {article.code}
+              </div>
             </div>
             <button type="button" className="btn btn-secondary btn-sm" style={{ width: '100%', marginTop: 10 }} onClick={onBarcode}>
               Voir / imprimer
@@ -602,11 +605,11 @@ export default function ArticlesStock({ onArticlesChange }) {
           </button>
           {selectedArticles.length > 0 && (
             <>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => downloadStockArticleLabels(selectedArticles, getCategoryName)}>
-                <Download size={14} /> Étiquettes ({selectedArticles.length})
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => downloadStockArticleLabelsA4(selectedArticles, 'standard')}>
+                <Download size={14} /> A4 {LABEL_FORMATS.standard.name}
               </button>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => printStockArticleLabels(selectedArticles, getCategoryName)}>
-                <Printer size={14} /> Planche A4
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => downloadStockArticleLabelsA4(selectedArticles, 'small')}>
+                <Download size={14} /> A4 {LABEL_FORMATS.small.name}
               </button>
             </>
           )}
@@ -832,7 +835,6 @@ export default function ArticlesStock({ onArticlesChange }) {
       <BarcodeModal
         open={!!barcodeArticle}
         article={barcodeArticle}
-        categoryName={barcodeArticle ? getCategoryName(barcodeArticle) : ''}
         onClose={() => setBarcodeArticle(null)}
       />
 
