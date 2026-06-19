@@ -76,6 +76,15 @@ export function formatSupabaseError(error, fallback = 'Une erreur est survenue.'
   if (message.includes('articles') && (message.includes('column') || message.includes('colonne'))) {
     return 'Schéma articles incomplet — exécutez les migrations articles dans Supabase SQL Editor.';
   }
+  if (code === '42P01' || message.includes('stock_levels')) {
+    return 'Table niveaux stock absente — exécutez supabase/RUN_STOCK_ARTICLES_LEVELS.sql dans Supabase SQL Editor.';
+  }
+  if ((code === '42703' || code === 'PGRST204') && message.includes('stock_articles')) {
+    return 'Schéma articles stock incomplet — exécutez supabase/RUN_STOCK_ARTICLES_LEVELS.sql dans Supabase SQL Editor.';
+  }
+  if (code === '42P01' || message.includes('stock_articles')) {
+    return 'Table articles stock absente — exécutez supabase/migrations/20260604120000_finance_achats_inventaire_ged.sql';
+  }
   if (code === '42P01' || message.includes('categories')) {
     return 'Table categories absente — exécutez supabase/migrations/20260526010000_categories.sql';
   }
