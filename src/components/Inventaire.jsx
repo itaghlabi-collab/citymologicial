@@ -41,8 +41,8 @@ export default function Inventaire({ activeTab }) {
       )}
       {tab === 'bons-mouvements' && (
         <BonsMouvements
-          depots={depots}
           articles={articles}
+          onArticlesChange={setArticles}
         />
       )}
       {tab === 'stocks' && (

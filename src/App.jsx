@@ -162,7 +162,7 @@ const NAV = [
     items: [
       { id: 'categories-stock',   label: 'Categories stock',     icon: Tag },
       { id: 'articles-stock',     label: 'Articles de stock',    icon: Package },
-      { id: 'depots',             label: 'Depots & Projets',     icon: Boxes },
+      { id: 'depots',             label: 'Emplacements',         icon: Boxes },
       { id: 'bons-mouvements',    label: 'Bons de mouvements',   icon: ArrowUpDown },
       { id: 'stocks',             label: 'Stocks',               icon: BarChart3 },
     ],
@@ -229,7 +229,7 @@ const MODULE_LABELS = {
   'ordres-achat':      "Ordre d'achat",
   'categories-stock':  'Categories stock',
   'articles-stock':    'Articles de stock',
-  depots:              'Depots & Projets',
+  depots:              'Emplacements',
   'bons-mouvements':   'Bons de mouvements',
   stocks:              'Stocks',
   utilisateurs:        'Utilisateurs',

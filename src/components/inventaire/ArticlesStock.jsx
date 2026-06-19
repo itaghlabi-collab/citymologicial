@@ -8,8 +8,6 @@ import {
 } from 'lucide-react';
 import { useStockArticles } from '../../hooks/useStockArticles';
 import { useStockCategories } from '../../hooks/useStockCategories';
-import { listStockWarehouses } from '../../services/inventaire/stockWarehouses';
-import { listProjects } from '../../services/projects/projects';
 import { generateStockArticleCode } from '../../services/inventaire/stockArticles';
 import {
   INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE, UNITES,
@@ -31,40 +29,20 @@ const EMPTY_FORM = {
   stock_minimum: '',
   etat: 'Neuf',
   statut: 'Actif',
-  localisation_id: '',
   emplacement: '',
   description: '',
   notes: '',
   quantite_initiale: '',
-  localisation_initiale: '',
   emplacement_initial: '',
 };
 
-function localisationLabel(id, warehouses, projects) {
-  if (!id) return '—';
-  if (String(id).startsWith('depot:')) {
-    const w = warehouses.find((d) => String(d.id) === String(id).replace('depot:', ''));
-    return w ? `Dépôt : ${w.nom}` : id;
-  }
-  if (String(id).startsWith('project:')) {
-    const p = projects.find((x) => String(x.id) === String(id).replace('project:', ''));
-    return p ? `Projet : ${p.nom}` : id;
-  }
-  return id;
-}
-
-function ArticleForm({ initial, categories, warehouses, projects, onSave, onCancel, saving }) {
+function ArticleForm({ initial, categories, onSave, onCancel, saving }) {
   const [form, setForm] = useState(() => {
     if (!initial) return { ...EMPTY_FORM };
     return {
       ...EMPTY_FORM,
       ...initial,
       code: initial.code || initial.reference || '',
-      localisation_id: initial.localisation_id
-        || (initial.default_project_id ? `project:${initial.default_project_id}` : '')
-        || (initial.default_warehouse_id ? `depot:${initial.default_warehouse_id}` : '')
-        || (initial.depot_id ? `depot:${initial.depot_id}` : '')
-        || (initial.projet_lie ? `project:${initial.projet_lie}` : ''),
     };
   });
   const [errors, setErrors] = useState({});
@@ -94,11 +72,6 @@ function ArticleForm({ initial, categories, warehouses, projects, onSave, onCanc
     if (Object.keys(e).length) { setErrors(e); return; }
     onSave(form);
   }
-
-  const locationOptions = [
-    ...(warehouses || []).map((w) => ({ value: `depot:${w.id}`, label: `Dépôt — ${w.nom}` })),
-    ...(projects || []).map((p) => ({ value: `project:${p.id}`, label: `Projet — ${p.nom || p.ref}` })),
-  ];
 
   function emplacementOptions(current) {
     const v = (current || '').trim();
@@ -173,14 +146,8 @@ function ArticleForm({ initial, categories, warehouses, projects, onSave, onCanc
         </FField>
       </FRow>
 
-      <SectionTitle>Localisation par défaut</SectionTitle>
+      <SectionTitle>Emplacement</SectionTitle>
       <FRow>
-        <FField label="Dépôt ou projet">
-          <select value={form.localisation_id} onChange={(e) => set('localisation_id', e.target.value)} style={SELECT_STYLE}>
-            <option value="">— Sélectionner —</option>
-            {locationOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-          </select>
-        </FField>
         <FField label="Emplacement">
           <select value={form.emplacement} onChange={(e) => set('emplacement', e.target.value)} style={SELECT_STYLE}>
             <option value="">— Sélectionner —</option>
@@ -197,12 +164,6 @@ function ArticleForm({ initial, categories, warehouses, projects, onSave, onCanc
           <FRow>
             <FField label="Quantité initiale">
               <input type="number" min="0" step="0.001" value={form.quantite_initiale} onChange={(e) => set('quantite_initiale', e.target.value)} placeholder="0" style={INPUT_STYLE} />
-            </FField>
-            <FField label="Localisation initiale">
-              <select value={form.localisation_initiale} onChange={(e) => set('localisation_initiale', e.target.value)} style={SELECT_STYLE}>
-                <option value="">— Même que défaut —</option>
-                {locationOptions.map((o) => <option key={`init-${o.value}`} value={o.value}>{o.label}</option>)}
-              </select>
             </FField>
             <FField label="Emplacement initial">
               <select value={form.emplacement_initial} onChange={(e) => set('emplacement_initial', e.target.value)} style={SELECT_STYLE}>
@@ -239,9 +200,8 @@ function ArticleForm({ initial, categories, warehouses, projects, onSave, onCanc
   );
 }
 
-function DetailArticle({ article, categories, warehouses, projects, movements, onBack, onEdit, onHistory, onArchive }) {
+function DetailArticle({ article, categories, movements, onBack, onEdit, onHistory, onArchive }) {
   const cat = (categories || []).find((c) => String(c.id) === String(article.categorie_id));
-  const locLabel = localisationLabel(article.localisation_id, warehouses, projects);
 
   return (
     <div className="animate-fade-in">
@@ -274,7 +234,6 @@ function DetailArticle({ article, categories, warehouses, projects, movements, o
                 ['Unité', article.unite],
                 ['État', article.etat],
                 ['Statut', article.statut],
-                ['Localisation', locLabel],
                 ['Emplacement', article.emplacement],
               ].map(([l, v]) => (
                 <div key={l}>
@@ -359,7 +318,7 @@ function DetailArticle({ article, categories, warehouses, projects, movements, o
   );
 }
 
-function MobileArticleRow({ item, catName, locLabel, onView, onEdit, onArchive, onHistory, onDelete }) {
+function MobileArticleRow({ item, catName, onView, onEdit, onArchive, onHistory, onDelete }) {
   return (
     <div className="inv-stock-mobile-row">
       <div className="inv-stock-mobile-icon" aria-hidden><Package size={18} style={{ color: 'var(--red)' }} /></div>
@@ -388,14 +347,12 @@ export default function ArticlesStock({ onArticlesChange }) {
   } = useStockArticles();
   const { records: categories } = useStockCategories();
 
-  const [warehouses, setWarehouses] = useState([]);
-  const [projects, setProjects] = useState([]);
   const [search, setSearch] = useState('');
   const [filterCat, setFilterCat] = useState('');
   const [filterType, setFilterType] = useState('');
   const [filterEtat, setFilterEtat] = useState('');
   const [filterStatut, setFilterStatut] = useState('');
-  const [filterLoc, setFilterLoc] = useState('');
+  const [filterEmplacement, setFilterEmplacement] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [editItem, setEditItem] = useState(null);
@@ -407,20 +364,10 @@ export default function ArticlesStock({ onArticlesChange }) {
   const [page, setPage] = useState(1);
 
   useEffect(() => {
-    Promise.all([
-      listStockWarehouses().catch(() => []),
-      listProjects().catch(() => []),
-    ]).then(([w, p]) => {
-      setWarehouses(w || []);
-      setProjects(p || []);
-    });
-  }, []);
-
-  useEffect(() => {
     if (onArticlesChange) onArticlesChange(articles);
   }, [articles, onArticlesChange]);
 
-  useEffect(() => { setPage(1); }, [search, filterCat, filterType, filterEtat, filterStatut, filterLoc]);
+  useEffect(() => { setPage(1); }, [search, filterCat, filterType, filterEtat, filterStatut, filterEmplacement]);
 
   const handleSave = useCallback(async (data) => {
     const res = await save(data, editItem?.id);
@@ -459,14 +406,13 @@ export default function ArticlesStock({ onArticlesChange }) {
     const q = search.toLowerCase();
     const cat = categories.find((c) => String(c.id) === String(x.categorie_id));
     const catName = (cat?.nom || cat?.name || '').toLowerCase();
-    const loc = x.localisation_id || '';
     return (!q || x.code.toLowerCase().includes(q) || x.designation.toLowerCase().includes(q) || catName.includes(q))
       && (!filterCat || String(x.categorie_id) === String(filterCat))
       && (!filterType || x.type === filterType)
       && (!filterEtat || x.etat === filterEtat)
       && (!filterStatut || x.statut === filterStatut)
-      && (!filterLoc || loc === filterLoc);
-  }), [articles, search, filterCat, filterType, filterEtat, filterStatut, filterLoc, categories]);
+      && (!filterEmplacement || x.emplacement === filterEmplacement);
+  }), [articles, search, filterCat, filterType, filterEtat, filterStatut, filterEmplacement, categories]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const pageItems = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -478,11 +424,6 @@ export default function ArticlesStock({ onArticlesChange }) {
   const articlesUsed = articles.filter((x) => x.etat === 'Utilisé').length;
   const valeurTotale = articles.reduce((s, a) => s + ((Number(a.valeur) || 0) * (Number(a.stock_actuel) || 0)), 0);
 
-  const locationOptions = [
-    ...(warehouses || []).map((w) => ({ value: `depot:${w.id}`, label: `Dépôt — ${w.nom}` })),
-    ...(projects || []).map((p) => ({ value: `project:${p.id}`, label: `Projet — ${p.nom || p.ref}` })),
-  ];
-
   if (detailId) {
     const art = articles.find((x) => x.id === detailId);
     if (!art) { setDetailId(null); return null; }
@@ -490,8 +431,6 @@ export default function ArticlesStock({ onArticlesChange }) {
       <DetailArticle
         article={art}
         categories={categories}
-        warehouses={warehouses}
-        projects={projects}
         movements={detailMovements}
         onBack={() => setDetailId(null)}
         onEdit={() => { setEditItem(art); setShowModal(true); }}
@@ -595,11 +534,11 @@ export default function ArticlesStock({ onArticlesChange }) {
               <option value="">Tous statuts</option>
               {STATUTS_ARTICLE_STOCK.map((s) => <option key={s} value={s}>{s}</option>)}
             </select>
-            <select value={filterLoc} onChange={(e) => setFilterLoc(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 180 }}>
-              <option value="">Toutes localisations</option>
-              {locationOptions.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+            <select value={filterEmplacement} onChange={(e) => setFilterEmplacement(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 200 }}>
+              <option value="">Tous emplacements</option>
+              {EMPLACEMENTS_STOCK.map((e) => <option key={e} value={e}>{e}</option>)}
             </select>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setFilterCat(''); setFilterType(''); setFilterEtat(''); setFilterStatut(''); setFilterLoc(''); }}>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setFilterCat(''); setFilterType(''); setFilterEtat(''); setFilterStatut(''); setFilterEmplacement(''); }}>
               Réinitialiser
             </button>
           </div>
@@ -703,7 +642,6 @@ export default function ArticlesStock({ onArticlesChange }) {
                   key={x.id}
                   item={x}
                   catName={cat ? (cat.nom || cat.name) : '—'}
-                  locLabel={localisationLabel(x.localisation_id, warehouses, projects)}
                   onView={() => setDetailId(x.id)}
                   onEdit={() => { setEditItem(x); setShowModal(true); }}
                   onHistory={() => openHistory(x.id)}
@@ -728,8 +666,6 @@ export default function ArticlesStock({ onArticlesChange }) {
         <ArticleForm
           initial={editItem}
           categories={categories}
-          warehouses={warehouses}
-          projects={projects}
           onSave={handleSave}
           onCancel={() => { if (!saving) { setShowModal(false); setEditItem(null); } }}
           saving={saving}
