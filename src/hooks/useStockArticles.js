@@ -134,14 +134,14 @@ export function useStockArticles() {
     }
   }
 
-  async function getMovements(articleId) {
+  const fetchMovements = useCallback(async (articleId) => {
     try {
       return await listMovementsForArticle(articleId);
     } catch (err) {
       console.error('[CITYMO] getMovements', err);
       return [];
     }
-  }
+  }, []);
 
   async function importCatalog() {
     setSaving(true);
@@ -214,7 +214,7 @@ export function useStockArticles() {
     save,
     archive,
     remove,
-    getMovements,
+    getMovements: fetchMovements,
     importCatalog,
     removeDuplicates,
     findDuplicates: findStockArticleDuplicates,

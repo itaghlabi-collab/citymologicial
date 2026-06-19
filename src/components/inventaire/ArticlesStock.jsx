@@ -428,20 +428,41 @@ export default function ArticlesStock({ onArticlesChange }) {
   }
 
   useEffect(() => {
-    if (!detailId) { setDetailMovements([]); return; }
-    setDetailMovementsLoading(true);
-    getMovements(detailId).then((rows) => {
-      setDetailMovements(rows);
+    if (!detailId) {
+      setDetailMovements([]);
       setDetailMovementsLoading(false);
-    });
+      return undefined;
+    }
+    let cancelled = false;
+    setDetailMovementsLoading(true);
+    getMovements(detailId)
+      .then((rows) => {
+        if (!cancelled) {
+          setDetailMovements(rows);
+          setDetailMovementsLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setDetailMovements([]);
+          setDetailMovementsLoading(false);
+        }
+      });
+    return () => { cancelled = true; };
   }, [detailId, getMovements]);
 
   const refreshDetail = useCallback(async () => {
     await reload();
     if (!detailId) return;
     setDetailMovementsLoading(true);
-    setDetailMovements(await getMovements(detailId));
-    setDetailMovementsLoading(false);
+    try {
+      const rows = await getMovements(detailId);
+      setDetailMovements(rows);
+    } catch {
+      setDetailMovements([]);
+    } finally {
+      setDetailMovementsLoading(false);
+    }
   }, [reload, detailId, getMovements]);
 
   const openBarcode = useCallback((article) => setBarcodeArticle(article), []);
