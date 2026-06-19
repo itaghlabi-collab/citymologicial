@@ -80,6 +80,9 @@ export function formatSupabaseError(error, fallback = 'Une erreur est survenue.'
     return 'Table niveaux stock absente — exécutez supabase/RUN_STOCK_ARTICLES_LEVELS.sql dans Supabase SQL Editor.';
   }
   if ((code === '42703' || code === 'PGRST204') && message.includes('stock_articles')) {
+    if (message.includes('barcode_value') || message.includes('last_scanned_at') || message.includes('current_state')) {
+      return 'Colonnes suivi articles absentes — exécutez supabase/RUN_STOCK_ARTICLES_BARCODE.sql dans Supabase SQL Editor.';
+    }
     return 'Schéma articles stock incomplet — exécutez supabase/RUN_STOCK_ARTICLES_LEVELS.sql dans Supabase SQL Editor.';
   }
   if (code === '42P01' || message.includes('stock_articles')) {

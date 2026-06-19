@@ -13,6 +13,8 @@ import {
   importStockArticlesCatalog,
   dedupeStockArticles,
   findStockArticleDuplicates,
+  findStockArticleByBarcode,
+  recordStockArticleScan,
 } from '../services/inventaire/stockArticles';
 
 export function useStockArticles() {
@@ -185,6 +187,22 @@ export function useStockArticles() {
     }
   }
 
+  async function lookupByBarcode(code, localArticles = records) {
+    setError(null);
+    try {
+      const article = await findStockArticleByBarcode(code, localArticles);
+      if (!article) {
+        return { article: null, error: `Aucun article trouvé pour le code « ${code} ».` };
+      }
+      await recordStockArticleScan(article.id);
+      return { article, error: null };
+    } catch (err) {
+      const msg = formatSupabaseError(err, 'Erreur recherche code-barres.');
+      setError(msg);
+      return { article: null, error: msg };
+    }
+  }
+
   return {
     records,
     loading,
@@ -200,5 +218,6 @@ export function useStockArticles() {
     importCatalog,
     removeDuplicates,
     findDuplicates: findStockArticleDuplicates,
+    lookupByBarcode,
   };
 }

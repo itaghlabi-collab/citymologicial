@@ -5,13 +5,22 @@ import { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   Package, Plus, Edit2, Trash2, Eye, Search, Filter, Download,
   ChevronLeft, Loader2, RefreshCw, Archive, History, CheckCircle2,
+  Barcode, ScanLine, Printer,
 } from 'lucide-react';
 import { useStockArticles } from '../../hooks/useStockArticles';
 import { useStockCategories } from '../../hooks/useStockCategories';
 import { generateStockArticleCode } from '../../services/inventaire/stockArticles';
+import { downloadStockArticleLabel, printStockArticleLabel, downloadStockArticleLabels, printStockArticleLabels } from '../../services/inventaire/stockArticleLabelPdf';
+import BarcodeModal from './BarcodeModal';
+import BarcodeScannerModal from './BarcodeScannerModal';
+import BarcodeDisplay from './BarcodeDisplay';
+import ArticleQuickActions, { ArticleMovementHistory } from './ArticleQuickActions';
+import { useAuth } from '../../hooks/useAuth';
+import { getArticleBarcodeValue } from '../../services/inventaire/barcodeUtils';
 import {
   INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE, UNITES,
   TYPES_ARTICLE_STOCK, ETATS_ARTICLE_STOCK, STATUTS_ARTICLE_STOCK, EMPLACEMENTS_STOCK,
+  CURRENT_STATES_ARTICLE, BADGE_CURRENT_STATE,
   KpiCard, EmptyState, Modal, SectionTitle, FField, FRow,
   formatMAD, StockAlert,
 } from './shared.jsx';
@@ -200,8 +209,12 @@ function ArticleForm({ initial, categories, onSave, onCancel, saving }) {
   );
 }
 
-function DetailArticle({ article, categories, movements, onBack, onEdit, onHistory, onArchive }) {
+function DetailArticle({
+  article, categories, movements, movementsLoading, onBack, onEdit, onHistory, onArchive, onBarcode, onRefresh, userName,
+}) {
   const cat = (categories || []).find((c) => String(c.id) === String(article.categorie_id));
+  const catName = cat ? (cat.nom || cat.name) : '';
+  const stateBadge = BADGE_CURRENT_STATE[article.current_state] || 'badge-grey';
 
   return (
     <div className="animate-fade-in">
@@ -212,7 +225,11 @@ function DetailArticle({ article, categories, movements, onBack, onEdit, onHisto
         <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1rem', flex: 1 }}>
           {article.code} — {article.designation}
         </h2>
+        <span className={`badge ${stateBadge}`} style={{ fontSize: '0.72rem' }}>{article.current_state || 'Disponible'}</span>
         <span className={`badge ${article.etat === 'Neuf' ? 'badge-green' : article.etat === 'Utilisé' ? 'badge-blue' : 'badge-orange'}`} style={{ fontSize: '0.72rem' }}>{article.etat}</span>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onBarcode}><Barcode size={13} /> Code-barres</button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => downloadStockArticleLabel(article, catName)}><Download size={13} /> Étiquette</button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => printStockArticleLabel(article, catName)}><Printer size={13} /> Imprimer</button>
         <button type="button" className="btn btn-ghost btn-sm" onClick={onHistory}><History size={13} /> Historique</button>
         <button type="button" className="btn btn-secondary btn-sm" onClick={onEdit}><Edit2 size={13} /> Modifier</button>
         {article.statut !== 'Archivé' && (
@@ -223,18 +240,24 @@ function DetailArticle({ article, categories, movements, onBack, onEdit, onHisto
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 16, alignItems: 'start' }}>
         <div>
           <div className="card" style={{ marginBottom: 14 }}>
-            <SectionTitle icon={<Package size={12} />}>Informations générales</SectionTitle>
+            <SectionTitle icon={<Package size={12} />}>État actuel & informations</SectionTitle>
+            <div style={{ marginBottom: 12, padding: '10px 12px', background: 'var(--bg-2)', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase' }}>État opérationnel</span>
+              <span className={`badge ${stateBadge}`}>{article.current_state || 'Disponible'}</span>
+              <span style={{ fontSize: '0.78rem', color: 'var(--text-2)' }}>Emplacement : <strong>{article.emplacement || '—'}</strong></span>
+            </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12, fontSize: '0.84rem' }}>
               {[
                 ['Code', article.code],
                 ['Désignation', article.designation],
+                ['Catégorie', catName || '—'],
                 ['Type', article.type],
-                ['Catégorie', cat ? (cat.nom || cat.name) : '—'],
                 ['N° série', article.numero_serie],
-                ['Unité', article.unite],
-                ['État', article.etat],
-                ['Statut', article.statut],
                 ['Emplacement', article.emplacement],
+                ['Valeur', article.valeur ? formatMAD(article.valeur) : '—'],
+                ['Stock minimum', article.stock_minimum || '—'],
+                ['État physique', article.etat],
+                ['Statut', article.statut],
               ].map(([l, v]) => (
                 <div key={l}>
                   <span style={{ color: 'var(--text-3)', fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', display: 'block' }}>{l}</span>
@@ -243,41 +266,25 @@ function DetailArticle({ article, categories, movements, onBack, onEdit, onHisto
               ))}
             </div>
           </div>
+
           {article.description && (
             <div className="card" style={{ marginBottom: 14 }}>
               <SectionTitle>Description</SectionTitle>
               <p style={{ fontSize: '0.84rem', color: 'var(--text-2)', margin: 0, whiteSpace: 'pre-wrap' }}>{article.description}</p>
             </div>
           )}
-          {movements?.length > 0 && (
-            <div className="card">
-              <SectionTitle icon={<History size={12} />}>Derniers mouvements</SectionTitle>
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Réf.</th>
-                      <th>Type</th>
-                      <th>Qté</th>
-                      <th>Date</th>
-                      <th>Motif</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {movements.slice(0, 10).map((m) => (
-                      <tr key={m.id}>
-                        <td style={{ fontSize: '0.8rem' }}>{m.ref || '—'}</td>
-                        <td style={{ fontSize: '0.8rem' }}>{m.type}</td>
-                        <td style={{ fontWeight: 700 }}>{m.quantite}</td>
-                        <td style={{ fontSize: '0.8rem' }}>{m.date}</td>
-                        <td style={{ fontSize: '0.8rem', color: 'var(--text-2)' }}>{m.motif || '—'}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
+
+          <ArticleQuickActions article={article} userName={userName} onDone={onRefresh} />
+
+          <div className="card">
+            <SectionTitle icon={<History size={12} />}>Historique complet</SectionTitle>
+            <ArticleMovementHistory movements={movements} loading={movementsLoading} compact />
+            {movements?.length > 10 && (
+              <button type="button" className="btn btn-ghost btn-sm" style={{ marginTop: 10 }} onClick={onHistory}>
+                Voir tout l&apos;historique
+              </button>
+            )}
+          </div>
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -309,8 +316,21 @@ function DetailArticle({ article, categories, movements, onBack, onEdit, onHisto
             </div>
           </div>
           <div className="card">
-            <SectionTitle>Date création</SectionTitle>
-            <div style={{ fontSize: '0.84rem' }}>{article.date_creation || '—'}</div>
+            <SectionTitle>Suivi</SectionTitle>
+            <div style={{ fontSize: '0.82rem', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div><span style={{ color: 'var(--text-3)' }}>Création : </span>{article.date_creation || '—'}</div>
+              <div><span style={{ color: 'var(--text-3)' }}>Dernier mouvement : </span>{article.dernier_mouvement?.date_label || '—'}{article.dernier_mouvement?.action ? ` — ${article.dernier_mouvement.action}` : ''}</div>
+              <div><span style={{ color: 'var(--text-3)' }}>Dernier scan : </span>{article.last_scanned_at ? new Date(article.last_scanned_at).toLocaleString('fr-FR') : '—'}</div>
+            </div>
+          </div>
+          <div className="card">
+            <SectionTitle icon={<Barcode size={12} />}>Code-barres</SectionTitle>
+            <div style={{ padding: '8px 4px', background: '#fff', borderRadius: 6, border: '1px solid var(--border)' }}>
+              <BarcodeDisplay article={article} height={48} width={1.8} />
+            </div>
+            <button type="button" className="btn btn-secondary btn-sm" style={{ width: '100%', marginTop: 10 }} onClick={onBarcode}>
+              Voir / imprimer
+            </button>
           </div>
         </div>
       </div>
@@ -318,7 +338,7 @@ function DetailArticle({ article, categories, movements, onBack, onEdit, onHisto
   );
 }
 
-function MobileArticleRow({ item, catName, onView, onEdit, onArchive, onHistory, onDelete }) {
+function MobileArticleRow({ item, catName, onView, onEdit, onArchive, onHistory, onDelete, onBarcode }) {
   return (
     <div className="inv-stock-mobile-row">
       <div className="inv-stock-mobile-icon" aria-hidden><Package size={18} style={{ color: 'var(--red)' }} /></div>
@@ -330,6 +350,7 @@ function MobileArticleRow({ item, catName, onView, onEdit, onArchive, onHistory,
       <span className={`inv-stock-mobile-status ${item.statut === 'Actif' ? 'is-active' : 'is-inactive'}`}>{item.statut}</span>
       <div className="inv-stock-mobile-actions">
         <button type="button" className="btn btn-ghost btn-sm inv-stock-mobile-btn" title="Voir" onClick={onView}><Eye size={14} /></button>
+        <button type="button" className="btn btn-ghost btn-sm inv-stock-mobile-btn" title="Code-barres" onClick={onBarcode}><Barcode size={14} /></button>
         <button type="button" className="btn btn-ghost btn-sm inv-stock-mobile-btn" title="Modifier" onClick={onEdit}><Edit2 size={14} /></button>
         <button type="button" className="btn btn-ghost btn-sm inv-stock-mobile-btn" title="Historique" onClick={onHistory}><History size={14} /></button>
         <button type="button" className="btn btn-ghost btn-sm inv-stock-mobile-btn" title="Archiver" onClick={onArchive}><Archive size={14} /></button>
@@ -340,10 +361,12 @@ function MobileArticleRow({ item, catName, onView, onEdit, onArchive, onHistory,
 }
 
 export default function ArticlesStock({ onArticlesChange }) {
+  const { user } = useAuth();
+  const userName = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Utilisateur';
   const {
     records: articles, loading, saving, error, success, configured,
     reload, save, archive, remove, getMovements, importCatalog,
-    removeDuplicates, findDuplicates,
+    removeDuplicates, findDuplicates, lookupByBarcode,
   } = useStockArticles();
   const { records: categories } = useStockCategories();
 
@@ -353,6 +376,7 @@ export default function ArticlesStock({ onArticlesChange }) {
   const [filterEtat, setFilterEtat] = useState('');
   const [filterStatut, setFilterStatut] = useState('');
   const [filterEmplacement, setFilterEmplacement] = useState('');
+  const [filterCurrentState, setFilterCurrentState] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [editItem, setEditItem] = useState(null);
@@ -362,12 +386,18 @@ export default function ArticlesStock({ onArticlesChange }) {
   const [historyLoading, setHistoryLoading] = useState(false);
   const [detailMovements, setDetailMovements] = useState([]);
   const [page, setPage] = useState(1);
+  const [barcodeArticle, setBarcodeArticle] = useState(null);
+  const [showScanner, setShowScanner] = useState(false);
+  const [scanLoading, setScanLoading] = useState(false);
+  const [scanError, setScanError] = useState('');
+  const [selectedIds, setSelectedIds] = useState([]);
+  const [detailMovementsLoading, setDetailMovementsLoading] = useState(false);
 
   useEffect(() => {
     if (onArticlesChange) onArticlesChange(articles);
   }, [articles, onArticlesChange]);
 
-  useEffect(() => { setPage(1); }, [search, filterCat, filterType, filterEtat, filterStatut, filterEmplacement]);
+  useEffect(() => { setPage(1); }, [search, filterCat, filterType, filterEtat, filterStatut, filterEmplacement, filterCurrentState]);
 
   const handleSave = useCallback(async (data) => {
     const res = await save(data, editItem?.id);
@@ -399,20 +429,55 @@ export default function ArticlesStock({ onArticlesChange }) {
 
   useEffect(() => {
     if (!detailId) { setDetailMovements([]); return; }
-    getMovements(detailId).then(setDetailMovements);
+    setDetailMovementsLoading(true);
+    getMovements(detailId).then((rows) => {
+      setDetailMovements(rows);
+      setDetailMovementsLoading(false);
+    });
   }, [detailId, getMovements]);
+
+  const refreshDetail = useCallback(async () => {
+    await reload();
+    if (!detailId) return;
+    setDetailMovementsLoading(true);
+    setDetailMovements(await getMovements(detailId));
+    setDetailMovementsLoading(false);
+  }, [reload, detailId, getMovements]);
+
+  const openBarcode = useCallback((article) => setBarcodeArticle(article), []);
+
+  const getCategoryName = useCallback((article) => {
+    const cat = categories.find((c) => String(c.id) === String(article?.categorie_id));
+    return cat ? (cat.nom || cat.name) : '';
+  }, [categories]);
+
+  const handleBarcodeScan = useCallback(async (code) => {
+    setScanLoading(true);
+    setScanError('');
+    const { article, error: lookupErr } = await lookupByBarcode(code, articles);
+    setScanLoading(false);
+    if (!article) {
+      setScanError(lookupErr || 'Article introuvable.');
+      return;
+    }
+    setShowScanner(false);
+    setScanError('');
+    setDetailId(article.id);
+  }, [lookupByBarcode, articles]);
 
   const filtered = useMemo(() => articles.filter((x) => {
     const q = search.toLowerCase();
     const cat = categories.find((c) => String(c.id) === String(x.categorie_id));
     const catName = (cat?.nom || cat?.name || '').toLowerCase();
-    return (!q || x.code.toLowerCase().includes(q) || x.designation.toLowerCase().includes(q) || catName.includes(q))
+    const bc = getArticleBarcodeValue(x).toLowerCase();
+    return (!q || x.code.toLowerCase().includes(q) || x.designation.toLowerCase().includes(q) || catName.includes(q) || bc.includes(q))
       && (!filterCat || String(x.categorie_id) === String(filterCat))
       && (!filterType || x.type === filterType)
       && (!filterEtat || x.etat === filterEtat)
       && (!filterStatut || x.statut === filterStatut)
-      && (!filterEmplacement || x.emplacement === filterEmplacement);
-  }), [articles, search, filterCat, filterType, filterEtat, filterStatut, filterEmplacement, categories]);
+      && (!filterEmplacement || x.emplacement === filterEmplacement)
+      && (!filterCurrentState || x.current_state === filterCurrentState);
+  }), [articles, search, filterCat, filterType, filterEtat, filterStatut, filterEmplacement, filterCurrentState, categories]);
 
   const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const pageItems = filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
@@ -424,21 +489,23 @@ export default function ArticlesStock({ onArticlesChange }) {
   const articlesUsed = articles.filter((x) => x.etat === 'Utilisé').length;
   const valeurTotale = articles.reduce((s, a) => s + ((Number(a.valeur) || 0) * (Number(a.stock_actuel) || 0)), 0);
 
-  if (detailId) {
-    const art = articles.find((x) => x.id === detailId);
-    if (!art) { setDetailId(null); return null; }
-    return (
-      <DetailArticle
-        article={art}
-        categories={categories}
-        movements={detailMovements}
-        onBack={() => setDetailId(null)}
-        onEdit={() => { setEditItem(art); setShowModal(true); }}
-        onHistory={() => openHistory(art.id)}
-        onArchive={() => handleArchive(art.id)}
-      />
-    );
+  const selectedArticles = useMemo(
+    () => articles.filter((a) => selectedIds.includes(a.id)),
+    [articles, selectedIds],
+  );
+
+  function toggleSelect(id) {
+    setSelectedIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   }
+
+  function toggleSelectAllPage() {
+    const ids = pageItems.map((x) => x.id);
+    const allSelected = ids.every((id) => selectedIds.includes(id));
+    if (allSelected) setSelectedIds((prev) => prev.filter((id) => !ids.includes(id)));
+    else setSelectedIds((prev) => [...new Set([...prev, ...ids])]);
+  }
+
+  const detailArt = detailId ? articles.find((x) => x.id === detailId) : null;
 
   if (loading && !articles.length) {
     return (
@@ -450,6 +517,24 @@ export default function ArticlesStock({ onArticlesChange }) {
 
   return (
     <div className="animate-fade-in">
+      {detailId && detailArt && (
+        <DetailArticle
+          article={detailArt}
+          categories={categories}
+          movements={detailMovements}
+          movementsLoading={detailMovementsLoading}
+          onBack={() => setDetailId(null)}
+          onEdit={() => { setEditItem(detailArt); setShowModal(true); }}
+          onHistory={() => openHistory(detailArt.id)}
+          onArchive={() => handleArchive(detailArt.id)}
+          onBarcode={() => openBarcode(detailArt)}
+          onRefresh={refreshDetail}
+          userName={userName}
+        />
+      )}
+
+      {!detailId && (
+        <>
       {!configured && (
         <div className="card" style={{ marginBottom: 12, padding: 12, color: 'var(--red)', fontSize: '0.85rem' }}>
           Supabase non configuré — exécutez supabase/RUN_STOCK_ARTICLES_LEVELS.sql puis reconnectez-vous.
@@ -491,6 +576,19 @@ export default function ArticlesStock({ onArticlesChange }) {
           <p className="page-subtitle">Gestion des articles, états et niveaux de stock.</p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowScanner(true)}>
+            <ScanLine size={14} /> Scanner article
+          </button>
+          {selectedArticles.length > 0 && (
+            <>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => downloadStockArticleLabels(selectedArticles, getCategoryName)}>
+                <Download size={14} /> Étiquettes ({selectedArticles.length})
+              </button>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => printStockArticleLabels(selectedArticles, getCategoryName)}>
+                <Printer size={14} /> Planche A4
+              </button>
+            </>
+          )}
           <button type="button" className="btn btn-secondary btn-sm" onClick={reload} disabled={loading}>
             <RefreshCw size={14} /> Actualiser
           </button>
@@ -516,7 +614,7 @@ export default function ArticlesStock({ onArticlesChange }) {
           <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
             <div style={{ flex: 1, minWidth: 200, position: 'relative' }}>
               <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
-              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Code, désignation, catégorie..." style={{ ...INPUT_STYLE, paddingLeft: 32 }} />
+              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Code, désignation, code-barres…" style={{ ...INPUT_STYLE, paddingLeft: 32 }} />
             </div>
             <select value={filterCat} onChange={(e) => setFilterCat(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 170 }}>
               <option value="">Toutes catégories</option>
@@ -538,7 +636,11 @@ export default function ArticlesStock({ onArticlesChange }) {
               <option value="">Tous emplacements</option>
               {EMPLACEMENTS_STOCK.map((e) => <option key={e} value={e}>{e}</option>)}
             </select>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setFilterCat(''); setFilterType(''); setFilterEtat(''); setFilterStatut(''); setFilterEmplacement(''); }}>
+            <select value={filterCurrentState} onChange={(e) => setFilterCurrentState(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 170 }}>
+              <option value="">Tous états opérationnels</option>
+              {CURRENT_STATES_ARTICLE.map((s) => <option key={s} value={s}>{s}</option>)}
+            </select>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setFilterCat(''); setFilterType(''); setFilterEtat(''); setFilterStatut(''); setFilterEmplacement(''); setFilterCurrentState(''); }}>
               Réinitialiser
             </button>
           </div>
@@ -547,7 +649,7 @@ export default function ArticlesStock({ onArticlesChange }) {
         <div className="card" style={{ marginBottom: 12, padding: '10px 14px' }}>
           <div style={{ position: 'relative' }}>
             <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher un article..." style={{ ...INPUT_STYLE, paddingLeft: 32 }} />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Code, désignation, code-barres…" style={{ ...INPUT_STYLE, paddingLeft: 32 }} />
           </div>
         </div>
       )}
@@ -585,41 +687,64 @@ export default function ArticlesStock({ onArticlesChange }) {
               <table>
                 <thead>
                   <tr>
+                    <th style={{ width: 36 }}>
+                      <input
+                        type="checkbox"
+                        checked={pageItems.length > 0 && pageItems.every((x) => selectedIds.includes(x.id))}
+                        onChange={toggleSelectAllPage}
+                        aria-label="Sélectionner la page"
+                      />
+                    </th>
                     <th>Code</th>
+                    <th>Code-barres</th>
                     <th>Désignation</th>
                     <th>Type</th>
                     <th>Catégorie</th>
-                    <th>Unité</th>
-                    <th>Valeur</th>
-                    <th>Stock min.</th>
-                    <th>État</th>
+                    <th>État op.</th>
                     <th>Emplacement</th>
+                    <th>Dernier mouvement</th>
+                    <th>Dernier scan</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {pageItems.map((x) => {
                     const cat = categories.find((c) => String(c.id) === String(x.categorie_id));
+                    const stateBadge = BADGE_CURRENT_STATE[x.current_state] || 'badge-grey';
                     return (
                       <tr key={x.id}>
                         <td>
+                          <input type="checkbox" checked={selectedIds.includes(x.id)} onChange={() => toggleSelect(x.id)} aria-label={`Sélectionner ${x.code}`} />
+                        </td>
+                        <td>
                           <span style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.82rem', color: 'var(--red)' }}>{x.code}</span>
+                        </td>
+                        <td data-label="Code-barres">
+                          <button type="button" className="btn btn-ghost btn-sm" title={getArticleBarcodeValue(x)} onClick={() => openBarcode(x)} style={{ fontFamily: 'monospace', fontSize: '0.72rem', padding: '2px 6px' }}>
+                            <Barcode size={12} /> {getArticleBarcodeValue(x)}
+                          </button>
                         </td>
                         <td data-label="Désignation" style={{ fontWeight: 600 }}>{x.designation}</td>
                         <td data-label="Type" style={{ fontSize: '0.82rem' }}>{x.type || '—'}</td>
                         <td data-label="Catégorie">
                           {cat ? <span className="badge badge-blue" style={{ fontSize: '0.7rem' }}>{cat.nom || cat.name}</span> : '—'}
                         </td>
-                        <td data-label="Unité">{x.unite}</td>
-                        <td data-label="Valeur" style={{ fontFamily: 'var(--font-head)', fontWeight: 700 }}>{x.valeur ? formatMAD(x.valeur) : '—'}</td>
-                        <td data-label="Stock min." style={{ color: 'var(--text-3)' }}>{x.stock_minimum || '—'}</td>
-                        <td data-label="État">
-                          <span className={`badge ${x.etat === 'Neuf' ? 'badge-green' : x.etat === 'Utilisé' ? 'badge-blue' : 'badge-orange'}`} style={{ fontSize: '0.7rem' }}>{x.etat}</span>
+                        <td data-label="État op.">
+                          <span className={`badge ${stateBadge}`} style={{ fontSize: '0.7rem' }}>{x.current_state || 'Disponible'}</span>
                         </td>
                         <td data-label="Emplacement" style={{ fontSize: '0.82rem', color: 'var(--text-2)' }}>{x.emplacement || '—'}</td>
+                        <td data-label="Dernier mouvement" style={{ fontSize: '0.78rem', color: 'var(--text-2)' }}>
+                          {x.dernier_mouvement ? (
+                            <span>{x.dernier_mouvement.date_label}<br /><span style={{ color: 'var(--text-3)' }}>{x.dernier_mouvement.action}</span></span>
+                          ) : '—'}
+                        </td>
+                        <td data-label="Dernier scan" style={{ fontSize: '0.78rem', color: 'var(--text-2)' }}>
+                          {x.last_scanned_at ? new Date(x.last_scanned_at).toLocaleDateString('fr-FR') : '—'}
+                        </td>
                         <td>
                           <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
                             <button type="button" className="btn btn-secondary btn-sm" title="Voir" onClick={() => setDetailId(x.id)}><Eye size={13} /></button>
+                            <button type="button" className="btn btn-ghost btn-sm" title="Code-barres" onClick={() => openBarcode(x)}><Barcode size={13} /></button>
                             <button type="button" className="btn btn-ghost btn-sm" title="Modifier" onClick={() => { setEditItem(x); setShowModal(true); }}><Edit2 size={13} /></button>
                             <button type="button" className="btn btn-ghost btn-sm" title="Historique" onClick={() => openHistory(x.id)}><History size={13} /></button>
                             <button type="button" className="btn btn-ghost btn-sm" title="Archiver" onClick={() => handleArchive(x.id)}><Archive size={13} /></button>
@@ -643,6 +768,7 @@ export default function ArticlesStock({ onArticlesChange }) {
                   item={x}
                   catName={cat ? (cat.nom || cat.name) : '—'}
                   onView={() => setDetailId(x.id)}
+                  onBarcode={() => openBarcode(x)}
                   onEdit={() => { setEditItem(x); setShowModal(true); }}
                   onHistory={() => openHistory(x.id)}
                   onArchive={() => handleArchive(x.id)}
@@ -661,6 +787,8 @@ export default function ArticlesStock({ onArticlesChange }) {
           )}
         </>
       )}
+        </>
+      )}
 
       <Modal open={showModal} onClose={() => { if (!saving) { setShowModal(false); setEditItem(null); } }} title={editItem ? "Modifier l'article" : 'Nouvel article de stock'} width={760}>
         <ArticleForm
@@ -672,38 +800,28 @@ export default function ArticlesStock({ onArticlesChange }) {
         />
       </Modal>
 
-      <Modal open={!!historyId} onClose={() => setHistoryId(null)} title="Historique des mouvements" width={720}>
+      <Modal open={!!historyId} onClose={() => setHistoryId(null)} title="Historique complet" width={900}>
         {historyLoading ? (
           <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-3)' }}><Loader2 size={20} className="cin-spin" /></div>
-        ) : historyRows.length === 0 ? (
-          <p style={{ color: 'var(--text-3)', fontSize: '0.85rem' }}>Aucun mouvement enregistré pour cet article.</p>
         ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Réf.</th>
-                  <th>Type</th>
-                  <th>Quantité</th>
-                  <th>Date</th>
-                  <th>Motif</th>
-                </tr>
-              </thead>
-              <tbody>
-                {historyRows.map((m) => (
-                  <tr key={m.id}>
-                    <td>{m.ref || '—'}</td>
-                    <td>{m.type}</td>
-                    <td style={{ fontWeight: 700 }}>{m.quantite}</td>
-                    <td>{m.date}</td>
-                    <td style={{ fontSize: '0.82rem', color: 'var(--text-2)' }}>{m.motif || '—'}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <ArticleMovementHistory movements={historyRows} loading={false} />
         )}
       </Modal>
+
+      <BarcodeModal
+        open={!!barcodeArticle}
+        article={barcodeArticle}
+        categoryName={barcodeArticle ? getCategoryName(barcodeArticle) : ''}
+        onClose={() => setBarcodeArticle(null)}
+      />
+
+      <BarcodeScannerModal
+        open={showScanner}
+        onClose={() => { setShowScanner(false); setScanError(''); }}
+        onScan={handleBarcodeScan}
+        scanning={scanLoading}
+        error={scanError}
+      />
     </div>
   );
 }

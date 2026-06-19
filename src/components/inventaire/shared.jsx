@@ -40,6 +40,22 @@ export const TYPES_DEPOT    = ['Dépôt principal', 'Chantier', 'Magasin', 'Stoc
 export const ETATS_ARTICLE  = ['Neuf', 'Utilisé', 'Défectueux', 'En réparation'];
 export const TYPES_ARTICLE_STOCK = ['Matériel', 'Outil', 'Consommable'];
 export const ETATS_ARTICLE_STOCK = ['Neuf', 'Utilisé', 'À réparer', 'Hors service'];
+export const CURRENT_STATES_ARTICLE = [
+  'Disponible',
+  'Affecté chantier',
+  'Utilisé',
+  'Réparation',
+  'Hors service',
+  'Perdu',
+];
+export const BADGE_CURRENT_STATE = {
+  Disponible: 'badge-green',
+  'Affecté chantier': 'badge-blue',
+  Utilisé: 'badge-orange',
+  Réparation: 'badge-purple',
+  'Hors service': 'badge-grey',
+  Perdu: 'badge-red',
+};
 export const STATUTS_ARTICLE_STOCK = ['Actif', 'Inactif', 'Archivé'];
 export const EMPLACEMENTS_STOCK = [
   'DEPOT LAKHYAYTA',

@@ -94,7 +94,11 @@ export function normalizeStockArticle(row, extras = {}) {
     emplacement: row.emplacement || '',
     description: row.description || '',
     notes: row.notes || '',
+    barcode_value: row.barcode_value || row.reference || '',
+    last_scanned_at: row.last_scanned_at || null,
+    current_state: row.current_state || 'Disponible',
     stock_actuel: Number(extras.stock_actuel ?? row.stock_actuel ?? 0),
+    dernier_mouvement: extras.dernier_mouvement ?? null,
     date_creation: row.created_at ? String(row.created_at).slice(0, 10) : '',
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -103,8 +107,9 @@ export function normalizeStockArticle(row, extras = {}) {
 
 export function toStockArticleRow(form) {
   const { warehouseId, projectId } = parseLocalisation(form);
-  return {
-    reference: (form.code || form.reference || '').trim(),
+  const reference = (form.code || form.reference || '').trim();
+  const row = {
+    reference,
     nom: (form.designation || form.nom || '').trim(),
     article_type: (form.type || form.article_type || '').trim() || null,
     category_id: form.categorie_id || form.category_id || null,
@@ -120,6 +125,36 @@ export function toStockArticleRow(form) {
     description: (form.description || '').trim() || null,
     notes: (form.notes || '').trim() || null,
   };
+  if (reference) row.barcode_value = reference;
+  return row;
+}
+
+function isMissingBarcodeColumn(error) {
+  const msg = String(error?.message || '').toLowerCase();
+  return (error?.code === '42703' || error?.code === 'PGRST204')
+    && (msg.includes('barcode_value') || msg.includes('last_scanned_at') || msg.includes('current_state'));
+}
+
+async function insertArticleRow(row) {
+  let payload = { ...row };
+  let { data, error } = await getSupabase().from(TABLE).insert([payload]).select().single();
+  if (error && isMissingBarcodeColumn(error)) {
+    const { barcode_value, last_scanned_at, ...rest } = payload;
+    ({ data, error } = await getSupabase().from(TABLE).insert([rest]).select().single());
+  }
+  if (error) throw error;
+  return data;
+}
+
+async function updateArticleRow(id, row) {
+  let payload = { ...row };
+  let { data, error } = await getSupabase().from(TABLE).update(payload).eq('id', id).select().single();
+  if (error && isMissingBarcodeColumn(error)) {
+    const { barcode_value, last_scanned_at, ...rest } = payload;
+    ({ data, error } = await getSupabase().from(TABLE).update(rest).eq('id', id).select().single());
+  }
+  if (error) throw error;
+  return data;
 }
 
 export async function generateStockArticleCode() {
@@ -189,6 +224,53 @@ async function attachStockQuantities(articles) {
   }));
 }
 
+function fmtMvtDate(d) {
+  if (!d) return '—';
+  try {
+    return new Date(`${d}T12:00:00`).toLocaleDateString('fr-FR', {
+      day: '2-digit', month: '2-digit', year: 'numeric',
+    });
+  } catch {
+    return String(d);
+  }
+}
+
+function summarizeLastMovement(row) {
+  if (!row) return null;
+  const p = row.payload || {};
+  const action = p.action_label || row.motif || row.type_mouvement || 'Mouvement';
+  return {
+    date: row.date_mouvement || '',
+    date_label: fmtMvtDate(row.date_mouvement),
+    action,
+    type: row.type_mouvement || '',
+    ref: row.ref_mouvement || '',
+  };
+}
+
+async function attachLastMovements(articles) {
+  if (!articles.length) return articles;
+  const ids = articles.map((a) => a.id);
+  const { data, error } = await getSupabase()
+    .from(MOVEMENTS)
+    .select('article_id, date_mouvement, type_mouvement, motif, ref_mouvement, payload, created_at')
+    .in('article_id', ids)
+    .order('date_mouvement', { ascending: false })
+    .order('created_at', { ascending: false });
+  if (error) {
+    if (error.code === '42P01') return articles;
+    throw error;
+  }
+  const lastByArticle = new Map();
+  (data || []).forEach((row) => {
+    if (!lastByArticle.has(row.article_id)) lastByArticle.set(row.article_id, row);
+  });
+  return articles.map((a) => ({
+    ...a,
+    dernier_mouvement: summarizeLastMovement(lastByArticle.get(a.id)),
+  }));
+}
+
 export async function listStockArticles() {
   const { data, error } = await getSupabase()
     .from(TABLE)
@@ -196,7 +278,8 @@ export async function listStockArticles() {
     .order('nom', { ascending: true });
   if (error) throw error;
   const normalized = (data || []).map((r) => normalizeStockArticle(r)).filter(Boolean);
-  return attachStockQuantities(normalized);
+  const withStock = await attachStockQuantities(normalized);
+  return attachLastMovements(withStock);
 }
 
 /** Détecte les doublons (même référence ou même désignation). */
@@ -248,10 +331,14 @@ export async function importStockArticlesCatalog() {
       if (existingRefs.has(ref)) return false;
       if (existingNoms.has(nom)) return false;
       return true;
-    });
+    }).map((r) => ({ ...r, barcode_value: r.reference }));
     if (!toInsert.length) return { seeded: 0, skipped: true };
 
-    const { error } = await getSupabase().from(TABLE).insert(toInsert);
+    let { error } = await getSupabase().from(TABLE).insert(toInsert);
+    if (error && isMissingBarcodeColumn(error)) {
+      const stripped = toInsert.map(({ barcode_value, ...r }) => r);
+      ({ error } = await getSupabase().from(TABLE).insert(stripped));
+    }
     if (error) throw error;
     return { seeded: toInsert.length, skipped: false };
   })();
@@ -371,18 +458,14 @@ export async function createStockArticle(form) {
   const uid = await requireSupabaseUserId();
   const row = toStockArticleRow(form);
   if (!row.reference) row.reference = await generateStockArticleCode();
+  row.barcode_value = row.reference;
   if (!row.nom) {
     const err = new Error('La désignation est obligatoire.');
     err.code = 'VALIDATION';
     throw err;
   }
 
-  const { data, error } = await getSupabase()
-    .from(TABLE)
-    .insert([row])
-    .select()
-    .single();
-  if (error) throw error;
+  const data = await insertArticleRow(row);
 
   const article = normalizeStockArticle(data);
   const qty = Number(form.quantite_initiale) || 0;
@@ -401,13 +484,7 @@ export async function updateStockArticle(id, form) {
     err.code = 'VALIDATION';
     throw err;
   }
-  const { data, error } = await getSupabase()
-    .from(TABLE)
-    .update(row)
-    .eq('id', id)
-    .select()
-    .single();
-  if (error) throw error;
+  const data = await updateArticleRow(id, row);
   const [withStock] = await attachStockQuantities([normalizeStockArticle(data)]);
   return withStock;
 }
@@ -456,17 +533,57 @@ export async function listMovementsForArticle(articleId) {
     .order('date_mouvement', { ascending: false })
     .order('created_at', { ascending: false });
   if (error) throw error;
-  return (data || []).map((m) => ({
+  return (data || []).map(formatArticleMovementHistory);
+}
+
+export function formatArticleMovementHistory(m) {
+  const p = m.payload || {};
+  const typeLabel = {
+    Entree: 'Entrée',
+    Sortie: 'Sortie',
+    Transfert: 'Transfert',
+    Retour: 'Retour',
+    Rebut: 'Réforme',
+    Reparation: 'Réparation',
+    Reforme: 'Réforme',
+  }[m.type_mouvement] || m.type_mouvement || '';
+  return {
     id: m.id,
     ref: m.ref_mouvement || '',
-    type: m.type_mouvement || '',
+    type: typeLabel,
+    type_raw: m.type_mouvement || '',
     quantite: Number(m.quantite ?? 0),
     date: m.date_mouvement || '',
+    date_label: fmtMvtDate(m.date_mouvement),
     motif: m.motif || '',
+    utilisateur: p.cree_par || p.utilisateur || '—',
+    action: p.action_label || m.motif || typeLabel || 'Mouvement',
+    origine: p.emplacement_source || '',
+    destination: p.emplacement_destination || '',
+    observation: p.note || p.ligne_notes || '',
     warehouse_id: m.warehouse_id,
-    payload: m.payload || {},
+    payload: p,
     created_at: m.created_at,
-  }));
+  };
+}
+
+export async function patchStockArticle(id, fields = {}) {
+  await requireSupabaseUserId();
+  const row = {};
+  if (fields.current_state !== undefined) row.current_state = fields.current_state || 'Disponible';
+  if (fields.emplacement !== undefined) row.emplacement = (fields.emplacement || '').trim() || null;
+  if (fields.last_scanned_at !== undefined) row.last_scanned_at = fields.last_scanned_at;
+  if (!Object.keys(row).length) return null;
+
+  let { data, error } = await getSupabase().from(TABLE).update(row).eq('id', id).select().single();
+  if (error && isMissingBarcodeColumn(error)) {
+    const { current_state, last_scanned_at, ...rest } = row;
+    if (!Object.keys(rest).length) return null;
+    ({ data, error } = await getSupabase().from(TABLE).update(rest).eq('id', id).select().single());
+  }
+  if (error) throw error;
+  const [withStock] = await attachStockQuantities([normalizeStockArticle(data)]);
+  return withStock;
 }
 
 export async function computeArticleStock(articleId) {
@@ -476,4 +593,68 @@ export async function computeArticleStock(articleId) {
   }
   const fromMvts = await sumMovementsByArticle([articleId]);
   return Math.max(0, Number(fromMvts[articleId] ?? 0));
+}
+
+function matchBarcodeArticle(article, code) {
+  const norm = String(code || '').trim().toLowerCase();
+  if (!norm) return false;
+  const ref = String(article.reference || article.code || '').trim().toLowerCase();
+  const bc = String(article.barcode_value || '').trim().toLowerCase();
+  return ref === norm || bc === norm;
+}
+
+/** Recherche locale dans la liste déjà chargée. */
+export function findStockArticleInList(articles, rawCode) {
+  const code = String(rawCode || '').trim();
+  if (!code) return null;
+  return articles.find((a) => matchBarcodeArticle(a, code)) || null;
+}
+
+/** Recherche article par code-barres (référence / barcode_value). */
+export async function findStockArticleByBarcode(rawCode, localArticles = []) {
+  const code = String(rawCode || '').trim();
+  if (!code) return null;
+
+  const local = findStockArticleInList(localArticles, code);
+  if (local) return local;
+
+  const { data: byRef, error: refErr } = await getSupabase()
+    .from(TABLE)
+    .select('*')
+    .ilike('reference', code)
+    .limit(1)
+    .maybeSingle();
+  if (refErr) throw refErr;
+  if (byRef) {
+    const [withStock] = await attachStockQuantities([normalizeStockArticle(byRef)]);
+    return withStock;
+  }
+
+  const { data: byBc, error: bcErr } = await getSupabase()
+    .from(TABLE)
+    .select('*')
+    .ilike('barcode_value', code)
+    .limit(1)
+    .maybeSingle();
+  if (bcErr) {
+    if (isMissingBarcodeColumn(bcErr)) return null;
+    throw bcErr;
+  }
+  if (!byBc) return null;
+  const [withStock] = await attachStockQuantities([normalizeStockArticle(byBc)]);
+  return withStock;
+}
+
+/** Enregistre la date du dernier scan (colonne optionnelle). */
+export async function recordStockArticleScan(id) {
+  if (!id) return;
+  try {
+    const { error } = await getSupabase()
+      .from(TABLE)
+      .update({ last_scanned_at: new Date().toISOString() })
+      .eq('id', id);
+    if (error && !isMissingBarcodeColumn(error)) throw error;
+  } catch {
+    /* colonne absente si SQL non exécuté */
+  }
 }
