@@ -6,11 +6,17 @@ import { jsPDF } from 'jspdf';
 const LOGO_URL = 'https://i.ibb.co/N6SbC06M/logopng.png';
 const RED = [198, 40, 40];
 const TEXT = [33, 33, 33];
-const MUTED = [100, 100, 100];
-const BORDER = [180, 180, 180];
-const M = 14;
+const MUTED = [90, 90, 90];
+const BORDER = [190, 190, 190];
+const GREY_BG = [248, 248, 248];
+const HEADER_BG = [250, 250, 250];
+const WHITE = [255, 255, 255];
+
+const M = 12;
 const PAGE_W = 210;
+const PAGE_H = 297;
 const CONTENT_W = PAGE_W - M * 2;
+const FOOTER_LIMIT = 275;
 
 const COMPANY = {
   address: '228 Bd Mohammed V, Casablanca 20000, Maroc',
@@ -38,61 +44,85 @@ async function loadImage(url) {
 function fmtDate(d) {
   if (!d) return '—';
   try {
-    return new Date(`${d}T12:00:00`).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    return new Date(`${d}T12:00:00`).toLocaleDateString('fr-FR', {
+      day: '2-digit', month: '2-digit', year: 'numeric',
+    });
   } catch {
     return String(d);
   }
 }
 
-function fieldRow(doc, y, label, value, x = M, w = CONTENT_W) {
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8);
-  doc.setTextColor(...MUTED);
-  doc.text(label, x, y);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(9.5);
-  doc.setTextColor(...TEXT);
-  const lines = doc.splitTextToSize(value || '—', w - 4);
-  doc.text(lines, x, y + 4.5);
-  return y + 4.5 + lines.length * 4.2 + 4;
+function drawBorderedBox(doc, x, y, w, h, fill = null) {
+  if (fill) {
+    doc.setFillColor(...fill);
+    doc.rect(x, y, w, h, 'F');
+  }
+  doc.setDrawColor(...BORDER);
+  doc.setLineWidth(0.35);
+  doc.rect(x, y, w, h);
 }
 
-export async function generateMouvementPdf(bon, articles = []) {
-  const logo = await loadImage(LOGO_URL);
-  const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
-  let y = M;
+function drawHeader(doc, bon, logo) {
+  const headerH = 48;
+  const halfW = CONTENT_W / 2;
+  const top = M;
 
+  drawBorderedBox(doc, M, top, CONTENT_W, headerH);
+
+  doc.setFillColor(...HEADER_BG);
+  doc.rect(M, top, halfW, headerH, 'F');
   doc.setDrawColor(...BORDER);
-  doc.setLineWidth(0.3);
-  doc.rect(M, y, CONTENT_W, 38);
+  doc.setLineWidth(0.35);
+  doc.line(M + halfW, top, M + halfW, top + headerH);
+  doc.rect(M, top, CONTENT_W, headerH);
 
   if (logo) {
-    try { doc.addImage(logo, 'PNG', M + 4, y + 6, 36, 14); } catch { /* skip */ }
+    try { doc.addImage(logo, 'PNG', M + 6, top + 7, 44, 16); } catch { /* skip */ }
   }
 
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8.5);
+  doc.setFontSize(9);
   doc.setTextColor(...MUTED);
-  let ly = y + 22;
+  let ly = top + 26;
   [COMPANY.address, COMPANY.email, COMPANY.phone, COMPANY.ice].forEach((line) => {
-    doc.text(line, M + 4, ly);
-    ly += 4;
+    doc.text(line, M + 6, ly);
+    ly += 4.8;
   });
 
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(18);
-  doc.setTextColor(...RED);
-  doc.text('BON DE MOUVEMENT', PAGE_W - M - 4, y + 14, { align: 'right' });
-  doc.setFontSize(9.5);
-  doc.setTextColor(...TEXT);
-  doc.text(`Réf. : ${bon.ref || '—'}`, PAGE_W - M - 4, y + 22, { align: 'right' });
-  doc.text(`Date : ${fmtDate(bon.date_creation)}`, PAGE_W - M - 4, y + 28, { align: 'right' });
-  doc.text(`Statut : ${bon.statut || 'Brouillon'}`, PAGE_W - M - 4, y + 34, { align: 'right' });
+  const rightX = M + halfW + 8;
+  const rightW = halfW - 16;
 
-  y += 46;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(20);
+  doc.setTextColor(...RED);
+  doc.text('BON DE MOUVEMENT', rightX + rightW, top + 16, { align: 'right' });
+
+  const metaLines = [
+    ['Réf.', bon.ref || '—'],
+    ['Date', fmtDate(bon.date_creation)],
+    ['Statut', bon.statut || 'Brouillon'],
+  ];
+
+  let ry = top + 26;
+  metaLines.forEach(([label, value]) => {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
+    doc.setTextColor(...TEXT);
+    doc.text(`${label} :`, rightX, ry);
+    doc.setFont('helvetica', 'normal');
+    doc.text(String(value), rightX + 22, ry);
+    ry += 7;
+  });
+
+  return top + headerH + 8;
+}
+
+function drawMetaGrid(doc, bon, startY) {
+  const boxH = 34;
+  drawBorderedBox(doc, M, startY, CONTENT_W, boxH, GREY_BG);
 
   const colW = CONTENT_W / 3;
-  const meta = [
+  const fields = [
     ['Type de mouvement', bon.type_mouvement || '—'],
     ['Emplacement source', bon.emplacement_source || '—'],
     ['Emplacement destination', bon.emplacement_destination || '—'],
@@ -101,97 +131,172 @@ export async function generateMouvementPdf(bon, articles = []) {
     ['Réceptionnaire', bon.receptionnaire || '—'],
   ];
 
-  doc.setFillColor(248, 248, 248);
-  doc.rect(M, y, CONTENT_W, 28, 'F');
-  doc.setDrawColor(...BORDER);
-  doc.rect(M, y, CONTENT_W, 28);
-
-  meta.forEach(([label, val], i) => {
+  fields.forEach(([label, value], i) => {
     const col = i % 3;
     const row = Math.floor(i / 3);
-    const x = M + 4 + col * colW;
-    const my = y + 8 + row * 12;
+    const x = M + 6 + col * colW;
+    const y = startY + 10 + row * 14;
+
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7);
+    doc.setFontSize(8);
     doc.setTextColor(...MUTED);
-    doc.text(label.toUpperCase(), x, my);
+    doc.text(label.toUpperCase(), x, y);
+
     doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8.5);
+    doc.setFontSize(10.5);
     doc.setTextColor(...TEXT);
-    doc.text(doc.splitTextToSize(val, colW - 6), x, my + 4);
+    const lines = doc.splitTextToSize(String(value), colW - 8);
+    doc.text(lines, x, y + 5);
   });
 
-  y += 36;
-  if (bon.motif) y = fieldRow(doc, y, 'Motif', bon.motif);
-  if (bon.note) y = fieldRow(doc, y, 'Notes', bon.note);
+  return startY + boxH + 8;
+}
 
-  y += 4;
+function drawTextBlock(doc, label, value, startY) {
+  if (!value?.trim()) return startY;
+  const pad = 6;
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(9);
+  doc.setFontSize(10);
+  doc.setTextColor(...TEXT);
+  doc.text(label, M + pad, startY + 8);
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(10.5);
+  doc.setTextColor(...TEXT);
+  const lines = doc.splitTextToSize(value.trim(), CONTENT_W - pad * 2);
+  const blockH = Math.max(16, 12 + lines.length * 5);
+
+  drawBorderedBox(doc, M, startY, CONTENT_W, blockH, WHITE);
+  doc.text(lines, M + pad, startY + 14);
+
+  return startY + blockH + 6;
+}
+
+function drawArticlesTable(doc, bon, articles, startY) {
+  let y = startY;
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
   doc.setTextColor(...TEXT);
   doc.text('Articles', M, y);
-  y += 6;
+  y += 7;
 
-  const cols = [12, 78, 24, 56, CONTENT_W - 170];
-  const headers = ['#', 'Article', 'Qté', 'Unité', 'Notes'];
+  const cols = [14, 82, 22, 24, CONTENT_W - 142];
   const xs = [M];
   for (let i = 1; i < cols.length; i++) xs[i] = xs[i - 1] + cols[i - 1];
+  const hdrH = 10;
 
-  doc.setFillColor(245, 245, 245);
-  doc.rect(M, y, CONTENT_W, 8, 'F');
+  doc.setFillColor(...RED);
+  doc.rect(M, y, CONTENT_W, hdrH, 'F');
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(...WHITE);
+  const headers = ['#', 'Article', 'Qté', 'Unité', 'Notes'];
   headers.forEach((h, i) => {
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7.5);
-    doc.setTextColor(...MUTED);
-    doc.text(h, xs[i] + 2, y + 5.5);
+    const align = i === 0 || i === 3 ? 'center' : 'left';
+    const tx = i === 0 ? xs[i] + cols[i] / 2 : xs[i] + 3;
+    doc.text(h, tx, y + 6.5, { align });
   });
-  y += 8;
+  y += hdrH;
 
-  (bon.lignes || []).forEach((ligne, idx) => {
+  const lignes = bon.lignes || [];
+  if (!lignes.length) {
+    drawBorderedBox(doc, M, y, CONTENT_W, 14, WHITE);
+    doc.setFont('helvetica', 'italic');
+    doc.setFontSize(10);
+    doc.setTextColor(...MUTED);
+    doc.text('Aucun article', M + CONTENT_W / 2, y + 9, { align: 'center' });
+    return y + 14;
+  }
+
+  lignes.forEach((ligne, idx) => {
     const art = articles.find((a) => String(a.id) === String(ligne.article_id));
     const label = art
       ? `${art.code || art.reference} — ${art.designation || art.nom}`
       : (ligne.article_designation || ligne.article_code || '—');
     const unite = art?.unite || 'U';
     const notes = ligne.notes || '';
-    const desLines = doc.splitTextToSize(label, cols[1] - 4);
-    const noteLines = notes ? doc.splitTextToSize(notes, cols[4] - 4) : [];
-    const rowH = Math.max(8, desLines.length * 3.8 + 3, noteLines.length * 3.5 + 3);
 
-    if (y + rowH > 270) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9.5);
+    const desLines = doc.splitTextToSize(label, cols[1] - 6);
+    const noteLines = notes ? doc.splitTextToSize(notes, cols[4] - 6) : [];
+    const rowH = Math.max(12, Math.max(desLines.length, noteLines.length || 1) * 5 + 6);
+
+    if (y + rowH > FOOTER_LIMIT) {
       doc.addPage();
       y = M;
     }
 
-    doc.setDrawColor(...BORDER);
-    doc.rect(M, y, CONTENT_W, rowH);
-    doc.setFont('helvetica', 'normal');
-    doc.setFontSize(8);
+    cols.forEach((w, i) => drawBorderedBox(doc, xs[i], y, w, rowH, idx % 2 === 0 ? WHITE : GREY_BG));
+
+    const midY = y + rowH / 2 + 1.5;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(10);
     doc.setTextColor(...TEXT);
-    doc.text(String(idx + 1), xs[0] + 2, y + 5);
-    doc.text(desLines, xs[1] + 2, y + 5);
-    doc.text(String(ligne.quantite ?? ''), xs[2] + 2, y + 5);
-    doc.text(unite, xs[3] + 2, y + 5);
-    if (noteLines.length) doc.text(noteLines, xs[4] + 2, y + 5);
+    doc.text(String(idx + 1), xs[0] + cols[0] / 2, midY, { align: 'center' });
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(9.5);
+    let ty = y + 6;
+    desLines.forEach((line) => {
+      doc.text(line, xs[1] + 3, ty);
+      ty += 5;
+    });
+
+    doc.setFont('helvetica', 'bold');
+    doc.text(String(ligne.quantite ?? ''), xs[2] + cols[2] / 2, midY, { align: 'center' });
+    doc.setFont('helvetica', 'normal');
+    doc.text(unite, xs[3] + cols[3] / 2, midY, { align: 'center' });
+
+    if (noteLines.length) {
+      let ny = y + 6;
+      noteLines.forEach((line) => {
+        doc.text(line, xs[4] + 3, ny);
+        ny += 5;
+      });
+    }
+
     y += rowH;
   });
 
-  y += 10;
+  return y;
+}
+
+function drawFooter(doc, bon, startY) {
+  let y = startY + 10;
   const totalLignes = (bon.lignes || []).length;
   const totalQte = (bon.lignes || []).reduce((s, l) => s + (Number(l.quantite) || 0), 0);
+
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(9.5);
+  doc.setFontSize(11);
   doc.setTextColor(...TEXT);
   doc.text(`Lignes : ${totalLignes}  —  Quantité totale : ${totalQte}`, M, y);
 
-  y += 14;
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(8);
-  doc.setTextColor(...MUTED);
-  doc.text('Signature livreur', M, y);
-  doc.text('Signature réceptionnaire', M + CONTENT_W / 2, y);
-  doc.line(M, y + 14, M + 70, y + 14);
-  doc.line(M + CONTENT_W / 2, y + 14, M + CONTENT_W / 2 + 70, y + 14);
+  y += 16;
+  const sigW = (CONTENT_W - 12) / 2;
+
+  [['Signature livreur', M], ['Signature réceptionnaire', M + sigW + 12]].forEach(([label, x]) => {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(10);
+    doc.setTextColor(...MUTED);
+    doc.text(label, x, y);
+    doc.setDrawColor(...BORDER);
+    doc.setLineWidth(0.4);
+    doc.line(x, y + 16, x + sigW, y + 16);
+  });
+}
+
+export async function generateMouvementPdf(bon, articles = []) {
+  const logo = await loadImage(LOGO_URL);
+  const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+
+  let y = drawHeader(doc, bon, logo);
+  y = drawMetaGrid(doc, bon, y);
+  y = drawTextBlock(doc, 'Motif', bon.motif, y);
+  y = drawTextBlock(doc, 'Notes', bon.note, y);
+  y = drawArticlesTable(doc, bon, articles, y);
+  drawFooter(doc, bon, y);
 
   const filename = `bon-mouvement-${(bon.ref || 'draft').replace(/\s+/g, '-')}.pdf`;
   doc.save(filename);
