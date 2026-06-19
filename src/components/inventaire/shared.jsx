@@ -41,6 +41,22 @@ export const ETATS_ARTICLE  = ['Neuf', 'Utilisé', 'Défectueux', 'En réparatio
 export const TYPES_ARTICLE_STOCK = ['Matériel', 'Outil', 'Consommable'];
 export const ETATS_ARTICLE_STOCK = ['Neuf', 'Utilisé', 'À réparer', 'Hors service'];
 export const STATUTS_ARTICLE_STOCK = ['Actif', 'Inactif', 'Archivé'];
+export const EMPLACEMENTS_STOCK = [
+  'DEPOT LAKHYAYTA',
+  'CHANTIER LONGOMETAL',
+  'ATELIER MENUISERIE',
+  'SAV HOUCINE HEZGUIT',
+  'CHANTIER ALCOTT',
+  'CHANTIER ONDA',
+  'CHANTIER LOGIPARC',
+  'CHANTIER VILLA POLO',
+  'CHANTIER VILLA BENSOUDA',
+  'CHANTIER VILLA BOUSKOURA',
+  'CHANTIER MEDAFRICA BELVEDER',
+  "ATELIER D'ALUMINIUM",
+  'ATELIER DE FERRONNERIE',
+  'BUREAU CITYMO BD MED 5',
+];
 export const UNITES         = ['U', 'kg', 'g', 't', 'm', 'm²', 'm³', 'ml', 'cm', 'l', 'cl', 'sac', 'rouleau', 'boîte', 'palette', 'lot', 'pièce'];
 export const TYPES_MOUVEMENT = ['Entrée', 'Sortie', 'Transfert', 'Retour', 'Rebut'];
 export const STATUTS_MOUVEMENT = ['Brouillon', 'Validé', 'En cours', 'Terminé', 'Annulé'];

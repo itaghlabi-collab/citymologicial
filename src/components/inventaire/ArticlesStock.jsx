@@ -13,7 +13,7 @@ import { listProjects } from '../../services/projects/projects';
 import { generateStockArticleCode } from '../../services/inventaire/stockArticles';
 import {
   INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE, UNITES,
-  TYPES_ARTICLE_STOCK, ETATS_ARTICLE_STOCK, STATUTS_ARTICLE_STOCK,
+  TYPES_ARTICLE_STOCK, ETATS_ARTICLE_STOCK, STATUTS_ARTICLE_STOCK, EMPLACEMENTS_STOCK,
   KpiCard, EmptyState, Modal, SectionTitle, FField, FRow,
   formatMAD, StockAlert,
 } from './shared.jsx';
@@ -100,6 +100,12 @@ function ArticleForm({ initial, categories, warehouses, projects, onSave, onCanc
     ...(projects || []).map((p) => ({ value: `project:${p.id}`, label: `Projet — ${p.nom || p.ref}` })),
   ];
 
+  function emplacementOptions(current) {
+    const v = (current || '').trim();
+    if (v && !EMPLACEMENTS_STOCK.includes(v)) return [v, ...EMPLACEMENTS_STOCK];
+    return EMPLACEMENTS_STOCK;
+  }
+
   return (
     <form onSubmit={handleSubmit}>
       <SectionTitle icon={<Package size={12} />}>Informations article</SectionTitle>
@@ -176,7 +182,12 @@ function ArticleForm({ initial, categories, warehouses, projects, onSave, onCanc
           </select>
         </FField>
         <FField label="Emplacement">
-          <input value={form.emplacement} onChange={(e) => set('emplacement', e.target.value)} placeholder="Ex: Étagère A3, Zone B..." style={INPUT_STYLE} />
+          <select value={form.emplacement} onChange={(e) => set('emplacement', e.target.value)} style={SELECT_STYLE}>
+            <option value="">— Sélectionner —</option>
+            {emplacementOptions(form.emplacement).map((e) => (
+              <option key={e} value={e}>{e}</option>
+            ))}
+          </select>
         </FField>
       </FRow>
 
@@ -194,7 +205,12 @@ function ArticleForm({ initial, categories, warehouses, projects, onSave, onCanc
               </select>
             </FField>
             <FField label="Emplacement initial">
-              <input value={form.emplacement_initial} onChange={(e) => set('emplacement_initial', e.target.value)} placeholder="Même que défaut si vide" style={INPUT_STYLE} />
+              <select value={form.emplacement_initial} onChange={(e) => set('emplacement_initial', e.target.value)} style={SELECT_STYLE}>
+                <option value="">— Même que défaut —</option>
+                {emplacementOptions(form.emplacement_initial).map((e) => (
+                  <option key={`init-${e}`} value={e}>{e}</option>
+                ))}
+              </select>
             </FField>
           </FRow>
         </>
