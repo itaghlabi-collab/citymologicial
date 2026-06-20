@@ -2716,11 +2716,12 @@ tbody tr:last-child td { border-bottom: none; }
     justify-content: flex-end;
   }
 
-  /* RH listes — actions compactes à côté du nom (présence, paiement hebdo, sous-traitants) */
+  /* RH listes — actions compactes (ligne horizontale sous le nom) */
   .rh-ext-page .table-wrap tbody tr.rh-ext-compact-row,
   .rh-ext-page .table-wrap tbody tr.rh-payroll-row {
     display: grid;
-    grid-template-columns: 1fr auto;
+    grid-template-columns: 1fr;
+    grid-template-rows: auto auto;
     padding: 0;
   }
 
@@ -2729,7 +2730,7 @@ tbody tr:last-child td { border-bottom: none; }
   .rh-ext-page .table-wrap tbody tr.rh-payroll-row td[data-label="Ouvrier"] {
     grid-column: 1;
     grid-row: 1;
-    border-radius: var(--radius) 0 0 0 !important;
+    border-radius: var(--radius) var(--radius) 0 0 !important;
     min-width: 0;
   }
 
@@ -2744,17 +2745,25 @@ tbody tr:last-child td { border-bottom: none; }
 
   .rh-ext-page .table-wrap tbody tr.rh-ext-compact-row td.payment-actions-cell,
   .rh-ext-page .table-wrap tbody tr.rh-payroll-row td.payment-actions-cell {
-    grid-column: 2;
-    grid-row: 1;
+    grid-column: 1;
+    grid-row: 2;
     border-bottom: 1px solid var(--border);
     background: var(--surface-2);
-    border-radius: 0 var(--radius) 0 0;
+    border-radius: 0;
     flex-direction: row !important;
     align-items: center !important;
-    justify-content: flex-end !important;
-    padding: 6px 8px !important;
+    justify-content: flex-start !important;
+    padding: 6px 10px !important;
     min-height: auto !important;
     min-width: 0;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .rh-ext-page .table-wrap tbody tr.rh-ext-compact-row td.payment-actions-cell::-webkit-scrollbar,
+  .rh-ext-page .table-wrap tbody tr.rh-payroll-row td.payment-actions-cell::-webkit-scrollbar {
+    display: none;
   }
 
   .rh-ext-page .table-wrap tbody tr.rh-ext-compact-row td.payment-actions-cell::before,
@@ -2770,11 +2779,12 @@ tbody tr:last-child td { border-bottom: none; }
   .rh-ext-page .table-wrap tbody tr.rh-ext-compact-row .payment-row-actions,
   .rh-ext-page .table-wrap tbody tr.rh-payroll-row .payment-row-actions {
     flex-direction: row !important;
-    flex-wrap: wrap;
+    flex-wrap: nowrap !important;
     align-items: center !important;
-    justify-content: flex-end !important;
-    width: auto !important;
-    gap: 4px !important;
+    justify-content: flex-start !important;
+    width: max-content !important;
+    min-width: 100%;
+    gap: 6px !important;
   }
 
   .rh-ext-page .table-wrap tbody tr.rh-ext-compact-row .payment-row-actions .btn,
@@ -2786,6 +2796,7 @@ tbody tr:last-child td { border-bottom: none; }
     justify-content: center !important;
     font-size: 0 !important;
     gap: 0 !important;
+    flex-shrink: 0;
   }
 
   .rh-ext-page .table-wrap tbody tr.rh-ext-compact-row .payment-row-actions .btn svg,
@@ -2793,6 +2804,22 @@ tbody tr:last-child td { border-bottom: none; }
     width: 14px;
     height: 14px;
     flex-shrink: 0;
+  }
+
+  /* Paiement hebdo — barre d'actions en-tête (2 boutons alignés) */
+  .rh-ext-page .finance-page-actions--duo {
+    grid-template-columns: 1fr 1fr !important;
+    max-width: none !important;
+  }
+
+  .rh-ext-page .finance-page-actions--duo .btn {
+    width: 100% !important;
+    min-height: 38px;
+  }
+
+  .rh-ext-btn-correction {
+    border: 1.5px dashed var(--border) !important;
+    color: var(--text-3) !important;
   }
 }
 

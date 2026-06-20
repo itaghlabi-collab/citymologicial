@@ -498,7 +498,7 @@ export default function PaiementHebdo() {
             Correction manuelle uniquement en cas d&apos;erreur de saisie par le chef de chantier.
           </p>
         </div>
-        <div className="finance-page-actions">
+        <div className="finance-page-actions finance-page-actions--duo">
           <button
             type="button"
             className="btn btn-secondary"
@@ -511,11 +511,10 @@ export default function PaiementHebdo() {
           </button>
           <button
             type="button"
-            className="btn btn-ghost btn-sm"
+            className="btn btn-ghost rh-ext-btn-correction"
             onClick={openCreate}
             disabled={loading || saving || !configured}
             title="Uniquement si erreur de présence — ouvrier oublié, mauvaise semaine, etc."
-            style={{ border: '1.5px dashed var(--border)', color: 'var(--text-3)', fontSize: '0.82rem' }}
           >
             <Plus size={14} /> Correction exceptionnelle
           </button>
