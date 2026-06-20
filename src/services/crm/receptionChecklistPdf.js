@@ -40,11 +40,26 @@ const COMPANY = {
 const DEFAULT_CONDITIONS =
   '• Les prix sont exprimés en MAD • Paiement selon les modalités convenues au contrat. • Nos prestations se limitent aux services proposés dans notre offre commerciale tous travaux supplémentaires seront soumis à un devis complémentaire.';
 
-/** # | Désignation | Unité | Quantité | Check */
-const COL_W = [8, 98, 18, 24, 18];
-const COL_X = [M];
-for (let i = 1; i < COL_W.length; i++) COL_X[i] = COL_X[i - 1] + COL_W[i - 1];
-const COL_R = COL_W.map((w, i) => COL_X[i] + w - 2);
+/** Colonnes # | Désignation | Unité | Quantité | Check — largeurs = CONTENT_W exact */
+const COL_WEIGHTS = [8, 98, 18, 24, 18];
+
+function buildTableColumns() {
+  const sumW = COL_WEIGHTS.reduce((a, b) => a + b, 0);
+  const COL_W = [];
+  let used = 0;
+  for (let i = 0; i < COL_WEIGHTS.length - 1; i++) {
+    const w = Math.round((COL_WEIGHTS[i] / sumW) * CONTENT_W * 10) / 10;
+    COL_W.push(w);
+    used += w;
+  }
+  COL_W.push(Math.round((CONTENT_W - used) * 10) / 10);
+
+  const COL_X = COL_W.map((_, i) => M + COL_W.slice(0, i).reduce((a, b) => a + b, 0));
+  const COL_R = COL_W.map((w, i) => COL_X[i] + w - 2);
+  return { COL_W, COL_X, COL_R };
+}
+
+const { COL_W, COL_X, COL_R } = buildTableColumns();
 
 const TABLE_HDR_H = 8;
 const CAT_ROW_H = 7;
@@ -139,6 +154,16 @@ function drawCellBorder(doc, x, y, w, h) {
   doc.setDrawColor(...BORDER);
   doc.setLineWidth(0.25);
   doc.rect(x, y, w, h);
+}
+
+/** Grille 5 colonnes alignée sur toute la largeur CONTENT_W */
+function drawTableRowGrid(doc, y, h) {
+  doc.setDrawColor(...BORDER);
+  doc.setLineWidth(0.25);
+  doc.rect(M, y, CONTENT_W, h);
+  for (let i = 1; i < COL_X.length; i++) {
+    doc.line(COL_X[i], y, COL_X[i], y + h);
+  }
 }
 
 function buildChecklistRows(devis, catMap) {
@@ -299,6 +324,14 @@ export async function generateReceptionChecklistPdf(devis, catMap = {}) {
   const drawTableHeader = (startY) => {
     doc.setFillColor(...RED);
     doc.rect(M, startY, CONTENT_W, TABLE_HDR_H, 'F');
+    doc.setDrawColor(...BORDER);
+    doc.setLineWidth(0.25);
+    doc.rect(M, startY, CONTENT_W, TABLE_HDR_H);
+    for (let i = 1; i < COL_X.length; i++) {
+      doc.setDrawColor(...WHITE);
+      doc.setLineWidth(0.15);
+      doc.line(COL_X[i], startY + 0.5, COL_X[i], startY + TABLE_HDR_H - 0.5);
+    }
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(7);
     doc.setTextColor(...WHITE);
@@ -312,16 +345,16 @@ export async function generateReceptionChecklistPdf(devis, catMap = {}) {
   };
 
   const drawCategoryRow = (text, startY) => {
-    drawCellBorder(doc, M, startY, CONTENT_W, CAT_ROW_H);
+    drawTableRowGrid(doc, startY, CAT_ROW_H);
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(7.5);
     doc.setTextColor(...TEXT);
-    doc.text(String(text).toUpperCase(), M + 2.5, startY + CAT_ROW_H / 2 + 1);
+    doc.text(String(text).toUpperCase(), COL_X[1] + 2, startY + CAT_ROW_H / 2 + 1);
     return startY + CAT_ROW_H;
   };
 
   const drawEmptyRow = (startY) => {
-    drawCellBorder(doc, M, startY, CONTENT_W, 12);
+    drawTableRowGrid(doc, startY, 12);
     doc.setFont('helvetica', 'italic');
     doc.setFontSize(8);
     doc.setTextColor(...MUTED);
@@ -334,7 +367,7 @@ export async function generateReceptionChecklistPdf(devis, catMap = {}) {
     const { titleLines, descLines } = getDesigLines(doc, row);
     const midY = startY + h / 2 + 1;
 
-    COL_W.forEach((w, i) => drawCellBorder(doc, COL_X[i], startY, w, h));
+    drawTableRowGrid(doc, startY, h);
 
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(7.5);
