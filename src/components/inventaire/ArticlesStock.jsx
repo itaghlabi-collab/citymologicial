@@ -15,6 +15,7 @@ import BarcodeModal from './BarcodeModal';
 import BarcodeScannerModal from './BarcodeScannerModal';
 import BarcodeDisplay from './BarcodeDisplay';
 import ArticleQuickActions, { ArticleMovementHistory } from './ArticleQuickActions';
+import { canExecuteStockAction } from '../../services/inventaire/articleQuickActions';
 import { useAuth } from '../../hooks/useAuth';
 import { getArticleBarcodeValue } from '../../services/inventaire/barcodeUtils';
 import {
@@ -274,7 +275,12 @@ function DetailArticle({
             </div>
           )}
 
-          <ArticleQuickActions article={article} userName={userName} onDone={onRefresh} />
+          <ArticleQuickActions
+            article={article}
+            userName={userName}
+            onDone={onRefresh}
+            disabled={!canExecuteStockAction(article)}
+          />
 
           <div className="card">
             <SectionTitle icon={<History size={12} />}>Historique complet</SectionTitle>
@@ -293,7 +299,7 @@ function DetailArticle({
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <div>
                 <span style={{ color: 'var(--text-3)', fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', display: 'block' }}>Stock disponible</span>
-                <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.4rem', color: 'var(--text)' }}>
+                <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.4rem', color: (article.stock_actuel || 0) <= 0 ? 'var(--red)' : 'var(--text)' }}>
                   {article.stock_actuel || 0}
                   <span style={{ fontSize: '0.9rem', fontWeight: 500, marginLeft: 6, color: 'var(--text-3)' }}>{article.unite}</span>
                   <StockAlert qte={article.stock_actuel || 0} seuil={article.stock_minimum} />

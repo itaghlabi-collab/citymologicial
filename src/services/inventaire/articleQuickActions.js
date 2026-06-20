@@ -2,7 +2,7 @@
  * articleQuickActions.js — Actions rapides fiche article → mouvement stock auto-validé
  */
 import { saveStockMovementBon } from './stockMovements';
-import { patchStockArticle } from './stockArticles';
+import { patchStockArticle, computeArticleStock } from './stockArticles';
 import { requireSupabaseUserId } from '../supabase/requireUser';
 
 export const QUICK_ACTIONS = {
@@ -74,6 +74,15 @@ function isChantierEmplacement(emp) {
   return e.includes('CHANTIER') || e.includes('VILLA') || e.includes('LOGIPARC') || e.includes('ONDA');
 }
 
+export function getArticleStockQty(article) {
+  return Math.max(0, Number(article?.stock_actuel ?? 0));
+}
+
+/** Aucune action rapide si stock à 0. */
+export function canExecuteStockAction(article) {
+  return getArticleStockQty(article) > 0;
+}
+
 export async function executeArticleQuickAction({
   article,
   actionKey,
@@ -85,6 +94,19 @@ export async function executeArticleQuickAction({
   const config = QUICK_ACTIONS[actionKey];
   if (!config || !article?.id) {
     const err = new Error('Action invalide.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+
+  if (!canExecuteStockAction(article)) {
+    const err = new Error('Stock insuffisant (0 unité) — aucune action de mouvement n\'est possible.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+
+  const liveQty = await computeArticleStock(article.id);
+  if (liveQty <= 0) {
+    const err = new Error(`Stock insuffisant (${liveQty} unité) — aucune affectation, transfert ou sortie n'est autorisée.`);
     err.code = 'VALIDATION';
     throw err;
   }

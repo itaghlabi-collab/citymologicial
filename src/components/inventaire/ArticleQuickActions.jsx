@@ -7,7 +7,7 @@ import {
   Ban, AlertTriangle, Loader2,
 } from 'lucide-react';
 import { Modal, SELECT_STYLE, TEXTAREA_STYLE, EMPLACEMENTS_STOCK } from './shared.jsx';
-import { QUICK_ACTIONS, executeArticleQuickAction } from '../../services/inventaire/articleQuickActions';
+import { QUICK_ACTIONS, executeArticleQuickAction, canExecuteStockAction, getArticleStockQty } from '../../services/inventaire/articleQuickActions';
 
 const ACTION_ICONS = {
   affecter_chantier: MapPin,
@@ -45,16 +45,20 @@ export default function ArticleQuickActions({ article, userName, onDone, disable
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
+  const config = pending ? QUICK_ACTIONS[pending] : null;
+  const actionsBlocked = disabled || !canExecuteStockAction(article);
+
   function openAction(key) {
-    const config = QUICK_ACTIONS[key];
+    if (actionsBlocked) return;
+    const cfg = QUICK_ACTIONS[key];
     setPending(key);
     setError('');
     setObservation('');
-    setDestination(config?.defaultDest || article?.emplacement || '');
+    setDestination(cfg?.defaultDest || article?.emplacement || '');
   }
 
   async function confirmAction() {
-    if (!pending) return;
+    if (!pending || actionsBlocked) return;
     setSaving(true);
     setError('');
     try {
@@ -74,13 +78,22 @@ export default function ArticleQuickActions({ article, userName, onDone, disable
     }
   }
 
-  const config = pending ? QUICK_ACTIONS[pending] : null;
+  const stockQty = getArticleStockQty(article);
 
   return (
     <div className="card" style={{ marginBottom: 14 }}>
       <div style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 12 }}>
         Actions rapides
       </div>
+      {stockQty <= 0 && (
+        <div style={{
+          marginBottom: 12, padding: '10px 12px', borderRadius: 8,
+          background: '#FFEBEE', color: '#C62828', fontSize: '0.82rem', lineHeight: 1.45,
+        }}
+        >
+          Stock à <strong>0 {article?.unite || 'U'}</strong> — aucune affectation, transfert ou mouvement n&apos;est autorisé.
+        </div>
+      )}
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
         {Object.entries(QUICK_ACTIONS).map(([key, cfg]) => {
           const Icon = ACTION_ICONS[key] || ArrowRightLeft;
@@ -89,9 +102,10 @@ export default function ArticleQuickActions({ article, userName, onDone, disable
               key={key}
               type="button"
               className="btn btn-secondary btn-sm"
-              disabled={disabled || saving}
+              disabled={actionsBlocked || saving}
               onClick={() => openAction(key)}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              title={actionsBlocked ? 'Stock insuffisant' : cfg.label}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6, opacity: actionsBlocked ? 0.45 : 1 }}
             >
               <Icon size={13} /> {cfg.label}
             </button>
