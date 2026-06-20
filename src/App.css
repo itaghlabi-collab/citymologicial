@@ -2715,6 +2715,74 @@ tbody tr:last-child td { border-bottom: none; }
     width: auto;
     justify-content: flex-end;
   }
+
+  /* Paiement hebdo — actions compactes à côté du nom ouvrier */
+  .rh-ext-page .table-wrap tbody tr.rh-payroll-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    padding: 0;
+  }
+
+  .rh-ext-page .table-wrap tbody tr.rh-payroll-row td[data-label="Ouvrier"] {
+    grid-column: 1;
+    grid-row: 1;
+    border-radius: var(--radius) 0 0 0 !important;
+    min-width: 0;
+  }
+
+  .rh-ext-page .table-wrap tbody tr.rh-payroll-row td[data-label="Ouvrier"] button {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+  }
+
+  .rh-ext-page .table-wrap tbody tr.rh-payroll-row td.payment-actions-cell {
+    grid-column: 2;
+    grid-row: 1;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-2);
+    border-radius: 0 var(--radius) 0 0;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: flex-end !important;
+    padding: 6px 8px !important;
+    min-height: auto !important;
+    min-width: 0;
+  }
+
+  .rh-ext-page .table-wrap tbody tr.rh-payroll-row td.payment-actions-cell::before {
+    display: none !important;
+  }
+
+  .rh-ext-page .table-wrap tbody tr.rh-payroll-row td:not([data-label="Ouvrier"]):not(.payment-actions-cell) {
+    grid-column: 1 / -1;
+  }
+
+  .rh-ext-page .table-wrap tbody tr.rh-payroll-row .payment-row-actions {
+    flex-direction: row !important;
+    flex-wrap: wrap;
+    align-items: center !important;
+    justify-content: flex-end !important;
+    width: auto !important;
+    gap: 4px !important;
+  }
+
+  .rh-ext-page .table-wrap tbody tr.rh-payroll-row .payment-row-actions .btn {
+    width: auto !important;
+    min-width: 32px !important;
+    min-height: 32px !important;
+    padding: 6px !important;
+    justify-content: center !important;
+    font-size: 0 !important;
+    gap: 0 !important;
+  }
+
+  .rh-ext-page .table-wrap tbody tr.rh-payroll-row .payment-row-actions .btn svg {
+    width: 14px;
+    height: 14px;
+    flex-shrink: 0;
+  }
 }
 
 /* =============================================
@@ -4055,6 +4123,70 @@ tbody tr:last-child td { border-bottom: none; }
 .inv-stock-mobile-only { display: none !important; }
 .inv-stock-desktop-only { display: block; }
 
+.inv-depot-mobile-only { display: none !important; }
+.inv-depot-desktop-only { display: block; }
+
+.inv-depot-mobile-list {
+  padding: 0 !important;
+  overflow: hidden;
+}
+
+.inv-depot-mobile-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 14px;
+  min-height: 52px;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+}
+
+.inv-depot-mobile-row:last-child { border-bottom: none; }
+
+.inv-depot-mobile-row:active {
+  background: var(--surface-2);
+}
+
+.inv-depot-mobile-icon {
+  width: 32px;
+  height: 32px;
+  min-width: 32px;
+  border-radius: 8px;
+  background: var(--red-light);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.inv-depot-mobile-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.inv-depot-mobile-body strong {
+  display: block;
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.25;
+  word-break: break-word;
+}
+
+.inv-depot-mobile-body span {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--text-3);
+  margin-top: 2px;
+}
+
+.inv-depot-mobile-btn {
+  padding: 4px !important;
+  min-width: 32px !important;
+  min-height: 32px !important;
+  flex-shrink: 0;
+}
+
 .rh-ext-desktop-only { display: block; }
 .rh-ext-mobile-only { display: none !important; }
 
@@ -4241,6 +4373,18 @@ tbody tr:last-child td { border-bottom: none; }
     display: block !important;
   }
   .inv-stock-desktop-only { display: none !important; }
+
+  .inv-depot-mobile-only { display: block !important; }
+  .inv-depot-desktop-only { display: none !important; }
+
+  .inventaire-module .inv-depot-mobile-row {
+    padding: 10px 12px;
+  }
+
+  .inventaire-module .inv-depot-mobile-body strong {
+    font-family: var(--font-head);
+    font-size: 0.82rem;
+  }
 
   .rh-ext-mobile-only { display: block !important; }
   .rh-ext-desktop-only { display: none !important; }
@@ -5178,7 +5322,7 @@ tbody tr:last-child td { border-bottom: none; }
   .inventaire-module .table-wrap tbody td[data-label="Type"],
   .inventaire-module .table-wrap tbody td[data-label="Catégorie"],
   .inventaire-module .table-wrap tbody td[data-label="État op."],
-  .inventaire-module .table-wrap tbody td[data-label="Emplacement"],
+  .inventaire-module .table-wrap tbody td[data-label="Lieu stock"],
   .inventaire-module .table-wrap tbody td[data-label="Dernier mouvement"],
   .inventaire-module .table-wrap tbody td[data-label="Dernier scan"],
   .inventaire-module .table-wrap tbody td[data-label="Département"],

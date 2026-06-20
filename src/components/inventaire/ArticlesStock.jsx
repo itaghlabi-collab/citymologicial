@@ -788,7 +788,7 @@ export default function ArticlesStock({ onArticlesChange }) {
                         <td data-label="État op.">
                           <span className={`badge ${stateBadge}`} style={{ fontSize: '0.7rem' }}>{x.current_state || 'Disponible'}</span>
                         </td>
-                        <td data-label="Emplacement" style={{ fontSize: '0.82rem', color: 'var(--text-2)' }}>{x.emplacement || '—'}</td>
+                        <td data-label="Lieu stock" style={{ fontSize: '0.82rem', color: 'var(--text-2)' }}>{x.emplacement || '—'}</td>
                         <td data-label="Dernier mouvement" style={{ fontSize: '0.78rem', color: 'var(--text-2)' }}>
                           {x.dernier_mouvement ? (
                             <span>{x.dernier_mouvement.date_label}<br /><span style={{ color: 'var(--text-3)' }}>{x.dernier_mouvement.action}</span></span>

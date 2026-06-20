@@ -27,6 +27,23 @@ function buildEmplacementsList() {
   }));
 }
 
+function MobileDepotRow({ item, count, onView }) {
+  return (
+    <div className="inv-depot-mobile-row" role="button" tabIndex={0} onClick={onView} onKeyDown={(e) => { if (e.key === 'Enter') onView(); }}>
+      <div className="inv-depot-mobile-icon" aria-hidden>
+        <MapPin size={14} style={{ color: 'var(--red)' }} />
+      </div>
+      <div className="inv-depot-mobile-body">
+        <strong>{item.nom}</strong>
+        <span>{item.type} · {count} article{count !== 1 ? 's' : ''}</span>
+      </div>
+      <button type="button" className="btn btn-ghost btn-sm inv-depot-mobile-btn" title="Voir" onClick={(e) => { e.stopPropagation(); onView(); }}>
+        <Eye size={14} />
+      </button>
+    </div>
+  );
+}
+
 function DetailEmplacement({ emplacement, articles, onBack }) {
   const articlesHere = (articles || []).filter(
     (a) => String(a.emplacement || '').trim().toLowerCase() === String(emplacement.nom).trim().toLowerCase(),
@@ -163,6 +180,8 @@ export default function Depots({ articles, onDepotsChange }) {
         {filtered.length === 0 ? (
           <EmptyState icon={<MapPin size={24} />} title="Aucun emplacement" sub="Aucun résultat pour cette recherche" />
         ) : (
+          <>
+          <div className="inv-depot-desktop-only">
           <div className="table-wrap">
             <table>
               <thead>
@@ -176,7 +195,7 @@ export default function Depots({ articles, onDepotsChange }) {
               <tbody>
                 {filtered.map((x) => (
                   <tr key={x.id} style={{ cursor: 'pointer' }} onClick={() => setDetailId(x.id)}>
-                    <td data-label="Emplacement">
+                    <td>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                         <div style={{ width: 32, height: 32, borderRadius: 7, background: 'var(--red-light)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                           <MapPin size={14} style={{ color: 'var(--red)' }} />
@@ -196,6 +215,19 @@ export default function Depots({ articles, onDepotsChange }) {
               </tbody>
             </table>
           </div>
+          </div>
+
+          <div className="inv-depot-mobile-only inv-depot-mobile-list">
+            {filtered.map((x) => (
+              <MobileDepotRow
+                key={x.id}
+                item={x}
+                count={getArticlesCount(x.nom)}
+                onView={() => setDetailId(x.id)}
+              />
+            ))}
+          </div>
+          </>
         )}
       </div>
     </div>
