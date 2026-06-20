@@ -490,15 +490,15 @@ export default function PaiementHebdo() {
     <div className="animate-fade-in rh-ext-page">
       <Toast toast={toast} />
 
-      <div className="page-header flex-between">
+      <div className="page-header flex-between finance-page-header">
         <div>
           <h1 className="page-title">Paiement hebdomadaire ouvriers</h1>
-          <p className="page-subtitle">
+          <p className="page-subtitle finance-sub-hide-mobile">
             Flux normal : synchroniser les présences puis <strong>Payer</strong>.
             Correction manuelle uniquement en cas d&apos;erreur de saisie par le chef de chantier.
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <div className="finance-page-actions">
           <button
             type="button"
             className="btn btn-secondary"
@@ -523,7 +523,7 @@ export default function PaiementHebdo() {
       </div>
 
       {!loading && configured && (
-        <div style={{ background: '#E3F2FD', border: '1px solid #90CAF9', borderRadius: 'var(--radius)', padding: '10px 16px', marginBottom: 16, fontSize: '0.84rem', color: '#1565C0' }}>
+        <div className="rh-ext-hide-mobile" style={{ background: '#E3F2FD', border: '1px solid #90CAF9', borderRadius: 'var(--radius)', padding: '10px 16px', marginBottom: 16, fontSize: '0.84rem', color: '#1565C0' }}>
           <strong>Comment ça marche :</strong> les lignes viennent des <em>présences</em> (bouton Synchroniser).
           Pour payer : statut <strong>Payé</strong> ou bouton <strong>Payer</strong> (date caisse = aujourd&apos;hui).
           Utilisez <strong>Correction exceptionnelle</strong> ou <strong>Ajuster</strong> seulement si le chef de chantier s&apos;est trompé à la saisie.
@@ -543,7 +543,7 @@ export default function PaiementHebdo() {
         </div>
       )}
 
-      <div className="stat-grid rh-ext-stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(190px,1fr))' }}>
+      <div className="stat-grid rh-ext-stat-grid finance-kpi-strip" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(190px,1fr))' }}>
         <div className="stat-card"><div className="stat-icon blue"><Banknote size={18} /></div><div className="stat-body"><div className="stat-value" style={{ fontSize: '1rem' }}>{loading ? '—' : fmtMAD(stats.totalAPayer)}</div><div className="stat-label">Net {filterSemaine ? 'semaine' : 'total'}</div></div></div>
         <div className="stat-card"><div className="stat-icon green"><CheckCircle size={18} /></div><div className="stat-body"><div className="stat-value" style={{ fontSize: '1rem' }}>{loading ? '—' : fmtMAD(stats.totalPaye)}</div><div className="stat-label">Payé</div></div></div>
         <div className="stat-card"><div className="stat-icon orange"><TrendingUp size={18} /></div><div className="stat-body"><div className="stat-value" style={{ fontSize: '1rem' }}>{loading ? '—' : fmtMAD(stats.totalEnAttente)}</div><div className="stat-label">En attente</div></div></div>
@@ -595,9 +595,9 @@ export default function PaiementHebdo() {
         </div>
       ) : (
         enrichedGroups.map((group) => (
-          <div key={payrollGroupKey(group)} className="card" style={{ marginBottom: 16 }}>
-            <div style={{ marginBottom: 16, paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>
-              <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
+          <div key={payrollGroupKey(group)} className="card rh-ext-group-card">
+            <div className="rh-ext-group-head">
+              <div className="rh-ext-group-head-inner">
                 <div>
                   <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.05rem', marginBottom: 6 }}>
                     <Building2 size={16} style={{ verticalAlign: -2, marginRight: 6 }} />
@@ -608,9 +608,8 @@ export default function PaiementHebdo() {
                   </div>
                 </div>
                 <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>Total net chantier</div>
-                  <div style={{ fontWeight: 800, color: 'var(--red)', fontSize: '1.1rem' }}>{fmtMAD(group.totalNet)}</div>
-                  <div style={{ fontSize: '0.75rem', color: 'var(--text-3)' }}>Brut {fmtMAD(group.totalBrut)}</div>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>Total net</div>
+                  <div style={{ fontWeight: 800, color: 'var(--red)', fontSize: '1.05rem' }}>{fmtMAD(group.totalNet)}</div>
                 </div>
               </div>
             </div>

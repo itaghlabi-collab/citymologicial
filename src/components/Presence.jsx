@@ -566,14 +566,16 @@ export default function Presence() {
     <div className="animate-fade-in rh-ext-page">
       <Toast toast={toast} />
 
-      <div className="page-header flex-between">
+      <div className="page-header flex-between finance-page-header">
         <div>
           <h1 className="page-title">Presence ouvriers</h1>
-          <p className="page-subtitle">Une ligne par ouvrier — dates et détail journalier dans « Détail »</p>
+          <p className="page-subtitle finance-sub-hide-mobile">Une ligne par ouvrier — dates et détail journalier dans « Détail »</p>
         </div>
-        <button className="btn btn-primary" onClick={openCreate} disabled={loading || saving}>
-          <Plus size={15} /> Ajouter une presence
-        </button>
+        <div className="finance-page-actions finance-page-actions--solo">
+          <button className="btn btn-primary" onClick={openCreate} disabled={loading || saving}>
+            <Plus size={15} /> Ajouter une presence
+          </button>
+        </div>
       </div>
 
       {!configured && (
@@ -590,7 +592,7 @@ export default function Presence() {
       )}
 
       {/* Stats */}
-      <div className="stat-grid rh-ext-stat-grid">
+      <div className="stat-grid rh-ext-stat-grid finance-kpi-strip">
         <div className="stat-card">
           <div className="stat-icon green"><CheckCircle size={18} /></div>
           <div className="stat-body"><div className="stat-value">{loading ? '—' : stats.present}</div><div className="stat-label">Presents</div></div>
@@ -674,9 +676,9 @@ export default function Presence() {
         </div>
       ) : (
         summaryGroups.map((group) => (
-          <div key={groupKey(group)} className="card" style={{ marginBottom: 16 }}>
-            <div style={{ marginBottom: 16, paddingBottom: 12, borderBottom: '1px solid var(--border)' }}>
-              <div style={{ display: 'flex', flexWrap: 'wrap', justifyContent: 'space-between', gap: 12, alignItems: 'flex-start' }}>
+          <div key={groupKey(group)} className="card rh-ext-group-card">
+            <div className="rh-ext-group-head">
+              <div className="rh-ext-group-head-inner">
                 <div>
                   <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.05rem', marginBottom: 6 }}>
                     <Building2 size={16} style={{ verticalAlign: -2, marginRight: 6 }} />
@@ -686,7 +688,7 @@ export default function Presence() {
                     {filterSemaine ? fmtWeekRange(group.semaineDebut, group.semaineFin) : 'Toutes les semaines'} · {group.ouvriers.length} ouvrier{group.ouvriers.length > 1 ? 's' : ''}
                   </div>
                 </div>
-                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                <div className="rh-ext-group-actions">
                   <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleGroupPdf(group, false)} disabled={pdfLoading}>
                     <Download size={13} /> Télécharger PDF
                   </button>

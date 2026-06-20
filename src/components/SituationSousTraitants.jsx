@@ -26,10 +26,10 @@ export default function SituationSousTraitants() {
     <div className="animate-fade-in rh-ext-page">
       <Toast toast={toast} />
 
-      <div className="page-header flex-between">
+      <div className="page-header flex-between finance-page-header">
         <div>
           <h1 className="page-title">Situation sous-traitants</h1>
-          <p className="page-subtitle">
+          <p className="page-subtitle finance-sub-hide-mobile">
             Suivi des paiements par projet — mètre / tâche / service, avances, retenues et historique
           </p>
         </div>

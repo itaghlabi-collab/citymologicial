@@ -886,6 +886,29 @@ function CINScanner({
   );
 }
 
+function MobileOuvrierRow({ w, cfg, pdfLoading, onView, onEdit, onPdf, onDelete }) {
+  return (
+    <div className="rh-ext-mobile-row">
+      <button type="button" className="rh-ext-mobile-row-main" onClick={onView}>
+        <Avatar worker={w} size={28} />
+        <div>
+          <strong>{w.prenom} {w.nom}</strong>
+          <span>{w.fonction || '—'}{w.chantier ? ` · ${w.chantier}` : ''}</span>
+        </div>
+      </button>
+      <span className={`badge ${cfg.cls}`} style={{ fontSize: '0.65rem', flexShrink: 0 }}>{cfg.label}</span>
+      <div className="rh-ext-mobile-row-actions">
+        <button type="button" className="btn btn-ghost btn-sm" title="Voir" onClick={onView}><Eye size={14} /></button>
+        <button type="button" className="btn btn-ghost btn-sm" title="Modifier" onClick={onEdit}><Edit2 size={14} /></button>
+        <button type="button" className="btn btn-ghost btn-sm" title="PDF" disabled={pdfLoading} onClick={onPdf}>
+          {pdfLoading ? <Loader size={14} style={{ animation: 'spin 0.8s linear infinite' }} /> : <Download size={14} />}
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm" title="Supprimer" onClick={onDelete} style={{ color: 'var(--red)' }}><Trash2 size={14} /></button>
+      </div>
+    </div>
+  );
+}
+
 /* ══════════════════════════════════════════════════════
    OUVRIER DETAIL PAGE
    ══════════════════════════════════════════════════════ */
@@ -907,7 +930,7 @@ function OuvrierDetail({ worker, onBack, onEdit, onDownloadPdf, pdfLoading }) {
       </button>
 
       {/* Profile header */}
-      <div className="card" style={{ padding: '24px 28px', marginBottom: 16 }}>
+      <div className="card rh-ext-profile-card">
         <div style={{ display: 'flex', alignItems: 'center', gap: 24, flexWrap: 'wrap' }}>
           <Avatar worker={worker} size={80} />
           <div style={{ flex: 1, minWidth: 200 }}>
@@ -1738,20 +1761,19 @@ export default function OuvriersListe({ onWorkersChange }) {
       )}
 
       {/* Header */}
-      <div className="page-header" style={{ marginBottom: 20 }}>
+      <div className="page-header flex-between finance-page-header">
         <div>
           <h1 className="page-title">Ouvriers</h1>
-          <p className="page-subtitle">Gestion du personnel de chantier — {nTotal} ouvrier{nTotal > 1 ? 's' : ''}</p>
+          <p className="page-subtitle"><span className="finance-sub-hide-mobile">Gestion du personnel de chantier — </span>{nTotal} ouvrier{nTotal > 1 ? 's' : ''}</p>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div className="finance-page-actions finance-page-actions--solo">
           <button className="btn btn-primary" onClick={openAdd} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <Plus size={15} /> Ajouter un ouvrier
           </button>
         </div>
       </div>
 
-      {/* KPI Cards */}
-      <div className="stats-grid" style={{ marginBottom: 20 }}>
+      <div className="stats-grid finance-kpi-strip rh-ext-stat-grid">
         <div className="stat-card">
           <div className="stat-icon" style={{ background: '#FFEBEE', color: 'var(--red)' }}><HardHat size={20} /></div>
           <div className="stat-body"><div className="stat-value">{nTotal}</div><div className="stat-label">Total ouvriers</div></div>
@@ -1812,6 +1834,8 @@ export default function OuvriersListe({ onWorkersChange }) {
             <p style={{ color: 'var(--text-3)', fontSize: '0.875rem' }}>{workers.length === 0 ? 'Aucun ouvrier enregistre.' : 'Aucun resultat.'}</p>
           </div>
         ) : (
+          <>
+          <div className="rh-ext-desktop-only">
           <div className="table-wrap">
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
               <thead>
@@ -1910,6 +1934,26 @@ export default function OuvriersListe({ onWorkersChange }) {
               </tbody>
             </table>
           </div>
+          </div>
+
+          <div className="rh-ext-mobile-only rh-ext-mobile-list">
+            {filtered.map(w => {
+              const cfg = STATUT_CFG[w.statut] || STATUT_CFG.actif;
+              return (
+                <MobileOuvrierRow
+                  key={w.id}
+                  w={w}
+                  cfg={cfg}
+                  pdfLoading={pdfLoadingId === w.id}
+                  onView={() => { setDetail(w); setView('detail'); }}
+                  onEdit={() => openEdit(w)}
+                  onPdf={(e) => { e?.stopPropagation?.(); handleDownloadPdf(w); }}
+                  onDelete={() => del(w.id)}
+                />
+              );
+            })}
+          </div>
+          </>
         )}
       </div>
     </div>

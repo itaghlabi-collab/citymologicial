@@ -148,22 +148,24 @@ export default function PaiementSousTraitantsSection({ onNotify, standalone = fa
   const totalPaid = payments.reduce((s, p) => s + Number(p.amount || 0), 0);
 
   return (
-    <div className="card" style={standalone ? {} : { marginTop: 24 }}>
-      <div className="flex-between" style={{ marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
+    <div className={standalone ? 'card rh-ext-table-card' : 'card rh-ext-table-card'} style={standalone ? {} : { marginTop: 24 }}>
+      <div className="flex-between finance-page-header" style={{ marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
         <div>
           <div className="card-title" style={{ marginBottom: 4 }}>
             <Handshake size={16} /> {standalone ? 'Situation sous-traitants' : 'Paiement sous-traitant'}
           </div>
-          <p style={{ margin: 0, fontSize: '0.83rem', color: 'var(--text-3)' }}>
+          <p className="rh-ext-hide-mobile" style={{ margin: 0, fontSize: '0.83rem', color: 'var(--text-3)' }}>
             Projet → sous-traitants → avances / retenues → montant net (mètre / tâche / service)
           </p>
         </div>
-        <button type="button" className="btn btn-primary" onClick={openCreate}>
-          <Plus size={15} /> {standalone ? 'Nouveau paiement' : 'Ajouter paiement sous-traitant'}
-        </button>
+        <div className="finance-page-actions finance-page-actions--solo">
+          <button type="button" className="btn btn-primary" onClick={openCreate}>
+            <Plus size={15} /> {standalone ? 'Nouveau paiement' : 'Ajouter paiement sous-traitant'}
+          </button>
+        </div>
       </div>
 
-      <div className="stat-grid rh-ext-stat-grid">
+      <div className="stat-grid rh-ext-stat-grid finance-kpi-strip">
         <div className="stat-card">
           <div className="stat-body">
             <div className="stat-value" style={{ fontSize: '0.95rem' }}>{loading ? '—' : payments.length}</div>

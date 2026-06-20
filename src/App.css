@@ -1727,6 +1727,14 @@ tbody tr:last-child td { border-bottom: none; }
     font-size: 1.15rem;
   }
 
+  .rh-ext-page .finance-kpi-strip .stat-card {
+    flex: 0 0 min(132px, 44vw);
+  }
+
+  .rh-ext-page .page-title {
+    font-size: 1.15rem;
+  }
+
   .stat-grid,
   .stats-grid {
     grid-template-columns: repeat(2, 1fr);
@@ -2497,6 +2505,215 @@ tbody tr:last-child td { border-bottom: none; }
     flex-direction: column;
     align-items: flex-start !important;
     gap: 8px;
+  }
+
+  /* ── RH externe — mobile compact (aligné Finance/Inventaire) ── */
+  .rh-ext-page .finance-sub-hide-mobile,
+  .rh-ext-page .rh-ext-hide-mobile {
+    display: none;
+  }
+
+  .rh-ext-page .finance-page-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    width: 100%;
+  }
+
+  .rh-ext-page .finance-page-actions--solo {
+    grid-template-columns: 1fr;
+    max-width: 160px;
+  }
+
+  .rh-ext-page .finance-page-actions .btn {
+    width: auto !important;
+    flex: none !important;
+    justify-content: center;
+    padding: 8px 10px;
+    font-size: 0.75rem;
+    min-height: 38px;
+  }
+
+  .rh-ext-page .finance-page-actions .btn-primary {
+    grid-column: 1 / -1;
+    font-size: 0.82rem;
+  }
+
+  .rh-ext-page .finance-page-actions .btn-secondary,
+  .rh-ext-page .finance-page-actions .btn-ghost:not(.btn-primary) {
+    font-size: 0;
+    gap: 0;
+    padding: 8px;
+  }
+
+  .rh-ext-page .finance-page-actions .btn-secondary svg,
+  .rh-ext-page .finance-page-actions .btn-ghost:not(.btn-primary) svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .rh-ext-page .stats-grid.finance-kpi-strip,
+  .rh-ext-page .stat-grid.finance-kpi-strip {
+    display: flex !important;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 10px;
+    margin-bottom: 14px;
+    padding-bottom: 4px;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    grid-template-columns: unset !important;
+  }
+
+  .rh-ext-page .finance-kpi-strip::-webkit-scrollbar {
+    display: none;
+  }
+
+  .rh-ext-page .finance-kpi-strip .stat-card {
+    flex: 0 0 min(140px, 42vw);
+    scroll-snap-align: start;
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 12px 11px;
+    gap: 8px;
+    margin: 0;
+  }
+
+  .rh-ext-page .finance-kpi-strip .stat-icon {
+    width: 32px;
+    height: 32px;
+  }
+
+  .rh-ext-page .finance-kpi-strip .stat-value {
+    font-size: 0.95rem !important;
+    word-break: break-word;
+  }
+
+  .rh-ext-page .finance-kpi-strip .stat-label {
+    font-size: 0.68rem;
+    line-height: 1.25;
+  }
+
+  .rh-ext-page .rh-ext-group-card {
+    padding: 12px 14px !important;
+    margin-bottom: 10px !important;
+  }
+
+  .rh-ext-page .rh-ext-group-head {
+    margin-bottom: 10px !important;
+    padding-bottom: 8px !important;
+  }
+
+  .rh-ext-page .rh-ext-group-head-inner > div:first-child > div:first-child {
+    font-size: 0.92rem !important;
+  }
+
+  .rh-ext-page .rh-ext-group-actions .btn {
+    font-size: 0;
+    padding: 8px;
+    min-width: 36px;
+    min-height: 36px;
+    justify-content: center;
+  }
+
+  .rh-ext-page .rh-ext-group-actions .btn svg {
+    width: 15px;
+    height: 15px;
+  }
+
+  .rh-ext-page .rh-ext-profile-card {
+    padding: 14px 16px !important;
+  }
+
+  .rh-ext-page .rh-ext-profile-card h1 {
+    font-size: 1.15rem !important;
+  }
+
+  .rh-ext-page .rh-ext-table-card {
+    padding: 12px 14px !important;
+  }
+
+  .rh-ext-page .rh-ext-table-card .card-title {
+    font-size: 0.88rem;
+    margin-bottom: 10px !important;
+  }
+
+  .rh-ext-page .payment-row-actions {
+    flex-wrap: wrap;
+    gap: 6px;
+  }
+
+  .rh-ext-page .payment-row-actions .btn-secondary,
+  .rh-ext-page .payment-row-actions .btn-ghost {
+    font-size: 0;
+    padding: 8px;
+    min-width: 34px;
+    min-height: 34px;
+  }
+
+  .rh-ext-page .payment-row-actions .btn-secondary svg,
+  .rh-ext-page .payment-row-actions .btn-ghost svg {
+    width: 14px;
+    height: 14px;
+  }
+
+  .rh-ext-page .table-wrap tbody td[data-label="CIN"],
+  .rh-ext-page .table-wrap tbody td[data-label="Tel"],
+  .rh-ext-page .table-wrap tbody td[data-label="Telephone"],
+  .rh-ext-page .table-wrap tbody td[data-label="Fonction"],
+  .rh-ext-page .table-wrap tbody td[data-label="Chantier"],
+  .rh-ext-page .table-wrap tbody td[data-label="Badge"],
+  .rh-ext-page .table-wrap tbody td[data-label="Projet / chantier"],
+  .rh-ext-page .table-wrap tbody td[data-label="Chef chantier"],
+  .rh-ext-page .table-wrap tbody td[data-label="Présences"],
+  .rh-ext-page .table-wrap tbody td[data-label="Retard"],
+  .rh-ext-page .table-wrap tbody td[data-label="Équiv. jours"],
+  .rh-ext-page .table-wrap tbody td[data-label="Date"],
+  .rh-ext-page .table-wrap tbody td[data-label="Projet"],
+  .rh-ext-page .table-wrap tbody td[data-label="Tarif/h"],
+  .rh-ext-page .table-wrap tbody td[data-label="Heures sup"],
+  .rh-ext-page .table-wrap tbody td[data-label="CIN / Passeport"],
+  .rh-ext-page .table-wrap tbody td[data-label="Projets actifs"],
+  .rh-ext-page .table-wrap tbody td[data-label="Prestations"],
+  .rh-ext-page .table-wrap tbody td[data-label="Total payé"],
+  .rh-ext-page .table-wrap tbody td[data-label="Brut"],
+  .rh-ext-page .table-wrap tbody td[data-label="Avances"],
+  .rh-ext-page .table-wrap tbody td[data-label="Retenues"],
+  .rh-ext-page .table-wrap tbody td[data-label="Type"],
+  .rh-ext-page .table-wrap tbody td[data-label="Lignes"],
+  .rh-ext-page .table-wrap tbody td[data-label="Source"],
+  .rh-ext-page .table-wrap tbody td[data-label="Destination"],
+  .rh-ext-page .table-wrap tbody td[data-label="Qté"],
+  .rh-ext-page .table-wrap tbody td[data-label="Notes"] {
+    display: none;
+  }
+
+  .rh-ext-page .table-wrap tbody td {
+    padding: 6px 12px;
+    min-height: 32px;
+  }
+
+  .rh-ext-page .ouv-filter-card {
+    padding: 12px 14px !important;
+  }
+
+  .rh-ext-page .table-wrap tbody td.rh-ext-actions-cell {
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 4px;
+  }
+
+  .rh-ext-page .table-wrap tbody td.rh-ext-actions-cell::before {
+    display: none;
+  }
+
+  .rh-ext-page .table-wrap tbody td.rh-ext-actions-cell .rh-ext-actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+    width: auto;
+    justify-content: flex-end;
   }
 }
 
@@ -3838,6 +4055,108 @@ tbody tr:last-child td { border-bottom: none; }
 .inv-stock-mobile-only { display: none !important; }
 .inv-stock-desktop-only { display: block; }
 
+.rh-ext-desktop-only { display: block; }
+.rh-ext-mobile-only { display: none !important; }
+
+/* Employés externes — liste mobile compacte */
+.rh-ext-mobile-list {
+  padding: 0 !important;
+  overflow: hidden;
+}
+
+.rh-ext-mobile-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  min-height: 48px;
+  border-bottom: 1px solid var(--border);
+}
+
+.rh-ext-mobile-row:last-child { border-bottom: none; }
+
+.rh-ext-mobile-row-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  background: none;
+  padding: 0;
+  margin: 0;
+  text-align: left;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.rh-ext-mobile-row-main strong {
+  display: block;
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rh-ext-mobile-row-main span {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--text-3);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.rh-ext-mobile-row-actions {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  flex-shrink: 0;
+}
+
+.rh-ext-mobile-row-actions .btn {
+  padding: 4px !important;
+  min-width: 30px !important;
+  min-height: 30px !important;
+  width: 30px;
+  height: 30px;
+}
+
+.rh-ext-group-card {
+  margin-bottom: 16px;
+}
+
+.rh-ext-group-head {
+  margin-bottom: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.rh-ext-group-head-inner {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.rh-ext-group-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.rh-ext-profile-card {
+  padding: 24px 28px;
+  margin-bottom: 16px;
+}
+
+.rh-ext-table-card .card-title {
+  margin-bottom: 16px;
+}
+
 /* Catégories stock — liste mobile compacte (1 ligne / catégorie) */
 .inv-stock-mobile-list {
   padding: 0 !important;
@@ -3922,6 +4241,9 @@ tbody tr:last-child td { border-bottom: none; }
     display: block !important;
   }
   .inv-stock-desktop-only { display: none !important; }
+
+  .rh-ext-mobile-only { display: block !important; }
+  .rh-ext-desktop-only { display: none !important; }
   .mes-docs-folder-grid {
     grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
   }

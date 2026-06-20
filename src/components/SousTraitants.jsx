@@ -263,14 +263,16 @@ export default function SousTraitants() {
 
       {view === 'list' ? (
         <>
-          <div className="page-header flex-between">
+          <div className="page-header flex-between finance-page-header">
             <div>
               <h1 className="page-title">Sous-traitants</h1>
-              <p className="page-subtitle">Fiche globale, affectations multi-projets et suivi des paiements</p>
+              <p className="page-subtitle finance-sub-hide-mobile">Fiche globale, affectations multi-projets et suivi des paiements</p>
             </div>
-            <button className="btn btn-primary" onClick={() => openModal('sub-create')} disabled={loading}>
-              <Plus size={15} /> Nouveau sous-traitant
-            </button>
+            <div className="finance-page-actions finance-page-actions--solo">
+              <button className="btn btn-primary" onClick={() => openModal('sub-create')} disabled={loading}>
+                <Plus size={15} /> Nouveau sous-traitant
+              </button>
+            </div>
           </div>
 
           {!configured && (

@@ -237,14 +237,16 @@ export default function HeuresSupp() {
     <div className="animate-fade-in rh-ext-page">
       <Toast toast={toast} />
 
-      <div className="page-header flex-between">
+      <div className="page-header flex-between finance-page-header">
         <div>
           <h1 className="page-title">Heures supplementaires</h1>
-          <p className="page-subtitle">Saisie et calcul automatique du montant du au tarif x heures</p>
+          <p className="page-subtitle finance-sub-hide-mobile">Saisie et calcul automatique du montant du au tarif x heures</p>
         </div>
-        <button className="btn btn-primary" onClick={openCreate} disabled={loading || saving}>
-          <Plus size={15} /> Ajouter heures sup
-        </button>
+        <div className="finance-page-actions finance-page-actions--solo">
+          <button className="btn btn-primary" onClick={openCreate} disabled={loading || saving}>
+            <Plus size={15} /> Ajouter heures sup
+          </button>
+        </div>
       </div>
 
       {!configured && (
@@ -261,7 +263,7 @@ export default function HeuresSupp() {
       )}
 
       {/* KPIs */}
-      <div className="stat-grid rh-ext-stat-grid">
+      <div className="stat-grid rh-ext-stat-grid finance-kpi-strip">
         <div className="stat-card">
           <div className="stat-icon orange"><BarChart3 size={18} /></div>
           <div className="stat-body"><div className="stat-value">{loading ? '—' : `${stats.totalHeures}h`}</div><div className="stat-label">Total heures sup</div></div>
@@ -306,7 +308,7 @@ export default function HeuresSupp() {
         </div>
       </div>
 
-      <div className="card">
+      <div className="card rh-ext-table-card">
         <div className="card-title" style={{ marginBottom: 16 }}><BarChart3 size={16} /> Liste des heures supplementaires</div>
         {loading ? (
           <div style={{ textAlign: 'center', padding: '40px 24px', color: 'var(--text-3)' }}>
