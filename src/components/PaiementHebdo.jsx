@@ -625,7 +625,7 @@ export default function PaiementHebdo() {
                 </thead>
                 <tbody>
                   {group.lignes.map((p) => (
-                    <tr key={p.key || p.id} className="rh-payroll-row">
+                    <tr key={p.key || p.id} className="rh-ext-compact-row rh-payroll-row">
                       <td data-label="Ouvrier">
                         <button
                           type="button"

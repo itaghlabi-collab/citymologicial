@@ -1,4 +1,4 @@
-import { Handshake, Plus, Loader2, X, FileDown, Printer } from 'lucide-react';
+import { Handshake, Plus, Loader2, X, FileDown, Printer, Pencil } from 'lucide-react';
 import { useState, useEffect, useCallback } from 'react';
 import { useSubcontractorPaymentForm } from '../hooks/useSubcontractorPaymentForm';
 import SubcontractorPaymentFormBody from './SubcontractorPaymentFormBody';
@@ -150,7 +150,7 @@ export default function PaiementSousTraitantsSection({ onNotify, standalone = fa
   return (
     <div className={standalone ? 'card rh-ext-table-card' : 'card rh-ext-table-card'} style={standalone ? {} : { marginTop: 24 }}>
       <div className="flex-between finance-page-header" style={{ marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
-        <div>
+        <div className={standalone ? 'rh-ext-hide-mobile' : undefined}>
           <div className="card-title" style={{ marginBottom: 4 }}>
             <Handshake size={16} /> {standalone ? 'Situation sous-traitants' : 'Paiement sous-traitant'}
           </div>
@@ -190,7 +190,7 @@ export default function PaiementSousTraitantsSection({ onNotify, standalone = fa
           Aucun paiement sous-traitant. Cliquez sur « Ajouter paiement sous-traitant ».
         </div>
       ) : (
-        <div className="table-wrap">
+        <div className="table-wrap" style={standalone ? { padding: 0 } : undefined}>
           <table>
             <thead>
                 <tr>
@@ -200,13 +200,13 @@ export default function PaiementSousTraitantsSection({ onNotify, standalone = fa
             </thead>
             <tbody>
               {payments.map((p) => (
-                <tr key={p.id}>
+                <tr key={p.id} className="rh-ext-compact-row">
                   <td data-label="Sous-traitant" style={{ fontWeight: 600 }}>
                     <button type="button" onClick={() => openDetail(p)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontWeight: 600, color: 'var(--text)', padding: 0, textDecoration: 'underline', textUnderlineOffset: 2 }}>
                       {p.subcontractorName || '—'}
                     </button>
                   </td>
-                  <td data-label="Date">{fmtDate(p.paymentDate)}</td>
+                  <td data-label="Date paiement">{fmtDate(p.paymentDate)}</td>
                   <td data-label="Projet">{p.projectName || '—'}</td>
                   <td data-label="Type">{paymentTypeLabel(p.paymentType)}</td>
                   <td data-label="Brut">{fmtMAD(p.grossAmount)}</td>
@@ -216,9 +216,9 @@ export default function PaiementSousTraitantsSection({ onNotify, standalone = fa
                   <td data-label="Statut">{paymentStatusFromDb(p.status)}</td>
                   <td data-label="Actions" className="payment-actions-cell">
                     <div className="payment-row-actions">
-                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => openEdit(p)}>Modifier</button>
-                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleSubPdf(p, false)}><FileDown size={13} /> Télécharger PDF</button>
-                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleSubPdf(p, true)}><Printer size={13} /> Imprimer</button>
+                      <button type="button" className="btn btn-secondary btn-sm" title="Modifier" onClick={() => openEdit(p)}><Pencil size={13} /> Modifier</button>
+                      <button type="button" className="btn btn-secondary btn-sm" title="PDF" onClick={() => handleSubPdf(p, false)}><FileDown size={13} /> Télécharger PDF</button>
+                      <button type="button" className="btn btn-secondary btn-sm" title="Imprimer" onClick={() => handleSubPdf(p, true)}><Printer size={13} /> Imprimer</button>
                     </div>
                   </td>
                 </tr>

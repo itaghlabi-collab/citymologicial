@@ -2716,13 +2716,16 @@ tbody tr:last-child td { border-bottom: none; }
     justify-content: flex-end;
   }
 
-  /* Paiement hebdo — actions compactes à côté du nom ouvrier */
+  /* RH listes — actions compactes à côté du nom (présence, paiement hebdo, sous-traitants) */
+  .rh-ext-page .table-wrap tbody tr.rh-ext-compact-row,
   .rh-ext-page .table-wrap tbody tr.rh-payroll-row {
     display: grid;
     grid-template-columns: 1fr auto;
     padding: 0;
   }
 
+  .rh-ext-page .table-wrap tbody tr.rh-ext-compact-row td[data-label="Ouvrier"],
+  .rh-ext-page .table-wrap tbody tr.rh-ext-compact-row td[data-label="Sous-traitant"],
   .rh-ext-page .table-wrap tbody tr.rh-payroll-row td[data-label="Ouvrier"] {
     grid-column: 1;
     grid-row: 1;
@@ -2730,6 +2733,8 @@ tbody tr:last-child td { border-bottom: none; }
     min-width: 0;
   }
 
+  .rh-ext-page .table-wrap tbody tr.rh-ext-compact-row td[data-label="Ouvrier"] button,
+  .rh-ext-page .table-wrap tbody tr.rh-ext-compact-row td[data-label="Sous-traitant"] button,
   .rh-ext-page .table-wrap tbody tr.rh-payroll-row td[data-label="Ouvrier"] button {
     overflow: hidden;
     text-overflow: ellipsis;
@@ -2737,6 +2742,7 @@ tbody tr:last-child td { border-bottom: none; }
     max-width: 100%;
   }
 
+  .rh-ext-page .table-wrap tbody tr.rh-ext-compact-row td.payment-actions-cell,
   .rh-ext-page .table-wrap tbody tr.rh-payroll-row td.payment-actions-cell {
     grid-column: 2;
     grid-row: 1;
@@ -2751,14 +2757,17 @@ tbody tr:last-child td { border-bottom: none; }
     min-width: 0;
   }
 
+  .rh-ext-page .table-wrap tbody tr.rh-ext-compact-row td.payment-actions-cell::before,
   .rh-ext-page .table-wrap tbody tr.rh-payroll-row td.payment-actions-cell::before {
     display: none !important;
   }
 
+  .rh-ext-page .table-wrap tbody tr.rh-ext-compact-row td:not([data-label="Ouvrier"]):not([data-label="Sous-traitant"]):not(.payment-actions-cell),
   .rh-ext-page .table-wrap tbody tr.rh-payroll-row td:not([data-label="Ouvrier"]):not(.payment-actions-cell) {
     grid-column: 1 / -1;
   }
 
+  .rh-ext-page .table-wrap tbody tr.rh-ext-compact-row .payment-row-actions,
   .rh-ext-page .table-wrap tbody tr.rh-payroll-row .payment-row-actions {
     flex-direction: row !important;
     flex-wrap: wrap;
@@ -2768,6 +2777,7 @@ tbody tr:last-child td { border-bottom: none; }
     gap: 4px !important;
   }
 
+  .rh-ext-page .table-wrap tbody tr.rh-ext-compact-row .payment-row-actions .btn,
   .rh-ext-page .table-wrap tbody tr.rh-payroll-row .payment-row-actions .btn {
     width: auto !important;
     min-width: 32px !important;
@@ -2778,6 +2788,7 @@ tbody tr:last-child td { border-bottom: none; }
     gap: 0 !important;
   }
 
+  .rh-ext-page .table-wrap tbody tr.rh-ext-compact-row .payment-row-actions .btn svg,
   .rh-ext-page .table-wrap tbody tr.rh-payroll-row .payment-row-actions .btn svg {
     width: 14px;
     height: 14px;

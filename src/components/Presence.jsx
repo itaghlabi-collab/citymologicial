@@ -708,7 +708,7 @@ export default function Presence() {
                 </thead>
                 <tbody>
                   {group.ouvriers.map((s) => (
-                    <tr key={s.key}>
+                    <tr key={s.key} className="rh-ext-compact-row">
                       <td data-label="Ouvrier">
                         <button
                           type="button"
@@ -727,13 +727,13 @@ export default function Presence() {
                       <td data-label="Statut"><span className={'badge ' + (STATUS_BADGE[s.statutGlobal] || 'badge-grey')}>{s.statutGlobal}</span></td>
                       <td data-label="Actions" className="payment-actions-cell">
                         <div className="payment-row-actions">
-                          <button type="button" className="btn btn-secondary btn-sm" onClick={() => setDetailSummary(s)}>
+                          <button type="button" className="btn btn-secondary btn-sm" title="Détail" onClick={() => setDetailSummary(s)}>
                             <Eye size={13} /> Détail
                           </button>
-                          <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleModifySummary(s)}>
+                          <button type="button" className="btn btn-secondary btn-sm" title="Modifier" onClick={() => handleModifySummary(s)}>
                             <Pencil size={13} /> Modifier
                           </button>
-                          <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleSummaryPdf(s, false)} disabled={pdfLoading}>
+                          <button type="button" className="btn btn-secondary btn-sm" title="Télécharger PDF" onClick={() => handleSummaryPdf(s, false)} disabled={pdfLoading}>
                             <Download size={13} /> Télécharger
                           </button>
                           <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleSummaryPdf(s, true)} disabled={pdfLoading} title="Imprimer">
