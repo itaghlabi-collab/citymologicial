@@ -125,12 +125,12 @@ export default function CategoriesCharge() {
         <div className="card" style={{ marginBottom: 12, padding: 12, color: 'var(--red)', fontSize: '0.85rem' }}>{error}</div>
       )}
       {/* Header */}
-      <div className="page-header flex-between" style={{ flexWrap: 'wrap', gap: 10 }}>
+      <div className="page-header flex-between finance-page-header">
         <div>
           <h1 className="page-title">CATÉGORIES DE CHARGE</h1>
-          <p className="page-subtitle">Gestion des catégories de dépenses et charges financières.</p>
+          <p className="page-subtitle finance-sub-hide-mobile">Gestion des catégories de dépenses et charges financières.</p>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <div className="finance-page-actions">
           <button type="button" className="btn btn-secondary btn-sm" onClick={() => reload()} disabled={loading}>
             <RefreshCw size={14} /> Actualiser
           </button>
@@ -147,7 +147,7 @@ export default function CategoriesCharge() {
       </div>
 
       {/* KPIs */}
-      <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', marginBottom: 20 }}>
+      <div className="stat-grid finance-kpi-strip" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', marginBottom: 20 }}>
         <KpiCard icon={<Tag size={17} />}         label="Total catégories"    value={total}      color="grey"   />
         <KpiCard icon={<Tag size={17} />}         label="Catégories actives"  value={actives}    color="green"  />
         <KpiCard icon={<Archive size={17} />}     label="Archivées"           value={archivees}  color="orange" />
@@ -156,8 +156,8 @@ export default function CategoriesCharge() {
 
       {/* Filtres */}
       {showFilters && (
-        <div className="card" style={{ marginBottom: 16, padding: '14px 20px' }}>
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="card finance-toolbar" style={{ marginBottom: 16, padding: '14px 20px' }}>
+          <div className="finance-toolbar-inner">
             <div style={{ flex: 1, minWidth: 200, position: 'relative' }}>
               <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
               <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Nom, description..." style={{ ...INPUT_STYLE, paddingLeft: 32 }} />
@@ -211,7 +211,7 @@ export default function CategoriesCharge() {
               <tbody>
                 {filtered.map(c => (
                   <tr key={c.id}>
-                    <td>
+                    <td data-label="Nom">
                       <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
                         <div style={{ width: 32, height: 32, borderRadius: 8, background: 'var(--red-light)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                           <Tag size={14} style={{ color: 'var(--red)' }} />

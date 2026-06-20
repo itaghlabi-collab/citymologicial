@@ -380,18 +380,18 @@ export default function FeuilleCaisse() {
 
   return (
     <div className="animate-fade-in">
-      <div className="page-header flex-between" style={{ flexWrap: 'wrap', gap: 10 }}>
+      <div className="page-header flex-between finance-page-header">
         <div>
           <h1 className="page-title">FEUILLE DE CAISSE</h1>
           <p className="page-subtitle">
-            Journal trésorerie — paiements validés à la date réelle du paiement.
+            <span className="finance-sub-hide-mobile">Journal trésorerie — paiements validés à la date réelle du paiement. </span>
             {viewMode === 'day'
-              ? <> Validation DG : <strong>{formatDateShortFr(selectedDate)}</strong>.</>
-              : <> Synthèse mensuelle — <strong>{periodLabel}</strong>.</>}
-            {' '}<strong>{filterLabel}</strong>
+              ? <>Validation <strong>{formatDateShortFr(selectedDate)}</strong></>
+              : <>Mois <strong>{periodLabel}</strong></>}
+            {' · '}<strong>{filterLabel}</strong>
           </p>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <div className="finance-page-actions">
           <button type="button" className="btn btn-secondary btn-sm" onClick={() => exportCashSheetExcel({ year, month, transactions: cashSheetRecords, totals })}>
             <FileSpreadsheet size={14} /> Excel
           </button>
@@ -419,19 +419,20 @@ export default function FeuilleCaisse() {
         </div>
       </div>
 
-      <div className="card" style={{ marginBottom: 16, padding: '14px 20px' }}>
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+      <div className="card finance-toolbar" style={{ marginBottom: 16, padding: '14px 20px' }}>
+        <div className="finance-toolbar-inner">
           <select value={month} onChange={(e) => setMonth(Number(e.target.value))} style={{ ...SELECT_STYLE, maxWidth: 160 }}>
             {MOIS_OPTS.map((m) => <option key={m.v} value={m.v}>{m.l}</option>)}
           </select>
           <select value={year} onChange={(e) => setYear(Number(e.target.value))} style={{ ...SELECT_STYLE, maxWidth: 120 }}>
             {years.map((y) => <option key={y} value={y}>{y}</option>)}
           </select>
-          <span style={{ fontSize: '0.82rem', color: 'var(--text-3)' }}>
+          <span className="finance-sub-hide-mobile" style={{ fontSize: '0.82rem', color: 'var(--text-3)' }}>
             Période : <strong>{periodLabel}</strong>
             {isCurrentMonth ? ' (mois en cours)' : ''}
             {!loading && cashSheetRecords.length > 0 ? ` — ${cashSheetRecords.length} op. ce mois` : ''}
           </span>
+          <div className="finance-toolbar-filters">
           {TABLE_FILTERS.map((f) => (
             <button
               key={f.id}
@@ -444,6 +445,7 @@ export default function FeuilleCaisse() {
               {f.label}
             </button>
           ))}
+          </div>
           {!isCurrentMonth && (
             <button
               type="button"
@@ -541,14 +543,14 @@ export default function FeuilleCaisse() {
       )}
 
       {viewMode === 'day' && dailyTotals ? (
-        <div className="stat-grid finance-kpi-grid" style={{ marginBottom: 20 }}>
+        <div className="stat-grid finance-kpi-grid finance-kpi-strip">
           <KpiCard icon={<Wallet size={17} />} label={`Solde début ${dayKpiLabel}`} value={formatMAD(dailyTotals.soldeDebutJournee)} color="grey" sub="solde cumulé avant cette date" />
           <KpiCard icon={<Plus size={17} />} label={`Entrées ${dayKpiLabel}`} value={formatMAD(dailyTotals.entreesJour)} color="green" />
           <KpiCard icon={<TrendingDown size={17} />} label={`Sorties ${dayKpiLabel}`} value={formatMAD(dailyTotals.sortiesJour)} color="red" />
           <KpiCard icon={<Wallet size={17} />} label={`Solde fin ${dayKpiLabel}`} value={formatMAD(dailyTotals.soldeFinJournee)} color="blue" sub="début + entrées − sorties" />
         </div>
       ) : viewMode === 'month' ? (
-        <div className="stat-grid finance-kpi-grid" style={{ marginBottom: 20 }}>
+        <div className="stat-grid finance-kpi-grid finance-kpi-strip">
           <KpiCard icon={<Wallet size={17} />} label="Solde initial" value={formatMAD(totals.soldeInitial)} color="grey" />
           <KpiCard icon={<Plus size={17} />} label="Alimentation" value={formatMAD(totals.alimentation)} color="purple" />
           <KpiCard icon={<Plus size={17} />} label="Total entrées" value={formatMAD(totals.totalEntrees)} color="green" />

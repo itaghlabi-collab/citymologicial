@@ -78,16 +78,18 @@ export default function FinanceDashboard() {
 
   return (
     <div className="finance-dashboard animate-fade-in">
-      <div className="page-header flex-between finance-dash-header">
+      <div className="page-header flex-between finance-dash-header finance-page-header">
         <div>
           <h1 className="page-title">COCKPIT FINANCE & TRÉSORERIE</h1>
           <p className="page-subtitle">
-            Pilotage financier — {MOIS[month]} {year}
+            <span className="finance-sub-hide-mobile">Pilotage financier — </span>{MOIS[month]} {year}
           </p>
         </div>
-        <button type="button" className="btn btn-secondary btn-sm" onClick={reload}>
-          <RefreshCw size={14} /> Actualiser
-        </button>
+        <div className="finance-page-actions finance-page-actions--solo">
+          <button type="button" className="btn btn-secondary btn-sm" onClick={reload}>
+            <RefreshCw size={14} /> Actualiser
+          </button>
+        </div>
       </div>
 
       {error && (

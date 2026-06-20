@@ -19,7 +19,7 @@ export default function Finance({ activeTab }) {
   const tab = activeTab || 'finance-dashboard';
 
   return (
-    <div>
+    <div className="finance-module">
       {tab === 'finance-dashboard' && <FinanceDashboard />}
       {tab === 'categories-charge' && <CategoriesCharge />}
       {tab === 'charges' && <Charges categories={categories} />}

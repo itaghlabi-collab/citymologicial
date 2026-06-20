@@ -133,7 +133,7 @@ function DetailCharge({ charge, onBack, onEdit, onDelete, onValider, onComptabil
           <h1 className="page-title" style={{ marginBottom: 4 }}>{charge.ref}</h1>
           <p className="page-subtitle">{charge.libelle} — {charge.date}</p>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <div className="finance-page-actions">
           <button className="btn btn-secondary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={onEdit}><Edit2 size={13} /> Modifier</button>
           {charge.statut === 'En attente validation' && (
             <button className="btn btn-primary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => onValider(charge)}>
@@ -151,11 +151,11 @@ function DetailCharge({ charge, onBack, onEdit, onDelete, onValider, onComptabil
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 16, alignItems: 'start' }}>
+      <div className="finance-detail-grid">
         <div>
           <div className="card" style={{ marginBottom: 16 }}>
             <SectionTitle icon={<TrendingDown size={13} />}>Informations dépense</SectionTitle>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div className="finance-detail-fields">
               {[
                 ['Libellé', charge.libelle],
                 ['Date', charge.date || '—'],
@@ -302,12 +302,12 @@ export default function Charges({ categories }) {
         <div className="card" style={{ marginBottom: 12, padding: 12, color: 'var(--red)', fontSize: '0.85rem' }}>{error}</div>
       )}
       {/* Header */}
-      <div className="page-header flex-between" style={{ flexWrap: 'wrap', gap: 10 }}>
+      <div className="page-header flex-between finance-page-header">
         <div>
           <h1 className="page-title">CHARGES</h1>
-          <p className="page-subtitle">Gestion des dépenses et affectations financières.</p>
+          <p className="page-subtitle finance-sub-hide-mobile">Gestion des dépenses et affectations financières.</p>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <div className="finance-page-actions">
           <button className="btn btn-ghost btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => setShowFilters(f => !f)}>
             <Filter size={14} /> Filtres
           </button>
@@ -321,7 +321,7 @@ export default function Charges({ categories }) {
       </div>
 
       {/* KPIs */}
-      <div className="stat-grid finance-kpi-grid" style={{ marginBottom: 20 }}>
+      <div className="stat-grid finance-kpi-grid finance-kpi-strip">
         <KpiCard icon={<TrendingDown size={17} />} label="Total dépenses"       value={formatMAD(totalDep)}   color="red"    />
         <KpiCard icon={<TrendingDown size={17} />} label="Dépenses ce mois"     value={formatMAD(depMois)}    color="orange" />
         <KpiCard icon={<FileText size={17} />}     label="Sur projets"          value={formatMAD(depProjet)}  color="blue"   />
@@ -332,8 +332,8 @@ export default function Charges({ categories }) {
 
       {/* Filtres */}
       {showFilters && (
-        <div className="card" style={{ marginBottom: 16, padding: '14px 20px' }}>
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="card finance-toolbar" style={{ marginBottom: 16, padding: '14px 20px' }}>
+          <div className="finance-toolbar-inner">
             <div style={{ flex: 1, minWidth: 200, position: 'relative' }}>
               <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
               <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Réf., libellé, fournisseur..." style={{ ...INPUT_STYLE, paddingLeft: 32 }} />
@@ -396,7 +396,7 @@ export default function Charges({ categories }) {
               <tbody>
                 {filtered.map(c => (
                   <tr key={c.id}>
-                    <td>
+                    <td data-label="Référence">
                       <span style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.82rem', color: 'var(--red)' }}>{c.ref}</span>
                     </td>
                     <td data-label="Date">{c.date || '—'}</td>

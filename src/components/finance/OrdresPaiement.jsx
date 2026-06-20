@@ -149,7 +149,7 @@ function DetailOrdre({ ordre, onBack, onEdit, onDelete, onValider, onExecuter, o
           <h1 className="page-title" style={{ marginBottom: 4 }}>{ordre.ref}</h1>
           <p className="page-subtitle">{ordre.beneficiaire} — {ordre.motif || 'Ordre de paiement'}</p>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <div className="finance-page-actions">
           <button className="btn btn-secondary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={onEdit}><Edit2 size={13} /> Modifier</button>
           <button className="btn btn-secondary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => exportPaymentOrderPdf(ordre)}>
             <Download size={13} /> PDF
@@ -175,11 +175,11 @@ function DetailOrdre({ ordre, onBack, onEdit, onDelete, onValider, onExecuter, o
         </div>
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 16, alignItems: 'start' }}>
+      <div className="finance-detail-grid">
         <div>
           <div className="card" style={{ marginBottom: 16 }}>
             <SectionTitle icon={<CreditCard size={13} />}>Informations ordre</SectionTitle>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+            <div className="finance-detail-fields">
               {[
                 ['Bénéficiaire', ordre.beneficiaire],
                 ['Type', ordre.type_benef || '—'],
@@ -323,12 +323,12 @@ export default function OrdresPaiement({ categories = [] }) {
         <div className="card" style={{ marginBottom: 12, padding: 12, color: 'var(--red)', fontSize: '0.85rem' }}>{error}</div>
       )}
       {/* Header */}
-      <div className="page-header flex-between" style={{ flexWrap: 'wrap', gap: 10 }}>
+      <div className="page-header flex-between finance-page-header">
         <div>
           <h1 className="page-title">ORDRES DE PAIEMENT</h1>
-          <p className="page-subtitle">Gestion des paiements et validations financières.</p>
+          <p className="page-subtitle finance-sub-hide-mobile">Gestion des paiements et validations financières.</p>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <div className="finance-page-actions">
           <button className="btn btn-ghost btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => setShowFilters(f => !f)}>
             <Filter size={14} /> Filtres
           </button>
@@ -342,7 +342,7 @@ export default function OrdresPaiement({ categories = [] }) {
       </div>
 
       {/* KPIs */}
-      <div className="stat-grid finance-kpi-grid" style={{ marginBottom: 20 }}>
+      <div className="stat-grid finance-kpi-grid finance-kpi-strip">
         <KpiCard icon={<Clock size={17} />}        label="En attente"          value={enAttente}              color="orange" />
         <KpiCard icon={<CheckCircle size={17} />}  label="Validés"             value={valides}                color="green"  />
         <KpiCard icon={<PlayCircle size={17} />}   label="Exécutés"            value={executes}               color="blue"   />
@@ -352,8 +352,8 @@ export default function OrdresPaiement({ categories = [] }) {
 
       {/* Filtres */}
       {showFilters && (
-        <div className="card" style={{ marginBottom: 16, padding: '14px 20px' }}>
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="card finance-toolbar" style={{ marginBottom: 16, padding: '14px 20px' }}>
+          <div className="finance-toolbar-inner">
             <div style={{ flex: 1, minWidth: 200, position: 'relative' }}>
               <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
               <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Réf., bénéficiaire, motif..." style={{ ...INPUT_STYLE, paddingLeft: 32 }} />
@@ -415,7 +415,7 @@ export default function OrdresPaiement({ categories = [] }) {
               <tbody>
                 {filtered.map(o => (
                   <tr key={o.id}>
-                    <td>
+                    <td data-label="Référence">
                       <span style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.82rem', color: 'var(--red)' }}>{o.ref}</span>
                     </td>
                     <td data-label="Bénéficiaire">
