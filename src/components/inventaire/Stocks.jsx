@@ -60,17 +60,19 @@ export default function Stocks({ articles, categories, depots }) {
 
   return (
     <div className="animate-fade-in">
-      <div className="page-header flex-between" style={{ flexWrap: 'wrap', gap: 10 }}>
+      <div className="page-header flex-between finance-page-header">
         <div>
           <h1 className="page-title">STOCKS</h1>
-          <p className="page-subtitle">Vue globale des niveaux et états de stock.</p>
+          <p className="page-subtitle finance-sub-hide-mobile">Vue globale des niveaux et états de stock.</p>
         </div>
-        <button className="btn btn-ghost btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => setShowFilters(f => !f)}>
-          <Filter size={14} /> Filtres
-        </button>
+        <div className="finance-page-actions finance-page-actions--solo">
+          <button className="btn btn-ghost btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => setShowFilters(f => !f)}>
+            <Filter size={14} /> Filtres
+          </button>
+        </div>
       </div>
 
-      <div className="stat-grid finance-kpi-grid" style={{ marginBottom: 20 }}>
+      <div className="stat-grid finance-kpi-grid finance-kpi-strip">
         <KpiCard icon={<BarChart2 size={17} />}     label="Valeur totale stock"  value={formatMAD(valeurTotale)} color="red"    />
         <KpiCard icon={<AlertTriangle size={17} />} label="Stock faible"         value={stockFaible}             color="orange" />
         <KpiCard icon={<AlertTriangle size={17} />} label="Articles critiques"   value={stockCritique}           color="red"    />
@@ -87,7 +89,7 @@ export default function Stocks({ articles, categories, depots }) {
               Alertes stock ({alertes.length})
             </span>
           </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 10 }}>
+          <div className="inv-alerts-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 10 }}>
             {alertes.slice(0, 6).map(a => {
               const s = getStatutStock(a.stock_actuel, a.stock_minimum);
               const depot = (depots || []).find(d => String(d.id) === String(a.depot_id));
@@ -117,8 +119,8 @@ export default function Stocks({ articles, categories, depots }) {
       )}
 
       {showFilters && (
-        <div className="card" style={{ marginBottom: 16, padding: '14px 20px' }}>
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="card finance-toolbar" style={{ marginBottom: 16, padding: '14px 20px' }}>
+          <div className="finance-toolbar-inner">
             <div style={{ flex: 1, minWidth: 180, position: 'relative' }}>
               <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
               <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Code, désignation..." style={{ ...INPUT_STYLE, paddingLeft: 32 }} />

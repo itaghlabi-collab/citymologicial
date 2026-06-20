@@ -27,11 +27,11 @@ const TYPE_ICONS = {
 function DetailBon({ bon, articles, onBack, onEdit, onPdf, onDelete, pdfLoading }) {
   return (
     <div className="animate-fade-in">
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
+      <div className="finance-page-actions finance-detail-actions" style={{ marginBottom: 20, flexWrap: 'wrap', gap: 10 }}>
         <button type="button" className="btn btn-ghost btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }} onClick={onBack}>
           <ChevronLeft size={15} /> Retour
         </button>
-        <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1rem', flex: 1 }}>
+        <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1rem', flex: 1, minWidth: 0 }}>
           {bon.ref} — {bon.type_mouvement}
         </h2>
         <span className={`badge ${BADGE_MOUVEMENT[bon.type_mouvement] || 'badge-grey'}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
@@ -49,7 +49,7 @@ function DetailBon({ bon, articles, onBack, onEdit, onPdf, onDelete, pdfLoading 
 
       <div className="card" style={{ marginBottom: 14, padding: '18px 20px' }}>
         <SectionTitle>Détails du bon</SectionTitle>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12, fontSize: '0.84rem' }}>
+        <div className="finance-detail-fields" style={{ fontSize: '0.84rem' }}>
           {[
             ['Type', bon.type_mouvement],
             ['Source', bon.emplacement_source],
@@ -216,12 +216,12 @@ export default function BonsMouvements({ articles, onArticlesChange }) {
         </div>
       )}
 
-      <div className="page-header flex-between" style={{ flexWrap: 'wrap', gap: 10 }}>
+      <div className="page-header flex-between finance-page-header">
         <div>
           <h1 className="page-title">BONS DE MOUVEMENTS</h1>
-          <p className="page-subtitle">Entrées, sorties et transferts entre emplacements.</p>
+          <p className="page-subtitle finance-sub-hide-mobile">Entrées, sorties et transferts entre emplacements.</p>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <div className="finance-page-actions">
           <button type="button" className="btn btn-secondary btn-sm" onClick={reload} disabled={loading}>
             <RefreshCw size={14} /> Actualiser
           </button>
@@ -234,7 +234,7 @@ export default function BonsMouvements({ articles, onArticlesChange }) {
         </div>
       </div>
 
-      <div className="stat-grid finance-kpi-grid" style={{ marginBottom: 20 }}>
+      <div className="stat-grid finance-kpi-grid finance-kpi-strip">
         <KpiCard icon={<ArrowUpDown size={17} />} label="Mouvements auj." value={mvtJour} color="grey" />
         <KpiCard icon={<ArrowDown size={17} />} label="Entrées" value={entrees} color="green" />
         <KpiCard icon={<ArrowUp size={17} />} label="Sorties" value={sorties} color="red" />
@@ -243,8 +243,8 @@ export default function BonsMouvements({ articles, onArticlesChange }) {
       </div>
 
       {showFilters ? (
-        <div className="card" style={{ marginBottom: 16, padding: '14px 20px' }}>
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="card finance-toolbar" style={{ marginBottom: 16, padding: '14px 20px' }}>
+          <div className="finance-toolbar-inner">
             <div style={{ flex: 1, minWidth: 180, position: 'relative' }}>
               <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
               <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Référence, motif, opérateur..." style={{ ...INPUT_STYLE, paddingLeft: 32 }} />
@@ -303,7 +303,7 @@ export default function BonsMouvements({ articles, onArticlesChange }) {
               <tbody>
                 {filtered.map((x) => (
                   <tr key={x.ref} style={{ cursor: 'pointer' }} onClick={() => setDetailRef(x.ref)}>
-                    <td><span style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.82rem', color: 'var(--red)' }}>{x.ref}</span></td>
+                    <td data-label="Référence"><span style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.82rem', color: 'var(--red)' }}>{x.ref}</span></td>
                     <td data-label="Type">
                       <span className={`badge ${BADGE_MOUVEMENT[x.type_mouvement] || 'badge-grey'}`} style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: '0.72rem' }}>
                         {TYPE_ICONS[x.type_mouvement]} {x.type_mouvement}

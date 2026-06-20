@@ -59,10 +59,10 @@ function DetailEmplacement({ emplacement, articles, onBack }) {
               <tbody>
                 {articlesHere.map((a) => (
                   <tr key={a.id}>
-                    <td style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.82rem', color: 'var(--red)' }}>{a.code}</td>
-                    <td style={{ fontWeight: 600 }}>{a.designation}</td>
-                    <td style={{ fontSize: '0.82rem' }}>{a.type || '—'}</td>
-                    <td><span className="badge badge-green" style={{ fontSize: '0.7rem' }}>{a.etat || '—'}</span></td>
+                    <td data-label="Code" style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.82rem', color: 'var(--red)' }}>{a.code}</td>
+                    <td data-label="Désignation" style={{ fontWeight: 600 }}>{a.designation}</td>
+                    <td data-label="Type" style={{ fontSize: '0.82rem' }}>{a.type || '—'}</td>
+                    <td data-label="État"><span className="badge badge-green" style={{ fontSize: '0.7rem' }}>{a.etat || '—'}</span></td>
                   </tr>
                 ))}
               </tbody>
@@ -117,19 +117,19 @@ export default function Depots({ articles, onDepotsChange }) {
 
   return (
     <div className="animate-fade-in">
-      <div className="page-header flex-between" style={{ flexWrap: 'wrap', gap: 10 }}>
+      <div className="page-header flex-between finance-page-header">
         <div>
           <h1 className="page-title">EMPLACEMENTS</h1>
-          <p className="page-subtitle">Lieux de stockage CITYMO — dépôts, chantiers et ateliers.</p>
+          <p className="page-subtitle finance-sub-hide-mobile">Lieux de stockage CITYMO — dépôts, chantiers et ateliers.</p>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <div className="finance-page-actions">
           <button type="button" className="btn btn-ghost btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => setShowFilters((f) => !f)}>
             <Filter size={14} /> Filtres
           </button>
         </div>
       </div>
 
-      <div className="stat-grid finance-kpi-grid" style={{ marginBottom: 20 }}>
+      <div className="stat-grid finance-kpi-grid finance-kpi-strip">
         <KpiCard icon={<MapPin size={17} />} label="Total emplacements" value={emplacements.length} color="grey" />
         <KpiCard icon={<MapPin size={17} />} label="Dépôts" value={depotsCount} color="green" />
         <KpiCard icon={<MapPin size={17} />} label="Chantiers" value={chantiers} color="blue" />
@@ -137,8 +137,8 @@ export default function Depots({ articles, onDepotsChange }) {
       </div>
 
       {showFilters ? (
-        <div className="card" style={{ marginBottom: 16, padding: '14px 20px' }}>
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="card finance-toolbar" style={{ marginBottom: 16, padding: '14px 20px' }}>
+          <div className="finance-toolbar-inner">
             <div style={{ flex: 1, minWidth: 180, position: 'relative' }}>
               <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
               <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Nom emplacement..." style={{ ...INPUT_STYLE, paddingLeft: 32 }} />
@@ -176,7 +176,7 @@ export default function Depots({ articles, onDepotsChange }) {
               <tbody>
                 {filtered.map((x) => (
                   <tr key={x.id} style={{ cursor: 'pointer' }} onClick={() => setDetailId(x.id)}>
-                    <td>
+                    <td data-label="Emplacement">
                       <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                         <div style={{ width: 32, height: 32, borderRadius: 7, background: 'var(--red-light)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
                           <MapPin size={14} style={{ color: 'var(--red)' }} />

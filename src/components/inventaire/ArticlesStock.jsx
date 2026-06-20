@@ -219,11 +219,11 @@ function DetailArticle({
 
   return (
     <div className="animate-fade-in">
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
+      <div className="finance-page-actions finance-detail-actions" style={{ marginBottom: 20, flexWrap: 'wrap', gap: 10 }}>
         <button type="button" className="btn btn-ghost btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }} onClick={onBack}>
           <ChevronLeft size={15} /> Retour
         </button>
-        <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1rem', flex: 1 }}>
+        <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1rem', flex: 1, minWidth: 0 }}>
           {article.code} — {article.designation}
         </h2>
         <span className={`badge ${stateBadge}`} style={{ fontSize: '0.72rem' }}>{article.current_state || 'Disponible'}</span>
@@ -238,7 +238,7 @@ function DetailArticle({
         )}
       </div>
 
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 16, alignItems: 'start' }}>
+      <div className="finance-detail-grid">
         <div>
           <div className="card" style={{ marginBottom: 14 }}>
             <SectionTitle icon={<Package size={12} />}>État actuel & informations</SectionTitle>
@@ -356,7 +356,7 @@ function MobileArticleRow({ item, catName, onView, onEdit, onArchive, onHistory,
         <span>{item.designation}</span>
         <span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>{catName} · Stock {item.stock_actuel || 0} {item.unite}</span>
       </button>
-      <span className={`inv-stock-mobile-status ${item.statut === 'Actif' ? 'is-active' : 'is-inactive'}`}>{item.statut}</span>
+      <span className={`inv-stock-mobile-status ${item.statut === 'Actif' ? 'is-active' : 'is-inactive'}`} title={item.statut} aria-label={item.statut} />
       <div className="inv-stock-mobile-actions">
         <button type="button" className="btn btn-ghost btn-sm inv-stock-mobile-btn" title="Voir" onClick={onView}><Eye size={14} /></button>
         <button type="button" className="btn btn-ghost btn-sm inv-stock-mobile-btn" title="Code-barres" onClick={onBarcode}><Barcode size={14} /></button>
@@ -626,12 +626,12 @@ export default function ArticlesStock({ onArticlesChange }) {
         </div>
       )}
 
-      <div className="page-header flex-between" style={{ flexWrap: 'wrap', gap: 10 }}>
+      <div className="page-header flex-between finance-page-header">
         <div>
           <h1 className="page-title">ARTICLES DE STOCK</h1>
-          <p className="page-subtitle">Gestion des articles, états et niveaux de stock.</p>
+          <p className="page-subtitle finance-sub-hide-mobile">Gestion des articles, états et niveaux de stock.</p>
         </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+        <div className="finance-page-actions">
           <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowScanner(true)}>
             <ScanLine size={14} /> Scanner article
           </button>
@@ -657,7 +657,7 @@ export default function ArticlesStock({ onArticlesChange }) {
         </div>
       </div>
 
-      <div className="stat-grid finance-kpi-grid" style={{ marginBottom: 20 }}>
+      <div className="stat-grid finance-kpi-grid finance-kpi-strip">
         <KpiCard icon={<Package size={17} />} label="Total articles" value={total} color="grey" />
         <KpiCard icon={<Package size={17} />} label="Stock faible" value={stockFaible} color="orange" />
         <KpiCard icon={<Package size={17} />} label="Articles neufs" value={articlesNeuf} color="green" />
@@ -666,8 +666,8 @@ export default function ArticlesStock({ onArticlesChange }) {
       </div>
 
       {showFilters ? (
-        <div className="card" style={{ marginBottom: 16, padding: '14px 20px' }}>
-          <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        <div className="card finance-toolbar" style={{ marginBottom: 16, padding: '14px 20px' }}>
+          <div className="finance-toolbar-inner">
             <div style={{ flex: 1, minWidth: 200, position: 'relative' }}>
               <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
               <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Code, désignation, code-barres…" style={{ ...INPUT_STYLE, paddingLeft: 32 }} />

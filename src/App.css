@@ -1718,8 +1718,12 @@ tbody tr:last-child td { border-bottom: none; }
     flex: 0 0 min(132px, 44vw);
   }
 
-  .finance-module .finance-page-title,
-  .finance-module .page-title {
+  .inventaire-module .finance-kpi-strip .stat-card {
+    flex: 0 0 min(132px, 44vw);
+  }
+
+  .finance-module .page-title,
+  .inventaire-module .page-title {
     font-size: 1.15rem;
   }
 
@@ -4378,6 +4382,10 @@ tbody tr:last-child td { border-bottom: none; }
   align-items: start;
 }
 
+.inventaire-module .finance-detail-grid {
+  grid-template-columns: 1fr 280px;
+}
+
 .finance-detail-fields {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -4666,6 +4674,215 @@ tbody tr:last-child td { border-bottom: none; }
   .finance-module .card[style*="background:#FFF3E0"] {
     padding: 12px 14px !important;
     font-size: 0.82rem;
+  }
+
+  /* ── Inventaire & Dépôt — mobile compact (utilitaires partagés) ── */
+  .inventaire-module .finance-sub-hide-mobile {
+    display: none;
+  }
+
+  .inventaire-module .finance-page-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    width: 100%;
+  }
+
+  .inventaire-module .finance-page-actions--solo {
+    grid-template-columns: 1fr;
+    max-width: 160px;
+  }
+
+  .inventaire-module .finance-page-actions .btn {
+    width: auto !important;
+    flex: none !important;
+    justify-content: center;
+    padding: 8px 10px;
+    font-size: 0.75rem;
+    min-height: 38px;
+  }
+
+  .inventaire-module .finance-page-actions .btn-primary {
+    grid-column: 1 / -1;
+    font-size: 0.82rem;
+  }
+
+  .inventaire-module .finance-page-actions .btn-secondary,
+  .inventaire-module .finance-page-actions .btn-ghost:not(.btn-primary) {
+    font-size: 0;
+    gap: 0;
+    padding: 8px;
+  }
+
+  .inventaire-module .finance-page-actions .btn-secondary svg,
+  .inventaire-module .finance-page-actions .btn-ghost:not(.btn-primary) svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  .inventaire-module .finance-detail-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .inventaire-module .finance-detail-actions h2 {
+    font-size: 0.92rem;
+    line-height: 1.25;
+  }
+
+  .inventaire-module .finance-detail-actions .btn-secondary,
+  .inventaire-module .finance-detail-actions .btn-ghost {
+    font-size: 0;
+    padding: 8px;
+    min-width: 36px;
+    min-height: 36px;
+  }
+
+  .inventaire-module .finance-detail-actions .btn-secondary svg,
+  .inventaire-module .finance-detail-actions .btn-ghost svg {
+    width: 15px;
+    height: 15px;
+  }
+
+  .inventaire-module .finance-toolbar {
+    padding: 12px 14px !important;
+  }
+
+  .inventaire-module .finance-toolbar-inner {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+  }
+
+  .inventaire-module .finance-toolbar-inner select,
+  .inventaire-module .finance-toolbar-inner input {
+    width: 100% !important;
+    max-width: none !important;
+  }
+
+  .inventaire-module .finance-kpi-strip {
+    display: flex !important;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    gap: 10px;
+    margin-bottom: 14px;
+    padding-bottom: 4px;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .inventaire-module .finance-kpi-strip::-webkit-scrollbar {
+    display: none;
+  }
+
+  .inventaire-module .finance-kpi-strip .stat-card {
+    flex: 0 0 min(148px, 42vw);
+    scroll-snap-align: start;
+    flex-direction: column;
+    align-items: flex-start;
+    padding: 12px 11px;
+    gap: 8px;
+    margin: 0;
+  }
+
+  .inventaire-module .finance-kpi-strip .stat-icon {
+    width: 32px;
+    height: 32px;
+  }
+
+  .inventaire-module .finance-kpi-strip .stat-value {
+    font-size: 0.95rem !important;
+    word-break: break-word;
+  }
+
+  .inventaire-module .finance-kpi-strip .stat-label {
+    font-size: 0.68rem;
+    line-height: 1.25;
+  }
+
+  .inventaire-module .finance-kpi-strip .stat-sub {
+    display: none;
+  }
+
+  .inventaire-module .finance-form-row,
+  .inventaire-module .finance-detail-grid,
+  .inventaire-module .finance-detail-fields {
+    grid-template-columns: 1fr !important;
+  }
+
+  .inventaire-module .inv-alerts-grid {
+    grid-template-columns: 1fr !important;
+  }
+
+  .inventaire-module .inv-alerts-grid > div {
+    padding: 10px 12px !important;
+  }
+
+  .inventaire-module .inv-stock-mobile-name {
+    white-space: normal;
+    line-height: 1.25;
+  }
+
+  .inventaire-module .inv-stock-mobile-name strong {
+    display: block;
+    font-family: var(--font-head);
+    font-size: 0.76rem;
+    color: var(--red);
+    margin-bottom: 1px;
+  }
+
+  .inventaire-module .inv-stock-mobile-name span {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .inventaire-module .inv-stock-mobile-row {
+    padding: 10px 12px;
+    align-items: flex-start;
+  }
+
+  .inventaire-module .inv-stock-mobile-actions {
+    flex-wrap: wrap;
+    max-width: 102px;
+    justify-content: flex-end;
+  }
+
+  /* Listes inventaire — champs secondaires masqués sur mobile */
+  .inventaire-module .table-wrap tbody td[data-label="Code-barres"],
+  .inventaire-module .table-wrap tbody td[data-label="Type"],
+  .inventaire-module .table-wrap tbody td[data-label="Catégorie"],
+  .inventaire-module .table-wrap tbody td[data-label="État op."],
+  .inventaire-module .table-wrap tbody td[data-label="Emplacement"],
+  .inventaire-module .table-wrap tbody td[data-label="Dernier mouvement"],
+  .inventaire-module .table-wrap tbody td[data-label="Dernier scan"],
+  .inventaire-module .table-wrap tbody td[data-label="Département"],
+  .inventaire-module .table-wrap tbody td[data-label="Type stock"],
+  .inventaire-module .table-wrap tbody td[data-label="Description"],
+  .inventaire-module .table-wrap tbody td[data-label="Lignes"],
+  .inventaire-module .table-wrap tbody td[data-label="Source"],
+  .inventaire-module .table-wrap tbody td[data-label="Destination"],
+  .inventaire-module .table-wrap tbody td[data-label="Date"],
+  .inventaire-module .table-wrap tbody td[data-label="Dépôt"],
+  .inventaire-module .table-wrap tbody td[data-label="Min."],
+  .inventaire-module .table-wrap tbody td[data-label="État"],
+  .inventaire-module .table-wrap tbody td[data-label="Valeur u."],
+  .inventaire-module .table-wrap tbody td[data-label="Valeur tot."],
+  .inventaire-module .table-wrap tbody td[data-label="Type"],
+  .inventaire-module .table-wrap tbody td[data-label="Notes"] {
+    display: none;
+  }
+
+  .inventaire-module .table-wrap tbody td {
+    padding: 6px 12px;
+    min-height: 32px;
+  }
+
+  .inventaire-module .table-wrap tbody td:first-child {
+    padding: 9px 12px 7px;
   }
 }
 

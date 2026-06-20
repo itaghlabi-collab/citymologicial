@@ -124,7 +124,7 @@ export function KpiCard({ icon, label, value, sub, color }) {
       <div className="stat-body">
         <div className="stat-value">{value}</div>
         <div className="stat-label">{label}</div>
-        {sub && <div style={{ fontSize: '0.7rem', color: 'var(--text-3)', marginTop: 2 }}>{sub}</div>}
+        {sub && <div className="stat-sub" style={{ fontSize: '0.7rem', color: 'var(--text-3)', marginTop: 2 }}>{sub}</div>}
       </div>
     </div>
   );
@@ -183,7 +183,7 @@ export function FField({ label, required, children }) {
 }
 
 export function FRow({ children }) {
-  return <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 14, marginBottom: 14 }}>{children}</div>;
+  return <div className="finance-form-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 14, marginBottom: 14 }}>{children}</div>;
 }
 
 export function UploadField({ label }) {

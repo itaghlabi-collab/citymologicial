@@ -28,7 +28,7 @@ export default function Inventaire({ activeTab }) {
   }, [tab]);
 
   return (
-    <div>
+    <div className="inventaire-module">
       {tab === 'categories-stock' && <CategoriesStock />}
       {tab === 'articles-stock' && (
         <ArticlesStock onArticlesChange={setArticles} />
