@@ -1,0 +1,6 @@
+-- CITYMO ERP — Module Administration
+-- Copier-coller le contenu de :
+--   supabase/migrations/20260622120000_administration_schema.sql
+-- dans le SQL Editor Supabase et exécuter.
+--
+-- Prérequis : migrations RH + is_super_admin() déjà appliquées.

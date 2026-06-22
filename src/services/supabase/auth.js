@@ -6,6 +6,18 @@ import { logAuth, logAuthError } from '../../utils/authLog';
 
 const PROFILE_TIMEOUT_MS = 5000;
 
+async function recordLastSignIn(userId) {
+  if (!userId) return;
+  try {
+    await getSupabase()
+      .from('profiles')
+      .update({ last_sign_in_at: new Date().toISOString() })
+      .eq('id', userId);
+  } catch {
+    /* colonne absente si migration Administration non appliquée */
+  }
+}
+
 export function mapSupabaseUser(user, profile = null) {
   const meta = user.user_metadata || {};
   const nom =
@@ -193,6 +205,10 @@ export function subscribeToAuthChanges(onUser) {
         email: fallbackUser.email,
       });
       onUser(fallbackUser);
+
+      if (event === 'SIGNED_IN') {
+        recordLastSignIn(session.user.id);
+      }
 
       loadProfileInBackground(session.user, onUser);
     },
