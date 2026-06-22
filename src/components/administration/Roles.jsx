@@ -1,114 +1,66 @@
 /**
- * Roles.jsx — Gestion RBAC Rôles & Permissions ERP CITYMO (Supabase).
+ * Roles.jsx — Rôles liés aux départements + permissions par sous-rubrique.
  */
 import { useState, useCallback } from 'react';
-import { Shield, Plus, Edit2, Trash2, Eye, Copy, Download, ChevronLeft, CheckSquare, Square, ToggleLeft } from 'lucide-react';
+import { Shield, Plus, Edit2, Trash2, Eye, Copy, ChevronLeft, ToggleLeft } from 'lucide-react';
 import {
-  INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE, MODULES_ERP, ACTIONS_PERMS,
+  INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE,
   KpiCard, EmptyState, Modal, SectionTitle, FField, FRow, InfoRow,
 } from './shared.jsx';
-import { emptyPermissionMatrix, fullPermissionMatrix } from '../../services/admin/constants';
+import SubPermMatrix from './SubPermMatrix.jsx';
 import {
-  createRole,
-  updateRole,
-  deleteRole,
-  toggleRoleStatut,
-  duplicateRole,
+  emptySubmodulePermissions,
+  fullSubmodulePermissions,
+  getDepartmentOptions,
+  ROLE_TEMPLATES,
+  departmentPermissionTemplate,
+} from '../../services/admin/constants';
+import {
+  createRole, updateRole, deleteRole, toggleRoleStatut, duplicateRole,
 } from '../../services/admin/roles';
 
-const EMPTY_FORM = { nom: '', description: '', statut: 'Actif', est_admin: false, permissions: emptyPermissionMatrix() };
+const DEPT_OPTIONS = getDepartmentOptions();
 
-function PermMatrix({ permissions, onChange, readOnly }) {
-  function togglePerm(mod, action) {
-    if (readOnly) return;
-    const next = {
-      ...permissions,
-      [mod]: { ...permissions[mod], [action]: !permissions[mod][action] },
-    };
-    onChange(next);
-  }
-  function toggleAll(mod) {
-    if (readOnly) return;
-    const allOn = ACTIONS_PERMS.every((a) => permissions[mod][a]);
-    const next = { ...permissions, [mod]: {} };
-    ACTIONS_PERMS.forEach((a) => { next[mod][a] = !allOn; });
-    onChange(next);
-  }
-  function toggleAction(action) {
-    if (readOnly) return;
-    const allOn = MODULES_ERP.every((m) => permissions[m][action]);
-    const next = { ...permissions };
-    MODULES_ERP.forEach((m) => { next[m] = { ...next[m], [action]: !allOn }; });
-    onChange(next);
-  }
-
-  return (
-    <div style={{ overflowX: 'auto' }}>
-      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.78rem' }}>
-        <thead>
-          <tr style={{ background: 'var(--surface-2)' }}>
-            <th style={{ padding: '8px 12px', textAlign: 'left', fontWeight: 700, color: 'var(--text-3)', fontSize: '0.72rem', textTransform: 'uppercase', minWidth: 130 }}>Module</th>
-            {ACTIONS_PERMS.map((a) => (
-              <th key={a} style={{ padding: '8px 10px', textAlign: 'center', fontWeight: 700, color: 'var(--text-3)', fontSize: '0.7rem', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
-                {!readOnly ? (
-                  <button type="button" onClick={() => toggleAction(a)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', fontWeight: 700, fontSize: '0.7rem', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 3, margin: '0 auto' }} title="Tout activer/désactiver">
-                    {a}
-                  </button>
-                ) : a}
-              </th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {MODULES_ERP.map((mod, idx) => {
-            const allOn = ACTIONS_PERMS.every((a) => permissions[mod] && permissions[mod][a]);
-            return (
-              <tr key={mod} style={{ borderBottom: '1px solid var(--border)', background: idx % 2 === 0 ? '#fff' : 'var(--surface-2)' }}>
-                <td style={{ padding: '8px 12px', fontWeight: 600, fontSize: '0.82rem' }}>
-                  {!readOnly ? (
-                    <button type="button" onClick={() => toggleAll(mod)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: allOn ? 'var(--red)' : 'var(--text-3)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                      {allOn ? <CheckSquare size={13} /> : <Square size={13} />}
-                      {mod}
-                    </button>
-                  ) : (
-                    <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                      {allOn ? <CheckSquare size={13} style={{ color: 'var(--red)' }} /> : <Square size={13} style={{ color: 'var(--text-3)' }} />}
-                      {mod}
-                    </span>
-                  )}
-                </td>
-                {ACTIONS_PERMS.map((a) => {
-                  const on = permissions[mod] && permissions[mod][a];
-                  return (
-                    <td key={a} style={{ padding: '8px 10px', textAlign: 'center' }}>
-                      <button
-                        type="button"
-                        onClick={() => togglePerm(mod, a)}
-                        disabled={readOnly}
-                        style={{ background: 'none', border: 'none', cursor: readOnly ? 'default' : 'pointer', color: on ? 'var(--red)' : 'var(--border)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
-                      >
-                        {on ? <CheckSquare size={16} /> : <Square size={16} />}
-                      </button>
-                    </td>
-                  );
-                })}
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
-}
+const EMPTY_FORM = {
+  nom: '',
+  description: '',
+  statut: 'Actif',
+  est_admin: false,
+  department_id: '',
+  submodulePermissions: emptySubmodulePermissions(),
+};
 
 function RoleForm({ initial, onSave, onCancel, saving }) {
-  const [form, setForm] = useState(initial || { ...EMPTY_FORM, permissions: emptyPermissionMatrix() });
+  const [form, setForm] = useState(() => {
+    if (!initial) return { ...EMPTY_FORM, submodulePermissions: emptySubmodulePermissions() };
+    return {
+      ...EMPTY_FORM,
+      ...initial,
+      department_id: initial.department_id || '',
+      submodulePermissions: initial.submodulePermissions || initial.permissions || emptySubmodulePermissions(),
+    };
+  });
   const [errors, setErrors] = useState({});
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
+  function applyDepartmentTemplate() {
+    if (!form.department_id) return;
+    set('submodulePermissions', departmentPermissionTemplate(form.department_id));
+  }
+
+  function applyNamedTemplate(key) {
+    const tpl = ROLE_TEMPLATES[key];
+    if (!tpl) return;
+    setForm((p) => ({
+      ...p,
+      department_id: tpl.departmentId || p.department_id,
+      submodulePermissions: tpl.permissions(),
+    }));
+  }
+
   function handleAdminToggle(val) {
     set('est_admin', val);
-    set('permissions', val ? fullPermissionMatrix() : emptyPermissionMatrix());
+    set('submodulePermissions', val ? fullSubmodulePermissions() : emptySubmodulePermissions());
   }
 
   function handleSubmit(ev) {
@@ -122,8 +74,14 @@ function RoleForm({ initial, onSave, onCancel, saving }) {
       <SectionTitle icon={<Shield size={12} />}>Informations du rôle</SectionTitle>
       <FRow>
         <FField label="Nom du rôle" required>
-          <input value={form.nom} onChange={(e) => set('nom', e.target.value)} placeholder="Ex: Chef de projet..." style={{ ...INPUT_STYLE, borderColor: errors.nom ? 'var(--red)' : 'var(--border)' }} />
+          <input value={form.nom} onChange={(e) => set('nom', e.target.value)} style={{ ...INPUT_STYLE, borderColor: errors.nom ? 'var(--red)' : 'var(--border)' }} />
           {errors.nom && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.nom}</div>}
+        </FField>
+        <FField label="Département lié">
+          <select value={form.department_id} onChange={(e) => set('department_id', e.target.value)} style={SELECT_STYLE}>
+            <option value="">— Sélectionner —</option>
+            {DEPT_OPTIONS.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
+          </select>
         </FField>
         <FField label="Statut">
           <select value={form.statut} onChange={(e) => set('statut', e.target.value)} style={SELECT_STYLE}>
@@ -131,27 +89,45 @@ function RoleForm({ initial, onSave, onCancel, saving }) {
             <option value="Inactif">Inactif</option>
           </select>
         </FField>
-        <FField label="Accès administrateur">
+        <FField label="Super Admin">
           <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, cursor: 'pointer', fontSize: '0.85rem' }}>
-            <input type="checkbox" checked={!!form.est_admin} onChange={(e) => handleAdminToggle(e.target.checked)} style={{ width: 16, height: 16 }} />
-            Super Admin (accès complet)
+            <input type="checkbox" checked={!!form.est_admin} onChange={(e) => handleAdminToggle(e.target.checked)} />
+            Accès total
           </label>
         </FField>
       </FRow>
-      <div style={{ marginBottom: 16 }}>
+
+      <div style={{ marginBottom: 12 }}>
         <FField label="Description">
-          <textarea value={form.description} onChange={(e) => set('description', e.target.value)} placeholder="Description du rôle..." style={{ ...TEXTAREA_STYLE, minHeight: 56 }} />
+          <textarea value={form.description} onChange={(e) => set('description', e.target.value)} style={{ ...TEXTAREA_STYLE, minHeight: 48 }} />
         </FField>
       </div>
 
-      <SectionTitle icon={<Shield size={12} />}>Matrice de permissions</SectionTitle>
+      {!form.est_admin && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 14 }}>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={applyDepartmentTemplate} disabled={!form.department_id}>
+            Modèle département
+          </button>
+          {Object.keys(ROLE_TEMPLATES).map((k) => (
+            <button key={k} type="button" className="btn btn-ghost btn-sm" onClick={() => applyNamedTemplate(k)}>
+              Modèle {k.toUpperCase()}
+            </button>
+          ))}
+        </div>
+      )}
+
+      <SectionTitle icon={<Shield size={12} />}>Rubriques & sous-rubriques autorisées</SectionTitle>
       <div style={{ marginBottom: 20, border: '1.5px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
-        <PermMatrix permissions={form.permissions} onChange={(v) => set('permissions', v)} readOnly={!!form.est_admin} />
+        <SubPermMatrix
+          permissions={form.submodulePermissions}
+          onChange={(v) => set('submodulePermissions', v)}
+          readOnly={!!form.est_admin}
+        />
       </div>
 
       <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
         <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={saving}>Annuler</button>
-        <button type="submit" className="btn btn-primary" disabled={saving} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+        <button type="submit" className="btn btn-primary" disabled={saving}>
           <Plus size={14} /> {saving ? 'Enregistrement…' : (initial ? 'Enregistrer' : 'Créer rôle')}
         </button>
       </div>
@@ -159,33 +135,38 @@ function RoleForm({ initial, onSave, onCancel, saving }) {
   );
 }
 
+function countGranted(perms) {
+  let c = 0;
+  Object.values(perms || {}).forEach((acts) => {
+    Object.values(acts || {}).forEach((v) => { if (v) c++; });
+  });
+  return c;
+}
+
 function DetailRole({ role, users, onBack, onEdit }) {
+  const perms = role.submodulePermissions || role.permissions || emptySubmodulePermissions();
   return (
     <div className="animate-fade-in">
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20, flexWrap: 'wrap' }}>
         <button type="button" className="btn btn-ghost btn-sm" onClick={onBack}><ChevronLeft size={15} /> Retour</button>
         <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1rem', flex: 1 }}>{role.nom}</h2>
-        <span className={`badge ${role.statut === 'Actif' ? 'badge-green' : 'badge-grey'}`} style={{ fontSize: '0.72rem' }}>{role.statut}</span>
-        {role.est_admin && <span className="badge badge-red" style={{ fontSize: '0.72rem' }}>Super Admin</span>}
+        <span className={`badge ${role.statut === 'Actif' ? 'badge-green' : 'badge-grey'}`}>{role.statut}</span>
+        {role.est_admin && <span className="badge badge-red">Super Admin</span>}
         <button type="button" className="btn btn-secondary btn-sm" onClick={onEdit}><Edit2 size={13} /> Modifier</button>
       </div>
-
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 260px', gap: 16, alignItems: 'start' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 240px', gap: 16 }}>
         <div className="card">
-          <SectionTitle icon={<Shield size={12} />}>Matrice de permissions</SectionTitle>
+          <SectionTitle>Permissions par sous-rubrique</SectionTitle>
           <div style={{ border: '1.5px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
-            <PermMatrix permissions={role.permissions || emptyPermissionMatrix()} onChange={() => {}} readOnly />
+            <SubPermMatrix permissions={perms} onChange={() => {}} readOnly />
           </div>
         </div>
         <div className="card">
           <SectionTitle>Informations</SectionTitle>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <InfoRow label="Code" value={role.code} />
-            <InfoRow label="Statut" value={role.statut} />
-            <InfoRow label="Date création" value={role.date_creation} />
-            <InfoRow label="Utilisateurs" value={String((users || []).filter((u) => String(u.role_id) === String(role.id)).length)} />
-            {role.description && <InfoRow label="Description" value={role.description} />}
-          </div>
+          <InfoRow label="Département" value={role.departement} />
+          <InfoRow label="Code" value={role.code} />
+          <InfoRow label="Utilisateurs" value={String((users || []).filter((u) => String(u.role_id) === String(role.id)).length)} />
+          <InfoRow label="Permissions actives" value={String(countGranted(perms))} />
         </div>
       </div>
     </div>
@@ -204,9 +185,7 @@ export default function Roles({ users = [], roles = [], setRoles, reload, canMan
     setSaving(true);
     setMsg('');
     try {
-      const saved = editRole
-        ? await updateRole(editRole.id, data)
-        : await createRole(data);
+      const saved = editRole ? await updateRole(editRole.id, data) : await createRole(data);
       setRoles((prev) => {
         const exists = prev.some((r) => r.id === saved.id);
         return exists ? prev.map((r) => (r.id === saved.id ? saved : r)) : [...prev, saved];
@@ -215,7 +194,7 @@ export default function Roles({ users = [], roles = [], setRoles, reload, canMan
       setEditRole(null);
       reload?.();
     } catch (err) {
-      setMsg(err.message || 'Erreur enregistrement rôle');
+      setMsg(err.message || 'Erreur');
     } finally {
       setSaving(false);
     }
@@ -256,12 +235,7 @@ export default function Roles({ users = [], roles = [], setRoles, reload, canMan
 
   const total = roles.length;
   const actifs = roles.filter((x) => x.statut === 'Actif').length;
-  const permsCount = roles.reduce((s, r) => {
-    let c = 0;
-    if (r.permissions) MODULES_ERP.forEach((m) => ACTIONS_PERMS.forEach((a) => { if (r.permissions[m] && r.permissions[m][a]) c++; }));
-    return s + c;
-  }, 0);
-  const usersAffectes = (users || []).filter((u) => u.role_id).length;
+  const permsCount = roles.reduce((s, r) => s + countGranted(r.submodulePermissions || r.permissions), 0);
 
   if (detailId) {
     const role = roles.find((x) => x.id === detailId);
@@ -271,7 +245,7 @@ export default function Roles({ users = [], roles = [], setRoles, reload, canMan
         role={role}
         users={users}
         onBack={() => setDetailId(null)}
-        onEdit={() => { if (canManage) { setEditRole(role); setShowModal(true); setDetailId(null); } }}
+        onEdit={() => { setEditRole(role); setShowModal(true); setDetailId(null); }}
       />
     );
   }
@@ -281,7 +255,7 @@ export default function Roles({ users = [], roles = [], setRoles, reload, canMan
       <div className="page-header flex-between" style={{ flexWrap: 'wrap', gap: 10 }}>
         <div>
           <h1 className="page-title">RÔLES & PERMISSIONS</h1>
-          <p className="page-subtitle">Chaque utilisateur hérite des permissions de son rôle.</p>
+          <p className="page-subtitle">Rôles liés aux départements CITYMO — accès par sous-rubrique.</p>
         </div>
         {canManage && (
           <button type="button" className="btn btn-primary" onClick={() => { setEditRole(null); setShowModal(true); }}>
@@ -295,20 +269,20 @@ export default function Roles({ users = [], roles = [], setRoles, reload, canMan
       <div className="stat-grid finance-kpi-grid" style={{ marginBottom: 20 }}>
         <KpiCard icon={<Shield size={17} />} label="Total rôles" value={total} color="grey" />
         <KpiCard icon={<Shield size={17} />} label="Rôles actifs" value={actifs} color="green" />
-        <KpiCard icon={<CheckSquare size={17} />} label="Permissions actives" value={permsCount} color="blue" />
-        <KpiCard icon={<Shield size={17} />} label="Utilisateurs liés" value={usersAffectes} color="orange" />
+        <KpiCard icon={<Shield size={17} />} label="Permissions actives" value={permsCount} color="blue" />
+        <KpiCard icon={<Shield size={17} />} label="Utilisateurs liés" value={users.filter((u) => u.role_id).length} color="orange" />
       </div>
 
       <div className="card" style={{ padding: 0 }}>
         {roles.length === 0 ? (
-          <EmptyState icon={<Shield size={24} />} title="Aucun rôle défini" sub="Exécutez la migration Administration dans Supabase" />
+          <EmptyState icon={<Shield size={24} />} title="Aucun rôle" sub="Exécutez les migrations Administration dans Supabase" />
         ) : (
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
                   <th>Rôle</th>
-                  <th>Description</th>
+                  <th>Département</th>
                   <th>Utilisateurs</th>
                   <th>Permissions</th>
                   <th>Statut</th>
@@ -317,32 +291,19 @@ export default function Roles({ users = [], roles = [], setRoles, reload, canMan
               </thead>
               <tbody>
                 {roles.map((r) => {
-                  const nbPerms = (() => { let c = 0; if (r.permissions) MODULES_ERP.forEach((m) => ACTIONS_PERMS.forEach((a) => { if (r.permissions[m] && r.permissions[m][a]) c++; })); return c; })();
-                  const nbUsers = (users || []).filter((u) => String(u.role_id) === String(r.id)).length;
+                  const nb = countGranted(r.submodulePermissions || r.permissions);
+                  const nbUsers = users.filter((u) => String(u.role_id) === String(r.id)).length;
                   return (
                     <tr key={r.id} style={{ cursor: 'pointer' }} onClick={() => setDetailId(r.id)}>
                       <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                          <div style={{ width: 34, height: 34, borderRadius: 8, background: r.est_admin ? 'var(--red-light)' : '#E3F2FD', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                            <Shield size={15} style={{ color: r.est_admin ? 'var(--red)' : '#1565C0' }} />
-                          </div>
-                          <div>
-                            <div style={{ fontWeight: 700, fontSize: '0.87rem' }}>{r.nom}</div>
-                            {r.est_admin && <span style={{ fontSize: '0.68rem', color: 'var(--red)', fontWeight: 700 }}>SUPER ADMIN</span>}
-                          </div>
-                        </div>
+                        <div style={{ fontWeight: 700 }}>{r.nom}</div>
+                        {r.est_admin && <span style={{ fontSize: '0.68rem', color: 'var(--red)', fontWeight: 700 }}>SUPER ADMIN</span>}
                       </td>
-                      <td data-label="Description" style={{ fontSize: '0.82rem', color: 'var(--text-2)' }}>
-                        {r.description ? (r.description.length > 60 ? `${r.description.slice(0, 60)}...` : r.description) : '—'}
-                      </td>
-                      <td data-label="Utilisateurs"><span style={{ fontWeight: 700 }}>{nbUsers}</span></td>
-                      <td data-label="Permissions">
-                        <span style={{ fontFamily: 'var(--font-head)', fontWeight: 700, color: nbPerms > 0 ? 'var(--red)' : 'var(--text-3)' }}>
-                          {nbPerms} / {MODULES_ERP.length * ACTIONS_PERMS.length}
-                        </span>
-                      </td>
+                      <td data-label="Département">{r.departement || '—'}</td>
+                      <td data-label="Utilisateurs">{nbUsers}</td>
+                      <td data-label="Permissions" style={{ fontWeight: 700, color: nb > 0 ? 'var(--red)' : 'var(--text-3)' }}>{nb}</td>
                       <td data-label="Statut">
-                        <span className={`badge ${r.statut === 'Actif' ? 'badge-green' : 'badge-grey'}`} style={{ fontSize: '0.72rem' }}>{r.statut}</span>
+                        <span className={`badge ${r.statut === 'Actif' ? 'badge-green' : 'badge-grey'}`}>{r.statut}</span>
                       </td>
                       <td onClick={(e) => e.stopPropagation()}>
                         <div style={{ display: 'flex', gap: 3 }}>
@@ -351,9 +312,7 @@ export default function Roles({ users = [], roles = [], setRoles, reload, canMan
                             <>
                               <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setEditRole(r); setShowModal(true); }}><Edit2 size={13} /></button>
                               <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleDupliquer(r)}><Copy size={13} /></button>
-                              <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleToggleStatut(r.id, r.statut)}>
-                                <ToggleLeft size={13} style={{ color: r.statut === 'Actif' ? '#E65100' : '#2E7D32' }} />
-                              </button>
+                              <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleToggleStatut(r.id, r.statut)}><ToggleLeft size={13} /></button>
                               <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleDelete(r.id)} style={{ color: 'var(--red)' }}><Trash2 size={13} /></button>
                             </>
                           )}
@@ -368,7 +327,7 @@ export default function Roles({ users = [], roles = [], setRoles, reload, canMan
         )}
       </div>
 
-      <Modal open={showModal} onClose={() => { setShowModal(false); setEditRole(null); }} title={editRole ? 'Modifier le rôle' : 'Nouveau rôle'} width={860}>
+      <Modal open={showModal} onClose={() => { setShowModal(false); setEditRole(null); }} title={editRole ? 'Modifier le rôle' : 'Nouveau rôle'} width={920}>
         <RoleForm initial={editRole} onSave={handleSave} onCancel={() => { setShowModal(false); setEditRole(null); }} saving={saving} />
       </Modal>
     </div>

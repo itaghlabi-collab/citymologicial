@@ -8,6 +8,7 @@ import {
   ensureProfile,
   getSupabaseSessionUser,
 } from './supabase/auth';
+import { validateAccountAccess } from './admin/accountAccess';
 import {
   authErrorPayload,
   logAuth,
@@ -73,7 +74,12 @@ export async function loginWithCredentials(email, password) {
   });
 
   logAuth('ensureProfile (login) →', { userId: data.user.id });
-  const profile = await ensureProfile(data.user);
+  const access = await validateAccountAccess(data.user);
+  if (!access.ok) {
+    return { success: false, error: access.error, errorCode: 'account_disabled' };
+  }
+
+  const profile = access.profile || await ensureProfile(data.user);
   if (profile) {
     logAuth('profile loaded (login)', {
       userId: profile.id,

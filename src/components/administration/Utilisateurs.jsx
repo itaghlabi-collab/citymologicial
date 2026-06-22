@@ -15,16 +15,19 @@ import {
   createUserFromEmployee as createUser,
   updateAdminUser as updateUser,
   setUserStatut as changeStatut,
-  requestPasswordReset as resetPwd,
+  adminResetPassword,
 } from '../../services/admin/users';
+import { generateTempPassword } from '../../services/admin/passwordUtils';
+import { getDepartmentOptions } from '../../services/admin/constants';
 import { getRolePermissionsForUser } from '../../services/admin/permissions';
-import { ERP_MODULES, ERP_ACTIONS } from '../../services/admin/constants';
+import { ERP_ACTIONS, findSubmodule } from '../../config/menuRegistry';
 
+const DEPT_OPTIONS = getDepartmentOptions();
 const EMPTY_FORM = {
   employee_id: '',
   prenom: '', nom: '', email: '', telephone: '', poste: '',
   password: '', password_confirm: '',
-  role_id: '', departement: '', statut: 'Actif',
+  role_id: '', department_id: '', statut: 'Actif',
   notes: '',
 };
 
@@ -50,8 +53,14 @@ function UserForm({ initial, roles, employees, onSave, onCancel, saving }) {
       email: emp.email || '',
       telephone: emp.telephone || '',
       poste: emp.poste || '',
+      department_id: emp.department_id ? String(emp.department_id) : '',
       departement: emp.department || '',
     }));
+  }
+
+  function generatePassword() {
+    const pwd = generateTempPassword(12);
+    setForm((p) => ({ ...p, password: pwd, password_confirm: pwd }));
   }
 
   function validate() {
@@ -124,7 +133,10 @@ function UserForm({ initial, roles, employees, onSave, onCancel, saving }) {
           <input value={form.poste} readOnly={linkedToRh} onChange={(e) => set('poste', e.target.value)} style={fieldStyle('poste')} />
         </FField>
         <FField label="Département">
-          <input value={form.departement || selectedEmployee?.department || ''} readOnly style={{ ...INPUT_STYLE, background: 'var(--surface-2)' }} />
+          <select value={form.department_id} onChange={(e) => set('department_id', e.target.value)} style={SELECT_STYLE}>
+            <option value="">— Sélectionner —</option>
+            {DEPT_OPTIONS.map((d) => <option key={d.value} value={d.value}>{d.label}</option>)}
+          </select>
         </FField>
       </FRow>
 
@@ -132,12 +144,16 @@ function UserForm({ initial, roles, employees, onSave, onCancel, saving }) {
       <FRow>
         {!initial && (
           <>
-            <FField label="Mot de passe" required>
-              <input type="password" value={form.password} onChange={(e) => set('password', e.target.value)} style={fieldStyle('password')} />
+            <FField label="Mot de passe temporaire" required>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <input type="text" value={form.password} onChange={(e) => set('password', e.target.value)} style={{ ...fieldStyle('password'), flex: 1 }} autoComplete="new-password" />
+                <button type="button" className="btn btn-secondary btn-sm" onClick={generatePassword}>Générer</button>
+              </div>
               {errors.password && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.password}</div>}
+              <div style={{ fontSize: '0.7rem', color: 'var(--text-3)', marginTop: 4 }}>Communiquez ce mot de passe à l&apos;utilisateur. Changement obligatoire à la 1ère connexion.</div>
             </FField>
             <FField label="Confirmer mot de passe">
-              <input type="password" value={form.password_confirm} onChange={(e) => set('password_confirm', e.target.value)} style={fieldStyle('password_confirm')} />
+              <input type="text" value={form.password_confirm} onChange={(e) => set('password_confirm', e.target.value)} style={fieldStyle('password_confirm')} />
               {errors.password_confirm && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.password_confirm}</div>}
             </FField>
           </>
@@ -199,31 +215,43 @@ function PermissionsModal({ open, onClose, userId, userName }) {
             {data?.role?.est_admin && <span className="badge badge-red" style={{ marginLeft: 8 }}>Super Admin</span>}
           </p>
           {data?.role?.est_admin ? (
-            <p style={{ color: 'var(--text-2)' }}>Accès complet à tous les modules.</p>
+            <p style={{ color: 'var(--text-2)' }}>Accès complet à toutes les rubriques et sous-rubriques.</p>
           ) : (
             <div style={{ maxHeight: 360, overflowY: 'auto' }}>
               <table style={{ width: '100%', fontSize: '0.8rem' }}>
                 <thead>
                   <tr>
-                    <th style={{ textAlign: 'left', padding: 6 }}>Module</th>
+                    <th style={{ textAlign: 'left', padding: 6 }}>Rubrique</th>
+                    <th style={{ textAlign: 'left', padding: 6 }}>Sous-rubrique</th>
                     <th style={{ textAlign: 'left', padding: 6 }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {ERP_MODULES.map((mod) => {
-                    const acts = (data?.permissions || [])
-                      .filter((p) => p.module_code === mod.code)
-                      .map((p) => ERP_ACTIONS.find((a) => a.code === p.action_code)?.label || p.action_code);
-                    if (!acts.length) return null;
+                  {(data?.permissions || []).map((p) => {
+                    const found = findSubmodule(p.submodule_code);
+                    const acts = ERP_ACTIONS.find((a) => a.code === p.action_code)?.label || p.action_code;
                     return (
-                      <tr key={mod.code}>
-                        <td style={{ padding: 6, fontWeight: 600 }}>{mod.label}</td>
-                        <td style={{ padding: 6 }}>{acts.join(', ')}</td>
+                      <tr key={`${p.submodule_code}-${p.action_code}`}>
+                        <td style={{ padding: 6 }}>{found?.rubrique?.label || p.module_code}</td>
+                        <td style={{ padding: 6, fontWeight: 600 }}>{found?.submodule?.label || p.submodule_code}</td>
+                        <td style={{ padding: 6 }}>{acts}</td>
                       </tr>
                     );
                   })}
                 </tbody>
               </table>
+              {(data?.exceptions || []).length > 0 && (
+                <>
+                  <div style={{ marginTop: 12, fontWeight: 700, fontSize: '0.75rem', color: 'var(--orange)' }}>Exceptions utilisateur</div>
+                  <ul style={{ fontSize: '0.78rem', paddingLeft: 18 }}>
+                    {data.exceptions.map((e) => (
+                      <li key={`${e.submodule_code}-${e.action_code}`}>
+                        {findSubmodule(e.submodule_code)?.submodule?.label || e.submodule_code} — {e.action_code} : {e.granted ? 'autorisé' : 'refusé'}
+                      </li>
+                    ))}
+                  </ul>
+                </>
+              )}
             </div>
           )}
         </>
@@ -328,22 +356,27 @@ export default function Utilisateurs({
   const [saving, setSaving] = useState(false);
   const [permsUser, setPermsUser] = useState(null);
   const [msg, setMsg] = useState('');
+  const [createdCreds, setCreatedCreds] = useState(null);
 
   const handleSave = useCallback(async (data) => {
     setSaving(true);
     setMsg('');
     try {
       let saved;
+      const tempPwd = data.password;
       if (editUser) {
         saved = await updateUser(editUser.id, data, data.employee);
       } else {
         saved = await createUser({
           employee: data.employee,
           role_id: data.role_id,
+          department_id: data.department_id,
           statut: data.statut,
           password: data.password,
           notes: data.notes,
+          mustChangePassword: true,
         });
+        setCreatedCreds({ email: saved.email, password: tempPwd, nom: [saved.prenom, saved.nom].filter(Boolean).join(' ') });
       }
       setUsers((prev) => {
         const exists = prev.some((u) => u.id === saved.id);
@@ -372,8 +405,8 @@ export default function Utilisateurs({
   async function handleResetPwd(u) {
     if (!canManage || !u?.email) return;
     try {
-      await resetPwd(u.email);
-      alert(`Email de réinitialisation envoyé à ${u.email}`);
+      await adminResetPassword(u.id, u.email);
+      alert(`Email de réinitialisation envoyé à ${u.email}. L'utilisateur devra définir un nouveau mot de passe.`);
     } catch (err) {
       alert(err.message);
     }
@@ -531,6 +564,21 @@ export default function Utilisateurs({
         )}
       </div>
 
+      <Modal open={Boolean(createdCreds)} onClose={() => setCreatedCreds(null)} title="Compte créé" width={480}>
+        {createdCreds && (
+          <div>
+            <p style={{ fontSize: '0.88rem', color: 'var(--text-2)' }}>
+              Transmettez ces identifiants à <strong>{createdCreds.nom}</strong>. Le mot de passe est géré par Supabase Auth et ne sera pas stocké dans l&apos;ERP.
+            </p>
+            <div style={{ background: 'var(--surface-2)', borderRadius: 8, padding: 14, marginBottom: 16, fontFamily: 'monospace', fontSize: '0.85rem' }}>
+              <div>Email : {createdCreds.email}</div>
+              <div>Mot de passe temporaire : {createdCreds.password}</div>
+            </div>
+            <p style={{ fontSize: '0.78rem', color: '#E65100' }}>Changement de mot de passe obligatoire à la première connexion.</p>
+            <button type="button" className="btn btn-primary" style={{ width: '100%', marginTop: 8 }} onClick={() => setCreatedCreds(null)}>Fermer</button>
+          </div>
+        )}
+      </Modal>
       <Modal open={showModal} onClose={() => { setShowModal(false); setEditUser(null); }} title={editUser ? "Modifier l'utilisateur" : 'Nouvel utilisateur'} width={720}>
         <UserForm initial={editUser} roles={roles} employees={employees} onSave={handleSave} onCancel={() => { setShowModal(false); setEditUser(null); }} saving={saving} />
       </Modal>

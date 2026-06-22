@@ -2,7 +2,7 @@
  * administration/shared.jsx — Composants partagés module Administration ERP CITYMO
  */
 import { X, Plus } from 'lucide-react';
-import { ERP_MODULES, ERP_ACTIONS } from '../../services/admin/constants';
+import { ERP_RUBRIQUES, ERP_ACTIONS } from '../../config/menuRegistry';
 
 export const INPUT_STYLE = {
   width: '100%', padding: '8px 11px', border: '1.5px solid var(--border)',
@@ -14,7 +14,7 @@ export const TEXTAREA_STYLE = { ...INPUT_STYLE, minHeight: 72, resize: 'vertical
 
 export const STATUTS_USER = ['Actif', 'Suspendu', 'Désactivé'];
 export const DEPARTEMENTS  = ['Direction', 'RH', 'Commercial', 'Finance', 'Technique', 'Logistique', 'Informatique', 'Achats', 'Projets', 'Administration'];
-export const MODULES_ERP   = ERP_MODULES.map((m) => m.label);
+export const MODULES_ERP   = ERP_RUBRIQUES.map((m) => m.label);
 export const ACTIONS_PERMS = ERP_ACTIONS.map((a) => a.label);
 export const TYPES_BACKUP  = ['Complète', 'Base données', 'Documents', 'Système', 'Manuelle', 'Automatique'];
 export const STATUTS_BACKUP = ['Succès', 'En cours', 'Erreur', 'Planifié'];

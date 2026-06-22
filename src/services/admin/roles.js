@@ -1,20 +1,25 @@
 /**
- * roles.js — CRUD rôles ERP + matrice permissions (Supabase).
+ * roles.js — CRUD rôles ERP + permissions par sous-rubrique (Supabase).
  */
 import { getSupabase } from '../../lib/supabase';
+import { DEPT_DISPLAY } from '../../config/menuRegistry';
 import {
-  permissionsToMatrix,
-  matrixToPermissionRows,
+  permissionsToSubmoduleMap,
+  submoduleMapToPermissionRows,
   STATUT_ROLE_DB,
   STATUT_ROLE_UI,
-  fullPermissionMatrix,
-  emptyPermissionMatrix,
+  fullSubmodulePermissions,
+  emptySubmodulePermissions,
 } from './constants';
 
 const ROLES_TABLE = 'erp_roles';
 const PERMS_TABLE = 'role_permissions';
 
 function mapRole(row, permissions) {
+  const subPerms = row.est_admin
+    ? fullSubmodulePermissions()
+    : permissionsToSubmoduleMap(permissions);
+
   return {
     id: row.id,
     code: row.code,
@@ -22,8 +27,11 @@ function mapRole(row, permissions) {
     description: row.description || '',
     statut: STATUT_ROLE_DB[row.statut] || 'Actif',
     est_admin: Boolean(row.est_admin),
+    department_id: row.department_id ?? null,
+    departement: row.department_id ? (DEPT_DISPLAY[row.department_id] || '—') : '—',
     date_creation: row.created_at?.slice(0, 10) || '',
-    permissions: row.est_admin ? fullPermissionMatrix() : permissionsToMatrix(permissions),
+    submodulePermissions: subPerms,
+    permissions: subPerms,
     _permissionsRaw: permissions || [],
   };
 }
@@ -41,7 +49,7 @@ export async function listRoles() {
   const ids = roles.map((r) => r.id);
   const { data: perms, error: pErr } = await sb
     .from(PERMS_TABLE)
-    .select('role_id, module_code, action_code, granted')
+    .select('role_id, module_code, submodule_code, action_code, granted')
     .in('role_id', ids);
 
   if (pErr) throw pErr;
@@ -55,12 +63,10 @@ export async function listRoles() {
   return roles.map((r) => mapRole(r, byRole[r.id]));
 }
 
-export async function getRoleById(roleId) {
-  const roles = await listRoles();
-  return roles.find((r) => r.id === roleId) || null;
-}
-
-export async function createRole({ nom, description, statut, est_admin, permissions }) {
+export async function createRole({
+  nom, description, statut, est_admin, department_id,
+  submodulePermissions, permissions,
+}) {
   const sb = getSupabase();
   const code = nom
     .toLowerCase()
@@ -78,19 +84,26 @@ export async function createRole({ nom, description, statut, est_admin, permissi
       description: description?.trim() || null,
       statut: STATUT_ROLE_UI[statut] || 'actif',
       est_admin: Boolean(est_admin),
+      department_id: department_id ? Number(department_id) : null,
     })
     .select('*')
     .single();
 
   if (error) throw error;
 
-  const matrix = est_admin ? fullPermissionMatrix() : (permissions || emptyPermissionMatrix());
-  await saveRolePermissions(role.id, matrix, Boolean(est_admin));
+  const map = est_admin
+    ? fullSubmodulePermissions()
+    : (submodulePermissions || permissions || emptySubmodulePermissions());
 
-  return mapRole(role, matrixToPermissionRows(role.id, matrix));
+  await saveRolePermissions(role.id, map, Boolean(est_admin));
+
+  return mapRole(role, submoduleMapToPermissionRows(role.id, map));
 }
 
-export async function updateRole(roleId, { nom, description, statut, est_admin, permissions }) {
+export async function updateRole(roleId, {
+  nom, description, statut, est_admin, department_id,
+  submodulePermissions, permissions,
+}) {
   const sb = getSupabase();
   const { data: role, error } = await sb
     .from(ROLES_TABLE)
@@ -99,6 +112,7 @@ export async function updateRole(roleId, { nom, description, statut, est_admin, 
       description: description?.trim() || null,
       statut: STATUT_ROLE_UI[statut] || 'actif',
       est_admin: Boolean(est_admin),
+      department_id: department_id ? Number(department_id) : null,
     })
     .eq('id', roleId)
     .select('*')
@@ -106,15 +120,18 @@ export async function updateRole(roleId, { nom, description, statut, est_admin, 
 
   if (error) throw error;
 
-  const matrix = est_admin ? fullPermissionMatrix() : (permissions || emptyPermissionMatrix());
-  await saveRolePermissions(roleId, matrix, Boolean(est_admin));
+  const map = est_admin
+    ? fullSubmodulePermissions()
+    : (submodulePermissions || permissions || emptySubmodulePermissions());
 
-  return mapRole(role, matrixToPermissionRows(roleId, matrix));
+  await saveRolePermissions(roleId, map, Boolean(est_admin));
+
+  return mapRole(role, submoduleMapToPermissionRows(roleId, map));
 }
 
-async function saveRolePermissions(roleId, matrix, allGranted) {
+async function saveRolePermissions(roleId, map, allGranted) {
   const sb = getSupabase();
-  const rows = matrixToPermissionRows(roleId, matrix).map((r) => ({
+  const rows = submoduleMapToPermissionRows(roleId, map).map((r) => ({
     ...r,
     granted: allGranted ? true : r.granted,
   }));
@@ -158,6 +175,7 @@ export async function duplicateRole(role) {
     description: role.description,
     statut: role.statut,
     est_admin: role.est_admin,
-    permissions: role.permissions,
+    department_id: role.department_id,
+    submodulePermissions: role.submodulePermissions || role.permissions,
   });
 }

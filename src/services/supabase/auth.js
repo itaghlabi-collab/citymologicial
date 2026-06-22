@@ -3,6 +3,7 @@
  */
 import { getSupabase } from '../../lib/supabase';
 import { logAuth, logAuthError } from '../../utils/authLog';
+import { validateAccountAccess } from '../admin/accountAccess';
 
 const PROFILE_TIMEOUT_MS = 5000;
 
@@ -37,10 +38,13 @@ export function mapSupabaseUser(user, profile = null) {
     id: user.id,
     nom,
     email: user.email || profile?.email || '',
-    role: profile?.role || meta.role || 'commercial',
+    role: profile?.erp_roles?.code || profile?.role || meta.role || 'commercial',
+    role_id: profile?.role_id ?? null,
     initiales,
     department_id: profile?.department_id ?? null,
     created_at: profile?.created_at ?? null,
+    statut: profile?.statut || 'actif',
+    must_change_password: Boolean(profile?.must_change_password),
   };
 }
 
@@ -51,7 +55,11 @@ export async function fetchProfile(userId) {
 
   const { data, error } = await getSupabase()
     .from('profiles')
-    .select('id, nom, email, role, initiales, department_id, created_at')
+    .select(`
+      id, nom, email, role, role_id, initiales, department_id, created_at,
+      statut, must_change_password,
+      erp_roles ( code, nom )
+    `)
     .eq('id', userId)
     .maybeSingle();
 
@@ -84,7 +92,7 @@ async function ensureProfileInternal(authUser) {
       id: authUser.id,
       nom,
       email: authUser.email,
-      role: meta.role || 'Super Admin',
+      role: meta.role || 'employe',
       initiales: meta.initiales || parts.map((p) => p[0]).join('').slice(0, 2).toUpperCase(),
     })
     .select('id, nom, email, role, initiales, department_id')
@@ -127,7 +135,13 @@ export function loadProfileInBackground(authUser, onUpdate) {
   setTimeout(async () => {
     try {
       logAuth('loadProfileInBackground →', { userId: authUser.id });
-      const profile = await ensureProfile(authUser);
+      const access = await validateAccountAccess(authUser);
+      if (!access.ok) {
+        await getSupabase().auth.signOut();
+        onUpdate(null);
+        return;
+      }
+      const profile = access.profile || await ensureProfile(authUser);
       if (profile) {
         logAuth('profile loaded (background)', {
           email: profile.email || authUser.email,
@@ -165,7 +179,14 @@ export async function getSupabaseSessionUser() {
     return null;
   }
 
-  const profile = await ensureProfile(session.user);
+  const access = await validateAccountAccess(session.user);
+  if (!access.ok) {
+    logAuth('getSession: account disabled', { userId: session.user.id });
+    await getSupabase().auth.signOut();
+    return null;
+  }
+
+  const profile = access.profile || await ensureProfile(session.user);
   if (profile) {
     logAuth('profile loaded (session restore)', {
       email: profile.email,
@@ -198,19 +219,28 @@ export function subscribeToAuthChanges(onUser) {
         return;
       }
 
-      const fallbackUser = mapSupabaseUser(session.user, null);
-      logAuth('onAuthStateChange → user (fallback, profile loading)', {
-        event,
-        userId: fallbackUser.id,
-        email: fallbackUser.email,
-      });
-      onUser(fallbackUser);
+      (async () => {
+        const access = await validateAccountAccess(session.user);
+        if (!access.ok) {
+          await getSupabase().auth.signOut();
+          onUser(null);
+          return;
+        }
 
-      if (event === 'SIGNED_IN') {
-        recordLastSignIn(session.user.id);
-      }
+        const fallbackUser = mapSupabaseUser(session.user, access.profile);
+        logAuth('onAuthStateChange → user (fallback, profile loading)', {
+          event,
+          userId: fallbackUser.id,
+          email: fallbackUser.email,
+        });
+        onUser(fallbackUser);
 
-      loadProfileInBackground(session.user, onUser);
+        if (event === 'SIGNED_IN') {
+          recordLastSignIn(session.user.id);
+        }
+
+        loadProfileInBackground(session.user, onUser);
+      })();
     },
   );
 

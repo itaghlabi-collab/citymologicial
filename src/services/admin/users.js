@@ -5,8 +5,26 @@ import { getSupabase } from '../../lib/supabase';
 import { getDeptName } from '../../data/departments';
 import { employeeFullName } from '../rh/employees';
 import { STATUT_USER_DB, STATUT_USER_UI } from './constants';
+import { clearPermissionCache } from './permissions';
 
 const TABLE = 'profiles';
+
+export const DISABLED_ACCOUNT_MSG = 'Compte désactivé, contactez l\'administrateur.';
+
+export function isProfileActive(profile) {
+  if (!profile) return true;
+  return (profile.statut || 'actif') === 'actif';
+}
+
+export async function clearMustChangePassword(userId) {
+  const sb = getSupabase();
+  const { error } = await sb
+    .from(TABLE)
+    .update({ must_change_password: false })
+    .eq('id', userId);
+  if (error) throw error;
+  clearPermissionCache();
+}
 
 function splitNom(nom) {
   const parts = (nom || '').trim().split(/\s+/).filter(Boolean);
@@ -41,6 +59,7 @@ function mapAdminUser(row) {
     role_code: role?.code || row.role || '',
     role_nom: role?.nom || row.role || '',
     statut: STATUT_USER_DB[row.statut] || 'Actif',
+    must_change_password: Boolean(row.must_change_password),
     date_creation: row.created_at?.slice(0, 10) || '',
     derniere_connexion: row.last_sign_in_at
       ? new Date(row.last_sign_in_at).toLocaleString('fr-FR')
@@ -59,6 +78,7 @@ export async function listAdminUsers() {
     .select(`
       id, nom, prenom, email, role, role_id, statut, telephone, notes,
       department_id, employee_id, initiales, created_at, last_sign_in_at,
+      must_change_password,
       employees ( id, firstname, lastname, email, telephone, poste, department, department_id, statut ),
       erp_roles ( id, code, nom, est_admin, statut )
     `)
@@ -97,17 +117,23 @@ function profilePayloadFromForm(form, employee) {
     email: (employee?.email || form.email)?.trim()?.toLowerCase(),
     telephone: employee?.telephone || form.telephone?.trim() || null,
     role_id: form.role_id || null,
-    department_id: employee?.department_id ?? form.department_id ?? null,
+    department_id: form.department_id
+      ? Number(form.department_id)
+      : (employee?.department_id ?? form.department_id ?? null),
     employee_id: employee?.id ?? form.employee_id ?? null,
     statut: STATUT_USER_UI[form.statut] || 'actif',
     notes: form.notes?.trim() || null,
     initiales: [prenom?.[0], nom?.[0]].filter(Boolean).join('').toUpperCase().slice(0, 2) || null,
+    must_change_password: form.must_change_password ?? undefined,
   };
 }
 
 export async function updateAdminUser(userId, form, employee) {
   const sb = getSupabase();
   const payload = profilePayloadFromForm(form, employee);
+  if (payload.must_change_password === undefined) {
+    delete payload.must_change_password;
+  }
 
   const { data, error } = await sb
     .from(TABLE)
@@ -116,12 +142,14 @@ export async function updateAdminUser(userId, form, employee) {
     .select(`
       id, nom, prenom, email, role, role_id, statut, telephone, notes,
       department_id, employee_id, initiales, created_at, last_sign_in_at,
+      must_change_password,
       employees ( id, firstname, lastname, email, telephone, poste, department, department_id ),
       erp_roles ( id, code, nom, est_admin )
     `)
     .single();
 
   if (error) throw error;
+  clearPermissionCache();
   return mapAdminUser(data);
 }
 
@@ -149,7 +177,9 @@ export async function linkExistingProfileByEmail(email, form, employee) {
   return updateAdminUser(profile.id, form, employee);
 }
 
-export async function createUserFromEmployee({ employee, role_id, statut, password, notes }) {
+export async function createUserFromEmployee({
+  employee, role_id, department_id, statut, password, notes, mustChangePassword = true,
+}) {
   const sb = getSupabase();
   const email = employee.email?.trim()?.toLowerCase();
   if (!email) throw new Error('L’employé doit avoir un email.');
@@ -158,12 +188,14 @@ export async function createUserFromEmployee({ employee, role_id, statut, passwo
 
   const form = {
     role_id,
+    department_id,
     statut: statut || 'Actif',
     notes,
     email,
     prenom: employee.firstname,
     nom: employee.lastname,
     telephone: employee.telephone,
+    must_change_password: mustChangePassword,
   };
 
   const { data: existing } = await sb.from(TABLE).select('id').ilike('email', email).maybeSingle();
@@ -183,6 +215,8 @@ export async function createUserFromEmployee({ employee, role_id, statut, passwo
         nom: employeeFullName(employee),
         prenom: employee.firstname,
         role: 'employe',
+        must_change_password: mustChangePassword,
+        statut: STATUT_USER_UI[statut || 'Actif'] || 'actif',
       },
     },
   });
@@ -206,7 +240,18 @@ export async function createUserFromEmployee({ employee, role_id, statut, passwo
     throw new Error('Compte créé mais identifiant introuvable. Vérifiez la confirmation email Supabase.');
   }
 
-  return updateAdminUser(userId, form, employee);
+  const saved = await updateAdminUser(userId, form, employee);
+  if (mustChangePassword) {
+    await sb.from(TABLE).update({ must_change_password: true }).eq('id', userId);
+    saved.must_change_password = true;
+  }
+  return saved;
+}
+
+export async function adminResetPassword(userId, email) {
+  const sb = getSupabase();
+  await requestPasswordReset(email);
+  await sb.from(TABLE).update({ must_change_password: true }).eq('id', userId);
 }
 
 export async function requestPasswordReset(email) {

@@ -3,6 +3,7 @@ import { useAuth } from './hooks/useAuth';
 import './App.css';
 import NotificationCenter from './components/notifications/NotificationCenter';
 import UserProfileMenu from './components/dashboard/UserProfileMenu';
+import ForcePasswordChangeModal from './components/dashboard/ForcePasswordChangeModal';
 
 import Dashboard from './components/Dashboard';
 import RH from './components/RH';
@@ -38,6 +39,7 @@ import Inventaire from './components/Inventaire';
 import Documents from './components/Documents';
 import SAV from './components/SAV';
 import Administration from './components/Administration';
+import { usePermissions } from './hooks/usePermissions';
 import { canAccessExecutiveCalendar } from './services/auth/executiveCalendarAccess';
 
 import {
@@ -416,7 +418,7 @@ function LoginPage() {
 /* =============================================
    SIDEBAR
    ============================================= */
-function Sidebar({ active, onNavigate, collapsed, mobileOpen, onMobileClose, user }) {
+function Sidebar({ active, onNavigate, collapsed, mobileOpen, onMobileClose, user, canShowRoute }) {
   // Build className: desktop collapsed vs mobile open
   const cls = [
     'sidebar',
@@ -446,7 +448,7 @@ function Sidebar({ active, onNavigate, collapsed, mobileOpen, onMobileClose, use
         {NAV.map((group) => {
           const items = group.items.filter((item) => {
             if (item.id === 'agenda-direction') return canAccessExecutiveCalendar(user);
-            return true;
+            return canShowRoute(item.id);
           });
           if (!items.length) return null;
           return (
@@ -515,10 +517,13 @@ function Header({ module, onToggleSidebar, user, onLogout, onNavigate }) {
    APP ROOT
    ============================================= */
 export default function App() {
-  const { user, loading, logout } = useAuth();
+  const { user, loading, logout, refreshUser } = useAuth();
   const [module, setModule] = useState('dashboard');
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  const { canShowRoute } = usePermissions(user);
+  const mustChangePassword = Boolean(user?.must_change_password);
 
   // While restoring session — même fond login Codia (spinner visible)
   if (loading) {
@@ -539,13 +544,21 @@ export default function App() {
     return <LoginPage />;
   }
 
-  // Detect mobile (≤768px) to decide toggle behaviour
+  if (mustChangePassword) {
+    return (
+      <ForcePasswordChangeModal
+        user={user}
+        onComplete={() => refreshUser?.()}
+      />
+    );
+  }
+
   function toggleSidebar() {
     const isMobile = window.innerWidth <= 768;
     if (isMobile) {
-      setMobileOpen(o => !o);
+      setMobileOpen((o) => !o);
     } else {
-      setCollapsed(c => !c);
+      setCollapsed((c) => !c);
     }
   }
 
@@ -569,6 +582,7 @@ export default function App() {
         mobileOpen={mobileOpen}
         onMobileClose={closeMobile}
         user={user}
+        canShowRoute={canShowRoute}
       />
       <div className="main-area">
         <Header

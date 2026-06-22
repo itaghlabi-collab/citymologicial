@@ -5,7 +5,7 @@ import {
   clearLegacyAuthStorage,
   handleUnauthorized,
 } from '../services/auth';
-import { subscribeToAuthChanges } from '../services/supabase/auth';
+import { subscribeToAuthChanges, getSupabaseSessionUser } from '../services/supabase/auth';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { logAuth, logAuthError } from '../utils/authLog';
 
@@ -100,8 +100,13 @@ export function AuthProvider({ children }) {
     setUser(null);
   }, []);
 
+  const refreshUser = useCallback(async () => {
+    const next = await getSupabaseSessionUser();
+    setUser(next);
+  }, []);
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout }}>
+    <AuthContext.Provider value={{ user, loading, login, logout, refreshUser }}>
       {children}
     </AuthContext.Provider>
   );
