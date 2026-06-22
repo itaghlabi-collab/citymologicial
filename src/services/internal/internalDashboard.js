@@ -92,7 +92,7 @@ export async function loadInternalDashboardData() {
       recentFactures: [],
       activities: [],
       alerts: [],
-      kpis: {},
+      kpis: { overdueMeetings: 0, todayMeetings: 0 },
     };
   }
 
@@ -121,10 +121,16 @@ export async function loadInternalDashboardData() {
 
   const todayMeetings = appts
     .filter((a) => a.date === today && a.statut === 'planifie')
-    .map(toDashboardMeeting);
-  const dashboardMeetings = todayMeetings.length
-    ? todayMeetings
-    : appts.filter((a) => a.statut === 'planifie').slice(0, 6).map(toDashboardMeeting);
+    .map((a) => toDashboardMeeting(a, today))
+    .sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+
+  const overdueMeetings = appts
+    .filter((a) => a.date && a.date < today && a.statut === 'planifie')
+    .sort((a, b) => b.date.localeCompare(a.date) || (a.time || '').localeCompare(b.time || ''))
+    .slice(0, 8)
+    .map((a) => toDashboardMeeting(a, today));
+
+  const dashboardMeetings = [...overdueMeetings, ...todayMeetings];
 
   const prospects = prospectsRaw
     .slice()
@@ -188,6 +194,7 @@ export async function loadInternalDashboardData() {
     kpis: {
       pendingTasks: pendingTasks.length,
       todayMeetings: todayMeetings.length,
+      overdueMeetings: overdueMeetings.length,
       prospectsCount: prospectsRaw.length,
       pendingQuotes,
       conversionRate,

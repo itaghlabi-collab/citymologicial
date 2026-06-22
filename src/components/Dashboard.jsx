@@ -7,6 +7,7 @@ import {
 } from 'lucide-react';
 import { useDashboard } from '../hooks/useDashboard';
 import { formatMAD, formatMADPrecise, formatCompact, formatDate } from '../utils/formatters';
+import { ROUTES } from '../config/routes';
 
 /* ── Helpers ─────────────────────────────────────────────────────── */
 function fmtMAD(n) { return formatMADPrecise(n); }
@@ -196,11 +197,27 @@ function BudgetBarChart({ projects }) {
 }
 
 /* ── Timeline Activity ──────────────────────────────────────────── */
-function TimelineItem({ time, title, location, type, tech, isLast }) {
-  const dotColor = type === 'sav' ? '#D32F2F' : type === 'call' ? '#1565C0' : '#2E7D32';
-  const bgColor = type === 'sav' ? '#FFF5F5' : type === 'call' ? '#F0F7FF' : '#F1F8F1';
+function TimelineItem({ time, title, location, type, tech, isLast, onClick }) {
+  const dotColor = type === 'overdue' ? '#D32F2F' : type === 'call' ? '#1565C0' : '#2E7D32';
+  const bgColor = type === 'overdue' ? '#FFF0F0' : type === 'call' ? '#F0F7FF' : '#F1F8F1';
+  const Wrapper = onClick ? 'button' : 'div';
   return (
-    <div style={{ display: 'flex', gap: 12, position: 'relative' }}>
+    <Wrapper
+      type={onClick ? 'button' : undefined}
+      onClick={onClick}
+      style={{
+        display: 'flex',
+        gap: 12,
+        position: 'relative',
+        width: '100%',
+        border: 'none',
+        background: 'none',
+        padding: 0,
+        textAlign: 'left',
+        cursor: onClick ? 'pointer' : 'default',
+        fontFamily: 'inherit',
+      }}
+    >
       {/* Timeline spine */}
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', flexShrink: 0 }}>
         <div style={{ width: 10, height: 10, borderRadius: '50%', background: dotColor, border: '2px solid #fff', boxShadow: `0 0 0 2px ${dotColor}30`, marginTop: 4, flexShrink: 0 }} />
@@ -219,7 +236,7 @@ function TimelineItem({ time, title, location, type, tech, isLast }) {
           <span style={{ fontSize: '0.75rem', fontWeight: 800, color: dotColor, fontFamily: 'var(--font-head)', flexShrink: 0, marginTop: 1 }}>{time}</span>
         </div>
       </div>
-    </div>
+    </Wrapper>
   );
 }
 
@@ -255,6 +272,8 @@ export default function Dashboard({ onNavigate }) {
 
   const tasks = useInternal ? (internal.tasks || []) : [];
   const meetings = useInternal ? (internal.meetings || []) : [];
+  const overdueMeetings = meetings.filter((m) => m.isOverdue);
+  const todayMeetings = meetings.filter((m) => m.isToday);
   const prospects = useInternal ? (internal.prospects || []) : [];
   const recentFactures = useInternal ? (internal.recentFactures || []) : (dash?.legacyInvoices || []);
   const {
@@ -311,17 +330,18 @@ export default function Dashboard({ onNavigate }) {
 
   const dayLabels = ['L', 'M', 'Me', 'J', 'V', 'S', 'D'];
 
-  const sortedMeetings = [...meetings].sort((a, b) => (a.time || '').localeCompare(b.time || ''));
+  const sortedMeetings = [...meetings];
 
   const activityTimeline = (internal?.activities || []).slice(0, 5).map((act) => ({
     time: act.at ? new Date(act.at).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' }) : '—',
     title: act.label,
-    location: act.sub || 'Activite recente',
+    location: act.sub || 'Activité récente',
     type: act.kind === 'rdv' ? 'call' : 'other',
     tech: '',
+    kind: act.kind,
   }));
 
-  const timelineItems = sortedMeetings.length ? sortedMeetings : activityTimeline;
+  const goRdv = onNavigate ? () => onNavigate(ROUTES.RENDEZVOUS) : undefined;
 
   if (loading && !dash) {
     return (
@@ -609,19 +629,59 @@ export default function Dashboard({ onNavigate }) {
 
         {/* Timeline */}
         <div className="card">
-          <div className="card-title"><Calendar size={15} /> Activites du jour</div>
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            {timelineItems.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '20px 0', color: 'var(--text-3)', fontSize: '0.85rem' }}>Aucune activite prevue aujourd&apos;hui.</div>
-            ) : timelineItems.map((m, i) => (
-              <TimelineItem key={i} {...m} isLast={i === timelineItems.length - 1} />
-            ))}
+          <div className="card-title" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}><Calendar size={15} /> Activités du jour</span>
+            {onNavigate && (
+              <button type="button" className="btn btn-ghost btn-sm" onClick={goRdv} style={{ fontSize: '0.72rem' }}>
+                Rendez-vous →
+              </button>
+            )}
           </div>
-          {activityTimeline.length > 0 && sortedMeetings.length > 0 && (
+          <p style={{ margin: '0 0 12px', fontSize: '0.75rem', color: 'var(--text-3)' }}>
+            Lié au module <strong>Rendez-vous</strong> — RDV du jour et relances non traitées.
+          </p>
+          <div style={{ display: 'flex', flexDirection: 'column' }}>
+            {sortedMeetings.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '20px 0', color: 'var(--text-3)', fontSize: '0.85rem' }}>
+                Aucun RDV prévu aujourd&apos;hui ni relance en attente.
+              </div>
+            ) : (
+              <>
+                {overdueMeetings.length > 0 && (
+                  <>
+                    <div style={{ fontSize: '0.68rem', fontWeight: 800, letterSpacing: '0.1em', color: '#C62828', textTransform: 'uppercase', marginBottom: 8 }}>
+                      Relances ({overdueMeetings.length})
+                    </div>
+                    {overdueMeetings.map((m, i) => (
+                      <TimelineItem key={m.id || `ov-${i}`} {...m} isLast={i === overdueMeetings.length - 1 && todayMeetings.length === 0} onClick={goRdv} />
+                    ))}
+                  </>
+                )}
+                {todayMeetings.length > 0 && (
+                  <>
+                    {overdueMeetings.length > 0 && (
+                      <div style={{ fontSize: '0.68rem', fontWeight: 800, letterSpacing: '0.1em', color: 'var(--text-3)', textTransform: 'uppercase', margin: '12px 0 8px' }}>
+                        Aujourd&apos;hui ({todayMeetings.length})
+                      </div>
+                    )}
+                    {todayMeetings.map((m, i) => (
+                      <TimelineItem key={m.id || `td-${i}`} {...m} isLast={i === todayMeetings.length - 1} onClick={goRdv} />
+                    ))}
+                  </>
+                )}
+              </>
+            )}
+          </div>
+          {activityTimeline.length > 0 && (
             <>
-              <div style={{ fontSize: '0.68rem', fontWeight: 800, letterSpacing: '0.1em', color: 'var(--text-3)', textTransform: 'uppercase', margin: '16px 0 10px' }}>Activites recentes</div>
+              <div style={{ fontSize: '0.68rem', fontWeight: 800, letterSpacing: '0.1em', color: 'var(--text-3)', textTransform: 'uppercase', margin: '16px 0 10px' }}>Activités récentes</div>
               {activityTimeline.map((m, i) => (
-                <TimelineItem key={'act-' + i} {...m} isLast={i === activityTimeline.length - 1} />
+                <TimelineItem
+                  key={'act-' + i}
+                  {...m}
+                  isLast={i === activityTimeline.length - 1}
+                  onClick={m.kind === 'rdv' ? goRdv : () => onNavigate?.(ROUTES.TACHES)}
+                />
               ))}
             </>
           )}

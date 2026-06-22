@@ -160,22 +160,37 @@ export function collectAppointmentResponsables(appts) {
 }
 
 /** Shape for Dashboard timeline */
-export function toDashboardMeeting(appt) {
+export function toDashboardMeeting(appt, today) {
+  const todayIso = today || new Date().toISOString().slice(0, 10);
+  const isOverdue = Boolean(
+    appt.date && appt.date < todayIso && appt.statut === 'planifie',
+  );
+  const isToday = appt.date === todayIso;
+
   const typeMap = {
     appel: 'call',
-    visite_client: 'sav',
+    visite_client: 'call',
     reunion_interne: 'other',
-    chantier: 'sav',
+    chantier: 'other',
     commercial: 'call',
     autre: 'other',
   };
+
+  const lieu = appt.lieu || appt.client_prospect || '—';
+  const resp = appt.employe || '';
+
   return {
     id: appt.id,
+    date: appt.date,
     time: appt.heure || '—',
     title: appt.titre,
-    location: appt.lieu || appt.client_prospect || '—',
-    type: typeMap[appt.type] || 'other',
-    tech: appt.employe || '',
+    location: isOverdue
+      ? `Relance · ${lieu}${resp ? ` · ${resp}` : ''}`
+      : `${lieu}${resp ? ` · ${resp}` : ''}`,
+    type: isOverdue ? 'overdue' : (isToday ? (typeMap[appt.type] || 'other') : 'other'),
+    tech: isOverdue ? `Prévu le ${appt.date}` : '',
     statut: appt.statut,
+    isOverdue,
+    isToday,
   };
 }
