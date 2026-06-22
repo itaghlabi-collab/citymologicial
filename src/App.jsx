@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useAuth } from './hooks/useAuth';
 import './App.css';
 import NotificationCenter from './components/notifications/NotificationCenter';
+import UserProfileMenu from './components/dashboard/UserProfileMenu';
 
 import Dashboard from './components/Dashboard';
 import RH from './components/RH';
@@ -240,9 +241,9 @@ const MODULE_LABELS = {
 /* =============================================
    PAGE RENDERER  (map new IDs to existing components)
    ============================================= */
-function PageContent({ module }) {
+function PageContent({ module, onNavigate }) {
   switch (module) {
-    case 'dashboard':           return <Dashboard />;
+    case 'dashboard':           return <Dashboard onNavigate={onNavigate} />;
     /* Organisation interne */
     case 'taches':              return <Taches />;
     case 'rendezvous':          return <RendezVous />;
@@ -504,9 +505,7 @@ function Header({ module, onToggleSidebar, user, onLogout, onNavigate }) {
           <Search size={18} />
         </button>
         <NotificationCenter user={user} onNavigate={onNavigate} />
-        <div className="header-avatar" title={user.nom} onClick={onLogout} style={{ cursor: 'pointer' }}>
-          {user.initiales || user.nom.split(' ').map(n => n[0]).slice(0, 2).join('')}
-        </div>
+        <UserProfileMenu user={user} onLogout={onLogout} onNavigate={onNavigate} />
       </div>
     </header>
   );
@@ -580,7 +579,7 @@ export default function App() {
           onNavigate={setModule}
         />
         <main className="page-content">
-          <PageContent module={module} />
+          <PageContent module={module} onNavigate={setModule} />
         </main>
       </div>
     </div>

@@ -850,6 +850,235 @@ html, body, #root {
   cursor: pointer;
   font-family: var(--font-head);
   margin-left: 4px;
+  border: none;
+  padding: 0;
+}
+
+/* ---- User profile dropdown ---- */
+.user-profile-menu {
+  position: relative;
+  margin-left: 4px;
+}
+
+.user-profile-trigger {
+  display: inline-flex !important;
+  align-items: center;
+  gap: 2px;
+  padding-right: 2px !important;
+}
+
+.user-profile-trigger.is-open {
+  box-shadow: 0 0 0 2px rgba(211, 47, 47, 0.25);
+}
+
+.user-profile-chevron {
+  opacity: 0.85;
+  margin-right: 2px;
+}
+
+.user-profile-dropdown {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  min-width: 260px;
+  max-width: min(320px, calc(100vw - 24px));
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: var(--shadow-lg);
+  z-index: 1100;
+  padding: 8px 0;
+  animation: fadeIn 0.15s ease;
+}
+
+.user-profile-dropdown-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px 12px;
+}
+
+.user-profile-dropdown-avatar {
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  background: var(--red);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 0.85rem;
+  font-family: var(--font-head);
+  flex-shrink: 0;
+}
+
+.user-profile-dropdown-meta {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.user-profile-dropdown-meta strong {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.25;
+  word-break: break-word;
+}
+
+.user-profile-dropdown-meta > span:not(.user-profile-dropdown-role) {
+  font-size: 0.76rem;
+  color: var(--text-3);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.user-profile-dropdown-role {
+  font-size: 0.7rem !important;
+  font-weight: 600;
+  color: var(--red) !important;
+  text-transform: capitalize;
+}
+
+.user-profile-dropdown-divider {
+  height: 1px;
+  background: var(--border);
+  margin: 4px 0;
+}
+
+.user-profile-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 10px 14px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-family: var(--font-body);
+  font-size: 0.84rem;
+  color: var(--text);
+  text-align: left;
+}
+
+.user-profile-dropdown-item:hover {
+  background: var(--surface-2);
+}
+
+.user-profile-dropdown-item.is-danger {
+  color: var(--red);
+}
+
+.user-profile-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 1200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+
+.user-profile-modal {
+  width: 100%;
+  max-width: 520px;
+  max-height: 90vh;
+  overflow-y: auto;
+  padding: 20px 22px;
+}
+
+.user-profile-modal--sm {
+  max-width: 420px;
+}
+
+.user-profile-modal-head {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+
+.user-profile-modal-avatar {
+  width: 52px;
+  height: 52px;
+  border-radius: 50%;
+  background: var(--red);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 800;
+  font-size: 1rem;
+  font-family: var(--font-head);
+  flex-shrink: 0;
+}
+
+.user-profile-modal-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+/* ---- Dashboard meta ---- */
+.dashboard-period-label {
+  margin: 6px 0 0;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.dashboard-last-update {
+  margin: 4px 0 0;
+  font-size: 0.72rem;
+  color: var(--text-3);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.dashboard-updated-badge {
+  display: inline-flex;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #E8F5E9;
+  color: #2E7D32;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.dashboard-refreshing-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--red);
+  animation: pulse 1s ease infinite;
+}
+
+.dashboard-spin {
+  animation: spin 0.8s linear infinite;
+}
+
+@media (max-width: 768px) {
+  .dashboard-page-header {
+    flex-direction: column;
+    align-items: flex-start !important;
+    gap: 12px;
+  }
+
+  .user-profile-modal-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .user-profile-dropdown {
+    right: -8px;
+  }
 }
 
 /* ---- PAGE CONTENT ---- */

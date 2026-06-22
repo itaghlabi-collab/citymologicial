@@ -1,19 +1,16 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState } from 'react';
 import {
   TrendingUp, TrendingDown, DollarSign, FileText, FolderOpen,
   Users, HardHat, Package, ShoppingCart, AlertTriangle,
   CheckCircle, Clock, Calendar, UserCheck, BarChart2,
-  RefreshCw, AlertCircle, ArrowUpRight, MapPin
+  RefreshCw, AlertCircle, ArrowUpRight, MapPin,
 } from 'lucide-react';
-import { loadMainDashboardData } from '../services/dashboard/dashboardData';
+import { useDashboard } from '../hooks/useDashboard';
+import { formatMAD, formatMADPrecise, formatCompact, formatDate } from '../utils/formatters';
 
 /* ── Helpers ─────────────────────────────────────────────────────── */
-function fmt(n) {
-  if (n >= 1000000) return (n / 1000000).toFixed(1) + ' M';
-  if (n >= 1000) return (n / 1000).toFixed(0) + ' K';
-  return n.toLocaleString('fr-FR');
-}
-function fmtMAD(n) { return fmt(n) + ' MAD'; }
+function fmtMAD(n) { return formatMADPrecise(n); }
+function fmt(n) { return formatCompact(n); }
 
 /* ── Curved Line Chart (SVG cubic bezier) ───────────────────────── */
 function CurvedLineChart({ series, labels }) {
@@ -229,27 +226,22 @@ function TimelineItem({ time, title, location, type, tech, isLast }) {
 /* ══════════════════════════════════════════════════════════════════
    DASHBOARD COMPONENT
    ══════════════════════════════════════════════════════════════════ */
-export default function Dashboard() {
+export default function Dashboard({ onNavigate }) {
   const today = new Date().toISOString().slice(0, 10);
   const firstDay = today.slice(0, 7) + '-01';
 
   const [dateFrom, setDateFrom] = useState(firstDay);
   const [dateTo, setDateTo] = useState(today);
-  const [loading, setLoading] = useState(true);
-  const [dash, setDash] = useState(null);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const payload = await loadMainDashboardData({ dateFrom, dateTo });
-      setDash(payload);
-    } catch (_) {
-      setDash(null);
-    }
-    setLoading(false);
-  }, [dateFrom, dateTo]);
-
-  useEffect(() => { load(); }, [load]);
+  const {
+    data: dash,
+    loading,
+    refreshing,
+    error,
+    lastUpdated,
+    justUpdated,
+    reload,
+  } = useDashboard({ dateFrom, dateTo });
 
   const internal = dash?.internal;
   const useInternal = internal?.configured;
@@ -312,15 +304,8 @@ export default function Dashboard() {
     { label: 'En attente', value: pendingLeaves, color: '#FF9800' },
   ];
 
-  /* Alerts */
-  const internalAlerts = useInternal ? (internal.alerts || []) : [];
-  const legacyAlerts = [
-    ...(dash?.legacyInvoices || []).filter((i) => i.status === 'overdue').map((i) => ({ type: 'error', msg: `Facture en retard : ${i.ref} — ${fmtMAD(i.amount)} (${i.client})` })),
-    ...projects.filter((p) => p.delayed).map((p) => ({ type: 'warning', msg: `Projet en retard : ${p.name}` })),
-    ...leaves.filter((l) => l.status === 'pending').map((l) => ({ type: 'info', msg: `Conge en attente : ${l.employee} (${l.type})` })),
-    ...(dash?.purchaseAlerts || []),
-  ];
-  const alerts = [...internalAlerts, ...legacyAlerts];
+  /* Alerts — centralisées via dashboardService */
+  const alerts = dash?.alerts || [];
 
   const lowStock = products.filter(p => p.qty < p.threshold);
 
@@ -338,30 +323,44 @@ export default function Dashboard() {
 
   const timelineItems = sortedMeetings.length ? sortedMeetings : activityTimeline;
 
-  if (loading) {
+  if (loading && !dash) {
     return (
       <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '60vh', gap: 14 }}>
         <div style={{ width: 36, height: 36, border: '3px solid var(--border)', borderTopColor: 'var(--red)', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-        <p style={{ color: 'var(--text-3)', fontSize: '0.9rem' }}>Chargement des donnees...</p>
+        <p style={{ color: 'var(--text-3)', fontSize: '0.9rem' }}>Chargement des données…</p>
       </div>
     );
   }
+
+  const lastUpdatedLabel = lastUpdated
+    ? lastUpdated.toLocaleTimeString('fr-MA', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
+    : null;
 
   return (
     <div className="animate-fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
 
       {/* ── HEADER ─────────────────────────────────────────────────── */}
-      <div className="flex-between">
+      <div className="flex-between dashboard-page-header">
         <div>
           <h1 className="page-title" style={{ marginBottom: 4 }}>Tableau de Bord</h1>
           <p className="page-subtitle">
-            Centre de pilotage CITYMO — mise a jour en temps reel
+            Centre de pilotage CITYMO — données en temps réel
             {useInternal && internal.kpis ? (
               <span style={{ marginLeft: 8, color: 'var(--text-3)' }}>
-                · {internal.kpis.pendingTasks} taches · {internal.kpis.todayMeetings} RDV aujourd&apos;hui
+                · {internal.kpis.pendingTasks} tâches · {internal.kpis.todayMeetings} RDV aujourd&apos;hui
               </span>
             ) : null}
           </p>
+          <p className="dashboard-period-label">
+            Données du {formatDate(dateFrom)} au {formatDate(dateTo)}
+          </p>
+          {lastUpdatedLabel && (
+            <p className="dashboard-last-update">
+              Dernière mise à jour : {lastUpdatedLabel}
+              {justUpdated && <span className="dashboard-updated-badge">Mis à jour</span>}
+              {refreshing && <span className="dashboard-refreshing-dot" aria-hidden />}
+            </p>
+          )}
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '7px 12px', fontSize: '0.83rem' }}>
@@ -372,15 +371,22 @@ export default function Dashboard() {
             <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)}
               style={{ border: 'none', outline: 'none', fontSize: '0.83rem', fontFamily: 'var(--font-body)', color: 'var(--text)', background: 'none' }} />
           </div>
-          <button className="btn btn-primary btn-sm" onClick={load} style={{ gap: 6 }}>
-            <RefreshCw size={13} /> Actualiser
+          <button type="button" className="btn btn-primary btn-sm" onClick={reload} disabled={refreshing} style={{ gap: 6 }}>
+            <RefreshCw size={13} className={refreshing ? 'dashboard-spin' : ''} /> Actualiser
           </button>
         </div>
       </div>
 
+      {error && (
+        <div className="card" style={{ padding: '12px 16px', borderColor: 'var(--red)', color: '#C62828', fontSize: '0.85rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 12 }}>
+          <span>{error}</span>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={reload}>Réessayer</button>
+        </div>
+      )}
+
       {!dash?.configured && (
         <div className="card" style={{ padding: '12px 16px', borderColor: 'var(--orange, #E65100)', color: '#BF360C', fontSize: '0.85rem' }}>
-          Supabase non configure — verifiez VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY sur Vercel.
+          Supabase non configuré — vérifiez VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY sur Vercel.
         </div>
       )}
 
@@ -393,16 +399,25 @@ export default function Dashboard() {
               warning: { bg: '#FFFBF0', border: 'rgba(230,81,0,0.25)', text: '#BF360C', icon: '#E65100' },
               info: { bg: '#F0F6FF', border: 'rgba(21,101,192,0.25)', text: '#0D47A1', icon: '#1565C0' },
             }[a.type];
+            const clickable = Boolean(a.module && onNavigate);
             return (
-              <div key={i} style={{
-                display: 'inline-flex', alignItems: 'center', gap: 7,
-                padding: '6px 12px', borderRadius: 20,
-                background: cfg.bg, border: `1px solid ${cfg.border}`,
-                fontSize: '0.8rem', color: cfg.text,
-              }}>
+              <button
+                key={i}
+                type="button"
+                disabled={!clickable}
+                onClick={() => clickable && onNavigate(a.module)}
+                style={{
+                  display: 'inline-flex', alignItems: 'center', gap: 7,
+                  padding: '6px 12px', borderRadius: 20,
+                  background: cfg.bg, border: `1px solid ${cfg.border}`,
+                  fontSize: '0.8rem', color: cfg.text,
+                  cursor: clickable ? 'pointer' : 'default',
+                  fontFamily: 'inherit',
+                }}
+              >
                 <AlertTriangle size={12} style={{ color: cfg.icon, flexShrink: 0 }} />
                 {a.msg}
-              </div>
+              </button>
             );
           })}
         </div>
@@ -423,7 +438,7 @@ export default function Dashboard() {
             <DonutChart
               segments={financeDonut}
               centerLabel={fmt(tresorerie)}
-              centerSub="Tresorerie"
+              centerSub="Trésorerie"
               size={120}
             />
           </div>
@@ -465,7 +480,7 @@ export default function Dashboard() {
           <div className="card-title" style={{ marginBottom: 0 }}>
             <BarChart2 size={15} /> Synthese financiere — periode en cours
           </div>
-          <span className="text-muted" style={{ fontSize: '0.78rem' }}>Factures / Depenses / Tresorerie (MAD)</span>
+          <span className="text-muted" style={{ fontSize: '0.78rem' }}>Factures / Dépenses / Trésorerie (MAD)</span>
         </div>
         <CurvedLineChart series={chartSeries} labels={months} />
       </div>

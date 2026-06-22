@@ -28,6 +28,7 @@ export function mapSupabaseUser(user, profile = null) {
     role: profile?.role || meta.role || 'commercial',
     initiales,
     department_id: profile?.department_id ?? null,
+    created_at: profile?.created_at ?? null,
   };
 }
 
@@ -38,7 +39,7 @@ export async function fetchProfile(userId) {
 
   const { data, error } = await getSupabase()
     .from('profiles')
-    .select('id, nom, email, role, initiales, department_id')
+    .select('id, nom, email, role, initiales, department_id, created_at')
     .eq('id', userId)
     .maybeSingle();
 

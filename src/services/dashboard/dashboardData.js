@@ -11,7 +11,12 @@ import { listAttendance } from '../rh/attendance';
 import { listLeaves } from '../rh/leaves';
 import { listPurchaseOrders } from '../achats/purchaseOrders';
 import { listCrmFactures } from '../crm/crmFactures';
+import { listStockArticles } from '../inventaire/stockArticles';
+import { listWorkerPayroll } from '../rh/workerPayroll';
+import { listAllSubcontractorPayments } from '../rh/subcontractors';
+import { getPendingCashValidation } from '../finance/cashDailyValidation';
 import { inMonth } from '../finance/financeDashboardData';
+import { roundMoney } from '../../utils/formatters';
 
 const EXECUTED_ORDER_STATUTS = ['Payé', 'Exécuté', 'Comptabilisé'];
 const PAID_CHARGE_STATUTS = ['Payé', 'Validé', 'Validée', 'Comptabilisée'];
@@ -178,13 +183,37 @@ function buildFinanceKpis({ charges, orders, transactions, factures, dateFrom, d
     : executedPayments - totalExpenses;
 
   return {
-    totalInvoices,
-    unpaidInvoices,
-    totalExpenses,
-    executedPayments,
-    tresorerie,
+    totalInvoices: roundMoney(totalInvoices),
+    unpaidInvoices: roundMoney(unpaidInvoices),
+    totalExpenses: roundMoney(totalExpenses),
+    executedPayments: roundMoney(executedPayments),
+    tresorerie: roundMoney(tresorerie),
     expensesCount: periodCharges.length || periodTxs.filter((t) => t.sens === 'sortie').length,
   };
+}
+
+function mapStockForDashboard(articles) {
+  return (articles || [])
+    .filter((a) => a.statut === 'Actif' && Number(a.seuil_alerte) > 0)
+    .filter((a) => Number(a.stock_actuel ?? 0) < Number(a.seuil_alerte))
+    .map((a) => ({
+      id: a.id,
+      name: a.nom || a.designation || a.code,
+      qty: Number(a.stock_actuel ?? 0),
+      threshold: Number(a.seuil_alerte),
+      unit: a.unite || 'U',
+    }))
+    .sort((a, b) => (a.qty / a.threshold) - (b.qty / b.threshold))
+    .slice(0, 10);
+}
+
+function filterLeavesInRange(leavesRaw, from, to) {
+  return (leavesRaw || []).filter((l) => {
+    const start = l.date_debut || l.dateDebut;
+    const end = l.date_fin || l.dateFin || start;
+    if (!start) return true;
+    return String(end).slice(0, 10) >= from && String(start).slice(0, 10) <= to;
+  });
 }
 
 export async function loadMainDashboardData({ dateFrom, dateTo } = {}) {
@@ -205,6 +234,9 @@ export async function loadMainDashboardData({ dateFrom, dateTo } = {}) {
     leaves: [],
     purchaseOrders: [],
     products: [],
+    workerPayments: [],
+    subcontractorPayments: [],
+    cashValidation: null,
   };
 
   if (!isSupabaseConfigured()) return empty;
@@ -218,6 +250,10 @@ export async function loadMainDashboardData({ dateFrom, dateTo } = {}) {
     listAttendance(),
     listLeaves(),
     listPurchaseOrders(),
+    listStockArticles(),
+    listWorkerPayroll(),
+    listAllSubcontractorPayments(100),
+    getPendingCashValidation(),
   ]);
 
   const val = (i) => (results[i].status === 'fulfilled' ? results[i].value : []);
@@ -229,6 +265,10 @@ export async function loadMainDashboardData({ dateFrom, dateTo } = {}) {
   const attendanceRaw = val(5);
   const leavesRaw = val(6);
   const purchaseOrders = val(7);
+  const stockArticles = val(8);
+  const workerPaymentsRaw = val(9);
+  const subcontractorPayments = val(10);
+  const cashValidationResult = results[11].status === 'fulfilled' ? results[11].value : null;
 
   const factures = internal?.recentFactures?.length
     ? internal.recentFactures
@@ -263,7 +303,7 @@ export async function loadMainDashboardData({ dateFrom, dateTo } = {}) {
   const projects = (projectsRaw || []).map((p) => mapProjectForDashboard(p, to));
   const attendance = buildAttendanceSummary(attendanceRaw, to);
 
-  const leaves = (leavesRaw || []).map((l) => ({
+  const leaves = filterLeavesInRange(leavesRaw, from, to).map((l) => ({
     id: l.id,
     employee: l.employe || l.employe_label || '—',
     type: l.type_conge || l.type || 'Congé',
@@ -271,6 +311,18 @@ export async function loadMainDashboardData({ dateFrom, dateTo } = {}) {
     dateDebut: l.date_debut || l.dateDebut,
     dateFin: l.date_fin || l.dateFin,
   }));
+
+  const workerPayments = (workerPaymentsRaw || []).map((p) => ({
+    id: p.id,
+    ouvrier: p.ouvrier,
+    total: roundMoney(p.total),
+    statut: p.statut,
+    paymentDate: p.paymentDate,
+    semaineDebut: p.semaineDebut,
+    semaineFin: p.semaineFin,
+  }));
+
+  const products = mapStockForDashboard(stockArticles);
 
   const purchaseAlerts = (purchaseOrders || [])
     .filter((o) => ['Brouillon', 'Soumis', 'En attente'].includes(o.statut))
@@ -286,9 +338,14 @@ export async function loadMainDashboardData({ dateFrom, dateTo } = {}) {
     attendance,
     leaves,
     purchaseOrders,
-    products: [],
+    products,
+    workerPayments,
+    subcontractorPayments: subcontractorPayments || [],
+    cashValidation: cashValidationResult,
     purchaseAlerts,
     legacyInvoices: mappedFactures.length ? mappedFactures : factures,
     expenses: charges.filter((c) => inDateRange(c.date, from, to)),
+    dateFrom: from,
+    dateTo: to,
   };
 }

@@ -10,13 +10,25 @@
  * @param {number|string} amount
  * @param {boolean} [compact] - Use compact notation (K / M)
  */
+export function roundMoney(amount) {
+  return Math.round((Number(amount) || 0) * 100) / 100;
+}
+
+/** MAD with exactly 2 decimals — avoids float artifacts like 32717.240000000005 */
+export function formatMADPrecise(amount) {
+  return roundMoney(amount).toLocaleString('fr-MA', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }) + ' MAD';
+}
+
 export function formatMAD(amount, compact = false) {
-  const n = Number(amount) || 0;
+  const n = roundMoney(amount);
   if (compact) {
     if (n >= 1_000_000) return (n / 1_000_000).toFixed(1) + ' M MAD';
     if (n >= 1_000) return (n / 1_000).toFixed(0) + ' K MAD';
   }
-  return n.toLocaleString('fr-MA') + ' MAD';
+  return n.toLocaleString('fr-MA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' MAD';
 }
 
 /**
@@ -24,7 +36,7 @@ export function formatMAD(amount, compact = false) {
  * @param {number} n
  */
 export function formatCompact(n) {
-  const v = Number(n) || 0;
+  const v = roundMoney(n);
   if (v >= 1_000_000) return (v / 1_000_000).toFixed(1) + ' M';
   if (v >= 1_000) return (v / 1_000).toFixed(0) + ' K';
   return v.toLocaleString('fr-FR');

@@ -51,6 +51,12 @@ export default function NotificationCenter({ user, onNavigate }) {
     return () => document.removeEventListener('mousedown', onDocClick);
   }, [open]);
 
+  useEffect(() => {
+    function openFromMenu() { setOpen(true); }
+    window.addEventListener('citymo:open-notifications', openFromMenu);
+    return () => window.removeEventListener('citymo:open-notifications', openFromMenu);
+  }, []);
+
   const filtered = items.filter((n) => {
     if (filter === 'unread') return !n.isRead;
     if (filter === 'urgent') return n.priority === 'urgent' || n.priority === 'high';
