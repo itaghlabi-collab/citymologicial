@@ -11,6 +11,7 @@ import {
   deleteInternalTask,
   setInternalTaskStatut,
   setInternalTaskDgPush,
+  sendInternalTaskDgRelance,
   filterInternalTasks,
   computeInternalTaskStats,
   computeDgTaskStats,
@@ -134,6 +135,21 @@ export function useInternalTasks() {
     }
   }, [load]);
 
+  const sendDgRelance = useCallback(async (task, message) => {
+    setSaving(true);
+    setError(null);
+    try {
+      await sendInternalTaskDgRelance(task, message);
+      return { success: true };
+    } catch (err) {
+      const msg = formatSupabaseError(err, 'Erreur relance.');
+      setError(msg);
+      return { success: false, error: msg };
+    } finally {
+      setSaving(false);
+    }
+  }, []);
+
   return {
     records,
     loading,
@@ -146,6 +162,7 @@ export function useInternalTasks() {
     remove,
     setStatut,
     toggleDgPush,
+    sendDgRelance,
     responsables,
     filterInternalTasks,
     computeInternalTaskStats,

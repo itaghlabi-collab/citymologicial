@@ -1,12 +1,12 @@
 import {
-  Plus, CheckSquare, Clock, Trash2, Edit2, X, User, Building2, RefreshCw, AlertCircle,
+  Plus, CheckSquare, Clock, Trash2, Edit2, X, User, Building2, RefreshCw, AlertCircle, Bell,
 } from 'lucide-react';
 import { useState, useEffect, useRef, useMemo } from 'react';
 import { listEmployees, employeeFullName } from '../services/rh/employees';
 import { DEPARTMENTS, getDeptById } from '../data/departments';
 import { useInternalTasks } from '../hooks/useInternalTasks';
 import { useAuth } from '../hooks/useAuth';
-import { canManageTaskDgPush, canCreateDgTask } from '../services/auth/taskDgPushAccess';
+import { canManageTaskDgPush, canCreateDgTask, userMatchesAssignee } from '../services/auth/taskDgPushAccess';
 import {
   TASK_STATUTS,
   TASK_STATUT_LABELS,
@@ -43,6 +43,141 @@ const FILTER_S = {
   padding: '7px 10px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius)',
   fontSize: '0.82rem', background: '#fff', fontFamily: 'var(--font-body)',
 };
+
+const DISPLAY_FILTER_OPTIONS = [
+  { value: 'all', label: 'Toutes les tâches', dgOnly: false },
+  { value: 'mine', label: 'Mes tâches', dgOnly: false },
+  { value: 'dg', label: 'Tâches DG', dgOnly: true },
+  { value: 'mine_dg', label: 'Mes tâches DG', dgOnly: true },
+  { value: 'created_by_me', label: 'Tâches créées par moi', dgOnly: false },
+];
+
+function applyDisplayFilter(tasks, filter, user) {
+  const rows = [...(tasks || [])];
+  switch (filter) {
+    case 'mine':
+      return rows.filter((t) => !t.is_dg_task && userMatchesAssignee(user, t.assigne));
+    case 'dg':
+      return rows.filter((t) => t.is_dg_task);
+    case 'mine_dg':
+      return rows.filter((t) => t.is_dg_task && userMatchesAssignee(user, t.assigne));
+    case 'created_by_me':
+      return rows.filter((t) => t.created_by && t.created_by === user?.id);
+    default:
+      return rows;
+  }
+}
+
+function ConfirmModal({ open, title, message, confirmLabel, confirmClass, onConfirm, onCancel, loading }) {
+  if (!open) return null;
+  return (
+    <div className="taches-modal-backdrop animate-fade-in" onClick={(e) => e.target === e.currentTarget && onCancel()}>
+      <div className="taches-modal card taches-confirm-modal">
+        <div className="flex-between" style={{ marginBottom: 12 }}>
+          <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.05rem', textTransform: 'uppercase', margin: 0 }}>
+            {title}
+          </h2>
+          <button type="button" onClick={onCancel} style={{ background: 'none', border: 'none', cursor: 'pointer' }} aria-label="Fermer">
+            <X size={20} />
+          </button>
+        </div>
+        <p style={{ color: 'var(--text-2)', fontSize: '0.9rem', margin: '0 0 20px', lineHeight: 1.5 }}>{message}</p>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={loading}>Annuler</button>
+          <button type="button" className={`btn ${confirmClass || 'btn-primary'}`} onClick={onConfirm} disabled={loading}>
+            {confirmLabel || 'Confirmer'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RelanceDirecteurModal({ task, open, onClose, onSubmit, saving }) {
+  const [message, setMessage] = useState('');
+  useEffect(() => {
+    if (open) setMessage('');
+  }, [open, task?.id]);
+
+  if (!open || !task) return null;
+
+  return (
+    <div className="taches-modal-backdrop animate-fade-in" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="taches-modal card taches-relance-modal">
+        <div className="flex-between" style={{ marginBottom: 4 }}>
+          <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.15rem', margin: 0 }}>
+            🔔 Relance Directeur
+          </h2>
+          <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer' }} aria-label="Fermer">
+            <X size={20} />
+          </button>
+        </div>
+        <p style={{ color: 'var(--text-3)', fontSize: '0.85rem', margin: '0 0 18px' }}>
+          Envoyer une relance au collaborateur concernant cette tâche.
+        </p>
+        <div className="form-group" style={{ marginBottom: 14 }}>
+          <label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Message de relance (optionnel)</label>
+          <textarea
+            rows={3}
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            placeholder={'Exemple :\nMerci de mettre à jour l\'avancement de cette tâche.'}
+            style={{ ...INPUT_S(false), resize: 'vertical', marginTop: 6 }}
+          />
+        </div>
+        <div className="taches-relance-info">
+          <div><span>Tâche :</span> {task.titre}</div>
+          <div><span>Responsable :</span> {task.assigne || '—'}</div>
+          <div><span>Statut :</span> {TASK_STATUT_LABELS[task.statut] || task.statut}</div>
+        </div>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 20 }}>
+          <button type="button" className="btn btn-secondary" onClick={onClose} disabled={saving}>Annuler</button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => onSubmit(message)}
+            disabled={saving}
+          >
+            Envoyer la relance
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DgPushModal({ task, open, onClose, onSubmit, saving }) {
+  const [note, setNote] = useState('');
+  useEffect(() => {
+    if (open) setNote(task?.dg_note || '');
+  }, [open, task?.id, task?.dg_note]);
+
+  if (!open || !task) return null;
+
+  return (
+    <div className="taches-modal-backdrop animate-fade-in" onClick={(e) => e.target === e.currentTarget && onClose()}>
+      <div className="taches-modal card">
+        <div className="flex-between" style={{ marginBottom: 12 }}>
+          <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.05rem', textTransform: 'uppercase', margin: 0 }}>
+            Urgent DG
+          </h2>
+          <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={20} /></button>
+        </div>
+        <p style={{ color: 'var(--text-3)', fontSize: '0.85rem', margin: '0 0 14px' }}>
+          Marquer « {task.titre} » comme urgent pour la Direction.
+        </p>
+        <div className="form-group">
+          <label style={{ fontSize: '0.82rem' }}>Commentaire (optionnel)</label>
+          <textarea rows={2} value={note} onChange={(e) => setNote(e.target.value)} style={{ ...INPUT_S(false), resize: 'vertical', marginTop: 6 }} />
+        </div>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>
+          <button type="button" className="btn btn-secondary" onClick={onClose} disabled={saving}>Annuler</button>
+          <button type="button" className="btn btn-primary" onClick={() => onSubmit(note)} disabled={saving}>Activer l&apos;urgence DG</button>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 function employeeDepartmentId(emp) {
   if (!emp) return null;
@@ -86,7 +221,7 @@ function StatusSelect({ value, onChange, disabled }) {
 }
 
 function TaskRow({
-  t, canDgPush, onStatusChange, onDgPush, onToggleDone, onEdit, onDelete, saving, showDgCategoryBadge,
+  t, canDgPush, onStatusChange, onDgPush, onRelance, onToggleDone, onEdit, onDelete, saving, showDgCategoryBadge,
 }) {
   const isDone = t.statut === 'terminee';
   const isCancelled = t.statut === 'annulee';
@@ -144,15 +279,26 @@ function TaskRow({
           {t.priorite}
         </span>
         {canDgPush ? (
-          <button
-            type="button"
-            className={'btn btn-sm taches-dg-push-btn' + (t.dg_push ? ' is-active' : '')}
-            title="Marquer comme urgent par la Direction"
-            onClick={() => onDgPush(t)}
-            disabled={saving}
-          >
-            <AlertCircle size={14} />
-          </button>
+          <>
+            <button
+              type="button"
+              className="btn btn-sm taches-relance-btn"
+              title="Relance Directeur"
+              onClick={() => onRelance(t)}
+              disabled={saving}
+            >
+              <Bell size={14} />
+            </button>
+            <button
+              type="button"
+              className={'btn btn-sm taches-dg-push-btn' + (t.dg_push ? ' is-active' : '')}
+              title={t.dg_push ? 'Retirer l\'urgence DG' : 'Marquer comme urgent par la Direction'}
+              onClick={() => onDgPush(t)}
+              disabled={saving}
+            >
+              <AlertCircle size={14} />
+            </button>
+          </>
         ) : t.dg_push ? (
           <span title="Urgent DG" style={{ color: 'var(--red)', display: 'flex', alignItems: 'center' }}>
             <AlertCircle size={16} />
@@ -172,11 +318,13 @@ export default function Taches() {
   const canDgPush = canManageTaskDgPush(user);
   const {
     records: tasks, loading, saving, error, configured, load,
-    create, update, remove, setStatut, toggleDgPush,
+    create, update, remove, setStatut, toggleDgPush, sendDgRelance,
     responsables, filterInternalTasks, computeInternalTaskStats, computeDgTaskStats, splitTasksByCategory,
   } = useInternalTasks();
 
   const [employees, setEmployees] = useState([]);
+  const [displayFilter, setDisplayFilter] = useState('all');
+  const [viewTab, setViewTab] = useState('all');
   const [filter, setFilter] = useState('all');
   const [dgFilter, setDgFilter] = useState('all');
   const [prioriteFilter, setPrioriteFilter] = useState('all');
@@ -188,6 +336,9 @@ export default function Taches() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [errors, setErrors] = useState({});
   const [toast, setToast] = useState(null);
+  const [relanceTask, setRelanceTask] = useState(null);
+  const [pushTask, setPushTask] = useState(null);
+  const [confirmState, setConfirmState] = useState(null);
   const toastRef = useRef(null);
 
   useEffect(() => {
@@ -258,10 +409,107 @@ export default function Taches() {
   }
 
   async function deleteTask(id) {
-    if (!window.confirm('Supprimer cette tâche ?')) return;
-    const result = await remove(id);
-    showToast(result.success ? 'success' : 'error', result.success ? 'Tâche supprimée.' : (result.error || 'Erreur.'));
+    setConfirmState({
+      title: 'Supprimer la tâche',
+      message: 'Supprimer cette tâche ? Cette action est irréversible.',
+      confirmLabel: 'Supprimer',
+      confirmClass: 'btn-primary',
+      onConfirm: async () => {
+        const result = await remove(id);
+        setConfirmState(null);
+        showToast(result.success ? 'success' : 'error', result.success ? 'Tâche supprimée.' : (result.error || 'Erreur.'));
+      },
+    });
   }
+
+  function openRelance(t) {
+    if (!canDgPush) return;
+    setRelanceTask(t);
+  }
+
+  async function handleRelanceSubmit(message) {
+    if (!relanceTask) return;
+    const result = await sendDgRelance(relanceTask, message);
+    if (result.success) {
+      showToast('success', 'Relance envoyée avec succès');
+      setRelanceTask(null);
+    } else {
+      showToast('error', result.error || 'Erreur relance.');
+    }
+  }
+
+  function handleDgPush(t) {
+    if (!canDgPush) return;
+    if (t.dg_push) {
+      setConfirmState({
+        title: 'Retirer l\'urgence DG',
+        message: `Retirer le Push DG de la tâche « ${t.titre} » ?`,
+        confirmLabel: 'Retirer',
+        confirmClass: 'btn-primary',
+        onConfirm: async () => {
+          const result = await toggleDgPush(t.id, false, user?.id, '');
+          setConfirmState(null);
+          if (result.success) {
+            showToast('success', 'Push DG retiré');
+          } else {
+            showToast('error', result.error || 'Erreur Push DG.');
+          }
+        },
+      });
+    } else {
+      setPushTask(t);
+    }
+  }
+
+  async function handlePushSubmit(note) {
+    if (!pushTask) return;
+    const result = await toggleDgPush(pushTask.id, true, user?.id, note);
+    if (result.success) {
+      showToast('info', `Push DG activé — « ${pushTask.titre} » remontée en priorité`);
+      window.dispatchEvent(new CustomEvent('citymo:dg-task-push', {
+        detail: { taskId: pushTask.id, title: pushTask.titre },
+      }));
+      setPushTask(null);
+    } else {
+      showToast('error', result.error || 'Erreur Push DG.');
+    }
+  }
+
+  const displayFilteredTasks = useMemo(
+    () => applyDisplayFilter(tasks, displayFilter, user),
+    [tasks, displayFilter, user],
+  );
+
+  const { normalTasks, dgTasks } = useMemo(
+    () => splitTasksByCategory(displayFilteredTasks, user),
+    [displayFilteredTasks, user, splitTasksByCategory],
+  );
+
+  const hasAssignedDgTask = useMemo(
+    () => tasks.some((t) => t.is_dg_task && userMatchesAssignee(user, t.assigne)),
+    [tasks, user],
+  );
+
+  const showDgStatsRow = canCreateDgTask(user) || hasAssignedDgTask;
+
+  const availableDisplayFilters = useMemo(() => {
+    if (canCreateDgTask(user)) return DISPLAY_FILTER_OPTIONS;
+    return DISPLAY_FILTER_OPTIONS.filter((o) => ['mine', 'dg'].includes(o.value));
+  }, [user]);
+
+  useEffect(() => {
+    if (!availableDisplayFilters.some((o) => o.value === displayFilter)) {
+      setDisplayFilter(availableDisplayFilters[0]?.value || 'mine');
+    }
+  }, [availableDisplayFilters, displayFilter]);
+
+  useEffect(() => {
+    if (displayFilter === 'dg' || displayFilter === 'mine_dg') {
+      setViewTab('dg');
+    } else {
+      setViewTab('all');
+    }
+  }, [displayFilter]);
 
   async function handleStatusChange(id, nextStatut) {
     const result = await setStatut(id, nextStatut);
@@ -277,36 +525,6 @@ export default function Taches() {
     if (!result.success) showToast('error', result.error || 'Erreur.');
   }
 
-  async function handleDgPush(t) {
-    if (!canDgPush) return;
-    const next = !t.dg_push;
-    let dgNote = t.dg_note || '';
-    if (next) {
-      const note = window.prompt('Commentaire urgent DG (optionnel) :', dgNote);
-      if (note === null) return;
-      dgNote = note;
-    } else if (!window.confirm('Retirer le Push DG de cette tâche ?')) return;
-
-    const result = await toggleDgPush(t.id, next, user?.id, dgNote);
-    if (result.success) {
-      if (next) {
-        showToast('info', `Push DG activé — « ${t.titre} » remontée en priorité`);
-        window.dispatchEvent(new CustomEvent('citymo:dg-task-push', {
-          detail: { taskId: t.id, title: t.titre },
-        }));
-      } else {
-        showToast('success', 'Push DG retiré');
-      }
-    } else {
-      showToast('error', result.error || 'Erreur Push DG.');
-    }
-  }
-
-  const { normalTasks, dgTasks } = useMemo(
-    () => splitTasksByCategory(tasks, user),
-    [tasks, user, splitTasksByCategory],
-  );
-
   const filterBase = useMemo(() => ({
     priorite: prioriteFilter,
     responsable: responsableFilter,
@@ -315,9 +533,6 @@ export default function Taches() {
   }), [prioriteFilter, responsableFilter, dateFrom, dateTo]);
 
   const filtered = useMemo(() => {
-    if (filter === 'dg_push') {
-      return filterInternalTasks(normalTasks, { ...filterBase, dgPushOnly: true });
-    }
     return filterInternalTasks(normalTasks, { ...filterBase, statut: filter });
   }, [normalTasks, filter, filterBase, filterInternalTasks]);
 
@@ -378,7 +593,6 @@ export default function Taches() {
     ['en_cours', 'En cours', counts.en_cours],
     ['en_attente', 'En attente', counts.en_attente],
     ['terminee', 'Terminées', counts.terminee],
-    ['dg_push', 'Urgent DG', counts.dg_push],
   ];
 
   const dgStatCards = [
@@ -387,6 +601,12 @@ export default function Taches() {
     ['en_cours', 'DG en cours', dgCounts.en_cours],
     ['terminee', 'DG terminées', dgCounts.terminee],
   ];
+
+  const showNormalSection = viewTab === 'all' && displayFilter !== 'dg' && displayFilter !== 'mine_dg';
+  const showDgSection = viewTab === 'dg' || (viewTab === 'all' && displayFilter !== 'mine' && (dgTasks.length > 0 || displayFilter === 'dg' || displayFilter === 'mine_dg'));
+  const showDgEmptyHint = viewTab === 'all' && dgTasks.length === 0 && showDgStatsRow && displayFilter !== 'dg' && displayFilter !== 'mine_dg';
+  const showGeneralKpi = showNormalSection || (viewTab === 'all' && displayFilter !== 'dg' && displayFilter !== 'mine_dg');
+  const showDgKpi = showDgStatsRow && (showGeneralKpi || viewTab === 'dg');
 
   return (
     <div className="animate-fade-in taches-module">
@@ -413,51 +633,90 @@ export default function Taches() {
         <div className="card" style={{ marginBottom: 16, padding: 12, color: 'var(--red)', fontSize: '0.85rem' }}>{error}</div>
       )}
 
-      <div className="stat-grid taches-kpi-grid" style={{ marginBottom: 16 }}>
-        {statCards.map(([k, label, val]) => (
-          <div
-            key={k}
-            className="stat-card"
-            style={{
-              cursor: 'pointer',
-              border: filter === k ? '2px solid var(--red)' : '1px solid var(--border)',
-            }}
-            onClick={() => setFilter(k)}
-          >
-            <div className="stat-body">
-              <div className="stat-value" style={{ color: filter === k ? 'var(--red)' : k === 'dg_push' ? 'var(--red)' : 'var(--text)' }}>
-                {k === 'dg_push' ? counts.dg_push : val}
-              </div>
-              <div className="stat-label">{label}</div>
+      <div className="card taches-toolbar" style={{ padding: '12px 16px', marginBottom: 12 }}>
+        <div className="taches-toolbar-row">
+          <label className="taches-display-filter">
+            <span>Afficher :</span>
+            <select value={displayFilter} onChange={(e) => setDisplayFilter(e.target.value)} style={FILTER_S}>
+              {availableDisplayFilters.map((o) => (
+                <option key={o.value} value={o.value}>{o.label}</option>
+              ))}
+            </select>
+          </label>
+          {showDgStatsRow && (
+            <div className="taches-view-tabs">
+              <button
+                type="button"
+                className={viewTab === 'all' ? 'active' : ''}
+                onClick={() => setViewTab('all')}
+              >
+                Toutes les tâches
+              </button>
+              <button
+                type="button"
+                className={viewTab === 'dg' ? 'active' : ''}
+                onClick={() => setViewTab('dg')}
+              >
+                Tâches DG
+              </button>
             </div>
-          </div>
-        ))}
+          )}
+        </div>
       </div>
 
-      {(canCreateDgTask(user) || dgCounts.total > 0) && (
-        <div className="stat-grid taches-kpi-grid" style={{ marginBottom: 16 }}>
-          {dgStatCards.map(([k, label, val]) => (
-            <div
-              key={`dg-${k}`}
-              className="stat-card"
-              style={{
-                cursor: 'pointer',
-                border: dgFilter === k ? '2px solid #6A1B9A' : '1px solid var(--border)',
-              }}
-              onClick={() => setDgFilter(k)}
-            >
-              <div className="stat-body">
-                <div className="stat-value" style={{ color: dgFilter === k ? '#6A1B9A' : 'var(--text)' }}>
-                  {val}
+      {showGeneralKpi && (
+        <>
+          <div className="taches-kpi-section-label">Tâches générales</div>
+          <div className="stat-grid taches-kpi-grid taches-kpi-grid--compact" style={{ marginBottom: 10 }}>
+            {statCards.map(([k, label, val]) => (
+              <div
+                key={k}
+                className="stat-card taches-stat-card--compact"
+                style={{
+                  cursor: 'pointer',
+                  border: filter === k ? '2px solid var(--red)' : '1px solid var(--border)',
+                }}
+                onClick={() => setFilter(k)}
+              >
+                <div className="stat-body">
+                  <div className="stat-value" style={{ color: filter === k ? 'var(--red)' : 'var(--text)' }}>
+                    {val}
+                  </div>
+                  <div className="stat-label">{label}</div>
                 </div>
-                <div className="stat-label">{label}</div>
               </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        </>
       )}
 
-      <div className="card taches-filters" style={{ padding: '12px 16px', marginBottom: 16 }}>
+      {showDgKpi && (
+        <>
+          <div className="taches-kpi-section-label">Tâches DG</div>
+          <div className="stat-grid taches-kpi-grid taches-kpi-grid--compact" style={{ marginBottom: 12 }}>
+            {dgStatCards.map(([k, label, val]) => (
+              <div
+                key={`dg-${k}`}
+                className="stat-card taches-stat-card--compact"
+                style={{
+                  cursor: 'pointer',
+                  border: dgFilter === k ? '2px solid #6A1B9A' : '1px solid var(--border)',
+                }}
+                onClick={() => setDgFilter(k)}
+              >
+                <div className="stat-body">
+                  <div className="stat-value" style={{ color: dgFilter === k ? '#6A1B9A' : 'var(--text)' }}>
+                    {val}
+                  </div>
+                  <div className="stat-label">{label}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
+      <div className="card taches-filters" style={{ padding: '12px 16px', marginBottom: 12 }}>
         <select value={prioriteFilter} onChange={(e) => setPrioriteFilter(e.target.value)} style={FILTER_S}>
           <option value="all">Toutes priorités</option>
           <option value="urgente">Urgente</option>
@@ -474,39 +733,46 @@ export default function Taches() {
         <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={FILTER_S} title="Date fin" />
       </div>
 
-      <div className="card">
-        <div className="card-title" style={{ marginBottom: 16 }}>
-          <CheckSquare size={16} />
-          {filter === 'all' ? 'Toutes les tâches' : filter === 'dg_push' ? 'Urgent DG' : (TASK_STATUT_LABELS[filter] || 'Tâches')}
-          {counts.dg_push > 0 && filter === 'all' && (
-            <span className="badge badge-red" style={{ marginLeft: 8, fontSize: '0.68rem' }}>{counts.dg_push} urgent DG</span>
+      {showNormalSection && (
+        <div className="card" style={{ marginBottom: showDgSection || showDgEmptyHint ? 12 : 0 }}>
+          <div className="card-title" style={{ marginBottom: 12 }}>
+            <CheckSquare size={16} />
+            {filter === 'all' ? 'Toutes les tâches' : (TASK_STATUT_LABELS[filter] || 'Tâches')}
+            {counts.dg_push > 0 && filter === 'all' && (
+              <span className="badge badge-red" style={{ marginLeft: 8, fontSize: '0.68rem' }}>{counts.dg_push} urgent DG</span>
+            )}
+          </div>
+          {filtered.length === 0 ? (
+            <div className="taches-empty-inline">Aucune tâche dans cette catégorie.</div>
+          ) : (
+            <div className="taches-list">
+              {filtered.map((t) => (
+                <TaskRow
+                  key={t.id}
+                  t={t}
+                  canDgPush={canDgPush}
+                  saving={saving}
+                  showDgCategoryBadge={false}
+                  onStatusChange={handleStatusChange}
+                  onDgPush={handleDgPush}
+                  onRelance={openRelance}
+                  onToggleDone={toggleDone}
+                  onEdit={openEdit}
+                  onDelete={deleteTask}
+                />
+              ))}
+            </div>
           )}
         </div>
-        {filtered.length === 0 ? (
-          <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-3)' }}>Aucune tâche dans cette catégorie.</div>
-        ) : (
-          <div className="taches-list">
-            {filtered.map((t) => (
-              <TaskRow
-                key={t.id}
-                t={t}
-                canDgPush={canDgPush}
-                saving={saving}
-                showDgCategoryBadge={false}
-                onStatusChange={handleStatusChange}
-                onDgPush={handleDgPush}
-                onToggleDone={toggleDone}
-                onEdit={openEdit}
-                onDelete={deleteTask}
-              />
-            ))}
-          </div>
-        )}
-      </div>
+      )}
 
-      {(canCreateDgTask(user) || dgTasks.length > 0) && (
-        <div className="card" style={{ marginTop: 16 }}>
-          <div className="card-title" style={{ marginBottom: 16 }}>
+      {showDgEmptyHint && (
+        <p className="taches-dg-empty-hint">Aucune tâche DG pour le moment.</p>
+      )}
+
+      {showDgSection && (
+        <div className="card" style={{ marginTop: showNormalSection ? 0 : 0 }}>
+          <div className="card-title" style={{ marginBottom: 12 }}>
             <CheckSquare size={16} />
             {dgFilter === 'all' ? 'Tâches DG' : `Tâches DG — ${TASK_STATUT_LABELS[dgFilter] || dgFilter}`}
             {dgCounts.total > 0 && (
@@ -514,8 +780,8 @@ export default function Taches() {
             )}
           </div>
           {filteredDg.length === 0 ? (
-            <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-3)' }}>
-              Aucune tâche DG dans cette catégorie.
+            <div className="taches-empty-inline">
+              {viewTab === 'dg' ? 'Aucune tâche DG dans cette catégorie.' : 'Aucune tâche DG pour le moment.'}
             </div>
           ) : (
             <div className="taches-list">
@@ -528,6 +794,7 @@ export default function Taches() {
                   showDgCategoryBadge
                   onStatusChange={handleStatusChange}
                   onDgPush={handleDgPush}
+                  onRelance={openRelance}
                   onToggleDone={toggleDone}
                   onEdit={openEdit}
                   onDelete={deleteTask}
@@ -538,8 +805,33 @@ export default function Taches() {
         </div>
       )}
 
+      <RelanceDirecteurModal
+        task={relanceTask}
+        open={Boolean(relanceTask)}
+        onClose={() => setRelanceTask(null)}
+        onSubmit={handleRelanceSubmit}
+        saving={saving}
+      />
+      <DgPushModal
+        task={pushTask}
+        open={Boolean(pushTask)}
+        onClose={() => setPushTask(null)}
+        onSubmit={handlePushSubmit}
+        saving={saving}
+      />
+      <ConfirmModal
+        open={Boolean(confirmState)}
+        title={confirmState?.title}
+        message={confirmState?.message}
+        confirmLabel={confirmState?.confirmLabel}
+        confirmClass={confirmState?.confirmClass}
+        onConfirm={confirmState?.onConfirm}
+        onCancel={() => setConfirmState(null)}
+        loading={saving}
+      />
+
       {showModal && (
-        <div className="taches-modal-backdrop" onClick={(e) => e.target === e.currentTarget && closeModal()}>
+        <div className="taches-modal-backdrop animate-fade-in" onClick={(e) => e.target === e.currentTarget && closeModal()}>
           <div className="taches-modal card">
             <div className="flex-between" style={{ marginBottom: 20 }}>
               <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.2rem', textTransform: 'uppercase' }}>

@@ -282,6 +282,13 @@ function FormulaireProjet({ initial, onSave, onCancel, saving, clients = [] }) {
         </FField>
       </div>
 
+      {initial?.id && (
+        <div style={{ marginBottom: 20 }}>
+          <SectionTitle icon={<Users size={12} />}>Équipe — affectation ouvriers</SectionTitle>
+          <ProjectEquipeTab projet={initial} compact />
+        </div>
+      )}
+
       <SectionTitle icon={<Archive size={12} />}>Documents</SectionTitle>
       <div style={{ marginBottom: 20 }}>
         <ProjectDocuments projectId={initial?.id} compact />
@@ -299,18 +306,20 @@ function FormulaireProjet({ initial, onSave, onCancel, saving, clients = [] }) {
 
 // ── Onglet Équipe projet ─────────────────────────────────────────────────────
 
-function ProjectEquipeTab({ projet }) {
+function ProjectEquipeTab({ projet, compact = false }) {
   const [workerAssignments, setWorkerAssignments] = useState([]);
   const [subAssignments, setSubAssignments] = useState([]);
   const [allWorkers, setAllWorkers] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState(null);
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
 
   const load = useCallback(async () => {
     if (!projet?.id) return;
     setLoading(true);
+    setLoadError(null);
     try {
       const [wa, sa, workers] = await Promise.all([
         listWorkersByProject(projet.id),
@@ -322,6 +331,12 @@ function ProjectEquipeTab({ projet }) {
       setAllWorkers(workers);
     } catch (err) {
       console.error('[CITYMO] ProjectEquipeTab load', err);
+      const msg = err?.message || '';
+      if (/worker_project_assignments|42P01|does not exist/i.test(msg)) {
+        setLoadError('Table worker_project_assignments absente — exécutez supabase/RUN_WORKER_PROJECT_ASSIGNMENTS.sql dans Supabase.');
+      } else {
+        setLoadError(err.message || 'Impossible de charger l\'équipe.');
+      }
     } finally {
       setLoading(false);
     }
@@ -377,16 +392,28 @@ function ProjectEquipeTab({ projet }) {
 
   if (loading) {
     return (
-      <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--text-3)' }}>
+      <div className={compact ? '' : 'card'} style={{ padding: compact ? '16px 0' : 32, textAlign: 'center', color: 'var(--text-3)' }}>
         Chargement de l&apos;équipe…
       </div>
     );
   }
 
+  if (loadError) {
+    return (
+      <div style={{ padding: '12px 14px', background: '#FFF8E1', border: '1px solid #FFCC80', borderRadius: 8, color: '#E65100', fontSize: '0.84rem' }}>
+        {loadError}
+      </div>
+    );
+  }
+
+  const wrapStyle = compact
+    ? { marginBottom: 0, padding: '14px 16px', border: '1.5px solid var(--border)', borderRadius: 8, background: 'var(--bg)' }
+    : { marginBottom: 16 };
+
   return (
     <>
-      <div className="card" style={{ marginBottom: 16 }}>
-        <SectionTitle icon={<Users size={13} />}>Équipe affectée au projet</SectionTitle>
+      <div className={compact ? '' : 'card'} style={wrapStyle}>
+        {!compact && <SectionTitle icon={<Users size={13} />}>Équipe affectée au projet</SectionTitle>}
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12, marginBottom: 20 }}>
           <div style={{ padding: '12px 14px', background: 'var(--surface-2)', borderRadius: 8 }}>
@@ -498,8 +525,8 @@ function ProjectEquipeTab({ projet }) {
 
 // ── Page Détail Projet ───────────────────────────────────────────────────────
 
-function DetailProjet({ projet, onBack, onEdit, onCreateSAV }) {
-  const [activeTab, setActiveTab] = useState('general');
+function DetailProjet({ projet, onBack, onEdit, onCreateSAV, initialTab = 'general' }) {
+  const [activeTab, setActiveTab] = useState(initialTab);
 
   const tabs = [
     { k: 'general',    label: 'Vue générale'     },
@@ -705,6 +732,7 @@ export default function ProjetsList({ onCreateSAV }) {
   const [showModal, setShowModal] = useState(false);
   const [editProjet, setEditProjet] = useState(null);
   const [detailProjet, setDetailProjet] = useState(null);
+  const [detailInitialTab, setDetailInitialTab] = useState('general');
   const [showFilters, setShowFilters] = useState(false);
   const [pdfLoadingId, setPdfLoadingId] = useState(null);
 
@@ -734,9 +762,10 @@ export default function ProjetsList({ onCreateSAV }) {
     if (!result.success) alert(result.error || 'Erreur suppression.');
   }, [remove]);
 
-  const openDetail = useCallback(async (p) => {
+  const openDetail = useCallback(async (p, tab = 'general') => {
     try {
       const full = await fetchOne(p.id);
+      setDetailInitialTab(tab);
       setDetailProjet(full);
     } catch (err) {
       alert(err.message || 'Impossible de charger le projet.');
@@ -785,7 +814,8 @@ export default function ProjetsList({ onCreateSAV }) {
     return (
       <DetailProjet
         projet={detailProjet}
-        onBack={() => setDetailProjet(null)}
+        initialTab={detailInitialTab}
+        onBack={() => { setDetailProjet(null); setDetailInitialTab('general'); }}
         onEdit={() => { openEdit(detailProjet); setDetailProjet(null); }}
         onCreateSAV={onCreateSAV}
       />
@@ -909,7 +939,16 @@ export default function ProjetsList({ onCreateSAV }) {
                   {filtered.map(p => (
                     <tr key={p.id}>
                       <td style={{ fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--red)', whiteSpace: 'nowrap' }}>{p.ref}</td>
-                      <td style={{ fontWeight: 600 }}>{p.nom}</td>
+                      <td>
+                        <button
+                          type="button"
+                          onClick={() => openDetail(p)}
+                          style={{ fontWeight: 600, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text)', padding: 0, textAlign: 'left' }}
+                          title="Ouvrir la fiche projet"
+                        >
+                          {p.nom}
+                        </button>
+                      </td>
                       <td>{p.client || '—'}</td>
                       <td>{p.chef_projet || '—'}</td>
                       <td style={{ whiteSpace: 'nowrap' }}>{(p.budget_approuve || 0).toLocaleString('fr-MA')} MAD</td>
@@ -923,6 +962,7 @@ export default function ProjetsList({ onCreateSAV }) {
                       <td>
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'nowrap' }}>
                           <button className="btn btn-secondary btn-sm" title="Voir" onClick={() => openDetail(p)}><Eye size={13} /></button>
+                          <button className="btn btn-ghost btn-sm" title="Équipe / affectation ouvriers" onClick={() => openDetail(p, 'equipe')} style={{ color: '#1565C0' }}><Users size={13} /></button>
                           <button className="btn btn-ghost btn-sm" title="Modifier" onClick={() => openEdit(p)}><Edit2 size={13} /></button>
                           <button className="btn btn-ghost btn-sm" title="PDF récap" disabled={pdfLoadingId === p.id} onClick={() => handlePdf(p)} style={{ color: 'var(--text-3)' }}><Download size={13} /></button>
                           <button className="btn btn-ghost btn-sm" title="Supprimer" onClick={() => handleDelete(p.id)} style={{ color: 'var(--red)' }}><Trash2 size={13} /></button>
@@ -955,6 +995,7 @@ export default function ProjetsList({ onCreateSAV }) {
                   </div>
                   <div className="projet-mobile-actions">
                     <button type="button" className="btn btn-secondary btn-sm" onClick={() => openDetail(p)}><Eye size={13} /> Voir</button>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => openDetail(p, 'equipe')} style={{ color: '#1565C0' }}><Users size={13} /> Équipe</button>
                     <button type="button" className="btn btn-ghost btn-sm" onClick={() => openEdit(p)}><Edit2 size={13} /> Modifier</button>
                     <button type="button" className="btn btn-ghost btn-sm" disabled={pdfLoadingId === p.id} onClick={() => handlePdf(p)}><Download size={13} /> PDF</button>
                     <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleDelete(p.id)} style={{ color: 'var(--red)' }}><Trash2 size={13} /></button>
@@ -967,7 +1008,7 @@ export default function ProjetsList({ onCreateSAV }) {
       </div>
 
       {/* Modal formulaire */}
-      <Modal open={showModal} onClose={() => { setShowModal(false); setEditProjet(null); }} title={editProjet ? 'Modifier le projet' : 'Nouveau projet'} width={760}>
+      <Modal open={showModal} onClose={() => { setShowModal(false); setEditProjet(null); }} title={editProjet ? 'Modifier le projet' : 'Nouveau projet'} width={editProjet?.id ? 820 : 760}>
         <FormulaireProjet initial={editProjet} onSave={handleSave} onCancel={() => { setShowModal(false); setEditProjet(null); }} saving={saving} clients={clients} />
       </Modal>
     </div>

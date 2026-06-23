@@ -86,6 +86,26 @@ export async function notifyTaskCreated(task) {
   });
 }
 
+/** Relance Directeur → notification à l'assigné uniquement. */
+export async function notifyTaskDgRelance(task, customMessage) {
+  if (!task?.id) return;
+  const assignee = await findProfileByAssigneeName(task.assigne);
+  if (!assignee?.id) return;
+  let message = `Le Directeur vous demande une mise à jour concernant la tâche :\n${task.titre}`;
+  if (customMessage?.trim()) {
+    message += `\n\n${customMessage.trim()}`;
+  }
+  return notifyUser(assignee.id, {
+    title: 'Relance Directeur',
+    message,
+    type: NOTIFICATION_TYPES.TASK,
+    priority: NOTIFICATION_PRIORITIES.HIGH,
+    entityType: 'internal_task_dg_relance',
+    entityId: task.id,
+    actionUrl: moduleActionUrl('taches'),
+  });
+}
+
 /** Cas B — Tâche urgente DG (Push DG). */
 export async function notifyTaskDgUrgent(task) {
   if (!task?.id) return;

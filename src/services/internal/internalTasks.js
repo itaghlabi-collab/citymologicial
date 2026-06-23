@@ -167,6 +167,13 @@ export async function setInternalTaskStatut(id, statut) {
   return task;
 }
 
+/** Relance Directeur — notification interne à l'assigné (sans modification de la tâche). */
+export async function sendInternalTaskDgRelance(task, message) {
+  await getAuthUserId();
+  const { notifyTaskDgRelance } = await import('../notifications/notificationEvents');
+  return notifyTaskDgRelance(task, message);
+}
+
 export async function setInternalTaskDgPush(id, enabled, userId, dgNote) {
   const patch = {
     dg_push: Boolean(enabled),

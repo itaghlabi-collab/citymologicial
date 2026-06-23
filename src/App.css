@@ -6437,6 +6437,102 @@ tbody tr:last-child td { border-bottom: none; }
 .taches-kpi-grid {
   grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)) !important;
 }
+.taches-kpi-grid--compact {
+  grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)) !important;
+}
+.taches-kpi-section-label {
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+  margin: 0 0 6px 2px;
+}
+.taches-stat-card--compact .stat-value {
+  font-size: 1.35rem !important;
+}
+.taches-stat-card--compact .stat-label {
+  font-size: 0.68rem !important;
+}
+.taches-stat-card--compact .stat-body {
+  padding: 10px 8px !important;
+}
+.taches-toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+.taches-display-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.taches-view-tabs {
+  display: flex;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+.taches-view-tabs button {
+  padding: 6px 12px;
+  border: none;
+  cursor: pointer;
+  background: #fff;
+  color: var(--text-2);
+  font-family: var(--font-body);
+  font-weight: 600;
+  font-size: 0.78rem;
+}
+.taches-view-tabs button.active {
+  background: var(--red);
+  color: #fff;
+}
+.taches-relance-btn {
+  background: #fff !important;
+  border: 1.5px solid #1565C0 !important;
+  color: #1565C0 !important;
+  padding: 4px 7px !important;
+  min-width: 32px;
+}
+.taches-relance-info {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px 14px;
+  font-size: 0.84rem;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.taches-relance-info span {
+  font-weight: 700;
+  color: var(--text-3);
+  margin-right: 6px;
+}
+.taches-relance-modal {
+  max-width: 480px;
+}
+.taches-confirm-modal {
+  max-width: 420px;
+}
+.taches-empty-inline {
+  text-align: center;
+  padding: 20px 0;
+  color: var(--text-3);
+  font-size: 0.85rem;
+}
+.taches-dg-empty-hint {
+  text-align: center;
+  color: var(--text-3);
+  font-size: 0.82rem;
+  margin: 4px 0 12px;
+  font-style: italic;
+}
 .taches-filters {
   display: flex;
   gap: 10px;
