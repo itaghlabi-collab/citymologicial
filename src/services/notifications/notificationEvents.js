@@ -11,7 +11,7 @@ import {
   formatMad,
   moduleActionUrl,
 } from './notifications';
-import { findProfileById } from './notificationRecipients';
+import { findProfileById, findProfileByAssigneeName } from './notificationRecipients';
 import { FINANCE_SOURCE_TYPES } from '../finance/financeSync';
 
 const PAYMENT_HIGH_THRESHOLD = 5000;
@@ -53,9 +53,28 @@ export async function notifyPaymentRealized({ sourceType, sourceId, entity, mont
   });
 }
 
-/** Cas B — Tâche créée. */
+/** Cas B — Tâche DG créée : notification uniquement pour l'assigné. */
+export async function notifyDgTaskCreated(task) {
+  if (!task?.id || !task.is_dg_task) return;
+  const assignee = await findProfileByAssigneeName(task.assigne);
+  if (!assignee?.id) return;
+  return notifyUser(assignee.id, {
+    title: 'Tâche DG',
+    message: `La Direction vous a assigné la tâche « ${task.titre} »${task.dateLimite ? ` — échéance ${task.dateLimite}` : ''}.`,
+    type: NOTIFICATION_TYPES.TASK,
+    priority: NOTIFICATION_PRIORITIES.HIGH,
+    entityType: 'internal_task_dg_assign',
+    entityId: task.id,
+    actionUrl: moduleActionUrl('taches'),
+  });
+}
+
+/** Cas B — Tâche créée (tâches classiques uniquement). */
 export async function notifyTaskCreated(task) {
   if (!task?.id) return;
+  if (task.is_dg_task) {
+    return notifyDgTaskCreated(task);
+  }
   return notifySuperAdmins({
     title: 'Nouvelle tâche',
     message: `Tâche « ${task.titre} » créée${task.assigne ? ` — assignée à ${task.assigne}` : ''}.`,

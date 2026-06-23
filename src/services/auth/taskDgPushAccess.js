@@ -28,3 +28,20 @@ export function canManageTaskDgPush(user) {
   if (email === DG_EMAIL || email === 'selim.moumni@gmail.com') return true;
   return MANAGE_ROLES.has(normRole(user));
 }
+
+/** Alias métier — création / visibilité globale des tâches DG */
+export const canCreateDgTask = canManageTaskDgPush;
+
+export function normalizePersonName(name) {
+  return String(name || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function userMatchesAssignee(user, assigneeName) {
+  if (!user?.nom || !assigneeName) return false;
+  return normalizePersonName(user.nom) === normalizePersonName(assigneeName);
+}

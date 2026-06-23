@@ -174,8 +174,8 @@ export default function WorkerPaymentDetailModal({
         <div className="card" style={{ padding: '16px 20px', marginBottom: 16 }}>
           <SectionTitle icon={Banknote}>Récapitulatif financier</SectionTitle>
           <FinRow
-            label="Tarif journalier"
-            value={`${fmtMAD(record.tarifJournalier)}/j${record.tarifHoraire ? ` (${Number(record.tarifHoraire).toLocaleString('fr-MA', { minimumFractionDigits: 2 })} MAD/h × 8)` : ''}`}
+            label="Tarif horaire"
+            value={`${Number(record.tarifHoraire || 0).toLocaleString('fr-MA', { minimumFractionDigits: 2 })} MAD/h${record.tarifJournalier ? ` — équiv. ${fmtMAD(record.tarifJournalier)}/j` : ''}`}
           />
           <FinRow label="Montant brut" value={fmtMAD(record.montantBrut)} />
           <FinRow

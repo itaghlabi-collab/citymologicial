@@ -104,7 +104,7 @@ export function formatSupabaseError(error, fallback = 'Une erreur est survenue.'
     return 'Session requise. Veuillez vous connecter.';
   }
   if (code === '42P01' || message.includes('internal_tasks') || message.includes('dg_push')) {
-    return 'Table tâches absente ou incomplète — exécutez supabase/RUN_INTERNAL_TASKS_ENHANCE.sql';
+    return 'Table tâches absente ou incomplète — exécutez supabase/RUN_INTERNAL_TASKS_ENHANCE.sql et RUN_INTERNAL_TASKS_DG.sql';
   }
   if (code === '42P01' || message.includes('internal_appointments')) {
     return 'Table rendez-vous absente — exécutez supabase/migrations/20260526110000_internal_appointments.sql';

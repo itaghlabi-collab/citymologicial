@@ -371,7 +371,7 @@ export default function PaiementHebdo() {
     if (!selectedLines.length) e.workers = 'Sélectionnez au moins un ouvrier';
     selectedLines.forEach((l) => {
       if (l.joursPaies === '' || Number(l.joursPaies) < 0) e[`j_${l.workerId}`] = 'Jours requis';
-      if (!l.tarifJournalier || Number(l.tarifJournalier) <= 0) e[`t_${l.workerId}`] = 'Tarif journalier requis';
+      if (!l.tarifHoraire || Number(l.tarifHoraire) <= 0) e[`t_${l.workerId}`] = 'Tarif horaire requis';
     });
     return e;
   }
@@ -618,7 +618,7 @@ export default function PaiementHebdo() {
                 <thead>
                   <tr>
                     <th>Ouvrier</th><th>Projet / chantier</th><th>Chef chantier</th><th>Présences</th>
-                    <th>H. travaillées</th><th>Retard</th><th>Équiv. jours</th><th>Tarif/j</th><th>Net à payer</th>
+                    <th>H. travaillées</th><th>Retard</th><th>Équiv. jours</th><th>Tarif/h</th><th>Net à payer</th>
                     <th>Date paiement</th><th>Statut</th><th>Actions</th>
                   </tr>
                 </thead>
@@ -640,7 +640,7 @@ export default function PaiementHebdo() {
                       <td data-label="H. travaillées">{fmtHours(p.heuresNormales)}</td>
                       <td data-label="Retard" style={{ color: p.totalRetard > 0 ? '#E65100' : 'var(--text-3)' }}>{p.totalRetard > 0 ? fmtHours(p.totalRetard) : '—'}</td>
                       <td data-label="Équiv. jours" style={{ fontWeight: 600 }}>{fmtDayEquiv(p.joursPaies)}</td>
-                      <td data-label="Tarif/j">{fmtMAD(p.tarifJournalier)}</td>
+                      <td data-label="Tarif/h">{fmtMAD(p.tarifHoraire)}</td>
                       <td data-label="Net à payer" style={{ fontWeight: 800, color: 'var(--red)' }}>{fmtMAD(p.total)}</td>
                       <td data-label="Date paiement">
                         {p.statut === 'Payé' ? (
@@ -718,7 +718,7 @@ export default function PaiementHebdo() {
                     <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginTop: 10 }}>
                       <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Jours équivalents</span><div style={{ fontWeight: 700 }}>{fmtDayEquiv(editRecord.joursPaies)} j</div></div>
                       <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Heures travaillées</span><div style={{ fontWeight: 700 }}>{fmtHours(editRecord.heuresNormales)}</div></div>
-                      <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Tarif journalier</span><div style={{ fontWeight: 700 }}>{fmtMAD(editRecord.tarifJournalier)}</div></div>
+                      <div><span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Tarif horaire</span><div style={{ fontWeight: 700 }}>{fmtMAD(editRecord.tarifHoraire)}</div></div>
                     </div>
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-3)', marginTop: 8 }}>
                       Calculé automatiquement depuis les présences — non modifiable ici.
@@ -869,7 +869,7 @@ export default function PaiementHebdo() {
                                 <div style={{ flex: 1 }}>
                                   <div style={{ fontWeight: 700 }}>{workerFullName(w)}</div>
                                   <div style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>
-                                    {w.fonction || '—'} · Tarif/j : {fmtMAD(sel?.tarifJournalier ?? buildWorkerPayrollLine(w).tarifJournalier)}
+                                    {w.fonction || '—'} · Tarif/h : {fmtMAD(sel?.tarifHoraire ?? buildWorkerPayrollLine(w).tarifHoraire)}
                                     {sel?.fromPresence && <span style={{ color: '#2E7D32', marginLeft: 6 }}>· Présences</span>}
                                   </div>
                                 </div>
@@ -879,8 +879,8 @@ export default function PaiementHebdo() {
                                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(120px, 1fr))', gap: 8, paddingLeft: 28 }}>
                                   <div><label style={{ fontSize: '0.72rem', fontWeight: 600 }}>Jours</label>
                                     <input type="number" min="0" step="0.5" value={sel.joursPaies ?? ''} onChange={(e) => setWorkerField(w.id, 'joursPaies', e.target.value)} style={{ ...INPUT_S(errors[`j_${w.id}`]), padding: '6px 8px', fontSize: '0.85rem' }} /></div>
-                                  <div><label style={{ fontSize: '0.72rem', fontWeight: 600 }}>Tarif/j</label>
-                                    <input type="number" value={sel.tarifJournalier ?? ''} readOnly style={{ ...READONLY_S, padding: '6px 8px', fontSize: '0.85rem' }} /></div>
+                                  <div><label style={{ fontSize: '0.72rem', fontWeight: 600 }}>Tarif/h</label>
+                                    <input type="number" value={sel.tarifHoraire ?? ''} readOnly style={{ ...READONLY_S, padding: '6px 8px', fontSize: '0.85rem' }} /></div>
                                   <div><label style={{ fontSize: '0.72rem', fontWeight: 600 }}>H. sup</label>
                                     <input type="number" min="0" step="0.5" value={sel.heuresSup ?? ''} onChange={(e) => setWorkerField(w.id, 'heuresSup', e.target.value)} style={{ ...INPUT_S(false), padding: '6px 8px', fontSize: '0.85rem' }} /></div>
                                   <div><label style={{ fontSize: '0.72rem', fontWeight: 600 }}>Avances</label>

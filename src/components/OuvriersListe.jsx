@@ -2,7 +2,7 @@ import {
   HardHat, Plus, Edit2, Trash2, Eye, Download, Search, X,
   Upload, Camera, ScanLine, User, FileText, Shield,
   Phone, MapPin, CheckCircle, Clock, AlertCircle,
-  ChevronLeft, RefreshCw, ArrowUpDown, QrCode, Package,
+  ChevronLeft, RefreshCw, ArrowUpDown, Package,
   Loader
 } from 'lucide-react';
 
@@ -57,8 +57,6 @@ function fmtTarifJour(n) { return Number(n).toLocaleString('fr-MA', { minimumFra
 function tarifJourFromHeure(h) { return Math.round(Number(h || 0) * WORKER_HOURS_PER_DAY * 100) / 100; }
 function fmtDate(d) { if (!d) return '—'; try { return new Date(d).toLocaleDateString('fr-MA', { day: '2-digit', month: '2-digit', year: 'numeric' }); } catch { return d; } }
 function initials(w) { return ((w.prenom?.[0] || '') + (w.nom?.[0] || '')).toUpperCase() || '?'; }
-function genBadge() { return 'CH-' + String(Math.floor(Math.random() * 9000) + 1000); }
-
 /* ── Input style ── */
 function IS(err, extra = {}) {
   return {
@@ -945,11 +943,6 @@ function OuvrierDetail({ worker, onBack, onEdit, onDownloadPdf, pdfLoading }) {
               <span><Phone size={12} style={{ display: 'inline', marginRight: 4 }} />{worker.telephone || '—'}</span>
               <span>CIN : <strong style={{ color: 'var(--text-2)' }}>{worker.cin || '—'}</strong></span>
               {worker.chantier && <span><MapPin size={12} style={{ display: 'inline', marginRight: 4 }} />{worker.chantier}</span>}
-              {worker.badge && (
-                <span style={{ display: 'flex', alignItems: 'center', gap: 4, background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, padding: '2px 8px' }}>
-                  <QrCode size={11} /> {worker.badge}
-                </span>
-              )}
             </div>
           </div>
           <div className="rh-ext-detail-header-actions">
@@ -984,12 +977,8 @@ function OuvrierDetail({ worker, onBack, onEdit, onDownloadPdf, pdfLoading }) {
               ['Telephone', worker.telephone],
               ['CIN', worker.cin],
               ['Date naissance', fmtDate(worker.date_naissance)],
-              ['Expiration CIN', fmtDate(worker.date_expiration)],
               ['Ville naissance', worker.ville_naissance],
               ['Adresse', worker.adresse],
-              ['Nationalite', worker.nationalite],
-              ['Etat civil', worker.etat_civil],
-              ['Groupe sanguin', worker.groupe_sanguin],
             ].map(([k, v]) => v ? (
               <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.83rem', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
                 <span style={{ color: 'var(--text-3)' }}>{k}</span>
@@ -1002,13 +991,12 @@ function OuvrierDetail({ worker, onBack, onEdit, onDownloadPdf, pdfLoading }) {
             {[
               ['Fonction', worker.fonction],
               ['Experience', EXP_LABEL[worker.experience] || worker.experience],
-              ['Date recrutement', fmtDate(worker.date_recrutement)],
+              ['Date de première intervention', fmtDate(worker.date_recrutement)],
               ['Statut', STATUT_CFG[worker.statut]?.label || worker.statut],
               ['Disponibilite', worker.disponibilite === 'oui' ? 'Disponible' : 'Non disponible'],
               ['Chantier affecte', worker.chantier],
               ['Tarif horaire', fmtTarifHeure(worker.tarif)],
-              ['Tarif journalier', fmtTarifJour(tarifJourFromHeure(worker.tarif))],
-              ['Badge', worker.badge],
+              ['Équivalent journalier (8 h)', fmtTarifJour(tarifJourFromHeure(worker.tarif))],
             ].map(([k, v]) => v ? (
               <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.83rem', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
                 <span style={{ color: 'var(--text-3)' }}>{k}</span>
@@ -1051,7 +1039,6 @@ function OuvrierDetail({ worker, onBack, onEdit, onDownloadPdf, pdfLoading }) {
             ['Contact', worker.contact_urgence],
             ['Telephone', worker.tel_urgence],
             ['Relation', worker.relation_urgence],
-            ['Groupe sanguin', worker.groupe_sanguin],
           ].map(([k, v]) => (
             <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.83rem', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
               <span style={{ color: 'var(--text-3)' }}>{k}</span>
@@ -1069,7 +1056,6 @@ function OuvrierDetail({ worker, onBack, onEdit, onDownloadPdf, pdfLoading }) {
             ['Taille vetement', worker.taille_vetement],
             ['Taille gants', worker.taille_gants],
             ['Casque attribue', worker.casque],
-            ['Badge chantier', worker.badge],
           ].map(([k, v]) => (
             <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.83rem', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
               <span style={{ color: 'var(--text-3)' }}>{k}</span>
@@ -1096,7 +1082,7 @@ function OuvrierDetail({ worker, onBack, onEdit, onDownloadPdf, pdfLoading }) {
    ══════════════════════════════════════════════════════ */
 function OuvrierModal({ worker, onClose, onSave, saving, projects = [] }) {
   const isEdit = !!worker;
-  const [form, setForm] = useState(() => worker ? { ...EMPTY_FORM, ...worker } : { ...EMPTY_FORM, badge: genBadge() });
+  const [form, setForm] = useState(() => worker ? { ...EMPTY_FORM, ...worker } : { ...EMPTY_FORM });
   const [errors, setErrors] = useState({});
   const [showScanner, setShowScanner] = useState(false);
   const [scannerStream, setScannerStream] = useState(null);
@@ -1358,37 +1344,12 @@ function OuvrierModal({ worker, onClose, onSave, saving, projects = [] }) {
                       <input type="date" value={form.date_naissance} onChange={e => set('date_naissance', e.target.value)} style={IS(false, ocrFilled && form.date_naissance ? { borderColor: '#43A047', background: '#F1F8E9' } : {})} />
                     </div>
                     <div className="form-group">
-                      <Label>Expiration CIN</Label>
-                      <input type="date" value={form.date_expiration} onChange={e => set('date_expiration', e.target.value)} style={IS(false, ocrFilled && form.date_expiration ? { borderColor: '#43A047', background: '#F1F8E9' } : {})} />
-                    </div>
-                    <div className="form-group">
                       <Label>Ville de naissance</Label>
                       <input value={form.ville_naissance} onChange={e => set('ville_naissance', e.target.value)} style={IS(false, ocrFilled && form.ville_naissance ? { borderColor: '#43A047', background: '#F1F8E9' } : {})} />
                     </div>
                     <div className="form-group" style={{ gridColumn: '1 / -1' }}>
                       <Label>Adresse</Label>
                       <input value={form.adresse} onChange={e => set('adresse', e.target.value)} style={IS(false)} />
-                    </div>
-                    <div className="form-group">
-                      <Label>Nationalite</Label>
-                      <input value={form.nationalite} onChange={e => set('nationalite', e.target.value)} style={IS(false, ocrFilled && form.nationalite ? { borderColor: '#43A047', background: '#F1F8E9' } : {})} />
-                    </div>
-                    <div className="form-group">
-                      <Label>Etat civil</Label>
-                      <select value={form.etat_civil} onChange={e => set('etat_civil', e.target.value)} style={IS(false)}>
-                        <option value="">Choisir...</option>
-                        <option value="celibataire">Celibataire</option>
-                        <option value="marie">Marie(e)</option>
-                        <option value="divorce">Divorce(e)</option>
-                        <option value="veuf">Veuf/Veuve</option>
-                      </select>
-                    </div>
-                    <div className="form-group">
-                      <Label>Groupe sanguin</Label>
-                      <select value={form.groupe_sanguin} onChange={e => set('groupe_sanguin', e.target.value)} style={IS(false)}>
-                        <option value="">Choisir...</option>
-                        {GROUPES.map(g => <option key={g} value={g}>{g}</option>)}
-                      </select>
                     </div>
                   </div>
                 </div>
@@ -1409,7 +1370,7 @@ function OuvrierModal({ worker, onClose, onSave, saving, projects = [] }) {
                     <input type="number" min="0" step="0.01" value={form.tarif} onChange={e => set('tarif', e.target.value)} placeholder="15.00" style={IS(errors.tarif)} />
                     {form.tarif && !errors.tarif && (
                       <div style={{ fontSize: '0.75rem', color: 'var(--text-3)', marginTop: 4 }}>
-                        Tarif journalier : {fmtTarifJour(tarifJourFromHeure(form.tarif))} (× {WORKER_HOURS_PER_DAY} h)
+                        Équivalent journalier : {fmtTarifJour(tarifJourFromHeure(form.tarif))} (× {WORKER_HOURS_PER_DAY} h)
                       </div>
                     )}
                     {errors.tarif && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.tarif}</span>}
@@ -1421,7 +1382,7 @@ function OuvrierModal({ worker, onClose, onSave, saving, projects = [] }) {
                     </select>
                   </div>
                   <div className="form-group">
-                    <Label>Date de recrutement</Label>
+                    <Label>Date de première intervention</Label>
                     <input type="date" value={form.date_recrutement} onChange={e => set('date_recrutement', e.target.value)} style={IS(false)} />
                   </div>
                   <div className="form-group">
@@ -1469,10 +1430,6 @@ function OuvrierModal({ worker, onClose, onSave, saving, projects = [] }) {
                       />
                     </div>
                   )}
-                  <div className="form-group">
-                    <Label>Badge chantier</Label>
-                    <input value={form.badge} onChange={e => set('badge', e.target.value)} style={IS(false)} />
-                  </div>
                 </div>
               )}
 
@@ -1496,13 +1453,6 @@ function OuvrierModal({ worker, onClose, onSave, saving, projects = [] }) {
                       <option value="frere_soeur">Frere / Soeur</option>
                       <option value="ami">Ami(e)</option>
                       <option value="autre">Autre</option>
-                    </select>
-                  </div>
-                  <div className="form-group">
-                    <Label>Groupe sanguin</Label>
-                    <select value={form.groupe_sanguin} onChange={e => set('groupe_sanguin', e.target.value)} style={IS(false)}>
-                      <option value="">Choisir...</option>
-                      {GROUPES.map(g => <option key={g} value={g}>{g}</option>)}
                     </select>
                   </div>
                 </div>
@@ -1574,10 +1524,6 @@ function OuvrierModal({ worker, onClose, onSave, saving, projects = [] }) {
                   <div className="form-group">
                     <Label>Casque attribue</Label>
                     <input value={form.casque} onChange={e => set('casque', e.target.value)} placeholder="N° casque..." style={IS(false)} />
-                  </div>
-                  <div className="form-group">
-                    <Label>Badge chantier</Label>
-                    <input value={form.badge} onChange={e => set('badge', e.target.value)} style={IS(false)} />
                   </div>
                 </div>
               )}
@@ -1763,8 +1709,8 @@ export default function OuvriersListe({ onWorkersChange }) {
       {/* Header */}
       <div className="page-header flex-between finance-page-header">
         <div>
-          <h1 className="page-title">Ouvriers</h1>
-          <p className="page-subtitle"><span className="finance-sub-hide-mobile">Gestion du personnel de chantier — </span>{nTotal} ouvrier{nTotal > 1 ? 's' : ''}</p>
+          <h1 className="page-title">Ouvriers externes</h1>
+          <p className="page-subtitle"><span className="finance-sub-hide-mobile">Gestion du personnel de chantier externe — </span>{nTotal} ouvrier{nTotal > 1 ? 's' : ''}</p>
         </div>
         <div className="finance-page-actions finance-page-actions--solo">
           <button className="btn btn-primary" onClick={openAdd} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -1846,9 +1792,8 @@ export default function OuvriersListe({ onWorkersChange }) {
                     { label: 'Telephone',   field: 'telephone' },
                     { label: 'Fonction',    field: 'fonction' },
                     { label: 'Chantier',    field: 'chantier' },
-                    { label: 'Tarif/j',  field: 'tarif', align: 'right' },
+                    { label: 'Tarif/h',  field: 'tarif', align: 'right' },
                     { label: 'Statut',      field: 'statut' },
-                    { label: 'Badge',       field: 'badge' },
                     { label: 'Actions',     field: null },
                   ].map(col => (
                     <th key={col.label} onClick={col.field ? () => toggleSort(col.field) : undefined}
@@ -1875,7 +1820,7 @@ export default function OuvriersListe({ onWorkersChange }) {
                           <Avatar worker={w} size={34} />
                           <div>
                             <div style={{ fontWeight: 700, color: 'var(--text)', fontSize: '0.88rem' }}>{w.prenom} {w.nom}</div>
-                            {w.date_recrutement && <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Depuis {fmtDate(w.date_recrutement)}</div>}
+                            {w.date_recrutement && <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>1ère interv. {fmtDate(w.date_recrutement)}</div>}
                           </div>
                         </div>
                       </td>
@@ -1898,22 +1843,13 @@ export default function OuvriersListe({ onWorkersChange }) {
                       </td>
 
                       {/* Tarif */}
-                      <td data-label="Tarif/j" style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'var(--font-head)', fontWeight: 800, color: 'var(--red)', whiteSpace: 'nowrap' }}>
-                        {fmtTarifJour(tarifJourFromHeure(w.tarif))}
-                        <div style={{ fontSize: '0.68rem', color: 'var(--text-3)', fontWeight: 500 }}>{fmtTarifHeure(w.tarif)}</div>
+                      <td data-label="Tarif/h" style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'var(--font-head)', fontWeight: 800, color: 'var(--red)', whiteSpace: 'nowrap' }}>
+                        {fmtTarifHeure(w.tarif)}
+                        <div style={{ fontSize: '0.68rem', color: 'var(--text-3)', fontWeight: 500 }}>{fmtTarifJour(tarifJourFromHeure(w.tarif))} / j</div>
                       </td>
 
                       {/* Statut */}
                       <td data-label="Statut" style={{ padding: '10px 12px' }}><span className={'badge ' + cfg.cls}>{cfg.label}</span></td>
-
-                      {/* Badge */}
-                      <td data-label="Badge" style={{ padding: '10px 12px' }}>
-                        {w.badge ? (
-                          <span style={{ fontSize: '0.72rem', display: 'flex', alignItems: 'center', gap: 4, color: 'var(--text-3)', fontFamily: 'var(--font-head)', letterSpacing: '0.04em' }}>
-                            <QrCode size={11} /> {w.badge}
-                          </span>
-                        ) : '—'}
-                      </td>
 
                       {/* Actions */}
                       <td className="rh-ext-actions-cell" style={{ padding: '10px 10px', whiteSpace: 'nowrap' }}>

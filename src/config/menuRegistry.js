@@ -48,12 +48,19 @@ export const ERP_RUBRIQUES = Object.freeze([
     label: 'Employés Externes',
     departmentIds: [2, 5],
     submodules: [
-      { code: 'ouvriers', label: 'Ouvriers' },
+      { code: 'ouvriers', label: 'Ouvriers externes' },
       { code: 'presence', label: 'Présence ouvriers' },
       { code: 'heures-sup', label: 'Heures supplémentaires' },
       { code: 'paiement-hebdo', label: 'Paiement hebdo. ouvriers' },
-      { code: 'situation-sous-traitants', label: 'Situation sous-traitants' },
+    ],
+  },
+  {
+    code: 'sous_traitants',
+    label: 'Sous-traitants',
+    departmentIds: [2, 5],
+    submodules: [
       { code: 'sous-traitants', label: 'Sous-traitants' },
+      { code: 'situation-sous-traitants', label: 'Situation sous-traitants' },
     ],
   },
   {

@@ -135,7 +135,7 @@ export function toWorkerRow(form, meta = {}) {
     telephone: emptyToNull(form.telephone?.trim()),
     fonction: emptyToNull(form.fonction),
     tarif: Number(form.tarif) || 0,
-    tarif_unite: form.tarif_unite || 'heure',
+    tarif_unite: 'heure',
     experience: form.experience || 'intermediaire',
     date_naissance: emptyToNull(form.date_naissance),
     lieu_naissance: emptyToNull(form.ville_naissance?.trim()),

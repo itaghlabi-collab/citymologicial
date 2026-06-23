@@ -106,7 +106,8 @@ export async function loadInternalDashboardData() {
   ]);
 
   const val = (i) => (results[i].status === 'fulfilled' ? results[i].value : []);
-  const tasks = val(0);
+  const allTasks = val(0);
+  const tasks = (allTasks || []).filter((t) => !t.is_dg_task);
   const appts = val(1);
   const prospectsRaw = val(2);
   const devisRaw = val(3);

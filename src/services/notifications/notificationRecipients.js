@@ -82,3 +82,24 @@ export function invalidateProfilesCache() {
   profilesCache = null;
   profilesCacheAt = 0;
 }
+
+/** Trouve un profil utilisateur par nom affiché (assigné tâche DG). */
+export async function findProfileByAssigneeName(assigneeName) {
+  if (!assigneeName?.trim()) return null;
+  const q = String(assigneeName)
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const profiles = await fetchProfiles();
+  return profiles.find((p) => {
+    const nom = String(p.nom || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/\p{M}/gu, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+    return nom === q;
+  }) || null;
+}

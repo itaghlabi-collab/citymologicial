@@ -2,6 +2,7 @@
  * internalTasks.js — CRUD Tâches organisation interne (Supabase internal_tasks)
  */
 import { getSupabase } from '../../lib/supabase';
+import { canManageTaskDgPush, userMatchesAssignee } from '../auth/taskDgPushAccess';
 
 const TABLE = 'internal_tasks';
 
@@ -50,6 +51,8 @@ export function normalizeInternalTask(row) {
     pushed_at: row.pushed_at || null,
     pushed_by: row.pushed_by || null,
     dg_note: row.dg_note || '',
+    is_dg_task: Boolean(row.is_dg_task),
+    created_by: row.created_by || null,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -70,6 +73,8 @@ export function toInternalTaskRow(form) {
   if (form.pushed_at !== undefined) row.pushed_at = form.pushed_at;
   if (form.pushed_by !== undefined) row.pushed_by = form.pushed_by;
   if (form.dg_note !== undefined) row.dg_note = form.dg_note?.trim() || null;
+  if (form.is_dg_task !== undefined) row.is_dg_task = Boolean(form.is_dg_task);
+  if (form.created_by !== undefined) row.created_by = form.created_by || null;
   return row;
 }
 
@@ -96,10 +101,16 @@ export async function listInternalTasks() {
 }
 
 export async function createInternalTask(form) {
-  await getAuthUserId();
+  const userId = await getAuthUserId();
   const row = toInternalTaskRow(form);
+  row.created_by = userId;
   if (!row.titre) {
     const err = new Error('Le titre est requis.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  if (row.is_dg_task && !row.responsable) {
+    const err = new Error('Un responsable est requis pour une tâche DG.');
     err.code = 'VALIDATION';
     throw err;
   }
@@ -202,7 +213,14 @@ export function sortInternalTasks(tasks) {
 
 export function filterInternalTasks(tasks, filters = {}) {
   let rows = [...(tasks || [])];
-  const { statut, priorite, responsable, dateFrom, dateTo, search, dgPushOnly } = filters;
+  const { statut, priorite, responsable, dateFrom, dateTo, search, dgPushOnly, dgOnly, excludeDg } = filters;
+
+  if (excludeDg) {
+    rows = rows.filter((t) => !t.is_dg_task);
+  }
+  if (dgOnly) {
+    rows = rows.filter((t) => t.is_dg_task);
+  }
 
   if (statut && statut !== 'all') {
     rows = rows.filter((t) => t.statut === statut);
@@ -231,8 +249,8 @@ export function filterInternalTasks(tasks, filters = {}) {
   return sortInternalTasks(rows);
 }
 
-export function computeInternalTaskStats(tasks) {
-  const list = tasks || [];
+export function computeInternalTaskStats(tasks, { excludeDg = false } = {}) {
+  const list = excludeDg ? (tasks || []).filter((t) => !t.is_dg_task) : (tasks || []);
   return {
     total: list.length,
     a_faire: list.filter((t) => t.statut === 'a_faire').length,
@@ -244,6 +262,33 @@ export function computeInternalTaskStats(tasks) {
     overdue: list.filter((t) =>
       !['terminee', 'annulee'].includes(t.statut) && t.dateLimite && t.dateLimite < new Date().toISOString().slice(0, 10),
     ).length,
+  };
+}
+
+/** Statistiques tâches DG (sous-ensemble is_dg_task). */
+export function computeDgTaskStats(tasks) {
+  return computeInternalTaskStats((tasks || []).filter((t) => t.is_dg_task));
+}
+
+/** Visibilité tâche DG : créateur DG, assigné, ou rôle DG. */
+export function canViewDgTask(task, user) {
+  if (!task?.is_dg_task) return true;
+  if (!user) return false;
+  if (canManageTaskDgPush(user)) return true;
+  if (task.created_by && task.created_by === user.id) return true;
+  if (userMatchesAssignee(user, task.assigne)) return true;
+  return false;
+}
+
+export function applyTaskVisibility(tasks, user) {
+  return (tasks || []).filter((t) => canViewDgTask(t, user));
+}
+
+export function splitTasksByCategory(tasks, user) {
+  const visible = applyTaskVisibility(tasks, user);
+  return {
+    normalTasks: visible.filter((t) => !t.is_dg_task),
+    dgTasks: visible.filter((t) => t.is_dg_task),
   };
 }
 

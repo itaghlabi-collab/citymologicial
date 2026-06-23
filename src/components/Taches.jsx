@@ -2,12 +2,11 @@ import {
   Plus, CheckSquare, Clock, Trash2, Edit2, X, User, Building2, RefreshCw, AlertCircle,
 } from 'lucide-react';
 import { useState, useEffect, useRef, useMemo } from 'react';
-import { listEmployees } from '../services/rh/employees';
-import { employeeFullName } from '../services/rh/leaves';
-import { DEPARTMENTS } from '../data/departments';
+import { listEmployees, employeeFullName } from '../services/rh/employees';
+import { DEPARTMENTS, getDeptById } from '../data/departments';
 import { useInternalTasks } from '../hooks/useInternalTasks';
 import { useAuth } from '../hooks/useAuth';
-import { canManageTaskDgPush } from '../services/auth/taskDgPushAccess';
+import { canManageTaskDgPush, canCreateDgTask } from '../services/auth/taskDgPushAccess';
 import {
   TASK_STATUTS,
   TASK_STATUT_LABELS,
@@ -32,7 +31,7 @@ const PRIORITY_BADGES = { urgente: 'badge-red', haute: 'badge-red', normale: 'ba
 
 const EMPTY_FORM = {
   titre: '', description: '', assigne: '', departement_id: '', dateLimite: '',
-  statut: 'a_faire', priorite: 'normale', module_lie: '', commentaire: '',
+  statut: 'a_faire', priorite: 'normale', module_lie: '', commentaire: '', is_dg_task: false,
 };
 
 const INPUT_S = (err) => ({
@@ -44,6 +43,20 @@ const FILTER_S = {
   padding: '7px 10px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius)',
   fontSize: '0.82rem', background: '#fff', fontFamily: 'var(--font-body)',
 };
+
+function employeeDepartmentId(emp) {
+  if (!emp) return null;
+  if (emp.department_id) return Number(emp.department_id);
+  const dept = DEPARTMENTS.find(
+    (d) => d.code === emp.department || d.nom === emp.department,
+  );
+  return dept?.id ?? null;
+}
+
+function employeeDepartmentCode(emp) {
+  const id = employeeDepartmentId(emp);
+  return id ? (getDeptById(id)?.code || '—') : '—';
+}
 
 function StatusSelect({ value, onChange, disabled }) {
   const style = TASK_STATUT_SELECT_STYLE[value] || TASK_STATUT_SELECT_STYLE.a_faire;
@@ -73,7 +86,7 @@ function StatusSelect({ value, onChange, disabled }) {
 }
 
 function TaskRow({
-  t, canDgPush, onStatusChange, onDgPush, onToggleDone, onEdit, onDelete, saving,
+  t, canDgPush, onStatusChange, onDgPush, onToggleDone, onEdit, onDelete, saving, showDgCategoryBadge,
 }) {
   const isDone = t.statut === 'terminee';
   const isCancelled = t.statut === 'annulee';
@@ -101,6 +114,9 @@ function TaskRow({
             {t.dg_push && <AlertCircle size={14} style={{ color: 'var(--red)', marginRight: 6, verticalAlign: -2 }} />}
             {t.titre}
           </div>
+          {showDgCategoryBadge && t.is_dg_task && (
+            <span className="badge badge-purple taches-urgent-badge">TÂCHE DG</span>
+          )}
           {t.dg_push && <span className="badge badge-red taches-urgent-badge">URGENT DG</span>}
         </div>
         {t.description && <div className="taches-row-desc">{t.description}</div>}
@@ -157,11 +173,12 @@ export default function Taches() {
   const {
     records: tasks, loading, saving, error, configured, load,
     create, update, remove, setStatut, toggleDgPush,
-    responsables, filterInternalTasks, computeInternalTaskStats,
+    responsables, filterInternalTasks, computeInternalTaskStats, computeDgTaskStats, splitTasksByCategory,
   } = useInternalTasks();
 
   const [employees, setEmployees] = useState([]);
   const [filter, setFilter] = useState('all');
+  const [dgFilter, setDgFilter] = useState('all');
   const [prioriteFilter, setPrioriteFilter] = useState('all');
   const [responsableFilter, setResponsableFilter] = useState('all');
   const [dateFrom, setDateFrom] = useState('');
@@ -204,6 +221,7 @@ export default function Taches() {
       priorite: t.priorite,
       module_lie: t.module_lie || '',
       commentaire: t.commentaire || '',
+      is_dg_task: Boolean(t.is_dg_task),
     });
     setErrors({});
     setEditId(t.id);
@@ -211,6 +229,10 @@ export default function Taches() {
   }
   function closeModal() { setShowModal(false); setEditId(null); }
   function setF(k, v) { setForm((p) => ({ ...p, [k]: v })); }
+
+  function handleDepartmentChange(deptId) {
+    setForm((p) => ({ ...p, departement_id: deptId, assigne: '' }));
+  }
 
   function payloadFromForm(f) {
     const dept = DEPARTMENTS.find((d) => d.id === Number(f.departement_id));
@@ -222,9 +244,14 @@ export default function Taches() {
     const errs = {};
     if (!form.titre.trim()) errs.titre = 'Requis';
     if (!form.dateLimite) errs.dateLimite = 'Requis';
+    if (form.is_dg_task && !form.assigne?.trim()) errs.assigne = 'Responsable requis pour une tâche DG';
     if (Object.keys(errs).length) { setErrors(errs); return; }
     if (!configured) { showToast('error', 'Supabase non configuré.'); return; }
-    const result = editId ? await update(editId, payloadFromForm(form)) : await create(payloadFromForm(form));
+    const payload = payloadFromForm(form);
+    if (!canCreateDgTask(user)) {
+      delete payload.is_dg_task;
+    }
+    const result = editId ? await update(editId, payload) : await create(payload);
     if (!result.success) { showToast('error', result.error || 'Erreur.'); return; }
     showToast('success', editId ? 'Tâche mise à jour !' : 'Tâche créée avec succès !');
     closeModal();
@@ -275,20 +302,34 @@ export default function Taches() {
     }
   }
 
-  const filtered = useMemo(() => {
-    const base = {
-      priorite: prioriteFilter,
-      responsable: responsableFilter,
-      dateFrom: dateFrom || undefined,
-      dateTo: dateTo || undefined,
-    };
-    if (filter === 'dg_push') {
-      return filterInternalTasks(tasks, { ...base, dgPushOnly: true });
-    }
-    return filterInternalTasks(tasks, { ...base, statut: filter });
-  }, [tasks, filter, prioriteFilter, responsableFilter, dateFrom, dateTo, filterInternalTasks]);
+  const { normalTasks, dgTasks } = useMemo(
+    () => splitTasksByCategory(tasks, user),
+    [tasks, user, splitTasksByCategory],
+  );
 
-  const counts = computeInternalTaskStats(tasks);
+  const filterBase = useMemo(() => ({
+    priorite: prioriteFilter,
+    responsable: responsableFilter,
+    dateFrom: dateFrom || undefined,
+    dateTo: dateTo || undefined,
+  }), [prioriteFilter, responsableFilter, dateFrom, dateTo]);
+
+  const filtered = useMemo(() => {
+    if (filter === 'dg_push') {
+      return filterInternalTasks(normalTasks, { ...filterBase, dgPushOnly: true });
+    }
+    return filterInternalTasks(normalTasks, { ...filterBase, statut: filter });
+  }, [normalTasks, filter, filterBase, filterInternalTasks]);
+
+  const filteredDg = useMemo(() => {
+    if (dgFilter === 'all') {
+      return filterInternalTasks(dgTasks, filterBase);
+    }
+    return filterInternalTasks(dgTasks, { ...filterBase, statut: dgFilter });
+  }, [dgTasks, dgFilter, filterBase, filterInternalTasks]);
+
+  const counts = computeInternalTaskStats(normalTasks);
+  const dgCounts = computeDgTaskStats(dgTasks);
 
   const employeeNames = useMemo(() => {
     const fromRh = employees
@@ -297,6 +338,30 @@ export default function Taches() {
       .filter(Boolean);
     return [...new Set([...fromRh, ...responsables])].sort((a, b) => a.localeCompare(b, 'fr'));
   }, [employees, responsables]);
+
+  /** Liste employés du formulaire — filtrée par département sélectionné */
+  const assignableEmployees = useMemo(() => {
+    const active = employees.filter((e) => e.statut !== 'Inactif');
+    const deptId = form.departement_id ? Number(form.departement_id) : null;
+    const filtered = deptId
+      ? active.filter((e) => employeeDepartmentId(e) === deptId)
+      : active;
+
+    const options = filtered.map((e) => ({
+      name: employeeFullName(e),
+      deptCode: employeeDepartmentCode(e),
+    })).filter((o) => o.name);
+
+    if (form.assigne && !options.some((o) => o.name === form.assigne)) {
+      const match = active.find((e) => employeeFullName(e) === form.assigne);
+      options.push({
+        name: form.assigne,
+        deptCode: match ? employeeDepartmentCode(match) : '—',
+      });
+    }
+
+    return options.sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+  }, [employees, form.departement_id, form.assigne]);
 
   if (loading && tasks.length === 0) {
     return (
@@ -314,6 +379,13 @@ export default function Taches() {
     ['en_attente', 'En attente', counts.en_attente],
     ['terminee', 'Terminées', counts.terminee],
     ['dg_push', 'Urgent DG', counts.dg_push],
+  ];
+
+  const dgStatCards = [
+    ['all', 'Tâches DG', dgCounts.total],
+    ['a_faire', 'DG à faire', dgCounts.a_faire],
+    ['en_cours', 'DG en cours', dgCounts.en_cours],
+    ['terminee', 'DG terminées', dgCounts.terminee],
   ];
 
   return (
@@ -334,7 +406,7 @@ export default function Taches() {
 
       {!configured && (
         <div className="card" style={{ marginBottom: 16, padding: 12, color: '#E65100', fontSize: '0.85rem' }}>
-          Supabase non configuré — exécutez supabase/RUN_INTERNAL_TASKS_ENHANCE.sql
+          Supabase non configuré — exécutez supabase/RUN_INTERNAL_TASKS_ENHANCE.sql et RUN_INTERNAL_TASKS_DG.sql
         </div>
       )}
       {error && (
@@ -361,6 +433,29 @@ export default function Taches() {
           </div>
         ))}
       </div>
+
+      {(canCreateDgTask(user) || dgCounts.total > 0) && (
+        <div className="stat-grid taches-kpi-grid" style={{ marginBottom: 16 }}>
+          {dgStatCards.map(([k, label, val]) => (
+            <div
+              key={`dg-${k}`}
+              className="stat-card"
+              style={{
+                cursor: 'pointer',
+                border: dgFilter === k ? '2px solid #6A1B9A' : '1px solid var(--border)',
+              }}
+              onClick={() => setDgFilter(k)}
+            >
+              <div className="stat-body">
+                <div className="stat-value" style={{ color: dgFilter === k ? '#6A1B9A' : 'var(--text)' }}>
+                  {val}
+                </div>
+                <div className="stat-label">{label}</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       <div className="card taches-filters" style={{ padding: '12px 16px', marginBottom: 16 }}>
         <select value={prioriteFilter} onChange={(e) => setPrioriteFilter(e.target.value)} style={FILTER_S}>
@@ -397,6 +492,7 @@ export default function Taches() {
                 t={t}
                 canDgPush={canDgPush}
                 saving={saving}
+                showDgCategoryBadge={false}
                 onStatusChange={handleStatusChange}
                 onDgPush={handleDgPush}
                 onToggleDone={toggleDone}
@@ -407,6 +503,40 @@ export default function Taches() {
           </div>
         )}
       </div>
+
+      {(canCreateDgTask(user) || dgTasks.length > 0) && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <div className="card-title" style={{ marginBottom: 16 }}>
+            <CheckSquare size={16} />
+            {dgFilter === 'all' ? 'Tâches DG' : `Tâches DG — ${TASK_STATUT_LABELS[dgFilter] || dgFilter}`}
+            {dgCounts.total > 0 && (
+              <span className="badge badge-purple" style={{ marginLeft: 8, fontSize: '0.68rem' }}>{dgCounts.total} tâche{dgCounts.total > 1 ? 's' : ''}</span>
+            )}
+          </div>
+          {filteredDg.length === 0 ? (
+            <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-3)' }}>
+              Aucune tâche DG dans cette catégorie.
+            </div>
+          ) : (
+            <div className="taches-list">
+              {filteredDg.map((t) => (
+                <TaskRow
+                  key={t.id}
+                  t={t}
+                  canDgPush={canDgPush}
+                  saving={saving}
+                  showDgCategoryBadge
+                  onStatusChange={handleStatusChange}
+                  onDgPush={handleDgPush}
+                  onToggleDone={toggleDone}
+                  onEdit={openEdit}
+                  onDelete={deleteTask}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
 
       {showModal && (
         <div className="taches-modal-backdrop" onClick={(e) => e.target === e.currentTarget && closeModal()}>
@@ -427,21 +557,41 @@ export default function Taches() {
                 <label>Description (optionnel)</label>
                 <textarea rows={2} value={form.description} onChange={(e) => setF('description', e.target.value)} style={{ ...INPUT_S(false), resize: 'vertical' }} />
               </div>
-              <div className="taches-form-grid-2">
-                <div className="form-group">
-                  <label>Assigné à</label>
-                  <select value={form.assigne} onChange={(e) => setF('assigne', e.target.value)} style={INPUT_S(false)}>
-                    <option value="">Liste des employés</option>
-                    {employeeNames.map((name) => <option key={name} value={name}>{name}</option>)}
-                  </select>
-                </div>
-                <div className="form-group">
-                  <label>Département</label>
-                  <select value={form.departement_id} onChange={(e) => setF('departement_id', e.target.value)} style={INPUT_S(false)}>
-                    <option value="">Tous les départements</option>
-                    {DEPARTMENTS.map((d) => <option key={d.id} value={d.id}>{d.code} — {d.nom}</option>)}
-                  </select>
-                </div>
+              {canCreateDgTask(user) && !editId && (
+                <label style={{ display: 'flex', alignItems: 'center', gap: 10, cursor: 'pointer', padding: '10px 12px', background: form.is_dg_task ? '#F3E5F5' : 'var(--bg)', borderRadius: 8, border: `1.5px solid ${form.is_dg_task ? '#6A1B9A' : 'var(--border)'}` }}>
+                  <input
+                    type="checkbox"
+                    checked={Boolean(form.is_dg_task)}
+                    onChange={(e) => setF('is_dg_task', e.target.checked)}
+                  />
+                  <span>
+                    <strong style={{ display: 'block', fontSize: '0.88rem' }}>Tâche DG</strong>
+                    <span style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>Visible uniquement par la Direction et le responsable assigné</span>
+                  </span>
+                </label>
+              )}
+              <div className="form-group">
+                <label>Département</label>
+                <select
+                  value={form.departement_id}
+                  onChange={(e) => handleDepartmentChange(e.target.value)}
+                  style={INPUT_S(false)}
+                >
+                  <option value="">Tous les départements</option>
+                  {DEPARTMENTS.map((d) => <option key={d.id} value={d.id}>{d.code} — {d.nom}</option>)}
+                </select>
+              </div>
+              <div className="form-group">
+                <label>Assigné à{form.is_dg_task ? ' *' : ''}</label>
+                <select value={form.assigne} onChange={(e) => setF('assigne', e.target.value)} style={INPUT_S(errors.assigne)}>
+                  <option value="">
+                    {form.departement_id ? 'Choisir un employé du département…' : 'Liste des employés'}
+                  </option>
+                  {assignableEmployees.map(({ name, deptCode }) => (
+                    <option key={name} value={name}>{name} ({deptCode})</option>
+                  ))}
+                </select>
+                {errors.assigne && <div style={{ color: 'var(--red)', fontSize: '0.75rem', marginTop: 2 }}>{errors.assigne}</div>}
               </div>
               <div className="form-group">
                 <label>Date limite</label>

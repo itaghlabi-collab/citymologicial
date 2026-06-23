@@ -13,6 +13,8 @@ import {
   setInternalTaskDgPush,
   filterInternalTasks,
   computeInternalTaskStats,
+  computeDgTaskStats,
+  splitTasksByCategory,
   collectTaskResponsables,
 } from '../services/internal/internalTasks';
 
@@ -147,5 +149,7 @@ export function useInternalTasks() {
     responsables,
     filterInternalTasks,
     computeInternalTaskStats,
+    computeDgTaskStats,
+    splitTasksByCategory,
   };
 }

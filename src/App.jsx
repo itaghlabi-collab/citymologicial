@@ -84,12 +84,17 @@ const NAV = [
   {
     section: 'Employes Externes',
     items: [
-      { id: 'ouvriers',           label: 'Ouvriers',             icon: HardHat },
+      { id: 'ouvriers',           label: 'Ouvriers externes',    icon: HardHat },
       { id: 'presence',           label: 'Presence ouvriers',    icon: ClockIcon },
       { id: 'heures-sup',         label: 'Heures supplementaires', icon: BarChart3 },
       { id: 'paiement-hebdo',     label: 'Paiement hebdo. ouvriers', icon: Banknote },
-      { id: 'situation-sous-traitants', label: 'Situation sous-traitants', icon: ClipboardList },
+    ],
+  },
+  {
+    section: 'Sous-traitants',
+    items: [
       { id: 'sous-traitants',     label: 'Sous-traitants',       icon: Handshake },
+      { id: 'situation-sous-traitants', label: 'Situation sous-traitants', icon: ClipboardList },
     ],
   },
   {
@@ -190,7 +195,7 @@ const MODULE_LABELS = {
   departements:        'Departements',
   employes:            'Employes',
   conges:              'Demande de conge',
-  ouvriers:            'Ouvriers',
+  ouvriers:            'Ouvriers externes',
   presence:            'Presence ouvriers',
   'heures-sup':        'Heures supplementaires',
   'paiement-hebdo':    'Paiement hebdo. ouvriers',
