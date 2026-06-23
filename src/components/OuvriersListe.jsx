@@ -12,7 +12,6 @@ import { useWorkers } from '../hooks/useWorkers';
 import { scanCIN, canUseCamera, getCameraBlockedReason, getCameraErrorMessage, getCINCameraStream, preloadOcrEngine } from '../services/ocr';
 import { captureCINFromVideo, prepareImportedCINImage } from '../services/cinCapture';
 import { generateWorkerPdf } from '../services/rh/workerPdf';
-import { listProjects } from '../services/projects/projects';
 import { WORKER_HOURS_PER_DAY } from '../services/rh/workers';
 
 /* Exported for compatibility — starts empty, populated from API */
@@ -891,7 +890,7 @@ function MobileOuvrierRow({ w, cfg, pdfLoading, onView, onEdit, onPdf, onDelete 
         <Avatar worker={w} size={28} />
         <div>
           <strong>{w.prenom} {w.nom}</strong>
-          <span>{w.fonction || '—'}{w.chantier ? ` · ${w.chantier}` : ''}</span>
+          <span>{w.fonction || '—'}</span>
         </div>
       </button>
       <span className={`badge ${cfg.cls}`} style={{ fontSize: '0.65rem', flexShrink: 0 }}>{cfg.label}</span>
@@ -915,7 +914,6 @@ function OuvrierDetail({ worker, onBack, onEdit, onDownloadPdf, pdfLoading }) {
   const tabs = [
     { id: 'infos',      label: 'Informations' },
     { id: 'documents',  label: 'Documents' },
-    { id: 'chantier',   label: 'Chantier' },
     { id: 'securite',   label: 'Securite' },
     { id: 'equipements', label: 'Equipements' },
   ];
@@ -987,14 +985,13 @@ function OuvrierDetail({ worker, onBack, onEdit, onDownloadPdf, pdfLoading }) {
             ) : null)}
           </div>
           <div className="card" style={{ padding: '20px 22px' }}>
-            <STitle><HardHat size={14} /> Infos chantier</STitle>
+            <STitle><HardHat size={14} /> Infos métier</STitle>
             {[
               ['Fonction', worker.fonction],
               ['Experience', EXP_LABEL[worker.experience] || worker.experience],
               ['Date de première intervention', fmtDate(worker.date_recrutement)],
               ['Statut', STATUT_CFG[worker.statut]?.label || worker.statut],
               ['Disponibilite', worker.disponibilite === 'oui' ? 'Disponible' : 'Non disponible'],
-              ['Chantier affecte', worker.chantier],
               ['Tarif horaire', fmtTarifHeure(worker.tarif)],
               ['Équivalent journalier (8 h)', fmtTarifJour(tarifJourFromHeure(worker.tarif))],
             ].map(([k, v]) => v ? (
@@ -1065,14 +1062,6 @@ function OuvrierDetail({ worker, onBack, onEdit, onDownloadPdf, pdfLoading }) {
         </div>
       )}
 
-      {tab === 'chantier' && (
-        <div className="card" style={{ padding: '20px 22px' }}>
-          <STitle><HardHat size={14} /> Historique chantier</STitle>
-          <div style={{ textAlign: 'center', padding: '32px 0', color: 'var(--text-3)', fontSize: '0.85rem' }}>
-            Aucun historique disponible — connectez le backend pour voir les affectations passees.
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -1080,7 +1069,7 @@ function OuvrierDetail({ worker, onBack, onEdit, onDownloadPdf, pdfLoading }) {
 /* ══════════════════════════════════════════════════════
    OUVRIER FORM MODAL
    ══════════════════════════════════════════════════════ */
-function OuvrierModal({ worker, onClose, onSave, saving, projects = [] }) {
+function OuvrierModal({ worker, onClose, onSave, saving }) {
   const isEdit = !!worker;
   const [form, setForm] = useState(() => worker ? { ...EMPTY_FORM, ...worker } : { ...EMPTY_FORM });
   const [errors, setErrors] = useState({});
@@ -1097,7 +1086,7 @@ function OuvrierModal({ worker, onClose, onSave, saving, projects = [] }) {
 
   const formTabs = [
     { id: 'identite',    label: 'Identite' },
-    { id: 'chantier',    label: 'Chantier' },
+    { id: 'chantier',    label: 'Métier' },
     { id: 'securite',    label: 'Securite' },
     { id: 'documents',   label: 'Documents' },
     { id: 'equipements', label: 'Equipements' },
@@ -1398,38 +1387,6 @@ function OuvrierModal({ worker, onClose, onSave, saving, projects = [] }) {
                       <option value="non">Non disponible</option>
                     </select>
                   </div>
-                  <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-                    <Label>Projet / Chantier affecte</Label>
-                    <select
-                      value={form.project_id || ''}
-                      onChange={e => {
-                        const pr = projects.find(p => String(p.id) === String(e.target.value));
-                        setForm(p => ({
-                          ...p,
-                          project_id: e.target.value,
-                          projet_nom: pr?.nom || '',
-                          chantier: pr?.nom || (e.target.value ? '' : (p.chantier_legacy || p.chantier || '')),
-                        }));
-                      }}
-                      style={IS(false)}
-                    >
-                      <option value="">— Aucun projet —</option>
-                      {projects.map(p => (
-                        <option key={p.id} value={p.id}>{p.ref ? `${p.ref} — ${p.nom}` : p.nom}</option>
-                      ))}
-                    </select>
-                  </div>
-                  {!form.project_id && (
-                    <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-                      <Label>Chantier (texte libre)</Label>
-                      <input
-                        value={form.chantier_legacy || form.chantier || ''}
-                        onChange={e => setForm(p => ({ ...p, chantier: e.target.value, chantier_legacy: e.target.value }))}
-                        placeholder="Ancien chantier non lie a un projet..."
-                        style={IS(false)}
-                      />
-                    </div>
-                  )}
                 </div>
               )}
 
@@ -1576,11 +1533,6 @@ export default function OuvriersListe({ onWorkersChange }) {
   const [toast, setToast]           = useState(null);
   const [pdfLoadingId, setPdfLoadingId] = useState(null);
   const toastRef                    = useRef(null);
-  const [projects, setProjects]       = useState([]);
-
-  useEffect(() => {
-    listProjects().then(setProjects).catch(() => setProjects([]));
-  }, []);
 
   function notify(type, msg) {
     clearTimeout(toastRef.current);
@@ -1648,7 +1600,7 @@ export default function OuvriersListe({ onWorkersChange }) {
 
   const filtered = workers.filter(w => {
     const q = search.toLowerCase();
-    const matchSearch = !q || (w.prenom + ' ' + w.nom).toLowerCase().includes(q) || (w.cin || '').toLowerCase().includes(q) || (w.fonction || '').toLowerCase().includes(q) || (w.chantier || '').toLowerCase().includes(q) || (w.projet_nom || '').toLowerCase().includes(q);
+    const matchSearch = !q || (w.prenom + ' ' + w.nom).toLowerCase().includes(q) || (w.cin || '').toLowerCase().includes(q) || (w.fonction || '').toLowerCase().includes(q);
     const matchStatut  = !filterStatut   || w.statut   === filterStatut;
     const matchFonction = !filterFonction || w.fonction === filterFonction;
     return matchSearch && matchStatut && matchFonction;
@@ -1685,7 +1637,6 @@ export default function OuvriersListe({ onWorkersChange }) {
             onClose={() => setShowModal(false)}
             onSave={handleSave}
             saving={saving}
-            projects={projects}
           />
         )}
       </>
@@ -1702,7 +1653,6 @@ export default function OuvriersListe({ onWorkersChange }) {
           onClose={() => setShowModal(false)}
           onSave={handleSave}
           saving={saving}
-          projects={projects}
         />
       )}
 
@@ -1747,7 +1697,7 @@ export default function OuvriersListe({ onWorkersChange }) {
         <div className="ouv-filter-bar">
           <div className="ouv-search-wrap">
             <Search size={14} className="ouv-search-icon" />
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Nom, CIN, fonction, chantier..."
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Nom, CIN, fonction..."
               className="ouv-search-input" />
           </div>
           <select value={filterStatut} onChange={e => setFStatut(e.target.value)} className="ouv-filter-select">
@@ -1791,7 +1741,6 @@ export default function OuvriersListe({ onWorkersChange }) {
                     { label: 'CIN',         field: 'cin' },
                     { label: 'Telephone',   field: 'telephone' },
                     { label: 'Fonction',    field: 'fonction' },
-                    { label: 'Chantier',    field: 'chantier' },
                     { label: 'Tarif/h',  field: 'tarif', align: 'right' },
                     { label: 'Statut',      field: 'statut' },
                     { label: 'Actions',     field: null },
@@ -1836,11 +1785,6 @@ export default function OuvriersListe({ onWorkersChange }) {
 
                       {/* Fonction */}
                       <td data-label="Fonction" style={{ padding: '10px 12px' }}><span className="badge badge-blue">{w.fonction || '—'}</span></td>
-
-                      {/* Chantier */}
-                      <td data-label="Chantier" style={{ padding: '10px 12px', color: 'var(--text-2)', fontSize: '0.82rem', maxWidth: 130, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        {w.chantier ? <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><MapPin size={11} style={{ flexShrink: 0 }} />{w.chantier}</span> : '—'}
-                      </td>
 
                       {/* Tarif */}
                       <td data-label="Tarif/h" style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'var(--font-head)', fontWeight: 800, color: 'var(--red)', whiteSpace: 'nowrap' }}>

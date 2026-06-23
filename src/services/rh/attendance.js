@@ -292,10 +292,18 @@ export function filterAttendanceRecords(records, filters = {}) {
   });
 }
 
+export function workerIsAssignedToProject(worker, projectId) {
+  if (!projectId || !worker) return false;
+  const pid = String(projectId);
+  if (Array.isArray(worker.assigned_project_ids) && worker.assigned_project_ids.length > 0) {
+    return worker.assigned_project_ids.includes(pid);
+  }
+  return String(worker.project_id || '') === pid;
+}
+
 export function filterWorkersForProject(workers, projectId) {
   if (!projectId) return workers || [];
-  const pid = String(projectId);
-  return (workers || []).filter((w) => String(w.project_id) === pid);
+  return (workers || []).filter((w) => workerIsAssignedToProject(w, projectId));
 }
 
 export function collectProjectFilterOptions(projects = [], workers = [], records = []) {
@@ -304,9 +312,14 @@ export function collectProjectFilterOptions(projects = [], workers = [], records
     if (p?.id) map.set(String(p.id), { id: String(p.id), label: p.ref ? `${p.ref} — ${p.nom}` : (p.nom || 'Projet') });
   });
   (workers || []).forEach((w) => {
-    if (w.project_id && !map.has(String(w.project_id))) {
-      map.set(String(w.project_id), { id: String(w.project_id), label: w.projet_nom || w.chantier || 'Projet' });
-    }
+    const ids = w.assigned_project_ids?.length
+      ? w.assigned_project_ids
+      : (w.project_id ? [String(w.project_id)] : []);
+    ids.forEach((id) => {
+      if (id && !map.has(id)) {
+        map.set(id, { id, label: w.projet_nom || w.chantier || 'Projet' });
+      }
+    });
   });
   (records || []).forEach((r) => {
     if (r.projectId && !map.has(String(r.projectId))) {

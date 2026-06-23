@@ -6,7 +6,7 @@ import { isSupabaseConfigured } from '../lib/supabase';
 import { formatSupabaseError } from '../services/supabase/formatError';
 import { listWorkers } from '../services/rh/workers';
 import { listProjects } from '../services/projects/projects';
-import { workerFullName } from '../services/rh/attendance';
+import { workerFullName, filterWorkersForProject } from '../services/rh/attendance';
 import {
   listOvertime,
   createOvertime,
@@ -67,10 +67,7 @@ export function useOvertime() {
   );
 
   const workersByProject = useCallback(
-    (projectId) => {
-      if (!projectId) return [];
-      return workers.filter((w) => String(w.project_id || '') === String(projectId));
-    },
+    (projectId) => filterWorkersForProject(workers, projectId),
     [workers],
   );
 

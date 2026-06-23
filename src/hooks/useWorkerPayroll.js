@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { formatSupabaseError } from '../services/supabase/formatError';
 import { listWorkers } from '../services/rh/workers';
-import { workerFullName, listAttendance, sumWorkerAttendanceFromRecords } from '../services/rh/attendance';
+import { workerFullName, listAttendance, sumWorkerAttendanceFromRecords, filterWorkersForProject } from '../services/rh/attendance';
 import { listOvertime, sumWorkerOvertimeFromRecords } from '../services/rh/overtime';
 import { listProjects } from '../services/projects/projects';
 import {
@@ -131,10 +131,7 @@ export function useWorkerPayroll() {
   const weeks = useMemo(() => collectPayrollWeeks(records), [records]);
 
   const workersByProject = useCallback(
-    (projectId) => {
-      if (!projectId) return [];
-      return workers.filter((w) => String(w.project_id || '') === String(projectId));
-    },
+    (projectId) => filterWorkersForProject(workers, projectId),
     [workers],
   );
 

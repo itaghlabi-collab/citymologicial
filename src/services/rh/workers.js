@@ -9,6 +9,11 @@ import {
   resolveStorageUrl,
   uploadWorkerMedia,
 } from './workerStorage';
+import {
+  listActiveWorkerProjectAssignments,
+  buildWorkerProjectIdsMap,
+  enrichWorkersWithProjectIds,
+} from './workerProjectAssignments';
 
 const TABLE = 'workers';
 const DOCS_TABLE = 'worker_documents';
@@ -148,12 +153,6 @@ export function toWorkerRow(form, meta = {}) {
     date_recrutement: emptyToNull(form.date_recrutement),
     statut: form.statut || 'actif',
     disponibilite: form.disponibilite || 'oui',
-    project_id: form.project_id || null,
-    chantier: emptyToNull(
-      form.project_id
-        ? (form.projet_nom || form.chantier || '').trim()
-        : (form.chantier_legacy || form.chantier || '').trim(),
-    ),
     badge: emptyToNull(form.badge?.trim()),
     contact_urgence: emptyToNull(form.contact_urgence?.trim()),
     tel_urgence: emptyToNull(form.tel_urgence?.trim()),
@@ -242,7 +241,18 @@ export async function listWorkers() {
 
   if (error) throw error;
 
-  const normalized = (data || []).map(normalizeWorker);
+  let assignmentMap = new Map();
+  try {
+    const assignments = await listActiveWorkerProjectAssignments();
+    assignmentMap = buildWorkerProjectIdsMap(assignments);
+  } catch (assignErr) {
+    console.warn('[CITYMO] worker assignments load', assignErr);
+  }
+
+  const normalized = enrichWorkersWithProjectIds(
+    (data || []).map(normalizeWorker),
+    assignmentMap,
+  );
   return Promise.all(normalized.map(enrichWorkerMedia));
 }
 

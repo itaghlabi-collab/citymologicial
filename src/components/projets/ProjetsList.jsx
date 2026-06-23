@@ -11,13 +11,21 @@ import {
   AlertTriangle, Settings, Archive, ChevronDown, DollarSign,
   HardHat, Users, ClipboardList, Layers, Gauge, Wrench
 } from 'lucide-react';
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useProjects } from '../../hooks/useProjects';
 import { listClients, clientDisplayName } from '../../services/crm/clients';
 import { TYPE_PROJET_VALUES, TYPE_PROJET_LABEL } from '../../constants/commercial';
 import { isProjectLate } from '../../services/projects/projects';
 import { generateProjectRecapPdf } from '../../services/projects/projectPdf';
 import ProjectDocuments from './ProjectDocuments';
+import { listWorkers } from '../../services/rh/workers';
+import { workerFullName } from '../../services/rh/attendance';
+import {
+  listWorkersByProject,
+  saveProjectWorkerAssignments,
+  removeWorkerFromProject,
+} from '../../services/rh/workerProjectAssignments';
+import { listAssignmentsByProject } from '../../services/rh/subcontractors';
 
 // ── Shared primitives ───────────────────────────────────────────────────────
 
@@ -289,6 +297,205 @@ function FormulaireProjet({ initial, onSave, onCancel, saving, clients = [] }) {
   );
 }
 
+// ── Onglet Équipe projet ─────────────────────────────────────────────────────
+
+function ProjectEquipeTab({ projet }) {
+  const [workerAssignments, setWorkerAssignments] = useState([]);
+  const [subAssignments, setSubAssignments] = useState([]);
+  const [allWorkers, setAllWorkers] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [showAssignModal, setShowAssignModal] = useState(false);
+  const [selectedIds, setSelectedIds] = useState(() => new Set());
+
+  const load = useCallback(async () => {
+    if (!projet?.id) return;
+    setLoading(true);
+    try {
+      const [wa, sa, workers] = await Promise.all([
+        listWorkersByProject(projet.id),
+        listAssignmentsByProject(projet.id).catch(() => []),
+        listWorkers().catch(() => []),
+      ]);
+      setWorkerAssignments(wa);
+      setSubAssignments(sa);
+      setAllWorkers(workers);
+    } catch (err) {
+      console.error('[CITYMO] ProjectEquipeTab load', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [projet?.id]);
+
+  useEffect(() => { load(); }, [load]);
+
+  const assignableWorkers = useMemo(
+    () => (allWorkers || []).filter((w) => !['archive', 'suspendu', 'annule'].includes(w.statut)),
+    [allWorkers],
+  );
+
+  function openAssignModal() {
+    setSelectedIds(new Set(workerAssignments.map((a) => String(a.workerId))));
+    setShowAssignModal(true);
+  }
+
+  function toggleWorker(id) {
+    const sid = String(id);
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(sid)) next.delete(sid);
+      else next.add(sid);
+      return next;
+    });
+  }
+
+  async function handleSaveAssignments() {
+    setSaving(true);
+    try {
+      const updated = await saveProjectWorkerAssignments(projet.id, [...selectedIds]);
+      setWorkerAssignments(updated);
+      setShowAssignModal(false);
+    } catch (err) {
+      alert(err.message || 'Erreur lors de l\'affectation.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleRemoveWorker(workerId) {
+    if (!window.confirm('Retirer cet ouvrier du projet ?')) return;
+    setSaving(true);
+    try {
+      await removeWorkerFromProject(projet.id, workerId);
+      await load();
+    } catch (err) {
+      alert(err.message || 'Erreur.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  if (loading) {
+    return (
+      <div className="card" style={{ padding: 32, textAlign: 'center', color: 'var(--text-3)' }}>
+        Chargement de l&apos;équipe…
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="card" style={{ marginBottom: 16 }}>
+        <SectionTitle icon={<Users size={13} />}>Équipe affectée au projet</SectionTitle>
+
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12, marginBottom: 20 }}>
+          <div style={{ padding: '12px 14px', background: 'var(--surface-2)', borderRadius: 8 }}>
+            <div style={{ fontSize: '0.68rem', fontWeight: 800, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 4 }}>Chef de projet</div>
+            <div style={{ fontWeight: 700 }}>{projet.responsable || projet.chef_projet || '—'}</div>
+          </div>
+          <div style={{ padding: '12px 14px', background: 'var(--surface-2)', borderRadius: 8 }}>
+            <div style={{ fontSize: '0.68rem', fontWeight: 800, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 4 }}>Chef de chantier</div>
+            <div style={{ fontWeight: 700 }}>{projet.chef_chantier || '—'}</div>
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+          <div style={{ fontSize: '0.82rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <HardHat size={15} /> Ouvriers externes affectés ({workerAssignments.length})
+          </div>
+          <button type="button" className="btn btn-primary btn-sm" onClick={openAssignModal} disabled={saving} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+            <Plus size={14} /> Affecter des ouvriers
+          </button>
+        </div>
+
+        {workerAssignments.length === 0 ? (
+          <div style={{ padding: '20px 0', color: 'var(--text-3)', fontSize: '0.85rem', textAlign: 'center' }}>
+            Aucun ouvrier affecté — utilisez le bouton ci-dessus.
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {workerAssignments.map((a) => (
+              <div key={a.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 8, gap: 10 }}>
+                <div>
+                  <div style={{ fontWeight: 700 }}>{a.workerName || '—'}</div>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>{a.workerFonction || '—'}</div>
+                </div>
+                <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleRemoveWorker(a.workerId)} disabled={saving} title="Retirer">
+                  <Trash2 size={13} style={{ color: 'var(--red)' }} />
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
+          <div style={{ fontSize: '0.82rem', fontWeight: 700, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
+            <ClipboardList size={15} /> Sous-traitants affectés ({subAssignments.length})
+          </div>
+          {subAssignments.length === 0 ? (
+            <div style={{ color: 'var(--text-3)', fontSize: '0.84rem' }}>
+              Aucun sous-traitant — gérez les affectations depuis le module Sous-traitants.
+            </div>
+          ) : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {subAssignments.map((s) => (
+                <div key={s.id} style={{ padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 8 }}>
+                  <div style={{ fontWeight: 700 }}>{s.subcontractorName || '—'}</div>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>
+                    {s.subcontractorFonction || s.role || '—'}
+                    {s.unitPrice > 0 ? ` · ${Number(s.unitPrice).toLocaleString('fr-MA')} MAD` : ''}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+
+      <Modal open={showAssignModal} onClose={() => !saving && setShowAssignModal(false)} title="Affecter des ouvriers externes" width={520}>
+        <p style={{ fontSize: '0.84rem', color: 'var(--text-3)', marginBottom: 14 }}>
+          Projet : <strong>{projet.nom}</strong> — cochez les ouvriers à affecter (plusieurs projets possibles par ouvrier).
+        </p>
+        {assignableWorkers.length === 0 ? (
+          <div style={{ color: 'var(--text-3)', padding: '16px 0' }}>Aucun ouvrier actif disponible.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 360, overflowY: 'auto', marginBottom: 16 }}>
+            {assignableWorkers.map((w) => {
+              const checked = selectedIds.has(String(w.id));
+              const otherCount = (w.assigned_project_ids || []).filter((id) => String(id) !== String(projet.id)).length;
+              return (
+                <label
+                  key={w.id}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 8, cursor: 'pointer',
+                    border: `1.5px solid ${checked ? 'var(--red)' : 'var(--border)'}`,
+                    background: checked ? '#FFF5F5' : '#fff',
+                  }}
+                >
+                  <input type="checkbox" checked={checked} onChange={() => toggleWorker(w.id)} />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 700 }}>{workerFullName(w)}</div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-3)' }}>
+                      {w.fonction || '—'}
+                      {otherCount > 0 ? ` · ${otherCount} autre${otherCount > 1 ? 's' : ''} projet${otherCount > 1 ? 's' : ''}` : ''}
+                    </div>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+        )}
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button type="button" className="btn btn-secondary" onClick={() => setShowAssignModal(false)} disabled={saving}>Annuler</button>
+          <button type="button" className="btn btn-primary" onClick={handleSaveAssignments} disabled={saving || assignableWorkers.length === 0}>
+            {saving ? 'Enregistrement…' : 'Enregistrer l\'affectation'}
+          </button>
+        </div>
+      </Modal>
+    </>
+  );
+}
+
 // ── Page Détail Projet ───────────────────────────────────────────────────────
 
 function DetailProjet({ projet, onBack, onEdit, onCreateSAV }) {
@@ -456,10 +663,7 @@ function DetailProjet({ projet, onBack, onEdit, onCreateSAV }) {
 
       {/* Tab: équipe */}
       {activeTab === 'equipe' && (
-        <div className="card">
-          <SectionTitle icon={<Users size={13} />}>Équipe affectée</SectionTitle>
-          <EmptyState icon={<Users size={22} />} title="Aucun membre affecté" sub="Affectez des collaborateurs à ce projet" action="Affecter un membre" onAction={() => {}} />
-        </div>
+        <ProjectEquipeTab projet={projet} />
       )}
 
       {/* Tab: historique */}
