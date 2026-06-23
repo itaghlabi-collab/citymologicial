@@ -45,11 +45,9 @@ const FILTER_S = {
 };
 
 const DISPLAY_FILTER_OPTIONS = [
-  { value: 'all', label: 'Toutes les tâches', dgOnly: false },
-  { value: 'mine', label: 'Mes tâches', dgOnly: false },
-  { value: 'dg', label: 'Tâches DG', dgOnly: true },
-  { value: 'mine_dg', label: 'Mes tâches DG', dgOnly: true },
-  { value: 'created_by_me', label: 'Tâches créées par moi', dgOnly: false },
+  { value: 'all', label: 'Toutes les tâches' },
+  { value: 'mine', label: 'Mes tâches' },
+  { value: 'dg', label: 'Tâches DG' },
 ];
 
 function applyDisplayFilter(tasks, filter, user) {
@@ -59,10 +57,6 @@ function applyDisplayFilter(tasks, filter, user) {
       return rows.filter((t) => !t.is_dg_task && userMatchesAssignee(user, t.assigne));
     case 'dg':
       return rows.filter((t) => t.is_dg_task);
-    case 'mine_dg':
-      return rows.filter((t) => t.is_dg_task && userMatchesAssignee(user, t.assigne));
-    case 'created_by_me':
-      return rows.filter((t) => t.created_by && t.created_by === user?.id);
     default:
       return rows;
   }
@@ -504,7 +498,7 @@ export default function Taches() {
   }, [availableDisplayFilters, displayFilter]);
 
   useEffect(() => {
-    if (displayFilter === 'dg' || displayFilter === 'mine_dg') {
+    if (displayFilter === 'dg') {
       setViewTab('dg');
     } else {
       setViewTab('all');
@@ -602,10 +596,10 @@ export default function Taches() {
     ['terminee', 'DG terminées', dgCounts.terminee],
   ];
 
-  const showNormalSection = viewTab === 'all' && displayFilter !== 'dg' && displayFilter !== 'mine_dg';
-  const showDgSection = viewTab === 'dg' || (viewTab === 'all' && displayFilter !== 'mine' && (dgTasks.length > 0 || displayFilter === 'dg' || displayFilter === 'mine_dg'));
-  const showDgEmptyHint = viewTab === 'all' && dgTasks.length === 0 && showDgStatsRow && displayFilter !== 'dg' && displayFilter !== 'mine_dg';
-  const showGeneralKpi = showNormalSection || (viewTab === 'all' && displayFilter !== 'dg' && displayFilter !== 'mine_dg');
+  const showNormalSection = viewTab === 'all' && displayFilter !== 'dg';
+  const showDgSection = viewTab === 'dg' || (viewTab === 'all' && displayFilter !== 'mine' && (dgTasks.length > 0 || displayFilter === 'dg'));
+  const showDgEmptyHint = viewTab === 'all' && dgTasks.length === 0 && showDgStatsRow && displayFilter !== 'dg';
+  const showGeneralKpi = showNormalSection || (viewTab === 'all' && displayFilter !== 'dg');
   const showDgKpi = showDgStatsRow && (showGeneralKpi || viewTab === 'dg');
 
   return (
