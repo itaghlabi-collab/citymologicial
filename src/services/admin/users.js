@@ -281,7 +281,7 @@ export async function adminSetPassword(userId, password, { mustChangePassword = 
       msg = err.error || err.message || msg;
     } catch { /* ignore */ }
     if (res.status === 404 || res.status === 503) {
-      msg += ' — Vérifiez RAILWAY_API_URL sur Vercel et le déploiement Railway.';
+      msg += ' — Ajoutez SUPABASE_SERVICE_ROLE_KEY sur Vercel (mot de passe) ou RAILWAY_API_URL (sauvegardes).';
     }
     throw new Error(msg);
   }

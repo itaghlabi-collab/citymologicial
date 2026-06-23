@@ -564,6 +564,8 @@ export default function Utilisateurs({
   const handleSave = useCallback(async (data) => {
     setSaving(true);
     setMsg('');
+    const editingId = editUser?.id;
+    const newPassword = data.new_password?.trim() || '';
     try {
       let saved;
       const tempPwd = data.password;
@@ -574,11 +576,6 @@ export default function Utilisateurs({
         } else {
           const allCodes = ERP_RUBRIQUES.flatMap((r) => visibleSubmodules(r).map((s) => s.code));
           await saveUserSubmoduleAccess(editUser.id, allCodes);
-        }
-        if (data.new_password?.trim()) {
-          await adminSetPassword(editUser.id, data.new_password.trim(), {
-            mustChangePassword: Boolean(data.force_change_on_login),
-          });
         }
       } else {
         saved = await createUser({
@@ -602,6 +599,16 @@ export default function Utilisateurs({
       setShowModal(false);
       setEditUser(null);
       reload?.();
+
+      if (editingId && newPassword) {
+        try {
+          await adminSetPassword(editingId, newPassword, {
+            mustChangePassword: Boolean(data.force_change_on_login),
+          });
+        } catch (pwdErr) {
+          setMsg(`Utilisateur enregistré, mais mot de passe non modifié : ${pwdErr.message}`);
+        }
+      }
     } catch (err) {
       setMsg(err.message || 'Erreur enregistrement');
     } finally {
