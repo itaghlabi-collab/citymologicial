@@ -6,6 +6,8 @@ import { getDeptName } from '../../data/departments';
 import { employeeFullName } from '../rh/employees';
 import { STATUT_USER_DB, STATUT_USER_UI } from './constants';
 import { clearPermissionCache } from './permissions';
+import { resolveApiBaseUrl } from '../../config/env';
+import { getAuthToken } from '../auth';
 
 const TABLE = 'profiles';
 
@@ -107,15 +109,16 @@ export async function listEmployeesForLink() {
 }
 
 function profilePayloadFromForm(form, employee) {
-  const prenom = employee?.firstname || form.prenom?.trim();
-  const nom = employee?.lastname || form.nom?.trim();
+  const useForm = !employee;
+  const prenom = useForm ? form.prenom?.trim() : (employee?.firstname || form.prenom?.trim());
+  const nom = useForm ? form.nom?.trim() : (employee?.lastname || form.nom?.trim());
   const fullName = [prenom, nom].filter(Boolean).join(' ').trim();
 
   return {
     nom: fullName || form.email?.split('@')[0] || 'Utilisateur',
     prenom: prenom || null,
-    email: (employee?.email || form.email)?.trim()?.toLowerCase(),
-    telephone: employee?.telephone || form.telephone?.trim() || null,
+    email: (useForm ? form.email : (employee?.email || form.email))?.trim()?.toLowerCase(),
+    telephone: (useForm ? form.telephone?.trim() : (employee?.telephone || form.telephone?.trim())) || null,
     role_id: form.role_id || null,
     department_id: form.department_id
       ? Number(form.department_id)
@@ -253,6 +256,51 @@ export async function adminResetPassword(userId, email) {
   await requestPasswordReset(email);
   await sb.from(TABLE).update({ must_change_password: true }).eq('id', userId);
 }
+
+/** Définir le mot de passe manuellement via backend Railway (pas d'email). */
+export async function adminSetPassword(userId, password, { mustChangePassword = false } = {}) {
+  const token = await getAuthToken();
+  if (!token) throw new Error('Session expirée. Reconnectez-vous.');
+
+  const res = await fetch(`${resolveApiBaseUrl()}/admin/users/${userId}/password`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({
+      password,
+      must_change_password: mustChangePassword,
+    }),
+  });
+
+  if (!res.ok) {
+    let msg = `Erreur ${res.status}`;
+    try {
+      const err = await res.json();
+      msg = err.error || err.message || msg;
+    } catch { /* ignore */ }
+    throw new Error(msg);
+  }
+
+  clearPermissionCache();
+  return res.json();
+}
+
+function resolveRoleId(roles, { estSuperAdmin }) {
+  const list = roles || [];
+  if (estSuperAdmin) {
+    return list.find((r) => r.est_admin || r.code === 'super_admin' || /super\s*admin/i.test(r.nom || ''))?.id
+      || list.find((r) => r.est_admin)?.id
+      || null;
+  }
+  return list.find((r) => r.code === 'employe' || /employé|employe/i.test(r.nom || ''))?.id
+    || list.find((r) => !r.est_admin && r.statut === 'Actif')?.id
+    || list[0]?.id
+    || null;
+}
+
+export { resolveRoleId };
 
 export async function requestPasswordReset(email) {
   const sb = getSupabase();

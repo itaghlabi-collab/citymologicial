@@ -56,7 +56,7 @@ import {
   ListFilter, TrendingDown, CreditCard, PiggyBank, Wallet,
   ClipboardList, ShoppingCart, UserCog, Scale, FileCheck,
   Boxes, Package, ArrowUpDown,
-  ShieldCheck, Database,
+  Database,
   Search, Menu, ChevronRight, X as XIcon
 } from 'lucide-react';
 
@@ -174,7 +174,6 @@ const NAV = [
     section: 'Administration',
     items: [
       { id: 'utilisateurs',       label: 'Utilisateurs',         icon: Users },
-      { id: 'roles',              label: 'Roles',                icon: ShieldCheck },
       { id: 'sauvegardes',        label: 'Sauvegardes',          icon: Database },
     ],
   },
@@ -236,7 +235,6 @@ const MODULE_LABELS = {
   'bons-mouvements':   'Bons de mouvements',
   stocks:              'Stocks',
   utilisateurs:        'Utilisateurs',
-  roles:               'Roles',
   sauvegardes:         'Sauvegardes',
 };
 
@@ -311,7 +309,6 @@ function PageContent({ module, onNavigate }) {
     case 'stocks':              return <Inventaire activeTab="stocks" />;
     /* Administration */
     case 'utilisateurs':        return <Administration activeTab="utilisateurs" />;
-    case 'roles':               return <Administration activeTab="roles" />;
     case 'sauvegardes':         return <Administration activeTab="sauvegardes" />;
     default:                    return <Dashboard />;
   }

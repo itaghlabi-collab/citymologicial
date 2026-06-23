@@ -1,10 +1,13 @@
 /**
- * backups.js — Journal des sauvegardes ERP (Supabase).
+ * backups.js — Sauvegardes ERP CITYMO (Supabase + API Railway sécurisée).
  */
 import { getSupabase } from '../../lib/supabase';
+import { getAuthToken } from '../auth';
+import { resolveApiBaseUrl } from '../../config/env';
 import { moduleLabel } from './constants';
 
 const TABLE = 'erp_backups';
+const BACKUP_TIMEOUT_MS = 300000;
 
 const STATUT_DB = {
   succes: 'Succès',
@@ -45,7 +48,7 @@ function mapBackup(row) {
     nom: row.nom || '—',
     type: TYPE_DB[row.type] || row.type || 'Manuelle',
     module: row.module_code ? moduleLabel(row.module_code) : '—',
-    planification: row.planification === 'manuelle' ? 'Manuelle' : row.planification,
+    planification: capitalizePlan(row.planification),
     date: row.created_at
       ? new Date(row.created_at).toLocaleString('fr-FR')
       : '—',
@@ -54,8 +57,52 @@ function mapBackup(row) {
     statut: STATUT_DB[row.statut] || 'En cours',
     cree_par: row.cree_par_nom || '—',
     description: row.description || '',
+    error_message: row.error_message || '',
+    file_path: row.file_path || null,
+    storage_provider: row.storage_provider || 'supabase_storage',
+    drive_synced: Boolean(row.drive_synced),
+    drive_folder_id: row.drive_folder_id || null,
+    drive_sync_error: row.drive_sync_error || '',
     created_at: row.created_at,
   };
+}
+
+function capitalizePlan(p) {
+  if (!p || p === 'manuelle') return 'Manuelle';
+  return p.charAt(0).toUpperCase() + p.slice(1);
+}
+
+async function backupApiFetch(path, options = {}) {
+  const token = await getAuthToken();
+  if (!token) throw new Error('Session expirée. Reconnectez-vous.');
+
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), BACKUP_TIMEOUT_MS);
+
+  try {
+    const res = await fetch(`${resolveApiBaseUrl()}${path}`, {
+      ...options,
+      signal: ctrl.signal,
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${token}`,
+        ...(options.headers || {}),
+      },
+    });
+
+    if (!res.ok) {
+      let msg = `Erreur ${res.status}`;
+      try {
+        const err = await res.json();
+        msg = err.error || err.message || msg;
+      } catch { /* ignore */ }
+      throw new Error(msg);
+    }
+
+    return res.json();
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 export function genBackupRef() {
@@ -75,66 +122,74 @@ export async function listBackups() {
   return (data || []).map(mapBackup);
 }
 
-export async function createBackupLog({ type, planification, description, module_code }, actor) {
-  const sb = getSupabase();
-  const ref = genBackupRef();
-  const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
-  const typeKey = TYPE_UI[type] || 'manuelle';
-  const nom = `backup_citymo_${today}_${typeKey}.sql`;
+/**
+ * Lance une vraie sauvegarde via le backend sécurisé (Super Admin).
+ * Planification quotidienne/hebdo/mensuelle → enregistre un schedule.
+ */
+export async function runBackup({ type, planification, description }) {
+  const result = await backupApiFetch('/backups', {
+    method: 'POST',
+    body: JSON.stringify({
+      type,
+      planification,
+      description,
+    }),
+  });
 
-  const { data, error } = await sb
-    .from(TABLE)
-    .insert({
-      ref,
-      nom,
-      type: typeKey,
-      module_code: module_code || null,
-      planification: (planification || 'Manuelle').toLowerCase(),
-      statut: 'en_cours',
-      description: description?.trim() || null,
-      cree_par: actor?.id || null,
-      cree_par_nom: actor?.nom || actor?.email || 'Administrateur',
-    })
-    .select('*')
-    .single();
+  if (result.scheduled) {
+    return {
+      scheduled: true,
+      message: result.message,
+    };
+  }
 
-  if (error) throw error;
-  return mapBackup(data);
+  return mapBackup(result.backup);
 }
 
-export async function finalizeBackup(id, { statut = 'Succès', taille_bytes = null } = {}) {
-  const sb = getSupabase();
-  const { data, error } = await sb
-    .from(TABLE)
-    .update({
-      statut: STATUT_UI[statut] || 'succes',
-      taille_bytes,
-    })
-    .eq('id', id)
-    .select('*')
-    .single();
+export async function downloadBackup(id) {
+  const result = await backupApiFetch(`/backups/${id}/download`);
+  if (result.url) {
+    window.open(result.url, '_blank', 'noopener,noreferrer');
+  }
+  return result;
+}
 
-  if (error) throw error;
-  return mapBackup(data);
+export async function openDriveFolder(id) {
+  const result = await backupApiFetch(`/backups/${id}/drive`);
+  if (result.url) {
+    window.open(result.url, '_blank', 'noopener,noreferrer');
+  }
+  return result;
+}
+
+export async function restoreBackup(id, confirmation) {
+  return backupApiFetch(`/backups/${id}/restore`, {
+    method: 'POST',
+    body: JSON.stringify({ confirmation }),
+  });
 }
 
 export async function deleteBackup(id) {
-  const sb = getSupabase();
-  const { error } = await sb.from(TABLE).delete().eq('id', id);
-  if (error) throw error;
+  await backupApiFetch(`/backups/${id}`, { method: 'DELETE' });
 }
 
-export async function requestRestore(backup) {
-  // Journal uniquement — pas de restauration destructive réelle
-  const sb = getSupabase();
-  const { error } = await sb.from(TABLE).insert({
-    ref: genBackupRef(),
-    nom: `restore_request_${backup.ref}.log`,
-    type: 'systeme',
-    planification: 'manuelle',
-    statut: 'planifie',
-    description: `Demande de restauration pour ${backup.ref} — confirmation manuelle requise en production.`,
-    cree_par_nom: 'Système',
+/** @deprecated Utiliser runBackup */
+export async function createBackupLog(data, actor) {
+  return runBackup({
+    type: data.type,
+    planification: data.planification,
+    description: data.description,
   });
-  if (error) throw error;
 }
+
+/** @deprecated Géré par le backend */
+export async function finalizeBackup() {
+  throw new Error('finalizeBackup est géré par le backend.');
+}
+
+/** @deprecated Utiliser restoreBackup */
+export async function requestRestore(backup, confirmation) {
+  return restoreBackup(backup.id, confirmation);
+}
+
+export { mapBackup, formatTaille };

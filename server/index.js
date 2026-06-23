@@ -30,6 +30,8 @@ const depensesRouter       = require('./routes/depenses');
 const propositionsRouter   = require('./routes/propositions');
 const notificationsRouter  = require('./routes/notifications');
 const dashboardRouter      = require('./routes/dashboard');
+const backupsRouter        = require('./routes/backups');
+const adminUsersRouter     = require('./routes/adminUsers');
 const existingRouter       = require('./routes/existing');
 const ocrRouter            = require('./routes/ocr');
 
@@ -39,6 +41,7 @@ const { requireAuth }     = require('./middleware/auth');
 
 // ── CRON jobs ─────────────────────────────────────────────────────────────────
 const { startCronJobs } = require('./jobs/cronJobs');
+const { logBackupEnvironmentOnStartup } = require('./services/backup/backupEnvCheck');
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -84,6 +87,12 @@ app.use('/api/propositions',       requireAuth, propositionsRouter);
 app.use('/api/notifications',      requireAuth, notificationsRouter);
 app.use('/api/dashboard',          requireAuth, dashboardRouter);
 
+// ── Sauvegardes ERP (Supabase JWT + Super Admin) ─────────────────────────────
+app.use('/api/backups', backupsRouter);
+
+// ── Admin utilisateurs (mot de passe manuel) ──────────────────────────────────
+app.use('/api/admin/users', adminUsersRouter);
+
 // ── OCR module (CORS — clé Mindee côté serveur uniquement) ───────────────────
 app.use('/api/ocr', ocrRouter);
 
@@ -107,6 +116,7 @@ app.listen(PORT, () => {
 
   // Start background jobs after server is up
   startCronJobs();
+  logBackupEnvironmentOnStartup();
 });
 
 module.exports = app;

@@ -34,7 +34,7 @@ export const BADGE_BACKUP = {
 export const BADGE_TYPE_BACKUP = {
   'Complète':      'badge-purple',
   'Base données':  'badge-blue',
-  'Documents':     'badge-blue',
+  'Documents':     'badge-teal',
   'Système':       'badge-grey',
   'Manuelle':      'badge-orange',
   'Automatique':   'badge-green',

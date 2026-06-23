@@ -4,7 +4,7 @@
 import { getSupabase } from '../../lib/supabase';
 import { isSuperAdmin } from '../rh/isSuperAdmin';
 import { canAccessExecutiveCalendar } from '../auth/executiveCalendarAccess';
-import { ERP_ACTIONS, allSubmoduleCodes } from '../../config/menuRegistry';
+import { ERP_ACTIONS, allSubmoduleCodes, ERP_RUBRIQUES } from '../../config/menuRegistry';
 
 let cache = {
   userId: null,
@@ -194,6 +194,64 @@ export async function saveUserExceptions(userId, exceptionMap) {
   }
 
   clearPermissionCache();
+}
+
+export async function saveUserRubriqueAccess(userId, rubriqueCodes) {
+  const sb = getSupabase();
+  const { error: delErr } = await sb
+    .from('user_permission_exceptions')
+    .delete()
+    .eq('user_id', userId);
+  if (delErr) throw delErr;
+
+  const codes = Array.isArray(rubriqueCodes) ? rubriqueCodes : [];
+  const rows = [];
+  ERP_RUBRIQUES.forEach((rub) => {
+    if (!codes.includes(rub.code)) return;
+    rub.submodules.forEach((sub) => {
+      if (sub.executiveOnly) return;
+      ['voir', 'creer', 'modifier', 'exporter'].forEach((action) => {
+        rows.push({
+          user_id: userId,
+          submodule_code: sub.code,
+          action_code: action,
+          granted: true,
+        });
+      });
+    });
+  });
+
+  if (rows.length) {
+    const { error } = await sb.from('user_permission_exceptions').insert(rows);
+    if (error) throw error;
+  }
+
+  clearPermissionCache();
+}
+
+/** Rubriques cochées dérivées des permissions effectives utilisateur */
+export async function loadUserRubriqueCodes(userId) {
+  const data = await getRolePermissionsForUser(userId);
+  if (data?.role?.est_admin) {
+    return ERP_RUBRIQUES.map((r) => r.code);
+  }
+
+  const effective = {};
+  (data?.permissions || []).forEach((p) => {
+    const code = p.submodule_code || p.module_code;
+    if (code && p.action_code === 'voir' && p.granted) {
+      effective[code] = true;
+    }
+  });
+  (data?.exceptions || []).forEach((p) => {
+    if (p.action_code === 'voir') {
+      effective[p.submodule_code] = p.granted;
+    }
+  });
+
+  return ERP_RUBRIQUES.filter((rub) =>
+    rub.submodules.some((sub) => effective[sub.code]),
+  ).map((r) => r.code);
 }
 
 export async function loadRoleSubmodulePermissions(roleId) {

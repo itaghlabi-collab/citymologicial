@@ -1,0 +1,12 @@
+-- =============================================================================
+-- CITYMO ERP — Sauvegardes opérationnelles (étape 1)
+-- Copier-coller le contenu de :
+--   supabase/migrations/20260625130000_erp_backups_operational.sql
+-- dans le SQL Editor Supabase et exécuter.
+--
+-- Prérequis : migrations Administration + is_super_admin() déjà appliquées.
+--
+-- Backend Railway — variables d'environnement requises :
+--   SUPABASE_URL, SUPABASE_ANON_KEY, SUPABASE_SERVICE_ROLE_KEY
+--   BACKUP_STORAGE_PROVIDER=supabase_storage
+-- =============================================================================

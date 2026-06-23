@@ -1,13 +1,12 @@
 /**
  * Administration.jsx — Routeur module Administration ERP CITYMO
- * Sous-modules : Utilisateurs · Rôles & Permissions · Sauvegardes
+ * Sous-modules : Utilisateurs · Sauvegardes
  */
 import { Shield } from 'lucide-react';
 import { useAuth } from '../hooks/useAuth';
 import { isSuperAdmin } from '../services/rh/isSuperAdmin';
 import { useAdministration } from '../hooks/useAdministration';
 import Utilisateurs from './administration/Utilisateurs.jsx';
-import Roles from './administration/Roles.jsx';
 import Sauvegardes from './administration/Sauvegardes.jsx';
 
 export default function Administration({ activeTab }) {
@@ -57,11 +56,10 @@ export default function Administration({ activeTab }) {
     <div>
       {!canManage && (
         <div style={{ marginBottom: 14, padding: '10px 14px', background: '#FFF8E1', border: '1px solid #FFE082', borderRadius: 8, fontSize: '0.82rem', color: '#E65100' }}>
-          Mode lecture seule — seuls les Super Admin peuvent modifier utilisateurs, rôles et sauvegardes.
+          Mode lecture seule — seuls les Super Admin peuvent modifier utilisateurs et sauvegardes.
         </div>
       )}
       {tab === 'utilisateurs' && <Utilisateurs {...shared} />}
-      {tab === 'roles' && <Roles {...shared} />}
       {tab === 'sauvegardes' && <Sauvegardes {...shared} />}
     </div>
   );

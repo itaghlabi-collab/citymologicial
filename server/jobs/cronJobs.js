@@ -107,6 +107,53 @@ function remindTodayRDV() {
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
+   Job 3 – Sauvegardes ERP planifiées
+───────────────────────────────────────────────────────────────────────────── */
+async function runScheduledBackups() {
+  try {
+    const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
+    const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!url || !key) return;
+
+    const { getSupabaseAdmin } = require('../lib/supabaseAdmin');
+    const { runBackup, computeNextRun } = require('../services/backup/backupService');
+    const sb = getSupabaseAdmin();
+    const now = new Date().toISOString();
+
+    const { data: schedules, error } = await sb
+      .from('erp_backup_schedules')
+      .select('*')
+      .eq('enabled', true)
+      .lte('next_run_at', now);
+
+    if (error || !schedules?.length) return;
+
+    for (const schedule of schedules) {
+      try {
+        await runBackup({
+          type: schedule.backup_type,
+          planification: schedule.planification,
+          description: schedule.notes || `Sauvegarde planifiée (${schedule.planification})`,
+          actor: { id: schedule.created_by, email: 'cron@citymo.ma', nom: 'Planificateur ERP' },
+        });
+
+        const nextRun = computeNextRun(schedule.planification);
+        await sb.from('erp_backup_schedules').update({
+          last_run_at: now,
+          next_run_at: nextRun.toISOString(),
+        }).eq('id', schedule.id);
+
+        console.log(`[CRON backups] ${schedule.planification} ${schedule.backup_type} OK`);
+      } catch (err) {
+        console.error(`[CRON backups] schedule ${schedule.id}:`, err.message);
+      }
+    }
+  } catch (err) {
+    console.error('[CRON backups] Erreur:', err.message);
+  }
+}
+
+/* ─────────────────────────────────────────────────────────────────────────────
    Register all CRON schedules
 ───────────────────────────────────────────────────────────────────────────── */
 function startCronJobs() {
@@ -122,10 +169,16 @@ function startCronJobs() {
     timezone: 'Africa/Algiers',
   });
 
-  console.log('[CRON] Jobs planifiés: devis_stagnant (toutes les heures) + rdv_rappel (quotidien 08:00)');
+  // Sauvegardes planifiées — toutes les heures à :15
+  cron.schedule('15 * * * *', runScheduledBackups, {
+    scheduled: true,
+    timezone: 'Africa/Algiers',
+  });
+
+  console.log('[CRON] Jobs planifiés: devis_stagnant + rdv_rappel + backups ERP');
 
   // Run devis check immediately on startup to catch any backlog
   checkStaleDevis();
 }
 
-module.exports = { startCronJobs, checkStaleDevis, remindTodayRDV };
+module.exports = { startCronJobs, checkStaleDevis, remindTodayRDV, runScheduledBackups };

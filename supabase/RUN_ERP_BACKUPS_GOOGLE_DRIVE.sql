@@ -1,0 +1,11 @@
+-- =============================================================================
+-- CITYMO ERP — Google Drive (2e copie sauvegardes)
+-- Copier-coller le contenu de :
+--   supabase/migrations/20260626120000_erp_backups_google_drive.sql
+-- dans le SQL Editor Supabase et exécuter.
+--
+-- Railway — variables requises :
+--   BACKUP_GOOGLE_DRIVE_ENABLED=true
+--   GOOGLE_DRIVE_FOLDER_ID=...
+--   GOOGLE_SERVICE_ACCOUNT_JSON={...}
+-- =============================================================================
