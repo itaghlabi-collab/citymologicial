@@ -4,7 +4,7 @@
 import { getSupabase } from '../../lib/supabase';
 import { isSuperAdmin } from '../rh/isSuperAdmin';
 import { canAccessExecutiveCalendar } from '../auth/executiveCalendarAccess';
-import { ERP_ACTIONS, allSubmoduleCodes, ERP_RUBRIQUES } from '../../config/menuRegistry';
+import { ERP_ACTIONS, allSubmoduleCodes, ERP_RUBRIQUES, findSubmodule } from '../../config/menuRegistry';
 
 let cache = {
   userId: null,
@@ -196,7 +196,7 @@ export async function saveUserExceptions(userId, exceptionMap) {
   clearPermissionCache();
 }
 
-export async function saveUserRubriqueAccess(userId, rubriqueCodes) {
+export async function saveUserSubmoduleAccess(userId, submoduleCodes) {
   const sb = getSupabase();
   const { error: delErr } = await sb
     .from('user_permission_exceptions')
@@ -204,19 +204,17 @@ export async function saveUserRubriqueAccess(userId, rubriqueCodes) {
     .eq('user_id', userId);
   if (delErr) throw delErr;
 
-  const codes = Array.isArray(rubriqueCodes) ? rubriqueCodes : [];
+  const codes = new Set(Array.isArray(submoduleCodes) ? submoduleCodes : []);
   const rows = [];
-  ERP_RUBRIQUES.forEach((rub) => {
-    if (!codes.includes(rub.code)) return;
-    rub.submodules.forEach((sub) => {
-      if (sub.executiveOnly) return;
-      ['voir', 'creer', 'modifier', 'exporter'].forEach((action) => {
-        rows.push({
-          user_id: userId,
-          submodule_code: sub.code,
-          action_code: action,
-          granted: true,
-        });
+
+  codes.forEach((subCode) => {
+    if (!subCode) return;
+    ['voir', 'creer', 'modifier', 'exporter'].forEach((action) => {
+      rows.push({
+        user_id: userId,
+        submodule_code: subCode,
+        action_code: action,
+        granted: true,
       });
     });
   });
@@ -229,28 +227,54 @@ export async function saveUserRubriqueAccess(userId, rubriqueCodes) {
   clearPermissionCache();
 }
 
-/** Rubriques cochées dérivées des permissions effectives utilisateur */
-export async function loadUserRubriqueCodes(userId) {
-  const data = await getRolePermissionsForUser(userId);
-  if (data?.role?.est_admin) {
-    return ERP_RUBRIQUES.map((r) => r.code);
-  }
+/** @deprecated Utiliser saveUserSubmoduleAccess */
+export async function saveUserRubriqueAccess(userId, rubriqueCodes) {
+  const codes = Array.isArray(rubriqueCodes) ? rubriqueCodes : [];
+  const submoduleCodes = [];
+  ERP_RUBRIQUES.forEach((rub) => {
+    if (!codes.includes(rub.code)) return;
+    rub.submodules.forEach((sub) => {
+      if (!sub.executiveOnly) submoduleCodes.push(sub.code);
+    });
+  });
+  return saveUserSubmoduleAccess(userId, submoduleCodes);
+}
 
+function effectiveSubmoduleVoir(data) {
   const effective = {};
   (data?.permissions || []).forEach((p) => {
     const code = p.submodule_code || p.module_code;
-    if (code && p.action_code === 'voir' && p.granted) {
-      effective[code] = true;
-    }
+    if (code && p.action_code === 'voir' && p.granted) effective[code] = true;
   });
   (data?.exceptions || []).forEach((p) => {
-    if (p.action_code === 'voir') {
-      effective[p.submodule_code] = p.granted;
-    }
+    if (p.action_code === 'voir') effective[p.submodule_code] = p.granted;
   });
+  return effective;
+}
+
+/** Sous-rubriques avec accès lecture effectif */
+export async function loadUserSubmoduleCodes(userId) {
+  const data = await getRolePermissionsForUser(userId);
+  if (data?.role?.est_admin) {
+    return allSubmoduleCodes().filter((code) => {
+      const found = findSubmodule(code);
+      return found && !found.submodule.executiveOnly;
+    });
+  }
+
+  const effective = effectiveSubmoduleVoir(data);
+  return Object.entries(effective)
+    .filter(([, granted]) => granted)
+    .map(([code]) => code);
+}
+
+/** Rubriques cochées dérivées des permissions effectives utilisateur */
+export async function loadUserRubriqueCodes(userId) {
+  const submoduleCodes = await loadUserSubmoduleCodes(userId);
+  const set = new Set(submoduleCodes);
 
   return ERP_RUBRIQUES.filter((rub) =>
-    rub.submodules.some((sub) => effective[sub.code]),
+    rub.submodules.some((sub) => set.has(sub.code)),
   ).map((r) => r.code);
 }
 

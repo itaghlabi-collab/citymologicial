@@ -16,7 +16,6 @@ import {
   restoreBackup,
 } from '../../services/admin/backups';
 
-const BACKUP_TYPES = ['Complète', 'Base données', 'Documents'];
 const PLAN_OPTIONS = [
   { value: 'Manuelle', label: 'Manuelle (maintenant)' },
   { value: 'Quotidienne', label: 'Quotidienne' },
@@ -25,7 +24,6 @@ const PLAN_OPTIONS = [
 ];
 
 const EMPTY_FORM = {
-  type: 'Complète',
   description: '',
   planification: 'Manuelle',
 };
@@ -36,17 +34,15 @@ function BackupForm({ onSave, onCancel, saving }) {
 
   function handleSubmit(ev) {
     ev.preventDefault();
-    onSave(form);
+    onSave({ ...form, type: 'Complète' });
   }
 
   return (
     <form onSubmit={handleSubmit}>
-      <SectionTitle icon={<HardDrive size={12} />}>Nouvelle sauvegarde</SectionTitle>
+      <SectionTitle icon={<HardDrive size={12} />}>Nouvelle sauvegarde complète</SectionTitle>
       <FRow>
-        <FField label="Type de sauvegarde" required>
-          <select value={form.type} onChange={(e) => set('type', e.target.value)} style={SELECT_STYLE}>
-            {BACKUP_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-          </select>
+        <FField label="Type">
+          <input value="Sauvegarde complète (base + fichiers + config)" readOnly style={{ ...INPUT_STYLE, background: 'var(--surface-2)' }} />
         </FField>
         <FField label="Planification">
           <select value={form.planification} onChange={(e) => set('planification', e.target.value)} style={SELECT_STYLE}>
@@ -64,8 +60,8 @@ function BackupForm({ onSave, onCancel, saving }) {
         <div style={{ fontWeight: 700, marginBottom: 4 }}>Sauvegarde sécurisée</div>
         <div>
           {form.planification === 'Manuelle'
-            ? 'La sauvegarde sera exécutée immédiatement via le backend Railway (base, fichiers Storage, configuration ERP).'
-            : `Une planification ${form.planification.toLowerCase()} sera enregistrée. Le serveur exécutera la sauvegarde automatiquement.`}
+            ? 'Export complet : toutes les tables Supabase, tous les buckets Storage (hors sauvegardes), configuration ERP et copie Google Drive si activée.'
+            : `Planification ${form.planification.toLowerCase()} — chaque exécution sera une sauvegarde complète.`}
         </div>
       </div>
 

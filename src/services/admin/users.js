@@ -280,6 +280,9 @@ export async function adminSetPassword(userId, password, { mustChangePassword = 
       const err = await res.json();
       msg = err.error || err.message || msg;
     } catch { /* ignore */ }
+    if (res.status === 404 || res.status === 503) {
+      msg += ' — Vérifiez RAILWAY_API_URL sur Vercel et le déploiement Railway.';
+    }
     throw new Error(msg);
   }
 

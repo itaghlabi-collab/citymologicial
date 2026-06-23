@@ -3,8 +3,8 @@
  */
 import { useState, useCallback, useEffect } from 'react';
 import {
-  Users, Plus, Edit2, Trash2, Eye, Key, Search, Filter, Download,
-  ChevronLeft, UserPlus, ToggleLeft, Shield, Clock,
+  Users, Plus, Edit2, Eye, Key, Search, Filter,
+  ChevronLeft, ToggleLeft, Shield, Clock, ChevronDown, ChevronRight,
 } from 'lucide-react';
 import {
   INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE,
@@ -20,7 +20,7 @@ import {
 } from '../../services/admin/users';
 import { generateTempPassword } from '../../services/admin/passwordUtils';
 import { getDepartmentOptions } from '../../services/admin/constants';
-import { saveUserRubriqueAccess, loadUserRubriqueCodes } from '../../services/admin/permissions';
+import { saveUserSubmoduleAccess, loadUserSubmoduleCodes } from '../../services/admin/permissions';
 import { ERP_RUBRIQUES } from '../../config/menuRegistry';
 
 const DEPT_OPTIONS = getDepartmentOptions();
@@ -32,9 +32,156 @@ const EMPTY_FORM = {
   force_change_on_login: false,
   department_id: '', statut: 'Actif',
   est_super_admin: false,
-  rubriqueCodes: [],
+  submoduleCodes: [],
   notes: '',
 };
+
+function visibleSubmodules(rub) {
+  return (rub.submodules || []).filter((s) => !s.executiveOnly);
+}
+
+function RubriqueAccessPicker({ selectedCodes, onChange, disabled, loading }) {
+  const [expanded, setExpanded] = useState(() => {
+    const init = {};
+    ERP_RUBRIQUES.forEach((rub) => {
+      const subs = visibleSubmodules(rub);
+      if (subs.some((s) => selectedCodes.includes(s.code))) init[rub.code] = true;
+    });
+    return init;
+  });
+  const selected = new Set(selectedCodes || []);
+
+  function setSelected(nextSet) {
+    onChange([...nextSet]);
+  }
+
+  function toggleSubmodule(code) {
+    const next = new Set(selected);
+    if (next.has(code)) next.delete(code);
+    else next.add(code);
+    setSelected(next);
+  }
+
+  function toggleRubrique(rub) {
+    const subs = visibleSubmodules(rub).map((s) => s.code);
+    const next = new Set(selected);
+    const allOn = subs.length > 0 && subs.every((c) => next.has(c));
+    subs.forEach((c) => {
+      if (allOn) next.delete(c);
+      else next.add(c);
+    });
+    setSelected(next);
+    if (!allOn) setExpanded((p) => ({ ...p, [rub.code]: true }));
+  }
+
+  function rubriqueState(rub) {
+    const subs = visibleSubmodules(rub).map((s) => s.code);
+    if (!subs.length) return { checked: false, partial: false, count: 0 };
+    const count = subs.filter((c) => selected.has(c)).length;
+    return {
+      checked: count === subs.length,
+      partial: count > 0 && count < subs.length,
+      count,
+      total: subs.length,
+    };
+  }
+
+  if (loading) {
+    return <p style={{ fontSize: '0.82rem', color: 'var(--text-3)' }}>Chargement des accès…</p>;
+  }
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+      {ERP_RUBRIQUES.map((rub) => {
+        const state = rubriqueState(rub);
+        const isOpen = expanded[rub.code];
+        const subs = visibleSubmodules(rub);
+        if (!subs.length) return null;
+
+        return (
+          <div
+            key={rub.code}
+            style={{
+              border: '1px solid var(--border)',
+              borderRadius: 8,
+              overflow: 'hidden',
+              background: state.count ? '#F8FBFF' : '#fff',
+            }}
+          >
+            <div
+              style={{
+                display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px',
+                cursor: disabled ? 'not-allowed' : 'pointer',
+                background: isOpen ? '#EEF4FC' : 'transparent',
+              }}
+            >
+              <input
+                type="checkbox"
+                disabled={disabled}
+                checked={state.checked}
+                ref={(el) => { if (el) el.indeterminate = state.partial; }}
+                onChange={() => toggleRubrique(rub)}
+                onClick={(e) => e.stopPropagation()}
+              />
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() => setExpanded((p) => ({ ...p, [rub.code]: !p[rub.code] }))}
+                style={{
+                  flex: 1, display: 'flex', alignItems: 'center', gap: 8,
+                  border: 'none', background: 'transparent', padding: 0, textAlign: 'left',
+                  cursor: disabled ? 'not-allowed' : 'pointer', fontSize: '0.88rem',
+                }}
+              >
+                <span style={{ fontWeight: 700 }}>{rub.label}</span>
+                <span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>
+                  {state.count}/{state.total} sous-rubriques
+                </span>
+                <span style={{ marginLeft: 'auto', color: 'var(--text-3)' }}>
+                  {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                </span>
+              </button>
+            </div>
+
+            {isOpen && (
+              <div
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))',
+                  gap: 6,
+                  padding: '10px 12px 12px',
+                  borderTop: '1px solid var(--border)',
+                  background: '#fff',
+                }}
+              >
+                {subs.map((sub) => (
+                  <label
+                    key={sub.code}
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 8, padding: '7px 9px',
+                      border: '1px solid var(--border)', borderRadius: 6, fontSize: '0.8rem',
+                      cursor: disabled ? 'not-allowed' : 'pointer',
+                      background: selected.has(sub.code) ? '#E3F2FD' : '#fff',
+                      opacity: disabled ? 0.6 : 1,
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      disabled={disabled}
+                      checked={selected.has(sub.code)}
+                      onChange={() => toggleSubmodule(sub.code)}
+                    />
+                    {sub.label}
+                  </label>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
 
 function UserForm({ initial, roles, employees, onSave, onCancel, saving }) {
   const [form, setForm] = useState(initial ? {
@@ -44,41 +191,36 @@ function UserForm({ initial, roles, employees, onSave, onCancel, saving }) {
     password_confirm: '',
     new_password: '',
     new_password_confirm: '',
-    rubriqueCodes: initial.rubriqueCodes || [],
+    submoduleCodes: initial.submoduleCodes || [],
     est_super_admin: Boolean(initial.est_super_admin),
   } : EMPTY_FORM);
   const [errors, setErrors] = useState({});
-  const [loadingRubriques, setLoadingRubriques] = useState(false);
+  const [loadingAccess, setLoadingAccess] = useState(false);
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
   useEffect(() => {
     if (!initial?.id) return;
-    setLoadingRubriques(true);
-    loadUserRubriqueCodes(initial.id)
+    setLoadingAccess(true);
+    loadUserSubmoduleCodes(initial.id)
       .then((codes) => {
         setForm((p) => ({
           ...p,
-          rubriqueCodes: codes,
+          submoduleCodes: codes,
           est_super_admin: Boolean(
             initial.est_super_admin
             || roles?.find((r) => String(r.id) === String(initial.role_id))?.est_admin,
           ),
         }));
       })
-      .finally(() => setLoadingRubriques(false));
+      .finally(() => setLoadingAccess(false));
   }, [initial?.id, initial?.role_id, initial?.est_super_admin, roles]);
 
   const selectedEmployee = (employees || []).find((e) => e.id === form.employee_id);
   const linkedToRh = Boolean(selectedEmployee);
   const readonlyRhFields = linkedToRh && !initial;
 
-  function toggleRubrique(code) {
-    setForm((p) => {
-      const set = new Set(p.rubriqueCodes || []);
-      if (set.has(code)) set.delete(code);
-      else set.add(code);
-      return { ...p, rubriqueCodes: [...set] };
-    });
+  function allSubmoduleCodesList() {
+    return ERP_RUBRIQUES.flatMap((rub) => visibleSubmodules(rub).map((s) => s.code));
   }
 
   function onEmployeeChange(empId) {
@@ -114,8 +256,8 @@ function UserForm({ initial, roles, employees, onSave, onCancel, saving }) {
     if (initial && form.new_password && form.new_password !== form.new_password_confirm) {
       e.new_password_confirm = 'Les mots de passe ne correspondent pas';
     }
-    if (!form.est_super_admin && !(form.rubriqueCodes?.length)) {
-      e.rubriqueCodes = 'Sélectionnez au moins une rubrique ou cochez Super Admin';
+    if (!form.est_super_admin && !(form.submoduleCodes?.length)) {
+      e.submoduleCodes = 'Sélectionnez au moins une sous-rubrique ou cochez Super Admin';
     }
     return e;
   }
@@ -125,12 +267,12 @@ function UserForm({ initial, roles, employees, onSave, onCancel, saving }) {
     const e = validate();
     if (Object.keys(e).length) { setErrors(e); return; }
     const {
-      password_confirm, new_password_confirm, departement, rubriqueCodes, est_super_admin,
+      password_confirm, new_password_confirm, departement, submoduleCodes, est_super_admin,
       new_password, force_change_on_login, ...data
     } = form;
     onSave({
       ...data,
-      rubriqueCodes,
+      submoduleCodes,
       est_super_admin,
       new_password: new_password?.trim() || '',
       force_change_on_login,
@@ -238,7 +380,7 @@ function UserForm({ initial, roles, employees, onSave, onCancel, saving }) {
         </FField>
       </FRow>
 
-      <SectionTitle icon={<Shield size={12} />}>Rubriques autorisées</SectionTitle>
+      <SectionTitle icon={<Shield size={12} />}>Accès par rubrique et sous-rubrique</SectionTitle>
       <div style={{ marginBottom: 12 }}>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: '0.85rem', cursor: 'pointer' }}>
           <input
@@ -247,38 +389,19 @@ function UserForm({ initial, roles, employees, onSave, onCancel, saving }) {
             onChange={(e) => {
               const on = e.target.checked;
               set('est_super_admin', on);
-              if (on) set('rubriqueCodes', ERP_RUBRIQUES.map((r) => r.code));
+              if (on) set('submoduleCodes', allSubmoduleCodesList());
             }}
           />
           <strong>Super Admin</strong> — accès total à toutes les rubriques
         </label>
-        {errors.rubriqueCodes && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginBottom: 8 }}>{errors.rubriqueCodes}</div>}
-        {loadingRubriques ? (
-          <p style={{ fontSize: '0.82rem', color: 'var(--text-3)' }}>Chargement des rubriques…</p>
-        ) : (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 8 }}>
-            {ERP_RUBRIQUES.map((rub) => (
-              <label
-                key={rub.code}
-                style={{
-                  display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px',
-                  border: '1px solid var(--border)', borderRadius: 6, fontSize: '0.82rem',
-                  cursor: form.est_super_admin ? 'not-allowed' : 'pointer',
-                  opacity: form.est_super_admin ? 0.6 : 1,
-                  background: (form.rubriqueCodes || []).includes(rub.code) ? '#E3F2FD' : '#fff',
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={(form.rubriqueCodes || []).includes(rub.code)}
-                  disabled={form.est_super_admin}
-                  onChange={() => toggleRubrique(rub.code)}
-                />
-                {rub.label}
-              </label>
-            ))}
-          </div>
-        )}
+        {errors.submoduleCodes && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginBottom: 8 }}>{errors.submoduleCodes}</div>}
+        <RubriqueAccessPicker
+          key={initial?.id || 'new'}
+          selectedCodes={form.submoduleCodes || []}
+          onChange={(codes) => set('submoduleCodes', codes)}
+          disabled={form.est_super_admin}
+          loading={loadingAccess}
+        />
       </div>
 
       <div style={{ marginBottom: 20 }}>
@@ -297,19 +420,39 @@ function UserForm({ initial, roles, employees, onSave, onCancel, saving }) {
   );
 }
 
-function rubriqueLabels(codes) {
+function submoduleLabels(codes) {
   if (!codes?.length) return '—';
-  return codes
-    .map((c) => ERP_RUBRIQUES.find((r) => r.code === c)?.label || c)
-    .join(', ');
+  const byRubrique = {};
+  codes.forEach((code) => {
+    const found = ERP_RUBRIQUES.find((r) => r.submodules.some((s) => s.code === code));
+    const sub = found?.submodules.find((s) => s.code === code);
+    if (!found || !sub) return;
+    if (!byRubrique[found.label]) byRubrique[found.label] = [];
+    byRubrique[found.label].push(sub.label);
+  });
+  return Object.entries(byRubrique)
+    .map(([rub, subs]) => `${rub} (${subs.join(', ')})`)
+    .join(' · ');
+}
+
+function rubriqueSummaryFromSubmodules(codes) {
+  if (!codes?.length) return [];
+  const set = new Set(codes);
+  return ERP_RUBRIQUES.filter((rub) =>
+    rub.submodules.some((s) => set.has(s.code)),
+  ).map((rub) => {
+    const total = visibleSubmodules(rub).length;
+    const count = visibleSubmodules(rub).filter((s) => set.has(s.code)).length;
+    return { code: rub.code, label: rub.label, count, total, partial: count < total };
+  });
 }
 
 function DetailUser({ user, canManage, onBack, onEdit, onChangeStatut }) {
   const fullName = [user.prenom, user.nom].filter(Boolean).join(' ');
-  const [rubriques, setRubriques] = useState([]);
+  const [submodules, setSubmodules] = useState([]);
 
   useEffect(() => {
-    if (user?.id) loadUserRubriqueCodes(user.id).then(setRubriques);
+    if (user?.id) loadUserSubmoduleCodes(user.id).then(setSubmodules);
   }, [user?.id]);
 
   return (
@@ -342,7 +485,7 @@ function DetailUser({ user, canManage, onBack, onEdit, onChangeStatut }) {
             </div>
             <SectionTitle>Informations</SectionTitle>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 14 }}>
-              <InfoRow label="Rubriques" value={rubriqueLabels(rubriques)} />
+              <InfoRow label="Accès" value={submoduleLabels(submodules)} />
               <InfoRow label="Poste" value={user.poste} />
               <InfoRow label="Département" value={user.departement} />
               <InfoRow label="Téléphone" value={user.telephone} />
@@ -402,7 +545,7 @@ export default function Utilisateurs({
   const [saving, setSaving] = useState(false);
   const [msg, setMsg] = useState('');
   const [createdCreds, setCreatedCreds] = useState(null);
-  const [userRubriques, setUserRubriques] = useState({});
+  const [userAccess, setUserAccess] = useState({});
 
   useEffect(() => {
     let cancelled = false;
@@ -410,9 +553,10 @@ export default function Utilisateurs({
       const map = {};
       for (const u of users) {
         if (!u.id) continue;
-        map[u.id] = await loadUserRubriqueCodes(u.id);
+        const codes = await loadUserSubmoduleCodes(u.id);
+        map[u.id] = rubriqueSummaryFromSubmodules(codes);
       }
-      if (!cancelled) setUserRubriques(map);
+      if (!cancelled) setUserAccess(map);
     })();
     return () => { cancelled = true; };
   }, [users]);
@@ -426,9 +570,10 @@ export default function Utilisateurs({
       if (editUser) {
         saved = await updateUser(editUser.id, data, null);
         if (!data.est_super_admin) {
-          await saveUserRubriqueAccess(editUser.id, data.rubriqueCodes || []);
+          await saveUserSubmoduleAccess(editUser.id, data.submoduleCodes || []);
         } else {
-          await saveUserRubriqueAccess(editUser.id, ERP_RUBRIQUES.map((r) => r.code));
+          const allCodes = ERP_RUBRIQUES.flatMap((r) => visibleSubmodules(r).map((s) => s.code));
+          await saveUserSubmoduleAccess(editUser.id, allCodes);
         }
         if (data.new_password?.trim()) {
           await adminSetPassword(editUser.id, data.new_password.trim(), {
@@ -446,7 +591,7 @@ export default function Utilisateurs({
           mustChangePassword: true,
         });
         if (!data.est_super_admin) {
-          await saveUserRubriqueAccess(saved.id, data.rubriqueCodes || []);
+          await saveUserSubmoduleAccess(saved.id, data.submoduleCodes || []);
         }
         setCreatedCreds({ email: saved.email, password: tempPwd, nom: [saved.prenom, saved.nom].filter(Boolean).join(' ') });
       }
@@ -516,7 +661,7 @@ export default function Utilisateurs({
       <div className="page-header flex-between" style={{ flexWrap: 'wrap', gap: 10 }}>
         <div>
           <h1 className="page-title">UTILISATEURS</h1>
-          <p className="page-subtitle">Comptes ERP — rubriques en cases à cocher, mot de passe modifiable manuellement.</p>
+          <p className="page-subtitle">Comptes ERP — accès par sous-rubrique, mot de passe modifiable manuellement.</p>
         </div>
         {canManage && (
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -579,7 +724,7 @@ export default function Utilisateurs({
               <tbody>
                 {filtered.map((x) => {
                   const fullName = [x.prenom, x.nom].filter(Boolean).join(' ');
-                  const rubCodes = userRubriques[x.id] || [];
+                  const rubSummary = userAccess[x.id] || [];
                   return (
                     <tr key={x.id} style={{ cursor: 'pointer' }} onClick={() => setDetailId(x.id)}>
                       <td>
@@ -590,14 +735,19 @@ export default function Utilisateurs({
                       </td>
                       <td data-label="Email" style={{ fontSize: '0.82rem', color: 'var(--text-2)' }}>{x.email}</td>
                       <td data-label="Poste" style={{ fontSize: '0.82rem' }}>{x.poste || '—'}</td>
-                      <td data-label="Rubriques" style={{ fontSize: '0.75rem', maxWidth: 220 }}>
-                        {(rubCodes.length ? rubCodes : []).slice(0, 3).map((code) => (
-                          <span key={code} className="badge badge-blue" style={{ fontSize: '0.65rem', marginRight: 4, marginBottom: 2 }}>
-                            {ERP_RUBRIQUES.find((r) => r.code === code)?.label || code}
+                      <td data-label="Rubriques" style={{ fontSize: '0.75rem', maxWidth: 240 }}>
+                        {rubSummary.slice(0, 3).map((rub) => (
+                          <span
+                            key={rub.code}
+                            className={`badge ${rub.partial ? 'badge-orange' : 'badge-blue'}`}
+                            style={{ fontSize: '0.65rem', marginRight: 4, marginBottom: 2 }}
+                            title={rub.partial ? `${rub.count}/${rub.total} sous-rubriques` : 'Rubrique complète'}
+                          >
+                            {rub.label}{rub.partial ? ` (${rub.count}/${rub.total})` : ''}
                           </span>
                         ))}
-                        {rubCodes.length > 3 && <span style={{ color: 'var(--text-3)' }}>+{rubCodes.length - 3}</span>}
-                        {!rubCodes.length && '—'}
+                        {rubSummary.length > 3 && <span style={{ color: 'var(--text-3)' }}>+{rubSummary.length - 3}</span>}
+                        {!rubSummary.length && '—'}
                       </td>
                       <td data-label="Département" style={{ fontSize: '0.82rem' }}>{x.departement || '—'}</td>
                       <td data-label="Statut">

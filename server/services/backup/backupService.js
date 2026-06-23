@@ -94,7 +94,7 @@ async function compressJson(payload) {
 }
 
 async function runBackup({ type, planification, description, actor }) {
-  const typeKey = TYPE_MAP[type] || type || 'complete';
+  const typeKey = 'complete';
   const row = await createBackupRow({ type: typeKey, planification, description, actor });
   const storage = getBackupStorageProvider();
   const backupPrefix = row.ref;
@@ -225,7 +225,7 @@ async function runBackup({ type, planification, description, actor }) {
 
 async function registerSchedule({ type, planification, notes, actor }) {
   const sb = getSupabaseAdmin();
-  const typeKey = TYPE_MAP[type] || 'complete';
+  const typeKey = 'complete';
   const planKey = (planification || '').toLowerCase();
 
   if (!['quotidienne', 'hebdomadaire', 'mensuelle'].includes(planKey)) {

@@ -156,7 +156,6 @@ export const ERP_RUBRIQUES = Object.freeze([
     departmentIds: [7],
     submodules: [
       { code: 'utilisateurs', label: 'Utilisateurs' },
-      { code: 'roles', label: 'Rôles' },
       { code: 'sauvegardes', label: 'Sauvegardes' },
     ],
   },

@@ -3,12 +3,23 @@
  */
 const { getSupabaseAdmin } = require('../../lib/supabaseAdmin');
 
-const SOURCE_BUCKETS = [
+const SOURCE_BUCKETS_FALLBACK = [
   'citymo-workers',
   'citymo-projects',
   'citymo-documents',
   'documents',
 ];
+
+const EXCLUDE_BUCKETS = new Set(['citymo-backups']);
+
+async function listSourceBuckets() {
+  const sb = getSupabaseAdmin();
+  const { data, error } = await sb.storage.listBuckets();
+  if (error || !data?.length) return SOURCE_BUCKETS_FALLBACK;
+  return data
+    .map((b) => b.name || b.id)
+    .filter((name) => name && !EXCLUDE_BUCKETS.has(name));
+}
 
 async function listBucketFiles(bucket, prefix = '', acc = []) {
   const sb = getSupabaseAdmin();
@@ -49,15 +60,16 @@ async function copyFileToBackup(bucket, filePath, backupPrefix, storageProvider)
 }
 
 async function exportFiles(backupPrefix, storageProvider, onProgress) {
+  const buckets = await listSourceBuckets();
   const manifest = {
-    format: 'citymo-files-v1',
+    format: 'citymo-files-v2',
     exported_at: new Date().toISOString(),
-    buckets: SOURCE_BUCKETS,
+    buckets,
     files: [],
     errors: [],
   };
 
-  for (const bucket of SOURCE_BUCKETS) {
+  for (const bucket of buckets) {
     const listing = await listBucketFiles(bucket);
     const files = listing.files || [];
 
@@ -77,4 +89,4 @@ async function exportFiles(backupPrefix, storageProvider, onProgress) {
   return manifest;
 }
 
-module.exports = { exportFiles, SOURCE_BUCKETS, listBucketFiles };
+module.exports = { exportFiles, listSourceBuckets, listBucketFiles };

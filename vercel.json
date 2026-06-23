@@ -24,6 +24,18 @@
     "api/ocr/moroccan-cin.js": {
       "maxDuration": 60,
       "memory": 1024
+    },
+    "api/backups.js": {
+      "maxDuration": 300,
+      "memory": 1024
+    },
+    "api/backups/[...path].js": {
+      "maxDuration": 300,
+      "memory": 1024
+    },
+    "api/admin/users/[...path].js": {
+      "maxDuration": 60,
+      "memory": 512
     }
   }
 }
