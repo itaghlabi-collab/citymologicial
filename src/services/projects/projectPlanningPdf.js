@@ -195,12 +195,12 @@ export function buildPdfGanttScale(window, ganttWidth) {
   };
 }
 
-function taskBarRect(task, window, scale, ganttX) {
+function taskBarRect(task, timeWindow, scale, ganttX) {
   if (!task?.date_debut) return null;
   const tStart = task.date_debut;
   const tEnd = task.date_fin || task.date_debut;
-  const winStart = new Date(`${window.minDate}T12:00:00`);
-  const winEnd = new Date(`${window.maxDate}T12:00:00`);
+  const winStart = new Date(`${timeWindow.minDate}T12:00:00`);
+  const winEnd = new Date(`${timeWindow.maxDate}T12:00:00`);
   const start = new Date(`${tStart}T12:00:00`);
   const end = new Date(`${tEnd}T12:00:00`);
   if (end < winStart || start > winEnd) return null;
@@ -258,7 +258,7 @@ function fileSlug(projet, mode) {
   return mode === 'synthesis' ? `planning-synthese-${ref}` : `planning-detail-${ref}`;
 }
 
-async function drawPageHeader(doc, { logo, projet, window, mode, pageNum, totalPages, periodTitle }) {
+function drawPageHeader(doc, { logo, projet, timeWindow, mode, pageNum, totalPages, periodTitle }) {
   const y0 = M;
   if (logo?.dataUrl) {
     doc.addImage(logo.dataUrl, 'PNG', M, y0, logo.w, logo.h);
@@ -299,7 +299,7 @@ async function drawPageHeader(doc, { logo, projet, window, mode, pageNum, totalP
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
   doc.setTextColor(...MUTED);
-  doc.text(periodTitle || window.title, PAGE_W - M, y0 + 10, { align: 'right' });
+  doc.text(periodTitle || timeWindow.title, PAGE_W - M, y0 + 10, { align: 'right' });
   doc.text(`Page ${pageNum} / ${totalPages}`, PAGE_W - M, y0 + 15, { align: 'right' });
 
   const lineY = y0 + HEADER_BLOCK_H - 2;
@@ -386,7 +386,7 @@ function drawGanttGrid(doc, startY, endY, scale) {
   doc.line(PAGE_W - M, startY, PAGE_W - M, endY);
 }
 
-function drawRow(doc, row, y, window, scale, isLast) {
+function drawRow(doc, row, y, timeWindow, scale) {
   const isSummary = row.type === 'summary';
   const rowH = isSummary ? ROW_H_SUMMARY : ROW_H_TASK;
 
@@ -418,7 +418,7 @@ function drawRow(doc, row, y, window, scale, isLast) {
   const resp = doc.splitTextToSize(row.responsable || '—', LEFT_COLS[5].w - 2);
   doc.text(resp.slice(0, 1), x, y + 4);
 
-  const bar = taskBarRect(row, window, scale, GANTT_X);
+  const bar = taskBarRect(row, timeWindow, scale, GANTT_X);
   if (bar) {
     const lot = row.lot || row.nom;
     const rgb = hexToRgb(planningLotColor(lot));
@@ -460,14 +460,19 @@ function drawFooter(doc, pageNum, totalPages) {
  */
 export async function generateProjectPlanningPdf(projet, tasks = [], options = {}) {
   const mode = options.mode === 'synthesis' ? 'synthesis' : 'detailed';
-  const logo = await loadCompanyLogoFit(44, 14);
+  let logo = null;
+  try {
+    logo = await loadCompanyLogoFit(44, 14);
+  } catch {
+    logo = null;
+  }
   const doc = new jsPDF({ unit: 'mm', format: 'a3', orientation: 'landscape' });
 
   projet = { ...projet, _tasksForPdf: tasks };
 
   if (!tasks.length) {
-    await drawPageHeader(doc, {
-      logo, projet, window: { title: '—' }, mode, pageNum: 1, totalPages: 1, periodTitle: 'Aucune tâche',
+    drawPageHeader(doc, {
+      logo, projet, timeWindow: { title: '—' }, mode, pageNum: 1, totalPages: 1, periodTitle: 'Aucune tâche',
     });
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(10);
@@ -487,35 +492,35 @@ export async function generateProjectPlanningPdf(projet, tasks = [], options = {
   const maxRowsPerPage = Math.max(1, Math.floor((bodyBottom - bodyTop) / ROW_H_TASK));
 
   const pages = [];
-  windows.forEach((window) => {
+  windows.forEach((timeWindow) => {
     const rowChunks = chunkArray(rows, maxRowsPerPage);
-    rowChunks.forEach((chunk, chunkIdx) => {
-      pages.push({ window, rows: chunk, rowChunkIdx: chunkIdx });
+    rowChunks.forEach((chunk) => {
+      pages.push({ timeWindow, rows: chunk });
     });
   });
 
-  const totalPages = pages.length;
+  const totalPages = Math.max(1, pages.length);
 
   pages.forEach((page, pageIndex) => {
-    if (pageIndex > 0) doc.addPage('a3', 'landscape');
-    const scale = buildPdfGanttScale(page.window, GANTT_W);
+    if (pageIndex > 0) {
+      doc.addPage({ format: 'a3', orientation: 'landscape' });
+    }
+    const scale = buildPdfGanttScale(page.timeWindow, GANTT_W);
     const headerEnd = drawPageHeader(doc, {
       logo,
       projet,
-      window: page.window,
+      timeWindow: page.timeWindow,
       mode,
       pageNum: pageIndex + 1,
       totalPages,
-      periodTitle: page.window.title,
+      periodTitle: page.timeWindow.title,
     });
     const rowStartY = drawColumnHeaders(doc, headerEnd, scale);
-    const pageBodyEnd = bodyBottom;
-    drawGanttGrid(doc, rowStartY, pageBodyEnd, scale);
+    drawGanttGrid(doc, rowStartY, bodyBottom, scale);
 
     let y = rowStartY;
-    page.rows.forEach((row, i) => {
-      const h = drawRow(doc, row, y, page.window, scale, i === page.rows.length - 1);
-      y += h;
+    page.rows.forEach((row) => {
+      y += drawRow(doc, row, y, page.timeWindow, scale);
     });
 
     drawFooter(doc, pageIndex + 1, totalPages);

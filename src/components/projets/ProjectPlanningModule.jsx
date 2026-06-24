@@ -68,6 +68,21 @@ export default function ProjectPlanningModule({ projet }) {
 
   useEffect(() => { load(); }, [load]);
 
+  async function exportPdf(mode) {
+    try {
+      if (mode === 'synthesis') {
+        await generateProjectPlanningPdfSynthesis(projet, tasks);
+        setToast('PDF synthèse exporté');
+      } else {
+        await generateProjectPlanningPdfDetailed(projet, tasks);
+        setToast('PDF détaillé exporté');
+      }
+    } catch (err) {
+      console.error('[CITYMO] export PDF planning', err);
+      setError(err?.message || 'Erreur export PDF planning.');
+    }
+  }
+
   if (!projectId) {
     return (
       <div style={{ padding: 24, background: 'var(--surface-2)', borderRadius: 8, color: 'var(--text-3)', fontSize: '0.84rem', textAlign: 'center' }}>
@@ -110,10 +125,10 @@ export default function ProjectPlanningModule({ projet }) {
         </div>
 
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          <button type="button" onClick={async () => { await generateProjectPlanningPdfSynthesis(projet, tasks); setToast('PDF synthèse exporté'); }} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 12px', borderRadius: 6, border: '1.5px solid var(--border)', background: '#fff', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}>
+          <button type="button" onClick={() => exportPdf('synthesis')} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 12px', borderRadius: 6, border: '1.5px solid var(--border)', background: '#fff', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}>
             <FileText size={14} /> PDF synthèse
           </button>
-          <button type="button" onClick={async () => { await generateProjectPlanningPdfDetailed(projet, tasks); setToast('PDF détaillé exporté'); }} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 12px', borderRadius: 6, border: '1.5px solid var(--red)', background: '#fff', color: 'var(--red)', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}>
+          <button type="button" onClick={() => exportPdf('detailed')} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 12px', borderRadius: 6, border: '1.5px solid var(--red)', background: '#fff', color: 'var(--red)', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}>
             <FileText size={14} /> PDF détaillé
           </button>
           <button type="button" onClick={() => { exportPlanningTasksCsv(projet, tasks); setToast('Excel (CSV) exporté'); }} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 12px', borderRadius: 6, border: '1.5px solid var(--border)', background: '#fff', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}>
