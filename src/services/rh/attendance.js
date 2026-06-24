@@ -410,6 +410,47 @@ export function filterWorkersForProject(workers, projectId, { junctionOnly = fal
   return (workers || []).filter((w) => workerIsAssignedToProject(w, projectId, { junctionOnly }));
 }
 
+function normalizePersonNameForMatch(s) {
+  return (s || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .replace(/\s+/g, ' ');
+}
+
+function personNameTokenKey(s) {
+  return normalizePersonNameForMatch(s).split(' ').filter(Boolean).sort().join(' ');
+}
+
+/** Compare un nom chef (fiche projet) à un employé chef de chantier. */
+export function personNamesMatch(a, b) {
+  const na = normalizePersonNameForMatch(a);
+  const nb = normalizePersonNameForMatch(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  if (personNameTokenKey(a) === personNameTokenKey(b)) return true;
+  if (na.includes(nb) || nb.includes(na)) return true;
+  return false;
+}
+
+export function filterProjectsForChefChantier(projects, chef) {
+  if (!chef) return [];
+  const label = (chef.label || chef.name || '').trim();
+  if (!label) return [];
+  return (projects || []).filter((p) => personNamesMatch(p.chef_chantier, label));
+}
+
+export function filterProjectOptionsForChef(projectOptions, projects, chefId, chefsChantier) {
+  if (!chefId) return [];
+  const chef = (chefsChantier || []).find((c) => String(c.id) === String(chefId));
+  if (!chef) return [];
+  const allowed = new Set(
+    filterProjectsForChefChantier(projects, chef).map((p) => String(p.id)),
+  );
+  return (projectOptions || []).filter((o) => allowed.has(String(o.id)));
+}
+
 export function collectProjectFilterOptions(projects = [], workers = [], records = []) {
   const map = new Map();
   (projects || []).forEach((p) => {

@@ -3,7 +3,7 @@ import { useState, useRef, useMemo } from 'react';
 import { useAttendance } from '../hooks/useAttendance';
 import { generateAttendanceWeeklyPdf } from '../services/rh/attendanceSheetPdf';
 import { syncPayrollAfterAttendanceChange } from '../services/rh/workerPayroll';
-import { computeAttendanceWorkMetrics, STANDARD_SHIFT_START, STANDARD_SHIFT_END, groupAttendanceSummariesByProjectWeek, collectAttendanceWeeks, fmtWeekRange, weekStartMonday } from '../services/rh/attendance';
+import { computeAttendanceWorkMetrics, STANDARD_SHIFT_START, STANDARD_SHIFT_END, groupAttendanceSummariesByProjectWeek, collectAttendanceWeeks, fmtWeekRange, weekStartMonday, filterProjectOptionsForChef } from '../services/rh/attendance';
 import AttendanceDetailModal from './rh/AttendanceDetailModal';
 
 function EmptyState({ icon, title, sub }) {
@@ -101,7 +101,7 @@ function applyProjectChefChantier(next, projectId, projects, chefsChantier) {
   return next;
 }
 
-function WorkerChecklist({ workers, selectedIds, onChange, error, disabled }) {
+function WorkerChecklist({ workers, selectedIds, onChange, error, disabled, emptyHint }) {
   const [search, setSearch] = useState('');
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
@@ -167,7 +167,7 @@ function WorkerChecklist({ workers, selectedIds, onChange, error, disabled }) {
       }}>
         {workers.length === 0 ? (
           <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-3)', fontSize: '0.84rem' }}>
-            Aucun ouvrier pour ce projet. Choisissez un projet ou affectez des ouvriers au projet.
+            {emptyHint || 'Aucun ouvrier pour ce projet. Affectez des ouvriers au projet (Projet → ouvriers).'}
           </div>
         ) : filtered.length === 0 ? (
           <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-3)', fontSize: '0.84rem' }}>
@@ -269,17 +269,24 @@ export default function Presence() {
           filterWorkersForProject(workerOptions, v, PRESENCE_WORKER_FILTER).map((w) => w.id),
         );
         next.workerIds = (p.workerIds || []).filter((id) => allowed.has(id));
-        if (v) {
-          applyProjectChefChantier(next, v, projects, chefsChantier);
-        } else {
-          next.chefChantierId = '';
-          next.chefChantierNom = '';
+        if (!v) {
           next.workerIds = [];
+        } else if (!next.chefChantierId) {
+          applyProjectChefChantier(next, v, projects, chefsChantier);
         }
       }
       if (k === 'chefChantierId') {
         const chef = chefsChantier.find((c) => c.id === v);
         next.chefChantierNom = chef?.label || '';
+        const allowedProjects = new Set(
+          filterProjectOptionsForChef(projectOptions, projects, v, chefsChantier).map((o) => String(o.id)),
+        );
+        if (!v || (next.projectId && !allowedProjects.has(String(next.projectId)))) {
+          next.projectId = '';
+          next.projetNom = '';
+          next.projet = '';
+          next.workerIds = [];
+        }
       }
       if (k === 'heureEntree' || k === 'heureSortie') {
         if (next.statut !== 'Demi-journee' && next.statut !== 'Absent') {
@@ -392,12 +399,21 @@ export default function Presence() {
     [workerOptions, filterProjectId, filterWorkersForProject],
   );
 
+  const filterProjectOptionsList = useMemo(
+    () => filterProjectOptionsForChef(projectOptions, projects, filterChefId, chefsChantier),
+    [projectOptions, projects, filterChefId, chefsChantier],
+  );
+
+  const modalProjectOptions = useMemo(
+    () => filterProjectOptionsForChef(projectOptions, projects, form.chefChantierId, chefsChantier),
+    [projectOptions, projects, form.chefChantierId, chefsChantier],
+  );
+
   const modalWorkerOptions = useMemo(
-    () => filterWorkersForProject(
-      workerOptions,
-      form.projectId,
-      form.projectId ? PRESENCE_WORKER_FILTER : {},
-    ),
+    () => {
+      if (!form.projectId) return [];
+      return filterWorkersForProject(workerOptions, form.projectId, PRESENCE_WORKER_FILTER);
+    },
     [workerOptions, form.projectId, filterWorkersForProject],
   );
 
@@ -625,11 +641,11 @@ export default function Presence() {
             <option value="">Tous les ouvriers</option>
             {filterWorkerOptions.map(w => <option key={w.id} value={w.label}>{w.label}</option>)}
           </select>
-          <select value={filterProjectId} onChange={e => { setFilterProjectId(e.target.value); setFilterOuvrier(''); }}>
-            <option value="">Tous les projets</option>
-            {projectOptions.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+          <select value={filterProjectId} onChange={e => { setFilterProjectId(e.target.value); setFilterOuvrier(''); }} disabled={!!filterChefId && !filterProjectOptionsList.length}>
+            <option value="">{filterChefId ? 'Projets du chef…' : 'Tous les projets'}</option>
+            {(filterChefId ? filterProjectOptionsList : projectOptions).map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
           </select>
-          <select value={filterChefId} onChange={e => setFilterChefId(e.target.value)}>
+          <select value={filterChefId} onChange={e => { setFilterChefId(e.target.value); setFilterProjectId(''); setFilterOuvrier(''); }}>
             <option value="">Tous les chefs</option>
             {chefsChantier.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
           </select>
@@ -816,14 +832,6 @@ export default function Presence() {
             <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div className="form-group">
-                  <label>Projet</label>
-                  <select value={form.projectId} onChange={e => setF('projectId', e.target.value)} style={INPUT_S(errors.projet)}>
-                    <option value="">Choisir un projet...</option>
-                    {projectOptions.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
-                  </select>
-                  {errors.projet && <div style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.projet}</div>}
-                </div>
-                <div className="form-group">
                   <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <HardHat size={14} /> Chef de chantier
                   </label>
@@ -837,21 +845,24 @@ export default function Presence() {
                       Liste vide : vérifiez le poste « Chef de chantier » en RH ou rechargez la page.
                     </div>
                   )}
-                  {form.projectId && !form.chefChantierId && (() => {
-                    const proj = projects.find((p) => String(p.id) === String(form.projectId));
-                    const name = (proj?.chef_chantier || '').trim();
-                    if (!name) return null;
-                    return (
-                      <div style={{ fontSize: '0.72rem', color: '#E65100', marginTop: 4 }}>
-                        « {name} » (fiche projet) introuvable en RH — sélectionnez manuellement.
-                      </div>
-                    );
-                  })()}
-                  {form.projectId && form.chefChantierId && (
-                    <div style={{ fontSize: '0.72rem', color: '#2E7D32', marginTop: 4 }}>
-                      Affecté automatiquement depuis la fiche projet
+                  {form.chefChantierId && modalProjectOptions.length === 0 && (
+                    <div style={{ fontSize: '0.72rem', color: '#E65100', marginTop: 4 }}>
+                      Aucun projet assigné à ce chef en fiche projet.
                     </div>
                   )}
+                </div>
+                <div className="form-group">
+                  <label>Projet</label>
+                  <select
+                    value={form.projectId}
+                    onChange={e => setF('projectId', e.target.value)}
+                    disabled={!form.chefChantierId}
+                    style={{ ...INPUT_S(errors.projet), opacity: form.chefChantierId ? 1 : 0.65 }}
+                  >
+                    <option value="">{form.chefChantierId ? 'Choisir un projet…' : 'Choisissez d\'abord un chef de chantier'}</option>
+                    {modalProjectOptions.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+                  </select>
+                  {errors.projet && <div style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.projet}</div>}
                 </div>
               </div>
 
@@ -873,7 +884,8 @@ export default function Presence() {
                   selectedIds={form.workerIds || []}
                   onChange={setWorkerIds}
                   error={errors.workerIds}
-                  disabled={saving}
+                  disabled={saving || !form.projectId}
+                  emptyHint={!form.projectId ? 'Choisissez un projet pour afficher les ouvriers affectés.' : undefined}
                 />
               )}
               <div className="form-group">
