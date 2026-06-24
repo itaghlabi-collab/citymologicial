@@ -16,7 +16,7 @@ import {
   paymentStatusToDb, paymentStatusFromDb,
 } from '../services/rh/subcontractorConstants';
 import {
-  filterSubcontractors, computeListKpis,
+  filterSubcontractors, computeListKpis, mergeSubcontractorMetiers,
 } from '../services/rh/subcontractors';
 import {
   validateSubcontractorPaymentForm,
@@ -136,8 +136,13 @@ export default function SousTraitants() {
 
   const villes = useMemo(() => {
     const s = new Set(items.map((i) => i.ville).filter(Boolean));
-    return [...s].sort();
+    return [...s].sort((a, b) => a.localeCompare(b, 'fr'));
   }, [items]);
+
+  const metiers = useMemo(
+    () => mergeSubcontractorMetiers(items, SUBCONTRACTOR_METIERS),
+    [items],
+  );
 
   function openList() {
     setView('list');
@@ -374,7 +379,7 @@ export default function SousTraitants() {
                 <label style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase' }}>Métier</label>
                 <select value={filters.metier} onChange={(e) => setFilter('metier', e.target.value)} style={INPUT_S(false)}>
                   <option value="">Tous</option>
-                  {SUBCONTRACTOR_METIERS.map((m) => <option key={m} value={m}>{m}</option>)}
+                  {metiers.map((m) => <option key={m} value={m}>{m}</option>)}
                 </select>
               </div>
               <div>
@@ -717,7 +722,7 @@ export default function SousTraitants() {
                 <div><label>Métier / Fonction</label>
                   <select value={form.fonction || ''} onChange={(e) => setF('fonction', e.target.value)} style={INPUT_S(false)}>
                     <option value="">— Choisir —</option>
-                    {SUBCONTRACTOR_METIERS.map((m) => <option key={m} value={m}>{m}</option>)}
+                    {metiers.map((m) => <option key={m} value={m}>{m}</option>)}
                   </select>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>

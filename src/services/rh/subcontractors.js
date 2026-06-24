@@ -823,6 +823,26 @@ export function computeListKpis(items = []) {
   };
 }
 
+export function normalizeFilterKey(v) {
+  return String(v || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+}
+
+export function mergeSubcontractorMetiers(items = [], presets = []) {
+  const seen = new Set();
+  const out = [];
+  [...presets, ...(items || []).map((i) => i.fonction).filter(Boolean)].forEach((m) => {
+    const key = normalizeFilterKey(m);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    out.push(String(m).trim());
+  });
+  return out.sort((a, b) => a.localeCompare(b, 'fr', { sensitivity: 'base' }));
+}
+
 export function filterSubcontractors(items = [], filters = {}) {
   const {
     search = '', nom = '', telephone = '', cin = '',
@@ -833,10 +853,14 @@ export function filterSubcontractors(items = [], filters = {}) {
   const telQ = telephone.trim();
   const cinQ = cin.trim().toLowerCase();
   const villeQ = ville.trim().toLowerCase();
+  const metierQ = normalizeFilterKey(metier);
 
   return items.filter((s) => {
     if (statut && s.statut !== statut) return false;
-    if (metier && s.fonction !== metier) return false;
+    if (metierQ) {
+      const fn = normalizeFilterKey(s.fonction);
+      if (!fn || fn !== metierQ) return false;
+    }
     if (villeQ && !(s.ville || '').toLowerCase().includes(villeQ)) return false;
     if (nomQ && !s.fullName.toLowerCase().includes(nomQ)) return false;
     if (telQ && !(s.telephone || '').includes(telQ)) return false;
