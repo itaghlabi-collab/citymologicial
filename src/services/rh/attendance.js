@@ -131,6 +131,7 @@ export function normalizeAttendance(row) {
       ? ATTENDANCE_SOURCE_LEGACY
       : (row.source_version || ATTENDANCE_SOURCE_LEGACY),
     legacyArchivedAt: row.legacy_archived_at || null,
+    validatedNewLogic: row.validated_new_logic === true,
     created_at: row.created_at,
     updated_at: row.updated_at,
   });
@@ -139,6 +140,7 @@ export function normalizeAttendance(row) {
 /** Présence comptabilisée (nouvelle logique projet → affectation junction). */
 export function isActiveAttendanceRecord(r, assignmentLookup = cachedAssignmentLookup) {
   if (!r) return false;
+  if (r.validatedNewLogic !== true) return false;
   if (r.isLegacy === true) return false;
   if (r.sourceVersion !== ATTENDANCE_SOURCE_PROJECT) return false;
   if (!r.projectId) return false;
@@ -181,6 +183,7 @@ export function toAttendanceRow(form) {
     chef_chantier_nom: (form.chefChantierNom || form.chefChantier || '').trim() || null,
     is_legacy: false,
     source_version: ATTENDANCE_SOURCE_PROJECT,
+    validated_new_logic: true,
   };
 }
 
@@ -229,10 +232,16 @@ async function fetchAttendanceRows(select, { activeOnly = false } = {}) {
 
   if (!activeOnly) return base;
 
-  let q = base.eq('is_legacy', false).eq('source_version', ATTENDANCE_SOURCE_PROJECT);
+  let q = base
+    .eq('is_legacy', false)
+    .eq('source_version', ATTENDANCE_SOURCE_PROJECT)
+    .eq('validated_new_logic', true);
   const filtered = await q;
   if (!filtered.error) return filtered;
-  if (/is_legacy|source_version|column|does not exist/i.test(filtered.error.message || '')) {
+  if (/validated_new_logic|is_legacy|source_version|column|does not exist/i.test(filtered.error.message || '')) {
+    q = base.eq('is_legacy', false).eq('source_version', ATTENDANCE_SOURCE_PROJECT);
+    const fallback2 = await q;
+    if (!fallback2.error) return fallback2;
     const legacyOnly = await base.eq('is_legacy', false);
     if (!legacyOnly.error) return legacyOnly;
     return base;
