@@ -6464,6 +6464,9 @@ tbody tr:last-child td { border-bottom: none; }
   align-items: center;
   justify-content: space-between;
 }
+.taches-toolbar-row--tabs-only {
+  justify-content: flex-end;
+}
 .taches-display-filter {
   display: flex;
   align-items: center;

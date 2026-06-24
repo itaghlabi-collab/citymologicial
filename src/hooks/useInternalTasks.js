@@ -140,6 +140,7 @@ export function useInternalTasks() {
     setError(null);
     try {
       await sendInternalTaskDgRelance(task, message);
+      await load();
       return { success: true };
     } catch (err) {
       const msg = formatSupabaseError(err, 'Erreur relance.');
@@ -148,7 +149,7 @@ export function useInternalTasks() {
     } finally {
       setSaving(false);
     }
-  }, []);
+  }, [load]);
 
   return {
     records,

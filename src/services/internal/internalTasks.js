@@ -5,6 +5,7 @@ import { getSupabase } from '../../lib/supabase';
 import { canManageTaskDgPush, userMatchesAssignee } from '../auth/taskDgPushAccess';
 
 const TABLE = 'internal_tasks';
+const RELANCE_TABLE = 'internal_task_dg_relances';
 
 export const TASK_STATUTS = ['a_faire', 'en_cours', 'en_attente', 'terminee', 'annulee'];
 export const TASK_PRIORITES = ['basse', 'normale', 'haute', 'urgente'];
@@ -55,7 +56,16 @@ export function normalizeInternalTask(row) {
     created_by: row.created_by || null,
     created_at: row.created_at,
     updated_at: row.updated_at,
+    dg_relance_count: Number(row.dg_relance_count) || 0,
   };
+}
+
+/** Libellé badge relance DG selon le nombre d'envois. */
+export function formatDgRelanceBadge(count) {
+  const n = Number(count) || 0;
+  if (n < 1) return null;
+  if (n === 1) return 'RELANCE DG';
+  return `${n} Relances DG`;
 }
 
 export function toInternalTaskRow(form) {
@@ -88,16 +98,45 @@ async function getAuthUserId() {
   return user.id;
 }
 
+async function fetchRelanceCountMap(taskIds) {
+  if (!taskIds?.length) return new Map();
+  try {
+    const { data, error } = await getSupabase()
+      .from(RELANCE_TABLE)
+      .select('task_id')
+      .in('task_id', taskIds);
+    if (error) {
+      if (error.code === '42P01' || /internal_task_dg_relances/i.test(error.message || '')) {
+        return new Map();
+      }
+      throw error;
+    }
+    const map = new Map();
+    (data || []).forEach((row) => {
+      const id = row.task_id;
+      map.set(id, (map.get(id) || 0) + 1);
+    });
+    return map;
+  } catch {
+    return new Map();
+  }
+}
+
 export async function listInternalTasks() {
   await getAuthUserId();
   const { data, error } = await getSupabase()
     .from(TABLE)
     .select('*')
-    .order('dg_push', { ascending: false })
     .order('date_echeance', { ascending: true, nullsFirst: false })
     .order('created_at', { ascending: false });
   if (error) throw error;
-  return sortInternalTasks((data || []).map(normalizeInternalTask));
+  const rows = (data || []).map(normalizeInternalTask);
+  const relanceMap = await fetchRelanceCountMap(rows.map((t) => t.id));
+  const enriched = rows.map((t) => ({
+    ...t,
+    dg_relance_count: relanceMap.get(t.id) || 0,
+  }));
+  return sortInternalTasks(enriched);
 }
 
 export async function createInternalTask(form) {
@@ -167,11 +206,23 @@ export async function setInternalTaskStatut(id, statut) {
   return task;
 }
 
-/** Relance Directeur — notification interne à l'assigné (sans modification de la tâche). */
+/** Relance Directeur — enregistre l'historique + notification à l'assigné. */
 export async function sendInternalTaskDgRelance(task, message) {
-  await getAuthUserId();
+  const userId = await getAuthUserId();
+  const payload = {
+    task_id: task.id,
+    sent_by: userId,
+    message: message?.trim() || null,
+    sent_at: new Date().toISOString(),
+  };
+  const { error } = await getSupabase().from(RELANCE_TABLE).insert([payload]);
+  if (error) throw error;
   const { notifyTaskDgRelance } = await import('../notifications/notificationEvents');
-  return notifyTaskDgRelance(task, message);
+  await notifyTaskDgRelance(task, message);
+  return {
+    ...task,
+    dg_relance_count: (task.dg_relance_count || 0) + 1,
+  };
 }
 
 export async function setInternalTaskDgPush(id, enabled, userId, dgNote) {
@@ -209,7 +260,9 @@ export async function toggleInternalTaskDone(id, done) {
 export function sortInternalTasks(tasks) {
   const prioRank = { urgente: 0, haute: 1, normale: 2, basse: 3 };
   return [...(tasks || [])].sort((a, b) => {
-    if (a.dg_push !== b.dg_push) return a.dg_push ? -1 : 1;
+    const relA = a.dg_relance_count || 0;
+    const relB = b.dg_relance_count || 0;
+    if (relA !== relB) return relB - relA;
     const pr = (prioRank[a.priorite] ?? 2) - (prioRank[b.priorite] ?? 2);
     if (pr !== 0) return pr;
     const da = a.dateLimite || '9999-99-99';
@@ -291,11 +344,18 @@ export function applyTaskVisibility(tasks, user) {
   return (tasks || []).filter((t) => canViewDgTask(t, user));
 }
 
-export function splitTasksByCategory(tasks, user) {
+/** Périmètre utilisateur : employés = leurs tâches assignées ; DG/Admin = tout. */
+export function applyTasksUserScope(tasks, user) {
   const visible = applyTaskVisibility(tasks, user);
+  if (canManageTaskDgPush(user)) return visible;
+  return visible.filter((t) => userMatchesAssignee(user, t.assigne));
+}
+
+export function splitTasksByCategory(tasks, user) {
+  const scoped = applyTasksUserScope(tasks, user);
   return {
-    normalTasks: visible.filter((t) => !t.is_dg_task),
-    dgTasks: visible.filter((t) => t.is_dg_task),
+    normalTasks: scoped.filter((t) => !t.is_dg_task),
+    dgTasks: scoped.filter((t) => t.is_dg_task),
   };
 }
 
