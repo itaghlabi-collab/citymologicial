@@ -1,6 +1,7 @@
 import {
   Users, Plus, Search, X, ChevronLeft, Eye, Edit2, Trash2, Download,
   FolderKanban, ClipboardList, Banknote, Scale, FileText, Loader2, RefreshCw,
+  UserCheck, UserX, TrendingUp, Filter,
 } from 'lucide-react';
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import { useSubcontractors } from '../hooks/useSubcontractors';
@@ -8,11 +9,15 @@ import { useSubcontractorPaymentForm } from '../hooks/useSubcontractorPaymentFor
 import SubcontractorPaymentFormBody from './SubcontractorPaymentFormBody';
 import { generateSubcontractorProjectPdf } from '../services/rh/subcontractorProjectPdf';
 import {
-  REMUNERATION_TYPES, UNIT_TYPES, ASSIGNMENT_STATUSES, SERVICE_STATUSES,
+  REMUNERATION_TYPES, UNIT_TYPES,
   SUB_STATUTS, ASSIGNMENT_STATUS_LABEL, SERVICE_STATUS_LABEL,
   SUB_STATUT_LABEL, PAYMENT_BALANCE_LABEL,
+  SUBCONTRACTOR_METIERS, SUBCONTRACTOR_DOC_TYPES,
   paymentStatusToDb, paymentStatusFromDb,
 } from '../services/rh/subcontractorConstants';
+import {
+  filterSubcontractors, computeListKpis,
+} from '../services/rh/subcontractors';
 import {
   validateSubcontractorPaymentForm,
   buildSubcontractorPaymentPayload,
@@ -32,33 +37,64 @@ const INPUT_S = (err) => ({
   border: '1.5px solid ' + (err ? 'var(--red)' : 'var(--border)'), background: '#fff',
 });
 
-const TABS = [
-  { id: 'info', label: 'Informations', icon: Users },
-  { id: 'projects', label: 'Projets affectés', icon: FolderKanban },
-  { id: 'services', label: 'Prestations réalisées', icon: ClipboardList },
-  { id: 'payments', label: 'Paiements', icon: Banknote },
-  { id: 'balances', label: 'Solde par projet', icon: Scale },
+const EMPTY_FILTERS = {
+  search: '', nom: '', telephone: '', cin: '',
+  metier: '', ville: '', projet: '', statut: '',
+};
+
+const DETAIL_TABS = [
+  { id: 'info', label: 'Informations générales', icon: Users },
   { id: 'documents', label: 'Documents', icon: FileText },
+  { id: 'history', label: 'Historique projets', icon: FolderKanban },
+  { id: 'finance', label: 'Financier', icon: Banknote },
 ];
 
 const EMPTY_SUB = {
   prenom: '', nom: '', raison_sociale: '', fonction: '', numero_cin: '', passeport: '',
-  telephone: '', email: '', adresse: '', ice: '', statut: 'actif', notes: '',
+  telephone: '', email: '', adresse: '', ville: '', ice: '', numero_if: '', rc: '',
+  patente: '', rib: '', statut: 'actif', notes: '',
   assignmentProjectId: '',
   remunerationType: REMUNERATION_TYPES[0],
   unitType: UNIT_TYPES[0],
   unitPrice: '',
 };
 
+function StatutBadge({ statut }) {
+  const cls = statut === 'actif' ? 'badge-green'
+    : statut === 'suspendu' ? 'badge-orange'
+      : statut === 'archive' ? 'badge-grey' : 'badge-grey';
+  return <span className={'badge ' + cls}>{SUB_STATUT_LABEL[statut] || statut}</span>;
+}
+
+function KpiCard({ label, value, icon: Icon, color }) {
+  return (
+    <div className="stat-card">
+      <div className="stat-icon" style={{ background: color + '15', color }}>
+        <Icon size={18} />
+      </div>
+      <div className="stat-body">
+        <div className="stat-value" style={{ fontSize: typeof value === 'string' && value.includes('MAD') ? '0.92rem' : undefined }}>{value}</div>
+        <div className="stat-label">{label}</div>
+      </div>
+    </div>
+  );
+}
+
+function assignmentAmount(assignment, balances) {
+  const bal = (balances || []).find((b) => b.assignmentId === assignment.id);
+  if (bal) return bal.totalServicesAmount;
+  return assignment.estimatedTotal || 0;
+}
+
 export default function SousTraitants() {
   const {
     items, projects, loading, saving, error, configured, load, loadDetail,
     create, update, remove, createAssignment, createService, updateService,
-    createPaymentBatch,
+    createPaymentBatch, createDocument,
   } = useSubcontractors();
 
   const [view, setView] = useState('list');
-  const [search, setSearch] = useState('');
+  const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [selectedId, setSelectedId] = useState(null);
   const [detail, setDetail] = useState(null);
   const [tab, setTab] = useState('info');
@@ -67,9 +103,11 @@ export default function SousTraitants() {
   const [formErr, setFormErr] = useState({});
   const [toast, setToast] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
+  const [docForm, setDocForm] = useState({ doc_type: 'cin', file_name: '', notes: '' });
   const subPayment = useSubcontractorPaymentForm({ active: modal === 'payment' });
 
   const setF = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+  const setFilter = (k, v) => setFilters((p) => ({ ...p, [k]: v }));
 
   const notify = (msg, ok = true) => {
     setToast({ msg, ok });
@@ -93,16 +131,13 @@ export default function SousTraitants() {
     if (selectedId && view === 'detail') refreshDetail(selectedId);
   }, [selectedId, view, refreshDetail]);
 
-  const filtered = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    if (!q) return items;
-    return items.filter((s) =>
-      s.fullName.toLowerCase().includes(q)
-      || s.fonction?.toLowerCase().includes(q)
-      || s.numero_cin?.toLowerCase().includes(q)
-      || s.passeport?.toLowerCase().includes(q),
-    );
-  }, [items, search]);
+  const filtered = useMemo(() => filterSubcontractors(items, filters), [items, filters]);
+  const kpis = useMemo(() => computeListKpis(items), [items]);
+
+  const villes = useMemo(() => {
+    const s = new Set(items.map((i) => i.ville).filter(Boolean));
+    return [...s].sort();
+  }, [items]);
 
   function openList() {
     setView('list');
@@ -133,11 +168,7 @@ export default function SousTraitants() {
     if (Object.keys(err).length) { setFormErr(err); return; }
 
     const {
-      assignmentProjectId,
-      remunerationType,
-      unitType,
-      unitPrice,
-      ...subForm
+      assignmentProjectId, remunerationType, unitType, unitPrice, ...subForm
     } = form;
 
     const res = modal === 'sub-edit'
@@ -225,6 +256,16 @@ export default function SousTraitants() {
     if (selectedId) refreshDetail(selectedId);
   }
 
+  async function handleSaveDocument(e) {
+    e.preventDefault();
+    if (!docForm.file_name?.trim()) return notify('Nom du document requis.', false);
+    const res = await createDocument(selectedId, docForm);
+    if (!res.success) return notify(res.error, false);
+    notify('Document enregistré.');
+    setDocForm({ doc_type: 'cin', file_name: '', notes: '' });
+    refreshDetail(selectedId);
+  }
+
   async function handleDelete(id) {
     if (!window.confirm('Supprimer ce sous-traitant ?')) return;
     const res = await remove(id);
@@ -251,6 +292,15 @@ export default function SousTraitants() {
   }
 
   const sub = detail?.sub;
+  const docsByType = useMemo(() => {
+    const map = {};
+    (detail?.documents || []).forEach((d) => {
+      const key = d.doc_type || 'other';
+      if (!map[key]) map[key] = [];
+      map[key].push(d);
+    });
+    return map;
+  }, [detail?.documents]);
 
   return (
     <div className="animate-fade-in rh-ext-page">
@@ -266,9 +316,12 @@ export default function SousTraitants() {
           <div className="page-header flex-between finance-page-header">
             <div>
               <h1 className="page-title">Sous-traitants</h1>
-              <p className="page-subtitle finance-sub-hide-mobile">Fiche globale, affectations multi-projets et suivi des paiements</p>
+              <p className="page-subtitle finance-sub-hide-mobile">Base de données ERP — fiches, affectations et suivi financier</p>
             </div>
             <div className="finance-page-actions finance-page-actions--solo">
+              <button className="btn btn-ghost" onClick={load} disabled={loading} title="Actualiser">
+                <RefreshCw size={15} />
+              </button>
               <button className="btn btn-primary" onClick={() => openModal('sub-create')} disabled={loading}>
                 <Plus size={15} /> Nouveau sous-traitant
               </button>
@@ -288,11 +341,69 @@ export default function SousTraitants() {
             </div>
           )}
 
-          <div className="card rh-ext-filter-card">
-            <div className="rh-ext-search-wrap" style={{ maxWidth: 360 }}>
-              <Search size={15} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
-              <input type="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher..." style={INPUT_S(false)} />
+          <div className="stat-grid rh-ext-stat-grid" style={{ marginBottom: 16 }}>
+            <KpiCard label="Sous-traitants actifs" value={kpis.actifs} icon={UserCheck} color="#2E7D32" />
+            <KpiCard label="Sous-traitants inactifs" value={kpis.inactifs} icon={UserX} color="#757575" />
+            <KpiCard label="Montant total prestations" value={fmtMAD(kpis.totalServices)} icon={TrendingUp} color="#1565C0" />
+            <KpiCard label="Montant total payé" value={fmtMAD(kpis.totalPaid)} icon={Banknote} color="#2E7D32" />
+            <KpiCard label="Reste à payer" value={fmtMAD(kpis.remaining)} icon={Scale} color="#C62828" />
+          </div>
+
+          <div className="card rh-ext-filter-card" style={{ marginBottom: 16, padding: '16px 18px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, fontSize: '0.75rem', fontWeight: 800, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+              <Filter size={14} /> Filtres avancés
             </div>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 10 }}>
+              <div style={{ gridColumn: '1 / -1', maxWidth: 420, position: 'relative' }}>
+                <Search size={15} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
+                <input type="search" value={filters.search} onChange={(e) => setFilter('search', e.target.value)} placeholder="Recherche globale…" style={{ ...INPUT_S(false), paddingLeft: 32 }} />
+              </div>
+              <div>
+                <label style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase' }}>Nom</label>
+                <input value={filters.nom} onChange={(e) => setFilter('nom', e.target.value)} style={INPUT_S(false)} placeholder="Nom…" />
+              </div>
+              <div>
+                <label style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase' }}>Téléphone</label>
+                <input value={filters.telephone} onChange={(e) => setFilter('telephone', e.target.value)} style={INPUT_S(false)} placeholder="06…" />
+              </div>
+              <div>
+                <label style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase' }}>CIN</label>
+                <input value={filters.cin} onChange={(e) => setFilter('cin', e.target.value)} style={INPUT_S(false)} placeholder="CIN…" />
+              </div>
+              <div>
+                <label style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase' }}>Métier</label>
+                <select value={filters.metier} onChange={(e) => setFilter('metier', e.target.value)} style={INPUT_S(false)}>
+                  <option value="">Tous</option>
+                  {SUBCONTRACTOR_METIERS.map((m) => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase' }}>Ville</label>
+                <select value={filters.ville} onChange={(e) => setFilter('ville', e.target.value)} style={INPUT_S(false)}>
+                  <option value="">Toutes</option>
+                  {villes.map((v) => <option key={v} value={v}>{v}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase' }}>Projet</label>
+                <select value={filters.projet} onChange={(e) => setFilter('projet', e.target.value)} style={INPUT_S(false)}>
+                  <option value="">Tous</option>
+                  {projects.map((p) => <option key={p.id} value={p.id}>{p.ref ? `${p.ref} — ${p.nom}` : p.nom}</option>)}
+                </select>
+              </div>
+              <div>
+                <label style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase' }}>Statut</label>
+                <select value={filters.statut} onChange={(e) => setFilter('statut', e.target.value)} style={INPUT_S(false)}>
+                  <option value="">Tous</option>
+                  {SUB_STATUTS.map((s) => <option key={s} value={s}>{SUB_STATUT_LABEL[s]}</option>)}
+                </select>
+              </div>
+            </div>
+            {(filters.search || filters.nom || filters.telephone || filters.cin || filters.metier || filters.ville || filters.projet || filters.statut) && (
+              <button type="button" className="btn btn-ghost btn-sm" style={{ marginTop: 10 }} onClick={() => setFilters(EMPTY_FILTERS)}>
+                Réinitialiser les filtres
+              </button>
+            )}
           </div>
 
           <div className="card">
@@ -302,32 +413,36 @@ export default function SousTraitants() {
               </div>
             ) : filtered.length === 0 ? (
               <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-3)' }}>
-                {items.length === 0 ? 'Aucun sous-traitant. Exécutez RUN_SUBCONTRACTORS.sql dans Supabase.' : 'Aucun résultat.'}
+                {items.length === 0 ? 'Aucun sous-traitant. Exécutez RUN_SUBCONTRACTORS.sql dans Supabase.' : 'Aucun résultat pour ces filtres.'}
               </div>
             ) : (
               <div className="table-wrap">
                 <table>
                   <thead>
                     <tr>
-                      <th>Nom complet</th><th>Fonction</th><th>CIN / Passeport</th>
-                      <th>Projets actifs</th><th>Total prestations</th><th>Total payé</th>
-                      <th>Reste à payer</th><th>Statut</th><th>Actions</th>
+                      <th>Nom complet</th>
+                      <th>Métier / Fonction</th>
+                      <th>Téléphone</th>
+                      <th>Ville</th>
+                      <th>CIN</th>
+                      <th>Projet en cours</th>
+                      <th>Statut</th>
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filtered.map((s) => (
                       <tr key={s.id}>
                         <td data-label="Nom complet" style={{ fontWeight: 700 }}>{s.fullName}</td>
-                        <td data-label="Fonction">{s.fonction || '—'}</td>
-                        <td data-label="CIN / Passeport">{s.cinLabel}</td>
-                        <td data-label="Projets actifs" style={{ textAlign: 'center' }}>{s.activeProjectsCount}</td>
-                        <td data-label="Prestations" style={{ fontWeight: 600, color: 'var(--text-2)' }}>{fmtMAD(s.totalServices)}</td>
-                        <td data-label="Total payé" style={{ fontWeight: 600, color: '#2E7D32' }}>{fmtMAD(s.totalPaid)}</td>
-                        <td data-label="Reste à payer" style={{ fontWeight: 800, color: 'var(--red)' }}>{fmtMAD(s.remaining)}</td>
-                        <td data-label="Statut"><span className="badge badge-green">{SUB_STATUT_LABEL[s.statut] || s.statut}</span></td>
+                        <td data-label="Métier">{s.fonction || '—'}</td>
+                        <td data-label="Téléphone">{s.telephone || '—'}</td>
+                        <td data-label="Ville">{s.ville || '—'}</td>
+                        <td data-label="CIN">{s.numero_cin || s.passeport || '—'}</td>
+                        <td data-label="Projet en cours" style={{ fontSize: '0.85rem' }}>{s.currentProject || '—'}</td>
+                        <td data-label="Statut"><StatutBadge statut={s.statut} /></td>
                         <td className="rh-ext-actions-cell">
                           <div className="rh-ext-actions">
-                            <button className="btn btn-ghost btn-sm" onClick={() => openDetail(s.id)} title="Voir"><Eye size={14} /></button>
+                            <button className="btn btn-ghost btn-sm" onClick={() => openDetail(s.id)} title="Voir fiche"><Eye size={14} /></button>
                             <button className="btn btn-ghost btn-sm" onClick={() => { openDetail(s.id); setTimeout(() => openModal('sub-edit', s), 0); }} title="Modifier"><Edit2 size={14} /></button>
                             <button className="btn btn-ghost btn-sm" onClick={() => handleDelete(s.id)} title="Supprimer"><Trash2 size={14} style={{ color: 'var(--red)' }} /></button>
                           </div>
@@ -347,7 +462,7 @@ export default function SousTraitants() {
               <button className="btn btn-ghost" onClick={openList}><ChevronLeft size={16} /> Retour</button>
               <div>
                 <h1 className="page-title">{sub?.fullName || 'Sous-traitant'}</h1>
-                <p className="page-subtitle">{sub?.fonction || '—'} · {sub?.cinLabel}</p>
+                <p className="page-subtitle">{sub?.fonction || '—'} · {sub?.ville || '—'} · {sub?.cinLabel}</p>
               </div>
             </div>
             <div className="rh-ext-detail-header-actions">
@@ -358,17 +473,8 @@ export default function SousTraitants() {
             </div>
           </div>
 
-          {detail?.summary && (
-            <div className="stat-grid rh-ext-stat-grid">
-              <div className="stat-card"><div className="stat-body"><div className="stat-value">{detail.summary.activeProjects}</div><div className="stat-label">Projets</div></div></div>
-              <div className="stat-card"><div className="stat-body"><div className="stat-value" style={{ fontSize: '0.95rem' }}>{fmtMAD(detail.summary.totalServices)}</div><div className="stat-label">Prestations</div></div></div>
-              <div className="stat-card"><div className="stat-body"><div className="stat-value" style={{ fontSize: '0.95rem', color: '#2E7D32' }}>{fmtMAD(detail.summary.totalPaid)}</div><div className="stat-label">Payé</div></div></div>
-              <div className="stat-card"><div className="stat-body"><div className="stat-value" style={{ fontSize: '0.95rem', color: 'var(--red)' }}>{fmtMAD(detail.summary.remaining)}</div><div className="stat-label">Reste à payer</div></div></div>
-            </div>
-          )}
-
           <div className="rh-ext-tab-bar">
-            {TABS.map((t) => (
+            {DETAIL_TABS.map((t) => (
               <button key={t.id} type="button" onClick={() => setTab(t.id)}
                 className={'btn ' + (tab === t.id ? 'btn-primary' : 'btn-secondary')} style={{ fontSize: '0.78rem' }}>
                 <t.icon size={13} /> {t.label}
@@ -382,31 +488,104 @@ export default function SousTraitants() {
             <div className="card" style={{ padding: 20 }}>
               {tab === 'info' && sub && (
                 <div className="rh-ext-info-grid">
-                  {[['Nom', sub.fullName], ['Fonction', sub.fonction], ['CIN', sub.numero_cin], ['Passeport', sub.passeport], ['Téléphone', sub.telephone], ['Email', sub.email], ['Adresse', sub.adresse], ['ICE', sub.ice], ['Statut', SUB_STATUT_LABEL[sub.statut]], ['Notes', sub.notes]].map(([k, v]) => (
-                    <div key={k}><div style={{ fontSize: '0.7rem', color: 'var(--text-3)', fontWeight: 700, textTransform: 'uppercase' }}>{k}</div><div style={{ fontWeight: 600, marginTop: 4 }}>{v || '—'}</div></div>
+                  {[
+                    ['Nom complet', sub.fullName],
+                    ['Téléphone', sub.telephone],
+                    ['Email', sub.email],
+                    ['Adresse', sub.adresse],
+                    ['Ville', sub.ville],
+                    ['CIN', sub.numero_cin],
+                    ['Passeport', sub.passeport],
+                    ['ICE', sub.ice],
+                    ['IF', sub.numero_if],
+                    ['RC', sub.rc],
+                    ['Patente', sub.patente],
+                    ['RIB', sub.rib],
+                    ['Métier / Fonction', sub.fonction],
+                    ['Statut', SUB_STATUT_LABEL[sub.statut]],
+                    ['Notes', sub.notes],
+                  ].map(([k, v]) => (
+                    <div key={k}>
+                      <div style={{ fontSize: '0.7rem', color: 'var(--text-3)', fontWeight: 700, textTransform: 'uppercase' }}>{k}</div>
+                      <div style={{ fontWeight: 600, marginTop: 4 }}>{v || '—'}</div>
+                    </div>
                   ))}
                 </div>
               )}
 
-              {tab === 'projects' && (
+              {tab === 'documents' && (
+                <>
+                  <p style={{ color: 'var(--text-3)', fontSize: '0.88rem', marginBottom: 16 }}>
+                    Documents administratifs et contractuels du sous-traitant.
+                  </p>
+                  <div className="table-wrap" style={{ marginBottom: 20 }}>
+                    <table>
+                      <thead>
+                        <tr><th>Type</th><th>Fichier</th><th>Date</th><th>Notes</th></tr>
+                      </thead>
+                      <tbody>
+                        {SUBCONTRACTOR_DOC_TYPES.map((dt) => {
+                          const docs = docsByType[dt.id] || [];
+                          if (!docs.length) {
+                            return (
+                              <tr key={dt.id}>
+                                <td data-label="Type" style={{ fontWeight: 600 }}>{dt.label}</td>
+                                <td data-label="Fichier" colSpan={3} style={{ color: 'var(--text-3)', fontSize: '0.85rem' }}>Non fourni</td>
+                              </tr>
+                            );
+                          }
+                          return docs.map((d, i) => (
+                            <tr key={d.id}>
+                              <td data-label="Type" style={{ fontWeight: 600 }}>{i === 0 ? dt.label : ''}</td>
+                              <td data-label="Fichier">{d.file_name || d.storage_path || '—'}</td>
+                              <td data-label="Date">{fmtDate(d.created_at)}</td>
+                              <td data-label="Notes">{d.notes || '—'}</td>
+                            </tr>
+                          ));
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <form onSubmit={handleSaveDocument} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 10, alignItems: 'end', padding: 14, background: 'var(--surface-2)', borderRadius: 8 }}>
+                    <div>
+                      <label style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-3)' }}>Type</label>
+                      <select value={docForm.doc_type} onChange={(e) => setDocForm((p) => ({ ...p, doc_type: e.target.value }))} style={INPUT_S(false)}>
+                        {SUBCONTRACTOR_DOC_TYPES.map((dt) => <option key={dt.id} value={dt.id}>{dt.label}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-3)' }}>Nom fichier *</label>
+                      <input value={docForm.file_name} onChange={(e) => setDocForm((p) => ({ ...p, file_name: e.target.value }))} style={INPUT_S(false)} placeholder="document.pdf" />
+                    </div>
+                    <div>
+                      <label style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-3)' }}>Notes</label>
+                      <input value={docForm.notes} onChange={(e) => setDocForm((p) => ({ ...p, notes: e.target.value }))} style={INPUT_S(false)} />
+                    </div>
+                    <button type="submit" className="btn btn-primary" disabled={saving}>Ajouter document</button>
+                  </form>
+                </>
+              )}
+
+              {tab === 'history' && (
                 <>
                   <div className="flex-between" style={{ marginBottom: 12 }}>
-                    <strong>Projets affectés</strong>
+                    <strong>Historique des affectations projet</strong>
                     <button className="btn btn-primary btn-sm" onClick={() => openModal('assignment', { status: 'active', remunerationType: REMUNERATION_TYPES[0], unitType: UNIT_TYPES[0] })}>
                       <Plus size={13} /> Affecter à un projet
                     </button>
                   </div>
                   <div className="table-wrap">
                     <table>
-                      <thead><tr><th>Projet</th><th>Rôle</th><th>Rémunération</th><th>Unité</th><th>Prix unit.</th><th>Statut</th></tr></thead>
+                      <thead>
+                        <tr><th>Projet</th><th>Date début</th><th>Date fin</th><th>Montant</th><th>Statut</th></tr>
+                      </thead>
                       <tbody>
                         {(detail?.assignments || []).map((a) => (
                           <tr key={a.id}>
                             <td data-label="Projet" style={{ fontWeight: 600 }}>{a.projectName || a.projectRef || '—'}</td>
-                            <td data-label="Rôle">{a.role || '—'}</td>
-                            <td data-label="Rémunération">{a.remunerationType || '—'}</td>
-                            <td data-label="Unité">{a.unitType || '—'}</td>
-                            <td data-label="Prix unit.">{fmtMAD(a.unitPrice)}</td>
+                            <td data-label="Date début">{fmtDate(a.startDate)}</td>
+                            <td data-label="Date fin">{fmtDate(a.endDate)}</td>
+                            <td data-label="Montant" style={{ fontWeight: 700 }}>{fmtMAD(assignmentAmount(a, detail?.balances))}</td>
                             <td data-label="Statut">{ASSIGNMENT_STATUS_LABEL[a.status] || a.status}</td>
                           </tr>
                         ))}
@@ -416,15 +595,56 @@ export default function SousTraitants() {
                 </>
               )}
 
-              {tab === 'services' && (
+              {tab === 'finance' && (
                 <>
+                  {detail?.summary && (
+                    <div className="stat-grid rh-ext-stat-grid" style={{ marginBottom: 20 }}>
+                      <KpiCard label="Projets actifs" value={detail.summary.activeProjects} icon={FolderKanban} color="#1565C0" />
+                      <KpiCard label="Total prestations" value={fmtMAD(detail.summary.totalServices)} icon={ClipboardList} color="#1565C0" />
+                      <KpiCard label="Total payé" value={fmtMAD(detail.summary.totalPaid)} icon={Banknote} color="#2E7D32" />
+                      <KpiCard label="Reste à payer" value={fmtMAD(detail.summary.remaining)} icon={Scale} color="#C62828" />
+                    </div>
+                  )}
+
                   <div className="flex-between" style={{ marginBottom: 12 }}>
-                    <strong>Prestations réalisées</strong>
-                    <button className="btn btn-primary btn-sm" onClick={() => openModal('service', { serviceDate: new Date().toISOString().slice(0, 10), status: 'pending', quantity: '', unitPrice: '' })}>
-                      <Plus size={13} /> Ajouter prestation
-                    </button>
+                    <strong>Solde par projet</strong>
+                    <div style={{ display: 'flex', gap: 8 }}>
+                      <button className="btn btn-primary btn-sm" onClick={() => openModal('service', { serviceDate: new Date().toISOString().slice(0, 10), status: 'pending', quantity: '', unitPrice: '' })}>
+                        <Plus size={13} /> Prestation
+                      </button>
+                      <button className="btn btn-primary btn-sm" onClick={() => openModal('payment')}>
+                        <Plus size={13} /> Paiement
+                      </button>
+                    </div>
                   </div>
-                  <div className="table-wrap">
+                  <div className="table-wrap" style={{ marginBottom: 24 }}>
+                    <table>
+                      <thead>
+                        <tr><th>Projet</th><th>Prestations</th><th>Payé</th><th>Reste</th><th>Statut</th><th>Actions</th></tr>
+                      </thead>
+                      <tbody>
+                        {(detail?.balances || []).map((b) => (
+                          <tr key={b.assignmentId}>
+                            <td data-label="Projet" style={{ fontWeight: 600 }}>{b.projectName}</td>
+                            <td data-label="Prestations">{fmtMAD(b.totalServicesAmount)}</td>
+                            <td data-label="Payé">{fmtMAD(b.totalPaidAmount)}</td>
+                            <td data-label="Reste" style={{ fontWeight: 800, color: 'var(--red)' }}>{fmtMAD(b.remainingAmount)}</td>
+                            <td data-label="Statut">{PAYMENT_BALANCE_LABEL[b.paymentStatus] || b.paymentStatus}</td>
+                            <td className="rh-ext-actions-cell">
+                              <div className="rh-ext-actions">
+                                <button className="btn btn-ghost btn-sm" onClick={() => openModal('service', { assignmentId: b.assignmentId, serviceDate: new Date().toISOString().slice(0, 10), status: 'pending' })}>+ Prestation</button>
+                                <button className="btn btn-ghost btn-sm" onClick={() => openModal('payment', { projectId: b.projectId || '' })}>+ Paiement</button>
+                                <button className="btn btn-ghost btn-sm" onClick={() => exportBalancePdf(b)}><Download size={13} /> PDF</button>
+                              </div>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <strong style={{ display: 'block', marginBottom: 8 }}>Prestations réalisées</strong>
+                  <div className="table-wrap" style={{ marginBottom: 24 }}>
                     <table>
                       <thead><tr><th>Date</th><th>Description</th><th>Qté</th><th>Montant</th><th>Statut</th><th>Actions</th></tr></thead>
                       <tbody>
@@ -445,24 +665,12 @@ export default function SousTraitants() {
                       </tbody>
                     </table>
                   </div>
-                </>
-              )}
 
-              {tab === 'payments' && (
-                <>
-                  <div className="flex-between" style={{ marginBottom: 12 }}>
-                    <strong>Paiements</strong>
-                    <button className="btn btn-primary btn-sm" onClick={() => openModal('payment')}>
-                      <Plus size={13} /> Ajouter paiement
-                    </button>
-                  </div>
+                  <strong style={{ display: 'block', marginBottom: 8 }}>Paiements</strong>
                   <div className="table-wrap">
                     <table>
                       <thead>
-                        <tr>
-                          <th>Date</th><th>Type</th><th>Désignation</th><th>Montant</th>
-                          <th>Mode</th><th>Réf.</th><th>Statut</th>
-                        </tr>
+                        <tr><th>Date</th><th>Type</th><th>Désignation</th><th>Montant</th><th>Mode</th><th>Statut</th></tr>
                       </thead>
                       <tbody>
                         {(detail?.payments || []).map((p) => (
@@ -472,7 +680,6 @@ export default function SousTraitants() {
                             <td data-label="Désignation">{p.designation || p.description || '—'}</td>
                             <td data-label="Montant" style={{ fontWeight: 700, color: '#2E7D32' }}>{fmtMAD(p.amount)}</td>
                             <td data-label="Mode">{p.paymentMethod || '—'}</td>
-                            <td data-label="Référence">{p.reference || '—'}</td>
                             <td data-label="Statut">{paymentStatusFromDb(p.status)}</td>
                           </tr>
                         ))}
@@ -480,46 +687,6 @@ export default function SousTraitants() {
                     </table>
                   </div>
                 </>
-              )}
-
-              {tab === 'balances' && (
-                <div className="table-wrap">
-                  <table>
-                    <thead>
-                      <tr><th>Projet</th><th>Type rémun.</th><th>Prestations</th><th>Payé</th><th>Reste</th><th>Statut</th><th>Actions</th></tr>
-                    </thead>
-                    <tbody>
-                      {(detail?.balances || []).map((b) => (
-                        <tr key={b.assignmentId}>
-                          <td data-label="Projet" style={{ fontWeight: 600 }}>{b.projectName}</td>
-                          <td data-label="Type rémun.">{b.remunerationType || '—'}</td>
-                          <td data-label="Prestations">{fmtMAD(b.totalServicesAmount)}</td>
-                          <td data-label="Payé">{fmtMAD(b.totalPaidAmount)}</td>
-                          <td data-label="Reste" style={{ fontWeight: 800, color: 'var(--red)' }}>{fmtMAD(b.remainingAmount)}</td>
-                          <td data-label="Statut">{PAYMENT_BALANCE_LABEL[b.paymentStatus] || b.paymentStatus}</td>
-                          <td className="rh-ext-actions-cell">
-                            <div className="rh-ext-actions">
-                              <button className="btn btn-ghost btn-sm" onClick={() => openModal('service', { assignmentId: b.assignmentId, serviceDate: new Date().toISOString().slice(0, 10), status: 'pending' })}>+ Prestation</button>
-                              <button className="btn btn-ghost btn-sm" onClick={() => openModal('payment', { projectId: b.projectId || '' })}>+ Paiement</button>
-                              <button className="btn btn-ghost btn-sm" onClick={() => exportBalancePdf(b)}><Download size={13} /> PDF</button>
-                            </div>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-
-              {tab === 'documents' && (
-                <div>
-                  <p style={{ color: 'var(--text-3)', fontSize: '0.88rem', marginBottom: 12 }}>Documents liés au sous-traitant (contrats, attestations, etc.)</p>
-                  {(detail?.documents || []).length === 0 ? (
-                    <div style={{ color: 'var(--text-3)', fontSize: '0.85rem' }}>Aucun document enregistré.</div>
-                  ) : (
-                    <ul>{detail.documents.map((d) => <li key={d.id}>{d.file_name || d.storage_path || d.id}</li>)}</ul>
-                  )}
-                </div>
               )}
             </div>
           )}
@@ -541,40 +708,57 @@ export default function SousTraitants() {
             </div>
 
             {(modal === 'sub-create' || modal === 'sub-edit') && (
-              <form onSubmit={handleSaveSub} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+              <form onSubmit={handleSaveSub} style={{ display: 'flex', flexDirection: 'column', gap: 12, maxHeight: '70vh', overflowY: 'auto' }}>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                   <div><label>Prénom</label><input value={form.prenom || ''} onChange={(e) => setF('prenom', e.target.value)} style={INPUT_S(false)} /></div>
                   <div><label>Nom *</label><input value={form.nom || ''} onChange={(e) => setF('nom', e.target.value)} style={INPUT_S(formErr.nom)} /></div>
                 </div>
                 <div><label>Raison sociale</label><input value={form.raison_sociale || ''} onChange={(e) => setF('raison_sociale', e.target.value)} style={INPUT_S(false)} /></div>
-                <div><label>Fonction</label><input value={form.fonction || ''} onChange={(e) => setF('fonction', e.target.value)} style={INPUT_S(false)} /></div>
+                <div><label>Métier / Fonction</label>
+                  <select value={form.fonction || ''} onChange={(e) => setF('fonction', e.target.value)} style={INPUT_S(false)}>
+                    <option value="">— Choisir —</option>
+                    {SUBCONTRACTOR_METIERS.map((m) => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
                   <div><label>CIN</label><input value={form.numero_cin || ''} onChange={(e) => setF('numero_cin', e.target.value)} style={INPUT_S(false)} /></div>
                   <div><label>Passeport</label><input value={form.passeport || ''} onChange={(e) => setF('passeport', e.target.value)} style={INPUT_S(false)} /></div>
                 </div>
-                <div><label>Téléphone</label><input value={form.telephone || ''} onChange={(e) => setF('telephone', e.target.value)} style={INPUT_S(false)} /></div>
-                <div><label>Adresse</label><input value={form.adresse || ''} onChange={(e) => setF('adresse', e.target.value)} style={INPUT_S(false)} /></div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div><label>Téléphone</label><input value={form.telephone || ''} onChange={(e) => setF('telephone', e.target.value)} style={INPUT_S(false)} /></div>
+                  <div><label>Email</label><input type="email" value={form.email || ''} onChange={(e) => setF('email', e.target.value)} style={INPUT_S(false)} /></div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: 10 }}>
+                  <div><label>Adresse</label><input value={form.adresse || ''} onChange={(e) => setF('adresse', e.target.value)} style={INPUT_S(false)} /></div>
+                  <div><label>Ville</label><input value={form.ville || ''} onChange={(e) => setF('ville', e.target.value)} style={INPUT_S(false)} /></div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div><label>ICE</label><input value={form.ice || ''} onChange={(e) => setF('ice', e.target.value)} style={INPUT_S(false)} /></div>
+                  <div><label>IF</label><input value={form.numero_if || ''} onChange={(e) => setF('numero_if', e.target.value)} style={INPUT_S(false)} /></div>
+                  <div><label>RC</label><input value={form.rc || ''} onChange={(e) => setF('rc', e.target.value)} style={INPUT_S(false)} /></div>
+                  <div><label>Patente</label><input value={form.patente || ''} onChange={(e) => setF('patente', e.target.value)} style={INPUT_S(false)} /></div>
+                </div>
+                <div><label>RIB</label><input value={form.rib || ''} onChange={(e) => setF('rib', e.target.value)} style={INPUT_S(false)} /></div>
+                <div><label>Statut</label>
+                  <select value={form.statut || 'actif'} onChange={(e) => setF('statut', e.target.value)} style={INPUT_S(false)}>
+                    {SUB_STATUTS.map((s) => <option key={s} value={s}>{SUB_STATUT_LABEL[s]}</option>)}
+                  </select>
+                </div>
 
                 <div style={{ borderTop: '1.5px solid var(--border)', paddingTop: 12, marginTop: 4 }}>
-                  <div style={{ fontWeight: 700, fontSize: '0.88rem', marginBottom: 6, color: '#1565C0' }}>Affectation projet</div>
-                  <p style={{ fontSize: '0.78rem', color: 'var(--text-3)', margin: '0 0 10px' }}>
-                    Nécessaire pour afficher ce sous-traitant dans le formulaire <strong>Paiement sous-traitant</strong> du projet choisi.
-                  </p>
+                  <div style={{ fontWeight: 700, fontSize: '0.88rem', marginBottom: 6, color: '#1565C0' }}>Affectation projet (optionnel)</div>
                   {modal === 'sub-edit' && (detail?.assignments || []).length > 0 && (
-                    <div style={{ marginBottom: 10 }}>
-                      <div style={{ fontSize: '0.75rem', fontWeight: 600, marginBottom: 6, color: 'var(--text-3)' }}>Projets déjà affectés</div>
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-                        {(detail?.assignments || []).map((a) => (
-                          <span key={a.id} style={{ padding: '4px 10px', background: '#E3F2FD', borderRadius: 20, fontSize: '0.78rem', fontWeight: 600, color: '#1565C0' }}>
-                            {a.projectName || a.projectRef || 'Projet'}
-                          </span>
-                        ))}
-                      </div>
+                    <div style={{ marginBottom: 10, display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+                      {(detail?.assignments || []).map((a) => (
+                        <span key={a.id} style={{ padding: '4px 10px', background: '#E3F2FD', borderRadius: 20, fontSize: '0.78rem', fontWeight: 600, color: '#1565C0' }}>
+                          {a.projectName || a.projectRef || 'Projet'}
+                        </span>
+                      ))}
                     </div>
                   )}
                   <div><label>Projet / chantier</label>
                     <select value={form.assignmentProjectId || ''} onChange={(e) => setF('assignmentProjectId', e.target.value)} style={INPUT_S(false)}>
-                      <option value="">— Choisir un projet —</option>
+                      <option value="">— Aucun —</option>
                       {projects
                         .filter((p) => !(detail?.assignments || []).some((a) => String(a.projectId) === String(p.id)))
                         .map((p) => (
@@ -615,6 +799,10 @@ export default function SousTraitants() {
                     <option value="">Choisir…</option>
                     {projects.map((p) => <option key={p.id} value={p.id}>{p.ref ? `${p.ref} — ${p.nom}` : p.nom}</option>)}
                   </select>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+                  <div><label>Date début</label><input type="date" value={form.startDate || ''} onChange={(e) => setF('startDate', e.target.value)} style={INPUT_S(false)} /></div>
+                  <div><label>Date fin</label><input type="date" value={form.endDate || ''} onChange={(e) => setF('endDate', e.target.value)} style={INPUT_S(false)} /></div>
                 </div>
                 <div><label>Type rémunération</label>
                   <select value={form.remunerationType || ''} onChange={(e) => setF('remunerationType', e.target.value)} style={INPUT_S(false)}>

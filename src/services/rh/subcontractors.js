@@ -49,13 +49,20 @@ export function normalizeSubcontractor(row, summary = {}) {
     telephone: row.telephone || '',
     email: row.email || '',
     adresse: row.adresse || '',
+    ville: row.ville || '',
     ice: row.ice || '',
+    numero_if: row.numero_if || '',
+    rc: row.rc || '',
+    patente: row.patente || '',
+    rib: row.rib || '',
     statut: row.statut || 'actif',
     notes: row.notes || '',
     activeProjectsCount: summary.activeProjectsCount ?? 0,
     totalServices: summary.totalServices ?? 0,
     totalPaid: summary.totalPaid ?? 0,
     remaining: summary.remaining ?? 0,
+    currentProject: summary.currentProject ?? '',
+    activeAssignments: summary.activeAssignments ?? [],
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -164,7 +171,12 @@ function toSubcontractorRow(form) {
     telephone: emptyToNull(form.telephone?.trim()),
     email: emptyToNull(form.email?.trim()?.toLowerCase()),
     adresse: emptyToNull(form.adresse?.trim()),
+    ville: emptyToNull(form.ville?.trim()),
     ice: emptyToNull(form.ice?.trim()),
+    numero_if: emptyToNull(form.numero_if?.trim()),
+    rc: emptyToNull(form.rc?.trim()),
+    patente: emptyToNull(form.patente?.trim()),
+    rib: emptyToNull(form.rib?.trim()),
     statut: form.statut || 'actif',
     notes: emptyToNull(form.notes?.trim()),
   };
@@ -283,23 +295,34 @@ export async function listProjectBalances(subcontractorId = null) {
 
 export async function listSubcontractors() {
   await getAuthUserId();
-  const [subsRes, balances, activeRes] = await Promise.all([
+  const [subsRes, balances, assignRes] = await Promise.all([
     getSupabase().from(SUB_TABLE).select('*').order('nom').order('prenom'),
     listProjectBalances(),
-    getSupabase().from(ASSIGN_TABLE).select('subcontractor_id').eq('status', 'active'),
+    getSupabase().from(ASSIGN_TABLE).select('subcontractor_id, project_id, project_name, project_ref, status'),
   ]);
   if (subsRes.error) throw subsRes.error;
-  if (activeRes.error) throw activeRes.error;
+  if (assignRes.error) throw assignRes.error;
   const summaryMap = aggregateSummaries(balances);
   const activeCountMap = {};
-  (activeRes.data || []).forEach((a) => {
+  const activeBySub = {};
+  (assignRes.data || []).forEach((a) => {
+    if (a.status !== 'active') return;
     activeCountMap[a.subcontractor_id] = (activeCountMap[a.subcontractor_id] || 0) + 1;
+    if (!activeBySub[a.subcontractor_id]) activeBySub[a.subcontractor_id] = [];
+    activeBySub[a.subcontractor_id].push({
+      projectId: a.project_id ? String(a.project_id) : '',
+      projectName: a.project_name || a.project_ref || '',
+      status: a.status,
+    });
   });
   return (subsRes.data || []).map((r) => {
     const base = summaryMap[r.id] || {};
+    const activeList = activeBySub[r.id] || [];
     return normalizeSubcontractor(r, {
       ...base,
       activeProjectsCount: activeCountMap[r.id] || 0,
+      currentProject: activeList.map((p) => p.projectName).filter(Boolean).join(', ') || '',
+      activeAssignments: activeList,
     });
   });
 }
@@ -772,12 +795,77 @@ export async function listDocuments(subcontractorId) {
   return data || [];
 }
 
-export function computeGlobalSummary(balances) {
+export async function createSubcontractorDocument(subcontractorId, form = {}) {
+  await getAuthUserId();
+  const { data, error } = await getSupabase()
+    .from(DOC_TABLE)
+    .insert([{
+      subcontractor_id: subcontractorId,
+      doc_type: emptyToNull(form.doc_type) || 'other',
+      file_name: emptyToNull(form.file_name?.trim()),
+      storage_path: emptyToNull(form.storage_path?.trim()),
+      mime_type: emptyToNull(form.mime_type?.trim()),
+      notes: emptyToNull(form.notes?.trim()),
+    }])
+    .select('*')
+    .single();
+  if (error) throw error;
+  return data;
+}
+
+export function computeListKpis(items = []) {
+  return {
+    actifs: items.filter((s) => s.statut === 'actif').length,
+    inactifs: items.filter((s) => ['inactif', 'suspendu', 'archive'].includes(s.statut)).length,
+    totalServices: items.reduce((sum, s) => sum + Number(s.totalServices || 0), 0),
+    totalPaid: items.reduce((sum, s) => sum + Number(s.totalPaid || 0), 0),
+    remaining: items.reduce((sum, s) => sum + Number(s.remaining || 0), 0),
+  };
+}
+
+export function filterSubcontractors(items = [], filters = {}) {
+  const {
+    search = '', nom = '', telephone = '', cin = '',
+    metier = '', ville = '', projet = '', statut = '',
+  } = filters;
+  const q = search.trim().toLowerCase();
+  const nomQ = nom.trim().toLowerCase();
+  const telQ = telephone.trim();
+  const cinQ = cin.trim().toLowerCase();
+  const villeQ = ville.trim().toLowerCase();
+
+  return items.filter((s) => {
+    if (statut && s.statut !== statut) return false;
+    if (metier && s.fonction !== metier) return false;
+    if (villeQ && !(s.ville || '').toLowerCase().includes(villeQ)) return false;
+    if (nomQ && !s.fullName.toLowerCase().includes(nomQ)) return false;
+    if (telQ && !(s.telephone || '').includes(telQ)) return false;
+    if (cinQ) {
+      const cinHay = `${s.numero_cin || ''} ${s.passeport || ''}`.toLowerCase();
+      if (!cinHay.includes(cinQ)) return false;
+    }
+    if (projet) {
+      const matches = (s.activeAssignments || []).some((a) => String(a.projectId) === String(projet));
+      if (!matches) return false;
+    }
+    if (q) {
+      const hay = [
+        s.fullName, s.fonction, s.telephone, s.numero_cin, s.passeport,
+        s.ville, s.currentProject, s.email,
+      ].join(' ').toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+}
+
+export function computeGlobalSummary(balances, assignments = []) {
   const list = balances || [];
+  const activeProjects = (assignments || []).filter((a) => a.status === 'active').length;
   return {
     totalServices: list.reduce((s, b) => s + b.totalServicesAmount, 0),
     totalPaid: list.reduce((s, b) => s + b.totalPaidAmount, 0),
     remaining: list.reduce((s, b) => s + b.remainingAmount, 0),
-    activeProjects: list.length,
+    activeProjects,
   };
 }

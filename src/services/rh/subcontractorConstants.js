@@ -85,3 +85,33 @@ export const PAYMENT_BALANCE_LABEL = {
   'partiellement payé': 'Partiellement payé',
   'payé': 'Payé',
 };
+
+/** Métiers / fonctions sous-traitants (filtres + formulaires). */
+export const SUBCONTRACTOR_METIERS = [
+  'Ferrailleur',
+  'Coffreur',
+  'Maçon',
+  'Électricien',
+  'Plombier',
+  'Carreleur',
+  'Peintre',
+  'Menuisier',
+  'Climatisation',
+  'Aluminium',
+  'Caméra & Réseau',
+  'Gros œuvre',
+  'Second œuvre',
+  'TCE',
+];
+
+/** Types de documents attendus sur la fiche sous-traitant. */
+export const SUBCONTRACTOR_DOC_TYPES = [
+  { id: 'cin', label: 'CIN' },
+  { id: 'rc', label: 'RC' },
+  { id: 'if', label: 'IF' },
+  { id: 'ice', label: 'ICE' },
+  { id: 'attestation_fiscale', label: 'Attestation fiscale' },
+  { id: 'assurance', label: 'Assurance' },
+  { id: 'rib', label: 'RIB' },
+  { id: 'contrat', label: 'Contrat' },
+];

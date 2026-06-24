@@ -22,6 +22,7 @@ import {
   listAssignmentsByProject,
   listProjectBalances,
   listDocuments,
+  createSubcontractorDocument,
   computeGlobalSummary,
 } from '../services/rh/subcontractors';
 
@@ -74,7 +75,7 @@ export function useSubcontractors() {
       payments,
       balances,
       documents,
-      summary: computeGlobalSummary(balances),
+      summary: computeGlobalSummary(balances, assignments),
     };
   }, []);
 
@@ -111,6 +112,7 @@ export function useSubcontractors() {
     updateService: (subId, id, form) => wrapSave(() => updateService(id, subId, form)),
     createPayment: (subId, form) => wrapSave(() => createPayment(subId, form)),
     createPaymentBatch: (projectId, shared, lines) => wrapSave(() => createPaymentBatch(projectId, shared, lines)),
+    createDocument: (subId, form) => wrapSave(() => createSubcontractorDocument(subId, form)),
     listAssignmentsByProject,
   };
 }
