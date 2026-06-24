@@ -2,7 +2,7 @@
  * workerPayroll.js — Paiement hebdomadaire ouvriers (tarif journalier)
  */
 import { getSupabase } from '../../lib/supabase';
-import { workerFullName, listAttendance, computeAttendanceWorkMetrics, filterAttendanceForWorkerWeek, filterAttendanceForWorkerProject, sumWorkerAttendanceFromRecords, sumWorkerAttendanceForProject } from './attendance';
+import { workerFullName, listAttendance, computeAttendanceWorkMetrics, filterAttendanceForWorkerWeek, filterAttendanceForWorkerProject, sumWorkerAttendanceFromRecords, sumWorkerAttendanceForProject, filterActiveAttendance, isActiveAttendanceRecord } from './attendance';
 import { listOvertime, sumWorkerOvertimeFromRecords } from './overtime';
 import { listWorkers, workerTarifHoraire, workerTarifJournalier, WORKER_HOURS_PER_DAY } from './workers';
 import { listProjects } from '../projects/projects';
@@ -801,8 +801,9 @@ export function groupPayrollByProjectWeek(records, weekFilter = '') {
 export function buildAttendancePayrollDrafts({ attendance, workers, overtime, projects }) {
   const bucket = new Map();
 
-  for (const att of attendance || []) {
+  for (const att of filterActiveAttendance(attendance)) {
     if (!att.workerId || !att.date) continue;
+    if (!isActiveAttendanceRecord(att)) continue;
     const projectId = att.projectId || att.workerProjectId;
     if (!projectId) continue;
 
@@ -886,14 +887,15 @@ function payrollDraftKey(d) {
 export function enrichPayrollWithAttendance(payrollLine, attendance = []) {
   if (!payrollLine) return null;
 
+  const activeAttendance = filterActiveAttendance(attendance);
   const mergeAll = payrollLine.mergeAllWeeks || !payrollLine.semaineDebut;
 
   const presenceLignes = mergeAll
-    ? filterAttendanceForWorkerProject(attendance, {
+    ? filterAttendanceForWorkerProject(activeAttendance, {
       workerId: payrollLine.workerId,
       projectId: payrollLine.projectId,
     })
-    : filterAttendanceForWorkerWeek(attendance, {
+    : filterAttendanceForWorkerWeek(activeAttendance, {
       workerId: payrollLine.workerId,
       projectId: payrollLine.projectId,
       semaineDebut: payrollLine.semaineDebut,
@@ -901,9 +903,9 @@ export function enrichPayrollWithAttendance(payrollLine, attendance = []) {
     });
 
   const attSum = mergeAll
-    ? sumWorkerAttendanceForProject(attendance, payrollLine.workerId, payrollLine.projectId)
+    ? sumWorkerAttendanceForProject(activeAttendance, payrollLine.workerId, payrollLine.projectId)
     : sumWorkerAttendanceFromRecords(
-      attendance,
+      activeAttendance,
       payrollLine.workerId,
       payrollLine.projectId,
       payrollLine.semaineDebut,

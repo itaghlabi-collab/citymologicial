@@ -3,8 +3,12 @@
  */
 import { getSupabase } from '../../lib/supabase';
 import { WORKER_HOURS_PER_DAY } from './workers';
+import { listWorkersByProject } from './workerProjectAssignments';
 
 const TABLE = 'attendance';
+
+export const ATTENDANCE_SOURCE_PROJECT = 'project_assignment';
+export const ATTENDANCE_SOURCE_LEGACY = 'old_assignment';
 
 export const STANDARD_SHIFT_START = '09:00';
 export const STANDARD_SHIFT_END = '17:00';
@@ -122,9 +126,26 @@ export function normalizeAttendance(row) {
     chefChantier: row.chef_chantier_nom
       || [row.chef_employee?.firstname, row.chef_employee?.lastname].filter(Boolean).join(' ')
       || '',
+    isLegacy: Boolean(row.is_legacy),
+    sourceVersion: row.source_version || ATTENDANCE_SOURCE_PROJECT,
+    legacyArchivedAt: row.legacy_archived_at || null,
     created_at: row.created_at,
     updated_at: row.updated_at,
   });
+}
+
+/** Présence comptabilisée (nouvelle logique projet → affectation junction). */
+export function isActiveAttendanceRecord(r) {
+  if (!r) return false;
+  if (r.isLegacy === true) return false;
+  if (r.sourceVersion === ATTENDANCE_SOURCE_LEGACY) return false;
+  if (!r.projectId) return false;
+  if (!r.chefChantierId) return false;
+  return true;
+}
+
+export function filterActiveAttendance(records) {
+  return (records || []).filter(isActiveAttendanceRecord);
 }
 
 /** Form UI → DB row */
@@ -141,7 +162,24 @@ export function toAttendanceRow(form) {
     notes: form.notes?.trim() || null,
     chef_chantier_id: form.chefChantierId || null,
     chef_chantier_nom: (form.chefChantierNom || form.chefChantier || '').trim() || null,
+    is_legacy: false,
+    source_version: ATTENDANCE_SOURCE_PROJECT,
   };
+}
+
+async function assertWorkerAssignedToProject(workerId, projectId) {
+  if (!workerId || !projectId) {
+    const err = new Error('Projet et ouvrier requis.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  const assigned = await listWorkersByProject(projectId);
+  const ok = assigned.some((a) => String(a.workerId) === String(workerId));
+  if (!ok) {
+    const err = new Error('Cet ouvrier n\'est pas affecté à ce projet (affectation junction).');
+    err.code = 'VALIDATION';
+    throw err;
+  }
 }
 
 const ATTENDANCE_SELECT = `
@@ -159,12 +197,21 @@ const ATTENDANCE_SELECT_FALLBACK = `
 
 const ATTENDANCE_SELECT_MINIMAL = '*';
 
-async function fetchAttendanceRows(select) {
-  return getSupabase()
+async function fetchAttendanceRows(select, { activeOnly = false } = {}) {
+  const base = getSupabase()
     .from(TABLE)
     .select(select)
     .order('date', { ascending: false })
     .order('created_at', { ascending: false });
+
+  if (!activeOnly) return base;
+
+  const filtered = await base.eq('is_legacy', false);
+  if (!filtered.error) return filtered;
+  if (/is_legacy|column|does not exist/i.test(filtered.error.message || '')) {
+    return base;
+  }
+  return filtered;
 }
 
 async function getAuthUserId() {
@@ -177,23 +224,25 @@ async function getAuthUserId() {
   return user.id;
 }
 
-export async function listAttendance() {
-  let { data, error } = await fetchAttendanceRows(ATTENDANCE_SELECT);
+export async function listAttendance(options = {}) {
+  const { includeLegacy = false } = options;
+  let { data, error } = await fetchAttendanceRows(ATTENDANCE_SELECT, { activeOnly: !includeLegacy });
 
   if (error) {
     console.warn('[CITYMO] attendance list (full join)', error.message);
-    ({ data, error } = await fetchAttendanceRows(ATTENDANCE_SELECT_FALLBACK));
+    ({ data, error } = await fetchAttendanceRows(ATTENDANCE_SELECT_FALLBACK, { activeOnly: !includeLegacy }));
   }
   if (error) {
     console.warn('[CITYMO] attendance list (fallback)', error.message);
-    ({ data, error } = await fetchAttendanceRows(ATTENDANCE_SELECT_MINIMAL));
+    ({ data, error } = await fetchAttendanceRows(ATTENDANCE_SELECT_MINIMAL, { activeOnly: !includeLegacy }));
   }
 
   if (error) {
     console.error('[CITYMO] attendance list', error);
     throw error;
   }
-  return (data || []).map(normalizeAttendance);
+  const rows = (data || []).map(normalizeAttendance);
+  return includeLegacy ? rows : filterActiveAttendance(rows);
 }
 
 export async function createAttendance(form) {
@@ -221,6 +270,8 @@ export async function createAttendance(form) {
     throw err;
   }
 
+  await assertWorkerAssignedToProject(row.worker_id, row.project_id);
+
   const { data, error } = await getSupabase()
     .from(TABLE)
     .insert([row])
@@ -243,6 +294,8 @@ export async function updateAttendance(id, form) {
     err.code = 'VALIDATION';
     throw err;
   }
+
+  await assertWorkerAssignedToProject(row.worker_id, row.project_id);
 
   const { data, error } = await getSupabase()
     .from(TABLE)
@@ -279,6 +332,7 @@ export function filterAttendanceRecords(records, filters = {}) {
   } = filters;
 
   return (records || []).filter((r) => {
+    if (!isActiveAttendanceRecord(r)) return false;
     if (ouvrier && r.ouvrier !== ouvrier) return false;
     if (chefChantierId && String(r.chefChantierId) !== String(chefChantierId)) return false;
     if (projectId) {
@@ -322,7 +376,7 @@ export function collectProjectFilterOptions(projects = [], workers = [], records
       }
     });
   });
-  (records || []).forEach((r) => {
+  (filterActiveAttendance(records) || []).forEach((r) => {
     if (r.projectId && !map.has(String(r.projectId))) {
       map.set(String(r.projectId), { id: String(r.projectId), label: r.projet || 'Projet' });
     }
@@ -331,7 +385,7 @@ export function collectProjectFilterOptions(projects = [], workers = [], records
 }
 
 export function computeAttendanceStats(records) {
-  const list = records || [];
+  const list = filterActiveAttendance(records);
   return {
     present: list.filter((r) => r.statut === 'Present').length,
     absent: list.filter((r) => r.statut === 'Absent').length,
@@ -342,7 +396,7 @@ export function computeAttendanceStats(records) {
 /** Regroupe les présences par projet + jour (export PDF) */
 export function buildAttendanceSheetGroups(records) {
   const map = new Map();
-  for (const r of records || []) {
+  for (const r of filterActiveAttendance(records)) {
     const date = (r.date || '').toString().slice(0, 10);
     if (!date) continue;
     const projectId = r.projectId ? String(r.projectId) : '';
@@ -461,6 +515,7 @@ export function sumWorkerAttendanceFromRecords(records, workerId, projectId, wee
   }
 
   return (records || []).reduce((acc, r) => {
+    if (!isActiveAttendanceRecord(r)) return acc;
     if (!matchAttendanceWeekRecord(r, workerId, projectId, ws, we)) return acc;
     const m = computeAttendanceWorkMetrics(r);
     acc.joursEquivalent = round2(acc.joursEquivalent + m.joursEquivalent);
@@ -477,36 +532,38 @@ export function countWorkerPaidDaysFromRecords(records, workerId, projectId, wee
 /** Compte les jours travaillés pour un ouvrier sur une semaine (requête directe). */
 export async function countWorkerPaidDays(workerId, projectId, weekStart, weekEnd) {
   await getAuthUserId();
-  let query = getSupabase()
-    .from(TABLE)
-    .select('worker_id, project_id, date, statut, heure_entree, heure_sortie, workers ( project_id )')
-    .eq('worker_id', workerId)
-    .gte('date', weekStart)
-    .lte('date', weekEnd);
+  const selectCols = 'worker_id, project_id, date, statut, heure_entree, heure_sortie, is_legacy, workers ( project_id )';
 
-  if (projectId) {
-    query = query.eq('project_id', projectId);
+  async function runQuery(withLegacyFilter) {
+    let q = getSupabase()
+      .from(TABLE)
+      .select(selectCols)
+      .eq('worker_id', workerId)
+      .gte('date', weekStart)
+      .lte('date', weekEnd);
+    if (withLegacyFilter) q = q.eq('is_legacy', false);
+    if (projectId) q = q.eq('project_id', projectId);
+    return q;
   }
 
-  const { data, error } = await query;
+  let { data, error } = await runQuery(true);
+  if (error && /is_legacy|column|does not exist/i.test(error.message || '')) {
+    ({ data, error } = await runQuery(false));
+  }
   if (error) {
     console.error('[CITYMO] attendance count days', error);
     throw error;
   }
 
   return round2((data || []).reduce((sum, row) => {
+    if (row.is_legacy) return sum;
+    const normalized = normalizeAttendance(row);
+    if (!isActiveAttendanceRecord(normalized)) return sum;
     if (projectId) {
       const pid = String(projectId);
-      const rowPid = row.project_id ? String(row.project_id) : '';
-      const workerPid = row.workers?.project_id ? String(row.workers.project_id) : '';
-      if (rowPid !== pid && workerPid !== pid) return sum;
+      if (String(normalized.projectId) !== pid && String(normalized.workerProjectId) !== pid) return sum;
     }
-    const record = {
-      statut: DB_TO_UI[row.statut] || 'Absent',
-      heureEntree: fmtTime(row.heure_entree),
-      heureSortie: fmtTime(row.heure_sortie),
-    };
-    return sum + computeAttendanceWorkMetrics(record).joursEquivalent;
+    return sum + computeAttendanceWorkMetrics(normalized).joursEquivalent;
   }, 0));
 }
 
@@ -533,7 +590,7 @@ export function fmtWeekRange(debut, fin) {
 
 export function collectAttendanceWeeks(records) {
   const set = new Set();
-  (records || []).forEach((r) => {
+  (filterActiveAttendance(records) || []).forEach((r) => {
     if (r.date) set.add(weekStartMonday(r.date));
   });
   return [...set].sort((a, b) => b.localeCompare(a));
@@ -557,6 +614,7 @@ export function filterAttendanceForWorkerWeek(records, { workerId, projectId, se
   if (!ws || !workerId) return [];
 
   return (records || []).filter((r) => {
+    if (!isActiveAttendanceRecord(r)) return false;
     if (String(r.workerId) !== String(workerId)) return false;
     const pid = r.projectId || r.workerProjectId || '';
     if (projectId && String(pid) !== String(projectId)) return false;
@@ -570,6 +628,7 @@ export function filterAttendanceForWorkerWeek(records, { workerId, projectId, se
 export function filterAttendanceForWorkerProject(records, { workerId, projectId }) {
   if (!workerId) return [];
   return (records || []).filter((r) => {
+    if (!isActiveAttendanceRecord(r)) return false;
     if (String(r.workerId) !== String(workerId)) return false;
     const pid = r.projectId || r.workerProjectId || '';
     if (projectId && String(pid) !== String(projectId)) return false;
@@ -581,6 +640,7 @@ export function filterAttendanceForWorkerProject(records, { workerId, projectId 
 export function sumWorkerAttendanceForProject(records, workerId, projectId) {
   if (!workerId) return { joursEquivalent: 0, heuresTravaillees: 0 };
   return (records || []).reduce((acc, r) => {
+    if (!isActiveAttendanceRecord(r)) return acc;
     const pid = r.projectId || r.workerProjectId || '';
     if (String(r.workerId) !== String(workerId)) return acc;
     if (projectId && String(pid) !== String(projectId)) return acc;
@@ -606,7 +666,7 @@ export function groupAttendanceByProjectWeekWorker(records, options = {}) {
   const mergeWeeks = !weekFilter;
   const map = new Map();
 
-  for (const r of records || []) {
+  for (const r of filterActiveAttendance(records)) {
     if (!r?.workerId || !r?.date) continue;
 
     const weekStart = weekStartMonday(r.date);
