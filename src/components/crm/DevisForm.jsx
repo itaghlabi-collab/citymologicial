@@ -652,7 +652,7 @@ function LigneComposer({ draft, setDraft, categories, articles, onArticleSelect,
             />
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(100px, 1fr))', gap: 12, marginBottom: 12 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 10, marginBottom: 12, alignItems: 'end' }}>
             <div>
               <Label>Quantité</Label>
               <input type="number" min="0" step="0.01" value={draft.quantite} onChange={(e) => setF('quantite', e.target.value)} style={IS(false)} />
@@ -664,7 +664,7 @@ function LigneComposer({ draft, setDraft, categories, articles, onArticleSelect,
               </select>
             </div>
             <div>
-              <Label>Prix unitaire HT</Label>
+              <Label><span style={{ whiteSpace: 'nowrap', letterSpacing: '0.04em' }}>PRIX.U.HT.</span></Label>
               <input type="number" min="0" step="0.01" value={draft.prix_ht} onChange={(e) => setF('prix_ht', e.target.value)} style={IS(false)} />
             </div>
             <div>
@@ -714,6 +714,7 @@ function LigneComposer({ draft, setDraft, categories, articles, onArticleSelect,
    ════════════════════════════════════════════════ */
 export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
   const isEdit = !!devis;
+  const showCreateLabel = !devis;
   const [form, setForm] = useState(() => (devis ? {
     ...EMPTY_DEVIS,
     ...devis,
@@ -736,7 +737,9 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
   const [draft, setDraft] = useState(EMPTY_DRAFT);
   const [editingIdx, setEditingIdx] = useState(null);
   const [draftError, setDraftError] = useState('');
+  const [saveToast, setSaveToast] = useState('');
   const isSaving = saving || savingLocal;
+  const isPersisted = !!(devis?.id || form.id);
 
   useEffect(() => {
     Promise.all([listClients(), listArticles(), listCategories()]).then(([cl, ar, ca]) => {
@@ -944,7 +947,7 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
         total_ttc: totalTTC,
         lignes: enrichLignesDescriptions(form.lignes, articles),
       };
-      const result = await onSaved(payload, isEdit);
+      const result = await onSaved(payload, isPersisted, { stayOnForm: false });
       if (result && result.success === false) {
         setApiError(result.error || "Erreur lors de l'enregistrement.");
       }
@@ -955,13 +958,55 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
     }
   }
 
+  async function handleEnregistrer() {
+    setApiError('');
+    const errs = validate();
+    if (Object.keys(errs).length) { setErrors(errs); return; }
+    setSavingLocal(true);
+    try {
+      const payload = {
+        ...form,
+        total_ht: totalHT,
+        total_tva: totalTVA,
+        total_ttc: totalTTC,
+        lignes: enrichLignesDescriptions(form.lignes, articles),
+      };
+      const result = await onSaved(payload, isPersisted, { stayOnForm: true });
+      if (result && result.success === false) {
+        setApiError(result.error || "Erreur lors de l'enregistrement.");
+        return;
+      }
+      if (result?.data) {
+        const saved = result.data;
+        setForm((p) => ({
+          ...p,
+          ...saved,
+          lignes: saved.lignes?.length
+            ? saved.lignes.map((l) => ({
+              ...EMPTY_LIGNE(),
+              ...l,
+              ephemeral: l.ephemeral ?? (l.type === 'article' && !l.article_id && !!l.designation?.trim()),
+              _id: l._id || `${Date.now()}-${Math.random()}`,
+            }))
+            : p.lignes,
+        }));
+      }
+      setSaveToast('Devis enregistré');
+      setTimeout(() => setSaveToast(''), 3000);
+    } catch (err) {
+      setApiError(err.message || "Erreur lors de l'enregistrement.");
+    } finally {
+      setSavingLocal(false);
+    }
+  }
+
   async function handlePdf() {
-    if (!isEdit || !devis?.id) return;
+    if (!isPersisted || !(devis?.id || form.id)) return;
     try {
       const catMap = Object.fromEntries(categories.map((c) => [String(c.id), formatCategoryDisplayName(c.nom)]));
       await generateDevisPdf({
         ...form,
-        id: devis.id,
+        id: devis?.id || form.id,
         client: selectedClient,
         client_nom: selectedClient ? [selectedClient.prenom, selectedClient.nom].filter(Boolean).join(' ') || selectedClient.nom : '',
         total_ht: totalHT,
@@ -975,12 +1020,12 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
   }
 
   async function handleReceptionChecklist() {
-    if (!isEdit || !devis?.id) return;
+    if (!isPersisted || !(devis?.id || form.id)) return;
     try {
       const catMap = Object.fromEntries(categories.map((c) => [String(c.id), formatCategoryDisplayName(c.nom)]));
       await generateReceptionChecklistPdf({
         ...form,
-        id: devis.id,
+        id: devis?.id || form.id,
         client: selectedClient,
         client_nom: selectedClient ? [selectedClient.prenom, selectedClient.nom].filter(Boolean).join(' ') || selectedClient.nom : '',
         lignes: enrichLignesDescriptions(form.lignes, articles),
@@ -992,6 +1037,15 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
 
   return (
     <div className="animate-fade-in devis-form-page">
+      {saveToast && (
+        <div style={{
+          position: 'fixed', bottom: 28, right: 28, zIndex: 9999,
+          background: '#1B5E20', color: '#fff', borderRadius: 10, padding: '13px 20px',
+          fontSize: '0.875rem', fontWeight: 600, boxShadow: '0 4px 24px rgba(0,0,0,0.18)',
+        }}>
+          {saveToast}
+        </div>
+      )}
       <style>{`
         .devis-line-card { border: 1px solid var(--border); border-radius: 10px; padding: 14px; margin-bottom: 10px; }
         .devis-line-card--titre { background: #F5F5F5; border-left: 4px solid var(--red); }
@@ -1013,13 +1067,13 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
       <form onSubmit={handleSave}>
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
           <div>
-            <h1 className="page-title" style={{ marginBottom: 2 }}>{isEdit ? 'Modifier devis' : 'Nouveau devis'}</h1>
+            <h1 className="page-title" style={{ marginBottom: 2 }}>{isPersisted ? 'Modifier devis' : 'Nouveau devis'}</h1>
             <p className="page-subtitle">Prévisualisation professionnelle — les lignes s&apos;ajoutent via le bouton OK</p>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
             <button type="button" className="btn btn-ghost" onClick={onBack}>Annuler</button>
             <button type="submit" className="btn btn-primary" disabled={isSaving} style={{ minWidth: 130 }}>
-              {isSaving ? <Spinner /> : <><FileText size={14} /> {isEdit ? 'Enregistrer' : 'Créer devis'}</>}
+              {isSaving ? <Spinner /> : <><FileText size={14} /> {showCreateLabel ? 'Créer devis' : 'Enregistrer'}</>}
             </button>
           </div>
         </div>
@@ -1035,7 +1089,7 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
             <DevisDocumentHeader
               form={formWithClients}
               selectedClient={selectedClient}
-              isEdit={isEdit}
+              isEdit={isPersisted}
               onFieldChange={setField}
               errors={errors}
             />
@@ -1211,9 +1265,18 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
             </div>
             <div className="card" style={{ padding: '16px 18px' }}>
               <button type="submit" className="btn btn-primary" disabled={isSaving} style={{ width: '100%', justifyContent: 'center', marginBottom: 8 }}>
-                {isSaving ? <Spinner /> : <><FileText size={14} /> {isEdit ? 'Enregistrer' : 'Créer le devis'}</>}
+                {isSaving ? <Spinner /> : <><FileText size={14} /> {showCreateLabel ? 'Créer le devis' : 'Enregistrer'}</>}
               </button>
-              {isEdit && (
+              <button
+                type="button"
+                className="btn btn-ghost"
+                onClick={handleEnregistrer}
+                disabled={isSaving}
+                style={{ width: '100%', justifyContent: 'center', marginBottom: 8, fontWeight: 700 }}
+              >
+                Enregistrer le devis
+              </button>
+              {isPersisted && (
                 <>
                   <button type="button" className="btn btn-ghost" onClick={handlePdf} style={{ width: '100%', justifyContent: 'center', display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
                     <Download size={14} /> Télécharger PDF

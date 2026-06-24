@@ -206,11 +206,12 @@ export default function Devis() {
   }
   function backToList()  { setView('list'); setEditingDevis(null); }
 
-  async function handleSaved(payload, isEdit) {
+  async function handleSaved(payload, isEdit, options = {}) {
     const result = isEdit && payload.id
       ? await update(payload.id, payload)
       : await create(payload);
     if (!result.success) return result;
+    if (options?.stayOnForm) return result;
     showToast(isEdit ? 'Devis mis a jour avec succes.' : 'Devis cree avec succes.');
     backToList();
     return result;
