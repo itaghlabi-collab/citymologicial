@@ -11,7 +11,7 @@ import { listProjectMilestones, createProjectMilestone, updateProjectMilestone, 
 import { listProjectPlanningResources, createProjectPlanningResource, updateProjectPlanningResource, deleteProjectPlanningResource } from '../../services/projects/projectPlanningResources';
 import { listProjectPlanningComments, addProjectPlanningComment, deleteProjectPlanningComment } from '../../services/projects/projectPlanningComments';
 import { exportPlanningTasksCsv, exportPlanningResourcesCsv, exportPlanningMilestonesCsv } from '../../services/projects/projectPlanningExport';
-import { generateProjectPlanningPdf } from '../../services/projects/projectPlanningPdf';
+import { generateProjectPlanningPdfSynthesis, generateProjectPlanningPdfDetailed } from '../../services/projects/projectPlanningPdf';
 import { listActiveEmployees } from '../../services/rh/employees';
 import ProjectPlanningGantt from './ProjectPlanningGantt';
 import PlanningWbsView from './PlanningWbsView';
@@ -110,8 +110,11 @@ export default function ProjectPlanningModule({ projet }) {
         </div>
 
         <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-          <button type="button" onClick={() => { generateProjectPlanningPdf(projet, tasks); setToast('PDF exporté'); }} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 12px', borderRadius: 6, border: '1.5px solid var(--border)', background: '#fff', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}>
-            <FileText size={14} /> PDF
+          <button type="button" onClick={async () => { await generateProjectPlanningPdfSynthesis(projet, tasks); setToast('PDF synthèse exporté'); }} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 12px', borderRadius: 6, border: '1.5px solid var(--border)', background: '#fff', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}>
+            <FileText size={14} /> PDF synthèse
+          </button>
+          <button type="button" onClick={async () => { await generateProjectPlanningPdfDetailed(projet, tasks); setToast('PDF détaillé exporté'); }} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 12px', borderRadius: 6, border: '1.5px solid var(--red)', background: '#fff', color: 'var(--red)', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}>
+            <FileText size={14} /> PDF détaillé
           </button>
           <button type="button" onClick={() => { exportPlanningTasksCsv(projet, tasks); setToast('Excel (CSV) exporté'); }} style={{ display: 'flex', alignItems: 'center', gap: 5, padding: '7px 12px', borderRadius: 6, border: '1.5px solid var(--border)', background: '#fff', cursor: 'pointer', fontSize: '0.8rem', fontWeight: 600 }}>
             <FileSpreadsheet size={14} /> Excel

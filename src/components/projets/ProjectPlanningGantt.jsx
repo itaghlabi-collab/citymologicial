@@ -21,7 +21,7 @@ import {
   daysBetweenInclusive,
   endDateFromStartAndDuration,
 } from '../../services/projects/projectPlanningTasks';
-import { generateProjectPlanningPdf } from '../../services/projects/projectPlanningPdf';
+import { generateProjectPlanningPdfSynthesis, generateProjectPlanningPdfDetailed } from '../../services/projects/projectPlanningPdf';
 import {
   PLANNING_LOTS,
   PLANNING_STATUTS,
@@ -777,10 +777,15 @@ export default function ProjectPlanningGantt({
     }
   }
 
-  async function handleExportPdf() {
+  async function handleExportPdf(mode) {
     try {
-      await generateProjectPlanningPdf(projet, filtered);
-      setToast('PDF exporté.');
+      if (mode === 'synthesis') {
+        await generateProjectPlanningPdfSynthesis(projet, filtered);
+        setToast('PDF synthèse exporté.');
+      } else {
+        await generateProjectPlanningPdfDetailed(projet, filtered);
+        setToast('PDF détaillé exporté.');
+      }
     } catch (err) {
       setError(err.message || 'Erreur export PDF.');
     }
@@ -818,9 +823,14 @@ export default function ProjectPlanningGantt({
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           {!embedded && (
-            <button type="button" onClick={handleExportPdf} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 6, border: '1.5px solid var(--border)', background: '#fff', cursor: 'pointer', fontWeight: 600, fontSize: '0.84rem' }}>
-              <Download size={15} /> Export PDF
-            </button>
+            <>
+              <button type="button" onClick={() => handleExportPdf('synthesis')} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 6, border: '1.5px solid var(--border)', background: '#fff', cursor: 'pointer', fontWeight: 600, fontSize: '0.84rem' }}>
+                <Download size={15} /> PDF synthèse
+              </button>
+              <button type="button" onClick={() => handleExportPdf('detailed')} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '8px 14px', borderRadius: 6, border: '1.5px solid var(--red)', background: '#fff', color: 'var(--red)', cursor: 'pointer', fontWeight: 600, fontSize: '0.84rem' }}>
+                <Download size={15} /> PDF détaillé
+              </button>
+            </>
           )}
           <button
             type="button"
