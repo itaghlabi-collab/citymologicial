@@ -3,6 +3,7 @@
  */
 import { getSupabase } from '../../lib/supabase';
 import { clientDisplayName } from '../crm/clients';
+import { normalizeTypesIntervention } from '../../constants/projects';
 
 const TABLE = 'projects';
 
@@ -23,6 +24,7 @@ export function normalizeProject(row) {
     client: clientNom,
     client_nom: clientNom,
     type_projet: row.type_projet || '',
+    types_intervention: normalizeTypesIntervention(row.types_intervention),
     adresse_chantier: row.adresse_chantier || '',
     ville: row.ville || '',
     date_debut: row.date_debut || '',
@@ -57,6 +59,10 @@ function toProjectRow(form) {
     client_id: form.client_id || null,
     client_nom: form.client_nom?.trim() || form.client?.trim() || null,
     type_projet: form.type_projet?.trim() || null,
+    types_intervention: (() => {
+      const types = normalizeTypesIntervention(form.types_intervention);
+      return types.length ? types : null;
+    })(),
     adresse_chantier: form.adresse_chantier?.trim() || null,
     ville: form.ville?.trim() || null,
     date_debut: form.date_debut || null,
@@ -182,6 +188,7 @@ export function filterProjects(records, filters = {}) {
     statut = '',
     client_id = '',
     type_projet = '',
+    type_intervention = '',
     date = '',
   } = filters;
 
@@ -189,10 +196,15 @@ export function filterProjects(records, filters = {}) {
     if (statut && p.statut !== statut) return false;
     if (client_id && String(p.client_id) !== String(client_id)) return false;
     if (type_projet && p.type_projet !== type_projet) return false;
+    if (type_intervention) {
+      const types = normalizeTypesIntervention(p.types_intervention);
+      if (!types.includes(type_intervention)) return false;
+    }
     if (date && p.date_debut !== date) return false;
     if (search) {
       const q = search.toLowerCase();
-      const hay = `${p.ref || ''} ${p.nom || ''} ${p.client || ''} ${p.responsable || ''}`.toLowerCase();
+      const interventionLabel = normalizeTypesIntervention(p.types_intervention).join(' ');
+      const hay = `${p.ref || ''} ${p.nom || ''} ${p.client || ''} ${p.responsable || ''} ${interventionLabel}`.toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;

@@ -15,6 +15,7 @@ import { useState, useCallback, useEffect, useMemo } from 'react';
 import { useProjects } from '../../hooks/useProjects';
 import { listClients, clientDisplayName } from '../../services/crm/clients';
 import { TYPE_PROJET_VALUES, TYPE_PROJET_LABEL } from '../../constants/commercial';
+import { PROJECT_INTERVENTION_TYPES, normalizeTypesIntervention, formatTypesInterventionLabel } from '../../constants/projects';
 import { isProjectLate } from '../../services/projects/projects';
 import { generateProjectRecapPdf } from '../../services/projects/projectPdf';
 import ProjectDocuments from './ProjectDocuments';
@@ -161,12 +162,70 @@ const PRIORITES = [
 ];
 
 const EMPTY_FORM = {
-  nom: '', client_id: '', client: '', type_projet: '',
+  nom: '', client_id: '', client: '', type_projet: '', types_intervention: [],
   chef_projet: '', chef_chantier: '', devis_lie: '',
   budget_approuve: '', date_debut: '', date_fin_prevue: '', description: '',
   ville: '', adresse_chantier: '', statut: 'brouillon', priorite: 'normale',
   avancement: 0, observations: '',
 };
+
+function InterventionTypePicker({ value = [], onChange, disabled = false }) {
+  const selected = normalizeTypesIntervention(value);
+  function toggle(type) {
+    if (disabled) return;
+    const next = selected.includes(type)
+      ? selected.filter((t) => t !== type)
+      : [...selected, type];
+    onChange(next);
+  }
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, paddingTop: 2 }}>
+      {PROJECT_INTERVENTION_TYPES.map((type) => {
+        const checked = selected.includes(type);
+        return (
+          <label
+            key={type}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '6px 10px',
+              borderRadius: 6,
+              cursor: disabled ? 'not-allowed' : 'pointer',
+              border: `1.5px solid ${checked ? 'var(--red)' : 'var(--border)'}`,
+              background: checked ? '#FFF5F5' : '#fff',
+              fontSize: '0.82rem',
+              fontWeight: checked ? 700 : 500,
+              color: checked ? 'var(--red)' : 'var(--text-2)',
+              userSelect: 'none',
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={checked}
+              disabled={disabled}
+              onChange={() => toggle(type)}
+              style={{ width: 14, height: 14, accentColor: 'var(--red)', margin: 0 }}
+            />
+            {type}
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
+function InterventionTypeBadges({ types }) {
+  const list = normalizeTypesIntervention(types);
+  if (!list.length) return <span style={{ color: 'var(--text-3)' }}>—</span>;
+  return (
+    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+      {list.map((type) => (
+        <span key={type} className="badge badge-blue" style={{ fontSize: '0.68rem' }}>{type}</span>
+      ))}
+    </div>
+  );
+}
 
 // ── Formulaire Projet ────────────────────────────────────────────────────────
 
@@ -178,6 +237,7 @@ function FormulaireProjet({ initial, onSave, onCancel, saving, clients = [] }) {
       ...initial,
       client_id: initial.client_id || '',
       client: initial.client || initial.client_nom || '',
+      types_intervention: normalizeTypesIntervention(initial.types_intervention),
     };
   });
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
@@ -304,6 +364,15 @@ function FormulaireProjet({ initial, onSave, onCancel, saving, clients = [] }) {
           {errors.client_id && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.client_id}</div>}
         </FField>
       </FRow>
+      <div style={{ marginBottom: 14 }}>
+        <FField label="Type d'intervention">
+          <InterventionTypePicker
+            value={form.types_intervention}
+            onChange={(types) => set('types_intervention', types)}
+            disabled={saving}
+          />
+        </FField>
+      </div>
       <FRow>
         <FField label="Type de projet">
           <select value={form.type_projet} onChange={e => set('type_projet', e.target.value)} style={SELECT_STYLE}>
@@ -824,6 +893,7 @@ function DetailProjet({ projet, onBack, onEdit, onCreateSAV, initialTab = 'gener
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 16, marginBottom: 20 }}>
             {[
               ['Client', projet.client],
+              ['Type d\'intervention', formatTypesInterventionLabel(projet.types_intervention)],
               ['Type', projet.type_projet ? (TYPE_PROJET_LABEL[projet.type_projet] || projet.type_projet) : '—'],
               ['Responsable', projet.chef_projet || projet.responsable || '—'],
               ['Chef de chantier', projet.chef_chantier || '—'],
@@ -948,6 +1018,7 @@ export default function ProjetsList({ onCreateSAV }) {
   const [filterStatut, setFilterStatut] = useState('');
   const [filterClient, setFilterClient] = useState('');
   const [filterType, setFilterType] = useState('');
+  const [filterIntervention, setFilterIntervention] = useState('');
   const [filterDate, setFilterDate] = useState('');
   const [showModal, setShowModal] = useState(false);
   const [editProjet, setEditProjet] = useState(null);
@@ -1019,6 +1090,7 @@ export default function ProjetsList({ onCreateSAV }) {
     statut: filterStatut,
     client_id: filterClient,
     type_projet: filterType,
+    type_intervention: filterIntervention,
     date: filterDate,
   });
 
@@ -1110,13 +1182,19 @@ export default function ProjetsList({ onCreateSAV }) {
               ))}
             </select>
             <select value={filterType} onChange={e => setFilterType(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 180 }}>
-              <option value="">Tous les types</option>
+              <option value="">Tous les types projet</option>
               {TYPE_PROJET_VALUES.map(t => (
                 <option key={t} value={t}>{TYPE_PROJET_LABEL[t] || t}</option>
               ))}
             </select>
+            <select value={filterIntervention} onChange={e => setFilterIntervention(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 200 }}>
+              <option value="">Toutes interventions</option>
+              {PROJECT_INTERVENTION_TYPES.map(t => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </select>
             <input type="date" value={filterDate} onChange={e => setFilterDate(e.target.value)} style={{ ...INPUT_STYLE, maxWidth: 160 }} title="Date début" />
-            <button className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setFilterStatut(''); setFilterClient(''); setFilterType(''); setFilterDate(''); }}>Réinitialiser</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setFilterStatut(''); setFilterClient(''); setFilterType(''); setFilterIntervention(''); setFilterDate(''); }}>Réinitialiser</button>
           </div>
         </div>
       )}
@@ -1146,6 +1224,7 @@ export default function ProjetsList({ onCreateSAV }) {
                     <th>Réf.</th>
                     <th>Nom projet</th>
                     <th>Client</th>
+                    <th>Intervention</th>
                     <th>Chef projet</th>
                     <th>Budget</th>
                     <th>Avancement</th>
@@ -1170,6 +1249,7 @@ export default function ProjetsList({ onCreateSAV }) {
                         </button>
                       </td>
                       <td>{p.client || '—'}</td>
+                      <td><InterventionTypeBadges types={p.types_intervention} /></td>
                       <td>{p.chef_projet || '—'}</td>
                       <td style={{ whiteSpace: 'nowrap' }}>{(p.budget_approuve || 0).toLocaleString('fr-MA')} MAD</td>
                       <td style={{ minWidth: 130 }}><ProgressBar value={p.avancement} /></td>
@@ -1201,6 +1281,7 @@ export default function ProjetsList({ onCreateSAV }) {
                       <div className="projet-mobile-ref">{p.ref}</div>
                       <div className="projet-mobile-nom">{p.nom}</div>
                       <div className="projet-mobile-client">{p.client || '—'}</div>
+                      <div style={{ marginTop: 6 }}><InterventionTypeBadges types={p.types_intervention} /></div>
                     </div>
                     <div className="projet-mobile-badges">
                       <Badge type={p.statut} />
