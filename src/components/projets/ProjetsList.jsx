@@ -19,6 +19,7 @@ import { PROJECT_INTERVENTION_TYPES, normalizeTypesIntervention, formatTypesInte
 import { isProjectLate } from '../../services/projects/projects';
 import { generateProjectRecapPdf } from '../../services/projects/projectPdf';
 import ProjectDocuments from './ProjectDocuments';
+import ProjectPlanningModule from './ProjectPlanningModule';
 import { listWorkers } from '../../services/rh/workers';
 import { workerFullName } from '../../services/rh/attendance';
 import {
@@ -962,11 +963,7 @@ function DetailProjet({ projet, onBack, onEdit, onCreateSAV, initialTab = 'gener
       {activeTab === 'planning' && (
         <div className="card">
           <SectionTitle icon={<Calendar size={13} />}>Planning chantier</SectionTitle>
-          <div style={{ padding: '40px 24px', background: 'var(--surface-2)', borderRadius: 8, textAlign: 'center', color: 'var(--text-3)' }}>
-            <Calendar size={32} style={{ margin: '0 auto 12px', display: 'block', opacity: 0.4 }} />
-            <div style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '1rem', color: 'var(--text-2)', marginBottom: 6 }}>Module Planning</div>
-            <div style={{ fontSize: '0.84rem' }}>Diagramme de Gantt et jalons — Backend-ready</div>
-          </div>
+          <ProjectPlanningModule projet={projet} />
         </div>
       )}
 
