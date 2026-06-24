@@ -3,7 +3,7 @@ import { useState, useRef, useMemo } from 'react';
 import { useAttendance } from '../hooks/useAttendance';
 import { generateAttendanceWeeklyPdf } from '../services/rh/attendanceSheetPdf';
 import { syncPayrollAfterAttendanceChange } from '../services/rh/workerPayroll';
-import { computeAttendanceWorkMetrics, STANDARD_SHIFT_START, STANDARD_SHIFT_END, groupAttendanceSummariesByProjectWeek, collectAttendanceWeeks, fmtWeekRange, weekStartMonday, filterProjectOptionsForChef } from '../services/rh/attendance';
+import { computeAttendanceWorkMetrics, STANDARD_SHIFT_START, STANDARD_SHIFT_END, groupAttendanceSummariesByProjectWeek, collectAttendanceWeeks, fmtWeekRange, weekStartMonday, filterProjectOptionsForChef, personNamesMatch } from '../services/rh/attendance';
 import AttendanceDetailModal from './rh/AttendanceDetailModal';
 
 function EmptyState({ icon, title, sub }) {
@@ -60,31 +60,9 @@ const EMPTY_FORM = {
 
 const PRESENCE_WORKER_FILTER = { junctionOnly: true };
 
-function normalizePersonName(s) {
-  return (s || '')
-    .trim()
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/\p{M}/gu, '')
-    .replace(/\s+/g, ' ');
-}
-
-function nameTokenKey(s) {
-  return normalizePersonName(s).split(' ').filter(Boolean).sort().join(' ');
-}
-
 function matchChefChantierEmployee(chefsChantier, name) {
-  const target = normalizePersonName(name);
-  if (!target) return null;
-  const targetKey = nameTokenKey(name);
-
-  return (chefsChantier || []).find((c) => {
-    const label = normalizePersonName(c.label);
-    if (label === target) return true;
-    if (nameTokenKey(c.label) === targetKey) return true;
-    if (label.includes(target) || target.includes(label)) return true;
-    return false;
-  }) || null;
+  if (!(name || '').trim()) return null;
+  return (chefsChantier || []).find((c) => personNamesMatch(c.label, name)) || null;
 }
 
 function applyProjectChefChantier(next, projectId, projects, chefsChantier) {
