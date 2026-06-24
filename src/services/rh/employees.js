@@ -94,12 +94,49 @@ export async function listActiveEmployees() {
   });
 }
 
-function isChefChantierPoste(poste) {
-  const p = (poste || '')
+function normPoste(poste) {
+  return (poste || '')
     .toLowerCase()
     .normalize('NFD')
     .replace(/\p{M}/gu, '');
-  return p.includes('chef') && p.includes('chantier');
+}
+
+/** Chef de projet : Chef de projet, Project manager, Responsable projet */
+export function isChefProjetPoste(poste) {
+  const p = normPoste(poste);
+  if (!p) return false;
+  if (p.includes('project manager')) return true;
+  if (p.includes('chef') && p.includes('projet')) return true;
+  if (p.includes('responsable') && p.includes('projet')) return true;
+  return false;
+}
+
+/** Chef de chantier : Chef de chantier, Conducteur de travaux, Responsable chantier */
+export function isChefChantierPoste(poste) {
+  const p = normPoste(poste);
+  if (!p) return false;
+  if (p.includes('chef') && p.includes('chantier')) return true;
+  if (p.includes('conducteur') && p.includes('travaux')) return true;
+  if (p.includes('responsable') && p.includes('chantier')) return true;
+  return false;
+}
+
+export function filterChefsProjet(employees) {
+  return (employees || []).filter((e) => isChefProjetPoste(e.poste));
+}
+
+export function filterChefsChantierEmployees(employees) {
+  return (employees || []).filter((e) => isChefChantierPoste(e.poste));
+}
+
+/** Inclut l'employé sélectionné même si son poste ne correspond plus au filtre. */
+export function withSelectedEmployee(filtered, allEmployees, selectedId) {
+  const list = filtered || [];
+  if (!selectedId) return list;
+  const sid = String(selectedId);
+  if (list.some((e) => String(e.id) === sid)) return list;
+  const extra = (allEmployees || []).find((e) => String(e.id) === sid);
+  return extra ? [extra, ...list] : list;
 }
 
 function mapChefChantierRow(e) {

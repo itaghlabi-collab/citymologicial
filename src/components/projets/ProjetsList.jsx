@@ -26,7 +26,8 @@ import {
   removeWorkerFromProject,
 } from '../../services/rh/workerProjectAssignments';
 import { listAssignmentsByProject, listSubcontractors, saveProjectSubcontractorAssignments, removeSubcontractorFromProject, subcontractorFullName } from '../../services/rh/subcontractors';
-import { listActiveEmployees, employeeSelectLabel, findEmployeeByStoredLabel } from '../../services/rh/employees';
+import { listActiveEmployees, employeeSelectLabel, findEmployeeByStoredLabel, filterChefsProjet, filterChefsChantierEmployees, withSelectedEmployee } from '../../services/rh/employees';
+import { listCrmDevis, crmDevisSelectLabel, findCrmDevisByReference } from '../../services/crm/crmDevis';
 
 // ── Shared primitives ───────────────────────────────────────────────────────
 
@@ -182,23 +183,63 @@ function FormulaireProjet({ initial, onSave, onCancel, saving, clients = [] }) {
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
   const [errors, setErrors] = useState({});
   const [employees, setEmployees] = useState([]);
+  const [crmDevisList, setCrmDevisList] = useState([]);
   const [chefProjetId, setChefProjetId] = useState('');
   const [chefChantierId, setChefChantierId] = useState('');
+  const [devisId, setDevisId] = useState('');
 
   useEffect(() => {
     let cancelled = false;
-    listActiveEmployees()
-      .then((rows) => {
+    Promise.all([
+      listActiveEmployees().catch(() => []),
+      listCrmDevis().catch(() => []),
+    ])
+      .then(([rows, devisRows]) => {
         if (cancelled) return;
         setEmployees(rows);
+        setCrmDevisList(devisRows);
         const cp = findEmployeeByStoredLabel(rows, initial?.chef_projet || initial?.responsable);
         const cc = findEmployeeByStoredLabel(rows, initial?.chef_chantier);
         setChefProjetId(cp?.id ? String(cp.id) : '');
         setChefChantierId(cc?.id ? String(cc.id) : '');
+        const linkedDevis = initial?.devis_id
+          ? devisRows.find((d) => String(d.id) === String(initial.devis_id))
+          : findCrmDevisByReference(devisRows, initial?.devis_lie || initial?.devis_reference);
+        setDevisId(linkedDevis?.id ? String(linkedDevis.id) : '');
       })
-      .catch(() => { if (!cancelled) setEmployees([]); });
+      .catch(() => {
+        if (!cancelled) {
+          setEmployees([]);
+          setCrmDevisList([]);
+        }
+      });
     return () => { cancelled = true; };
-  }, [initial?.id, initial?.chef_projet, initial?.responsable, initial?.chef_chantier]);
+  }, [initial?.id, initial?.chef_projet, initial?.responsable, initial?.chef_chantier, initial?.devis_lie, initial?.devis_reference, initial?.devis_id]);
+
+  const chefsProjetOptions = useMemo(
+    () => withSelectedEmployee(filterChefsProjet(employees), employees, chefProjetId),
+    [employees, chefProjetId],
+  );
+
+  const chefsChantierOptions = useMemo(
+    () => withSelectedEmployee(filterChefsChantierEmployees(employees), employees, chefChantierId),
+    [employees, chefChantierId],
+  );
+
+  function onDevisChange(nextDevisId) {
+    setDevisId(nextDevisId);
+    const d = crmDevisList.find((x) => String(x.id) === String(nextDevisId));
+    if (!d) {
+      setForm((p) => ({ ...p, devis_lie: '' }));
+      return;
+    }
+    setForm((p) => ({
+      ...p,
+      devis_lie: d.reference || '',
+      budget_approuve: d.total_ttc != null ? d.total_ttc : p.budget_approuve,
+      ...(d.client_id ? { client_id: d.client_id, client: d.client_nom || p.client } : {}),
+    }));
+  }
 
   function onClientChange(clientId) {
     const cl = clients.find(c => String(c.id) === String(clientId));
@@ -223,10 +264,13 @@ function FormulaireProjet({ initial, onSave, onCancel, saving, clients = [] }) {
     const cl = clients.find(c => String(c.id) === String(form.client_id));
     const cp = employees.find((e) => String(e.id) === String(chefProjetId));
     const cc = employees.find((e) => String(e.id) === String(chefChantierId));
+    const selectedDevis = crmDevisList.find((d) => String(d.id) === String(devisId));
     onSave({
       ...form,
       chef_projet: cp ? employeeSelectLabel(cp) : '',
       chef_chantier: cc ? employeeSelectLabel(cc) : '',
+      devis_lie: selectedDevis?.reference || form.devis_lie || '',
+      devis_id: selectedDevis?.id || form.devis_id || '',
       client_nom: cl ? clientDisplayName(cl) : (form.client || '').trim(),
       avancement: Number(form.avancement) || 0,
       budget_approuve: Number(form.budget_approuve) || 0,
@@ -276,10 +320,15 @@ function FormulaireProjet({ initial, onSave, onCancel, saving, clients = [] }) {
             style={SELECT_STYLE}
           >
             <option value="">Choisir un employé...</option>
-            {employees.map((e) => (
+            {chefsProjetOptions.map((e) => (
               <option key={e.id} value={e.id}>{employeeSelectLabel(e)}</option>
             ))}
           </select>
+          {chefsProjetOptions.length === 0 && (
+            <div style={{ fontSize: '0.7rem', color: 'var(--text-3)', marginTop: 3 }}>
+              Aucun employé avec un poste « Chef de projet », « Project manager » ou « Responsable projet ».
+            </div>
+          )}
         </FField>
         <FField label="Chef de chantier">
           <select
@@ -288,13 +337,37 @@ function FormulaireProjet({ initial, onSave, onCancel, saving, clients = [] }) {
             style={SELECT_STYLE}
           >
             <option value="">Choisir un employé...</option>
-            {employees.map((e) => (
+            {chefsChantierOptions.map((e) => (
               <option key={e.id} value={e.id}>{employeeSelectLabel(e)}</option>
             ))}
           </select>
+          {chefsChantierOptions.length === 0 && (
+            <div style={{ fontSize: '0.7rem', color: 'var(--text-3)', marginTop: 3 }}>
+              Aucun employé avec un poste « Chef de chantier », « Conducteur de travaux » ou « Responsable chantier ».
+            </div>
+          )}
         </FField>
       </FRow>
-      <FRow>{inp('devis_lie', 'text', 'Référence devis lié')}{inp('budget_approuve', 'number', 'Budget approuvé (MAD)')}</FRow>
+      <FRow>
+        <FField label="Référence devis lié">
+          <select
+            value={devisId}
+            onChange={(e) => onDevisChange(e.target.value)}
+            style={SELECT_STYLE}
+          >
+            <option value="">Choisir un devis CRM...</option>
+            {crmDevisList.map((d) => (
+              <option key={d.id} value={d.id}>{crmDevisSelectLabel(d)}</option>
+            ))}
+          </select>
+          {form.devis_lie && !devisId && (
+            <div style={{ fontSize: '0.7rem', color: '#E65100', marginTop: 3 }}>
+              Référence actuelle : {form.devis_lie} (non trouvée dans le CRM)
+            </div>
+          )}
+        </FField>
+        {inp('budget_approuve', 'number', 'Budget approuvé (MAD)')}
+      </FRow>
       <FRow>{inp('date_debut', 'date', 'Date début')}{inp('date_fin_prevue', 'date', 'Date fin prévue')}</FRow>
       <div style={{ marginBottom: 14 }}>
         <FField label="Description">

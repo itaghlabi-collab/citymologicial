@@ -51,6 +51,25 @@ export function normalizeLigne(row) {
   };
 }
 
+/** Libellé liste déroulante projet : REF — CLIENT — TITRE — MONTANT MAD */
+export function crmDevisSelectLabel(devis) {
+  if (!devis) return '';
+  const ref = (devis.reference || '—').trim();
+  const client = (devis.client_nom || '—').trim();
+  const titre = (devis.titre || '—').trim();
+  const ttc = Number(devis.total_ttc || 0).toLocaleString('fr-MA', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+  return `${ref} — ${client} — ${titre} — ${ttc} MAD`;
+}
+
+export function findCrmDevisByReference(devisList, reference) {
+  const ref = (reference || '').trim();
+  if (!ref || !devisList?.length) return null;
+  return devisList.find((d) => (d.reference || '').trim() === ref) || null;
+}
+
 export function normalizeCrmDevis(row, lignes = []) {
   if (!row) return null;
   const c = row.clients;
