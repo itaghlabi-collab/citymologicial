@@ -173,6 +173,32 @@ CREATE POLICY spa_adj_auth ON public.subcontractor_project_adjustments
 NOTIFY pgrst, 'reload schema';
 
 -- ═══════════════════════════════════════════════════════════════════════════
+-- E. TÂCHES — Historique relances Directeur
+-- ═══════════════════════════════════════════════════════════════════════════
+
+CREATE TABLE IF NOT EXISTS public.internal_task_dg_relances (
+  id         UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  task_id    UUID NOT NULL REFERENCES public.internal_tasks(id) ON DELETE CASCADE,
+  sent_by    UUID REFERENCES auth.users(id) ON DELETE SET NULL,
+  message    TEXT,
+  sent_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_internal_task_dg_relances_task_id
+  ON public.internal_task_dg_relances (task_id, sent_at DESC);
+
+ALTER TABLE public.internal_task_dg_relances ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS internal_task_dg_relances_auth ON public.internal_task_dg_relances;
+CREATE POLICY internal_task_dg_relances_auth ON public.internal_task_dg_relances
+  FOR ALL TO authenticated USING (true) WITH CHECK (true);
+
+GRANT ALL ON public.internal_task_dg_relances TO authenticated;
+GRANT ALL ON public.internal_task_dg_relances TO service_role;
+
+NOTIFY pgrst, 'reload schema';
+
+-- ═══════════════════════════════════════════════════════════════════════════
 -- VÉRIFICATION
 -- ═══════════════════════════════════════════════════════════════════════════
 
@@ -204,4 +230,10 @@ SELECT 'subcontractor_payments.gross_amount',
   CASE WHEN EXISTS (
     SELECT 1 FROM information_schema.columns
     WHERE table_schema = 'public' AND table_name = 'subcontractor_payments' AND column_name = 'gross_amount'
-  ) THEN 'OK' ELSE 'MANQUANT (exécuter RUN_SUBCONTRACTORS.sql)' END;
+  ) THEN 'OK' ELSE 'MANQUANT (exécuter RUN_SUBCONTRACTORS.sql)' END
+UNION ALL
+SELECT 'internal_task_dg_relances',
+  CASE WHEN EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'internal_task_dg_relances'
+  ) THEN 'OK' ELSE 'MANQUANT (exécuter RUN_INTERNAL_TASKS_DG_RELANCES.sql)' END;

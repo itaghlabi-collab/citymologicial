@@ -21,4 +21,6 @@ CREATE POLICY internal_task_dg_relances_auth ON public.internal_task_dg_relances
 GRANT ALL ON public.internal_task_dg_relances TO authenticated;
 GRANT ALL ON public.internal_task_dg_relances TO service_role;
 
+NOTIFY pgrst, 'reload schema';
+
 COMMENT ON TABLE public.internal_task_dg_relances IS 'Historique des relances Directeur sur les tâches internes';

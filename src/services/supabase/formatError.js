@@ -106,6 +106,9 @@ export function formatSupabaseError(error, fallback = 'Une erreur est survenue.'
   if (code === '42P01' || message.includes('internal_tasks') || message.includes('dg_push')) {
     return 'Table tâches absente ou incomplète — exécutez supabase/RUN_INTERNAL_TASKS_ENHANCE.sql et RUN_INTERNAL_TASKS_DG.sql';
   }
+  if (message.includes('internal_task_dg_relances')) {
+    return 'Table relances DG absente — exécutez supabase/RUN_INTERNAL_TASKS_DG_RELANCES.sql dans Supabase → SQL Editor.';
+  }
   if (/worker_project_assignments/i.test(message)) {
     return 'Table affectations ouvriers absente — exécutez supabase/RUN_WORKER_PROJECT_ASSIGNMENTS.sql';
   }
