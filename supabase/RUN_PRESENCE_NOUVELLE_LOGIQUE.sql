@@ -101,6 +101,14 @@ WHERE COALESCE(a.is_legacy, false) = false
         AND wpa.project_id = a.project_id
         AND wpa.status = 'active'
     )
+    OR EXISTS (
+      SELECT 1
+      FROM public.worker_project_assignments wpa
+      WHERE wpa.worker_id = a.worker_id
+        AND wpa.project_id = a.project_id
+        AND wpa.status = 'active'
+        AND a.date < (wpa.assigned_at AT TIME ZONE 'UTC')::date
+    )
   );
 
 UPDATE public.attendance a
@@ -116,6 +124,7 @@ WHERE COALESCE(a.is_legacy, false) = false
     WHERE wpa.worker_id = a.worker_id
       AND wpa.project_id = a.project_id
       AND wpa.status = 'active'
+      AND a.date >= (wpa.assigned_at AT TIME ZONE 'UTC')::date
   );
 
 NOTIFY pgrst, 'reload schema';

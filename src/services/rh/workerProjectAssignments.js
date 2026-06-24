@@ -78,6 +78,25 @@ export function buildWorkerProjectIdsMap(assignments) {
   return map;
 }
 
+/** Map `${workerId}|${projectId}` → date d'affectation (YYYY-MM-DD) */
+export function buildAssignmentLookup(assignments) {
+  const map = new Map();
+  (assignments || []).forEach((a) => {
+    if (!a.workerId || !a.projectId || a.status !== 'active') return;
+    const key = `${a.workerId}|${a.projectId}`;
+    const assignedDate = (a.assignedAt || a.assigned_at || '').toString().slice(0, 10);
+    if (!assignedDate) return;
+    const prev = map.get(key);
+    if (!prev || assignedDate < prev) map.set(key, assignedDate);
+  });
+  return map;
+}
+
+export function assignmentKey(workerId, projectId) {
+  if (!workerId || !projectId) return '';
+  return `${workerId}|${projectId}`;
+}
+
 export function enrichWorkersWithProjectIds(workers, assignmentMap) {
   return (workers || []).map((w) => {
     const fromJunction = assignmentMap.get(String(w.id)) || [];

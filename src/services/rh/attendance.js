@@ -3,7 +3,7 @@
  */
 import { getSupabase } from '../../lib/supabase';
 import { WORKER_HOURS_PER_DAY } from './workers';
-import { listWorkersByProject } from './workerProjectAssignments';
+import { listWorkersByProject, listActiveWorkerProjectAssignments, buildAssignmentLookup, assignmentKey } from './workerProjectAssignments';
 
 const TABLE = 'attendance';
 
@@ -127,7 +127,9 @@ export function normalizeAttendance(row) {
       || [row.chef_employee?.firstname, row.chef_employee?.lastname].filter(Boolean).join(' ')
       || '',
     isLegacy: Boolean(row.is_legacy),
-    sourceVersion: row.source_version || ATTENDANCE_SOURCE_PROJECT,
+    sourceVersion: row.is_legacy
+      ? ATTENDANCE_SOURCE_LEGACY
+      : (row.source_version || ATTENDANCE_SOURCE_LEGACY),
     legacyArchivedAt: row.legacy_archived_at || null,
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -135,17 +137,32 @@ export function normalizeAttendance(row) {
 }
 
 /** Présence comptabilisée (nouvelle logique projet → affectation junction). */
-export function isActiveAttendanceRecord(r) {
+export function isActiveAttendanceRecord(r, assignmentLookup = cachedAssignmentLookup) {
   if (!r) return false;
   if (r.isLegacy === true) return false;
-  if (r.sourceVersion === ATTENDANCE_SOURCE_LEGACY) return false;
+  if (r.sourceVersion !== ATTENDANCE_SOURCE_PROJECT) return false;
   if (!r.projectId) return false;
   if (!r.chefChantierId) return false;
+
+  if (assignmentLookup) {
+    const key = assignmentKey(r.workerId, r.projectId);
+    const assignedDate = assignmentLookup.get(key);
+    if (!assignedDate) return false;
+    const attDate = (r.date || '').slice(0, 10);
+    if (attDate && attDate < assignedDate) return false;
+  }
+
   return true;
 }
 
-export function filterActiveAttendance(records) {
-  return (records || []).filter(isActiveAttendanceRecord);
+export function filterActiveAttendance(records, assignmentLookup = cachedAssignmentLookup) {
+  const input = records || [];
+  const active = input.filter((r) => isActiveAttendanceRecord(r, assignmentLookup));
+  const excluded = input.length - active.length;
+  if (excluded > 0) {
+    console.log('[PRESENCE FILTER] legacy excluded', { excluded, kept: active.length });
+  }
+  return active;
 }
 
 /** Form UI → DB row */
@@ -197,6 +214,12 @@ const ATTENDANCE_SELECT_FALLBACK = `
 
 const ATTENDANCE_SELECT_MINIMAL = '*';
 
+let cachedAssignmentLookup = null;
+
+export function getAttendanceAssignmentLookup() {
+  return cachedAssignmentLookup;
+}
+
 async function fetchAttendanceRows(select, { activeOnly = false } = {}) {
   const base = getSupabase()
     .from(TABLE)
@@ -206,9 +229,12 @@ async function fetchAttendanceRows(select, { activeOnly = false } = {}) {
 
   if (!activeOnly) return base;
 
-  const filtered = await base.eq('is_legacy', false);
+  let q = base.eq('is_legacy', false).eq('source_version', ATTENDANCE_SOURCE_PROJECT);
+  const filtered = await q;
   if (!filtered.error) return filtered;
-  if (/is_legacy|column|does not exist/i.test(filtered.error.message || '')) {
+  if (/is_legacy|source_version|column|does not exist/i.test(filtered.error.message || '')) {
+    const legacyOnly = await base.eq('is_legacy', false);
+    if (!legacyOnly.error) return legacyOnly;
     return base;
   }
   return filtered;
@@ -226,6 +252,20 @@ async function getAuthUserId() {
 
 export async function listAttendance(options = {}) {
   const { includeLegacy = false } = options;
+  let assignmentLookup = null;
+  if (!includeLegacy) {
+    try {
+      const assignments = await listActiveWorkerProjectAssignments();
+      cachedAssignmentLookup = buildAssignmentLookup(assignments);
+      assignmentLookup = cachedAssignmentLookup;
+    } catch (err) {
+      console.warn('[CITYMO] listAttendance assignments', err);
+      cachedAssignmentLookup = null;
+    }
+  } else {
+    cachedAssignmentLookup = null;
+  }
+
   let { data, error } = await fetchAttendanceRows(ATTENDANCE_SELECT, { activeOnly: !includeLegacy });
 
   if (error) {
@@ -242,7 +282,7 @@ export async function listAttendance(options = {}) {
     throw error;
   }
   const rows = (data || []).map(normalizeAttendance);
-  return includeLegacy ? rows : filterActiveAttendance(rows);
+  return includeLegacy ? rows : filterActiveAttendance(rows, assignmentLookup);
 }
 
 export async function createAttendance(form) {
@@ -534,21 +574,28 @@ export async function countWorkerPaidDays(workerId, projectId, weekStart, weekEn
   await getAuthUserId();
   const selectCols = 'worker_id, project_id, date, statut, heure_entree, heure_sortie, is_legacy, workers ( project_id )';
 
-  async function runQuery(withLegacyFilter) {
+  async function runQuery(withStrictFilter) {
     let q = getSupabase()
       .from(TABLE)
       .select(selectCols)
       .eq('worker_id', workerId)
       .gte('date', weekStart)
       .lte('date', weekEnd);
-    if (withLegacyFilter) q = q.eq('is_legacy', false);
+    if (withStrictFilter) {
+      q = q.eq('is_legacy', false).eq('source_version', ATTENDANCE_SOURCE_PROJECT);
+    } else if (withStrictFilter === false) {
+      q = q.eq('is_legacy', false);
+    }
     if (projectId) q = q.eq('project_id', projectId);
     return q;
   }
 
   let { data, error } = await runQuery(true);
-  if (error && /is_legacy|column|does not exist/i.test(error.message || '')) {
+  if (error && /is_legacy|source_version|column|does not exist/i.test(error.message || '')) {
     ({ data, error } = await runQuery(false));
+  }
+  if (error && /is_legacy|column|does not exist/i.test(error.message || '')) {
+    ({ data, error } = await runQuery(null));
   }
   if (error) {
     console.error('[CITYMO] attendance count days', error);

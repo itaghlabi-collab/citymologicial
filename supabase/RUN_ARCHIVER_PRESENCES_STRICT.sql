@@ -1,11 +1,13 @@
 -- =============================================================================
--- CITYMO ERP — Archivage présences ancienne logique (sans suppression)
--- Exécuter dans Supabase SQL Editor — idempotent (ADD ONLY)
+-- CITYMO ERP — Archivage STRICT des présences ancienne logique
+-- Exécuter dans Supabase SQL Editor — idempotent (ADD ONLY, pas de DELETE)
 --
--- Prérequis : RUN_WORKER_PROJECT_ASSIGNMENTS.sql (table worker_project_assignments)
+-- Prérequis : RUN_PRESENCE_NOUVELLE_LOGIQUE.sql (ou équivalent)
 --
--- Règle nouvelle logique :
---   présence valide = projet + ouvrier affecté (junction active) + chef chantier
+-- Règle : une présence active doit avoir
+--   project_id + chef_chantier_id + junction active
+--   + date >= date d'affectation junction
+--   + source_version = 'project_assignment'
 -- =============================================================================
 
 ALTER TABLE public.attendance
@@ -22,20 +24,7 @@ ALTER TABLE public.attendance
   ADD CONSTRAINT attendance_source_version_check
   CHECK (source_version IN ('project_assignment', 'old_assignment'));
 
-CREATE INDEX IF NOT EXISTS idx_attendance_active
-  ON public.attendance (date DESC, worker_id)
-  WHERE is_legacy = false;
-
-CREATE INDEX IF NOT EXISTS idx_attendance_legacy
-  ON public.attendance (legacy_archived_at DESC)
-  WHERE is_legacy = true;
-
-COMMENT ON COLUMN public.attendance.is_legacy IS
-  'true = ancienne logique, exclue des présences et paiements hebdo actuels';
-COMMENT ON COLUMN public.attendance.source_version IS
-  'project_assignment (nouvelle logique) | old_assignment (archivée)';
-
--- ─── Archiver les présences qui ne respectent pas la nouvelle logique ───────
+-- 1) Archiver : champs manquants ou pas d'affectation junction
 UPDATE public.attendance a
 SET
   is_legacy = true,
@@ -52,17 +41,25 @@ WHERE COALESCE(a.is_legacy, false) = false
         AND wpa.project_id = a.project_id
         AND wpa.status = 'active'
     )
-    OR EXISTS (
-      SELECT 1
-      FROM public.worker_project_assignments wpa
-      WHERE wpa.worker_id = a.worker_id
-        AND wpa.project_id = a.project_id
-        AND wpa.status = 'active'
-        AND a.date < (wpa.assigned_at AT TIME ZONE 'UTC')::date
-    )
   );
 
--- Les nouvelles présences créées par l''app ont is_legacy = false par défaut
+-- 2) Archiver : présence datée AVANT l'affectation junction (anciennes lignes)
+UPDATE public.attendance a
+SET
+  is_legacy = true,
+  source_version = 'old_assignment',
+  legacy_archived_at = COALESCE(a.legacy_archived_at, NOW())
+WHERE COALESCE(a.is_legacy, false) = false
+  AND EXISTS (
+    SELECT 1
+    FROM public.worker_project_assignments wpa
+    WHERE wpa.worker_id = a.worker_id
+      AND wpa.project_id = a.project_id
+      AND wpa.status = 'active'
+      AND a.date < (wpa.assigned_at AT TIME ZONE 'UTC')::date
+  );
+
+-- 3) Valider explicitement les présences conformes nouvelle logique
 UPDATE public.attendance a
 SET
   is_legacy = false,
@@ -82,6 +79,7 @@ WHERE COALESCE(a.is_legacy, false) = false
 NOTIFY pgrst, 'reload schema';
 
 SELECT
-  (SELECT COUNT(*)::int FROM public.attendance) AS total_presences,
-  (SELECT COUNT(*)::int FROM public.attendance WHERE is_legacy = true) AS archivees_legacy,
-  (SELECT COUNT(*)::int FROM public.attendance WHERE is_legacy = false) AS actives_nouvelle_logique;
+  (SELECT COUNT(*)::int FROM public.attendance) AS total,
+  (SELECT COUNT(*)::int FROM public.attendance WHERE is_legacy = true) AS archivees,
+  (SELECT COUNT(*)::int FROM public.attendance WHERE is_legacy = false AND source_version = 'project_assignment') AS actives_nouvelle_logique,
+  (SELECT COUNT(*)::int FROM public.attendance WHERE is_legacy = false AND source_version = 'old_assignment') AS encore_a_verifier;

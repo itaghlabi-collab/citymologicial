@@ -15,6 +15,7 @@ import {
   updateWorkerPayrollStatut,
   deleteWorkerPayroll,
   filterWorkerPayroll,
+  filterPayrollForNewLogicOnly,
   computePayrollStats,
   collectPayrollChantiers,
   collectPayrollWeeks,
@@ -82,6 +83,7 @@ export function useWorkerPayroll() {
         }
       }
 
+      rows = filterPayrollForNewLogicOnly(rows, attRows);
       setRecords(rows);
       setWorkers(workerRows);
       setProjects(projectRows);
@@ -255,7 +257,8 @@ export function useWorkerPayroll() {
     updateAdjustments,
     markPaid,
     remove,
-    filterWorkerPayroll,
-    computePayrollStats,
+  filterWorkerPayroll,
+  filterPayrollForNewLogicOnly,
+  computePayrollStats,
   };
 }
