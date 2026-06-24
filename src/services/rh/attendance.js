@@ -859,6 +859,22 @@ export function groupAttendanceByProjectWeekWorker(records, options = {}) {
   });
 }
 
+/**
+ * Résumés ouvrier pour export PDF — même source que l'écran Présence ouvriers.
+ * Projet → affectation junction → présences actives (validated_new_logic).
+ */
+export function collectAttendancePdfSummaries(records, {
+  projectId = '',
+  weekFilter = '',
+  search = '',
+} = {}) {
+  return groupAttendanceByProjectWeekWorker(records, {
+    projectIdFilter: projectId ? String(projectId) : '',
+    weekFilter: weekFilter || '',
+    search: search || '',
+  });
+}
+
 /** Cartes projet (× semaine si filtre actif) contenant les résumés ouvriers. */
 export function groupAttendanceSummariesByProjectWeek(records, options = {}) {
   const { weekFilter = '' } = options;

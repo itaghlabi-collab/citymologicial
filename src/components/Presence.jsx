@@ -3,7 +3,7 @@ import { useState, useRef, useMemo } from 'react';
 import { useAttendance } from '../hooks/useAttendance';
 import { generateAttendanceWeeklyPdf } from '../services/rh/attendanceSheetPdf';
 import { syncPayrollAfterAttendanceChange } from '../services/rh/workerPayroll';
-import { computeAttendanceWorkMetrics, STANDARD_SHIFT_START, STANDARD_SHIFT_END, groupAttendanceSummariesByProjectWeek, collectAttendanceWeeks, fmtWeekRange, weekStartMonday, filterProjectOptionsForChef, personNamesMatch } from '../services/rh/attendance';
+import { computeAttendanceWorkMetrics, STANDARD_SHIFT_START, STANDARD_SHIFT_END, groupAttendanceSummariesByProjectWeek, collectAttendanceWeeks, fmtWeekRange, weekStartMonday, filterProjectOptionsForChef, personNamesMatch, collectAttendancePdfSummaries } from '../services/rh/attendance';
 import AttendanceDetailModal from './rh/AttendanceDetailModal';
 
 function EmptyState({ icon, title, sub }) {
@@ -438,6 +438,14 @@ export default function Presence() {
 
   const canDownloadSheet = records.length > 0 && !loading;
 
+  function collectSummariesForPdfExport({ projectId = '', semaineDebut = '' } = {}) {
+    return collectAttendancePdfSummaries(filtered, {
+      projectId: projectId || filterProjectId,
+      weekFilter: semaineDebut || filterSemaine,
+      search: filterOuvrier,
+    });
+  }
+
   function resolveProjectLabel(group) {
     if (group?.projectId) {
       const opt = projectOptions.find((p) => String(p.id) === String(group.projectId));
@@ -533,10 +541,18 @@ export default function Presence() {
   }
 
   function handleGroupPdf(group, print = false) {
-    const chefs = [...new Set(group.ouvriers.map((o) => o.chefChantier).filter(Boolean))];
-    let { semaineDebut, semaineFin } = group;
+    const summaries = collectSummariesForPdfExport({
+      projectId: group?.projectId,
+      semaineDebut: filterSemaine ? group?.semaineDebut : '',
+    });
+    if (!summaries.length) {
+      notify('error', 'Aucune présence pour cette fiche.');
+      return;
+    }
+    const chefs = [...new Set(summaries.map((o) => o.chefChantier).filter(Boolean))];
+    let { semaineDebut, semaineFin } = group || {};
     if (!semaineDebut || !semaineFin) {
-      const dates = group.ouvriers.flatMap((o) => o.lignes || []).map((l) => l.date).filter(Boolean).sort();
+      const dates = summaries.flatMap((o) => o.lignes || []).map((l) => l.date).filter(Boolean).sort();
       semaineDebut = dates[0] || '';
       semaineFin = dates[dates.length - 1] || semaineDebut;
     }
@@ -545,7 +561,7 @@ export default function Presence() {
       semaineDebut,
       semaineFin,
       chefChantier: chefs.join(' · '),
-      summaries: group.ouvriers,
+      summaries,
       print,
     });
   }

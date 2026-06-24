@@ -525,6 +525,8 @@ export async function generateAttendanceWeeklyPdf({
   const chef = chefChantier
     || [...new Set(summaries.map((s) => s.chefChantier).filter(Boolean))].join(' · ')
     || '—';
+  const nbOuvriers = summaries.length;
+  const nbPresences = summaries.reduce((n, s) => n + (s.lignes?.length || 0), 0);
 
   let y = drawPdfLogoTitle(doc, logoData, 'FEUILLE DE PRÉSENCE — RÉCAPITULATIF');
 
@@ -532,7 +534,8 @@ export async function generateAttendanceWeeklyPdf({
     ['Projet / Chantier', projetNom],
     ['Période', periode],
     ['Chef de chantier', chef],
-    ['Nombre d\'ouvriers', String(summaries.length)],
+    ['Nombre d\'ouvriers', String(nbOuvriers)],
+    ['Nombre de présences', String(nbPresences)],
   ], y);
 
   doc.setFont('helvetica', 'bold');
@@ -595,14 +598,12 @@ export async function generateAttendanceWeeklyPdf({
   doc.text('Tableau complet — toutes les saisies', MARGIN, y);
   y += 8;
 
+  const allDetailRows = summaries.flatMap((s) => (s.lignes || []).map((row) => ({ row, ouvrier: s.ouvrier })));
+
   y = drawGenericTableHeader(doc, FULL_DETAIL_COLS, y);
-  let fullIdx = 0;
-  summaries.forEach((s) => {
-    (s.lignes || []).forEach((row) => {
-      y = ensurePageSpace(doc, y, 10, () => drawGenericTableHeader(doc, FULL_DETAIL_COLS, MARGIN));
-      y = drawGenericTableRow(doc, FULL_DETAIL_COLS, attendanceRowToFullCells(row, s.ouvrier, projetNom), fullIdx, y);
-      fullIdx += 1;
-    });
+  allDetailRows.forEach(({ row, ouvrier }, idx) => {
+    y = ensurePageSpace(doc, y, 10, () => drawGenericTableHeader(doc, FULL_DETAIL_COLS, MARGIN));
+    y = drawGenericTableRow(doc, FULL_DETAIL_COLS, attendanceRowToFullCells(row, ouvrier, projetNom), idx, y);
   });
 
   drawPdfFooter(doc);
