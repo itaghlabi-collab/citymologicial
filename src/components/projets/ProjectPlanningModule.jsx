@@ -70,11 +70,12 @@ export default function ProjectPlanningModule({ projet }) {
 
   async function exportPdf(mode) {
     try {
+      const pdfOpts = { milestones };
       if (mode === 'synthesis') {
-        await generateProjectPlanningPdfSynthesis(projet, tasks);
+        await generateProjectPlanningPdfSynthesis(projet, tasks, pdfOpts);
         setToast('PDF synthèse exporté');
       } else {
-        await generateProjectPlanningPdfDetailed(projet, tasks);
+        await generateProjectPlanningPdfDetailed(projet, tasks, pdfOpts);
         setToast('PDF détaillé exporté');
       }
     } catch (err) {
