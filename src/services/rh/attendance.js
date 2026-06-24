@@ -6,7 +6,7 @@ import { WORKER_HOURS_PER_DAY } from './workers';
 
 const TABLE = 'attendance';
 
-export const STANDARD_SHIFT_START = '07:30';
+export const STANDARD_SHIFT_START = '09:00';
 export const STANDARD_SHIFT_END = '17:00';
 
 export const UI_STATUTS = ['Present', 'Absent', 'Retard', 'Demi-journee'];
@@ -292,18 +292,19 @@ export function filterAttendanceRecords(records, filters = {}) {
   });
 }
 
-export function workerIsAssignedToProject(worker, projectId) {
+export function workerIsAssignedToProject(worker, projectId, { junctionOnly = false } = {}) {
   if (!projectId || !worker) return false;
   const pid = String(projectId);
-  if (Array.isArray(worker.assigned_project_ids) && worker.assigned_project_ids.length > 0) {
-    return worker.assigned_project_ids.includes(pid);
+  const junctionIds = Array.isArray(worker.assigned_project_ids) ? worker.assigned_project_ids : [];
+  if (junctionOnly || junctionIds.length > 0) {
+    return junctionIds.includes(pid);
   }
   return String(worker.project_id || '') === pid;
 }
 
-export function filterWorkersForProject(workers, projectId) {
+export function filterWorkersForProject(workers, projectId, { junctionOnly = false } = {}) {
   if (!projectId) return workers || [];
-  return (workers || []).filter((w) => workerIsAssignedToProject(w, projectId));
+  return (workers || []).filter((w) => workerIsAssignedToProject(w, projectId, { junctionOnly }));
 }
 
 export function collectProjectFilterOptions(projects = [], workers = [], records = []) {

@@ -3,7 +3,7 @@ import { useState, useRef, useMemo } from 'react';
 import { useAttendance } from '../hooks/useAttendance';
 import { generateAttendanceWeeklyPdf } from '../services/rh/attendanceSheetPdf';
 import { syncPayrollAfterAttendanceChange } from '../services/rh/workerPayroll';
-import { computeAttendanceWorkMetrics, STANDARD_SHIFT_START, groupAttendanceSummariesByProjectWeek, collectAttendanceWeeks, fmtWeekRange, weekStartMonday } from '../services/rh/attendance';
+import { computeAttendanceWorkMetrics, STANDARD_SHIFT_START, STANDARD_SHIFT_END, groupAttendanceSummariesByProjectWeek, collectAttendanceWeeks, fmtWeekRange, weekStartMonday } from '../services/rh/attendance';
 import AttendanceDetailModal from './rh/AttendanceDetailModal';
 
 function EmptyState({ icon, title, sub }) {
@@ -55,8 +55,10 @@ const INPUT_S = (err) => ({
 const EMPTY_FORM = {
   workerId: '', workerIds: [], projectId: '', projet: '', projetNom: '',
   chefChantierId: '', chefChantierNom: '',
-  date: today(), heureEntree: '07:30', heureSortie: '17:00', statut: 'Present', notes: '',
+  date: today(), heureEntree: STANDARD_SHIFT_START, heureSortie: STANDARD_SHIFT_END, statut: 'Present', notes: '',
 };
+
+const PRESENCE_WORKER_FILTER = { junctionOnly: true };
 
 function normalizePersonName(s) {
   return (s || '')
@@ -259,21 +261,12 @@ export default function Presence() {
   function setF(k, v) {
     setForm((p) => {
       const next = { ...p, [k]: v };
-      if (k === 'workerId') {
-        const w = workerOptions.find((o) => o.id === v);
-        if (w?.project_id) {
-          next.projectId = w.project_id;
-          next.projetNom = w.projet_nom || '';
-          next.projet = w.projet_nom || '';
-          applyProjectChefChantier(next, w.project_id, projects, chefsChantier);
-        }
-      }
       if (k === 'projectId') {
         const pr = projectOptions.find((o) => o.id === v);
         next.projetNom = pr?.label?.includes(' — ') ? pr.label.split(' — ').slice(1).join(' — ') : (pr?.label || '');
         next.projet = next.projetNom;
         const allowed = new Set(
-          filterWorkersForProject(workerOptions, v).map((w) => w.id),
+          filterWorkersForProject(workerOptions, v, PRESENCE_WORKER_FILTER).map((w) => w.id),
         );
         next.workerIds = (p.workerIds || []).filter((id) => allowed.has(id));
         if (v) {
@@ -281,6 +274,7 @@ export default function Presence() {
         } else {
           next.chefChantierId = '';
           next.chefChantierNom = '';
+          next.workerIds = [];
         }
       }
       if (k === 'chefChantierId') {
@@ -316,8 +310,8 @@ export default function Presence() {
       chefChantierId: record.chefChantierId || '',
       chefChantierNom: record.chefChantier || '',
       date: record.date || today(),
-      heureEntree: record.heureEntree || '07:30',
-      heureSortie: record.heureSortie || '17:00',
+      heureEntree: record.heureEntree || STANDARD_SHIFT_START,
+      heureSortie: record.heureSortie || STANDARD_SHIFT_END,
       statut: record.statut || 'Present',
       notes: record.notes || '',
     });
@@ -390,13 +384,21 @@ export default function Presence() {
   }
 
   const filterWorkerOptions = useMemo(
-    () => filterWorkersForProject(workerOptions, filterProjectId),
+    () => filterWorkersForProject(
+      workerOptions,
+      filterProjectId,
+      filterProjectId ? PRESENCE_WORKER_FILTER : {},
+    ),
     [workerOptions, filterProjectId, filterWorkersForProject],
   );
 
   const modalWorkerOptions = useMemo(
-    () => filterWorkersForProject(workerOptions, form.projectId || filterProjectId),
-    [workerOptions, form.projectId, filterProjectId, filterWorkersForProject],
+    () => filterWorkersForProject(
+      workerOptions,
+      form.projectId,
+      form.projectId ? PRESENCE_WORKER_FILTER : {},
+    ),
+    [workerOptions, form.projectId, filterWorkersForProject],
   );
 
   const filtered = useMemo(

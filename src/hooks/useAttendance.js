@@ -79,6 +79,7 @@ export function useAttendance() {
       label: workerFullName(w),
       project_id: w.project_id || '',
       projet_nom: w.projet_nom || w.chantier || '',
+      assigned_project_ids: w.assigned_project_ids || [],
     })).filter((o) => o.label),
     [workers],
   );

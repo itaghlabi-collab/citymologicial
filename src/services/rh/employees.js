@@ -42,6 +42,58 @@ export function employeeFullName(emp) {
   return [emp.firstname, emp.lastname].filter(Boolean).join(' ').trim();
 }
 
+function employeeDepartmentCode(emp) {
+  if (!emp) return '';
+  const dept = DEPARTMENTS.find(
+    (d) => d.id === emp.department_id || d.nom === emp.department || d.code === emp.department,
+  );
+  return dept?.code || '';
+}
+
+/** Libellé select : NOM PRÉNOM — CODE_DEPT / Fonction */
+export function employeeSelectLabel(emp) {
+  if (!emp) return '';
+  const name = [emp.lastname, emp.firstname].filter(Boolean).join(' ').toUpperCase();
+  const deptCode = employeeDepartmentCode(emp);
+  const poste = (emp.poste || '').trim();
+  let suffix = '—';
+  if (deptCode && poste) suffix = `${deptCode} / ${poste}`;
+  else if (deptCode) suffix = deptCode;
+  else if (poste) suffix = poste;
+  return `${name} — ${suffix}`;
+}
+
+function normEmployeeText(s) {
+  return (s || '')
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+}
+
+/** Retrouve un employé à partir du texte stocké en fiche projet. */
+export function findEmployeeByStoredLabel(employees, stored) {
+  const s = (stored || '').trim();
+  if (!s || !employees?.length) return null;
+  const exact = employees.find((e) => employeeSelectLabel(e) === s);
+  if (exact) return exact;
+  const target = normEmployeeText(s);
+  return employees.find((e) => {
+    const label = normEmployeeText(employeeSelectLabel(e));
+    const name = normEmployeeText(employeeFullName(e));
+    const nameUp = normEmployeeText([e.lastname, e.firstname].filter(Boolean).join(' '));
+    return label === target || target.startsWith(name) || target.startsWith(nameUp);
+  }) || null;
+}
+
+export async function listActiveEmployees() {
+  const rows = await listEmployees();
+  return (rows || []).filter((e) => {
+    const st = (e.statut || 'Actif').toLowerCase();
+    return st === 'actif';
+  });
+}
+
 function isChefChantierPoste(poste) {
   const p = (poste || '')
     .toLowerCase()

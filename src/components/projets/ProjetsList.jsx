@@ -25,7 +25,8 @@ import {
   saveProjectWorkerAssignments,
   removeWorkerFromProject,
 } from '../../services/rh/workerProjectAssignments';
-import { listAssignmentsByProject } from '../../services/rh/subcontractors';
+import { listAssignmentsByProject, listSubcontractors, saveProjectSubcontractorAssignments, removeSubcontractorFromProject, subcontractorFullName } from '../../services/rh/subcontractors';
+import { listActiveEmployees, employeeSelectLabel, findEmployeeByStoredLabel } from '../../services/rh/employees';
 
 // ── Shared primitives ───────────────────────────────────────────────────────
 
@@ -180,6 +181,24 @@ function FormulaireProjet({ initial, onSave, onCancel, saving, clients = [] }) {
   });
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
   const [errors, setErrors] = useState({});
+  const [employees, setEmployees] = useState([]);
+  const [chefProjetId, setChefProjetId] = useState('');
+  const [chefChantierId, setChefChantierId] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    listActiveEmployees()
+      .then((rows) => {
+        if (cancelled) return;
+        setEmployees(rows);
+        const cp = findEmployeeByStoredLabel(rows, initial?.chef_projet || initial?.responsable);
+        const cc = findEmployeeByStoredLabel(rows, initial?.chef_chantier);
+        setChefProjetId(cp?.id ? String(cp.id) : '');
+        setChefChantierId(cc?.id ? String(cc.id) : '');
+      })
+      .catch(() => { if (!cancelled) setEmployees([]); });
+    return () => { cancelled = true; };
+  }, [initial?.id, initial?.chef_projet, initial?.responsable, initial?.chef_chantier]);
 
   function onClientChange(clientId) {
     const cl = clients.find(c => String(c.id) === String(clientId));
@@ -202,8 +221,12 @@ function FormulaireProjet({ initial, onSave, onCancel, saving, clients = [] }) {
     const e = validate();
     if (Object.keys(e).length) { setErrors(e); return; }
     const cl = clients.find(c => String(c.id) === String(form.client_id));
+    const cp = employees.find((e) => String(e.id) === String(chefProjetId));
+    const cc = employees.find((e) => String(e.id) === String(chefChantierId));
     onSave({
       ...form,
+      chef_projet: cp ? employeeSelectLabel(cp) : '',
+      chef_chantier: cc ? employeeSelectLabel(cc) : '',
       client_nom: cl ? clientDisplayName(cl) : (form.client || '').trim(),
       avancement: Number(form.avancement) || 0,
       budget_approuve: Number(form.budget_approuve) || 0,
@@ -246,8 +269,30 @@ function FormulaireProjet({ initial, onSave, onCancel, saving, clients = [] }) {
             ))}
           </select>
         </FField>
-        {inp('chef_projet', 'text', 'Responsable')}
-        {inp('chef_chantier', 'text', 'Chef de chantier')}
+        <FField label="Chef de projet">
+          <select
+            value={chefProjetId}
+            onChange={(e) => setChefProjetId(e.target.value)}
+            style={SELECT_STYLE}
+          >
+            <option value="">Choisir un employé...</option>
+            {employees.map((e) => (
+              <option key={e.id} value={e.id}>{employeeSelectLabel(e)}</option>
+            ))}
+          </select>
+        </FField>
+        <FField label="Chef de chantier">
+          <select
+            value={chefChantierId}
+            onChange={(e) => setChefChantierId(e.target.value)}
+            style={SELECT_STYLE}
+          >
+            <option value="">Choisir un employé...</option>
+            {employees.map((e) => (
+              <option key={e.id} value={e.id}>{employeeSelectLabel(e)}</option>
+            ))}
+          </select>
+        </FField>
       </FRow>
       <FRow>{inp('devis_lie', 'text', 'Référence devis lié')}{inp('budget_approuve', 'number', 'Budget approuvé (MAD)')}</FRow>
       <FRow>{inp('date_debut', 'date', 'Date début')}{inp('date_fin_prevue', 'date', 'Date fin prévue')}</FRow>
@@ -310,25 +355,30 @@ function ProjectEquipeTab({ projet, compact = false }) {
   const [workerAssignments, setWorkerAssignments] = useState([]);
   const [subAssignments, setSubAssignments] = useState([]);
   const [allWorkers, setAllWorkers] = useState([]);
+  const [allSubcontractors, setAllSubcontractors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState(null);
   const [showAssignModal, setShowAssignModal] = useState(false);
+  const [showSubModal, setShowSubModal] = useState(false);
   const [selectedIds, setSelectedIds] = useState(() => new Set());
+  const [selectedSubIds, setSelectedSubIds] = useState(() => new Set());
 
   const load = useCallback(async () => {
     if (!projet?.id) return;
     setLoading(true);
     setLoadError(null);
     try {
-      const [wa, sa, workers] = await Promise.all([
+      const [wa, sa, workers, subs] = await Promise.all([
         listWorkersByProject(projet.id),
         listAssignmentsByProject(projet.id).catch(() => []),
         listWorkers().catch(() => []),
+        listSubcontractors().catch(() => []),
       ]);
       setWorkerAssignments(wa);
-      setSubAssignments(sa);
+      setSubAssignments((sa || []).filter((s) => s.status === 'active'));
       setAllWorkers(workers);
+      setAllSubcontractors(subs);
     } catch (err) {
       console.error('[CITYMO] ProjectEquipeTab load', err);
       const msg = err?.message || '';
@@ -345,13 +395,33 @@ function ProjectEquipeTab({ projet, compact = false }) {
   useEffect(() => { load(); }, [load]);
 
   const assignableWorkers = useMemo(
-    () => (allWorkers || []).filter((w) => !['archive', 'suspendu', 'annule'].includes(w.statut)),
+    () => (allWorkers || []).filter((w) => w.statut === 'actif'),
     [allWorkers],
+  );
+
+  const assignableSubcontractors = useMemo(
+    () => (allSubcontractors || []).filter((s) => s.statut === 'actif'),
+    [allSubcontractors],
   );
 
   function openAssignModal() {
     setSelectedIds(new Set(workerAssignments.map((a) => String(a.workerId))));
     setShowAssignModal(true);
+  }
+
+  function openSubModal() {
+    setSelectedSubIds(new Set(subAssignments.map((a) => String(a.subcontractorId))));
+    setShowSubModal(true);
+  }
+
+  function toggleSub(id) {
+    const sid = String(id);
+    setSelectedSubIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(sid)) next.delete(sid);
+      else next.add(sid);
+      return next;
+    });
   }
 
   function toggleWorker(id) {
@@ -372,6 +442,36 @@ function ProjectEquipeTab({ projet, compact = false }) {
       setShowAssignModal(false);
     } catch (err) {
       alert(err.message || 'Erreur lors de l\'affectation.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleSaveSubAssignments() {
+    setSaving(true);
+    try {
+      const updated = await saveProjectSubcontractorAssignments(
+        projet.id,
+        [...selectedSubIds],
+        { nom: projet.nom, ref: projet.ref },
+      );
+      setSubAssignments((updated || []).filter((s) => s.status === 'active'));
+      setShowSubModal(false);
+    } catch (err) {
+      alert(err.message || 'Erreur lors de l\'affectation.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleRemoveSubcontractor(subcontractorId) {
+    if (!window.confirm('Retirer ce sous-traitant du projet ?')) return;
+    setSaving(true);
+    try {
+      await removeSubcontractorFromProject(projet.id, subcontractorId);
+      await load();
+    } catch (err) {
+      alert(err.message || 'Erreur.');
     } finally {
       setSaving(false);
     }
@@ -456,22 +556,32 @@ function ProjectEquipeTab({ projet, compact = false }) {
         )}
 
         <div style={{ marginTop: 24, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
-          <div style={{ fontSize: '0.82rem', fontWeight: 700, marginBottom: 10, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <ClipboardList size={15} /> Sous-traitants affectés ({subAssignments.length})
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+            <div style={{ fontSize: '0.82rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
+              <ClipboardList size={15} /> Sous-traitants affectés ({subAssignments.length})
+            </div>
+            <button type="button" className="btn btn-primary btn-sm" onClick={openSubModal} disabled={saving} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <Plus size={14} /> Affecter des sous-traitants
+            </button>
           </div>
           {subAssignments.length === 0 ? (
-            <div style={{ color: 'var(--text-3)', fontSize: '0.84rem' }}>
-              Aucun sous-traitant — gérez les affectations depuis le module Sous-traitants.
+            <div style={{ padding: '20px 0', color: 'var(--text-3)', fontSize: '0.85rem', textAlign: 'center' }}>
+              Aucun sous-traitant affecté — utilisez le bouton ci-dessus.
             </div>
           ) : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {subAssignments.map((s) => (
-                <div key={s.id} style={{ padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 8 }}>
-                  <div style={{ fontWeight: 700 }}>{s.subcontractorName || '—'}</div>
-                  <div style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>
-                    {s.subcontractorFonction || s.role || '—'}
-                    {s.unitPrice > 0 ? ` · ${Number(s.unitPrice).toLocaleString('fr-MA')} MAD` : ''}
+                <div key={s.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 8, gap: 10 }}>
+                  <div>
+                    <div style={{ fontWeight: 700 }}>{s.subcontractorName || '—'}</div>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>
+                      {s.subcontractorFonction || s.role || '—'}
+                      {s.unitPrice > 0 ? ` · ${Number(s.unitPrice).toLocaleString('fr-MA')} MAD` : ''}
+                    </div>
                   </div>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleRemoveSubcontractor(s.subcontractorId)} disabled={saving} title="Retirer">
+                    <Trash2 size={13} style={{ color: 'var(--red)' }} />
+                  </button>
                 </div>
               ))}
             </div>
@@ -515,6 +625,43 @@ function ProjectEquipeTab({ projet, compact = false }) {
         <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
           <button type="button" className="btn btn-secondary" onClick={() => setShowAssignModal(false)} disabled={saving}>Annuler</button>
           <button type="button" className="btn btn-primary" onClick={handleSaveAssignments} disabled={saving || assignableWorkers.length === 0}>
+            {saving ? 'Enregistrement…' : 'Enregistrer l\'affectation'}
+          </button>
+        </div>
+      </Modal>
+
+      <Modal open={showSubModal} onClose={() => !saving && setShowSubModal(false)} title="Affecter des sous-traitants" width={520}>
+        <p style={{ fontSize: '0.84rem', color: 'var(--text-3)', marginBottom: 14 }}>
+          Projet : <strong>{projet.nom}</strong> — cochez les sous-traitants actifs à affecter.
+        </p>
+        {assignableSubcontractors.length === 0 ? (
+          <div style={{ color: 'var(--text-3)', padding: '16px 0' }}>Aucun sous-traitant actif disponible.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 360, overflowY: 'auto', marginBottom: 16 }}>
+            {assignableSubcontractors.map((s) => {
+              const checked = selectedSubIds.has(String(s.id));
+              return (
+                <label
+                  key={s.id}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 8, cursor: 'pointer',
+                    border: `1.5px solid ${checked ? 'var(--red)' : 'var(--border)'}`,
+                    background: checked ? '#FFF5F5' : '#fff',
+                  }}
+                >
+                  <input type="checkbox" checked={checked} onChange={() => toggleSub(s.id)} />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 700 }}>{subcontractorFullName(s)}</div>
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-3)' }}>{s.fonction || '—'}</div>
+                  </div>
+                </label>
+              );
+            })}
+          </div>
+        )}
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button type="button" className="btn btn-secondary" onClick={() => setShowSubModal(false)} disabled={saving}>Annuler</button>
+          <button type="button" className="btn btn-primary" onClick={handleSaveSubAssignments} disabled={saving || assignableSubcontractors.length === 0}>
             {saving ? 'Enregistrement…' : 'Enregistrer l\'affectation'}
           </button>
         </div>

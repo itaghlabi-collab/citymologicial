@@ -456,6 +456,77 @@ export async function listAssignmentsByProject(projectId) {
   }));
 }
 
+/**
+ * Synchronise les sous-traitants affectés à un projet (modale multi-select).
+ */
+export async function saveProjectSubcontractorAssignments(projectId, subcontractorIds = [], projectMeta = {}) {
+  if (!projectId) {
+    const err = new Error('Projet requis.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  await getAuthUserId();
+  const pid = String(projectId);
+  const desired = new Set((subcontractorIds || []).map(String));
+
+  const { data: existing, error: listErr } = await getSupabase()
+    .from(ASSIGN_TABLE)
+    .select('id, subcontractor_id, status')
+    .eq('project_id', pid);
+  if (listErr) throw listErr;
+
+  const bySub = new Map((existing || []).map((r) => [String(r.subcontractor_id), r]));
+
+  for (const subId of desired) {
+    const row = bySub.get(subId);
+    if (row) {
+      if (row.status !== 'active') {
+        const { error } = await getSupabase()
+          .from(ASSIGN_TABLE)
+          .update({ status: 'active' })
+          .eq('id', row.id);
+        if (error) throw error;
+      }
+    } else {
+      const { error } = await getSupabase()
+        .from(ASSIGN_TABLE)
+        .insert([{
+          subcontractor_id: subId,
+          project_id: pid,
+          project_ref: emptyToNull(projectMeta.ref),
+          project_name: emptyToNull(projectMeta.nom),
+          status: 'active',
+        }]);
+      if (error) throw error;
+    }
+  }
+
+  for (const row of existing || []) {
+    const sid = String(row.subcontractor_id);
+    if (!desired.has(sid) && row.status === 'active') {
+      const { error } = await getSupabase()
+        .from(ASSIGN_TABLE)
+        .update({ status: 'annulée' })
+        .eq('id', row.id);
+      if (error) throw error;
+    }
+  }
+
+  return listAssignmentsByProject(pid);
+}
+
+export async function removeSubcontractorFromProject(projectId, subcontractorId) {
+  if (!projectId || !subcontractorId) return;
+  await getAuthUserId();
+  const { error } = await getSupabase()
+    .from(ASSIGN_TABLE)
+    .update({ status: 'annulée' })
+    .eq('project_id', projectId)
+    .eq('subcontractor_id', subcontractorId)
+    .eq('status', 'active');
+  if (error) throw error;
+}
+
 /** Sous-traitants payables sur un projet : affectations d'abord, sinon tous les actifs */
 export async function listSubcontractorsForProjectPayment(projectId) {
   if (!projectId) return [];
