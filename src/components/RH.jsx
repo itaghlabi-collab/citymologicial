@@ -1,4 +1,4 @@
-import { Users, Plus, Edit2, Trash2, Search, UserCheck, X, Upload, Download, Loader, FolderOpen } from 'lucide-react';
+import { Users, Plus, Edit2, Trash2, Search, UserCheck, X, Upload, Download, Loader, FolderOpen, Eye } from 'lucide-react';
 import { useState, useRef } from 'react';
 import { DEPARTMENTS } from '../data/departments';
 import { useEmployees } from '../hooks/useEmployees';
@@ -105,6 +105,7 @@ export default function RH() {
   const [toast, setToast] = useState(null);
   const [pdfLoadingId, setPdfLoadingId] = useState(null);
   const [docsEmployee, setDocsEmployee] = useState(null);
+  const [docsMode, setDocsMode] = useState('manage');
   const toastTimer = useRef(null);
 
   function showToast(type, msg) {
@@ -458,8 +459,18 @@ export default function RH() {
                           type="button"
                           className="btn btn-ghost btn-sm"
                           style={{ padding: '4px 8px' }}
-                          title="Documents"
-                          onClick={() => setDocsEmployee(emp)}
+                          title="Dossier administratif"
+                          onClick={() => { setDocsMode('view'); setDocsEmployee(emp); }}
+                        >
+                          <Eye size={13} />
+                        </button>
+
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          style={{ padding: '4px 8px' }}
+                          title="Gérer les documents"
+                          onClick={() => { setDocsMode('manage'); setDocsEmployee(emp); }}
                         >
                           <FolderOpen size={13} />
                         </button>
@@ -712,7 +723,8 @@ export default function RH() {
       {docsEmployee && (
         <EmployeeDocuments
           employee={docsEmployee}
-          onClose={() => setDocsEmployee(null)}
+          mode={docsMode}
+          onClose={() => { setDocsEmployee(null); setDocsMode('manage'); }}
         />
       )}
     </div>

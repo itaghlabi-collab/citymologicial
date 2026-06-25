@@ -54,7 +54,8 @@ const selectStyle = {
   boxSizing: 'border-box',
 };
 
-export default function EmployeeDocuments({ employee, onClose }) {
+export default function EmployeeDocuments({ employee, onClose, mode = 'manage' }) {
+  const readOnly = mode === 'view';
   const [docs, setDocs] = useState([]);
   const [loading, setLoading] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -167,13 +168,19 @@ export default function EmployeeDocuments({ employee, onClose }) {
   return (
     <>
       <div className="rh-emp-docs-drawer-overlay" onClick={onClose} aria-hidden="true" />
-      <aside className="rh-emp-docs-drawer" role="dialog" aria-label={`Dossier documentaire — ${fullName}`}>
+      <aside
+        className="rh-emp-docs-drawer"
+        role="dialog"
+        aria-label={`${readOnly ? 'Dossier administratif' : 'Dossier documentaire'} — ${fullName}`}
+      >
         <header className="rh-emp-docs-drawer-header">
           <div>
             <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-              Dossier documentaire
+              {readOnly ? 'Dossier administratif' : 'Dossier documentaire'}
             </div>
-            <h2 className="rh-emp-docs-drawer-title">DOSSIER DOCUMENTAIRE — {fullName}</h2>
+            <h2 className="rh-emp-docs-drawer-title">
+              {readOnly ? 'DOSSIER ADMINISTRATIF' : 'DOSSIER DOCUMENTAIRE'} — {fullName}
+            </h2>
           </div>
           <button type="button" className="rh-emp-modal-close" onClick={onClose} aria-label="Fermer">
             <X size={20} />
@@ -215,17 +222,19 @@ export default function EmployeeDocuments({ employee, onClose }) {
             </div>
           </div>
 
-          <div className="flex-between" style={{ marginBottom: 12 }}>
-            <button
-              type="button"
-              className="btn btn-primary btn-sm"
-              onClick={() => setShowUpload((v) => !v)}
-            >
-              <Plus size={14} /> Ajouter un document
-            </button>
-          </div>
+          {!readOnly && (
+            <div className="flex-between" style={{ marginBottom: 12 }}>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() => setShowUpload((v) => !v)}
+              >
+                <Plus size={14} /> Ajouter un document
+              </button>
+            </div>
+          )}
 
-          {showUpload && (
+          {!readOnly && showUpload && (
             <div className="rh-emp-docs-upload-panel">
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 12 }}>
                 <div>
@@ -335,18 +344,22 @@ export default function EmployeeDocuments({ employee, onClose }) {
                             <button type="button" className="btn btn-ghost btn-sm" title="Télécharger" onClick={() => handleDownload(doc)}>
                               <Download size={13} />
                             </button>
-                            <button type="button" className="btn btn-ghost btn-sm" title="Renommer" onClick={() => handleRename(doc)}>
-                              <Pencil size={13} />
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn-ghost btn-sm"
-                              title="Supprimer"
-                              onClick={() => handleDelete(doc)}
-                              style={{ color: 'var(--red)' }}
-                            >
-                              <Trash2 size={13} />
-                            </button>
+                            {!readOnly && (
+                              <>
+                                <button type="button" className="btn btn-ghost btn-sm" title="Renommer" onClick={() => handleRename(doc)}>
+                                  <Pencil size={13} />
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-ghost btn-sm"
+                                  title="Supprimer"
+                                  onClick={() => handleDelete(doc)}
+                                  style={{ color: 'var(--red)' }}
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              </>
+                            )}
                           </div>
                         </li>
                       ))}
@@ -362,7 +375,9 @@ export default function EmployeeDocuments({ employee, onClose }) {
               <FolderOpen size={36} style={{ color: 'var(--text-3)', marginBottom: 10 }} />
               <div style={{ fontWeight: 600, color: 'var(--text-2)' }}>Dossier vide</div>
               <div style={{ fontSize: '0.84rem', color: 'var(--text-3)', marginTop: 4 }}>
-                Ajoutez les documents RH de cet employé via le bouton ci-dessus.
+                {readOnly
+                  ? 'Aucun document administratif enregistré pour cet employé.'
+                  : 'Ajoutez les documents RH de cet employé via le bouton ci-dessus.'}
               </div>
             </div>
           )}
