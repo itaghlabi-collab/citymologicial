@@ -203,6 +203,17 @@ function resolveWorkerSyncDate(entity) {
   return todayIsoLocal();
 }
 
+/** Date caisse ordre = date réelle du paiement (pas date_ordre / date prévue). */
+function resolvePaymentOrderSyncDate(entity) {
+  const paymentDate = entity?.date_paiement || entity?.paymentDate || entity?.payment_date;
+  if (paymentDate) return String(paymentDate).slice(0, 10);
+  if (isPaidStatut(entity?.statut, PAID_ORDER_STATUTS)) {
+    const ts = entity?.updated_at || entity?.updatedAt;
+    if (ts) return String(ts).slice(0, 10);
+  }
+  return entity?.date || entity?.date_ordre || entity?.date_prevue || todayIsoLocal();
+}
+
 function resolveWorkerSyncMontant(entity) {
   return Number(entity?.net_to_pay ?? entity?.paid_amount ?? entity?.total ?? entity?.montant_net) || 0;
 }
@@ -231,7 +242,7 @@ function buildTransactionRow(sourceType, entity) {
       };
     case FINANCE_SOURCE_TYPES.PAYMENT_ORDER:
       return {
-        date_operation: entity.date || entity.date_ordre || entity.date_prevue,
+        date_operation: resolvePaymentOrderSyncDate(entity),
         sens: 'sortie',
         type_operation: 'ordre_paiement',
         contrepartie: entity.beneficiaire || '',

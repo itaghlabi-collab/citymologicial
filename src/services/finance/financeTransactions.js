@@ -198,18 +198,47 @@ export async function syncPaymentOrderToTransaction(order) {
   return syncFinanceTransaction(FINANCE_SOURCE_TYPES.PAYMENT_ORDER, order.id, { entity: order });
 }
 
+const PAID_ORDER_STATUTS = ['Payé', 'Exécuté', 'Comptabilisé'];
+
+/** Rattrapage ordres payés → date caisse = date réelle du paiement. */
+export async function backfillPaymentOrdersToCash() {
+  const { data, error } = await getSupabase()
+    .from('payment_orders')
+    .select('*')
+    .in('statut', PAID_ORDER_STATUTS);
+  if (error) throw error;
+  const { normalizePaymentOrder } = await import('./paymentOrders');
+  let synced = 0;
+  const errors = [];
+  for (const row of data || []) {
+    try {
+      await syncPaymentOrderToTransaction(normalizePaymentOrder(row));
+      synced += 1;
+    } catch (err) {
+      errors.push({ id: row.id, message: err?.message || String(err) });
+    }
+  }
+  return { synced, errors };
+}
+
 /** Rattrapage RH → feuille de caisse (ouvriers + sous-traitants déjà payés). */
 export async function runRhPaymentsCashBackfill() {
   const { backfillWorkerPayrollToCash } = await import('../rh/workerPayroll');
   const { backfillSubcontractorPaymentsToCash } = await import('../rh/subcontractors');
-  const [payrollRes, subcontractorRes] = await Promise.all([
+  const [payrollRes, subcontractorRes, ordersRes] = await Promise.all([
     backfillWorkerPayrollToCash(),
     backfillSubcontractorPaymentsToCash(),
+    backfillPaymentOrdersToCash().catch((err) => ({ synced: 0, errors: [{ message: err?.message }] })),
   ]);
   const payroll = payrollRes?.synced ?? 0;
   const subcontractor = subcontractorRes?.synced ?? 0;
+  const orders = ordersRes?.synced ?? 0;
   const legacyPurged = payrollRes?.legacyPurged ?? 0;
   const removed = (payrollRes?.removed ?? 0) + (subcontractorRes?.removed ?? 0);
-  const errors = [...(payrollRes?.errors || []), ...(subcontractorRes?.errors || [])];
-  return { payroll, subcontractor, removed, legacyPurged, total: payroll + subcontractor, errors };
+  const errors = [
+    ...(payrollRes?.errors || []),
+    ...(subcontractorRes?.errors || []),
+    ...(ordersRes?.errors || []),
+  ];
+  return { payroll, subcontractor, orders, removed, legacyPurged, total: payroll + subcontractor + orders, errors };
 }
