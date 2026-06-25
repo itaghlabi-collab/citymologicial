@@ -4,7 +4,7 @@
 import { useMemo, useState } from 'react';
 import { ChevronDown, ChevronRight, Edit2, Plus } from 'lucide-react';
 import { buildWbsTree, flattenWbsTree } from '../../services/projects/projectPlanningTasks';
-import { planningStatutMeta, planningLotColor } from '../../constants/projectPlanning';
+import { planningStatutMeta, planningTaskBarColor } from '../../constants/projectPlanning';
 
 const HDR = {
   background: 'linear-gradient(135deg, var(--red-dark) 0%, var(--red) 100%)',
@@ -59,7 +59,7 @@ export default function PlanningWbsView({ tasks, onEdit, onAddChild }) {
       </div>
       {rows.map((row, i) => {
         const st = planningStatutMeta(row.statut);
-        const color = planningLotColor(row.lot);
+        const color = planningTaskBarColor(row);
         return (
           <div
             key={row.id}

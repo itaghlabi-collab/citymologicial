@@ -2,7 +2,7 @@
  * projectPlanningPdf.js — Export PDF planning Gantt (1 page, timeline condensée)
  */
 import { jsPDF } from 'jspdf';
-import { planningLotColor } from '../../constants/projectPlanning';
+import { planningLotColor, planningTaskBarColor } from '../../constants/projectPlanning';
 import { loadCompanyLogoFit } from '../finance/pdfShared';
 import {
   buildGanttDisplayRows,
@@ -630,7 +630,7 @@ function drawRow(doc, layout, row, y, minDate, maxDate, rowH, criticalIds, tasks
     ? isSummaryCritical(row, tasks, criticalIds)
     : (row.id && criticalIds.has(row.id));
   const lot = row.lot || row.nom;
-  const rgb = isCritical ? CRITICAL : hexToRgb(planningLotColor(lot));
+  const rgb = isCritical ? CRITICAL : hexToRgb(planningTaskBarColor(row));
 
   if (isSummary) {
     drawSummaryBar(doc, bar, barY, barH, rgb);

@@ -42,6 +42,20 @@ export function planningLotColor(lot) {
   return LOT_COLORS[lot] || LOT_COLORS.Autre;
 }
 
+/** Nuancier couleur personnalisée tâche planning (Gantt). */
+export const PLANNING_TASK_PALETTE = [
+  '#795548', '#5D4037', '#1565C0', '#0277BD', '#00897B',
+  '#2E7D32', '#F9A825', '#E65100', '#C62828', '#8E24AA',
+  '#7B1FA2', '#6D4C41', '#455A64', '#757575', '#212121',
+];
+
+/** Couleur barre Gantt : personnalisée si définie, sinon couleur du lot. */
+export function planningTaskBarColor(task) {
+  const custom = (task?.couleur || '').trim();
+  if (custom && /^#[0-9A-Fa-f]{6}$/.test(custom)) return custom;
+  return planningLotColor(task?.lot);
+}
+
 export const RESOURCE_TYPES = [
   { value: 'travail', label: 'Travail' },
   { value: 'materiel', label: 'Matériel' },

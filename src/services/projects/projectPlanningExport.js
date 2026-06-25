@@ -24,7 +24,7 @@ function downloadBlob(filename, content, mime) {
 }
 
 export function exportPlanningTasksCsv(projet, tasks = []) {
-  const headers = ['WBS', 'Tâche', 'Lot', 'Début', 'Fin', 'Durée (j)', 'Avancement %', 'Statut', 'Responsable', 'Notes'];
+  const headers = ['WBS', 'Tâche', 'Lot', 'Début', 'Fin', 'Durée (j)', 'Avancement %', 'Statut', 'Responsable', 'Couleur', 'Notes'];
   const lines = [headers.map(escCsv).join(';')];
   tasks.forEach((t, i) => {
     lines.push([
@@ -37,6 +37,7 @@ export function exportPlanningTasksCsv(projet, tasks = []) {
       t.avancement,
       t.statut,
       t.responsable,
+      t.couleur || '',
       t.notes,
     ].map(escCsv).join(';'));
   });

@@ -129,6 +129,15 @@ export function filterChefsChantierEmployees(employees) {
   return (employees || []).filter((e) => isChefChantierPoste(e.poste));
 }
 
+/** Responsables planning : chef de projet, chef de chantier, conducteur de travaux, responsable chantier. */
+export function isPlanningResponsablePoste(poste) {
+  return isChefProjetPoste(poste) || isChefChantierPoste(poste);
+}
+
+export function filterPlanningResponsables(employees) {
+  return (employees || []).filter((e) => isPlanningResponsablePoste(e.poste));
+}
+
 /** Inclut l'employé sélectionné même si son poste ne correspond plus au filtre. */
 export function withSelectedEmployee(filtered, allEmployees, selectedId) {
   const list = filtered || [];

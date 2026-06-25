@@ -27,8 +27,10 @@ import {
   PLANNING_STATUTS,
   planningStatutMeta,
   planningLotColor,
+  planningTaskBarColor,
+  PLANNING_TASK_PALETTE,
 } from '../../constants/projectPlanning';
-import { listActiveEmployees, employeeSelectLabel } from '../../services/rh/employees';
+import { listActiveEmployees, employeeSelectLabel, filterPlanningResponsables } from '../../services/rh/employees';
 
 const ROW_H = 34;
 const HDR_H = 50;
@@ -58,6 +60,7 @@ const EMPTY_TASK = {
   notes: '',
   predecessor_id: '',
   parent_id: '',
+  couleur: '',
 };
 
 const GANTT_HDR = {
@@ -91,6 +94,47 @@ function Toast({ msg, onClose }) {
     >
       {msg}
     </div>
+  );
+}
+
+function TaskColorPicker({ lot, value, onChange }) {
+  const defaultColor = planningLotColor(lot);
+  return (
+    <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase' }}>
+        Couleur de la tâche
+      </span>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, alignItems: 'center' }}>
+        <button
+          type="button"
+          title="Couleur par défaut (lot)"
+          onClick={() => onChange('')}
+          style={{
+            width: 28, height: 28, borderRadius: 6, cursor: 'pointer', padding: 0,
+            background: defaultColor,
+            border: !value ? '3px solid var(--red)' : '2px solid var(--border)',
+            boxShadow: 'inset 0 0 0 2px #fff',
+          }}
+        />
+        {PLANNING_TASK_PALETTE.map((c) => (
+          <button
+            key={c}
+            type="button"
+            title={c}
+            onClick={() => onChange(c)}
+            style={{
+              width: 28, height: 28, borderRadius: 6, cursor: 'pointer', padding: 0,
+              background: c,
+              border: value === c ? '3px solid var(--red)' : '2px solid #fff',
+              boxShadow: '0 0 0 1px var(--border)',
+            }}
+          />
+        ))}
+      </div>
+      <span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>
+        {value ? `Couleur sélectionnée : ${value}` : 'Couleur du lot utilisée par défaut'}
+      </span>
+    </label>
   );
 }
 
@@ -217,6 +261,9 @@ function TaskModal({ open, task, tasks, employees, saving, onClose, onSave, defa
               <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase' }}>Responsable</span>
               <select value={form.responsable} onChange={(e) => setField('responsable', e.target.value)} style={{ ...IS, cursor: 'pointer' }}>
                 <option value="">— Choisir —</option>
+                {form.responsable && !employees.some((e) => employeeSelectLabel(e) === form.responsable) && (
+                  <option value={form.responsable}>{form.responsable}</option>
+                )}
                 {employees.map((e) => (
                   <option key={e.id} value={employeeSelectLabel(e)}>{employeeSelectLabel(e)}</option>
                 ))}
@@ -228,8 +275,14 @@ function TaskModal({ open, task, tasks, employees, saving, onClose, onSave, defa
             </label>
           </div>
 
+          <TaskColorPicker
+            lot={form.lot}
+            value={form.couleur || ''}
+            onChange={(c) => setField('couleur', c)}
+          />
+
           <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase' }}>Tâche parente (WBS)</span>
+            <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase' }}>Lot de travaux</span>
             <select value={form.parent_id} onChange={(e) => setField('parent_id', e.target.value)} style={{ ...IS, cursor: 'pointer' }}>
               <option value="">— Racine —</option>
               {predecessors.map((t) => (
@@ -274,7 +327,7 @@ function GanttBar({ row, minDate, dayWidth, onEdit, onShift, onBarChange }) {
   if (!bar) return null;
 
   const isSummary = row.type === 'summary';
-  const color = isSummary ? 'var(--red-dark)' : planningLotColor(row.lot);
+  const color = isSummary ? 'var(--red-dark)' : planningTaskBarColor(row);
   const pct = Math.min(100, Math.max(0, Number(row.avancement) || 0));
   const h = isSummary ? 10 : 14;
   const top = isSummary ? 12 : 10;
@@ -673,6 +726,11 @@ export default function ProjectPlanningGantt({
     }
   }, [addChildParent]);
 
+  const responsableEmployees = useMemo(
+    () => filterPlanningResponsables(employees),
+    [employees],
+  );
+
   const filtered = useMemo(() => filterPlanningTasks(tasks, filters), [tasks, filters]);
 
   const taskById = useMemo(() => {
@@ -885,7 +943,7 @@ export default function ProjectPlanningGantt({
         open={modalOpen}
         task={editTask}
         tasks={tasks}
-        employees={employees}
+        employees={responsableEmployees}
         saving={saving}
         defaultParentId={addChildParent?.id}
         onClose={() => { setModalOpen(false); setEditTask(null); onExternalEditClear?.(); }}
