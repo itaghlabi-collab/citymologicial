@@ -3,6 +3,7 @@
  */
 import { getSupabase } from '../../lib/supabase';
 import { DEPARTMENTS } from '../../data/departments';
+import { purgeEmployeeDocuments } from './employeeDocuments';
 
 const TABLE = 'employees';
 
@@ -218,6 +219,7 @@ export async function updateEmployee(id, form) {
 }
 
 export async function deleteEmployee(id) {
+  await purgeEmployeeDocuments(id);
   const { error } = await getSupabase().from(TABLE).delete().eq('id', id);
   if (error) throw error;
 }

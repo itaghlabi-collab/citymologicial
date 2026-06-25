@@ -3236,6 +3236,245 @@ tbody tr:last-child td { border-bottom: none; }
 }
 
 /* =============================================
+   RH — Dossier documentaire employé (drawer)
+   ============================================= */
+
+.rh-emp-docs-drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 1100;
+}
+
+.rh-emp-docs-drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  width: min(920px, 96vw);
+  background: #fff;
+  box-shadow: -8px 0 40px rgba(0, 0, 0, 0.18);
+  z-index: 1101;
+  display: flex;
+  flex-direction: column;
+  animation: rhDocsSlideIn 0.22s ease;
+}
+
+@keyframes rhDocsSlideIn {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+.rh-emp-docs-drawer-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 20px 24px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.rh-emp-docs-drawer-title {
+  font-family: var(--font-head);
+  font-weight: 800;
+  font-size: 1.05rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin: 6px 0 0;
+  line-height: 1.3;
+}
+
+.rh-emp-docs-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 20px 24px 28px;
+}
+
+.rh-emp-docs-info-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 14px 16px;
+  background: var(--surface-2);
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}
+
+.rh-emp-docs-info-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--text-3);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.rh-emp-docs-info-value {
+  font-weight: 600;
+  font-size: 0.88rem;
+  margin-top: 4px;
+}
+
+.rh-emp-docs-stats {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 18px;
+}
+
+.rh-emp-docs-stat {
+  flex: 1;
+  min-width: 120px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.rh-emp-docs-stat-num {
+  display: block;
+  font-family: var(--font-head);
+  font-weight: 800;
+  font-size: 1.2rem;
+  color: var(--text-1);
+}
+
+.rh-emp-docs-stat-lbl {
+  display: block;
+  font-size: 0.72rem;
+  color: var(--text-3);
+  margin-top: 2px;
+}
+
+.rh-emp-docs-upload-panel {
+  margin-bottom: 18px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+}
+
+.rh-emp-docs-dropzone {
+  background: #fff;
+  border: 2px dashed var(--border);
+  border-radius: 8px;
+  padding: 22px 20px;
+  text-align: center;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.rh-emp-docs-dropzone.rh-emp-docs-drop-active {
+  border-color: var(--red);
+  background: #FFF8F8;
+}
+
+.rh-emp-docs-section {
+  margin-bottom: 20px;
+}
+
+.rh-emp-docs-section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-head);
+  font-size: 0.82rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin: 0 0 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--border);
+}
+
+.rh-emp-docs-section-count {
+  margin-left: auto;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-3);
+  background: var(--surface-2);
+  padding: 2px 8px;
+  border-radius: 99px;
+}
+
+.rh-emp-docs-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rh-emp-docs-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.rh-emp-docs-item-icon {
+  color: var(--red);
+  flex-shrink: 0;
+}
+
+.rh-emp-docs-item-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.rh-emp-docs-item-name {
+  font-weight: 600;
+  font-size: 0.85rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.rh-emp-docs-item-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  font-size: 0.72rem;
+  color: var(--text-3);
+  margin-top: 3px;
+}
+
+.rh-emp-docs-item-actions {
+  display: flex;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.rh-emp-docs-empty {
+  font-size: 0.82rem;
+  color: var(--text-3);
+  padding: 8px 4px 4px;
+}
+
+.rh-emp-docs-empty-state {
+  text-align: center;
+  padding: 32px 16px;
+  border: 2px dashed var(--border);
+  border-radius: 10px;
+  margin-top: 8px;
+}
+
+@media (max-width: 768px) {
+  .rh-emp-docs-info-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .rh-emp-docs-drawer {
+    width: 100vw;
+  }
+}
+
+/* =============================================
    CIN — Zones Documents (modal Ouvrier) + cadre preview
    ============================================= */
 
