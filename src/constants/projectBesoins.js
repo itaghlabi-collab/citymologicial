@@ -1,9 +1,13 @@
-/** Métiers / fonctions chantier (aligné ouvriers externes) */
-export const BESOIN_FONCTIONS = [
-  'Maçon', 'Coffreur', 'Ferrailleur', 'Électricien', 'Peintre', 'Plombier',
-  'Carreleur', 'Menuisier', 'Soudeur', 'Chauffeur', 'Manœuvre', 'Chef équipe',
-  'Conducteur engins', 'Topographe',
+/** Types de besoins RH projet (centralisation matériel → Demandes chantier / Inventaire) */
+export const BESOIN_RH_TYPES = [
+  'Chef de chantier',
+  'Chef de projet',
+  'Ouvriers',
+  'Sous-traitants',
 ];
+
+/** @deprecated Utiliser BESOIN_RH_TYPES */
+export const BESOIN_FONCTIONS = BESOIN_RH_TYPES;
 
 export const BESOIN_PRIORITES = ['Normale', 'Haute', 'Urgente'];
 
@@ -20,8 +24,24 @@ export const BESOIN_STAFF_STATUTS = {
   manque: { label: 'Manque', badge: 'badge-red' },
 };
 
-export const BESOIN_MODULE_TABS = [
-  { id: 'rh', label: 'Ressources humaines' },
-  { id: 'materiels', label: 'Matériels / Équipements' },
-  { id: 'materiaux', label: 'Matériaux' },
-];
+export function normBesoinFonction(s) {
+  return (s || '').trim().toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
+}
+
+export function isChefChantierFonction(fonction) {
+  const n = normBesoinFonction(fonction);
+  return (n.includes('chef') && n.includes('chantier'))
+    || (n.includes('conducteur') && n.includes('travaux'))
+    || (n.includes('responsable') && n.includes('chantier'));
+}
+
+export function isChefProjetFonction(fonction) {
+  const n = normBesoinFonction(fonction);
+  return (n.includes('chef') && n.includes('projet'))
+    || (n.includes('project') && n.includes('manager'))
+    || (n.includes('responsable') && n.includes('projet'));
+}
+
+export function isOuvrierFonction(fonction) {
+  return !isChefChantierFonction(fonction) && !isChefProjetFonction(fonction);
+}

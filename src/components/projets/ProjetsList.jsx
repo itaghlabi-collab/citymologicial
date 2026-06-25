@@ -972,7 +972,7 @@ function DetailProjet({ projet, onBack, onEdit, onCreateSAV, initialTab = 'gener
       {/* Tab: besoins */}
       {activeTab === 'besoins' && (
         <div className="card">
-          <SectionTitle icon={<ClipboardList size={13} />}>Besoins chantier</SectionTitle>
+          <SectionTitle icon={<ClipboardList size={13} />}>Besoins ressources humaines</SectionTitle>
           <ProjectBesoinsModule projet={projet} />
         </div>
       )}

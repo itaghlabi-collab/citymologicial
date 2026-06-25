@@ -8,14 +8,20 @@ import {
 } from '../rh/workerProjectAssignments';
 import { listWorkers } from '../rh/workers';
 import { workerFullName } from '../rh/attendance';
-import { BESOIN_REQUEST_STATUTS } from '../../constants/projectBesoins';
+import {
+  BESOIN_REQUEST_STATUTS,
+  isChefChantierFonction,
+  isChefProjetFonction,
+  isOuvrierFonction,
+  normBesoinFonction,
+} from '../../constants/projectBesoins';
 
 const TABLE = 'resource_requests';
 const WORKERS_TABLE = 'resource_request_workers';
 const HISTORY_TABLE = 'resource_request_history';
 
 function normFonction(s) {
-  return (s || '').trim().toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
+  return normBesoinFonction(s);
 }
 
 export function requestStatutLabel(statut) {
@@ -293,18 +299,23 @@ export async function closeResourceRequest(id) {
   return getResourceRequest(id);
 }
 
-/** Ouvriers disponibles pour une fonction (hors projet ou tous). */
+/** Ouvriers / ressources disponibles pour un type de besoin RH. */
 export async function listAvailableWorkersForFonction(fonction, projectId) {
   const all = await listWorkers();
-  const target = normFonction(fonction);
+  const f = (fonction || '').trim();
   const onProject = projectId
     ? new Set((await listWorkersByProject(projectId)).map((a) => String(a.workerId)))
     : new Set();
 
+  if (f === 'Sous-traitants') return [];
+
   return (all || []).filter((w) => {
-    if (normFonction(w.fonction) !== target) return false;
     if (w.statut === 'inactif') return false;
-    return !onProject.has(String(w.id));
+    if (onProject.has(String(w.id))) return false;
+    if (f === 'Ouvriers') return isOuvrierFonction(w.fonction);
+    if (f === 'Chef de chantier') return isChefChantierFonction(w.fonction);
+    if (f === 'Chef de projet') return isChefProjetFonction(w.fonction);
+    return normFonction(w.fonction) === normFonction(f);
   });
 }
 
