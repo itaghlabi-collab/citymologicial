@@ -4,7 +4,7 @@
 import { useState, useRef, useEffect } from 'react';
 import {
   Bell, X, CheckCheck, Wallet, ListTodo, Calendar, FileText,
-  ShoppingCart, AlertTriangle, Info, ExternalLink,
+  ShoppingCart, AlertTriangle, Info, ExternalLink, Users,
 } from 'lucide-react';
 import { useNotifications } from '../../hooks/useNotifications';
 import { parseActionUrl } from '../../services/notifications/notifications';
@@ -15,6 +15,7 @@ const TYPE_ICONS = {
   cash_review: Wallet,
   leave_request: Calendar,
   purchase_request: ShoppingCart,
+  resource_request: Users,
   document: FileText,
   system: Info,
 };

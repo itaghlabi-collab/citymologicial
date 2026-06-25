@@ -15,6 +15,7 @@ export const NOTIFICATION_TYPES = {
   CASH_REVIEW: 'cash_review',
   LEAVE_REQUEST: 'leave_request',
   PURCHASE_REQUEST: 'purchase_request',
+  RESOURCE_REQUEST: 'resource_request',
   DOCUMENT: 'document',
   SYSTEM: 'system',
 };

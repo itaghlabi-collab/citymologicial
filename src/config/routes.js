@@ -20,6 +20,7 @@ export const ROUTES = {
   DEPARTEMENTS:       'departements',
   EMPLOYES:           'employes',
   CONGES:             'conges',
+  DEMANDES_RESSOURCES: 'demandes-ressources',
 
   // Employes Externes
   OUVRIERS:           'ouvriers',

@@ -20,6 +20,7 @@ import { isProjectLate } from '../../services/projects/projects';
 import { generateProjectRecapPdf } from '../../services/projects/projectPdf';
 import ProjectDocuments from './ProjectDocuments';
 import ProjectPlanningModule from './ProjectPlanningModule';
+import ProjectBesoinsModule from './ProjectBesoinsModule';
 import { listWorkers } from '../../services/rh/workers';
 import { workerFullName } from '../../services/rh/attendance';
 import {
@@ -822,6 +823,7 @@ function DetailProjet({ projet, onBack, onEdit, onCreateSAV, initialTab = 'gener
     { k: 'general',    label: 'Vue générale'     },
     { k: 'budget',     label: 'Budget'           },
     { k: 'planning',   label: 'Planning'         },
+    { k: 'besoins',    label: 'Besoins'          },
     { k: 'documents',  label: 'Documents'        },
     { k: 'equipe',     label: 'Équipe'           },
     { k: 'historique', label: 'Historique'       },
@@ -964,6 +966,14 @@ function DetailProjet({ projet, onBack, onEdit, onCreateSAV, initialTab = 'gener
         <div className="card">
           <SectionTitle icon={<Calendar size={13} />}>Planning chantier</SectionTitle>
           <ProjectPlanningModule projet={projet} />
+        </div>
+      )}
+
+      {/* Tab: besoins */}
+      {activeTab === 'besoins' && (
+        <div className="card">
+          <SectionTitle icon={<ClipboardList size={13} />}>Besoins chantier</SectionTitle>
+          <ProjectBesoinsModule projet={projet} />
         </div>
       )}
 

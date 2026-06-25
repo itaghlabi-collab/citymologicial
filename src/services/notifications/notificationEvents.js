@@ -207,3 +207,34 @@ export async function notifyLeaveStatusChanged(leave, statut) {
     actionUrl: moduleActionUrl('conges'),
   });
 }
+
+/** Demande de ressources chantier créée → RH. */
+export async function notifyResourceRequestCreated(request) {
+  if (!request?.id) return;
+  const projet = request.project_name || request.project_ref || 'Projet';
+  return notifyExecutivesAndRh({
+    title: 'Demande de ressources chantier',
+    message: `${projet} — ${request.quantite} × ${request.fonction} (${request.priorite || 'Normale'}).`,
+    type: NOTIFICATION_TYPES.RESOURCE_REQUEST,
+    priority: request.priorite === 'Urgente'
+      ? NOTIFICATION_PRIORITIES.URGENT
+      : NOTIFICATION_PRIORITIES.HIGH,
+    entityType: 'resource_request',
+    entityId: request.id,
+    actionUrl: moduleActionUrl('demandes-ressources'),
+  });
+}
+
+/** Demande de ressources validée → demandeur. */
+export async function notifyResourceRequestValidated(request) {
+  if (!request?.id || !request.requested_by) return;
+  return notifyUser(request.requested_by, {
+    title: 'Ressources affectées',
+    message: `Votre demande ${request.ref || ''} — ${request.fonction} a été traitée. Les ouvriers sont affectés au projet.`,
+    type: NOTIFICATION_TYPES.RESOURCE_REQUEST,
+    priority: NOTIFICATION_PRIORITIES.NORMAL,
+    entityType: 'resource_request_validated',
+    entityId: request.id,
+    actionUrl: moduleActionUrl('projets'),
+  });
+}

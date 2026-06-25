@@ -12,6 +12,7 @@ import RendezVous from './components/RendezVous';
 import AgendaDirection from './components/AgendaDirection';
 import Departements from './components/Departements';
 import Conges from './components/Conges';
+import DemandesRessources from './components/DemandesRessources';
 import OuvriersListe from './components/OuvriersListe';
 import Presence from './components/Presence';
 import HeuresSupp from './components/HeuresSupp';
@@ -79,6 +80,7 @@ const NAV = [
       { id: 'departements',       label: 'Departements',         icon: Building2 },
       { id: 'employes',           label: 'Employes',             icon: Users },
       { id: 'conges',             label: 'Demande de conge',     icon: CalendarOff },
+      { id: 'demandes-ressources', label: 'Demandes ressources', icon: ClipboardList },
     ],
   },
   {
@@ -257,6 +259,7 @@ function PageContent({ module, onNavigate }) {
     case 'departements':        return <Departements />;
     case 'employes':            return <RH />;
     case 'conges':              return <Conges />;
+    case 'demandes-ressources': return <DemandesRessources />;
     /* Ouvriers */
     case 'ouvriers':            return <OuvriersListe />;
     case 'presence':            return <Presence />;

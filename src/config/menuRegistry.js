@@ -41,6 +41,7 @@ export const ERP_RUBRIQUES = Object.freeze([
       { code: 'departements', label: 'Départements' },
       { code: 'employes', label: 'Employés' },
       { code: 'conges', label: 'Demande de congé' },
+      { code: 'demandes-ressources', label: 'Demandes de ressources' },
     ],
   },
   {
@@ -221,7 +222,7 @@ export const ROLE_TEMPLATES = Object.freeze({
     departmentId: 2,
     permissions: () => {
       const m = emptySubmodulePermissions();
-      ['departements', 'employes', 'conges', 'ouvriers', 'presence', 'heures-sup', 'paiement-hebdo', 'situation-sous-traitants', 'sous-traitants'].forEach((code) => {
+      ['departements', 'employes', 'conges', 'demandes-ressources', 'ouvriers', 'presence', 'heures-sup', 'paiement-hebdo', 'situation-sous-traitants', 'sous-traitants'].forEach((code) => {
         m[code] = { voir: true, creer: true, modifier: true, supprimer: false, valider: true, exporter: true };
       });
       return m;

@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS public.notifications (
     priority IN ('low', 'normal', 'high', 'urgent')
   ),
   CONSTRAINT notifications_type_check CHECK (
-    type IN ('payment', 'task', 'cash_review', 'leave_request', 'purchase_request', 'document', 'system')
+    type IN ('payment', 'task', 'cash_review', 'leave_request', 'purchase_request', 'document', 'system', 'resource_request')
   )
 );
 
