@@ -214,13 +214,17 @@ function visiblePctLabel(pct) {
   return `${r}%`;
 }
 
-function fitText(doc, text, maxW, fontSize) {
-  if (!text) return '';
+function barLuminance(rgb) {
+  return (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) / 255;
+}
+
+function barContrastTextColor(rgb) {
+  return barLuminance(rgb) > 0.62 ? BLACK : [255, 255, 255];
+}
+
+function measureTextWidth(doc, text, fontSize) {
   doc.setFontSize(fontSize);
-  if (doc.getTextWidth(text) <= maxW) return text;
-  let s = text;
-  while (s.length > 2 && doc.getTextWidth(`${s}…`) > maxW) s = s.slice(0, -1);
-  return `${s}…`;
+  return doc.getTextWidth(String(text || ''));
 }
 
 /** Échelle temporelle : jours / semaines / mois selon la durée totale. */
@@ -536,61 +540,75 @@ function drawBarProgress(doc, bar, barY, barH, pct) {
   doc.rect(bar.x, barY + barH - h, (bar.w * pct) / 100, h, 'F');
 }
 
-function drawBarPctLabel(doc, bar, barY, barH, pct) {
+function drawBarPctLabel(doc, bar, barY, barH, pct, dateMeta) {
   const label = visiblePctLabel(pct);
-  if (!label || bar.w < 8) return;
-  const fs = bar.w >= 22 ? 6 : 5;
+  if (!label || pct <= 0 || bar.w < 14) return;
+
+  const fs = bar.w >= 36 ? 5.5 : 5;
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(fs);
+  const pctW = measureTextWidth(doc, label, fs);
+
+  if (dateMeta?.placement === 'inside' || dateMeta?.placement === 'inside-long') {
+    const centerGap = bar.w - (dateMeta.startPad || 0) - (dateMeta.endPad || 0);
+    if (centerGap < pctW + 4 || bar.w < 28) return;
+    doc.setTextColor(255, 255, 255);
+    doc.text(label, bar.x + bar.w / 2, barY + barH / 2 - 0.2, { align: 'center' });
+    return;
+  }
+
+  if (bar.w < 20) return;
   doc.setTextColor(255, 255, 255);
-  doc.text(label, bar.x + bar.w / 2, barY + barH / 2 + (fs > 5 ? 1.6 : 1.2), { align: 'center' });
+  doc.text(label, bar.x + bar.w / 2, barY + barH / 2 - 0.2, { align: 'center' });
 }
 
-function drawBarDateLabels(doc, bar, row, barY, barH, isSummary) {
+function drawBarDateLabels(doc, bar, row, barY, barH, barRgb) {
   const start = row.date_debut;
   const end = row.date_fin || row.date_debut;
-  if (!start) return;
+  if (!start || !bar) return null;
 
-  const useFull = bar.w >= 40;
-  const startLbl = isSummary ? `Début : ${fmtDate(start)}` : fmtDateBar(start, useFull);
-  const endLbl = isSummary ? `Fin : ${fmtDate(end)}` : fmtDateBar(end, useFull);
-  const fs = isSummary ? 4.8 : (bar.w >= 28 ? 5 : 4.2);
+  const startShort = fmtDateBar(start, false);
+  const endShort = fmtDateBar(end, false);
+  const startLong = `Début : ${fmtDate(start)}`;
+  const endLong = `Fin : ${fmtDate(end)}`;
+  const y = barY + barH - 1;
 
-  doc.setFont('helvetica', isSummary ? 'bold' : 'normal');
-  doc.setFontSize(fs);
+  doc.setFont('helvetica', 'bold');
 
-  if (bar.w >= 22) {
-    doc.setTextColor(255, 255, 255);
-    doc.text(startLbl, bar.x + 1.2, barY + (isSummary ? 2.8 : barH - 1));
-    doc.text(endLbl, bar.x + bar.w - 1.2, barY + (isSummary ? 2.8 : barH - 1), { align: 'right' });
-    if (isSummary && barH >= 5) {
-      doc.setFontSize(4.2);
-      doc.text(`${fmtDateBar(start)} ─ ${fmtDateBar(end)}`, bar.x + bar.w / 2, barY + barH - 1.1, { align: 'center' });
+  if (bar.w >= 46) {
+    const fs = 4.8;
+    doc.setFontSize(fs);
+    const wStart = measureTextWidth(doc, startLong, fs);
+    const wEnd = measureTextWidth(doc, endLong, fs);
+    if (wStart + wEnd + 6 <= bar.w) {
+      const tc = barContrastTextColor(barRgb);
+      doc.setTextColor(...tc);
+      doc.text(startLong, bar.x + 1.4, y);
+      doc.text(endLong, bar.x + bar.w - 1.4, y, { align: 'right' });
+      return { placement: 'inside-long', startPad: wStart + 1.4, endPad: wEnd + 1.4 };
     }
-    return;
   }
 
-  if (bar.w >= 10) {
-    doc.setTextColor(...BLACK);
-    doc.text(startLbl, bar.x - 0.6, barY + barH - 1, { align: 'right' });
-    doc.text(endLbl, bar.x + bar.w + 0.6, barY + barH - 1, { align: 'left' });
-    return;
+  const fs = bar.w >= 30 ? 5 : 4.6;
+  doc.setFontSize(fs);
+  const wStart = measureTextWidth(doc, startShort, fs);
+  const wEnd = measureTextWidth(doc, endShort, fs);
+  const pad = 1.2;
+  const gap = 3;
+
+  if (bar.w >= 16 && wStart + wEnd + gap <= bar.w) {
+    const tc = barContrastTextColor(barRgb);
+    doc.setTextColor(...tc);
+    doc.text(startShort, bar.x + pad, y);
+    doc.text(endShort, bar.x + bar.w - pad, y, { align: 'right' });
+    return { placement: 'inside', startPad: wStart + pad, endPad: wEnd + pad };
   }
 
-  doc.setTextColor(...MUTED);
-  doc.text(`${fmtDateBar(start)} – ${fmtDateBar(end)}`, bar.x + bar.w / 2, barY - 0.6, { align: 'center' });
-}
-
-function drawResponsableLabel(doc, layout, bar, barY, barH, responsable) {
-  if (!responsable || !bar) return;
-  const { ganttX, ganttW } = layout;
-  const maxW = ganttX + ganttW - (bar.x + bar.w + 1);
-  if (maxW < 8) return;
-  const label = fitText(doc, responsable, maxW, 4.8);
-  doc.setFont('helvetica', 'normal');
-  doc.setFontSize(4.8);
-  doc.setTextColor(...MUTED);
-  doc.text(label, bar.x + bar.w + 1.2, barY + barH - 1);
+  doc.setFontSize(4.6);
+  doc.setTextColor(...BLACK);
+  doc.text(startShort, bar.x - 0.4, y, { align: 'right' });
+  doc.text(endShort, bar.x + bar.w + 0.4, y, { align: 'left' });
+  return { placement: 'outside', startPad: 0, endPad: 0 };
 }
 
 function drawSummaryBar(doc, bar, barY, barH, rgb) {
@@ -657,7 +675,6 @@ function drawRow(doc, layout, row, y, minDate, maxDate, rowH, criticalIds, tasks
   const isCritical = isSummary
     ? isSummaryCritical(row, tasks, criticalIds)
     : (row.id && criticalIds.has(row.id));
-  const lot = row.lot || row.nom;
   const rgb = isCritical ? CRITICAL : hexToRgb(planningTaskBarColor(row));
 
   if (isSummary) {
@@ -672,9 +689,8 @@ function drawRow(doc, layout, row, y, minDate, maxDate, rowH, criticalIds, tasks
   }
 
   drawBarProgress(doc, bar, barY, barH, pct);
-  drawBarPctLabel(doc, bar, barY, barH, pct);
-  drawBarDateLabels(doc, bar, row, barY, barH, isSummary);
-  if (!isSummary) drawResponsableLabel(doc, layout, bar, barY, barH, row.responsable);
+  const dateMeta = drawBarDateLabels(doc, bar, row, barY, barH, rgb);
+  drawBarPctLabel(doc, bar, barY, barH, pct, dateMeta);
 
   return { bar, barY, barH, rowCenterY: y + rowH / 2 };
 }
