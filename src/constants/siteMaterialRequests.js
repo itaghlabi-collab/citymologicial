@@ -130,6 +130,22 @@ export function siteRequestStatutColor(statut) {
   return SITE_REQUEST_STATUTS.find((s) => s.value === statut)?.color || '#757575';
 }
 
+export function siteRequestPreparationStatut(statut) {
+  if (['en_preparation', 'preparation_partielle'].includes(statut)) return siteRequestStatutLabel(statut);
+  if (['prete', 'validee_dg', 'livree'].includes(statut)) return 'Préparée';
+  if (statut === 'soumise') return 'En attente';
+  if (statut === 'en_attente_dg') return 'Attente DG';
+  if (statut === 'annulee') return 'Annulée';
+  return '—';
+}
+
+export function siteRequestLivraisonStatut(statut) {
+  if (statut === 'livree') return 'Livrée';
+  if (['prete', 'validee_dg'].includes(statut)) return 'À livrer';
+  if (statut === 'annulee') return 'Annulée';
+  return '—';
+}
+
 export function buildDefaultCatalogLines() {
   const lines = [];
   let order = 0;

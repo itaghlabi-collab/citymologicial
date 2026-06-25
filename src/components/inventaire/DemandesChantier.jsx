@@ -11,6 +11,8 @@ import { listStockArticles } from '../../services/inventaire/stockArticles';
 import {
   SITE_REQUEST_STATUTS,
   siteRequestStatutColor,
+  siteRequestPreparationStatut,
+  siteRequestLivraisonStatut,
 } from '../../constants/siteMaterialRequests';
 import {
   listSiteMaterialRequests,
@@ -47,10 +49,38 @@ function fmtDateTime(d) {
   try { return new Date(d).toLocaleString('fr-FR'); } catch { return d; }
 }
 
-function prioriteBadge(p) {
-  if (p === 'Critique') return 'badge-red';
-  if (p === 'Urgente') return 'badge-orange';
+
+function prepBadgeClass(statut) {
+  if (['prete', 'validee_dg', 'livree'].includes(statut)) return 'badge-green';
+  if (['en_preparation', 'preparation_partielle', 'en_attente_dg'].includes(statut)) return 'badge-orange';
+  if (statut === 'soumise') return 'badge-blue';
   return 'badge-grey';
+}
+
+function livBadgeClass(statut) {
+  if (statut === 'livree') return 'badge-green';
+  if (['prete', 'validee_dg'].includes(statut)) return 'badge-blue';
+  return 'badge-grey';
+}
+
+function getRowActions(r, handlers) {
+  const actions = [
+    { key: 'view', label: 'Voir', icon: Eye, onClick: () => handlers.openDetail(r.id) },
+    { key: 'pdf', label: 'Télécharger PDF', icon: Download, onClick: () => handlers.handlePdf(r.id) },
+  ];
+  if (r.statut === 'brouillon') {
+    actions.push({ key: 'edit', label: 'Modifier', icon: Edit2, onClick: () => handlers.openEdit(r.id) });
+  }
+  if (r.statut === 'soumise') {
+    actions.push({ key: 'prepare', label: 'Préparer', icon: Package, onClick: () => handlers.openDetail(r.id) });
+  }
+  if (['en_preparation', 'preparation_partielle', 'en_attente_dg'].includes(r.statut)) {
+    actions.push({ key: 'validate', label: 'Valider', icon: CheckCircle, onClick: () => handlers.openDetail(r.id) });
+  }
+  if (['prete', 'validee_dg'].includes(r.statut)) {
+    actions.push({ key: 'deliver', label: 'Livrer', icon: Truck, onClick: () => handlers.openDetail(r.id) });
+  }
+  return actions;
 }
 
 export default function DemandesChantier() {
@@ -213,6 +243,21 @@ export default function DemandesChantier() {
     }
   }
 
+  async function handlePdf(id) {
+    setSaving(true);
+    setError('');
+    try {
+      const full = await getSiteMaterialRequest(id);
+      await generateSiteRequestPdf(full);
+    } catch (err) {
+      setError(err.message || 'Erreur lors de la génération du PDF.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const rowHandlers = { openDetail, openEdit, handlePdf };
+
   function updateDetailLine(lineId, patch) {
     setDetail((prev) => ({
       ...prev,
@@ -275,19 +320,22 @@ export default function DemandesChantier() {
         </div>
       ) : (
         <div className="card" style={{ padding: 0 }}>
-          <div className="table-wrap">
-            <table>
+          <div className="table-wrap" style={{ overflowX: 'auto' }}>
+            <table style={{ minWidth: 1100 }}>
               <thead>
                 <tr>
                   <th>Référence</th>
                   <th>Projet</th>
                   <th>Client</th>
-                  <th>Chef chantier</th>
-                  <th>Articles</th>
-                  <th>Priorité</th>
-                  <th>Date</th>
+                  <th>Nb articles</th>
+                  <th>Qté totale</th>
+                  <th>Magasinier</th>
+                  <th>Validation DG</th>
+                  <th>Date souhaitée</th>
+                  <th>Préparation</th>
+                  <th>Livraison</th>
                   <th>Statut</th>
-                  <th></th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -296,24 +344,53 @@ export default function DemandesChantier() {
                     <td data-label="Référence"><strong>{r.ref}</strong></td>
                     <td data-label="Projet">{r.project_name || '—'}</td>
                     <td data-label="Client">{r.client_name || '—'}</td>
-                    <td data-label="Chef chantier">{r.chef_chantier || '—'}</td>
-                    <td data-label="Articles">{r.distinct_articles} lignes · {r.total_articles} u.</td>
-                    <td data-label="Priorité"><span className={`badge ${prioriteBadge(r.priorite)}`}>{r.priorite}</span></td>
-                    <td data-label="Date">{fmtDate(r.date_demande)}</td>
+                    <td data-label="Nb articles">{r.distinct_articles}</td>
+                    <td data-label="Qté totale">{r.total_articles}</td>
+                    <td data-label="Magasinier">{r.prepared_by_name || '—'}</td>
+                    <td data-label="Validation DG">{r.validated_dg_name || (r.requires_dg ? 'En attente' : '—')}</td>
+                    <td data-label="Date souhaitée">{fmtDate(r.date_souhaitee)}</td>
+                    <td data-label="Préparation">
+                      <span className={`badge ${prepBadgeClass(r.statut)}`}>
+                        {siteRequestPreparationStatut(r.statut)}
+                      </span>
+                    </td>
+                    <td data-label="Livraison">
+                      <span className={`badge ${livBadgeClass(r.statut)}`}>
+                        {siteRequestLivraisonStatut(r.statut)}
+                      </span>
+                    </td>
                     <td data-label="Statut">
                       <span className="badge" style={{ background: `${siteRequestStatutColor(r.statut)}22`, color: siteRequestStatutColor(r.statut) }}>
                         {r.statutLabel}
                       </span>
                     </td>
                     <td data-label="Actions">
-                      <div style={{ display: 'flex', gap: 4 }}>
-                        <button type="button" className="btn btn-ghost btn-sm" title="Voir" onClick={() => openDetail(r.id)}><Eye size={13} /></button>
-                        <button type="button" className="btn btn-ghost btn-sm" title="PDF" onClick={() => generateSiteRequestPdf(r)}><Download size={13} /></button>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, minWidth: 120 }}>
+                        {getRowActions(r, rowHandlers).map((action) => {
+                          const Icon = action.icon;
+                          return (
+                            <button
+                              key={action.key}
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              title={action.label}
+                              onClick={action.onClick}
+                              disabled={saving}
+                            >
+                              <Icon size={13} />
+                            </button>
+                          );
+                        })}
                         {r.statut === 'brouillon' && (
-                          <>
-                            <button type="button" className="btn btn-ghost btn-sm" onClick={() => openEdit(r.id)}><Edit2 size={13} /></button>
-                            <button type="button" className="btn btn-ghost btn-sm" style={{ color: 'var(--red)' }} onClick={() => handleDelete(r.id)}><Trash2 size={13} /></button>
-                          </>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            style={{ color: 'var(--red)' }}
+                            title="Supprimer"
+                            onClick={() => handleDelete(r.id)}
+                          >
+                            <Trash2 size={13} />
+                          </button>
                         )}
                       </div>
                     </td>
@@ -434,7 +511,7 @@ export default function DemandesChantier() {
               )}
 
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
-                <button type="button" className="btn btn-secondary btn-sm" onClick={() => generateSiteRequestPdf(detail)}><Download size={14} /> PDF</button>
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => handlePdf(detail.id)}><Download size={14} /> Télécharger PDF</button>
                 {detail.statut === 'soumise' && (
                   <button type="button" className="btn btn-primary btn-sm" disabled={saving} onClick={() => runAction((id) => prepareSiteMaterialRequest(id, detail.lines))}>
                     <Package size={14} /> Prendre en charge
