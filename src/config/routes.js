@@ -83,6 +83,7 @@ export const ROUTES = {
   DEPOTS:             'depots',
   BONS_MOUVEMENTS:    'bons-mouvements',
   STOCKS:             'stocks',
+  DEMANDES_CHANTIER:  'demandes-chantier',
 
   // Administration
   UTILISATEURS:       'utilisateurs',

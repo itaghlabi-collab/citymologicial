@@ -16,6 +16,7 @@ export const NOTIFICATION_TYPES = {
   LEAVE_REQUEST: 'leave_request',
   PURCHASE_REQUEST: 'purchase_request',
   RESOURCE_REQUEST: 'resource_request',
+  SITE_MATERIAL_REQUEST: 'site_material_request',
   DOCUMENT: 'document',
   SYSTEM: 'system',
 };

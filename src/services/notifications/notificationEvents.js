@@ -238,3 +238,78 @@ export async function notifyResourceRequestValidated(request) {
     actionUrl: moduleActionUrl('projets'),
   });
 }
+
+/** Demande chantier soumise → magasinier / logistique. */
+export async function notifySiteRequestSubmitted(request) {
+  if (!request?.id) return;
+  return notifySuperAdmins({
+    title: 'Nouvelle demande chantier',
+    message: `${request.ref} — ${request.project_name || 'Projet'} (${request.priorite}). ${request.distinct_articles || 0} article(s) demandé(s).`,
+    type: NOTIFICATION_TYPES.SITE_MATERIAL_REQUEST,
+    priority: request.priorite === 'Critique'
+      ? NOTIFICATION_PRIORITIES.URGENT
+      : request.priorite === 'Urgente'
+        ? NOTIFICATION_PRIORITIES.HIGH
+        : NOTIFICATION_PRIORITIES.NORMAL,
+    entityType: 'site_material_request',
+    entityId: request.id,
+    actionUrl: moduleActionUrl('demandes-chantier'),
+  });
+}
+
+/** Demande chantier — validation DG requise. */
+export async function notifySiteRequestDgRequired(request) {
+  if (!request?.id) return;
+  return notifySuperAdmins({
+    title: 'Demande chantier — validation DG',
+    message: `La demande ${request.ref} (${request.project_name}) nécessite votre validation.`,
+    type: NOTIFICATION_TYPES.SITE_MATERIAL_REQUEST,
+    priority: NOTIFICATION_PRIORITIES.HIGH,
+    entityType: 'site_material_request_dg',
+    entityId: request.id,
+    actionUrl: moduleActionUrl('demandes-chantier'),
+  });
+}
+
+/** Matériel prêt → chef de chantier (demandeur). */
+export async function notifySiteRequestReady(request) {
+  if (!request?.id || !request.requested_by) return;
+  return notifyUser(request.requested_by, {
+    title: 'Matériel prêt',
+    message: `Votre demande ${request.ref} est prête au dépôt pour le chantier ${request.project_name || ''}.`,
+    type: NOTIFICATION_TYPES.SITE_MATERIAL_REQUEST,
+    priority: NOTIFICATION_PRIORITIES.NORMAL,
+    entityType: 'site_material_request_ready',
+    entityId: request.id,
+    actionUrl: moduleActionUrl('demandes-chantier'),
+  });
+}
+
+/** Demande livrée → chef de chantier. */
+export async function notifySiteRequestDelivered(request) {
+  if (!request?.id || !request.requested_by) return;
+  const bon = request.movement_ref ? ` Bon de sortie : ${request.movement_ref}.` : '';
+  return notifyUser(request.requested_by, {
+    title: 'Matériel livré',
+    message: `Votre demande ${request.ref} a été livrée.${bon}`,
+    type: NOTIFICATION_TYPES.SITE_MATERIAL_REQUEST,
+    priority: NOTIFICATION_PRIORITIES.NORMAL,
+    entityType: 'site_material_request_delivered',
+    entityId: request.id,
+    actionUrl: moduleActionUrl('demandes-chantier'),
+  });
+}
+
+/** Accusé réception demande → demandeur. */
+export async function notifySiteRequestReceived(request) {
+  if (!request?.id || !request.requested_by) return;
+  return notifyUser(request.requested_by, {
+    title: 'Demande reçue',
+    message: `Votre demande ${request.ref} a bien été reçue par le magasin.`,
+    type: NOTIFICATION_TYPES.SITE_MATERIAL_REQUEST,
+    priority: NOTIFICATION_PRIORITIES.LOW,
+    entityType: 'site_material_request_received',
+    entityId: request.id,
+    actionUrl: moduleActionUrl('demandes-chantier'),
+  });
+}

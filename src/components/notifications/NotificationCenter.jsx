@@ -16,6 +16,7 @@ const TYPE_ICONS = {
   leave_request: Calendar,
   purchase_request: ShoppingCart,
   resource_request: Users,
+  site_material_request: ShoppingCart,
   document: FileText,
   system: Info,
 };

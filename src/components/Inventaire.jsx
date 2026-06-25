@@ -7,6 +7,7 @@ import CategoriesStock from './inventaire/CategoriesStock.jsx';
 import ArticlesStock   from './inventaire/ArticlesStock.jsx';
 import Depots          from './inventaire/Depots.jsx';
 import BonsMouvements  from './inventaire/BonsMouvements.jsx';
+import DemandesChantier from './inventaire/DemandesChantier.jsx';
 import Stocks          from './inventaire/Stocks.jsx';
 import { listStockArticles } from '../services/inventaire/stockArticles';
 import { listStockCategories } from '../services/inventaire/stockCategories';
@@ -45,6 +46,7 @@ export default function Inventaire({ activeTab }) {
           onArticlesChange={setArticles}
         />
       )}
+      {tab === 'demandes-chantier' && <DemandesChantier />}
       {tab === 'stocks' && (
         <Stocks
           articles={articles}
