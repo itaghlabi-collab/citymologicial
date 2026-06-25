@@ -24,7 +24,10 @@ const PROGRESS = [46, 125, 50];
 
 const M = 10;
 const LEFT_W = 98;
-const HEADER_BLOCK_H = 38;
+const HEADER_BLOCK_H = 62;
+const LOGO_MAX_W = 62;
+const LOGO_MAX_H = 18;
+const LABEL_MUTED = [100, 100, 100];
 const CAL_H = 17;
 const FOOTER_H = 7;
 const ROW_GAP = 0.55;
@@ -383,59 +386,160 @@ function fileSlug(projet, mode) {
   return mode === 'synthesis' ? `planning-synthese-${ref}` : `planning-detail-${ref}`;
 }
 
-function drawHeader(doc, layout, { logo, projet, mode, minDate, maxDate, projectDates }) {
+function drawHeaderCell(doc, x, labelY, valueY, label, value, maxW) {
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7);
+  doc.setTextColor(...LABEL_MUTED);
+  doc.text(label, x, labelY);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.8);
+  doc.setTextColor(...BLACK);
+  const lines = doc.splitTextToSize(String(value || '—'), Math.max(12, maxW - 2));
+  lines.forEach((line, i) => {
+    doc.text(line, x, valueY + i * 4);
+  });
+  return lines.length;
+}
+
+function drawHeader(doc, layout, { logo, projet, minDate, maxDate, projectDates }) {
   const { pageW } = layout;
   const y0 = M;
+  const contentW = pageW - M * 2;
+  const LEFT_ZONE_W = 58;
+  const RIGHT_ZONE_W = 80;
+  const centerX = M + LEFT_ZONE_W + 8;
+  const centerW = contentW - LEFT_ZONE_W - RIGHT_ZONE_W - 16;
+  const rightX = pageW - M;
+  const topZoneH = 22;
 
-  if (logo?.dataUrl) {
-    doc.addImage(logo.dataUrl, 'PNG', M, y0, logo.w, logo.h);
-  } else {
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(16);
-    doc.setTextColor(...RED);
-    doc.text('CITYMO', M, y0 + 8);
-  }
-
-  const tx = M + (logo?.w || 0) + 6;
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(12);
-  doc.setTextColor(...BLACK);
-  doc.text(projet.nom || 'Projet', tx, y0 + 5);
-
-  doc.setFontSize(7.2);
-  doc.setFont('helvetica', 'normal');
-  doc.setTextColor(...MUTED);
   const client = projet.client || projet.client_nom || '—';
   const avancement = globalAvancement(projet, projet._tasksForPdf || []);
-  const span = projectDates || { start: minDate, end: maxDate, totalDays: daysBetweenInclusive(minDate, maxDate) };
-  const chefProjet = (projet.chef_projet || projet.responsable || '').trim();
-  const chefChantier = (projet.chef_chantier || '').trim();
-  const metaLines = [
-    `Client : ${client}`,
-    `Réf. ${projet.ref || '—'}`,
-    `Durée totale projet : ${span.totalDays || '—'} jours`,
-    `Date début projet : ${fmtDate(span.start)}`,
-    `Date fin projet : ${fmtDate(span.end)}`,
-    `Planning affiché : ${periodLabel(minDate, maxDate)} · Avancement ${avancement}%`,
-  ];
-  if (chefProjet) metaLines.push(`Chef de projet : ${chefProjet}`);
-  if (chefChantier) metaLines.push(`Chef de chantier : ${chefChantier}`);
-  metaLines.push(`Édité le ${new Date().toLocaleDateString('fr-FR')}`);
-  metaLines.forEach((line, i) => {
-    doc.text(line, tx, y0 + 10 + i * 3.2);
+  const span = projectDates || {
+    start: minDate,
+    end: maxDate,
+    totalDays: daysBetweenInclusive(minDate, maxDate),
+  };
+  const chefProjet = (projet.chef_projet || projet.responsable || '').trim() || '—';
+  const chefChantier = (projet.chef_chantier || '').trim() || '—';
+  const editionDate = new Date().toLocaleDateString('fr-FR', {
+    day: '2-digit', month: '2-digit', year: 'numeric',
+  });
+  const totalPages = doc.internal.getNumberOfPages();
+
+  /* Colonne gauche — logo */
+  const logoH = logo?.h || 14;
+  const logoY = y0 + Math.max(0, (topZoneH - logoH) / 2);
+  if (logo?.dataUrl) {
+    doc.addImage(logo.dataUrl, 'PNG', M, logoY, logo.w, logo.h);
+  } else {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(20);
+    doc.setTextColor(...RED);
+    doc.text('CITYMO', M, logoY + logoH * 0.65);
+  }
+
+  /* Colonne centrale — projet */
+  let cy = y0 + 5;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(16);
+  doc.setTextColor(...BLACK);
+  const nameLines = doc.splitTextToSize(projet.nom || 'Projet', centerW);
+  nameLines.forEach((line, i) => {
+    doc.text(line, centerX, cy + i * 6.8);
+  });
+  cy += nameLines.length * 6.8 + 3;
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7);
+  doc.setTextColor(...LABEL_MUTED);
+  doc.text('Client', centerX, cy);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.8);
+  doc.setTextColor(...BLACK);
+  doc.text(client, centerX + 13, cy);
+  cy += 5.5;
+
+  doc.setFont('helvetica', 'normal');
+  doc.setFontSize(7);
+  doc.setTextColor(...LABEL_MUTED);
+  doc.text('Référence', centerX, cy);
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8.8);
+  doc.setTextColor(...BLACK);
+  doc.text(projet.ref || '—', centerX + 18, cy);
+
+  /* Colonne droite — métadonnées document */
+  let ry = y0 + 5;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(11);
+  doc.setTextColor(...RED);
+  doc.text('PLANNING CHANTIER', rightX, ry, { align: 'right' });
+  ry += 7;
+
+  [
+    ['Date d\'édition', editionDate],
+    ['Page', `1 / ${totalPages}`],
+    ['Avancement global', `${avancement} %`],
+  ].forEach(([label, value]) => {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.8);
+    doc.setTextColor(...LABEL_MUTED);
+    doc.text(label, rightX, ry, { align: 'right' });
+    ry += 3.4;
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8.2);
+    doc.setTextColor(...BLACK);
+    doc.text(value, rightX, ry, { align: 'right' });
+    ry += 5.2;
   });
 
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(9);
-  doc.setTextColor(...RED);
-  const modeLabel = mode === 'synthesis' ? 'Planning synthèse — 1 page' : 'Planning détaillé — 1 page';
-  doc.text(modeLabel, pageW - M, y0 + 6, { align: 'right' });
-
-  const lineY = y0 + HEADER_BLOCK_H - 2;
+  /* Bloc d'informations aligné (style Devis / Factures) */
+  const infoTop = y0 + topZoneH + 8;
   doc.setDrawColor(...BORDER);
-  doc.setLineWidth(0.3);
-  doc.line(M, lineY, pageW - M, lineY);
-  return lineY + 2;
+  doc.setLineWidth(0.25);
+  doc.line(M, infoTop, pageW - M, infoTop);
+
+  const row1LabelY = infoTop + 5;
+  const row1ValueY = row1LabelY + 4.8;
+  const col3W = contentW / 3;
+  const row1 = [
+    { label: 'Chef de projet', value: chefProjet },
+    { label: 'Chef de chantier', value: chefChantier },
+    { label: 'Client', value: client },
+  ];
+  let row1Bottom = row1ValueY;
+  row1.forEach((item, i) => {
+    const x = M + i * col3W + 2;
+    const lineCount = drawHeaderCell(doc, x, row1LabelY, row1ValueY, item.label, item.value, col3W - 4);
+    row1Bottom = Math.max(row1Bottom, row1ValueY + (lineCount - 1) * 4);
+  });
+
+  const row2LabelY = row1Bottom + 7;
+  const row2ValueY = row2LabelY + 4.8;
+  const col4W = contentW / 4;
+  const row2 = [
+    { label: 'Début projet', value: fmtDate(span.start) },
+    { label: 'Fin projet', value: fmtDate(span.end) },
+    { label: 'Durée totale', value: span.totalDays ? `${span.totalDays} jours` : '—' },
+    { label: 'Avancement', value: `${avancement} %` },
+  ];
+  let row2Bottom = row2ValueY;
+  row2.forEach((item, i) => {
+    const x = M + i * col4W + 2;
+    const lineCount = drawHeaderCell(doc, x, row2LabelY, row2ValueY, item.label, item.value, col4W - 4);
+    row2Bottom = Math.max(row2Bottom, row2ValueY + (lineCount - 1) * 4);
+  });
+
+  const infoBottom = row2Bottom + 5;
+  doc.setDrawColor(...BORDER);
+  doc.setLineWidth(0.25);
+  doc.line(M, infoBottom, pageW - M, infoBottom);
+
+  /* Séparateur rouge avant le Gantt */
+  const sepY = infoBottom + 5;
+  doc.setDrawColor(...RED);
+  doc.setLineWidth(0.6);
+  doc.line(M, sepY, pageW - M, sepY);
 }
 
 function colCenterX(col, minDate, maxDate, ganttX, ganttW) {
@@ -754,7 +858,7 @@ export async function generateProjectPlanningPdf(projet, tasks = [], options = {
   const milestones = options.milestones || [];
   let logo = null;
   try {
-    logo = await loadCompanyLogoFit(44, 12);
+    logo = await loadCompanyLogoFit(LOGO_MAX_W, LOGO_MAX_H);
   } catch {
     logo = null;
   }
@@ -769,7 +873,7 @@ export async function generateProjectPlanningPdf(projet, tasks = [], options = {
 
   if (!tasks.length && !milestones.length) {
     drawHeader(doc, layout, {
-      logo, projet, mode,
+      logo, projet,
       minDate: projet.date_debut || '',
       maxDate: projet.date_fin_prevue || '',
       projectDates,
@@ -787,7 +891,7 @@ export async function generateProjectPlanningPdf(projet, tasks = [], options = {
   const { minDate, maxDate } = computePdfTimelineBounds(tasks, milestoneRows);
   const scale = buildPdfGanttScale(minDate, maxDate, layout.ganttW);
 
-  drawHeader(doc, layout, { logo, projet, mode, minDate, maxDate, projectDates });
+  drawHeader(doc, layout, { logo, projet, minDate, maxDate, projectDates });
   const rowStartY = drawColumnHeaders(doc, layout, scale, minDate, maxDate);
   drawWeekendBands(doc, layout, scale, minDate, maxDate, rowStartY);
   drawGanttGrid(doc, layout, scale, minDate, maxDate, rowStartY);
