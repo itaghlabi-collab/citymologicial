@@ -28,7 +28,45 @@ export function endDateFromStartAndDuration(startIso, dureeJours) {
   if (!startIso) return '';
   const d = new Date(`${startIso}T12:00:00`);
   d.setDate(d.getDate() + Math.max(1, Number(dureeJours) || 1) - 1);
-  return d.toISOString().slice(0, 10);
+  return isoDateLocal(d);
+}
+
+/** Date ISO locale (évite les décalages UTC de toISOString). */
+export function isoDateLocal(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+export function addDaysIso(iso, days) {
+  if (!iso) return '';
+  const d = new Date(`${iso}T12:00:00`);
+  d.setDate(d.getDate() + Number(days) || 0);
+  return isoDateLocal(d);
+}
+
+/**
+ * Bornes timeline PDF : min(date début) / max(date fin) sur toutes les tâches.
+ * Indépendant de la période affichée à l'écran ou des dates projet.
+ */
+export function computePdfTimelineBounds(tasks = [], extraRows = []) {
+  const all = [...tasks, ...extraRows];
+  let minD = '';
+  let maxD = '';
+  all.forEach((t) => {
+    const deb = fmtDate(t.date_debut);
+    const fin = fmtDate(t.date_fin) || deb;
+    if (deb && (!minD || deb < minD)) minD = deb;
+    if (fin && (!maxD || fin > maxD)) maxD = fin;
+  });
+  if (!minD && !maxD) return { minDate: '', maxDate: '' };
+  const minDate = minD || maxD;
+  const maxDate = maxD || minD;
+  return {
+    minDate: addDaysIso(minDate, -2),
+    maxDate: addDaysIso(maxDate, 3),
+  };
 }
 
 function syncTaskDates(form) {

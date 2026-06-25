@@ -6,8 +6,10 @@ import { planningLotColor, planningTaskBarColor } from '../../constants/projectP
 import { loadCompanyLogoFit } from '../finance/pdfShared';
 import {
   buildGanttDisplayRows,
-  computeTimelineBounds,
+  computePdfTimelineBounds,
   daysBetweenInclusive,
+  isoDateLocal,
+  addDaysIso,
 } from './projectPlanningTasks';
 
 const RED = [198, 40, 40];
@@ -230,7 +232,7 @@ export function buildPdfGanttScale(minDate, maxDate, ganttWidth) {
     const d = new Date(`${minDate}T12:00:00`);
     const end = new Date(`${maxDate}T12:00:00`);
     while (d <= end) {
-      const iso = d.toISOString().slice(0, 10);
+      const iso = isoDateLocal(d);
       const showMonth = d.getDate() === 1 || cols.length === 0;
       cols.push({
         start: iso,
@@ -252,32 +254,44 @@ export function buildPdfGanttScale(minDate, maxDate, ganttWidth) {
     d.setDate(d.getDate() + diff);
     const end = new Date(`${maxDate}T12:00:00`);
     while (d <= end) {
-      const start = d.toISOString().slice(0, 10);
+      const start = isoDateLocal(d);
       const wEnd = new Date(d);
       wEnd.setDate(wEnd.getDate() + 6);
+      const weekEndIso = wEnd > end ? maxDate : isoDateLocal(wEnd);
       cols.push({
         start,
-        end: wEnd > end ? maxDate : wEnd.toISOString().slice(0, 10),
+        end: weekEndIso,
         label: fmtDateShort(start),
         subLabel: fmtDateBar(start),
         unit: 'week',
       });
       d.setDate(d.getDate() + 7);
     }
+    if (cols.length && cols[cols.length - 1].end < maxDate) {
+      const lastStart = addDaysIso(cols[cols.length - 1].end, 1);
+      cols.push({
+        start: lastStart,
+        end: maxDate,
+        label: fmtDateShort(lastStart),
+        subLabel: fmtDateBar(lastStart),
+        unit: 'week',
+      });
+    }
     return { unit: 'week', cols, totalDays, ganttWidth };
   }
 
   const cols = [];
-  const d = new Date(`${minDate}T12:00:00`);
-  d.setDate(1);
+  const d0 = new Date(`${minDate}T12:00:00`);
+  d0.setDate(1);
   const end = new Date(`${maxDate}T12:00:00`);
+  const d = new Date(d0);
   while (d <= end) {
     const y = d.getFullYear();
     const m = d.getMonth();
-    const mStart = new Date(y, m, 1);
-    const mEnd = new Date(y, m + 1, 0);
-    const start = mStart < new Date(`${minDate}T12:00:00`) ? minDate : mStart.toISOString().slice(0, 10);
-    const mend = mEnd > end ? maxDate : mEnd.toISOString().slice(0, 10);
+    const mStartIso = isoDateLocal(new Date(y, m, 1));
+    const mEndIso = isoDateLocal(new Date(y, m + 1, 0));
+    const start = mStartIso < minDate ? minDate : mStartIso;
+    const mend = mEndIso > maxDate ? maxDate : mEndIso;
     cols.push({
       start,
       end: mend,
@@ -287,6 +301,15 @@ export function buildPdfGanttScale(minDate, maxDate, ganttWidth) {
     });
     d.setMonth(m + 1);
   }
+  if (cols.length && cols[cols.length - 1].end < maxDate) {
+    cols.push({
+      start: addDaysIso(cols[cols.length - 1].end, 1),
+      end: maxDate,
+      label: fmtMonthShort(maxDate),
+      subLabel: fmtDateBar(maxDate),
+      unit: 'month',
+    });
+  }
   return { unit: 'month', cols, totalDays, ganttWidth };
 }
 
@@ -295,17 +318,22 @@ export function taskBarProportional(task, minDate, maxDate, ganttX, ganttW) {
   if (!task?.date_debut) return null;
   const totalDays = Math.max(1, daysBetweenInclusive(minDate, maxDate));
   const winStart = new Date(`${minDate}T12:00:00`);
+  const winEnd = new Date(`${maxDate}T12:00:00`);
   const tStart = new Date(`${task.date_debut}T12:00:00`);
   const tEnd = new Date(`${(task.date_fin || task.date_debut)}T12:00:00`);
-  if (tEnd < winStart) return null;
+  if (tEnd < winStart || tStart > winEnd) return null;
 
-  const offsetDays = Math.max(0, Math.round((tStart - winStart) / 86400000));
-  const durDays = task.type === 'milestone'
-    ? 1
-    : daysBetweenInclusive(task.date_debut, task.date_fin || task.date_debut);
+  const visStart = tStart < winStart ? winStart : tStart;
+  const visEnd = tEnd > winEnd ? winEnd : tEnd;
+  const offsetDays = Math.max(0, Math.round((visStart - winStart) / 86400000));
+  const durDays = Math.max(
+    1,
+    task.type === 'milestone' ? 1 : Math.round((visEnd - visStart) / 86400000) + 1,
+  );
 
   const x = ganttX + (offsetDays / totalDays) * ganttW;
-  const w = Math.max((durDays / totalDays) * ganttW, task.type === 'milestone' ? 0.8 : 1.2);
+  const minW = task.type === 'milestone' ? 0.8 : 1.2;
+  const w = Math.max((durDays / totalDays) * ganttW, minW);
   return { x: x + 0.2, w: Math.max(w - 0.4, 0.6), endX: x + w, centerX: x + w / 2 };
 }
 
@@ -739,10 +767,8 @@ export async function generateProjectPlanningPdf(projet, tasks = [], options = {
     return;
   }
 
-  const { minDate, maxDate } = computeTimelineBounds(
-    [...tasks, ...milestones.map((m) => ({ date_debut: m.date_jalon, date_fin: m.date_jalon }))],
-    projet,
-  );
+  const milestoneRows = milestones.map((m) => ({ date_debut: m.date_jalon, date_fin: m.date_jalon }));
+  const { minDate, maxDate } = computePdfTimelineBounds(tasks, milestoneRows);
   const scale = buildPdfGanttScale(minDate, maxDate, layout.ganttW);
 
   drawHeader(doc, layout, { logo, projet, mode, minDate, maxDate, projectDates });

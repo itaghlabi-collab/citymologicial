@@ -838,10 +838,10 @@ export default function ProjectPlanningGantt({
   async function handleExportPdf(mode) {
     try {
       if (mode === 'synthesis') {
-        await generateProjectPlanningPdfSynthesis(projet, filtered);
+        await generateProjectPlanningPdfSynthesis(projet, tasks);
         setToast('PDF synthèse exporté.');
       } else {
-        await generateProjectPlanningPdfDetailed(projet, filtered);
+        await generateProjectPlanningPdfDetailed(projet, tasks);
         setToast('PDF détaillé exporté.');
       }
     } catch (err) {
