@@ -27,8 +27,13 @@ const LEFT_W = 98;
 const HEADER_BLOCK_H = 38;
 const CAL_H = 17;
 const FOOTER_H = 7;
-const MIN_ROW_H = 4;
-const MAX_ROW_H = 7;
+const ROW_GAP = 0.55;
+const MIN_ROW_H = 5;
+const MAX_ROW_H = 9;
+const SUMMARY_ROW_BOOST = 1.14;
+const SUMMARY_BG = [228, 228, 228];
+const WEEKEND_BG = [248, 248, 248];
+const MONTH_LINE = [175, 175, 175];
 
 const FORMATS = {
   a3: { w: 420, h: 297, name: 'a3' },
@@ -43,6 +48,14 @@ const LEFT_COLS = [
   { key: 'fin', label: 'Fin', w: 17 },
   { key: 'avancement', label: 'Av. %', w: 13 },
 ];
+
+function rowDurationDays(row) {
+  if (!row?.date_debut) return 0;
+  return Math.max(
+    1,
+    Number(row.duree_jours) || daysBetweenInclusive(row.date_debut, row.date_fin || row.date_debut),
+  );
+}
 
 function fmtDate(d) {
   if (!d) return '—';
@@ -204,24 +217,6 @@ function isSummaryCritical(row, tasks, criticalIds) {
   return tasks.some((t) => (t.lot || 'Autre') === lot && criticalIds.has(t.id));
 }
 
-function visiblePctLabel(pct) {
-  const r = Math.round(pct);
-  if (r <= 0) return '';
-  if (r >= 88) return '100%';
-  if (r >= 63) return '75%';
-  if (r >= 38) return '50%';
-  if (r >= 13) return '25%';
-  return `${r}%`;
-}
-
-function barLuminance(rgb) {
-  return (0.299 * rgb[0] + 0.587 * rgb[1] + 0.114 * rgb[2]) / 255;
-}
-
-function barContrastTextColor(rgb) {
-  return barLuminance(rgb) > 0.62 ? BLACK : [255, 255, 255];
-}
-
 function measureTextWidth(doc, text, fontSize) {
   doc.setFontSize(fontSize);
   return doc.getTextWidth(String(text || ''));
@@ -231,7 +226,7 @@ function measureTextWidth(doc, text, fontSize) {
 export function buildPdfGanttScale(minDate, maxDate, ganttWidth) {
   const totalDays = daysBetweenInclusive(minDate, maxDate);
 
-  if (totalDays <= 45) {
+  if (totalDays < 30) {
     const cols = [];
     const d = new Date(`${minDate}T12:00:00`);
     const end = new Date(`${maxDate}T12:00:00`);
@@ -363,29 +358,20 @@ function buildPdfRows(tasks, mode, milestones = []) {
   return msRows.length ? [...base, ...msRows] : base;
 }
 
-function pickPageLayout(rowCount) {
-  for (const key of ['a3', 'a2']) {
-    const fmt = FORMATS[key];
-    const bodyH = fmt.h - HEADER_BLOCK_H - CAL_H - FOOTER_H - M;
-    const rowH = bodyH / Math.max(1, rowCount);
-    if (rowH >= MIN_ROW_H) {
-      return {
-        format: fmt.name,
-        pageW: fmt.w,
-        pageH: fmt.h,
-        rowH: Math.min(MAX_ROW_H, rowH),
-        ganttX: M + LEFT_W,
-        ganttW: fmt.w - M * 2 - LEFT_W,
-        bodyBottom: fmt.h - FOOTER_H - 2,
-      };
-    }
-  }
-  const fmt = FORMATS.a2;
+function pickPageLayout(rowCount, rows = []) {
+  const fmt = FORMATS.a3;
+  const summaryExtra = (rows || []).filter((r) => r.type === 'summary').length * 0.12;
+  const effectiveRows = Math.max(1, rowCount + summaryExtra);
+  const bodyH = fmt.h - HEADER_BLOCK_H - CAL_H - FOOTER_H - M;
+  const totalGap = ROW_GAP * Math.max(0, rowCount - 1);
+  const rawRowH = (bodyH - totalGap) / effectiveRows;
+  const rowH = Math.min(MAX_ROW_H, Math.max(MIN_ROW_H, rawRowH));
   return {
     format: fmt.name,
     pageW: fmt.w,
     pageH: fmt.h,
-    rowH: MIN_ROW_H,
+    rowH,
+    rowGap: ROW_GAP,
     ganttX: M + LEFT_W,
     ganttW: fmt.w - M * 2 - LEFT_W,
     bodyBottom: fmt.h - FOOTER_H - 2,
@@ -422,15 +408,20 @@ function drawHeader(doc, layout, { logo, projet, mode, minDate, maxDate, project
   const client = projet.client || projet.client_nom || '—';
   const avancement = globalAvancement(projet, projet._tasksForPdf || []);
   const span = projectDates || { start: minDate, end: maxDate, totalDays: daysBetweenInclusive(minDate, maxDate) };
-  [
+  const chefProjet = (projet.chef_projet || projet.responsable || '').trim();
+  const chefChantier = (projet.chef_chantier || '').trim();
+  const metaLines = [
     `Client : ${client}`,
     `Réf. ${projet.ref || '—'}`,
     `Durée totale projet : ${span.totalDays || '—'} jours`,
     `Date début projet : ${fmtDate(span.start)}`,
     `Date fin projet : ${fmtDate(span.end)}`,
     `Planning affiché : ${periodLabel(minDate, maxDate)} · Avancement ${avancement}%`,
-    `Édité le ${new Date().toLocaleDateString('fr-FR')}`,
-  ].forEach((line, i) => {
+  ];
+  if (chefProjet) metaLines.push(`Chef de projet : ${chefProjet}`);
+  if (chefChantier) metaLines.push(`Chef de chantier : ${chefChantier}`);
+  metaLines.push(`Édité le ${new Date().toLocaleDateString('fr-FR')}`);
+  metaLines.forEach((line, i) => {
     doc.text(line, tx, y0 + 10 + i * 3.2);
   });
 
@@ -489,7 +480,7 @@ function drawColumnHeaders(doc, layout, scale, minDate, maxDate) {
   doc.rect(ganttX, calTop, ganttW, CAL_H, 'F');
   doc.rect(ganttX, calTop, ganttW, CAL_H);
 
-  scale.cols.forEach((col) => {
+  scale.cols.forEach((col, idx) => {
     const cx = colCenterX(col, minDate, maxDate, ganttX, ganttW);
     const gx = colStartX(col, minDate, maxDate, ganttX, ganttW);
     doc.setFont('helvetica', 'bold');
@@ -502,14 +493,51 @@ function drawColumnHeaders(doc, layout, scale, minDate, maxDate) {
       doc.setTextColor(...MUTED);
       doc.text(col.subLabel, cx, calTop + 9.5, { align: 'center' });
     }
-    doc.setDrawColor(...GRID);
-    doc.setLineWidth(0.12);
+    const isMonthBoundary = scale.unit === 'month'
+      || (col.subLabel && col.subLabel.length > 0)
+      || (scale.unit === 'week' && idx > 0 && col.label && scale.cols[idx - 1]?.label !== col.label);
+    doc.setDrawColor(...(isMonthBoundary ? MONTH_LINE : GRID));
+    doc.setLineWidth(isMonthBoundary ? 0.22 : 0.1);
     doc.line(gx, calTop, gx, layout.bodyBottom);
   });
 
   doc.setDrawColor(...BORDER);
   doc.line(ganttX, calBot, pageW - M, calBot);
   return calBot + 1;
+}
+
+function drawWeekendBands(doc, layout, scale, minDate, maxDate, startY) {
+  if (scale.unit !== 'day') return;
+  const { ganttX, ganttW, bodyBottom } = layout;
+  const totalDays = Math.max(1, daysBetweenInclusive(minDate, maxDate));
+  const winStart = new Date(`${minDate}T12:00:00`);
+  const end = new Date(`${maxDate}T12:00:00`);
+  const d = new Date(winStart);
+  const dayW = ganttW / totalDays;
+
+  while (d <= end) {
+    const dow = d.getDay();
+    if (dow === 0 || dow === 6) {
+      const offset = Math.round((d - winStart) / 86400000);
+      doc.setFillColor(...WEEKEND_BG);
+      doc.rect(ganttX + offset * dayW, startY, dayW, bodyBottom - startY, 'F');
+    }
+    d.setDate(d.getDate() + 1);
+  }
+}
+
+function drawTodayLine(doc, layout, minDate, maxDate, startY) {
+  const today = isoDateLocal(new Date());
+  if (!today || today < minDate || today > maxDate) return;
+  const { ganttX, ganttW, bodyBottom } = layout;
+  const totalDays = Math.max(1, daysBetweenInclusive(minDate, maxDate));
+  const winStart = new Date(`${minDate}T12:00:00`);
+  const t = new Date(`${today}T12:00:00`);
+  const offset = Math.round((t - winStart) / 86400000);
+  const x = ganttX + ((offset + 0.5) / totalDays) * ganttW;
+  doc.setDrawColor(...CRITICAL);
+  doc.setLineWidth(0.4);
+  doc.line(x, startY, x, bodyBottom);
 }
 
 function drawGanttGrid(doc, layout, scale, minDate, maxDate, startY) {
@@ -536,87 +564,56 @@ function drawDiamond(doc, cx, cy, r) {
 function drawBarProgress(doc, bar, barY, barH, pct) {
   if (pct <= 0 || pct >= 100) return;
   doc.setFillColor(...PROGRESS);
-  const h = Math.max(1.2, barH * 0.42);
+  const h = Math.max(1.6, barH * 0.48);
   doc.rect(bar.x, barY + barH - h, (bar.w * pct) / 100, h, 'F');
 }
 
-function drawBarPctLabel(doc, bar, barY, barH, pct, dateMeta) {
-  const label = visiblePctLabel(pct);
-  if (!label || pct <= 0 || bar.w < 14) return;
+function drawBarDateLabels(doc, bar, row, barY, barH) {
+  const start = row.date_debut;
+  const end = row.date_fin || row.date_debut;
+  if (!start || !bar) return;
 
-  const fs = bar.w >= 36 ? 5.5 : 5;
+  const durDays = rowDurationDays(row);
+  const startShort = fmtDateBar(start, false);
+  const endShort = fmtDateBar(end, false);
+  const fs = bar.w >= 32 ? 5.2 : 4.6;
+
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(fs);
-  const pctW = measureTextWidth(doc, label, fs);
+  doc.setTextColor(...BLACK);
 
-  if (dateMeta?.placement === 'inside' || dateMeta?.placement === 'inside-long') {
-    const centerGap = bar.w - (dateMeta.startPad || 0) - (dateMeta.endPad || 0);
-    if (centerGap < pctW + 4 || bar.w < 28) return;
-    doc.setTextColor(255, 255, 255);
-    doc.text(label, bar.x + bar.w / 2, barY + barH / 2 - 0.2, { align: 'center' });
+  const barTop = barY;
+  const barBottom = barY + barH;
+  const wStart = measureTextWidth(doc, startShort, fs);
+  const wEnd = measureTextWidth(doc, endShort, fs);
+
+  if (durDays < 3 || bar.w < 10) {
+    doc.text(startShort, bar.x + Math.max(bar.w / 2, 2), barTop - 0.9, { align: 'center' });
     return;
   }
 
-  if (bar.w < 20) return;
-  doc.setTextColor(255, 255, 255);
-  doc.text(label, bar.x + bar.w / 2, barY + barH / 2 - 0.2, { align: 'center' });
-}
-
-function drawBarDateLabels(doc, bar, row, barY, barH, barRgb) {
-  const start = row.date_debut;
-  const end = row.date_fin || row.date_debut;
-  if (!start || !bar) return null;
-
-  const startShort = fmtDateBar(start, false);
-  const endShort = fmtDateBar(end, false);
-  const startLong = `Début : ${fmtDate(start)}`;
-  const endLong = `Fin : ${fmtDate(end)}`;
-  const y = barY + barH - 1;
-
-  doc.setFont('helvetica', 'bold');
-
-  if (bar.w >= 46) {
-    const fs = 4.8;
-    doc.setFontSize(fs);
-    const wStart = measureTextWidth(doc, startLong, fs);
-    const wEnd = measureTextWidth(doc, endLong, fs);
-    if (wStart + wEnd + 6 <= bar.w) {
-      const tc = barContrastTextColor(barRgb);
-      doc.setTextColor(...tc);
-      doc.text(startLong, bar.x + 1.4, y);
-      doc.text(endLong, bar.x + bar.w - 1.4, y, { align: 'right' });
-      return { placement: 'inside-long', startPad: wStart + 1.4, endPad: wEnd + 1.4 };
-    }
+  if (bar.w >= 42) {
+    doc.text(startShort, bar.x, barTop - 0.9);
+    doc.text(endShort, bar.x + bar.w, barBottom + 2.4, { align: 'right' });
+    return;
   }
 
-  const fs = bar.w >= 30 ? 5 : 4.6;
-  doc.setFontSize(fs);
-  const wStart = measureTextWidth(doc, startShort, fs);
-  const wEnd = measureTextWidth(doc, endShort, fs);
-  const pad = 1.2;
-  const gap = 3;
-
-  if (bar.w >= 16 && wStart + wEnd + gap <= bar.w) {
-    const tc = barContrastTextColor(barRgb);
-    doc.setTextColor(...tc);
-    doc.text(startShort, bar.x + pad, y);
-    doc.text(endShort, bar.x + bar.w - pad, y, { align: 'right' });
-    return { placement: 'inside', startPad: wStart + pad, endPad: wEnd + pad };
+  if (bar.w >= 18 && wStart + wEnd + 4 <= bar.w + 8) {
+    doc.text(startShort, bar.x, barTop - 0.9);
+    doc.text(endShort, bar.x + bar.w, barTop - 0.9, { align: 'right' });
+    return;
   }
 
-  doc.setFontSize(4.6);
-  doc.setTextColor(...BLACK);
-  doc.text(startShort, bar.x - 0.4, y, { align: 'right' });
-  doc.text(endShort, bar.x + bar.w + 0.4, y, { align: 'left' });
-  return { placement: 'outside', startPad: 0, endPad: 0 };
+  doc.text(startShort, bar.x - 0.4, barTop - 0.9, { align: 'right' });
+  doc.text(endShort, bar.x + bar.w + 0.4, barTop - 0.9, { align: 'left' });
 }
 
 function drawSummaryBar(doc, bar, barY, barH, rgb) {
   doc.setFillColor(...rgb);
   doc.setDrawColor(...rgb);
-  const h = Math.max(2, barH * 0.55);
+  const h = Math.max(2.8, barH * 0.62);
   const y = barY + (barH - h) / 2;
-  const cap = Math.min(2.5, h / 2);
+  const cap = Math.min(3, h / 2);
   doc.rect(bar.x + cap, y, Math.max(bar.w - cap * 2, 1), h, 'F');
   doc.triangle(bar.x, y + h / 2, bar.x + cap, y, bar.x + cap, y + h, 'F');
   doc.triangle(bar.x + bar.w, y + h / 2, bar.x + bar.w - cap, y, bar.x + bar.w - cap, y + h, 'F');
@@ -628,7 +625,7 @@ function drawRow(doc, layout, row, y, minDate, maxDate, rowH, criticalIds, tasks
   const isMilestone = row.type === 'milestone';
   const pct = Math.min(100, Math.max(0, Number(row.avancement) || 0));
 
-  doc.setFillColor(isSummary ? 245 : 255, isSummary ? 245 : 255, isSummary ? 245 : 255);
+  doc.setFillColor(...(isSummary ? SUMMARY_BG : [255, 255, 255]));
   doc.rect(M, y, LEFT_W + ganttW, rowH, 'F');
   doc.setDrawColor(...BORDER);
   doc.setLineWidth(0.12);
@@ -637,7 +634,7 @@ function drawRow(doc, layout, row, y, minDate, maxDate, rowH, criticalIds, tasks
   let x = M + 1;
   const nom = row.nom || '—';
   const nomLines = doc.splitTextToSize(nom, LEFT_COLS[1].w - 2);
-  const fontSize = isSummary ? Math.min(7, rowH - 1) : Math.min(6.5, rowH - 1);
+  const fontSize = isSummary ? Math.min(7.8, rowH - 0.8) : Math.min(6.8, rowH - 1.2);
 
   doc.setFont('helvetica', isSummary || isMilestone ? 'bold' : 'normal');
   doc.setFontSize(fontSize);
@@ -660,8 +657,8 @@ function drawRow(doc, layout, row, y, minDate, maxDate, rowH, criticalIds, tasks
   const bar = taskBarProportional(row, minDate, maxDate, ganttX, ganttW);
   if (!bar) return { bar: null, rowCenterY: y + rowH / 2 };
 
-  const barY = y + 1.1;
-  const barH = Math.max(1.8, rowH - 2);
+  const barH = Math.max(2.4, rowH * (isSummary ? 0.58 : 0.68));
+  const barY = y + (rowH - barH) / 2 + (isSummary ? 0.2 : 0.6);
 
   if (isMilestone) {
     drawDiamond(doc, bar.centerX, y + rowH / 2, Math.min(2.8, barH / 2 + 0.5));
@@ -689,8 +686,7 @@ function drawRow(doc, layout, row, y, minDate, maxDate, rowH, criticalIds, tasks
   }
 
   drawBarProgress(doc, bar, barY, barH, pct);
-  const dateMeta = drawBarDateLabels(doc, bar, row, barY, barH, rgb);
-  drawBarPctLabel(doc, bar, barY, barH, pct, dateMeta);
+  drawBarDateLabels(doc, bar, row, barY, barH);
 
   return { bar, barY, barH, rowCenterY: y + rowH / 2 };
 }
@@ -733,6 +729,10 @@ function drawLegend(doc, layout) {
   doc.setFillColor(...hexToRgb(planningLotColor('Gros œuvre')));
   doc.rect(M + 54, y - 2, 4, 2, 'F');
   doc.text('Tâche standard', M + 59.5, y);
+  doc.setDrawColor(...CRITICAL);
+  doc.setLineWidth(0.35);
+  doc.line(M + 82, y - 1.5, M + 86, y - 1.5);
+  doc.text('Aujourd\'hui', M + 88, y);
 }
 
 function drawFooter(doc, layout) {
@@ -761,7 +761,7 @@ export async function generateProjectPlanningPdf(projet, tasks = [], options = {
 
   projet = { ...projet, _tasksForPdf: tasks };
   const rows = buildPdfRows(tasks, mode, milestones);
-  const layout = pickPageLayout(Math.max(1, rows.length));
+  const layout = pickPageLayout(Math.max(1, rows.length), rows);
   const projectDates = projectSpan(tasks, projet);
   const criticalIds = computeCriticalPathIds(tasks);
 
@@ -789,14 +789,17 @@ export async function generateProjectPlanningPdf(projet, tasks = [], options = {
 
   drawHeader(doc, layout, { logo, projet, mode, minDate, maxDate, projectDates });
   const rowStartY = drawColumnHeaders(doc, layout, scale, minDate, maxDate);
+  drawWeekendBands(doc, layout, scale, minDate, maxDate, rowStartY);
   drawGanttGrid(doc, layout, scale, minDate, maxDate, rowStartY);
+  drawTodayLine(doc, layout, minDate, maxDate, rowStartY);
 
   const rowMetrics = [];
   let y = rowStartY;
   rows.forEach((row) => {
-    const metric = drawRow(doc, layout, row, y, minDate, maxDate, layout.rowH, criticalIds, tasks);
+    const rh = row.type === 'summary' ? layout.rowH * SUMMARY_ROW_BOOST : layout.rowH;
+    const metric = drawRow(doc, layout, row, y, minDate, maxDate, rh, criticalIds, tasks);
     rowMetrics.push({ row, ...metric });
-    y += layout.rowH;
+    y += rh + layout.rowGap;
   });
 
   if (mode === 'detailed') {
