@@ -31,13 +31,35 @@ export const BESOIN_RH_TYPES = BESOIN_TYPES;
 export const BESOIN_FONCTIONS = BESOIN_TYPES;
 
 export const BESOIN_REQUEST_STATUTS = [
-  { value: 'en_attente', label: 'En attente', color: '#F57C00' },
+  { value: 'en_attente', label: 'En attente RH', color: '#F57C00' },
   { value: 'en_cours', label: 'En cours', color: '#1565C0' },
   { value: 'partielle', label: 'Partiellement couvert', color: '#F57C00' },
   { value: 'affectee', label: 'Couvert', color: '#2E7D32' },
-  { value: 'refusee', label: 'Refusée', color: '#C62828' },
-  { value: 'cloturee', label: 'Clôturée', color: '#757575' },
+  { value: 'recrutement_en_cours', label: 'Recrutement en cours', color: '#7B1FA2' },
+  { value: 'refusee', label: 'Refusé', color: '#C62828' },
+  { value: 'cloturee', label: 'Clos', color: '#757575' },
 ];
+
+export const RECRUITMENT_STATUTS = [
+  { value: 'cree', label: 'Créé', color: '#757575', badge: 'badge-grey' },
+  { value: 'en_recherche', label: 'En recherche', color: '#1565C0', badge: 'badge-blue' },
+  { value: 'entretien', label: 'Entretien', color: '#F57C00', badge: 'badge-orange' },
+  { value: 'valide', label: 'Validé', color: '#2E7D32', badge: 'badge-green' },
+  { value: 'annule', label: 'Annulé', color: '#C62828', badge: 'badge-red' },
+  { value: 'cloture', label: 'Clôturé', color: '#546E7A', badge: 'badge-grey' },
+];
+
+export function recruitmentStatutLabel(statut) {
+  return RECRUITMENT_STATUTS.find((s) => s.value === statut)?.label || statut || '—';
+}
+
+export function recruitmentStatutBadge(statut) {
+  return RECRUITMENT_STATUTS.find((s) => s.value === statut)?.badge || 'badge-grey';
+}
+
+export function recruitmentStatutColor(statut) {
+  return RECRUITMENT_STATUTS.find((s) => s.value === statut)?.color || '#757575';
+}
 
 /** Besoin modifiable tant qu'aucune prise en charge RH */
 export function canEditProjectNeed(need) {

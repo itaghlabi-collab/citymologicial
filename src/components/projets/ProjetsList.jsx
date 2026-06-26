@@ -24,6 +24,8 @@ import ProjectBesoinsModule from './ProjectBesoinsModule';
 import {
   listWorkersByProject,
 } from '../../services/rh/workerProjectAssignments';
+import { listProjectRecruitments } from '../../services/rh/resourceRequests';
+import { recruitmentStatutBadge, recruitmentStatutLabel } from '../../constants/projectBesoins';
 import { listAssignmentsByProject, listSubcontractors, saveProjectSubcontractorAssignments, removeSubcontractorFromProject, subcontractorFullName } from '../../services/rh/subcontractors';
 import { listActiveEmployees, employeeSelectLabel, findEmployeeByStoredLabel, filterChefsProjet, filterChefsChantierEmployees, withSelectedEmployee } from '../../services/rh/employees';
 import { listCrmDevis, crmDevisSelectLabel, findCrmDevisByReference } from '../../services/crm/crmDevis';
@@ -494,6 +496,7 @@ function FormulaireProjet({ initial, onSave, onCancel, saving, clients = [] }) {
 function ProjectEquipeTab({ projet, compact = false }) {
   const [workerAssignments, setWorkerAssignments] = useState([]);
   const [subAssignments, setSubAssignments] = useState([]);
+  const [recruitments, setRecruitments] = useState([]);
   const [allSubcontractors, setAllSubcontractors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -506,14 +509,16 @@ function ProjectEquipeTab({ projet, compact = false }) {
     setLoading(true);
     setLoadError(null);
     try {
-      const [wa, sa, subs] = await Promise.all([
+      const [wa, sa, subs, rec] = await Promise.all([
         listWorkersByProject(projet.id),
         listAssignmentsByProject(projet.id).catch(() => []),
         listSubcontractors().catch(() => []),
+        listProjectRecruitments(projet.id).catch(() => []),
       ]);
       setWorkerAssignments(wa);
       setSubAssignments((sa || []).filter((s) => s.status === 'active'));
       setAllSubcontractors(subs);
+      setRecruitments(rec || []);
     } catch (err) {
       console.error('[CITYMO] ProjectEquipeTab load', err);
       const msg = err?.message || '';
@@ -602,9 +607,13 @@ function ProjectEquipeTab({ projet, compact = false }) {
   return (
     <>
       <div className={compact ? '' : 'card'} style={wrapStyle}>
-        {!compact && <SectionTitle icon={<Users size={13} />}>Équipe affectée au projet</SectionTitle>}
+        {!compact && <SectionTitle icon={<Users size={13} />}>Équipe du projet</SectionTitle>}
 
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12, marginBottom: 20 }}>
+        {/* A. Encadrement */}
+        <div style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--red)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
+          A. Encadrement
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12, marginBottom: 24 }}>
           <div style={{ padding: '12px 14px', background: 'var(--surface-2)', borderRadius: 8 }}>
             <div style={{ fontSize: '0.68rem', fontWeight: 800, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 4 }}>Chef de projet</div>
             <div style={{ fontWeight: 700 }}>{projet.responsable || projet.chef_projet || '—'}</div>
@@ -615,30 +624,73 @@ function ProjectEquipeTab({ projet, compact = false }) {
           </div>
         </div>
 
-        <div style={{ padding: '10px 12px', background: '#E8F5E9', borderRadius: 8, fontSize: '0.82rem', color: '#2E7D32', marginBottom: 14 }}>
-          Les ouvriers sont affectés par le service RH (Demandes ressources). Cette liste est mise à jour automatiquement.
+        {/* B. Ouvriers affectés */}
+        <div style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--red)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
+          B. Ouvriers affectés
         </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
-          <div style={{ fontSize: '0.82rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <HardHat size={15} /> Ouvriers affectés ({workerAssignments.length})
-          </div>
+        <div style={{ padding: '10px 12px', background: '#E8F5E9', borderRadius: 8, fontSize: '0.82rem', color: '#2E7D32', marginBottom: 12 }}>
+          Affectation validée par le service RH — lecture seule.
         </div>
 
         {workerAssignments.length === 0 ? (
-          <div style={{ padding: '20px 0', color: 'var(--text-3)', fontSize: '0.85rem', textAlign: 'center' }}>
-            Aucun ouvrier affecté — les affectations apparaîtront ici après validation RH.
+          <div style={{ padding: '20px 0', color: 'var(--text-3)', fontSize: '0.85rem', textAlign: 'center', marginBottom: 24 }}>
+            Aucun ouvrier affecté pour le moment.
           </div>
         ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {workerAssignments.map((a) => (
-              <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 8, background: '#fff' }}>
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontWeight: 700 }}>{a.workerName || '—'}</div>
-                  <div style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>{a.workerFonction || '—'}</div>
-                </div>
-              </div>
-            ))}
+          <div className="table-wrap" style={{ marginBottom: 24 }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Nom</th>
+                  <th>Fonction</th>
+                </tr>
+              </thead>
+              <tbody>
+                {workerAssignments.map((a) => (
+                  <tr key={a.id}>
+                    <td style={{ fontWeight: 700 }}>{a.workerName || '—'}</td>
+                    <td>{a.workerFonction || '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+
+        {/* C. Postes en recrutement */}
+        <div style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--red)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
+          C. Postes en cours de recrutement
+        </div>
+        {recruitments.length === 0 ? (
+          <div style={{ padding: '20px 0', color: 'var(--text-3)', fontSize: '0.85rem', textAlign: 'center', marginBottom: 24 }}>
+            Aucun poste en cours de recrutement.
+          </div>
+        ) : (
+          <div className="table-wrap" style={{ marginBottom: 24 }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Fonction</th>
+                  <th>Quantité</th>
+                  <th>Statut</th>
+                  <th>Date demande</th>
+                </tr>
+              </thead>
+              <tbody>
+                {recruitments.map((r) => (
+                  <tr key={r.id}>
+                    <td style={{ fontWeight: 600 }}>{r.fonction}</td>
+                    <td>{r.quantite} poste{r.quantite > 1 ? 's' : ''}</td>
+                    <td>
+                      <span className={`badge ${recruitmentStatutBadge(r.recruitment_statut)}`}>
+                        {recruitmentStatutLabel(r.recruitment_statut)}
+                      </span>
+                    </td>
+                    <td>{r.created_at ? new Date(r.created_at).toLocaleDateString('fr-FR') : '—'}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
 

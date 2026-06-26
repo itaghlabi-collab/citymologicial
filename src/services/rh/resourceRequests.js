@@ -5,11 +5,14 @@ import { getSupabase } from '../../lib/supabase';
 import {
   listWorkersByProject,
   saveProjectWorkerAssignments,
+  removeWorkerFromProject,
 } from '../rh/workerProjectAssignments';
 import { listWorkers } from '../rh/workers';
 import { workerFullName } from '../rh/attendance';
 import {
   BESOIN_REQUEST_STATUTS,
+  RECRUITMENT_STATUTS,
+  recruitmentStatutLabel,
   isChefChantierFonction,
   isChefProjetFonction,
   isOuvrierFonction,
@@ -32,8 +35,9 @@ export function requestStatutColor(statut) {
   return BESOIN_REQUEST_STATUTS.find((s) => s.value === statut)?.color || '#757575';
 }
 
-function normalizeRequest(row, workers = [], history = []) {
+function normalizeRequest(row, workers = [], history = [], recruitments = []) {
   if (!row) return null;
+  const isRecruitment = row.request_type === 'recrutement';
   return {
     id: row.id,
     ref: row.ref_demande || '',
@@ -46,13 +50,20 @@ function normalizeRequest(row, workers = [], history = []) {
     priorite: row.priorite || 'Normale',
     commentaire: row.commentaire || '',
     statut: row.statut || 'en_attente',
-    statutLabel: requestStatutLabel(row.statut),
+    statutLabel: isRecruitment
+      ? recruitmentStatutLabel(row.recruitment_statut || 'cree')
+      : requestStatutLabel(row.statut),
+    request_type: row.request_type || 'ressource',
+    parent_request_id: row.parent_request_id || null,
+    recruitment_statut: row.recruitment_statut || null,
+    recruitment_statutLabel: recruitmentStatutLabel(row.recruitment_statut),
     requested_by: row.requested_by,
     requested_by_name: row.requested_by_name || '',
     assigned_by: row.assigned_by,
     assigned_by_name: row.assigned_by_name || '',
     staff_need_id: row.staff_need_id || null,
     workers,
+    recruitments,
     history,
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -101,7 +112,7 @@ async function logHistory(requestId, action, details, actorId, actorName) {
 async function loadRequestWorkers(requestId) {
   const { data, error } = await getSupabase()
     .from(WORKERS_TABLE)
-    .select('worker_id, assigned_at, workers(id, prenom, nom, fonction, statut)')
+    .select('worker_id, assigned_at, workers(id, prenom, nom, fonction, statut, telephone)')
     .eq('request_id', requestId);
   if (error) throw error;
   return (data || []).map((r) => ({
@@ -109,8 +120,54 @@ async function loadRequestWorkers(requestId) {
     workerName: workerFullName(r.workers) || '',
     fonction: r.workers?.fonction || '',
     statut: r.workers?.statut || '',
+    telephone: r.workers?.telephone || '',
     assigned_at: r.assigned_at,
   }));
+}
+
+async function loadChildRecruitments(parentId) {
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .select('*')
+    .eq('parent_request_id', parentId)
+    .eq('request_type', 'recrutement')
+    .order('created_at', { ascending: false });
+  if (error) throw error;
+  return (data || []).map((row) => normalizeRequest(row));
+}
+
+async function loadWorkerCounts(requestIds = []) {
+  if (!requestIds.length) return {};
+  const { data, error } = await getSupabase()
+    .from(WORKERS_TABLE)
+    .select('request_id')
+    .in('request_id', requestIds);
+  if (error) return {};
+  const counts = {};
+  (data || []).forEach((r) => {
+    counts[r.request_id] = (counts[r.request_id] || 0) + 1;
+  });
+  return counts;
+}
+
+async function syncRequestCoverageStatut(requestId) {
+  if (!requestId) return;
+  const request = await getResourceRequest(requestId);
+  if (!request || request.request_type === 'recrutement') return;
+  const assigned = request.workers?.length || 0;
+  const needed = Number(request.quantite) || 0;
+  const openRecruitments = (request.recruitments || []).filter(
+    (r) => !['cloture', 'annule', 'valide'].includes(r.recruitment_statut),
+  );
+  let statut = request.statut;
+  if (['refusee', 'cloturee'].includes(statut)) return;
+  if (openRecruitments.length > 0 && assigned < needed) statut = 'recrutement_en_cours';
+  else if (assigned >= needed && needed > 0) statut = 'affectee';
+  else if (assigned > 0 && assigned < needed) statut = 'partielle';
+  else if (assigned === 0 && statut === 'affectee') statut = 'en_attente';
+  if (statut !== request.statut) {
+    await getSupabase().from(TABLE).update({ statut, updated_at: new Date().toISOString() }).eq('id', requestId);
+  }
 }
 
 async function loadRequestHistory(requestId) {
@@ -125,10 +182,35 @@ async function loadRequestHistory(requestId) {
 
 export async function listResourceRequests({ statut = '', projectId = '' } = {}) {
   await requireUser();
-  let q = getSupabase().from(TABLE).select('*').order('created_at', { ascending: false });
+  let q = getSupabase()
+    .from(TABLE)
+    .select('*')
+    .or('request_type.eq.ressource,request_type.is.null')
+    .is('parent_request_id', null)
+    .order('created_at', { ascending: false });
   if (statut) q = q.eq('statut', statut);
   if (projectId) q = q.eq('project_id', projectId);
   const { data, error } = await q;
+  if (error) throw error;
+  const rows = data || [];
+  const counts = await loadWorkerCounts(rows.map((r) => r.id));
+  return rows.map((row) => {
+    const req = normalizeRequest(row);
+    req.workers_count = counts[row.id] || 0;
+    return req;
+  });
+}
+
+export async function listProjectRecruitments(projectId) {
+  if (!projectId) return [];
+  await requireUser();
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .select('*')
+    .eq('project_id', projectId)
+    .eq('request_type', 'recrutement')
+    .not('recruitment_statut', 'in', '("cloture","annule")')
+    .order('created_at', { ascending: false });
   if (error) throw error;
   return (data || []).map((row) => normalizeRequest(row));
 }
@@ -137,11 +219,12 @@ export async function getResourceRequest(id) {
   await requireUser();
   const { data, error } = await getSupabase().from(TABLE).select('*').eq('id', id).single();
   if (error) throw error;
-  const [workers, history] = await Promise.all([
-    loadRequestWorkers(id),
+  const [workers, history, recruitments] = await Promise.all([
+    data.request_type === 'recrutement' ? Promise.resolve([]) : loadRequestWorkers(id),
     loadRequestHistory(id),
+    data.request_type === 'recrutement' ? Promise.resolve([]) : loadChildRecruitments(id),
   ]);
-  return normalizeRequest(data, workers, history);
+  return normalizeRequest(data, workers, history, recruitments);
 }
 
 export async function createResourceRequest({
@@ -322,6 +405,7 @@ export async function validateResourceRequest(id, { allowPartial = true } = {}) 
     }
   }
 
+  await syncRequestCoverageStatut(id);
   return getResourceRequest(id);
 }
 
@@ -362,6 +446,7 @@ export async function createRecruitmentRequestFromRequest(id) {
   const actorName = await getProfileName(user.id);
   const request = await getResourceRequest(id);
   if (!request) throw new Error('Demande introuvable.');
+  if (request.request_type === 'recrutement') throw new Error('Impossible depuis une demande de recrutement.');
 
   const assigned = (request.workers || []).length;
   const manque = Math.max(0, (Number(request.quantite) || 0) - assigned);
@@ -377,16 +462,26 @@ export async function createRecruitmentRequestFromRequest(id) {
     quantite: manque,
     date_souhaitee: request.date_souhaitee || null,
     priorite: request.priorite || 'Normale',
-    commentaire: `Demande de recrutement — complément de ${manque} ${request.fonction}(s) pour ${request.project_name}`,
+    commentaire: `Recrutement — ${manque} ${request.fonction}(s) pour ${request.project_name}`,
     staff_need_id: request.staff_need_id || null,
+    parent_request_id: request.id,
+    request_type: 'recrutement',
+    recruitment_statut: 'cree',
     statut: 'en_attente',
     requested_by: user.id,
     requested_by_name: actorName,
+    assigned_by: user.id,
+    assigned_by_name: actorName,
     updated_at: new Date().toISOString(),
   };
 
   const { data, error } = await getSupabase().from(TABLE).insert([payload]).select().single();
   if (error) throw error;
+
+  await getSupabase()
+    .from(TABLE)
+    .update({ statut: 'recrutement_en_cours', updated_at: new Date().toISOString() })
+    .eq('id', request.id);
 
   await logHistory(id, 'recruitment_created', `Demande recrutement ${ref} pour ${manque} poste(s)`, user.id, actorName);
   await logHistory(data.id, 'created', `Recrutement lié à ${request.ref}`, user.id, actorName);
@@ -395,6 +490,7 @@ export async function createRecruitmentRequestFromRequest(id) {
     try {
       const { syncNeedFromRhRequest } = await import('../projects/projectBesoins');
       await syncNeedFromRhRequest(request, {
+        statut: 'recrutement_en_cours',
         details: `Demande de recrutement ${ref} créée pour ${manque} poste(s)`,
         actorId: user.id,
         actorName,
@@ -405,6 +501,80 @@ export async function createRecruitmentRequestFromRequest(id) {
   }
 
   return normalizeRequest(data);
+}
+
+export async function updateRecruitmentStatut(id, recruitmentStatut) {
+  const user = await requireUser();
+  const actorName = await getProfileName(user.id);
+  const valid = RECRUITMENT_STATUTS.some((s) => s.value === recruitmentStatut);
+  if (!valid) throw new Error('Statut recrutement invalide.');
+
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .update({
+      recruitment_statut: recruitmentStatut,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+
+  await logHistory(id, 'recruitment_status', `Recrutement → ${recruitmentStatutLabel(recruitmentStatut)}`, user.id, actorName);
+  await syncRequestCoverageStatut(data.parent_request_id);
+  return getResourceRequest(id);
+}
+
+export async function closeRecruitmentRequest(id) {
+  return updateRecruitmentStatut(id, 'cloture');
+}
+
+export async function removeWorkerFromResourceRequest(requestId, workerId) {
+  const user = await requireUser();
+  const actorName = await getProfileName(user.id);
+  const request = await getResourceRequest(requestId);
+  if (!request) throw new Error('Demande introuvable.');
+
+  const { error: delErr } = await getSupabase()
+    .from(WORKERS_TABLE)
+    .delete()
+    .eq('request_id', requestId)
+    .eq('worker_id', workerId);
+  if (delErr) throw delErr;
+
+  try {
+    await removeWorkerFromProject(request.project_id, workerId);
+  } catch (err) {
+    console.warn('[CITYMO] remove worker from project', err);
+  }
+
+  const updated = await getResourceRequest(requestId);
+  const count = updated.workers?.length || 0;
+  const needed = Number(request.quantite) || 0;
+  let newStatut = 'en_cours';
+  if (count === 0) newStatut = 'en_attente';
+  else if (count < needed) newStatut = 'partielle';
+  else newStatut = 'affectee';
+
+  await getSupabase()
+    .from(TABLE)
+    .update({ statut: newStatut, updated_at: new Date().toISOString() })
+    .eq('id', requestId);
+
+  await logHistory(requestId, 'worker_removed', `Ouvrier retiré de la demande`, user.id, actorName);
+
+  if (request.staff_need_id) {
+    try {
+      const { syncNeedFromRhRequest } = await import('../projects/projectBesoins');
+      await syncNeedFromRhRequest(request, { actorId: user.id, actorName });
+    } catch (err) {
+      console.warn('[CITYMO] sync after remove worker', err);
+    }
+  }
+
+  await syncRequestCoverageStatut(requestId);
+  if (request.parent_request_id) await syncRequestCoverageStatut(request.parent_request_id);
+  return getResourceRequest(requestId);
 }
 
 export async function closeResourceRequest(id) {
