@@ -51,6 +51,7 @@ function normalizeRequest(row, workers = [], history = []) {
     requested_by_name: row.requested_by_name || '',
     assigned_by: row.assigned_by,
     assigned_by_name: row.assigned_by_name || '',
+    staff_need_id: row.staff_need_id || null,
     workers,
     history,
     created_at: row.created_at,
@@ -150,6 +151,7 @@ export async function createResourceRequest({
   date_souhaitee,
   priorite,
   commentaire,
+  staff_need_id,
 }) {
   const user = await requireUser();
   if (!project?.id || !fonction?.trim()) throw new Error('Projet et fonction requis.');
@@ -167,6 +169,7 @@ export async function createResourceRequest({
     date_souhaitee: date_souhaitee || null,
     priorite: priorite || 'Normale',
     commentaire: commentaire?.trim() || null,
+    staff_need_id: staff_need_id || null,
     statut: 'en_attente',
     requested_by: user.id,
     requested_by_name: actorName,
@@ -282,6 +285,15 @@ export async function validateResourceRequest(id) {
     await notifyResourceRequestValidated(request);
   } catch (err) {
     console.warn('[CITYMO] notify resource validated', err);
+  }
+
+  if (request.staff_need_id) {
+    try {
+      const { syncProjectStaffNeedsCoverage } = await import('../projects/projectBesoins');
+      await syncProjectStaffNeedsCoverage(request.project_id);
+    } catch (err) {
+      console.warn('[CITYMO] sync staff need after RH', err);
+    }
   }
 
   return getResourceRequest(id);

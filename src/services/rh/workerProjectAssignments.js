@@ -157,7 +157,25 @@ export async function saveProjectWorkerAssignments(projectId, workerIds = []) {
     }
   }
 
+  await syncStaffNeedsAfterAssignment(pid);
   return listWorkersByProject(pid);
+}
+
+export async function removeWorkersFromProject(projectId, workerIds = []) {
+  for (const workerId of workerIds) {
+    await removeWorkerFromProject(projectId, workerId);
+  }
+  await syncStaffNeedsAfterAssignment(projectId);
+  return listWorkersByProject(projectId);
+}
+
+async function syncStaffNeedsAfterAssignment(projectId) {
+  try {
+    const { syncProjectStaffNeedsCoverage } = await import('../projects/projectBesoins');
+    await syncProjectStaffNeedsCoverage(projectId);
+  } catch (err) {
+    console.warn('[CITYMO] sync staff needs', err);
+  }
 }
 
 export async function removeWorkerFromProject(projectId, workerId) {
@@ -170,4 +188,5 @@ export async function removeWorkerFromProject(projectId, workerId) {
     .eq('worker_id', workerId)
     .eq('status', 'active');
   if (error) throw error;
+  await syncStaffNeedsAfterAssignment(projectId);
 }

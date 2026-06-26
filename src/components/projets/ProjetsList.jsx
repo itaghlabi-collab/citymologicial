@@ -21,13 +21,12 @@ import { generateProjectRecapPdf } from '../../services/projects/projectPdf';
 import ProjectDocuments from './ProjectDocuments';
 import ProjectPlanningModule from './ProjectPlanningModule';
 import ProjectBesoinsModule from './ProjectBesoinsModule';
-import { listWorkers } from '../../services/rh/workers';
-import { workerFullName } from '../../services/rh/attendance';
 import {
   listWorkersByProject,
-  saveProjectWorkerAssignments,
   removeWorkerFromProject,
+  removeWorkersFromProject,
 } from '../../services/rh/workerProjectAssignments';
+import AssignWorkersModal from './besoins/AssignWorkersModal';
 import { listAssignmentsByProject, listSubcontractors, saveProjectSubcontractorAssignments, removeSubcontractorFromProject, subcontractorFullName } from '../../services/rh/subcontractors';
 import { listActiveEmployees, employeeSelectLabel, findEmployeeByStoredLabel, filterChefsProjet, filterChefsChantierEmployees, withSelectedEmployee } from '../../services/rh/employees';
 import { listCrmDevis, crmDevisSelectLabel, findCrmDevisByReference } from '../../services/crm/crmDevis';
@@ -498,30 +497,27 @@ function FormulaireProjet({ initial, onSave, onCancel, saving, clients = [] }) {
 function ProjectEquipeTab({ projet, compact = false }) {
   const [workerAssignments, setWorkerAssignments] = useState([]);
   const [subAssignments, setSubAssignments] = useState([]);
-  const [allWorkers, setAllWorkers] = useState([]);
   const [allSubcontractors, setAllSubcontractors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState(null);
   const [showAssignModal, setShowAssignModal] = useState(false);
   const [showSubModal, setShowSubModal] = useState(false);
-  const [selectedIds, setSelectedIds] = useState(() => new Set());
   const [selectedSubIds, setSelectedSubIds] = useState(() => new Set());
+  const [selectedRemoveIds, setSelectedRemoveIds] = useState(() => new Set());
 
   const load = useCallback(async () => {
     if (!projet?.id) return;
     setLoading(true);
     setLoadError(null);
     try {
-      const [wa, sa, workers, subs] = await Promise.all([
+      const [wa, sa, subs] = await Promise.all([
         listWorkersByProject(projet.id),
         listAssignmentsByProject(projet.id).catch(() => []),
-        listWorkers().catch(() => []),
         listSubcontractors().catch(() => []),
       ]);
       setWorkerAssignments(wa);
       setSubAssignments((sa || []).filter((s) => s.status === 'active'));
-      setAllWorkers(workers);
       setAllSubcontractors(subs);
     } catch (err) {
       console.error('[CITYMO] ProjectEquipeTab load', err);
@@ -538,18 +534,12 @@ function ProjectEquipeTab({ projet, compact = false }) {
 
   useEffect(() => { load(); }, [load]);
 
-  const assignableWorkers = useMemo(
-    () => (allWorkers || []).filter((w) => w.statut === 'actif'),
-    [allWorkers],
-  );
-
   const assignableSubcontractors = useMemo(
     () => (allSubcontractors || []).filter((s) => s.statut === 'actif'),
     [allSubcontractors],
   );
 
   function openAssignModal() {
-    setSelectedIds(new Set(workerAssignments.map((a) => String(a.workerId))));
     setShowAssignModal(true);
   }
 
@@ -568,9 +558,9 @@ function ProjectEquipeTab({ projet, compact = false }) {
     });
   }
 
-  function toggleWorker(id) {
+  function toggleRemoveWorker(id) {
     const sid = String(id);
-    setSelectedIds((prev) => {
+    setSelectedRemoveIds((prev) => {
       const next = new Set(prev);
       if (next.has(sid)) next.delete(sid);
       else next.add(sid);
@@ -578,14 +568,25 @@ function ProjectEquipeTab({ projet, compact = false }) {
     });
   }
 
-  async function handleSaveAssignments() {
+  function toggleAllRemoveWorkers() {
+    if (selectedRemoveIds.size === workerAssignments.length) {
+      setSelectedRemoveIds(new Set());
+    } else {
+      setSelectedRemoveIds(new Set(workerAssignments.map((a) => String(a.workerId))));
+    }
+  }
+
+  async function handleBulkRemoveWorkers() {
+    if (selectedRemoveIds.size === 0) return;
+    const n = selectedRemoveIds.size;
+    if (!window.confirm(`Retirer ${n} ouvrier${n > 1 ? 's' : ''} du chantier ?`)) return;
     setSaving(true);
     try {
-      const updated = await saveProjectWorkerAssignments(projet.id, [...selectedIds]);
-      setWorkerAssignments(updated);
-      setShowAssignModal(false);
+      await removeWorkersFromProject(projet.id, [...selectedRemoveIds]);
+      setSelectedRemoveIds(new Set());
+      await load();
     } catch (err) {
-      alert(err.message || 'Erreur lors de l\'affectation.');
+      alert(err.message || 'Erreur.');
     } finally {
       setSaving(false);
     }
@@ -674,9 +675,16 @@ function ProjectEquipeTab({ projet, compact = false }) {
           <div style={{ fontSize: '0.82rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
             <HardHat size={15} /> Ouvriers externes affectés ({workerAssignments.length})
           </div>
-          <button type="button" className="btn btn-primary btn-sm" onClick={openAssignModal} disabled={saving} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-            <Plus size={14} /> Affecter des ouvriers
-          </button>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {selectedRemoveIds.size > 0 && (
+              <button type="button" className="btn btn-secondary btn-sm" onClick={handleBulkRemoveWorkers} disabled={saving} style={{ color: 'var(--red)' }}>
+                <Trash2 size={13} /> Retirer la sélection ({selectedRemoveIds.size})
+              </button>
+            )}
+            <button type="button" className="btn btn-primary btn-sm" onClick={openAssignModal} disabled={saving} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+              <Plus size={14} /> Affecter des ouvriers
+            </button>
+          </div>
         </div>
 
         {workerAssignments.length === 0 ? (
@@ -685,17 +693,29 @@ function ProjectEquipeTab({ projet, compact = false }) {
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {workerAssignments.map((a) => (
-              <div key={a.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 8, gap: 10 }}>
-                <div>
-                  <div style={{ fontWeight: 700 }}>{a.workerName || '—'}</div>
-                  <div style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>{a.workerFonction || '—'}</div>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.78rem', color: 'var(--text-3)', padding: '0 4px' }}>
+              <input
+                type="checkbox"
+                checked={selectedRemoveIds.size === workerAssignments.length && workerAssignments.length > 0}
+                onChange={toggleAllRemoveWorkers}
+              />
+              Tout sélectionner
+            </label>
+            {workerAssignments.map((a) => {
+              const checked = selectedRemoveIds.has(String(a.workerId));
+              return (
+                <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', border: `1px solid ${checked ? 'var(--red)' : 'var(--border)'}`, borderRadius: 8, background: checked ? '#FFF5F5' : '#fff' }}>
+                  <input type="checkbox" checked={checked} onChange={() => toggleRemoveWorker(a.workerId)} />
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 700 }}>{a.workerName || '—'}</div>
+                    <div style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>{a.workerFonction || '—'}</div>
+                  </div>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleRemoveWorker(a.workerId)} disabled={saving} title="Retirer">
+                    <Trash2 size={13} style={{ color: 'var(--red)' }} />
+                  </button>
                 </div>
-                <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleRemoveWorker(a.workerId)} disabled={saving} title="Retirer">
-                  <Trash2 size={13} style={{ color: 'var(--red)' }} />
-                </button>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
 
@@ -733,46 +753,13 @@ function ProjectEquipeTab({ projet, compact = false }) {
         </div>
       </div>
 
-      <Modal open={showAssignModal} onClose={() => !saving && setShowAssignModal(false)} title="Affecter des ouvriers externes" width={520}>
-        <p style={{ fontSize: '0.84rem', color: 'var(--text-3)', marginBottom: 14 }}>
-          Projet : <strong>{projet.nom}</strong> — cochez les ouvriers à affecter (plusieurs projets possibles par ouvrier).
-        </p>
-        {assignableWorkers.length === 0 ? (
-          <div style={{ color: 'var(--text-3)', padding: '16px 0' }}>Aucun ouvrier actif disponible.</div>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxHeight: 360, overflowY: 'auto', marginBottom: 16 }}>
-            {assignableWorkers.map((w) => {
-              const checked = selectedIds.has(String(w.id));
-              const otherCount = (w.assigned_project_ids || []).filter((id) => String(id) !== String(projet.id)).length;
-              return (
-                <label
-                  key={w.id}
-                  style={{
-                    display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 8, cursor: 'pointer',
-                    border: `1.5px solid ${checked ? 'var(--red)' : 'var(--border)'}`,
-                    background: checked ? '#FFF5F5' : '#fff',
-                  }}
-                >
-                  <input type="checkbox" checked={checked} onChange={() => toggleWorker(w.id)} />
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 700 }}>{workerFullName(w)}</div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-3)' }}>
-                      {w.fonction || '—'}
-                      {otherCount > 0 ? ` · ${otherCount} autre${otherCount > 1 ? 's' : ''} projet${otherCount > 1 ? 's' : ''}` : ''}
-                    </div>
-                  </div>
-                </label>
-              );
-            })}
-          </div>
-        )}
-        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-          <button type="button" className="btn btn-secondary" onClick={() => setShowAssignModal(false)} disabled={saving}>Annuler</button>
-          <button type="button" className="btn btn-primary" onClick={handleSaveAssignments} disabled={saving || assignableWorkers.length === 0}>
-            {saving ? 'Enregistrement…' : 'Enregistrer l\'affectation'}
-          </button>
-        </div>
-      </Modal>
+      <AssignWorkersModal
+        open={showAssignModal}
+        onClose={() => !saving && setShowAssignModal(false)}
+        projet={projet}
+        onSaved={load}
+        saving={saving}
+      />
 
       <Modal open={showSubModal} onClose={() => !saving && setShowSubModal(false)} title="Affecter des sous-traitants" width={520}>
         <p style={{ fontSize: '0.84rem', color: 'var(--text-3)', marginBottom: 14 }}>

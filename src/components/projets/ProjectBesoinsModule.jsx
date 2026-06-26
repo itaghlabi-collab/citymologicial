@@ -1,58 +1,82 @@
 /**
- * ProjectBesoinsModule.jsx — Besoins RH projet (chefs, ouvriers, sous-traitants)
+ * ProjectBesoinsModule.jsx — Module gestion des besoins RH chantier
  */
 import { useState, useEffect, useCallback } from 'react';
 import {
   Users, Plus, Trash2, Send, Loader2, AlertCircle, RefreshCw, Info,
+  Eye, Edit2, Download, CheckCircle, XCircle, ClipboardList, TrendingUp,
 } from 'lucide-react';
-import {
-  BESOIN_RH_TYPES,
-  BESOIN_PRIORITES,
-} from '../../constants/projectBesoins';
+import { prioriteBadgeClass } from '../../constants/projectBesoins';
 import {
   listProjectStaffNeeds,
-  upsertProjectStaffNeed,
+  createProjectStaffNeed,
+  updateProjectStaffNeed,
   deleteProjectStaffNeed,
+  submitProjectStaffNeed,
+  updateProjectStaffNeedStatut,
+  createRhRequestFromNeed,
+  getProjectStaffNeed,
+  computeBesoinStats,
 } from '../../services/projects/projectBesoins';
-import { createResourceRequest } from '../../services/rh/resourceRequests';
+import { generateBesoinPdf } from '../../services/projects/projectBesoinPdf';
+import { getBesoinActions } from './besoins/besoinActions';
+import BesoinFormModal from './besoins/BesoinFormModal';
+import BesoinDetailModal from './besoins/BesoinDetailModal';
+import AssignWorkersModal from './besoins/AssignWorkersModal';
 
-const inputStyle = {
-  padding: '8px 11px',
-  border: '1.5px solid var(--border)',
-  borderRadius: 6,
-  fontSize: '0.86rem',
-  width: '100%',
-  boxSizing: 'border-box',
-  background: '#fff',
-};
+function KpiCard({ icon, label, value, sub, color = 'grey' }) {
+  const colors = { red: 'var(--red)', blue: '#1565C0', green: '#2E7D32', orange: '#E65100', grey: 'var(--text-3)', purple: '#6A1B9A' };
+  const bg = { red: 'var(--red-light)', blue: '#E3F2FD', green: '#E8F5E9', orange: '#FFF3E0', grey: 'var(--surface-2)', purple: '#F3E5F5' };
+  return (
+    <div className="stat-card">
+      <div className="stat-icon" style={{ background: bg[color], color: colors[color] }}>{icon}</div>
+      <div className="stat-body">
+        <div className="stat-value">{value}</div>
+        <div className="stat-label">{label}</div>
+        {sub && <div className="stat-sub" style={{ fontSize: '0.7rem', color: 'var(--text-3)', marginTop: 2 }}>{sub}</div>}
+      </div>
+    </div>
+  );
+}
 
-const RH_TYPE_HINTS = {
-  'Chef de chantier': 'Affectation via la fiche projet ou demande RH.',
-  'Chef de projet': 'Affectation via la fiche projet ou demande RH.',
-  Ouvriers: 'Affectation via l’onglet Équipe ou demande RH.',
-  'Sous-traitants': 'Affectation via l’onglet Équipe ou demande RH.',
+function fmtDate(d) {
+  if (!d) return '—';
+  try { return new Date(`${String(d).slice(0, 10)}T12:00:00`).toLocaleDateString('fr-FR'); } catch { return d; }
+}
+
+function coverageIndicator(need) {
+  if (need.manque === 0 && need.quantite_affectee > 0) return { emoji: '🟢', label: 'Couvert', color: '#2E7D32' };
+  if (need.quantite_affectee > 0) return { emoji: '🟠', label: 'Partiel', color: '#F57C00' };
+  return { emoji: '🔴', label: 'Non couvert', color: '#C62828' };
+}
+
+const ACTION_ICONS = {
+  view: Eye, edit: Edit2, assign: Users, pdf: Download, delete: Trash2,
+  submit: Send, rh: Send, cancel: XCircle, close: CheckCircle,
 };
 
 export default function ProjectBesoinsModule({ projet }) {
   const projectId = projet?.id;
   const projectMeta = projet ? {
-    chef_projet: projet.chef_projet || '',
+    chef_projet: projet.chef_projet || projet.responsable || '',
     chef_chantier: projet.chef_chantier || '',
   } : null;
 
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
-  const [staffNeeds, setStaffNeeds] = useState([]);
-  const [staffForm, setStaffForm] = useState({ fonction: BESOIN_RH_TYPES[0], quantite_necessaire: 1 });
-  const [requestModal, setRequestModal] = useState(null);
+  const [needs, setNeeds] = useState([]);
+  const [formOpen, setFormOpen] = useState(false);
+  const [editNeed, setEditNeed] = useState(null);
+  const [detailNeed, setDetailNeed] = useState(null);
+  const [assignNeed, setAssignNeed] = useState(null);
 
   const load = useCallback(async () => {
     if (!projectId) return;
     setLoading(true);
     setError('');
     try {
-      setStaffNeeds(await listProjectStaffNeeds(projectId, projectMeta));
+      setNeeds(await listProjectStaffNeeds(projectId, projectMeta));
     } catch (err) {
       setError(err.message || 'Erreur de chargement.');
     } finally {
@@ -62,6 +86,8 @@ export default function ProjectBesoinsModule({ projet }) {
 
   useEffect(() => { load(); }, [load]);
 
+  const stats = computeBesoinStats(needs);
+
   if (!projectId) {
     return (
       <div style={{ padding: 20, textAlign: 'center', color: 'var(--text-3)', fontSize: '0.88rem' }}>
@@ -70,14 +96,18 @@ export default function ProjectBesoinsModule({ projet }) {
     );
   }
 
-  async function handleAddStaff(ev) {
-    ev.preventDefault();
+  async function handleSave(form, submit = false) {
     setSaving(true);
     setError('');
     try {
-      await upsertProjectStaffNeed(projectId, staffForm);
+      if (editNeed?.id) {
+        await updateProjectStaffNeed(editNeed.id, form, { submit });
+      } else {
+        await createProjectStaffNeed(projectId, form, { submit });
+      }
+      setFormOpen(false);
+      setEditNeed(null);
       await load();
-      setStaffForm({ fonction: BESOIN_RH_TYPES[0], quantite_necessaire: 1 });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -85,20 +115,68 @@ export default function ProjectBesoinsModule({ projet }) {
     }
   }
 
-  async function submitResourceRequest(ev) {
-    ev.preventDefault();
-    if (!requestModal) return;
-    setSaving(true);
-    setError('');
+  async function openDetail(need) {
     try {
-      await createResourceRequest({ project: projet, ...requestModal });
-      setRequestModal(null);
-      alert('Demande envoyée au service RH.');
+      const full = await getProjectStaffNeed(need.id, projectMeta);
+      setDetailNeed(full);
     } catch (err) {
       setError(err.message);
-    } finally {
-      setSaving(false);
     }
+  }
+
+  async function handleAction(action, need) {
+    setError('');
+    try {
+      switch (action) {
+        case 'view':
+          await openDetail(need);
+          break;
+        case 'edit':
+          setEditNeed(need);
+          setFormOpen(true);
+          break;
+        case 'assign':
+          setAssignNeed(need);
+          break;
+        case 'pdf':
+          await generateBesoinPdf(need, projet);
+          break;
+        case 'submit':
+          await submitProjectStaffNeed(need.id);
+          await load();
+          break;
+        case 'rh':
+          await createRhRequestFromNeed(need, projet);
+          alert('Demande RH créée — la chargée RH a été notifiée.');
+          await load();
+          break;
+        case 'cancel':
+          if (!window.confirm('Annuler ce besoin ?')) return;
+          await updateProjectStaffNeedStatut(need.id, 'annule', 'Besoin annulé');
+          await load();
+          break;
+        case 'close':
+          if (!window.confirm('Clôturer ce besoin ?')) return;
+          await updateProjectStaffNeedStatut(need.id, 'clos', 'Besoin clôturé');
+          await load();
+          break;
+        case 'delete':
+          if (!window.confirm('Supprimer définitivement ce besoin ?')) return;
+          await deleteProjectStaffNeed(need.id);
+          await load();
+          break;
+        default:
+          break;
+      }
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  function actionBtnClass(key) {
+    if (key === 'delete' || key === 'cancel') return 'btn btn-ghost btn-sm';
+    if (key === 'assign' || key === 'submit' || key === 'rh') return 'btn btn-primary btn-sm';
+    return 'btn btn-ghost btn-sm';
   }
 
   return (
@@ -115,12 +193,27 @@ export default function ProjectBesoinsModule({ projet }) {
         </div>
       </div>
 
+      <div className="stat-grid finance-kpi-grid" style={{ marginBottom: 16 }}>
+        <KpiCard icon={<ClipboardList size={17} />} label="Total besoins" value={stats.total} color="grey" />
+        <KpiCard icon={<Users size={17} />} label="Total affectés" value={stats.totalAffectes} sub={`sur ${stats.totalDemandes} demandés`} color="blue" />
+        <KpiCard icon={<TrendingUp size={17} />} label="Taux couverture" value={`${stats.taux}%`} color={stats.taux >= 100 ? 'green' : stats.taux >= 50 ? 'orange' : 'red'} />
+        <KpiCard icon={<AlertCircle size={17} />} label="Besoins ouverts" value={stats.ouverts} color="orange" />
+        <KpiCard icon={<AlertCircle size={17} />} label="Besoins urgents" value={stats.urgents} color="red" />
+      </div>
+
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16, alignItems: 'center' }}>
         <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Users size={14} /> Ressources humaines
+          <Users size={14} /> Demandes de ressources humaines
         </div>
         <button type="button" className="btn btn-ghost btn-sm" onClick={load} disabled={loading} style={{ marginLeft: 'auto' }}>
           <RefreshCw size={13} /> Actualiser
+        </button>
+        <button
+          type="button"
+          className="btn btn-primary btn-sm"
+          onClick={() => { setEditNeed(null); setFormOpen(true); }}
+        >
+          <Plus size={13} /> Ajouter un besoin
         </button>
       </div>
 
@@ -135,118 +228,110 @@ export default function ProjectBesoinsModule({ projet }) {
           <Loader2 size={20} style={{ animation: 'spin 0.8s linear infinite' }} /> Chargement…
         </div>
       ) : (
-        <>
-          <form onSubmit={handleAddStaff} style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 10, alignItems: 'end', marginBottom: 16, padding: 14, background: 'var(--surface-2)', borderRadius: 8 }}>
-            <div>
-              <label style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-3)' }}>Type de besoin</label>
-              <select value={staffForm.fonction} onChange={(e) => setStaffForm((p) => ({ ...p, fonction: e.target.value }))} style={{ ...inputStyle, marginTop: 4 }}>
-                {BESOIN_RH_TYPES.map((f) => <option key={f} value={f}>{f}</option>)}
-              </select>
-            </div>
-            <div>
-              <label style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-3)' }}>Quantité nécessaire</label>
-              <input type="number" min={0} value={staffForm.quantite_necessaire} onChange={(e) => setStaffForm((p) => ({ ...p, quantite_necessaire: e.target.value }))} style={{ ...inputStyle, marginTop: 4 }} />
-            </div>
-            <button type="submit" className="btn btn-primary" disabled={saving}><Plus size={13} /> Ajouter besoin</button>
-          </form>
-
-          <div className="table-wrap">
-            <table>
-              <thead>
+        <div className="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Type</th>
+                <th>Fonction</th>
+                <th>Demandé</th>
+                <th>Affecté</th>
+                <th>Manque</th>
+                <th>Couverture</th>
+                <th>Date souhaitée</th>
+                <th>Priorité</th>
+                <th>Statut</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {needs.length === 0 ? (
                 <tr>
-                  <th>Type de besoin</th>
-                  <th>Qté nécessaire</th>
-                  <th>Qté affectée</th>
-                  <th>Manque</th>
-                  <th>Ressources affectées</th>
-                  <th>Statut</th>
-                  <th>Actions</th>
+                  <td colSpan={10} style={{ color: 'var(--text-3)', textAlign: 'center', padding: 28 }}>
+                    Aucun besoin RH défini — cliquez sur « Ajouter un besoin » pour créer une demande.
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {staffNeeds.length === 0 ? (
-                  <tr><td colSpan={7} style={{ color: 'var(--text-3)', textAlign: 'center' }}>Aucun besoin RH défini pour ce projet.</td></tr>
-                ) : staffNeeds.map((n) => (
+              ) : needs.map((n) => {
+                const cov = coverageIndicator(n);
+                const actions = getBesoinActions(n);
+                return (
                   <tr key={n.id}>
                     <td data-label="Type">
-                      <div style={{ fontWeight: 600 }}>{n.fonction}</div>
-                      <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 2 }}>{RH_TYPE_HINTS[n.fonction]}</div>
+                      <div style={{ fontWeight: 600 }}>{n.type_besoin}</div>
+                      {n.ref_besoin && <div style={{ fontSize: '0.7rem', color: 'var(--text-3)' }}>{n.ref_besoin}</div>}
                     </td>
-                    <td data-label="Qté nécessaire">{n.quantite_necessaire}</td>
-                    <td data-label="Qté affectée">{n.quantite_affectee}</td>
-                    <td data-label="Manque" style={{ fontWeight: 700, color: n.manque > 0 ? 'var(--red)' : 'inherit' }}>{n.manque}</td>
-                    <td data-label="Ressources" style={{ fontSize: '0.82rem', color: 'var(--text-2)' }}>
-                      {(n.ressources_affectees || n.ouvriers_affectes || []).length
-                        ? (n.ressources_affectees || n.ouvriers_affectes).join(', ')
-                        : '—'}
+                    <td data-label="Fonction" style={{ fontWeight: 600 }}>{n.fonction}</td>
+                    <td data-label="Demandé">{n.quantite_necessaire}</td>
+                    <td data-label="Affecté">{n.quantite_affectee}</td>
+                    <td data-label="Manque" style={{ fontWeight: 700, color: n.manque > 0 ? 'var(--red)' : '#2E7D32' }}>{n.manque}</td>
+                    <td data-label="Couverture">
+                      <span title={cov.label} style={{ fontSize: '0.82rem', color: cov.color, fontWeight: 600 }}>
+                        {cov.emoji} {cov.label}
+                      </span>
                     </td>
-                    <td data-label="Statut"><span className={`badge ${n.statutBadge}`}>{n.statutLabel}</span></td>
+                    <td data-label="Date">{fmtDate(n.date_debut_souhaitee)}</td>
+                    <td data-label="Priorité">
+                      <span className={`badge ${prioriteBadgeClass(n.priorite)}`}>{n.priorite}</span>
+                    </td>
+                    <td data-label="Statut">
+                      <span className={`badge ${n.statutBadge}`}>{n.statutLabel}</span>
+                    </td>
                     <td data-label="Actions">
                       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                        {n.manque > 0 && (
-                          <button type="button" className="btn btn-primary btn-sm" onClick={() => setRequestModal({
-                            fonction: n.fonction,
-                            quantite: n.manque || 1,
-                            date_souhaitee: '',
-                            priorite: 'Normale',
-                            commentaire: '',
-                          })}
-                          >
-                            <Send size={12} /> Demander
-                          </button>
-                        )}
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-sm"
-                          style={{ color: 'var(--red)' }}
-                          onClick={() => deleteProjectStaffNeed(n.id, projectId, projectMeta).then(load)}
-                        >
-                          <Trash2 size={12} />
-                        </button>
+                        {actions.map((a) => {
+                          const Icon = ACTION_ICONS[a.key] || Eye;
+                          return (
+                            <button
+                              key={a.key}
+                              type="button"
+                              className={actionBtnClass(a.key)}
+                              title={a.label}
+                              style={a.key === 'delete' || a.key === 'cancel' ? { color: 'var(--red)' } : undefined}
+                              onClick={() => handleAction(a.key, n)}
+                            >
+                              <Icon size={13} />
+                            </button>
+                          );
+                        })}
                       </div>
                     </td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
-
-      {requestModal && (
-        <div className="rh-emp-modal-overlay" style={{ zIndex: 1200 }}>
-          <div className="card" style={{ width: '100%', maxWidth: 440, padding: 24 }}>
-            <h3 style={{ margin: '0 0 16px', fontFamily: 'var(--font-head)', fontWeight: 800 }}>Demander des ressources RH</h3>
-            <form onSubmit={submitResourceRequest}>
-              <div style={{ display: 'grid', gap: 12 }}>
-                <div><strong>Besoin :</strong> {requestModal.fonction}</div>
-                <div>
-                  <label style={{ fontSize: '0.68rem', fontWeight: 700 }}>Quantité</label>
-                  <input type="number" min={1} value={requestModal.quantite} onChange={(e) => setRequestModal((p) => ({ ...p, quantite: e.target.value }))} style={inputStyle} required />
-                </div>
-                <div>
-                  <label style={{ fontSize: '0.68rem', fontWeight: 700 }}>Date souhaitée</label>
-                  <input type="date" value={requestModal.date_souhaitee} onChange={(e) => setRequestModal((p) => ({ ...p, date_souhaitee: e.target.value }))} style={inputStyle} />
-                </div>
-                <div>
-                  <label style={{ fontSize: '0.68rem', fontWeight: 700 }}>Priorité</label>
-                  <select value={requestModal.priorite} onChange={(e) => setRequestModal((p) => ({ ...p, priorite: e.target.value }))} style={inputStyle}>
-                    {BESOIN_PRIORITES.map((p) => <option key={p} value={p}>{p}</option>)}
-                  </select>
-                </div>
-                <div>
-                  <label style={{ fontSize: '0.68rem', fontWeight: 700 }}>Commentaire</label>
-                  <textarea value={requestModal.commentaire} onChange={(e) => setRequestModal((p) => ({ ...p, commentaire: e.target.value }))} rows={3} style={{ ...inputStyle, resize: 'vertical' }} />
-                </div>
-              </div>
-              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 18 }}>
-                <button type="button" className="btn btn-secondary" onClick={() => setRequestModal(null)}>Annuler</button>
-                <button type="submit" className="btn btn-primary" disabled={saving}><Send size={13} /> Envoyer à la RH</button>
-              </div>
-            </form>
-          </div>
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
+
+      <BesoinFormModal
+        open={formOpen}
+        onClose={() => { setFormOpen(false); setEditNeed(null); }}
+        onSave={handleSave}
+        saving={saving}
+        projet={projet}
+        initial={editNeed}
+        submitLabel={editNeed ? 'Soumettre' : 'Enregistrer et soumettre'}
+      />
+
+      <BesoinDetailModal
+        open={!!detailNeed}
+        onClose={() => setDetailNeed(null)}
+        need={detailNeed}
+        projet={projet}
+        onPdf={(n) => generateBesoinPdf(n, projet)}
+        onAssign={(n) => { setDetailNeed(null); setAssignNeed(n); }}
+        onRh={(n) => handleAction('rh', n)}
+        onEdit={(n) => { setDetailNeed(null); setEditNeed(n); setFormOpen(true); }}
+      />
+
+      <AssignWorkersModal
+        open={!!assignNeed}
+        onClose={() => setAssignNeed(null)}
+        projet={projet}
+        need={assignNeed}
+        onSaved={load}
+        saving={saving}
+      />
     </div>
   );
 }
