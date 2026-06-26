@@ -11,10 +11,11 @@ import {
   Shield, Settings, Package, AlertTriangle, BarChart3,
   ClipboardList, Archive, Loader, ChevronDown, ExternalLink
 } from 'lucide-react';
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, Fragment } from 'react';
 import { useVehicles } from '../hooks/useVehicles';
 import { useInterventions } from '../hooks/useInterventions';
 import VehicleDailyReportModal from './logistique/VehicleDailyReportModal';
+import { listDailyReportsByVehicle } from '../services/logistique/vehicleDailyReports';
 
 // ── Design tokens (cohérents avec App.css) ──────────────────────────────────
 
@@ -569,6 +570,7 @@ function SousModuleVehicules({
         onSaved={() => {
           setReportVehicle(null);
           onReportSaved?.();
+          window.dispatchEvent(new Event('citymo:vehicle-reports-updated'));
         }}
       />
     </div>
@@ -975,8 +977,45 @@ function SousModuleHistorique({ historique, loading, error, filterFn }) {
 
 // ── Page détail véhicule ──────────────────────────────────────────────────────
 
-function DetailVehicule({ vehicule, interventions, onBack, onEdit }) {
-  const vehInterventions = interventions.filter(i => i.matricule === vehicule.matricule);
+function fmtDateFr(d) {
+  if (!d) return '—';
+  try {
+    return new Date(`${String(d).slice(0, 10)}T12:00:00`).toLocaleDateString('fr-FR');
+  } catch {
+    return d;
+  }
+}
+
+function DetailVehicule({ vehicule, interventions, onBack, onEdit, onOpenReport }) {
+  const vehInterventions = interventions.filter((i) => i.matricule === vehicule.matricule);
+  const [reports, setReports] = useState([]);
+  const [reportsLoading, setReportsLoading] = useState(true);
+  const [expandedReportId, setExpandedReportId] = useState(null);
+
+  const loadReports = useCallback(async () => {
+    if (!vehicule?.id && !vehicule?.matricule) {
+      setReports([]);
+      setReportsLoading(false);
+      return;
+    }
+    setReportsLoading(true);
+    try {
+      setReports(await listDailyReportsByVehicle(vehicule.id, { matricule: vehicule.matricule }));
+    } catch (err) {
+      console.warn('[CITYMO] load vehicle reports', err);
+      setReports([]);
+    } finally {
+      setReportsLoading(false);
+    }
+  }, [vehicule?.id, vehicule?.matricule]);
+
+  useEffect(() => { loadReports(); }, [loadReports]);
+
+  useEffect(() => {
+    const handler = () => loadReports();
+    window.addEventListener('citymo:vehicle-reports-updated', handler);
+    return () => window.removeEventListener('citymo:vehicle-reports-updated', handler);
+  }, [loadReports]);
 
   return (
     <div className="animate-fade-in">
@@ -987,6 +1026,7 @@ function DetailVehicule({ vehicule, interventions, onBack, onEdit }) {
           {vehicule.marque && <span style={{ color: 'var(--text-2)', fontWeight: 500, marginLeft: 10, fontSize: '0.95rem' }}>{vehicule.marque} {vehicule.modele}</span>}
         </div>
         <Badge type={vehicule.statut} />
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => onOpenReport?.()}><ClipboardList size={14} /> Compte rendu</button>
         <button className="btn btn-primary btn-sm" onClick={() => onEdit(vehicule)}><Edit2 size={14} /> Modifier</button>
       </div>
 
@@ -1042,6 +1082,106 @@ function DetailVehicule({ vehicule, interventions, onBack, onEdit }) {
               <span style={{ fontWeight: 600, color: v ? 'var(--text)' : 'var(--text-3)' }}>{v || '—'}</span>
             </div>
           ))}
+        </div>
+
+        {/* Comptes rendus journaliers */}
+        <div className="card" style={{ gridColumn: '1 / -1' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
+            <SectionTitle icon={<ClipboardList size={13} />}>Comptes rendus journaliers ({reports.length})</SectionTitle>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => onOpenReport?.()}>
+              <Plus size={13} /> Nouveau compte rendu
+            </button>
+          </div>
+          {reportsLoading ? (
+            <div style={{ color: 'var(--text-3)', fontSize: '0.875rem', padding: '12px 0' }}>Chargement des comptes rendus…</div>
+          ) : reports.length === 0 ? (
+            <div style={{ color: 'var(--text-3)', fontSize: '0.875rem', padding: '12px 0' }}>
+              Aucun compte rendu enregistré — utilisez le bouton ci-dessus pour saisir les déplacements du jour.
+            </div>
+          ) : (
+            <div className="table-wrap">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Référence</th>
+                    <th>Date</th>
+                    <th>Chauffeur</th>
+                    <th>Km parcourus</th>
+                    <th>Trajets</th>
+                    <th>Carburant</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {reports.map((r) => (
+                    <Fragment key={r.id}>
+                      <tr>
+                        <td style={{ fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--red)' }}>{r.ref}</td>
+                        <td>{fmtDateFr(r.date_rapport)}</td>
+                        <td>{r.chauffeur || '—'}</td>
+                        <td style={{ fontWeight: 600 }}>
+                          {r.km_parcourus ? `${Number(r.km_parcourus).toLocaleString('fr-MA')} km` : '—'}
+                        </td>
+                        <td>{r.trips?.length || 0}</td>
+                        <td>{r.carburant_litres ? `${r.carburant_litres} L` : '—'}</td>
+                        <td>
+                          <div style={{ display: 'flex', gap: 4 }}>
+                            <button type="button" className="btn btn-ghost btn-sm" title="Voir détail" onClick={() => setExpandedReportId((id) => (id === r.id ? null : r.id))}>
+                              <Eye size={13} />
+                            </button>
+                            <button type="button" className="btn btn-ghost btn-sm" title="Modifier" onClick={() => onOpenReport?.(r.date_rapport)}>
+                              <Edit2 size={13} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                      {expandedReportId === r.id && (
+                        <tr>
+                          <td colSpan={7} style={{ background: 'var(--surface-2)', padding: 16 }}>
+                            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12, marginBottom: 12, fontSize: '0.84rem' }}>
+                              <div><span style={{ color: 'var(--text-3)', fontSize: '0.68rem', fontWeight: 700 }}>KM DÉPART</span><div style={{ fontWeight: 600 }}>{r.km_depart || '—'}</div></div>
+                              <div><span style={{ color: 'var(--text-3)', fontSize: '0.68rem', fontWeight: 700 }}>KM ARRIVÉE</span><div style={{ fontWeight: 600 }}>{r.km_arrivee || '—'}</div></div>
+                              <div><span style={{ color: 'var(--text-3)', fontSize: '0.68rem', fontWeight: 700 }}>OBSERVATIONS</span><div>{r.observations || '—'}</div></div>
+                            </div>
+                            {(r.trips || []).length === 0 ? (
+                              <div style={{ color: 'var(--text-3)', fontSize: '0.82rem' }}>Aucun trajet détaillé.</div>
+                            ) : (
+                              <div className="table-wrap">
+                                <table style={{ fontSize: '0.82rem' }}>
+                                  <thead>
+                                    <tr>
+                                      <th>#</th>
+                                      <th>Horaires</th>
+                                      <th>Trajet</th>
+                                      <th>Objet</th>
+                                      <th>Projet</th>
+                                      <th>Km</th>
+                                    </tr>
+                                  </thead>
+                                  <tbody>
+                                    {r.trips.map((t, idx) => (
+                                      <tr key={t.id || idx}>
+                                        <td>{idx + 1}</td>
+                                        <td>{[t.heure_depart, t.heure_arrivee].filter(Boolean).join(' → ') || '—'}</td>
+                                        <td>{[t.lieu_depart, t.lieu_arrivee].filter(Boolean).join(' → ') || '—'}</td>
+                                        <td>{t.objet_mission || '—'}</td>
+                                        <td>{t.projet_nom || t.projet_ref || '—'}</td>
+                                        <td>{t.km_parcourus || '—'}</td>
+                                      </tr>
+                                    ))}
+                                  </tbody>
+                                </table>
+                              </div>
+                            )}
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
         </div>
 
         {/* Interventions liées */}
@@ -1135,6 +1275,8 @@ export default function Logistique({ activeTab: activeTabProp }) {
   const [detailVehicule, setDetailVehicule] = useState(null);
   const [editVehicule, setEditVehicule] = useState(null);
   const [showEditModal, setShowEditModal] = useState(false);
+  const [detailReportOpen, setDetailReportOpen] = useState(false);
+  const [detailReportDate, setDetailReportDate] = useState(null);
   const [vehToast, setVehToast] = useState(null);
   const [intToast, setIntToast] = useState(null);
 
@@ -1173,6 +1315,12 @@ export default function Logistique({ activeTab: activeTabProp }) {
     filterInterventionRequests,
     filterInterventionHistory,
   } = useInterventions({ enabled: intDataEnabled });
+
+  useEffect(() => {
+    if (!detailVehicule?.id) return;
+    const fresh = vehicules.find((v) => v.id === detailVehicule.id);
+    if (fresh) setDetailVehicule(fresh);
+  }, [vehicules, detailVehicule?.id]);
 
   function showVehToast(type, msg) {
     setVehToast({ type, msg });
@@ -1265,6 +1413,23 @@ export default function Logistique({ activeTab: activeTabProp }) {
           interventions={interventionsVehicule}
           onBack={() => setDetailVehicule(null)}
           onEdit={(v) => { setEditVehicule(v); setShowEditModal(true); }}
+          onOpenReport={(date) => {
+            setDetailReportDate(date || null);
+            setDetailReportOpen(true);
+          }}
+        />
+        <VehicleDailyReportModal
+          open={detailReportOpen}
+          vehicle={detailVehicule}
+          initialDate={detailReportDate}
+          onClose={() => { setDetailReportOpen(false); setDetailReportDate(null); }}
+          onSaved={async () => {
+            setDetailReportOpen(false);
+            setDetailReportDate(null);
+            await loadVehicules();
+            window.dispatchEvent(new Event('citymo:vehicle-reports-updated'));
+            showVehToast('success', 'Compte rendu enregistré — kilométrage mis à jour.');
+          }}
         />
         <Modal open={showEditModal} onClose={() => { setShowEditModal(false); setEditVehicule(null); }} title="Modifier le véhicule" width={780}>
           <FormulaireVehicule

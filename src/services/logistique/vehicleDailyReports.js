@@ -109,16 +109,43 @@ export async function getDailyReportForVehicleDate(vehicleId, dateRapport) {
   return normalizeReport(data, trips || []);
 }
 
-export async function listDailyReportsByVehicle(vehicleId, { limit = 30 } = {}) {
-  if (!vehicleId) return [];
-  const { data, error } = await getSupabase()
+async function attachTripsToReports(reports) {
+  if (!reports?.length) return [];
+  const ids = reports.map((r) => r.id).filter(Boolean);
+  if (!ids.length) return reports.map((r) => normalizeReport(r, []));
+
+  const { data: trips, error } = await getSupabase()
+    .from(TRIPS)
+    .select('*')
+    .in('report_id', ids)
+    .order('ordre', { ascending: true });
+  if (error) throw error;
+
+  const byReport = (trips || []).reduce((acc, trip) => {
+    const key = trip.report_id;
+    if (!acc[key]) acc[key] = [];
+    acc[key].push(trip);
+    return acc;
+  }, {});
+
+  return reports.map((r) => normalizeReport(r, byReport[r.id] || []));
+}
+
+export async function listDailyReportsByVehicle(vehicleId, { matricule, limit = 30 } = {}) {
+  if (!vehicleId && !matricule) return [];
+
+  let query = getSupabase()
     .from(REPORTS)
     .select('*')
-    .eq('vehicle_id', vehicleId)
     .order('date_rapport', { ascending: false })
     .limit(limit);
+
+  if (vehicleId) query = query.eq('vehicle_id', vehicleId);
+  else query = query.ilike('matricule', matricule);
+
+  const { data, error } = await query;
   if (error) throw error;
-  return (data || []).map((r) => normalizeReport(r, []));
+  return attachTripsToReports(data || []);
 }
 
 export async function saveDailyReport(vehicle, form, trips = []) {

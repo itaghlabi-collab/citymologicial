@@ -27,12 +27,12 @@ function emptyTrip() {
   };
 }
 
-export default function VehicleDailyReportModal({ open, vehicle, onClose, onSaved }) {
+export default function VehicleDailyReportModal({ open, vehicle, initialDate, onClose, onSaved }) {
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [form, setForm] = useState({
-    date_rapport: todayIso(),
+    date_rapport: initialDate || todayIso(),
     chauffeur: '',
     km_depart: '',
     km_arrivee: '',
@@ -45,16 +45,17 @@ export default function VehicleDailyReportModal({ open, vehicle, onClose, onSave
 
   useEffect(() => {
     if (!open || !vehicle?.id) return;
+    const dateToLoad = initialDate || todayIso();
     let cancelled = false;
     (async () => {
       setLoading(true);
       setError('');
       try {
-        const existing = await getDailyReportForVehicleDate(vehicle.id, form.date_rapport);
+        const existing = await getDailyReportForVehicleDate(vehicle.id, dateToLoad);
         if (cancelled) return;
         if (existing) {
           setForm({
-            date_rapport: existing.date_rapport || todayIso(),
+            date_rapport: existing.date_rapport || dateToLoad,
             chauffeur: existing.chauffeur || vehicle.chauffeur || '',
             km_depart: existing.km_depart || vehicle.km_actuel || '',
             km_arrivee: existing.km_arrivee || '',
@@ -64,7 +65,7 @@ export default function VehicleDailyReportModal({ open, vehicle, onClose, onSave
           setTrips(existing.trips?.length ? existing.trips : [emptyTrip()]);
         } else {
           setForm({
-            date_rapport: todayIso(),
+            date_rapport: dateToLoad,
             chauffeur: vehicle.chauffeur || '',
             km_depart: vehicle.km_actuel || '',
             km_arrivee: '',
@@ -80,7 +81,7 @@ export default function VehicleDailyReportModal({ open, vehicle, onClose, onSave
       }
     })();
     return () => { cancelled = true; };
-  }, [open, vehicle?.id]);
+  }, [open, vehicle?.id, initialDate]);
 
   async function loadForDate(date) {
     if (!vehicle?.id) return;
