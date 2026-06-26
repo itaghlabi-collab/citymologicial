@@ -6,7 +6,7 @@ import {
   Users, Plus, Trash2, Send, Loader2, AlertCircle, RefreshCw, Info,
   Eye, Edit2, Download, ClipboardList, TrendingUp,
 } from 'lucide-react';
-import { prioriteBadgeClass } from '../../constants/projectBesoins';
+import { prioriteBadgeClass, deleteProjectNeedWarnMessage } from '../../constants/projectBesoins';
 import {
   listProjectStaffNeeds,
   createProjectStaffNeed,
@@ -141,7 +141,7 @@ export default function ProjectBesoinsModule({ projet }) {
           await load();
           break;
         case 'delete': {
-          if (!window.confirm('Supprimer ce besoin ? La demande RH associée sera annulée si elle existe.')) return;
+          if (!window.confirm(deleteProjectNeedWarnMessage(need))) return;
           await deleteProjectStaffNeed(need.id);
           if (detailNeed?.id === need.id) setDetailNeed(null);
           await load();

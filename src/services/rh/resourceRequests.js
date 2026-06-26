@@ -593,6 +593,41 @@ export async function removeWorkerFromResourceRequest(requestId, workerId) {
   return getResourceRequest(requestId);
 }
 
+/** Supprime une demande RH et ses recrutements enfants (cascade workers/historique). */
+export async function deleteResourceRequestTree(requestId) {
+  if (!requestId) return;
+  await requireUser();
+  const { data: children, error: childQ } = await getSupabase()
+    .from(TABLE)
+    .select('id')
+    .eq('parent_request_id', requestId);
+  if (childQ) throw childQ;
+  for (const child of children || []) {
+    await deleteResourceRequestTree(child.id);
+  }
+  const { error } = await getSupabase().from(TABLE).delete().eq('id', requestId);
+  if (error) throw error;
+}
+
+/** Supprime toutes les demandes RH liées à un besoin projet. */
+export async function deleteResourceRequestsForStaffNeed(staffNeedId, { primaryRequestId = null } = {}) {
+  if (!staffNeedId && !primaryRequestId) return;
+  await requireUser();
+  const ids = new Set();
+  if (primaryRequestId) ids.add(primaryRequestId);
+  if (staffNeedId) {
+    const { data, error } = await getSupabase()
+      .from(TABLE)
+      .select('id')
+      .eq('staff_need_id', staffNeedId);
+    if (error) throw error;
+    (data || []).forEach((r) => ids.add(r.id));
+  }
+  for (const id of ids) {
+    await deleteResourceRequestTree(id);
+  }
+}
+
 export async function closeResourceRequest(id) {
   const user = await requireUser();
   const actorName = await getProfileName(user.id);

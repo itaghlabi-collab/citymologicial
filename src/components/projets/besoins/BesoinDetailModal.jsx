@@ -4,7 +4,7 @@
 import { useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { X, Download } from 'lucide-react';
-import { prioriteBadgeClass, canEditProjectNeed, canDeleteProjectNeed } from '../../../constants/projectBesoins';
+import { prioriteBadgeClass, canEditProjectNeed } from '../../../constants/projectBesoins';
 
 function fmtDate(d) {
   if (!d) return '—';
@@ -42,7 +42,6 @@ export default function BesoinDetailModal({
   const coverageColor = need.manque === 0 ? '#2E7D32' : need.quantite_affectee > 0 ? '#F57C00' : '#C62828';
   const coverageLabel = need.manque === 0 ? 'Couvert' : need.quantite_affectee > 0 ? 'Partiel' : 'Non couvert';
   const editable = canEditProjectNeed(need);
-  const deletable = canDeleteProjectNeed(need);
 
   return createPortal(
     <>
@@ -84,7 +83,7 @@ export default function BesoinDetailModal({
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 20 }}>
             {editable && onEdit && <button type="button" className="btn btn-secondary btn-sm" onClick={() => onEdit(need)}>Modifier</button>}
             {onPdf && <button type="button" className="btn btn-ghost btn-sm" onClick={() => onPdf(need)}><Download size={14} /> PDF</button>}
-            {deletable && onDelete && (
+            {onDelete && (
               <button type="button" className="btn btn-ghost btn-sm" style={{ color: 'var(--red)' }} onClick={() => onDelete(need)}>
                 Supprimer
               </button>

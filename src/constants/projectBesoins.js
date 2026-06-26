@@ -70,16 +70,14 @@ export function canEditProjectNeed(need) {
 }
 
 export function canDeleteProjectNeed(need) {
-  if (!need) return false;
-  if ((Number(need.quantite_affectee) || 0) > 0) return false;
-  return true;
+  return Boolean(need?.id);
 }
 
-export function deleteProjectNeedBlockReason(need) {
+export function deleteProjectNeedWarnMessage(need) {
   if ((Number(need?.quantite_affectee) || 0) > 0) {
-    return 'Des ouvriers ont déjà été affectés par le RH — suppression impossible.';
+    return 'Des ouvriers ont déjà été affectés par le RH. Supprimer définitivement ce besoin et la demande RH associée ?';
   }
-  return null;
+  return 'Supprimer ce besoin ? La demande RH associée sera également supprimée.';
 }
 
 export function isNeedTreatedByRh(need) {
