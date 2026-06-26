@@ -14,6 +14,7 @@ import {
 import { useState, useCallback, useEffect } from 'react';
 import { useVehicles } from '../hooks/useVehicles';
 import { useInterventions } from '../hooks/useInterventions';
+import VehicleDailyReportModal from './logistique/VehicleDailyReportModal';
 
 // ── Design tokens (cohérents avec App.css) ──────────────────────────────────
 
@@ -342,7 +343,7 @@ function FormulaireIntervention({ vehicules, initial, onSave, onClose, saving })
 // ── Sous-module Véhicules ─────────────────────────────────────────────────────
 
 function SousModuleVehicules({
-  vehicules, onAdd, onEdit, onDelete, onViewDetail,
+  vehicules, onAdd, onEdit, onDelete, onViewDetail, onReportSaved,
   loading, saving, error, onImportSeed, configured,
 }) {
   const [search, setSearch] = useState('');
@@ -350,6 +351,7 @@ function SousModuleVehicules({
   const [filterType, setFilterType] = useState('');
   const [showForm, setShowForm] = useState(false);
   const [editTarget, setEditTarget] = useState(null);
+  const [reportVehicle, setReportVehicle] = useState(null);
 
   const filtered = vehicules.filter(v => {
     const q = search.toLowerCase();
@@ -513,6 +515,9 @@ function SousModuleVehicules({
                           <button className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} title="Modifier" onClick={() => openEdit(v)}>
                             <Edit2 size={13} />
                           </button>
+                          <button className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} title="Compte rendu journée" onClick={() => setReportVehicle(v)}>
+                            <ClipboardList size={13} />
+                          </button>
                           <button className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }} title="Supprimer" disabled={saving} onClick={() => onDelete(v.id)}>
                             <Trash2 size={13} style={{ color: 'var(--red)' }} />
                           </button>
@@ -541,6 +546,7 @@ function SousModuleVehicules({
                     <>
                       <button type="button" className="btn btn-secondary btn-sm" onClick={() => onViewDetail(v)}><Eye size={13} /> Voir</button>
                       <button type="button" className="btn btn-ghost btn-sm" onClick={() => openEdit(v)}><Edit2 size={13} /> Modifier</button>
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => setReportVehicle(v)}><ClipboardList size={13} /> Compte rendu</button>
                       <button type="button" className="btn btn-ghost btn-sm" onClick={() => onDelete(v.id)} disabled={saving}><Trash2 size={13} /> Supprimer</button>
                     </>
                   )}
@@ -555,6 +561,16 @@ function SousModuleVehicules({
       <Modal open={showForm} onClose={() => { setShowForm(false); setEditTarget(null); }} title={editTarget ? "Modifier le véhicule" : "Ajouter un véhicule"} width={780}>
         <FormulaireVehicule initial={editTarget} onSave={handleSave} saving={saving} onClose={() => { setShowForm(false); setEditTarget(null); }} />
       </Modal>
+
+      <VehicleDailyReportModal
+        open={!!reportVehicle}
+        vehicle={reportVehicle}
+        onClose={() => setReportVehicle(null)}
+        onSaved={() => {
+          setReportVehicle(null);
+          onReportSaved?.();
+        }}
+      />
     </div>
   );
 }
@@ -1136,6 +1152,7 @@ export default function Logistique({ activeTab: activeTabProp }) {
     saving: vehiculesSaving,
     error: vehiculesError,
     configured: vehiculesConfigured,
+    load: loadVehicules,
     create: createVehicule,
     update: updateVehicule,
     remove: removeVehicule,
@@ -1325,6 +1342,10 @@ export default function Logistique({ activeTab: activeTabProp }) {
           onEdit={editVehiculeHandler}
           onDelete={deleteVehicule}
           onViewDetail={setDetailVehicule}
+          onReportSaved={() => {
+            loadVehicules();
+            showVehToast('success', 'Compte rendu enregistré — kilométrage mis à jour.');
+          }}
           loading={vehiculesLoading}
           saving={vehiculesSaving}
           error={vehiculesError}
