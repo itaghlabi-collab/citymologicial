@@ -30,6 +30,7 @@ import {
 } from '../../services/inventaire/siteMaterialRequests';
 import { generateSiteRequestPdf } from '../../services/inventaire/siteRequestPdf';
 import SiteRequestForm, { buildInitialLines } from './SiteRequestForm.jsx';
+import SiteRequestFormPage from './SiteRequestFormPage.jsx';
 import { KpiCard, INPUT_STYLE, SELECT_STYLE } from './shared.jsx';
 
 const EMPTY_FORM = {
@@ -93,7 +94,7 @@ export default function DemandesChantier() {
   const [search, setSearch] = useState('');
   const [statutFilter, setStatutFilter] = useState('');
   const [prioriteFilter, setPrioriteFilter] = useState('');
-  const [showForm, setShowForm] = useState(false);
+  const [view, setView] = useState('list');
   const [editId, setEditId] = useState(null);
   const [detail, setDetail] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -142,7 +143,8 @@ export default function DemandesChantier() {
     setEditId(null);
     setForm({ ...EMPTY_FORM, date_demande: new Date().toISOString().slice(0, 10) });
     setLines(buildInitialLines());
-    setShowForm(true);
+    setError('');
+    setView('form');
   }
 
   async function openEdit(id) {
@@ -151,6 +153,7 @@ export default function DemandesChantier() {
       const req = await getSiteMaterialRequest(id);
       setEditId(id);
       setForm({
+        ref: req.ref,
         project_id: req.project_id || '',
         project_ref: req.project_ref,
         project_name: req.project_name,
@@ -163,7 +166,8 @@ export default function DemandesChantier() {
         observation: req.observation,
       });
       setLines(buildInitialLines(req.lines));
-      setShowForm(true);
+      setError('');
+      setView('form');
     } catch (err) {
       setError(err.message);
     } finally {
@@ -183,8 +187,9 @@ export default function DemandesChantier() {
   }
 
   function closeForm() {
-    setShowForm(false);
+    setView('list');
     setEditId(null);
+    setError('');
   }
 
   async function handleSave(submitAfter = false) {
@@ -263,6 +268,24 @@ export default function DemandesChantier() {
       ...prev,
       lines: prev.lines.map((l) => (l.id === lineId ? { ...l, ...patch } : l)),
     }));
+  }
+
+  if (view === 'form') {
+    return (
+      <SiteRequestFormPage
+        editId={editId}
+        form={form}
+        setForm={setForm}
+        lines={lines}
+        setLines={setLines}
+        projects={projects}
+        stockArticles={stockArticles}
+        saving={saving}
+        error={error}
+        onBack={closeForm}
+        onSave={handleSave}
+      />
+    );
   }
 
   return (
@@ -402,39 +425,6 @@ export default function DemandesChantier() {
         </div>
       )}
 
-      {showForm && (
-        <>
-          <div className="rh-emp-docs-drawer-overlay" onClick={closeForm} aria-hidden="true" />
-          <aside className="rh-emp-docs-drawer" style={{ maxWidth: 920, width: 'min(96vw, 920px)' }} role="dialog">
-            <header className="rh-emp-docs-drawer-header">
-              <div>
-                <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase' }}>Demande chantier</div>
-                <h2 className="rh-emp-docs-drawer-title">{editId ? 'MODIFIER LA DEMANDE' : 'NOUVELLE DEMANDE CHANTIER'}</h2>
-              </div>
-              <button type="button" className="rh-emp-modal-close" onClick={closeForm}><X size={20} /></button>
-            </header>
-            <div className="rh-emp-docs-drawer-body">
-              <SiteRequestForm
-                form={form}
-                setForm={setForm}
-                lines={lines}
-                setLines={setLines}
-                projects={projects}
-                stockArticles={stockArticles}
-              />
-              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 20, paddingTop: 16, borderTop: '1px solid var(--border)' }}>
-                <button type="button" className="btn btn-secondary" onClick={closeForm}>Annuler</button>
-                <button type="button" className="btn btn-secondary" onClick={() => handleSave(false)} disabled={saving}>
-                  {saving ? <Loader2 size={14} className="spin" /> : null} Enregistrer brouillon
-                </button>
-                <button type="button" className="btn btn-primary" onClick={() => handleSave(true)} disabled={saving}>
-                  {saving ? <Loader2 size={14} className="spin" /> : <CheckCircle size={14} />} Soumettre au magasin
-                </button>
-              </div>
-            </div>
-          </aside>
-        </>
-      )}
 
       {detail && (
         <>
