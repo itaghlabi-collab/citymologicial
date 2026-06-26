@@ -1,8 +1,8 @@
 /**
- * BesoinDetailModal.jsx — Fiche complète besoin RH
+ * BesoinDetailModal.jsx — Consultation besoin (lecture seule côté affectation)
  */
-import { X, Download, Users, Send } from 'lucide-react';
-import { prioriteBadgeClass } from '../../../constants/projectBesoins';
+import { X, Download } from 'lucide-react';
+import { prioriteBadgeClass, canEditProjectNeed } from '../../../constants/projectBesoins';
 
 function fmtDate(d) {
   if (!d) return '—';
@@ -24,12 +24,13 @@ function InfoRow({ label, value }) {
 }
 
 export default function BesoinDetailModal({
-  open, onClose, need, projet, onPdf, onAssign, onRh, onEdit,
+  open, onClose, need, projet, onPdf, onEdit,
 }) {
   if (!open || !need) return null;
 
   const coverageColor = need.manque === 0 ? '#2E7D32' : need.quantite_affectee > 0 ? '#F57C00' : '#C62828';
   const coverageLabel = need.manque === 0 ? 'Couvert' : need.quantite_affectee > 0 ? 'Partiel' : 'Non couvert';
+  const editable = canEditProjectNeed(need);
 
   return (
     <div className="rh-emp-modal-overlay" style={{ zIndex: 1350 }}>
@@ -42,6 +43,10 @@ export default function BesoinDetailModal({
           <button type="button" className="rh-emp-modal-close" onClick={onClose}><X size={20} /></button>
         </header>
         <div className="rh-emp-docs-drawer-body">
+          <div style={{ padding: '10px 12px', background: '#F5F5F5', borderRadius: 8, fontSize: '0.82rem', color: 'var(--text-2)', marginBottom: 16 }}>
+            L&apos;affectation des ouvriers est gérée par le service RH. Ce besoin est mis à jour automatiquement après validation RH.
+          </div>
+
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
             <span className={`badge ${need.statutBadge}`} style={{ fontSize: '0.78rem' }}>{need.statutLabel}</span>
             <span className={`badge ${prioriteBadgeClass(need.priorite)}`}>{need.priorite}</span>
@@ -49,11 +54,7 @@ export default function BesoinDetailModal({
           </div>
 
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 20 }}>
-            {onEdit && <button type="button" className="btn btn-secondary btn-sm" onClick={() => onEdit(need)}>Modifier</button>}
-            {onAssign && <button type="button" className="btn btn-primary btn-sm" onClick={() => onAssign(need)}><Users size={14} /> Affecter</button>}
-            {onRh && need.manque > 0 && !need.resource_request_id && (
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => onRh(need)}><Send size={14} /> Créer demande RH</button>
-            )}
+            {editable && onEdit && <button type="button" className="btn btn-secondary btn-sm" onClick={() => onEdit(need)}>Modifier</button>}
             {onPdf && <button type="button" className="btn btn-ghost btn-sm" onClick={() => onPdf(need)}><Download size={14} /> PDF</button>}
           </div>
 
@@ -61,13 +62,11 @@ export default function BesoinDetailModal({
             <h3 style={{ fontSize: '0.78rem', fontWeight: 800, color: 'var(--red)', textTransform: 'uppercase', marginBottom: 12 }}>Informations générales</h3>
             <div className="rh-emp-docs-info-grid">
               <InfoRow label="Projet" value={projet?.nom} />
-              <InfoRow label="Client" value={projet?.client} />
               <InfoRow label="Type" value={need.type_besoin} />
-              <InfoRow label="Fonction" value={need.fonction} />
+              <InfoRow label="Fonction / métier" value={need.fonction} />
               <InfoRow label="Demandé / Affecté / Manque" value={`${need.quantite_necessaire} / ${need.quantite_affectee} / ${need.manque}`} />
               <InfoRow label="Date début" value={fmtDate(need.date_debut_souhaitee)} />
               <InfoRow label="Date fin" value={fmtDate(need.date_fin_estimee)} />
-              <InfoRow label="Durée prévue" value={need.duree_prevue} />
               <InfoRow label="Responsable" value={need.responsable_demande} />
             </div>
           </section>
@@ -79,13 +78,6 @@ export default function BesoinDetailModal({
             </section>
           )}
 
-          {(need.competences || need.epi_obligatoires) && (
-            <section style={{ marginBottom: 16, fontSize: '0.86rem' }}>
-              {need.competences && <div><strong>Compétences :</strong> {need.competences}</div>}
-              {need.epi_obligatoires && <div style={{ marginTop: 6 }}><strong>EPI :</strong> {need.epi_obligatoires}</div>}
-            </section>
-          )}
-
           {need.observation && (
             <section style={{ marginBottom: 16, fontSize: '0.86rem' }}>
               <strong>Observation :</strong> {need.observation}
@@ -93,13 +85,13 @@ export default function BesoinDetailModal({
           )}
 
           <section style={{ marginBottom: 20 }}>
-            <h3 style={{ fontSize: '0.78rem', fontWeight: 800, marginBottom: 8 }}>Ouvriers / ressources affectés</h3>
+            <h3 style={{ fontSize: '0.78rem', fontWeight: 800, marginBottom: 8 }}>Ouvriers affectés (via RH)</h3>
             {(need.ressources_affectees || []).length ? (
               <ul style={{ margin: 0, paddingLeft: 18, fontSize: '0.86rem' }}>
                 {need.ressources_affectees.map((n) => <li key={n}>{n}</li>)}
               </ul>
             ) : (
-              <div style={{ color: 'var(--text-3)', fontSize: '0.84rem' }}>Aucune ressource affectée pour le moment.</div>
+              <div style={{ color: 'var(--text-3)', fontSize: '0.84rem' }}>En attente d&apos;affectation par le service RH.</div>
             )}
           </section>
 

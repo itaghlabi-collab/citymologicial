@@ -1,9 +1,9 @@
 /**
- * DemandesRessources.jsx — RH : workflow demandes de ressources chantier
+ * DemandesRessources.jsx — RH : traitement et affectation des ressources chantier
  */
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  ClipboardList, Search, RefreshCw, Loader2, Eye, CheckCircle, XCircle, Users,
+  ClipboardList, Search, RefreshCw, Loader2, Eye, CheckCircle, XCircle, Users, UserPlus,
 } from 'lucide-react';
 import { BESOIN_REQUEST_STATUTS } from '../constants/projectBesoins';
 import {
@@ -13,9 +13,11 @@ import {
   setResourceRequestWorkers,
   validateResourceRequest,
   closeResourceRequest,
-  listAvailableWorkersForFonction,
+  refuseResourceRequest,
+  createRecruitmentRequestFromRequest,
   requestStatutColor,
 } from '../services/rh/resourceRequests';
+import RhAssignWorkersModal from './rh/RhAssignWorkersModal';
 
 const inputStyle = {
   padding: '8px 11px',
@@ -51,15 +53,13 @@ export default function DemandesRessources() {
   const [search, setSearch] = useState('');
   const [statutFilter, setStatutFilter] = useState('');
   const [detail, setDetail] = useState(null);
-  const [availableWorkers, setAvailableWorkers] = useState([]);
-  const [selectedWorkers, setSelectedWorkers] = useState([]);
+  const [assignOpen, setAssignOpen] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
-      const rows = await listResourceRequests({ statut: statutFilter });
-      setRequests(rows);
+      setRequests(await listResourceRequests({ statut: statutFilter }));
     } catch (err) {
       setError(err.message || 'Erreur de chargement.');
     } finally {
@@ -83,7 +83,7 @@ export default function DemandesRessources() {
   const stats = useMemo(() => ({
     total: requests.length,
     enAttente: requests.filter((r) => r.statut === 'en_attente').length,
-    enCours: requests.filter((r) => r.statut === 'en_cours').length,
+    enCours: requests.filter((r) => ['en_cours', 'partielle'].includes(r.statut)).length,
     affectees: requests.filter((r) => r.statut === 'affectee').length,
   }), [requests]);
 
@@ -91,22 +91,7 @@ export default function DemandesRessources() {
     setSaving(true);
     setError('');
     try {
-      const req = await getResourceRequest(id);
-      setDetail(req);
-      const workers = await listAvailableWorkersForFonction(req.fonction, req.project_id);
-      const assignedIds = new Set((req.workers || []).map((w) => String(w.worker_id)));
-      const merged = [
-        ...(req.workers || []).map((w) => ({
-          id: w.worker_id,
-          prenom: w.workerName?.split(' ')[0] || '',
-          nom: w.workerName?.split(' ').slice(1).join(' ') || '',
-          fonction: w.fonction,
-          onProject: true,
-        })),
-        ...workers.filter((w) => !assignedIds.has(String(w.id))),
-      ];
-      setAvailableWorkers(merged);
-      setSelectedWorkers((req.workers || []).map((w) => String(w.worker_id)));
+      setDetail(await getResourceRequest(id));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -116,15 +101,30 @@ export default function DemandesRessources() {
 
   function closeDetail() {
     setDetail(null);
-    setAvailableWorkers([]);
-    setSelectedWorkers([]);
+    setAssignOpen(false);
   }
 
-  async function handleSaveWorkers() {
+  async function handleAssignConfirm(workerIds) {
+    if (!detail) return;
+    setSaving(true);
+    setError('');
+    try {
+      await setResourceRequestWorkers(detail.id, workerIds);
+      await validateResourceRequest(detail.id, { allowPartial: true });
+      closeDetail();
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleTakeCharge() {
     if (!detail) return;
     setSaving(true);
     try {
-      await setResourceRequestWorkers(detail.id, selectedWorkers);
+      await updateResourceRequestStatus(detail.id, 'en_cours');
       await openDetail(detail.id);
       await load();
     } catch (err) {
@@ -134,13 +134,30 @@ export default function DemandesRessources() {
     }
   }
 
-  async function handleValidate() {
-    if (!detail || !window.confirm('Valider l\'affectation et mettre à jour le projet ?')) return;
+  async function handleRefuse() {
+    if (!detail) return;
+    const reason = window.prompt('Motif du refus (optionnel) :');
+    if (reason === null) return;
     setSaving(true);
     try {
-      await setResourceRequestWorkers(detail.id, selectedWorkers);
-      await validateResourceRequest(detail.id);
+      await refuseResourceRequest(detail.id, reason);
       closeDetail();
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleRecruitment() {
+    if (!detail) return;
+    if (!window.confirm('Créer une demande de recrutement pour les postes manquants ?')) return;
+    setSaving(true);
+    try {
+      const req = await createRecruitmentRequestFromRequest(detail.id);
+      alert(`Demande de recrutement ${req.ref} créée.`);
+      await openDetail(detail.id);
       await load();
     } catch (err) {
       setError(err.message);
@@ -163,18 +180,22 @@ export default function DemandesRessources() {
     }
   }
 
+  const assignedCount = detail?.workers?.length || 0;
+  const manque = detail ? Math.max(0, (Number(detail.quantite) || 0) - assignedCount) : 0;
+  const canAssign = detail && ['en_attente', 'en_cours', 'partielle'].includes(detail.statut);
+
   return (
     <div className="animate-fade-in">
       <div className="page-header">
         <h1 className="page-title">Demandes de ressources</h1>
-        <p className="page-subtitle">Workflow Chef de projet ↔ Service RH — affectation des ouvriers</p>
+        <p className="page-subtitle">Traitement RH — affectation des ouvriers sur les chantiers</p>
       </div>
 
       <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', marginBottom: 20 }}>
         <div className="stat-card"><div className="stat-body"><div className="stat-value">{stats.total}</div><div className="stat-label">Total</div></div></div>
         <div className="stat-card"><div className="stat-body"><div className="stat-value" style={{ color: '#F57C00' }}>{stats.enAttente}</div><div className="stat-label">En attente</div></div></div>
-        <div className="stat-card"><div className="stat-body"><div className="stat-value" style={{ color: '#1565C0' }}>{stats.enCours}</div><div className="stat-label">En cours</div></div></div>
-        <div className="stat-card"><div className="stat-body"><div className="stat-value" style={{ color: '#2E7D32' }}>{stats.affectees}</div><div className="stat-label">Affectées</div></div></div>
+        <div className="stat-card"><div className="stat-body"><div className="stat-value" style={{ color: '#1565C0' }}>{stats.enCours}</div><div className="stat-label">En cours / Partiel</div></div></div>
+        <div className="stat-card"><div className="stat-body"><div className="stat-value" style={{ color: '#2E7D32' }}>{stats.affectees}</div><div className="stat-label">Couvertes</div></div></div>
       </div>
 
       <div className="card">
@@ -207,6 +228,7 @@ export default function DemandesRessources() {
                   <th>Projet</th>
                   <th>Fonction</th>
                   <th>Qté</th>
+                  <th>Affectés</th>
                   <th>Date souhaitée</th>
                   <th>Priorité</th>
                   <th>Demandeur</th>
@@ -216,7 +238,7 @@ export default function DemandesRessources() {
               </thead>
               <tbody>
                 {filtered.length === 0 ? (
-                  <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--text-3)' }}>Aucune demande.</td></tr>
+                  <tr><td colSpan={10} style={{ textAlign: 'center', color: 'var(--text-3)' }}>Aucune demande.</td></tr>
                 ) : filtered.map((r) => (
                   <tr key={r.id}>
                     <td data-label="Réf." style={{ fontWeight: 700 }}>{r.ref || '—'}</td>
@@ -226,6 +248,7 @@ export default function DemandesRessources() {
                     </td>
                     <td data-label="Fonction">{r.fonction}</td>
                     <td data-label="Qté">{r.quantite}</td>
+                    <td data-label="Affectés">{r.workers?.length || 0}</td>
                     <td data-label="Date">{fmtDate(r.date_souhaitee)}</td>
                     <td data-label="Priorité">{r.priorite}</td>
                     <td data-label="Demandeur">{r.requested_by_name || '—'}</td>
@@ -247,46 +270,37 @@ export default function DemandesRessources() {
 
       {detail && (
         <div className="rh-emp-modal-overlay" style={{ zIndex: 1200 }}>
-          <div className="card" style={{ width: '100%', maxWidth: 560, maxHeight: '90vh', overflow: 'auto', padding: 24 }}>
+          <div className="card" style={{ width: '100%', maxWidth: 600, maxHeight: '90vh', overflow: 'auto', padding: 24 }}>
             <h3 style={{ margin: '0 0 4px', fontFamily: 'var(--font-head)', fontWeight: 800 }}>{detail.ref} — {detail.fonction}</h3>
             <p style={{ margin: '0 0 16px', color: 'var(--text-3)', fontSize: '0.84rem' }}>
-              {detail.project_name} ({detail.project_ref}) · {detail.quantite} poste(s) · Priorité {detail.priorite}
+              {detail.project_name} ({detail.project_ref}) · {detail.quantite} poste(s) demandé(s) · Priorité {detail.priorite}
             </p>
+
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16 }}>
+              <span className="badge" style={{ background: requestStatutColor(detail.statut), color: '#fff' }}>{detail.statutLabel}</span>
+              <span className="badge badge-blue">{assignedCount} affecté(s)</span>
+              {manque > 0 && <span className="badge badge-orange">{manque} manquant(s)</span>}
+            </div>
 
             {detail.commentaire && (
               <div style={{ padding: 10, background: 'var(--surface-2)', borderRadius: 8, marginBottom: 14, fontSize: '0.84rem' }}>
-                <strong>Commentaire :</strong> {detail.commentaire}
+                <strong>Description / commentaire :</strong>
+                <div style={{ whiteSpace: 'pre-wrap', marginTop: 4 }}>{detail.commentaire}</div>
               </div>
             )}
 
-            <div style={{ marginBottom: 16 }}>
+            <section style={{ marginBottom: 16 }}>
               <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-3)', marginBottom: 8, textTransform: 'uppercase' }}>
-                <Users size={12} style={{ display: 'inline', marginRight: 4 }} /> Ouvriers disponibles — {detail.fonction}
+                <Users size={12} style={{ display: 'inline', marginRight: 4 }} /> Ouvriers affectés
               </div>
-              <div style={{ maxHeight: 180, overflow: 'auto', border: '1px solid var(--border)', borderRadius: 8, padding: 8 }}>
-                {availableWorkers.length === 0 ? (
-                  <div style={{ color: 'var(--text-3)', fontSize: '0.84rem' }}>Aucun ouvrier disponible pour cette fonction.</div>
-                ) : availableWorkers.map((w) => {
-                  const id = String(w.id || w.worker_id);
-                  const name = w.prenom ? `${w.prenom} ${w.nom || ''}`.trim() : (w.workerName || id);
-                  return (
-                    <label key={id} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '6px 4px', cursor: 'pointer', fontSize: '0.86rem' }}>
-                      <input
-                        type="checkbox"
-                        checked={selectedWorkers.includes(id)}
-                        onChange={(e) => {
-                          setSelectedWorkers((prev) => e.target.checked
-                            ? [...prev, id]
-                            : prev.filter((x) => x !== id));
-                        }}
-                      />
-                      {name}
-                      {w.onProject && <span className="badge badge-blue" style={{ fontSize: '0.65rem' }}>déjà affecté</span>}
-                    </label>
-                  );
-                })}
-              </div>
-            </div>
+              {(detail.workers || []).length ? (
+                <ul style={{ margin: 0, paddingLeft: 18, fontSize: '0.86rem' }}>
+                  {detail.workers.map((w) => <li key={w.worker_id}>{w.workerName} — {w.fonction}</li>)}
+                </ul>
+              ) : (
+                <div style={{ color: 'var(--text-3)', fontSize: '0.84rem' }}>Aucun ouvrier affecté pour le moment.</div>
+              )}
+            </section>
 
             {detail.history?.length > 0 && (
               <div style={{ marginBottom: 16 }}>
@@ -306,27 +320,43 @@ export default function DemandesRessources() {
             <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
               <button type="button" className="btn btn-secondary" onClick={closeDetail}>Fermer</button>
               {detail.statut === 'en_attente' && (
-                <button type="button" className="btn btn-secondary" disabled={saving} onClick={() => updateResourceRequestStatus(detail.id, 'en_cours').then(() => openDetail(detail.id))}>
+                <button type="button" className="btn btn-secondary" disabled={saving} onClick={handleTakeCharge}>
                   Prendre en charge
                 </button>
               )}
-              {['en_attente', 'en_cours'].includes(detail.statut) && (
-                <>
-                  <button type="button" className="btn btn-secondary" disabled={saving} onClick={handleSaveWorkers}>Enregistrer sélection</button>
-                  <button type="button" className="btn btn-primary" disabled={saving || !selectedWorkers.length} onClick={handleValidate}>
-                    <CheckCircle size={13} /> Valider affectation
-                  </button>
-                </>
+              {canAssign && (
+                <button type="button" className="btn btn-primary" disabled={saving} onClick={() => setAssignOpen(true)}>
+                  <Users size={13} /> Affecter des ouvriers
+                </button>
               )}
-              {detail.statut === 'affectee' && (
+              {canAssign && (
+                <button type="button" className="btn btn-secondary" disabled={saving} onClick={handleRefuse} style={{ color: 'var(--red)' }}>
+                  <XCircle size={13} /> Refuser
+                </button>
+              )}
+              {manque > 0 && ['partielle', 'affectee', 'en_cours'].includes(detail.statut) && (
+                <button type="button" className="btn btn-secondary" disabled={saving} onClick={handleRecruitment}>
+                  <UserPlus size={13} /> Créer demande recrutement
+                </button>
+              )}
+              {['affectee', 'partielle'].includes(detail.statut) && (
                 <button type="button" className="btn btn-primary" disabled={saving} onClick={handleClose}>
-                  <XCircle size={13} /> Clôturer
+                  <CheckCircle size={13} /> Clôturer
                 </button>
               )}
             </div>
           </div>
         </div>
       )}
+
+      <RhAssignWorkersModal
+        open={assignOpen && !!detail}
+        onClose={() => setAssignOpen(false)}
+        request={detail}
+        initialSelected={(detail?.workers || []).map((w) => w.worker_id)}
+        onConfirm={handleAssignConfirm}
+        saving={saving}
+      />
     </div>
   );
 }

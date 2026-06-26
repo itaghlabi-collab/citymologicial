@@ -208,6 +208,22 @@ export async function updateResourceRequestStatus(id, statut) {
     .single();
   if (error) throw error;
   await logHistory(id, 'status_changed', `Statut → ${requestStatutLabel(statut)}`, user.id, actorName);
+
+  const request = normalizeRequest(data);
+  if (statut === 'en_cours' && request.staff_need_id) {
+    try {
+      const { syncNeedFromRhRequest } = await import('../projects/projectBesoins');
+      await syncNeedFromRhRequest(request, {
+        statut: 'en_recherche_rh',
+        details: 'Prise en charge par le service RH',
+        actorId: user.id,
+        actorName,
+      });
+    } catch (err) {
+      console.warn('[CITYMO] sync need take charge', err);
+    }
+  }
+
   return getResourceRequest(id);
 }
 
@@ -248,7 +264,7 @@ export async function setResourceRequestWorkers(id, workerIds = []) {
   return getResourceRequest(id);
 }
 
-export async function validateResourceRequest(id) {
+export async function validateResourceRequest(id, { allowPartial = true } = {}) {
   const user = await requireUser();
   const actorName = await getProfileName(user.id);
   const request = await getResourceRequest(id);
@@ -257,14 +273,23 @@ export async function validateResourceRequest(id) {
   const workerIds = (request.workers || []).map((w) => w.worker_id);
   if (!workerIds.length) throw new Error('Sélectionnez au moins un ouvrier.');
 
+  const needed = Number(request.quantite) || 1;
+  const assignedCount = workerIds.length;
+  if (!allowPartial && assignedCount < needed) {
+    throw new Error(`Il manque ${needed - assignedCount} ressource(s) pour valider complètement.`);
+  }
+
   const current = await listWorkersByProject(request.project_id);
   const merged = [...new Set([...current.map((a) => String(a.workerId)), ...workerIds.map(String)])];
   await saveProjectWorkerAssignments(request.project_id, merged);
 
+  const isPartial = assignedCount > 0 && assignedCount < needed;
+  const newStatut = isPartial ? 'partielle' : 'affectee';
+
   const { error } = await getSupabase()
     .from(TABLE)
     .update({
-      statut: 'affectee',
+      statut: newStatut,
       assigned_by: user.id,
       assigned_by_name: actorName,
       updated_at: new Date().toISOString(),
@@ -272,13 +297,10 @@ export async function validateResourceRequest(id) {
     .eq('id', id);
   if (error) throw error;
 
-  await logHistory(
-    id,
-    'validated',
-    `Affectation validée — ${workerIds.length} ouvrier(s) sur le projet`,
-    user.id,
-    actorName,
-  );
+  const detailMsg = isPartial
+    ? `Affectation partielle — ${assignedCount}/${needed} ouvrier(s) affecté(s)`
+    : `Affectation validée — ${assignedCount} ouvrier(s) sur le projet`;
+  await logHistory(id, isPartial ? 'partial_assignment' : 'validated', detailMsg, user.id, actorName);
 
   try {
     const { notifyResourceRequestValidated } = await import('../notifications/notificationEvents');
@@ -289,8 +311,12 @@ export async function validateResourceRequest(id) {
 
   if (request.staff_need_id) {
     try {
-      const { syncProjectStaffNeedsCoverage } = await import('../projects/projectBesoins');
-      await syncProjectStaffNeedsCoverage(request.project_id);
+      const { syncNeedFromRhRequest } = await import('../projects/projectBesoins');
+      await syncNeedFromRhRequest(request, {
+        details: detailMsg,
+        actorId: user.id,
+        actorName,
+      });
     } catch (err) {
       console.warn('[CITYMO] sync staff need after RH', err);
     }
@@ -299,35 +325,130 @@ export async function validateResourceRequest(id) {
   return getResourceRequest(id);
 }
 
+export async function refuseResourceRequest(id, reason = '') {
+  const user = await requireUser();
+  const actorName = await getProfileName(user.id);
+  const request = await getResourceRequest(id);
+  if (!request) throw new Error('Demande introuvable.');
+
+  const { error } = await getSupabase()
+    .from(TABLE)
+    .update({ statut: 'refusee', updated_at: new Date().toISOString() })
+    .eq('id', id);
+  if (error) throw error;
+
+  const details = reason?.trim() ? `Refusée : ${reason.trim()}` : 'Demande refusée par le service RH';
+  await logHistory(id, 'refused', details, user.id, actorName);
+
+  if (request.staff_need_id) {
+    try {
+      const { syncNeedFromRhRequest } = await import('../projects/projectBesoins');
+      await syncNeedFromRhRequest(request, {
+        statut: 'refuse',
+        details,
+        actorId: user.id,
+        actorName,
+      });
+    } catch (err) {
+      console.warn('[CITYMO] sync need refuse', err);
+    }
+  }
+
+  return getResourceRequest(id);
+}
+
+export async function createRecruitmentRequestFromRequest(id) {
+  const user = await requireUser();
+  const actorName = await getProfileName(user.id);
+  const request = await getResourceRequest(id);
+  if (!request) throw new Error('Demande introuvable.');
+
+  const assigned = (request.workers || []).length;
+  const manque = Math.max(0, (Number(request.quantite) || 0) - assigned);
+  if (manque <= 0) throw new Error('Aucun poste manquant — recrutement non nécessaire.');
+
+  const ref = await generateResourceRequestRef();
+  const payload = {
+    ref_demande: ref,
+    project_id: request.project_id,
+    project_ref: request.project_ref || '',
+    project_name: request.project_name || '',
+    fonction: request.fonction,
+    quantite: manque,
+    date_souhaitee: request.date_souhaitee || null,
+    priorite: request.priorite || 'Normale',
+    commentaire: `Demande de recrutement — complément de ${manque} ${request.fonction}(s) pour ${request.project_name}`,
+    staff_need_id: request.staff_need_id || null,
+    statut: 'en_attente',
+    requested_by: user.id,
+    requested_by_name: actorName,
+    updated_at: new Date().toISOString(),
+  };
+
+  const { data, error } = await getSupabase().from(TABLE).insert([payload]).select().single();
+  if (error) throw error;
+
+  await logHistory(id, 'recruitment_created', `Demande recrutement ${ref} pour ${manque} poste(s)`, user.id, actorName);
+  await logHistory(data.id, 'created', `Recrutement lié à ${request.ref}`, user.id, actorName);
+
+  if (request.staff_need_id) {
+    try {
+      const { syncNeedFromRhRequest } = await import('../projects/projectBesoins');
+      await syncNeedFromRhRequest(request, {
+        details: `Demande de recrutement ${ref} créée pour ${manque} poste(s)`,
+        actorId: user.id,
+        actorName,
+      });
+    } catch (err) {
+      console.warn('[CITYMO] sync need recruitment', err);
+    }
+  }
+
+  return normalizeRequest(data);
+}
+
 export async function closeResourceRequest(id) {
   const user = await requireUser();
   const actorName = await getProfileName(user.id);
+  const request = await getResourceRequest(id);
   const { error } = await getSupabase()
     .from(TABLE)
     .update({ statut: 'cloturee', updated_at: new Date().toISOString() })
     .eq('id', id);
   if (error) throw error;
   await logHistory(id, 'closed', 'Demande clôturée', user.id, actorName);
+
+  if (request?.staff_need_id) {
+    try {
+      const { syncNeedFromRhRequest } = await import('../projects/projectBesoins');
+      await syncNeedFromRhRequest(request, {
+        statut: 'clos',
+        details: 'Besoin clôturé par le service RH',
+        actorId: user.id,
+        actorName,
+      });
+    } catch (err) {
+      console.warn('[CITYMO] sync need close', err);
+    }
+  }
+
   return getResourceRequest(id);
 }
 
-/** Ouvriers / ressources disponibles pour un type de besoin RH. */
+/** Ouvriers disponibles pour affectation RH (tous actifs, filtrés par fonction). */
 export async function listAvailableWorkersForFonction(fonction, projectId) {
   const all = await listWorkers();
   const f = (fonction || '').trim();
-  const onProject = projectId
-    ? new Set((await listWorkersByProject(projectId)).map((a) => String(a.workerId)))
-    : new Set();
 
   if (f === 'Sous-traitants') return [];
 
   return (all || []).filter((w) => {
     if (w.statut === 'inactif') return false;
-    if (onProject.has(String(w.id))) return false;
     if (f === 'Ouvriers') return isOuvrierFonction(w.fonction);
     if (f === 'Chef de chantier') return isChefChantierFonction(w.fonction);
     if (f === 'Chef de projet') return isChefProjetFonction(w.fonction);
-    return normFonction(w.fonction) === normFonction(f);
+    return normFonction(w.fonction) === normFonction(f)
+      || normFonction(w.fonction).includes(normFonction(f));
   });
 }
 

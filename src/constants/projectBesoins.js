@@ -17,10 +17,11 @@ export const BESOIN_PRIORITES = ['Normale', 'Urgente', 'Critique'];
 
 export const BESOIN_WORKFLOW_STATUTS = [
   { value: 'brouillon', label: 'Brouillon', color: '#757575', badge: 'badge-grey' },
-  { value: 'soumis', label: 'Soumis', color: '#1565C0', badge: 'badge-blue' },
-  { value: 'en_recherche_rh', label: 'En recherche RH', color: '#7B1FA2', badge: 'badge-purple' },
+  { value: 'soumis', label: 'En attente RH', color: '#1565C0', badge: 'badge-blue' },
+  { value: 'en_recherche_rh', label: 'En cours RH', color: '#7B1FA2', badge: 'badge-purple' },
   { value: 'partiellement_couvert', label: 'Partiellement couvert', color: '#F57C00', badge: 'badge-orange' },
   { value: 'couvert', label: 'Couvert', color: '#2E7D32', badge: 'badge-green' },
+  { value: 'refuse', label: 'Refusé', color: '#C62828', badge: 'badge-red' },
   { value: 'annule', label: 'Annulé', color: '#C62828', badge: 'badge-red' },
   { value: 'clos', label: 'Clos', color: '#546E7A', badge: 'badge-grey' },
 ];
@@ -32,9 +33,29 @@ export const BESOIN_FONCTIONS = BESOIN_TYPES;
 export const BESOIN_REQUEST_STATUTS = [
   { value: 'en_attente', label: 'En attente', color: '#F57C00' },
   { value: 'en_cours', label: 'En cours', color: '#1565C0' },
-  { value: 'affectee', label: 'Affectée', color: '#2E7D32' },
+  { value: 'partielle', label: 'Partiellement couvert', color: '#F57C00' },
+  { value: 'affectee', label: 'Couvert', color: '#2E7D32' },
+  { value: 'refusee', label: 'Refusée', color: '#C62828' },
   { value: 'cloturee', label: 'Clôturée', color: '#757575' },
 ];
+
+/** Besoin modifiable tant qu'aucune prise en charge RH */
+export function canEditProjectNeed(need) {
+  if (!need) return false;
+  if (need.statut === 'brouillon') return true;
+  if (need.statut === 'soumis' && !need.resource_request_id) return true;
+  return false;
+}
+
+export function canDeleteProjectNeed(need) {
+  return need?.statut === 'brouillon';
+}
+
+export function isNeedTreatedByRh(need) {
+  if (!need) return false;
+  return Boolean(need.resource_request_id)
+    || ['en_recherche_rh', 'partiellement_couvert', 'couvert', 'refuse', 'clos'].includes(need.statut);
+}
 
 export const BESOIN_STAFF_STATUTS = {
   couvert: { label: 'Couvert', badge: 'badge-green' },

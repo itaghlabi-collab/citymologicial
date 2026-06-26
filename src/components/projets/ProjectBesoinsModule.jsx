@@ -1,10 +1,10 @@
 /**
- * ProjectBesoinsModule.jsx — Module gestion des besoins RH chantier
+ * ProjectBesoinsModule.jsx — Déclaration des besoins RH (lecture seule affectation)
  */
 import { useState, useEffect, useCallback } from 'react';
 import {
   Users, Plus, Trash2, Send, Loader2, AlertCircle, RefreshCw, Info,
-  Eye, Edit2, Download, CheckCircle, XCircle, ClipboardList, TrendingUp,
+  Eye, Edit2, Download, ClipboardList, TrendingUp,
 } from 'lucide-react';
 import { prioriteBadgeClass } from '../../constants/projectBesoins';
 import {
@@ -13,8 +13,6 @@ import {
   updateProjectStaffNeed,
   deleteProjectStaffNeed,
   submitProjectStaffNeed,
-  updateProjectStaffNeedStatut,
-  createRhRequestFromNeed,
   getProjectStaffNeed,
   computeBesoinStats,
 } from '../../services/projects/projectBesoins';
@@ -22,7 +20,6 @@ import { generateBesoinPdf } from '../../services/projects/projectBesoinPdf';
 import { getBesoinActions } from './besoins/besoinActions';
 import BesoinFormModal from './besoins/BesoinFormModal';
 import BesoinDetailModal from './besoins/BesoinDetailModal';
-import AssignWorkersModal from './besoins/AssignWorkersModal';
 
 function KpiCard({ icon, label, value, sub, color = 'grey' }) {
   const colors = { red: 'var(--red)', blue: '#1565C0', green: '#2E7D32', orange: '#E65100', grey: 'var(--text-3)', purple: '#6A1B9A' };
@@ -51,8 +48,7 @@ function coverageIndicator(need) {
 }
 
 const ACTION_ICONS = {
-  view: Eye, edit: Edit2, assign: Users, pdf: Download, delete: Trash2,
-  submit: Send, rh: Send, cancel: XCircle, close: CheckCircle,
+  view: Eye, edit: Edit2, pdf: Download, delete: Trash2, submit: Send,
 };
 
 export default function ProjectBesoinsModule({ projet }) {
@@ -69,7 +65,6 @@ export default function ProjectBesoinsModule({ projet }) {
   const [formOpen, setFormOpen] = useState(false);
   const [editNeed, setEditNeed] = useState(null);
   const [detailNeed, setDetailNeed] = useState(null);
-  const [assignNeed, setAssignNeed] = useState(null);
 
   const load = useCallback(async () => {
     if (!projectId) return;
@@ -101,12 +96,15 @@ export default function ProjectBesoinsModule({ projet }) {
     setError('');
     try {
       if (editNeed?.id) {
-        await updateProjectStaffNeed(editNeed.id, form, { submit });
+        await updateProjectStaffNeed(editNeed.id, form, { submit, projet });
       } else {
-        await createProjectStaffNeed(projectId, form, { submit });
+        await createProjectStaffNeed(projectId, form, { submit, projet });
       }
       setFormOpen(false);
       setEditNeed(null);
+      if (submit) {
+        alert('Besoin soumis — une demande a été transmise au service RH.');
+      }
       await load();
     } catch (err) {
       setError(err.message);
@@ -117,8 +115,7 @@ export default function ProjectBesoinsModule({ projet }) {
 
   async function openDetail(need) {
     try {
-      const full = await getProjectStaffNeed(need.id, projectMeta);
-      setDetailNeed(full);
+      setDetailNeed(await getProjectStaffNeed(need.id, projectMeta));
     } catch (err) {
       setError(err.message);
     }
@@ -135,33 +132,16 @@ export default function ProjectBesoinsModule({ projet }) {
           setEditNeed(need);
           setFormOpen(true);
           break;
-        case 'assign':
-          setAssignNeed(need);
-          break;
         case 'pdf':
           await generateBesoinPdf(need, projet);
           break;
         case 'submit':
-          await submitProjectStaffNeed(need.id);
-          await load();
-          break;
-        case 'rh':
-          await createRhRequestFromNeed(need, projet);
-          alert('Demande RH créée — la chargée RH a été notifiée.');
-          await load();
-          break;
-        case 'cancel':
-          if (!window.confirm('Annuler ce besoin ?')) return;
-          await updateProjectStaffNeedStatut(need.id, 'annule', 'Besoin annulé');
-          await load();
-          break;
-        case 'close':
-          if (!window.confirm('Clôturer ce besoin ?')) return;
-          await updateProjectStaffNeedStatut(need.id, 'clos', 'Besoin clôturé');
+          await submitProjectStaffNeed(need.id, projet);
+          alert('Besoin soumis — une demande a été transmise au service RH.');
           await load();
           break;
         case 'delete':
-          if (!window.confirm('Supprimer définitivement ce besoin ?')) return;
+          if (!window.confirm('Supprimer ce besoin en brouillon ?')) return;
           await deleteProjectStaffNeed(need.id);
           await load();
           break;
@@ -173,14 +153,21 @@ export default function ProjectBesoinsModule({ projet }) {
     }
   }
 
-  function actionBtnClass(key) {
-    if (key === 'delete' || key === 'cancel') return 'btn btn-ghost btn-sm';
-    if (key === 'assign' || key === 'submit' || key === 'rh') return 'btn btn-primary btn-sm';
-    return 'btn btn-ghost btn-sm';
-  }
-
   return (
     <div>
+      <div style={{
+        display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 16,
+        padding: '12px 14px', background: '#E8F5E9', borderRadius: 8, fontSize: '0.82rem', color: '#2E7D32',
+      }}
+      >
+        <Info size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+        <div>
+          <strong>Workflow RH</strong> — déclarez ici vos besoins en ressources humaines.
+          L&apos;affectation des ouvriers est réalisée exclusivement par le service RH dans{' '}
+          <em>RH → Demandes ressources</em>. L&apos;onglet Équipe affiche les affectations validées.
+        </div>
+      </div>
+
       <div style={{
         display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 16,
         padding: '12px 14px', background: '#E3F2FD', borderRadius: 8, fontSize: '0.82rem', color: '#1565C0',
@@ -188,8 +175,7 @@ export default function ProjectBesoinsModule({ projet }) {
       >
         <Info size={16} style={{ flexShrink: 0, marginTop: 1 }} />
         <div>
-          <strong>Matériel et consommables</strong> — utilisez le module{' '}
-          <em>Inventaire &amp; Dépôt → Demandes chantier</em> pour centraliser toutes les demandes de matériel.
+          <strong>Matériel</strong> — utilisez <em>Inventaire &amp; Dépôt → Demandes chantier</em> pour le matériel.
         </div>
       </div>
 
@@ -203,16 +189,12 @@ export default function ProjectBesoinsModule({ projet }) {
 
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16, alignItems: 'center' }}>
         <div style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Users size={14} /> Demandes de ressources humaines
+          <Users size={14} /> Besoins ressources humaines
         </div>
         <button type="button" className="btn btn-ghost btn-sm" onClick={load} disabled={loading} style={{ marginLeft: 'auto' }}>
           <RefreshCw size={13} /> Actualiser
         </button>
-        <button
-          type="button"
-          className="btn btn-primary btn-sm"
-          onClick={() => { setEditNeed(null); setFormOpen(true); }}
-        >
+        <button type="button" className="btn btn-primary btn-sm" onClick={() => { setEditNeed(null); setFormOpen(true); }}>
           <Plus size={13} /> Ajouter un besoin
         </button>
       </div>
@@ -248,7 +230,7 @@ export default function ProjectBesoinsModule({ projet }) {
               {needs.length === 0 ? (
                 <tr>
                   <td colSpan={10} style={{ color: 'var(--text-3)', textAlign: 'center', padding: 28 }}>
-                    Aucun besoin RH défini — cliquez sur « Ajouter un besoin » pour créer une demande.
+                    Aucun besoin — cliquez sur « Ajouter un besoin » pour déclarer une demande au service RH.
                   </td>
                 </tr>
               ) : needs.map((n) => {
@@ -284,9 +266,9 @@ export default function ProjectBesoinsModule({ projet }) {
                             <button
                               key={a.key}
                               type="button"
-                              className={actionBtnClass(a.key)}
+                              className={a.key === 'submit' ? 'btn btn-primary btn-sm' : a.key === 'delete' ? 'btn btn-ghost btn-sm' : 'btn btn-ghost btn-sm'}
                               title={a.label}
-                              style={a.key === 'delete' || a.key === 'cancel' ? { color: 'var(--red)' } : undefined}
+                              style={a.key === 'delete' ? { color: 'var(--red)' } : undefined}
                               onClick={() => handleAction(a.key, n)}
                             >
                               <Icon size={13} />
@@ -310,7 +292,7 @@ export default function ProjectBesoinsModule({ projet }) {
         saving={saving}
         projet={projet}
         initial={editNeed}
-        submitLabel={editNeed ? 'Soumettre' : 'Enregistrer et soumettre'}
+        submitLabel="Soumettre à la RH"
       />
 
       <BesoinDetailModal
@@ -319,18 +301,7 @@ export default function ProjectBesoinsModule({ projet }) {
         need={detailNeed}
         projet={projet}
         onPdf={(n) => generateBesoinPdf(n, projet)}
-        onAssign={(n) => { setDetailNeed(null); setAssignNeed(n); }}
-        onRh={(n) => handleAction('rh', n)}
         onEdit={(n) => { setDetailNeed(null); setEditNeed(n); setFormOpen(true); }}
-      />
-
-      <AssignWorkersModal
-        open={!!assignNeed}
-        onClose={() => setAssignNeed(null)}
-        projet={projet}
-        need={assignNeed}
-        onSaved={load}
-        saving={saving}
       />
     </div>
   );

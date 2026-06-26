@@ -8,6 +8,8 @@ import {
   besoinStatutBadge,
   besoinStatutLabel,
   besoinFonctionLabel,
+  canDeleteProjectNeed,
+  canEditProjectNeed,
   isChefChantierFonction,
   isChefProjetFonction,
   isConducteurTravauxFonction,
@@ -59,12 +61,10 @@ function listAffected(need, ctx) {
 }
 
 function resolveCoverageStatut(need, assigned, manque) {
-  if (['annule', 'clos', 'brouillon'].includes(need.statut)) return need.statut;
+  if (['refuse', 'annule', 'clos', 'brouillon'].includes(need.statut)) return need.statut;
   if (manque === 0 && assigned > 0) return 'couvert';
   if (assigned > 0 && manque > 0) return 'partiellement_couvert';
-  if (need.resource_request_id && ['soumis', 'en_recherche_rh'].includes(need.statut)) {
-    return 'en_recherche_rh';
-  }
+  if (need.resource_request_id) return 'en_recherche_rh';
   return need.statut || 'brouillon';
 }
 
@@ -213,7 +213,7 @@ function toDbPayload(projectId, form, userId) {
   };
 }
 
-export async function createProjectStaffNeed(projectId, form, { submit = false } = {}) {
+export async function createProjectStaffNeed(projectId, form, { submit = false, projet = null } = {}) {
   if (!projectId) throw new Error('Projet requis.');
   const user = await requireUser();
   const actorName = await getProfileName(user.id);
@@ -228,19 +228,26 @@ export async function createProjectStaffNeed(projectId, form, { submit = false }
   await logHistory(
     data.id,
     submit ? 'soumis' : 'created',
-    submit ? 'Besoin soumis' : 'Besoin créé en brouillon',
+    submit ? 'Besoin soumis au service RH' : 'Besoin créé en brouillon',
     user.id,
     actorName,
   );
-  return getProjectStaffNeed(data.id);
+  let need = await getProjectStaffNeed(data.id);
+  if (submit && projet) {
+    need = await submitNeedToRh(need, projet, user.id, actorName);
+  }
+  return need;
 }
 
-export async function updateProjectStaffNeed(id, form, { submit = false } = {}) {
+export async function updateProjectStaffNeed(id, form, { submit = false, projet = null } = {}) {
   const user = await requireUser();
   const actorName = await getProfileName(user.id);
   const existing = await getProjectStaffNeed(id);
   if (!existing) throw new Error('Besoin introuvable.');
-  if (['clos', 'annule'].includes(existing.statut)) {
+  if (!canEditProjectNeed(existing) && !submit) {
+    throw new Error('Ce besoin ne peut plus être modifié — traitement RH en cours.');
+  }
+  if (['clos', 'refuse', 'annule', 'couvert'].includes(existing.statut)) {
     throw new Error('Ce besoin ne peut plus être modifié.');
   }
   const payload = {
@@ -250,15 +257,28 @@ export async function updateProjectStaffNeed(id, form, { submit = false } = {}) 
   delete payload.created_by;
   const { error } = await getSupabase().from(TABLE).update(payload).eq('id', id);
   if (error) throw error;
-  await logHistory(id, submit ? 'soumis' : 'updated', submit ? 'Besoin soumis' : 'Besoin modifié', user.id, actorName);
-  await syncProjectStaffNeedsCoverage(existing.project_id);
-  return getProjectStaffNeed(id);
+  await logHistory(id, submit ? 'soumis' : 'updated', submit ? 'Besoin soumis au service RH' : 'Besoin modifié', user.id, actorName);
+  let need = await getProjectStaffNeed(id);
+  if (submit && projet) {
+    need = await submitNeedToRh(need, projet, user.id, actorName);
+  } else {
+    await syncProjectStaffNeedsCoverage(existing.project_id);
+  }
+  return need;
 }
 
-export async function submitProjectStaffNeed(id) {
+async function submitNeedToRh(need, projet, userId, actorName) {
+  if (need.resource_request_id) return need;
+  const req = await createRhRequestFromNeed(need, projet);
+  await logHistory(need.id, 'rh_request', `Demande RH ${req.ref} générée automatiquement`, userId, actorName);
+  return getProjectStaffNeed(need.id);
+}
+
+export async function submitProjectStaffNeed(id, projet = null) {
   const existing = await getProjectStaffNeed(id);
   if (!existing) throw new Error('Besoin introuvable.');
-  return updateProjectStaffNeed(id, existing, { submit: true });
+  if (existing.statut !== 'brouillon') throw new Error('Seuls les brouillons peuvent être soumis.');
+  return updateProjectStaffNeed(id, existing, { submit: true, projet });
 }
 
 export async function updateProjectStaffNeedStatut(id, statut, details = '') {
@@ -277,6 +297,11 @@ export async function updateProjectStaffNeedStatut(id, statut, details = '') {
 
 export async function deleteProjectStaffNeed(id) {
   await requireUser();
+  const existing = await getProjectStaffNeed(id);
+  if (!existing) throw new Error('Besoin introuvable.');
+  if (!canDeleteProjectNeed(existing)) {
+    throw new Error('Seuls les besoins en brouillon peuvent être supprimés.');
+  }
   const { error } = await getSupabase().from(TABLE).delete().eq('id', id);
   if (error) throw error;
 }
@@ -290,7 +315,7 @@ export async function syncProjectStaffNeedsCoverage(projectId, projectMeta = nul
   if (error) throw error;
   const ctx = await loadContext(projectId, projectMeta);
   for (const row of data || []) {
-    if (['annule', 'clos', 'brouillon'].includes(row.statut)) continue;
+    if (['refuse', 'annule', 'clos', 'brouillon'].includes(row.statut)) continue;
     const assigned = countAssigned(row, ctx);
     const manque = Math.max(0, (Number(row.quantite_necessaire) || 0) - assigned);
     const newStatut = resolveCoverageStatut(row, assigned, manque);
@@ -319,7 +344,7 @@ export async function createRhRequestFromNeed(need, projet) {
   const req = await createResourceRequest({
     project: projet,
     fonction: need.type_besoin === 'Ouvriers' ? (need.corps_metier || 'Ouvrier') : need.type_besoin,
-    quantite: need.manque || need.quantite_necessaire,
+    quantite: need.quantite_necessaire,
     date_souhaitee: need.date_debut_souhaitee,
     priorite: need.priorite,
     commentaire,
@@ -335,12 +360,24 @@ export async function createRhRequestFromNeed(need, projet) {
     })
     .eq('id', need.id);
 
-  await logHistory(need.id, 'rh_request', `Demande RH ${req.ref} créée`, user.id, actorName);
-  return getProjectStaffNeed(need.id);
+  return req;
+}
+
+export async function syncNeedFromRhRequest(request, { statut, details, actorId, actorName } = {}) {
+  if (!request?.staff_need_id) return;
+  const updates = { updated_at: new Date().toISOString() };
+  if (statut) updates.statut = statut;
+  await getSupabase().from(TABLE).update(updates).eq('id', request.staff_need_id);
+  if (details) {
+    await logHistory(request.staff_need_id, 'rh_sync', details, actorId, actorName);
+  }
+  if (request.project_id) {
+    await syncProjectStaffNeedsCoverage(request.project_id);
+  }
 }
 
 export function computeBesoinStats(needs = []) {
-  const open = needs.filter((n) => !['clos', 'annule'].includes(n.statut));
+  const open = needs.filter((n) => !['clos', 'annule', 'refuse'].includes(n.statut));
   const totalDemandes = open.reduce((s, n) => s + (Number(n.quantite_necessaire) || 0), 0);
   const totalAffectes = open.reduce((s, n) => s + (Number(n.quantite_affectee) || 0), 0);
   const ouverts = open.length;

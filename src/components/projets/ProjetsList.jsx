@@ -23,10 +23,7 @@ import ProjectPlanningModule from './ProjectPlanningModule';
 import ProjectBesoinsModule from './ProjectBesoinsModule';
 import {
   listWorkersByProject,
-  removeWorkerFromProject,
-  removeWorkersFromProject,
 } from '../../services/rh/workerProjectAssignments';
-import AssignWorkersModal from './besoins/AssignWorkersModal';
 import { listAssignmentsByProject, listSubcontractors, saveProjectSubcontractorAssignments, removeSubcontractorFromProject, subcontractorFullName } from '../../services/rh/subcontractors';
 import { listActiveEmployees, employeeSelectLabel, findEmployeeByStoredLabel, filterChefsProjet, filterChefsChantierEmployees, withSelectedEmployee } from '../../services/rh/employees';
 import { listCrmDevis, crmDevisSelectLabel, findCrmDevisByReference } from '../../services/crm/crmDevis';
@@ -472,7 +469,7 @@ function FormulaireProjet({ initial, onSave, onCancel, saving, clients = [] }) {
 
       {initial?.id && (
         <div style={{ marginBottom: 20 }}>
-          <SectionTitle icon={<Users size={12} />}>Équipe — affectation ouvriers</SectionTitle>
+          <SectionTitle icon={<Users size={12} />}>Équipe — ouvriers affectés (RH)</SectionTitle>
           <ProjectEquipeTab projet={initial} compact />
         </div>
       )}
@@ -501,10 +498,8 @@ function ProjectEquipeTab({ projet, compact = false }) {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState(null);
-  const [showAssignModal, setShowAssignModal] = useState(false);
   const [showSubModal, setShowSubModal] = useState(false);
   const [selectedSubIds, setSelectedSubIds] = useState(() => new Set());
-  const [selectedRemoveIds, setSelectedRemoveIds] = useState(() => new Set());
 
   const load = useCallback(async () => {
     if (!projet?.id) return;
@@ -539,10 +534,6 @@ function ProjectEquipeTab({ projet, compact = false }) {
     [allSubcontractors],
   );
 
-  function openAssignModal() {
-    setShowAssignModal(true);
-  }
-
   function openSubModal() {
     setSelectedSubIds(new Set(subAssignments.map((a) => String(a.subcontractorId))));
     setShowSubModal(true);
@@ -556,40 +547,6 @@ function ProjectEquipeTab({ projet, compact = false }) {
       else next.add(sid);
       return next;
     });
-  }
-
-  function toggleRemoveWorker(id) {
-    const sid = String(id);
-    setSelectedRemoveIds((prev) => {
-      const next = new Set(prev);
-      if (next.has(sid)) next.delete(sid);
-      else next.add(sid);
-      return next;
-    });
-  }
-
-  function toggleAllRemoveWorkers() {
-    if (selectedRemoveIds.size === workerAssignments.length) {
-      setSelectedRemoveIds(new Set());
-    } else {
-      setSelectedRemoveIds(new Set(workerAssignments.map((a) => String(a.workerId))));
-    }
-  }
-
-  async function handleBulkRemoveWorkers() {
-    if (selectedRemoveIds.size === 0) return;
-    const n = selectedRemoveIds.size;
-    if (!window.confirm(`Retirer ${n} ouvrier${n > 1 ? 's' : ''} du chantier ?`)) return;
-    setSaving(true);
-    try {
-      await removeWorkersFromProject(projet.id, [...selectedRemoveIds]);
-      setSelectedRemoveIds(new Set());
-      await load();
-    } catch (err) {
-      alert(err.message || 'Erreur.');
-    } finally {
-      setSaving(false);
-    }
   }
 
   async function handleSaveSubAssignments() {
@@ -614,19 +571,6 @@ function ProjectEquipeTab({ projet, compact = false }) {
     setSaving(true);
     try {
       await removeSubcontractorFromProject(projet.id, subcontractorId);
-      await load();
-    } catch (err) {
-      alert(err.message || 'Erreur.');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function handleRemoveWorker(workerId) {
-    if (!window.confirm('Retirer cet ouvrier du projet ?')) return;
-    setSaving(true);
-    try {
-      await removeWorkerFromProject(projet.id, workerId);
       await load();
     } catch (err) {
       alert(err.message || 'Erreur.');
@@ -671,51 +615,30 @@ function ProjectEquipeTab({ projet, compact = false }) {
           </div>
         </div>
 
+        <div style={{ padding: '10px 12px', background: '#E8F5E9', borderRadius: 8, fontSize: '0.82rem', color: '#2E7D32', marginBottom: 14 }}>
+          Les ouvriers sont affectés par le service RH (Demandes ressources). Cette liste est mise à jour automatiquement.
+        </div>
+
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
           <div style={{ fontSize: '0.82rem', fontWeight: 700, display: 'flex', alignItems: 'center', gap: 6 }}>
-            <HardHat size={15} /> Ouvriers externes affectés ({workerAssignments.length})
-          </div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            {selectedRemoveIds.size > 0 && (
-              <button type="button" className="btn btn-secondary btn-sm" onClick={handleBulkRemoveWorkers} disabled={saving} style={{ color: 'var(--red)' }}>
-                <Trash2 size={13} /> Retirer la sélection ({selectedRemoveIds.size})
-              </button>
-            )}
-            <button type="button" className="btn btn-primary btn-sm" onClick={openAssignModal} disabled={saving} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              <Plus size={14} /> Affecter des ouvriers
-            </button>
+            <HardHat size={15} /> Ouvriers affectés ({workerAssignments.length})
           </div>
         </div>
 
         {workerAssignments.length === 0 ? (
           <div style={{ padding: '20px 0', color: 'var(--text-3)', fontSize: '0.85rem', textAlign: 'center' }}>
-            Aucun ouvrier affecté — utilisez le bouton ci-dessus.
+            Aucun ouvrier affecté — les affectations apparaîtront ici après validation RH.
           </div>
         ) : (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.78rem', color: 'var(--text-3)', padding: '0 4px' }}>
-              <input
-                type="checkbox"
-                checked={selectedRemoveIds.size === workerAssignments.length && workerAssignments.length > 0}
-                onChange={toggleAllRemoveWorkers}
-              />
-              Tout sélectionner
-            </label>
-            {workerAssignments.map((a) => {
-              const checked = selectedRemoveIds.has(String(a.workerId));
-              return (
-                <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', border: `1px solid ${checked ? 'var(--red)' : 'var(--border)'}`, borderRadius: 8, background: checked ? '#FFF5F5' : '#fff' }}>
-                  <input type="checkbox" checked={checked} onChange={() => toggleRemoveWorker(a.workerId)} />
-                  <div style={{ flex: 1 }}>
-                    <div style={{ fontWeight: 700 }}>{a.workerName || '—'}</div>
-                    <div style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>{a.workerFonction || '—'}</div>
-                  </div>
-                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleRemoveWorker(a.workerId)} disabled={saving} title="Retirer">
-                    <Trash2 size={13} style={{ color: 'var(--red)' }} />
-                  </button>
+            {workerAssignments.map((a) => (
+              <div key={a.id} style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', border: '1px solid var(--border)', borderRadius: 8, background: '#fff' }}>
+                <div style={{ flex: 1 }}>
+                  <div style={{ fontWeight: 700 }}>{a.workerName || '—'}</div>
+                  <div style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>{a.workerFonction || '—'}</div>
                 </div>
-              );
-            })}
+              </div>
+            ))}
           </div>
         )}
 
@@ -752,14 +675,6 @@ function ProjectEquipeTab({ projet, compact = false }) {
           )}
         </div>
       </div>
-
-      <AssignWorkersModal
-        open={showAssignModal}
-        onClose={() => !saving && setShowAssignModal(false)}
-        projet={projet}
-        onSaved={load}
-        saving={saving}
-      />
 
       <Modal open={showSubModal} onClose={() => !saving && setShowSubModal(false)} title="Affecter des sous-traitants" width={520}>
         <p style={{ fontSize: '0.84rem', color: 'var(--text-3)', marginBottom: 14 }}>
