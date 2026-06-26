@@ -1,8 +1,10 @@
 /**
  * BesoinDetailModal.jsx — Consultation besoin (lecture seule côté affectation)
  */
+import { useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { X, Download } from 'lucide-react';
-import { prioriteBadgeClass, canEditProjectNeed } from '../../../constants/projectBesoins';
+import { prioriteBadgeClass, canEditProjectNeed, canDeleteProjectNeed } from '../../../constants/projectBesoins';
 
 function fmtDate(d) {
   if (!d) return '—';
@@ -24,24 +26,50 @@ function InfoRow({ label, value }) {
 }
 
 export default function BesoinDetailModal({
-  open, onClose, need, projet, onPdf, onEdit,
+  open, onClose, need, projet, onPdf, onEdit, onDelete,
 }) {
+  useEffect(() => {
+    if (!open) return undefined;
+    function onKey(e) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [open, onClose]);
+
   if (!open || !need) return null;
 
   const coverageColor = need.manque === 0 ? '#2E7D32' : need.quantite_affectee > 0 ? '#F57C00' : '#C62828';
   const coverageLabel = need.manque === 0 ? 'Couvert' : need.quantite_affectee > 0 ? 'Partiel' : 'Non couvert';
   const editable = canEditProjectNeed(need);
+  const deletable = canDeleteProjectNeed(need);
 
-  return (
-    <div className="rh-emp-modal-overlay" style={{ zIndex: 1350 }}>
-      <aside className="rh-emp-docs-drawer" style={{ maxWidth: 720, width: 'min(96vw, 720px)' }} role="dialog">
-        <header className="rh-emp-docs-drawer-header">
+  return createPortal(
+    <>
+      <div
+        className="rh-emp-docs-drawer-overlay"
+        onClick={onClose}
+        aria-hidden="true"
+        style={{ zIndex: 2100 }}
+      />
+      <aside
+        className="rh-emp-docs-drawer"
+        style={{ maxWidth: 720, width: 'min(96vw, 720px)', zIndex: 2101 }}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="besoin-detail-title"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <header className="rh-emp-docs-drawer-header" style={{ position: 'sticky', top: 0, background: '#fff', zIndex: 2 }}>
           <div>
             <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-3)' }}>{need.ref_besoin || 'Besoin RH'}</div>
-            <h2 className="rh-emp-docs-drawer-title">{need.type_besoin} — {need.fonction}</h2>
+            <h2 id="besoin-detail-title" className="rh-emp-docs-drawer-title">{need.type_besoin} — {need.fonction}</h2>
           </div>
-          <button type="button" className="rh-emp-modal-close" onClick={onClose}><X size={20} /></button>
+          <button type="button" className="btn btn-secondary btn-sm" onClick={onClose} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+            <X size={15} /> Fermer
+          </button>
         </header>
+
         <div className="rh-emp-docs-drawer-body">
           <div style={{ padding: '10px 12px', background: '#F5F5F5', borderRadius: 8, fontSize: '0.82rem', color: 'var(--text-2)', marginBottom: 16 }}>
             L&apos;affectation des ouvriers est gérée par le service RH. Ce besoin est mis à jour automatiquement après validation RH.
@@ -56,6 +84,12 @@ export default function BesoinDetailModal({
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 20 }}>
             {editable && onEdit && <button type="button" className="btn btn-secondary btn-sm" onClick={() => onEdit(need)}>Modifier</button>}
             {onPdf && <button type="button" className="btn btn-ghost btn-sm" onClick={() => onPdf(need)}><Download size={14} /> PDF</button>}
+            {deletable && onDelete && (
+              <button type="button" className="btn btn-ghost btn-sm" style={{ color: 'var(--red)' }} onClick={() => onDelete(need)}>
+                Supprimer
+              </button>
+            )}
+            <button type="button" className="btn btn-ghost btn-sm" onClick={onClose}><X size={14} /> Fermer</button>
           </div>
 
           <section style={{ marginBottom: 20 }}>
@@ -109,7 +143,18 @@ export default function BesoinDetailModal({
             </section>
           )}
         </div>
+
+        <footer style={{
+          padding: '14px 24px', borderTop: '1px solid var(--border)', background: '#fff',
+          display: 'flex', justifyContent: 'flex-end', gap: 8, flexShrink: 0,
+        }}
+        >
+          <button type="button" className="btn btn-secondary" onClick={onClose}>
+            <X size={15} /> Fermer
+          </button>
+        </footer>
       </aside>
-    </div>
+    </>,
+    document.body,
   );
 }

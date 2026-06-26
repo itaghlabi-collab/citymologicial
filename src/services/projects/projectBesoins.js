@@ -9,6 +9,7 @@ import {
   besoinStatutLabel,
   besoinFonctionLabel,
   canDeleteProjectNeed,
+  deleteProjectNeedBlockReason,
   canEditProjectNeed,
   isChefChantierFonction,
   isChefProjetFonction,
@@ -296,12 +297,35 @@ export async function updateProjectStaffNeedStatut(id, statut, details = '') {
 }
 
 export async function deleteProjectStaffNeed(id) {
-  await requireUser();
+  const user = await requireUser();
+  const actorName = await getProfileName(user.id);
   const existing = await getProjectStaffNeed(id);
   if (!existing) throw new Error('Besoin introuvable.');
   if (!canDeleteProjectNeed(existing)) {
-    throw new Error('Seuls les besoins en brouillon peuvent être supprimés.');
+    throw new Error(deleteProjectNeedBlockReason(existing) || 'Ce besoin ne peut pas être supprimé.');
   }
+
+  if (existing.resource_request_id) {
+    const { data: rhReq } = await getSupabase()
+      .from('resource_requests')
+      .select('id, statut')
+      .eq('id', existing.resource_request_id)
+      .maybeSingle();
+    if (rhReq && !['cloturee', 'refusee'].includes(rhReq.statut)) {
+      await getSupabase()
+        .from('resource_requests')
+        .update({ statut: 'cloturee', updated_at: new Date().toISOString() })
+        .eq('id', rhReq.id);
+      await getSupabase().from('resource_request_history').insert([{
+        request_id: rhReq.id,
+        action: 'cancelled',
+        details: 'Demande annulée — besoin supprimé côté projet',
+        actor_id: user.id,
+        actor_name: actorName,
+      }]);
+    }
+  }
+
   const { error } = await getSupabase().from(TABLE).delete().eq('id', id);
   if (error) throw error;
 }

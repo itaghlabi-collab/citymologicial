@@ -70,7 +70,16 @@ export function canEditProjectNeed(need) {
 }
 
 export function canDeleteProjectNeed(need) {
-  return need?.statut === 'brouillon';
+  if (!need) return false;
+  if ((Number(need.quantite_affectee) || 0) > 0) return false;
+  return true;
+}
+
+export function deleteProjectNeedBlockReason(need) {
+  if ((Number(need?.quantite_affectee) || 0) > 0) {
+    return 'Des ouvriers ont déjà été affectés par le RH — suppression impossible.';
+  }
+  return null;
 }
 
 export function isNeedTreatedByRh(need) {

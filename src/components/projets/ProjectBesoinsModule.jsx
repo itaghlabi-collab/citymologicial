@@ -140,11 +140,13 @@ export default function ProjectBesoinsModule({ projet }) {
           alert('Besoin soumis — une demande a été transmise au service RH.');
           await load();
           break;
-        case 'delete':
-          if (!window.confirm('Supprimer ce besoin en brouillon ?')) return;
+        case 'delete': {
+          if (!window.confirm('Supprimer ce besoin ? La demande RH associée sera annulée si elle existe.')) return;
           await deleteProjectStaffNeed(need.id);
+          if (detailNeed?.id === need.id) setDetailNeed(null);
           await load();
           break;
+        }
         default:
           break;
       }
@@ -302,6 +304,7 @@ export default function ProjectBesoinsModule({ projet }) {
         projet={projet}
         onPdf={(n) => generateBesoinPdf(n, projet)}
         onEdit={(n) => { setDetailNeed(null); setEditNeed(n); setFormOpen(true); }}
+        onDelete={(n) => handleAction('delete', n)}
       />
     </div>
   );
