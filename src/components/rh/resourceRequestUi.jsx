@@ -41,8 +41,21 @@ export function computeResourceRequestStats(requests = []) {
     recrutement: requests.filter((r) => r.statut === 'recrutement_en_cours').length,
     aRecruter: open.reduce((s, r) => s + getRequestCoverage(r).manque, 0),
     urgentes: requests.filter((r) => ['Urgente', 'Critique'].includes(r.priorite) && !['cloturee', 'refusee'].includes(r.statut)).length,
+    cloturees: requests.filter((r) => ['cloturee', 'refusee'].includes(r.statut)).length,
     taux: totalDemandes > 0 ? Math.round((totalAffectes / totalDemandes) * 100) : 0,
   };
+}
+
+export function deleteResourceRequestWarnMessage(r) {
+  const cov = getRequestCoverage(r);
+  if (cov.assigned > 0) {
+    return `Des ouvriers sont affectés (${cov.assigned}). Supprimer définitivement cette demande RH et le besoin projet lié ?`;
+  }
+  return 'Supprimer définitivement cette demande ? Le besoin projet lié sera également supprimé.';
+}
+
+export function canDeleteRequest() {
+  return true;
 }
 
 export function filterRequestsByTab(requests, tabKey) {

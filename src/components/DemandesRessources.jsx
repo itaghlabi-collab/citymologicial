@@ -4,7 +4,7 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   ClipboardList, Search, RefreshCw, Loader2, Eye, Users, UserPlus, CheckCircle,
-  Clock, AlertTriangle, TrendingUp, XCircle,
+  Clock, AlertTriangle, TrendingUp, XCircle, Trash2,
 } from 'lucide-react';
 import { RECRUITMENT_STATUTS, recruitmentStatutLabel } from '../constants/projectBesoins';
 import {
@@ -18,6 +18,7 @@ import {
   removeWorkerFromResourceRequest,
   updateRecruitmentStatut,
   closeRecruitmentRequest,
+  deleteResourceRequest,
 } from '../services/rh/resourceRequests';
 import { listWorkers } from '../services/rh/workers';
 import { KpiCard, INPUT_STYLE } from './inventaire/shared';
@@ -33,6 +34,7 @@ import {
   canAssignRequest,
   canCloseRequest,
   canRecruitRequest,
+  deleteResourceRequestWarnMessage,
   CoverageProgressBar,
   CoverageBadge,
 } from './rh/resourceRequestUi';
@@ -186,6 +188,24 @@ export default function DemandesRessources() {
     }
   }
 
+  async function handleDelete(targetId) {
+    const id = targetId || detail?.id;
+    if (!id) return;
+    const row = requests.find((r) => r.id === id) || detail;
+    if (!window.confirm(deleteResourceRequestWarnMessage(row))) return;
+    setSaving(true);
+    setError('');
+    try {
+      await deleteResourceRequest(id);
+      if (view === 'detail') backToList();
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
   async function handleClose(targetId) {
     const id = targetId || detail?.id;
     if (!id || !window.confirm('Clôturer cette demande ?')) return;
@@ -279,6 +299,7 @@ export default function DemandesRessources() {
           onRecruitment={() => handleRecruitment()}
           onRefuse={handleRefuse}
           onCloseRequest={() => handleClose()}
+          onDelete={() => handleDelete()}
           onRemoveWorker={handleRemoveWorker}
           onViewWorker={handleViewWorker}
           onViewRecruitment={(r) => alert(`${r.ref} — ${r.fonction} × ${r.quantite}\nStatut : ${recruitmentStatutLabel(r.recruitment_statut)}`)}
@@ -318,6 +339,16 @@ export default function DemandesRessources() {
         <KpiCard icon={<CheckCircle size={17} />} label="Couvertes" value={loading ? '—' : stats.couvertes} color="green" />
         <KpiCard icon={<UserPlus size={17} />} label="À recruter" value={loading ? '—' : stats.aRecruter} sub="postes manquants" color="red" />
         <KpiCard icon={<AlertTriangle size={17} />} label="Urgentes" value={loading ? '—' : stats.urgentes} color="red" />
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => setActiveTab('cloturee')}
+          onKeyDown={(e) => e.key === 'Enter' && setActiveTab('cloturee')}
+          style={{ cursor: 'pointer' }}
+          title="Voir les demandes clôturées / supprimables"
+        >
+          <KpiCard icon={<Trash2 size={17} />} label="Clôturées" value={loading ? '—' : stats.cloturees} sub="supprimables" color="grey" />
+        </div>
       </div>
 
       <div className="card" style={{ marginBottom: 16, padding: '12px 16px' }}>
@@ -446,6 +477,15 @@ export default function DemandesRessources() {
                               <CheckCircle size={13} />
                             </button>
                           )}
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            title="Supprimer"
+                            style={{ color: 'var(--red)' }}
+                            onClick={() => handleDelete(r.id)}
+                          >
+                            <Trash2 size={13} />
+                          </button>
                         </div>
                       </td>
                     </tr>

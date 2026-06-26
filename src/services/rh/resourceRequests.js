@@ -639,6 +639,35 @@ export async function deleteResourceRequestsForStaffNeed(staffNeedId, { primaryR
   }
 }
 
+/** Suppression définitive depuis le module RH (demande + besoin projet lié). */
+export async function deleteResourceRequest(id) {
+  await requireUser();
+  const request = await getResourceRequest(id);
+  if (!request) throw new Error('Demande introuvable.');
+
+  const staffNeedId = request.staff_need_id;
+  const projectId = request.project_id;
+
+  await deleteResourceRequestTree(id);
+
+  if (staffNeedId) {
+    const { error } = await getSupabase()
+      .from('project_staff_needs')
+      .delete()
+      .eq('id', staffNeedId);
+    if (error) console.warn('[CITYMO] delete staff need after RH request', error);
+  }
+
+  if (projectId) {
+    try {
+      const { syncProjectStaffNeedsCoverage } = await import('../projects/projectBesoins');
+      await syncProjectStaffNeedsCoverage(projectId);
+    } catch (err) {
+      console.warn('[CITYMO] sync besoins after delete request', err);
+    }
+  }
+}
+
 export async function closeResourceRequest(id) {
   const user = await requireUser();
   const actorName = await getProfileName(user.id);

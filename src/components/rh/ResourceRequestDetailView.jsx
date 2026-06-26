@@ -63,7 +63,7 @@ function InfoCell({ label, children }) {
 }
 
 export default function ResourceRequestDetailView({
-  detail, saving, loading, onBack, onTakeCharge, onAssign, onRecruitment, onRefuse, onCloseRequest,
+  detail, saving, loading, onBack, onTakeCharge, onAssign, onRecruitment, onRefuse, onCloseRequest, onDelete,
   onRemoveWorker, onViewWorker, onViewRecruitment, onEditRecruitment, onCloseRecruitment,
 }) {
   if (loading) {
@@ -299,6 +299,11 @@ export default function ResourceRequestDetailView({
           {['affectee', 'partielle', 'recrutement_en_cours'].includes(detail.statut) && (
             <button type="button" className="btn btn-primary btn-sm" disabled={saving} onClick={onCloseRequest}>
               <CheckCircle size={13} /> Clôturer la demande
+            </button>
+          )}
+          {onDelete && (
+            <button type="button" className="btn btn-ghost btn-sm" disabled={saving} onClick={onDelete} style={{ color: 'var(--red)' }}>
+              <Trash2 size={13} /> Supprimer
             </button>
           )}
         </div>
