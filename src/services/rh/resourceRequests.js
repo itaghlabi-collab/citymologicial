@@ -35,15 +35,16 @@ export function requestStatutColor(statut) {
   return BESOIN_REQUEST_STATUTS.find((s) => s.value === statut)?.color || '#757575';
 }
 
-function normalizeRequest(row, workers = [], history = [], recruitments = []) {
+function normalizeRequest(row, workers = [], history = [], recruitments = [], projectMeta = {}) {
   if (!row) return null;
   const isRecruitment = row.request_type === 'recrutement';
   return {
     id: row.id,
     ref: row.ref_demande || '',
     project_id: row.project_id,
-    project_ref: row.project_ref || '',
-    project_name: row.project_name || '',
+    project_ref: row.project_ref || projectMeta.project_ref || '',
+    project_name: row.project_name || projectMeta.project_nom || '',
+    client_name: projectMeta.client_name || '',
     fonction: row.fonction,
     quantite: row.quantite,
     date_souhaitee: row.date_souhaitee || '',
@@ -219,12 +220,27 @@ export async function getResourceRequest(id) {
   await requireUser();
   const { data, error } = await getSupabase().from(TABLE).select('*').eq('id', id).single();
   if (error) throw error;
-  const [workers, history, recruitments] = await Promise.all([
+  const [workers, history, recruitments, projectMeta] = await Promise.all([
     data.request_type === 'recrutement' ? Promise.resolve([]) : loadRequestWorkers(id),
     loadRequestHistory(id),
     data.request_type === 'recrutement' ? Promise.resolve([]) : loadChildRecruitments(id),
+    loadProjectMeta(data.project_id),
   ]);
-  return normalizeRequest(data, workers, history, recruitments);
+  return normalizeRequest(data, workers, history, recruitments, projectMeta);
+}
+
+async function loadProjectMeta(projectId) {
+  if (!projectId) return {};
+  const { data, error } = await getSupabase()
+    .from('projects')
+    .select('nom, ref, client_nom, clients(nom, prenom)')
+    .eq('id', projectId)
+    .maybeSingle();
+  if (error || !data) return {};
+  const client = data.client_nom
+    || [data.clients?.prenom, data.clients?.nom].filter(Boolean).join(' ').trim()
+    || '';
+  return { client_name: client, project_nom: data.nom, project_ref: data.ref };
 }
 
 export async function createResourceRequest({

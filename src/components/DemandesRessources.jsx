@@ -1,13 +1,12 @@
 /**
- * DemandesRessources.jsx — RH : traitement et affectation des ressources chantier
+ * DemandesRessources.jsx — Tableau de pilotage RH (style ERP Devis)
  */
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  ClipboardList, Search, RefreshCw, Loader2, Eye,
+  ClipboardList, Search, RefreshCw, Loader2, Eye, Users, UserPlus, CheckCircle,
+  Clock, AlertTriangle, TrendingUp, XCircle,
 } from 'lucide-react';
-import {
-  BESOIN_REQUEST_STATUTS, RECRUITMENT_STATUTS, recruitmentStatutLabel,
-} from '../constants/projectBesoins';
+import { RECRUITMENT_STATUTS, recruitmentStatutLabel } from '../constants/projectBesoins';
 import {
   listResourceRequests,
   getResourceRequest,
@@ -19,19 +18,24 @@ import {
   removeWorkerFromResourceRequest,
   updateRecruitmentStatut,
   closeRecruitmentRequest,
-  requestStatutColor,
 } from '../services/rh/resourceRequests';
 import { listWorkers } from '../services/rh/workers';
+import { KpiCard, INPUT_STYLE } from './inventaire/shared';
 import RhAssignWorkersModal from './rh/RhAssignWorkersModal';
-import ResourceRequestDetailPanel from './rh/ResourceRequestDetailPanel';
-
-const inputStyle = {
-  padding: '8px 11px',
-  border: '1.5px solid var(--border)',
-  borderRadius: 6,
-  fontSize: '0.86rem',
-  background: '#fff',
-};
+import ResourceRequestDetailView from './rh/ResourceRequestDetailView';
+import {
+  RH_REQUEST_TABS,
+  computeResourceRequestStats,
+  filterRequestsByTab,
+  getRequestCoverage,
+  statutBadgeClass,
+  prioriteBadgeClass,
+  canAssignRequest,
+  canCloseRequest,
+  canRecruitRequest,
+  CoverageProgressBar,
+  CoverageBadge,
+} from './rh/resourceRequestUi';
 
 function fmtDate(d) {
   if (!d) return '—';
@@ -42,13 +46,19 @@ function fmtDate(d) {
   }
 }
 
+function tabCount(requests, tabKey) {
+  return filterRequestsByTab(requests, tabKey).length;
+}
+
 export default function DemandesRessources() {
   const [requests, setRequests] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [detailLoading, setDetailLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
-  const [statutFilter, setStatutFilter] = useState('');
+  const [activeTab, setActiveTab] = useState('all');
+  const [view, setView] = useState('list');
   const [detail, setDetail] = useState(null);
   const [assignOpen, setAssignOpen] = useState(false);
 
@@ -56,55 +66,62 @@ export default function DemandesRessources() {
     setLoading(true);
     setError('');
     try {
-      setRequests(await listResourceRequests({ statut: statutFilter }));
+      setRequests(await listResourceRequests());
     } catch (err) {
       setError(err.message || 'Erreur de chargement.');
     } finally {
       setLoading(false);
     }
-  }, [statutFilter]);
+  }, []);
 
   useEffect(() => { load(); }, [load]);
 
+  const stats = useMemo(() => computeResourceRequestStats(requests), [requests]);
+
   const filtered = useMemo(() => {
+    let list = filterRequestsByTab(requests, activeTab);
     const q = search.toLowerCase().trim();
-    if (!q) return requests;
-    return requests.filter((r) =>
+    if (!q) return list;
+    return list.filter((r) =>
       (r.ref || '').toLowerCase().includes(q)
       || (r.project_name || '').toLowerCase().includes(q)
       || (r.fonction || '').toLowerCase().includes(q)
       || (r.requested_by_name || '').toLowerCase().includes(q),
     );
-  }, [requests, search]);
+  }, [requests, activeTab, search]);
 
-  const stats = useMemo(() => ({
-    total: requests.length,
-    enAttente: requests.filter((r) => r.statut === 'en_attente').length,
-    enCours: requests.filter((r) => ['en_cours', 'partielle', 'recrutement_en_cours'].includes(r.statut)).length,
-    affectees: requests.filter((r) => r.statut === 'affectee').length,
-  }), [requests]);
-
-  async function openDetail(id) {
-    setSaving(true);
+  async function openDetail(id, openAssign = false) {
+    setDetailLoading(true);
     setError('');
+    setView('detail');
     try {
       setDetail(await getResourceRequest(id));
+      if (openAssign) setAssignOpen(true);
     } catch (err) {
       setError(err.message);
+      setView('list');
     } finally {
-      setSaving(false);
+      setDetailLoading(false);
     }
   }
 
-  function closeDetail() {
+  function backToList() {
+    setView('list');
     setDetail(null);
     setAssignOpen(false);
   }
 
   async function refreshDetail() {
     if (!detail?.id) return;
-    await openDetail(detail.id);
-    await load();
+    setDetailLoading(true);
+    try {
+      setDetail(await getResourceRequest(detail.id));
+      await load();
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setDetailLoading(false);
+    }
   }
 
   async function handleAssignConfirm(workerIds) {
@@ -144,7 +161,7 @@ export default function DemandesRessources() {
     setSaving(true);
     try {
       await refuseResourceRequest(detail.id, reason);
-      closeDetail();
+      backToList();
       await load();
     } catch (err) {
       setError(err.message);
@@ -153,13 +170,15 @@ export default function DemandesRessources() {
     }
   }
 
-  async function handleRecruitment() {
-    if (!detail) return;
+  async function handleRecruitment(targetId) {
+    const id = targetId || detail?.id;
+    if (!id) return;
     if (!window.confirm('Créer une demande de recrutement pour les postes manquants ?')) return;
     setSaving(true);
     try {
-      await createRecruitmentRequestFromRequest(detail.id);
-      await refreshDetail();
+      await createRecruitmentRequestFromRequest(id);
+      if (view === 'detail') await refreshDetail();
+      else await load();
     } catch (err) {
       setError(err.message);
     } finally {
@@ -167,12 +186,13 @@ export default function DemandesRessources() {
     }
   }
 
-  async function handleClose() {
-    if (!detail || !window.confirm('Clôturer cette demande ?')) return;
+  async function handleClose(targetId) {
+    const id = targetId || detail?.id;
+    if (!id || !window.confirm('Clôturer cette demande ?')) return;
     setSaving(true);
     try {
-      await closeResourceRequest(detail.id);
-      closeDetail();
+      await closeResourceRequest(id);
+      if (view === 'detail') backToList();
       await load();
     } catch (err) {
       setError(err.message);
@@ -241,82 +261,192 @@ export default function DemandesRessources() {
     }
   }
 
-  return (
-    <div className="animate-fade-in">
-      <div className="page-header">
-        <h1 className="page-title">Demandes de ressources</h1>
-        <p className="page-subtitle">Affectation des ouvriers disponibles et suivi des recrutements</p>
-      </div>
-
-      <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', marginBottom: 20 }}>
-        <div className="stat-card"><div className="stat-body"><div className="stat-value">{stats.total}</div><div className="stat-label">Total</div></div></div>
-        <div className="stat-card"><div className="stat-body"><div className="stat-value" style={{ color: '#F57C00' }}>{stats.enAttente}</div><div className="stat-label">En attente RH</div></div></div>
-        <div className="stat-card"><div className="stat-body"><div className="stat-value" style={{ color: '#1565C0' }}>{stats.enCours}</div><div className="stat-label">En cours / Partiel</div></div></div>
-        <div className="stat-card"><div className="stat-body"><div className="stat-value" style={{ color: '#2E7D32' }}>{stats.affectees}</div><div className="stat-label">Couvertes</div></div></div>
-      </div>
-
-      <div className="card">
-        <div className="flex-between" style={{ marginBottom: 14, flexWrap: 'wrap', gap: 10 }}>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', flex: 1 }}>
-            <div style={{ position: 'relative', minWidth: 200 }}>
-              <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
-              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher…" style={{ ...inputStyle, paddingLeft: 32, width: '100%' }} />
-            </div>
-            <select value={statutFilter} onChange={(e) => setStatutFilter(e.target.value)} style={{ ...inputStyle, minWidth: 160 }}>
-              <option value="">Tous statuts</option>
-              {BESOIN_REQUEST_STATUTS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-            </select>
+  if (view === 'detail') {
+    return (
+      <div className="animate-fade-in crm-module">
+        {error && (
+          <div style={{ background: '#FFEBEE', color: 'var(--red)', borderRadius: 8, padding: '10px 14px', fontSize: '0.84rem', marginBottom: 16 }}>
+            {error}
           </div>
-          <button type="button" className="btn btn-secondary btn-sm" onClick={load} disabled={loading}>
-            <RefreshCw size={13} /> Actualiser
-          </button>
+        )}
+        <ResourceRequestDetailView
+          detail={detail}
+          loading={detailLoading}
+          saving={saving}
+          onBack={backToList}
+          onTakeCharge={handleTakeCharge}
+          onAssign={() => setAssignOpen(true)}
+          onRecruitment={() => handleRecruitment()}
+          onRefuse={handleRefuse}
+          onCloseRequest={() => handleClose()}
+          onRemoveWorker={handleRemoveWorker}
+          onViewWorker={handleViewWorker}
+          onViewRecruitment={(r) => alert(`${r.ref} — ${r.fonction} × ${r.quantite}\nStatut : ${recruitmentStatutLabel(r.recruitment_statut)}`)}
+          onEditRecruitment={handleEditRecruitment}
+          onCloseRecruitment={handleCloseRecruitment}
+        />
+        <RhAssignWorkersModal
+          open={assignOpen && !!detail}
+          onClose={() => setAssignOpen(false)}
+          request={detail}
+          initialSelected={(detail?.workers || []).map((w) => w.worker_id)}
+          onConfirm={handleAssignConfirm}
+          saving={saving}
+        />
+      </div>
+    );
+  }
+
+  return (
+    <div className="animate-fade-in crm-module">
+      <div className="page-header flex-between" style={{ marginBottom: 20 }}>
+        <div>
+          <h1 className="page-title">Demandes ressources</h1>
+          <p className="page-subtitle">
+            Tableau de pilotage RH — besoins chantier, affectations et recrutements
+          </p>
         </div>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={load} disabled={loading}>
+          <RefreshCw size={14} /> Actualiser
+        </button>
+      </div>
 
-        {error && <div style={{ color: 'var(--red)', marginBottom: 12, fontSize: '0.84rem' }}>{error}</div>}
+      <div className="stat-grid finance-kpi-grid" style={{ marginBottom: 16 }}>
+        <KpiCard icon={<ClipboardList size={17} />} label="Total demandes" value={loading ? '—' : stats.total} color="grey" />
+        <KpiCard icon={<Clock size={17} />} label="En attente RH" value={loading ? '—' : stats.enAttente} color="orange" />
+        <KpiCard icon={<Users size={17} />} label="En cours / partielles" value={loading ? '—' : stats.enCoursPartiel} sub={`${stats.recrutement} en recrutement`} color="blue" />
+        <KpiCard icon={<CheckCircle size={17} />} label="Couvertes" value={loading ? '—' : stats.couvertes} color="green" />
+        <KpiCard icon={<UserPlus size={17} />} label="À recruter" value={loading ? '—' : stats.aRecruter} sub="postes manquants" color="red" />
+        <KpiCard icon={<AlertTriangle size={17} />} label="Urgentes" value={loading ? '—' : stats.urgentes} color="red" />
+      </div>
 
-        {loading ? (
-          <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-3)' }}><Loader2 size={22} style={{ animation: 'spin 0.8s linear infinite' }} /></div>
-        ) : (
-          <div className="table-wrap">
-            <table>
+      <div className="card" style={{ marginBottom: 16, padding: '12px 16px' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+          <TrendingUp size={16} style={{ color: 'var(--text-3)' }} />
+          <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-2)' }}>Taux de couverture global</span>
+          <div style={{ flex: '1 1 180px', maxWidth: 280 }}>
+            <CoverageProgressBar
+              taux={stats.taux}
+              color={stats.taux >= 100 ? '#2E7D32' : stats.taux >= 50 ? '#F57C00' : '#C62828'}
+            />
+          </div>
+        </div>
+      </div>
+
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
+        {RH_REQUEST_TABS.map((tab) => {
+          const count = tabCount(requests, tab.key);
+          const active = activeTab === tab.key;
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => setActiveTab(tab.key)}
+              className={`btn btn-sm ${active ? 'btn-primary' : 'btn-ghost'}`}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            >
+              {tab.label}
+              <span style={{
+                fontSize: '0.68rem', fontWeight: 800, padding: '1px 6px', borderRadius: 10,
+                background: active ? 'rgba(255,255,255,0.25)' : 'var(--surface-2)',
+              }}
+              >
+                {loading ? '—' : count}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="card finance-toolbar" style={{ marginBottom: 16, padding: '14px 18px' }}>
+        <div style={{ position: 'relative', maxWidth: 320 }}>
+          <Search size={14} style={{ position: 'absolute', left: 10, top: 10, color: 'var(--text-3)' }} />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Rechercher référence, projet, fonction…"
+            style={{ ...INPUT_STYLE, paddingLeft: 32 }}
+          />
+        </div>
+      </div>
+
+      {error && (
+        <div className="card" style={{ marginBottom: 16, color: 'var(--red)', padding: 14, fontSize: '0.86rem', display: 'flex', alignItems: 'center', gap: 8 }}>
+          <XCircle size={15} /> {error}
+        </div>
+      )}
+
+      {loading ? (
+        <div style={{ textAlign: 'center', padding: 48 }}><Loader2 size={26} className="spin" /></div>
+      ) : filtered.length === 0 ? (
+        <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--text-3)' }}>
+          Aucune demande pour ce filtre.
+        </div>
+      ) : (
+        <div className="card" style={{ padding: 0 }}>
+          <div className="table-wrap" style={{ overflowX: 'auto' }}>
+            <table style={{ minWidth: 1200 }}>
               <thead>
                 <tr>
-                  <th>Réf.</th>
+                  <th>Référence</th>
                   <th>Projet</th>
-                  <th>Fonction</th>
-                  <th>Demandées</th>
-                  <th>Affectées</th>
-                  <th>Manque</th>
+                  <th>Fonction demandée</th>
+                  <th>Demandé</th>
+                  <th>Affecté</th>
+                  <th>Manquant</th>
+                  <th>Couverture</th>
                   <th>Priorité</th>
+                  <th>Date souhaitée</th>
                   <th>Statut</th>
-                  <th />
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {filtered.length === 0 ? (
-                  <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--text-3)' }}>Aucune demande.</td></tr>
-                ) : filtered.map((r) => {
-                  const aff = r.workers_count || 0;
-                  const manque = Math.max(0, (Number(r.quantite) || 0) - aff);
+                {filtered.map((r) => {
+                  const cov = getRequestCoverage(r);
                   return (
                     <tr key={r.id}>
-                      <td style={{ fontWeight: 700 }}>{r.ref || '—'}</td>
-                      <td>
+                      <td data-label="Référence"><strong>{r.ref || '—'}</strong></td>
+                      <td data-label="Projet">
                         <div style={{ fontWeight: 600 }}>{r.project_name}</div>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-3)' }}>{r.project_ref}</div>
+                        {r.project_ref && <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>{r.project_ref}</div>}
                       </td>
-                      <td>{r.fonction}</td>
-                      <td>{r.quantite}</td>
-                      <td>{aff}</td>
-                      <td style={{ fontWeight: 700, color: manque > 0 ? 'var(--red)' : '#2E7D32' }}>{manque}</td>
-                      <td>{r.priorite}</td>
-                      <td>
-                        <span className="badge" style={{ background: requestStatutColor(r.statut), color: '#fff' }}>{r.statutLabel}</span>
+                      <td data-label="Fonction" style={{ fontWeight: 600 }}>{r.fonction}</td>
+                      <td data-label="Demandé">{cov.demanded}</td>
+                      <td data-label="Affecté">{cov.assigned}</td>
+                      <td data-label="Manquant" style={{ fontWeight: 700, color: cov.manque > 0 ? 'var(--red)' : '#2E7D32' }}>{cov.manque}</td>
+                      <td data-label="Couverture" style={{ minWidth: 130 }}>
+                        <CoverageProgressBar taux={cov.taux} color={cov.color} />
+                        <div style={{ marginTop: 4 }}><CoverageBadge coverage={cov} /></div>
                       </td>
-                      <td>
-                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => openDetail(r.id)} title="Ouvrir">
-                          <Eye size={13} />
-                        </button>
+                      <td data-label="Priorité">
+                        <span className={`badge ${prioriteBadgeClass(r.priorite)}`}>{r.priorite}</span>
+                      </td>
+                      <td data-label="Date souhaitée">{fmtDate(r.date_souhaitee)}</td>
+                      <td data-label="Statut">
+                        <span className={`badge ${statutBadgeClass(r.statut)}`}>{r.statutLabel}</span>
+                      </td>
+                      <td data-label="Actions">
+                        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                          <button type="button" className="btn btn-ghost btn-sm" title="Voir" onClick={() => openDetail(r.id)}>
+                            <Eye size={13} />
+                          </button>
+                          {canAssignRequest(r) && (
+                            <button type="button" className="btn btn-ghost btn-sm" title="Affecter" onClick={() => openDetail(r.id, true)}>
+                              <Users size={13} />
+                            </button>
+                          )}
+                          {canRecruitRequest(r) && (
+                            <button type="button" className="btn btn-ghost btn-sm" title="Créer recrutement" onClick={() => handleRecruitment(r.id)}>
+                              <UserPlus size={13} />
+                            </button>
+                          )}
+                          {canCloseRequest(r) && (
+                            <button type="button" className="btn btn-ghost btn-sm" title="Clôturer" onClick={() => handleClose(r.id)}>
+                              <CheckCircle size={13} />
+                            </button>
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -324,33 +454,8 @@ export default function DemandesRessources() {
               </tbody>
             </table>
           </div>
-        )}
-      </div>
-
-      <ResourceRequestDetailPanel
-        detail={detail}
-        saving={saving}
-        onClose={closeDetail}
-        onTakeCharge={handleTakeCharge}
-        onAssign={() => setAssignOpen(true)}
-        onRecruitment={handleRecruitment}
-        onRefuse={handleRefuse}
-        onCloseRequest={handleClose}
-        onRemoveWorker={handleRemoveWorker}
-        onViewWorker={handleViewWorker}
-        onViewRecruitment={(r) => alert(`${r.ref} — ${r.fonction} × ${r.quantite}\nStatut : ${recruitmentStatutLabel(r.recruitment_statut)}`)}
-        onEditRecruitment={handleEditRecruitment}
-        onCloseRecruitment={handleCloseRecruitment}
-      />
-
-      <RhAssignWorkersModal
-        open={assignOpen && !!detail}
-        onClose={() => setAssignOpen(false)}
-        request={detail}
-        initialSelected={(detail?.workers || []).map((w) => w.worker_id)}
-        onConfirm={handleAssignConfirm}
-        saving={saving}
-      />
+        </div>
+      )}
     </div>
   );
 }
