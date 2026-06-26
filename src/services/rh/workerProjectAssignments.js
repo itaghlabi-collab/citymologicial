@@ -178,6 +178,32 @@ async function syncStaffNeedsAfterAssignment(projectId) {
   }
 }
 
+/**
+ * Recalcule l'équipe projet depuis les demandes RH validées (source de vérité).
+ * Évite les ouvriers fantômes laissés par d'anciens tests ou affectations manuelles.
+ */
+export async function syncProjectTeamFromRhRequests(projectId) {
+  if (!projectId) return [];
+  await getAuthUserId();
+
+  const { data, error } = await getSupabase()
+    .from('resource_requests')
+    .select('id, resource_request_workers(worker_id)')
+    .eq('project_id', projectId)
+    .or('request_type.eq.ressource,request_type.is.null')
+    .in('statut', ['en_cours', 'partielle', 'affectee', 'recrutement_en_cours']);
+  if (error) throw error;
+
+  const workerIds = new Set();
+  (data || []).forEach((req) => {
+    (req.resource_request_workers || []).forEach((w) => {
+      if (w.worker_id) workerIds.add(String(w.worker_id));
+    });
+  });
+
+  return saveProjectWorkerAssignments(projectId, [...workerIds]);
+}
+
 export async function removeWorkerFromProject(projectId, workerId) {
   if (!projectId || !workerId) return;
   await getAuthUserId();

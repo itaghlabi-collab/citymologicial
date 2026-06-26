@@ -33,4 +33,10 @@ USING public.projects p
 WHERE n.project_id = p.id
   AND (p.nom ILIKE '%AMENAGMENT TEST A%' OR p.nom ILIKE '%AMENAGEMENT TEST A%');
 
+-- 5) Affectations ouvriers orphelines (données test)
+DELETE FROM public.worker_project_assignments wpa
+USING public.projects p
+WHERE wpa.project_id = p.id
+  AND (p.nom ILIKE '%AMENAGMENT TEST A%' OR p.nom ILIKE '%AMENAGEMENT TEST A%');
+
 COMMIT;

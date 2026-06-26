@@ -3,9 +3,7 @@
  */
 import { getSupabase } from '../../lib/supabase';
 import {
-  listWorkersByProject,
-  saveProjectWorkerAssignments,
-  removeWorkerFromProject,
+  syncProjectTeamFromRhRequests,
 } from '../rh/workerProjectAssignments';
 import { listWorkers } from '../rh/workers';
 import { workerFullName } from '../rh/attendance';
@@ -378,9 +376,7 @@ export async function validateResourceRequest(id, { allowPartial = true } = {}) 
     throw new Error(`Il manque ${needed - assignedCount} ressource(s) pour valider complètement.`);
   }
 
-  const current = await listWorkersByProject(request.project_id);
-  const merged = [...new Set([...current.map((a) => String(a.workerId)), ...workerIds.map(String)])];
-  await saveProjectWorkerAssignments(request.project_id, merged);
+  await syncProjectTeamFromRhRequests(request.project_id);
 
   const isPartial = assignedCount > 0 && assignedCount < needed;
   const newStatut = isPartial ? 'partielle' : 'affectee';
@@ -559,9 +555,9 @@ export async function removeWorkerFromResourceRequest(requestId, workerId) {
   if (delErr) throw delErr;
 
   try {
-    await removeWorkerFromProject(request.project_id, workerId);
+    await syncProjectTeamFromRhRequests(request.project_id);
   } catch (err) {
-    console.warn('[CITYMO] remove worker from project', err);
+    console.warn('[CITYMO] sync project team after remove worker', err);
   }
 
   const updated = await getResourceRequest(requestId);
@@ -597,6 +593,13 @@ export async function removeWorkerFromResourceRequest(requestId, workerId) {
 export async function deleteResourceRequestTree(requestId) {
   if (!requestId) return;
   await requireUser();
+  const { data: row } = await getSupabase()
+    .from(TABLE)
+    .select('project_id')
+    .eq('id', requestId)
+    .maybeSingle();
+  const projectId = row?.project_id;
+
   const { data: children, error: childQ } = await getSupabase()
     .from(TABLE)
     .select('id')
@@ -607,6 +610,14 @@ export async function deleteResourceRequestTree(requestId) {
   }
   const { error } = await getSupabase().from(TABLE).delete().eq('id', requestId);
   if (error) throw error;
+
+  if (projectId) {
+    try {
+      await syncProjectTeamFromRhRequests(projectId);
+    } catch (err) {
+      console.warn('[CITYMO] sync project team after delete request', err);
+    }
+  }
 }
 
 /** Supprime toutes les demandes RH liées à un besoin projet. */

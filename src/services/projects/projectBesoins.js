@@ -311,6 +311,13 @@ export async function deleteProjectStaffNeed(id) {
 
   const { error } = await getSupabase().from(TABLE).delete().eq('id', id);
   if (error) throw error;
+
+  try {
+    const { syncProjectTeamFromRhRequests } = await import('../rh/workerProjectAssignments');
+    await syncProjectTeamFromRhRequests(existing.project_id);
+  } catch (err) {
+    console.warn('[CITYMO] sync project team after delete need', err);
+  }
 }
 
 export async function syncProjectStaffNeedsCoverage(projectId, projectMeta = null) {

@@ -23,6 +23,7 @@ import ProjectPlanningModule from './ProjectPlanningModule';
 import ProjectBesoinsModule from './ProjectBesoinsModule';
 import {
   listWorkersByProject,
+  syncProjectTeamFromRhRequests,
 } from '../../services/rh/workerProjectAssignments';
 import { listProjectRecruitments } from '../../services/rh/resourceRequests';
 import { recruitmentStatutBadge, recruitmentStatutLabel } from '../../constants/projectBesoins';
@@ -509,6 +510,7 @@ function ProjectEquipeTab({ projet, compact = false }) {
     setLoading(true);
     setLoadError(null);
     try {
+      await syncProjectTeamFromRhRequests(projet.id);
       const [wa, sa, subs, rec] = await Promise.all([
         listWorkersByProject(projet.id),
         listAssignmentsByProject(projet.id).catch(() => []),
