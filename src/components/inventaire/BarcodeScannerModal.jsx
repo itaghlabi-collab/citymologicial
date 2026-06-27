@@ -4,7 +4,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Camera, Keyboard, Loader2, ScanLine, X } from 'lucide-react';
 import { Modal, INPUT_STYLE } from './shared.jsx';
-import { normalizeScannedCode } from '../../services/inventaire/barcodeUtils';
+import { parseScannedArticleCode } from '../../services/inventaire/barcodeUtils';
 
 const READER_ID = 'citymo-barcode-scanner-reader';
 
@@ -75,13 +75,16 @@ export default function BarcodeScannerModal({
           {
             fps: 10,
             qrbox: (viewfinderWidth, viewfinderHeight) => ({
-              width: Math.min(320, viewfinderWidth * 0.85),
-              height: Math.min(140, viewfinderHeight * 0.45),
+              width: Math.min(280, viewfinderWidth * 0.85),
+              height: Math.min(280, viewfinderHeight * 0.7),
             }),
-            formatsToSupport: [Html5QrcodeSupportedFormats.CODE_128],
+            formatsToSupport: [
+              Html5QrcodeSupportedFormats.CODE_128,
+              Html5QrcodeSupportedFormats.QR_CODE,
+            ],
           },
           (decoded) => {
-            const code = normalizeScannedCode(decoded);
+            const code = parseScannedArticleCode(decoded);
             if (!code) return;
             const now = Date.now();
             if (code === lastScanRef.current && now - lastScanAtRef.current < 1500) return;
@@ -107,7 +110,7 @@ export default function BarcodeScannerModal({
 
   function submitManual(ev) {
     ev.preventDefault();
-    const code = normalizeScannedCode(manual);
+    const code = parseScannedArticleCode(manual);
     if (!code) return;
     onScan(code);
     setManual('');
@@ -116,7 +119,7 @@ export default function BarcodeScannerModal({
   function handleGunKeyDown(ev) {
     if (ev.key !== 'Enter') return;
     ev.preventDefault();
-    const code = normalizeScannedCode(ev.target.value);
+    const code = parseScannedArticleCode(ev.target.value);
     if (!code) return;
     onScan(code);
     ev.target.value = '';
@@ -175,7 +178,7 @@ export default function BarcodeScannerModal({
       ) : (
         <div>
           <p style={{ fontSize: '0.82rem', color: 'var(--text-2)', marginTop: 0, marginBottom: 10 }}>
-            Placez le code-barres CODE128 dans le cadre.
+            Placez le code-barres CODE128 ou le QR code dans le cadre.
           </p>
           <div
             id={READER_ID}

@@ -1,35 +1,25 @@
 /**
  * Depots.jsx — Emplacements de stock ERP CITYMO
  */
-import { useState, useEffect, useMemo } from 'react';
-import { MapPin, Search, Filter, Eye, ChevronLeft } from 'lucide-react';
+import { useState, useEffect, useCallback } from 'react';
+import { MapPin, Search, Filter, Eye, ChevronLeft, Plus, Trash2, Loader2 } from 'lucide-react';
 import {
   INPUT_STYLE, SELECT_STYLE, EMPLACEMENTS_STOCK,
-  KpiCard, EmptyState, SectionTitle,
+  KpiCard, EmptyState, SectionTitle, Modal, FField, FRow,
 } from './shared.jsx';
+import {
+  ensureStockWarehousesSeeded,
+  listStockWarehouses,
+  createStockWarehouse,
+  deleteStockWarehouse,
+  EMPLACEMENT_TYPES,
+} from '../../services/inventaire/stockWarehouses';
 
-function inferEmplacementType(nom) {
-  const n = (nom || '').toUpperCase();
-  if (n.startsWith('DEPOT')) return 'Dépôt';
-  if (n.startsWith('CHANTIER')) return 'Chantier';
-  if (n.startsWith('ATELIER')) return 'Atelier';
-  if (n.startsWith('SAV')) return 'SAV';
-  if (n.startsWith('BUREAU')) return 'Bureau';
-  return 'Autre';
-}
+const EMPTY_FORM = { nom: '', type_depot: 'Chantier', adresse: '', responsable: '' };
 
-function buildEmplacementsList() {
-  return EMPLACEMENTS_STOCK.map((nom, index) => ({
-    id: `emplacement-${index}`,
-    nom,
-    type: inferEmplacementType(nom),
-    statut: 'Actif',
-  }));
-}
-
-function MobileDepotRow({ item, count, onView }) {
+function MobileDepotRow({ item, count, onView, onDelete, deleting }) {
   return (
-    <div className="inv-depot-mobile-row" role="button" tabIndex={0} onClick={onView} onKeyDown={(e) => { if (e.key === 'Enter') onView(); }}>
+    <div className="inv-depot-mobile-row">
       <div className="inv-depot-mobile-icon" aria-hidden>
         <MapPin size={14} style={{ color: 'var(--red)' }} />
       </div>
@@ -37,9 +27,14 @@ function MobileDepotRow({ item, count, onView }) {
         <strong>{item.nom}</strong>
         <span>{item.type} · {count} article{count !== 1 ? 's' : ''}</span>
       </div>
-      <button type="button" className="btn btn-ghost btn-sm inv-depot-mobile-btn" title="Voir" onClick={(e) => { e.stopPropagation(); onView(); }}>
-        <Eye size={14} />
-      </button>
+      <div style={{ display: 'flex', gap: 4 }}>
+        <button type="button" className="btn btn-ghost btn-sm inv-depot-mobile-btn" title="Voir" onClick={onView}>
+          <Eye size={14} />
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm" title="Supprimer" disabled={deleting} onClick={onDelete} style={{ color: 'var(--red)' }}>
+          <Trash2 size={14} />
+        </button>
+      </div>
     </div>
   );
 }
@@ -92,15 +87,52 @@ function DetailEmplacement({ emplacement, articles, onBack }) {
 }
 
 export default function Depots({ articles, onDepotsChange }) {
-  const emplacements = useMemo(() => buildEmplacementsList(), []);
+  const [emplacements, setEmplacements] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
+  const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [filterType, setFilterType] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [detailId, setDetailId] = useState(null);
+  const [formOpen, setFormOpen] = useState(false);
+  const [form, setForm] = useState(EMPTY_FORM);
 
-  useEffect(() => {
-    if (onDepotsChange) onDepotsChange(emplacements);
-  }, [emplacements, onDepotsChange]);
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      let rows = await ensureStockWarehousesSeeded(EMPLACEMENTS_STOCK);
+      if (!rows.length) {
+        rows = await listStockWarehouses();
+      }
+      const mapped = rows.map((w) => ({
+        id: w.id,
+        nom: w.nom,
+        type: w.type,
+        statut: w.statut || 'Actif',
+      }));
+      setEmplacements(mapped);
+      onDepotsChange?.(mapped);
+    } catch (err) {
+      console.warn('[CITYMO] Depots load', err);
+      const fallback = EMPLACEMENTS_STOCK.map((nom, index) => ({
+        id: `local-${index}`,
+        nom,
+        type: nom.startsWith('DEPOT') ? 'Dépôt' : nom.startsWith('CHANTIER') ? 'Chantier' : 'Autre',
+        statut: 'Actif',
+        local: true,
+      }));
+      setEmplacements(fallback);
+      onDepotsChange?.(fallback);
+      setError('Base Supabase indisponible — mode lecture seule (exécutez le script stock_warehouses).');
+    } finally {
+      setLoading(false);
+    }
+  }, [onDepotsChange]);
+
+  useEffect(() => { load(); }, [load]);
 
   const filtered = emplacements.filter((x) => {
     const q = search.toLowerCase();
@@ -118,6 +150,65 @@ export default function Depots({ articles, onDepotsChange }) {
     return (articles || []).filter(
       (a) => String(a.emplacement || '').trim().toLowerCase() === String(nom).trim().toLowerCase(),
     ).length;
+  }
+
+  function openCreate() {
+    setForm(EMPTY_FORM);
+    setError('');
+    setFormOpen(true);
+  }
+
+  async function handleCreate(e) {
+    e.preventDefault();
+    if (!form.nom.trim()) {
+      setError('Le nom est requis.');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      const created = await createStockWarehouse(form);
+      const item = { id: created.id, nom: created.nom, type: created.type, statut: created.statut };
+      setEmplacements((prev) => {
+        const next = [...prev, item].sort((a, b) => a.nom.localeCompare(b.nom, 'fr'));
+        onDepotsChange?.(next);
+        return next;
+      });
+      setFormOpen(false);
+      setForm(EMPTY_FORM);
+    } catch (err) {
+      setError(err.message || 'Erreur lors de la création.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleDelete(item) {
+    const count = getArticlesCount(item.nom);
+    if (count > 0) {
+      alert(`Impossible de supprimer : ${count} article(s) encore affecté(s) à « ${item.nom} ».`);
+      return;
+    }
+    if (!window.confirm(`Supprimer l'emplacement « ${item.nom} » ?`)) return;
+    if (item.local || String(item.id).startsWith('local-')) {
+      alert('Emplacement par défaut — non supprimable en mode hors ligne.');
+      return;
+    }
+    setDeletingId(item.id);
+    setError('');
+    try {
+      await deleteStockWarehouse(item.id);
+      setEmplacements((prev) => {
+        const next = prev.filter((x) => x.id !== item.id);
+        onDepotsChange?.(next);
+        return next;
+      });
+      if (detailId === item.id) setDetailId(null);
+    } catch (err) {
+      setError(err.message || 'Erreur lors de la suppression.');
+    } finally {
+      setDeletingId(null);
+    }
   }
 
   if (detailId) {
@@ -139,12 +230,21 @@ export default function Depots({ articles, onDepotsChange }) {
           <h1 className="page-title">EMPLACEMENTS</h1>
           <p className="page-subtitle finance-sub-hide-mobile">Lieux de stockage CITYMO — dépôts, chantiers et ateliers.</p>
         </div>
-        <div className="finance-page-actions">
+        <div className="finance-page-actions" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button type="button" className="btn btn-ghost btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => setShowFilters((f) => !f)}>
             <Filter size={14} /> Filtres
           </button>
+          <button type="button" className="btn btn-primary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={openCreate}>
+            <Plus size={14} /> Nouvel emplacement
+          </button>
         </div>
       </div>
+
+      {error && (
+        <div style={{ background: '#FFF8E1', color: '#E65100', border: '1px solid #FFCC80', borderRadius: 8, padding: '10px 14px', fontSize: '0.84rem', marginBottom: 12 }}>
+          {error}
+        </div>
+      )}
 
       <div className="stat-grid finance-kpi-grid finance-kpi-strip">
         <KpiCard icon={<MapPin size={17} />} label="Total emplacements" value={emplacements.length} color="grey" />
@@ -177,59 +277,114 @@ export default function Depots({ articles, onDepotsChange }) {
       )}
 
       <div className="card" style={{ padding: 0 }}>
-        {filtered.length === 0 ? (
-          <EmptyState icon={<MapPin size={24} />} title="Aucun emplacement" sub="Aucun résultat pour cette recherche" />
+        {loading ? (
+          <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-3)' }}>
+            <Loader2 size={22} style={{ animation: 'spin 0.8s linear infinite' }} />
+          </div>
+        ) : filtered.length === 0 ? (
+          <EmptyState icon={<MapPin size={24} />} title="Aucun emplacement" sub="Aucun résultat pour cette recherche" action="Ajouter un emplacement" onAction={openCreate} />
         ) : (
           <>
-          <div className="inv-depot-desktop-only">
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Emplacement</th>
-                  <th>Type</th>
-                  <th>Articles</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((x) => (
-                  <tr key={x.id} style={{ cursor: 'pointer' }} onClick={() => setDetailId(x.id)}>
-                    <td>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                        <div style={{ width: 32, height: 32, borderRadius: 7, background: 'var(--red-light)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                          <MapPin size={14} style={{ color: 'var(--red)' }} />
-                        </div>
-                        <span style={{ fontWeight: 600 }}>{x.nom}</span>
-                      </div>
-                    </td>
-                    <td data-label="Type">
-                      <span className="badge badge-blue" style={{ fontSize: '0.72rem' }}>{x.type}</span>
-                    </td>
-                    <td data-label="Articles"><span style={{ fontWeight: 700 }}>{getArticlesCount(x.nom)}</span></td>
-                    <td onClick={(e) => e.stopPropagation()}>
-                      <button type="button" className="btn btn-secondary btn-sm" title="Voir" onClick={() => setDetailId(x.id)}><Eye size={13} /></button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          </div>
+            <div className="inv-depot-desktop-only">
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Emplacement</th>
+                      <th>Type</th>
+                      <th>Articles</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filtered.map((x) => (
+                      <tr key={x.id}>
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                            <div style={{ width: 32, height: 32, borderRadius: 7, background: 'var(--red-light)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                              <MapPin size={14} style={{ color: 'var(--red)' }} />
+                            </div>
+                            <span style={{ fontWeight: 600 }}>{x.nom}</span>
+                          </div>
+                        </td>
+                        <td data-label="Type">
+                          <span className="badge badge-blue" style={{ fontSize: '0.72rem' }}>{x.type}</span>
+                        </td>
+                        <td data-label="Articles"><span style={{ fontWeight: 700 }}>{getArticlesCount(x.nom)}</span></td>
+                        <td data-label="Actions">
+                          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                            <button type="button" className="btn btn-secondary btn-sm" title="Voir" onClick={() => setDetailId(x.id)}>
+                              <Eye size={13} />
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              title="Supprimer"
+                              disabled={deletingId === x.id}
+                              style={{ color: 'var(--red)' }}
+                              onClick={() => handleDelete(x)}
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
 
-          <div className="inv-depot-mobile-only inv-depot-mobile-list">
-            {filtered.map((x) => (
-              <MobileDepotRow
-                key={x.id}
-                item={x}
-                count={getArticlesCount(x.nom)}
-                onView={() => setDetailId(x.id)}
-              />
-            ))}
-          </div>
+            <div className="inv-depot-mobile-only inv-depot-mobile-list">
+              {filtered.map((x) => (
+                <MobileDepotRow
+                  key={x.id}
+                  item={x}
+                  count={getArticlesCount(x.nom)}
+                  onView={() => setDetailId(x.id)}
+                  onDelete={() => handleDelete(x)}
+                  deleting={deletingId === x.id}
+                />
+              ))}
+            </div>
           </>
         )}
       </div>
+
+      <Modal open={formOpen} onClose={() => !saving && setFormOpen(false)} title="Nouvel emplacement" width={520}>
+        <form onSubmit={handleCreate}>
+          <FRow>
+            <FField label="Nom" required>
+              <input
+                value={form.nom}
+                onChange={(e) => setForm((f) => ({ ...f, nom: e.target.value }))}
+                placeholder="Ex. CHANTIER NOUVEAU PROJET"
+                style={INPUT_STYLE}
+                required
+              />
+            </FField>
+            <FField label="Type" required>
+              <select value={form.type_depot} onChange={(e) => setForm((f) => ({ ...f, type_depot: e.target.value }))} style={SELECT_STYLE}>
+                {EMPLACEMENT_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </FField>
+          </FRow>
+          <FRow>
+            <FField label="Adresse">
+              <input value={form.adresse} onChange={(e) => setForm((f) => ({ ...f, adresse: e.target.value }))} style={INPUT_STYLE} />
+            </FField>
+            <FField label="Responsable">
+              <input value={form.responsable} onChange={(e) => setForm((f) => ({ ...f, responsable: e.target.value }))} style={INPUT_STYLE} />
+            </FField>
+          </FRow>
+          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 8 }}>
+            <button type="button" className="btn btn-secondary" onClick={() => setFormOpen(false)} disabled={saving}>Annuler</button>
+            <button type="submit" className="btn btn-primary" disabled={saving}>
+              {saving ? 'Enregistrement…' : 'Créer l\'emplacement'}
+            </button>
+          </div>
+        </form>
+      </Modal>
     </div>
   );
 }

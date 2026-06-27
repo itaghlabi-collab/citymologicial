@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from './hooks/useAuth';
 import './App.css';
 import NotificationCenter from './components/notifications/NotificationCenter';
@@ -42,6 +42,7 @@ import SAV from './components/SAV';
 import Administration from './components/Administration';
 import { usePermissions } from './hooks/usePermissions';
 import { canAccessExecutiveCalendar } from './services/auth/executiveCalendarAccess';
+import { parseInventaireArticlePath } from './services/inventaire/barcodeUtils';
 
 import {
   LayoutDashboard, CheckSquare, CalendarDays, CalendarClock,
@@ -250,7 +251,7 @@ const MODULE_LABELS = {
 /* =============================================
    PAGE RENDERER  (map new IDs to existing components)
    ============================================= */
-function PageContent({ module, onNavigate }) {
+function PageContent({ module, onNavigate, inventaireArticleCode, onInventaireArticleCodeConsumed }) {
   switch (module) {
     case 'dashboard':           return <Dashboard onNavigate={onNavigate} />;
     /* Organisation interne */
@@ -313,7 +314,13 @@ function PageContent({ module, onNavigate }) {
     case 'ordres-achat':        return <Achats activeTab="ordres-achat" />;
     /* Inventaire & Depot */
     case 'categories-stock':    return <Inventaire activeTab="categories-stock" />;
-    case 'articles-stock':      return <Inventaire activeTab="articles-stock" />;
+    case 'articles-stock':      return (
+      <Inventaire
+        activeTab="articles-stock"
+        initialArticleCode={inventaireArticleCode}
+        onArticleCodeConsumed={onInventaireArticleCodeConsumed}
+      />
+    );
     case 'depots':              return <Inventaire activeTab="depots" />;
     case 'bons-mouvements':     return <Inventaire activeTab="bons-mouvements" />;
     case 'demandes-chantier':   return <Inventaire activeTab="demandes-chantier" />;
@@ -526,12 +533,27 @@ function Header({ module, onToggleSidebar, user, onLogout, onNavigate }) {
    ============================================= */
 export default function App() {
   const { user, loading, logout, refreshUser } = useAuth();
-  const [module, setModule] = useState('dashboard');
+  const [module, setModule] = useState(() => (parseInventaireArticlePath() ? 'articles-stock' : 'dashboard'));
+  const [inventaireArticleCode, setInventaireArticleCode] = useState(() => parseInventaireArticlePath());
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const { canShowRoute } = usePermissions(user);
   const mustChangePassword = Boolean(user?.must_change_password);
+
+  useEffect(() => {
+    function onPopState() {
+      const code = parseInventaireArticlePath();
+      if (code) {
+        setModule('articles-stock');
+        setInventaireArticleCode(code);
+      } else {
+        setInventaireArticleCode(null);
+      }
+    }
+    window.addEventListener('popstate', onPopState);
+    return () => window.removeEventListener('popstate', onPopState);
+  }, []);
 
   // While restoring session — même fond login Codia (spinner visible)
   if (loading) {
@@ -601,7 +623,12 @@ export default function App() {
           onNavigate={setModule}
         />
         <main className="page-content">
-          <PageContent module={module} onNavigate={setModule} />
+          <PageContent
+            module={module}
+            onNavigate={setModule}
+            inventaireArticleCode={inventaireArticleCode}
+            onInventaireArticleCodeConsumed={() => setInventaireArticleCode(null)}
+          />
         </main>
       </div>
     </div>

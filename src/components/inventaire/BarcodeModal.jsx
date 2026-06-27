@@ -4,7 +4,8 @@
 import { Barcode, Download, Printer } from 'lucide-react';
 import { Modal } from './shared.jsx';
 import BarcodeDisplay from './BarcodeDisplay';
-import { getArticleBarcodeValue } from '../../services/inventaire/barcodeUtils';
+import QrCodeDisplay from './QrCodeDisplay';
+import { getArticleBarcodeValue, getArticlePublicUrl } from '../../services/inventaire/barcodeUtils';
 import {
   downloadStockArticleLabel,
   printStockArticleLabel,
@@ -34,9 +35,17 @@ export default function BarcodeModal({ open, article, onClose }) {
           <div style={{ fontWeight: 800, fontSize: '0.82rem', marginBottom: 10, lineHeight: 1.25 }}>
             {designation}
           </div>
-          <BarcodeDisplay article={article} height={72} width={2.4} displayValue={false} />
+          <div style={{ display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap' }}>
+            <div style={{ flex: 1, minWidth: 140 }}>
+              <BarcodeDisplay article={article} height={72} width={2.4} displayValue={false} />
+            </div>
+            <QrCodeDisplay article={article} size={88} />
+          </div>
           <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '0.9rem', marginTop: 8, letterSpacing: '0.06em' }}>
             {code}
+          </div>
+          <div style={{ fontSize: '0.68rem', color: 'var(--text-3)', marginTop: 6, wordBreak: 'break-all' }}>
+            {getArticlePublicUrl(code)}
           </div>
         </div>
 
@@ -76,7 +85,7 @@ export default function BarcodeModal({ open, article, onClose }) {
         </div>
         <p style={{ fontSize: '0.72rem', color: 'var(--text-3)', textAlign: 'center', margin: 0 }}>
           <Barcode size={11} style={{ verticalAlign: -2, marginRight: 4 }} />
-          CODE128 — {code}
+          CODE128 (douchette) + QR code (mobile) — {code}
         </p>
       </div>
     </Modal>

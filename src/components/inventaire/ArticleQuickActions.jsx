@@ -4,7 +4,7 @@
 import { useState } from 'react';
 import {
   MapPin, Warehouse, ArrowRightLeft, Wrench, RotateCcw,
-  Ban, AlertTriangle, Loader2,
+  Ban, AlertTriangle, Loader2, History,
 } from 'lucide-react';
 import { Modal, SELECT_STYLE, TEXTAREA_STYLE, EMPLACEMENTS_STOCK } from './shared.jsx';
 import { QUICK_ACTIONS, executeArticleQuickAction, canExecuteStockAction, getArticleStockQty } from '../../services/inventaire/articleQuickActions';
@@ -38,7 +38,7 @@ function destinationOptions(actionKey) {
   return EMPLACEMENTS_STOCK;
 }
 
-export default function ArticleQuickActions({ article, userName, onDone, disabled }) {
+export default function ArticleQuickActions({ article, userName, onDone, disabled, onHistory }) {
   const [pending, setPending] = useState(null);
   const [destination, setDestination] = useState('');
   const [observation, setObservation] = useState('');
@@ -111,6 +111,16 @@ export default function ArticleQuickActions({ article, userName, onDone, disable
             </button>
           );
         })}
+        {onHistory && (
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            onClick={onHistory}
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+          >
+            <History size={13} /> Voir historique
+          </button>
+        )}
       </div>
 
       <Modal

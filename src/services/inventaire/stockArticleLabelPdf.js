@@ -6,6 +6,7 @@ import {
   getArticleBarcodeValue,
   renderBarcodeForPrint,
   containBarcodeMm,
+  getArticlePublicUrl,
 } from './barcodeUtils';
 
 const TEXT = [0, 0, 0];
@@ -145,7 +146,7 @@ export function downloadStockArticleLabels(articles = [], formatOrLegacy = 'stan
   return downloadStockArticleLabelsA4(articles, formatOrLegacy);
 }
 
-function printHtml(article, formatKey) {
+function printHtml(article, formatKey, qrDataUrl = '') {
   const fmt = LABEL_FORMATS[formatKey] || LABEL_FORMATS.standard;
   const code = getArticleBarcodeValue(article);
   const designation = String(article.designation || article.nom || '—').trim().toUpperCase();
@@ -158,6 +159,7 @@ function printHtml(article, formatKey) {
 
   const desSize = formatKey === 'small' ? '7px' : '9px';
   const codeSize = formatKey === 'small' ? '9px' : '10px';
+  const qrSize = formatKey === 'small' ? '14mm' : '18mm';
 
   const w = window.open('', '_blank', 'noopener,noreferrer,width=420,height=520');
   if (!w) return false;
@@ -173,12 +175,17 @@ function printHtml(article, formatKey) {
     text-align: center; padding: 1.2mm;
   }
   .designation { font-weight: 800; font-size: ${desSize}; line-height: 1.15; width: 100%; }
-  .barcode-wrap { flex: 1; display: flex; align-items: center; justify-content: center; width: 100%; min-height: 0; }
-  .barcode-wrap img { max-width: 94%; max-height: 100%; width: auto; height: auto; object-fit: contain; }
+  .codes { display: flex; align-items: center; justify-content: center; gap: 2mm; width: 100%; flex: 1; min-height: 0; }
+  .barcode-wrap { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 0; }
+  .barcode-wrap img { max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; }
+  .qr-wrap img { width: ${qrSize}; height: ${qrSize}; }
   .code { font-weight: 800; font-size: ${codeSize}; letter-spacing: 0.08em; }
 </style></head><body>
   <div class="designation">${esc(designation)}</div>
-  <div class="barcode-wrap">${barcodeMeta?.dataUrl ? `<img src="${barcodeMeta.dataUrl}" alt="${esc(code)}" />` : ''}</div>
+  <div class="codes">
+    <div class="barcode-wrap">${barcodeMeta?.dataUrl ? `<img src="${barcodeMeta.dataUrl}" alt="${esc(code)}" />` : ''}</div>
+    ${qrDataUrl ? `<div class="qr-wrap"><img src="${qrDataUrl}" alt="QR" /></div>` : ''}
+  </div>
   <div class="code">${esc(code)}</div>
   <script>window.onload=function(){window.focus();window.print();};</script>
 </body></html>`);
@@ -186,9 +193,16 @@ function printHtml(article, formatKey) {
   return true;
 }
 
-export function printStockArticleLabel(article, formatOrLegacy = 'standard') {
+export async function printStockArticleLabel(article, formatOrLegacy = 'standard') {
   const formatKey = resolveFormat(formatOrLegacy);
-  if (!printHtml(article, formatKey)) {
+  let qrDataUrl = '';
+  try {
+    const QRCode = (await import('qrcode')).default;
+    qrDataUrl = await QRCode.toDataURL(getArticlePublicUrl(getArticleBarcodeValue(article)), { width: 96, margin: 0 });
+  } catch {
+    /* QR optionnel */
+  }
+  if (!printHtml(article, formatKey, qrDataUrl)) {
     downloadStockArticleLabel(article, formatKey);
   }
 }

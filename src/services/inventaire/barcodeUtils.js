@@ -95,3 +95,83 @@ export function normalizeScannedCode(raw) {
     .replace(/[\r\n\t]/g, '')
     .replace(/\s+/g, '');
 }
+
+/** Chemin relatif fiche article (pour QR code). */
+export function getArticleSharePath(code) {
+  const c = normalizeScannedCode(code);
+  if (!c) return '';
+  return `/inventaire/articles/${encodeURIComponent(c)}`;
+}
+
+/** URL complète fiche article (QR code étiquette). */
+export function getArticlePublicUrl(code) {
+  const path = getArticleSharePath(code);
+  if (!path) return '';
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return `${window.location.origin}${path}`;
+  }
+  return path;
+}
+
+/**
+ * Extrait le code article depuis un scan douchette (CODE128) ou QR (URL).
+ * Ex. TYJ2X8GA ou https://citymo.app/inventaire/articles/TYJ2X8GA
+ */
+export function parseScannedArticleCode(raw) {
+  let s = normalizeScannedCode(raw);
+  if (!s) return '';
+
+  const pathMatch = s.match(/\/inventaire\/articles\/([^/?#]+)/i);
+  if (pathMatch) {
+    try {
+      return decodeURIComponent(pathMatch[1]);
+    } catch {
+      return pathMatch[1];
+    }
+  }
+
+  if (/^https?:\/\//i.test(s)) {
+    try {
+      const url = new URL(s);
+      const m = url.pathname.match(/\/inventaire\/articles\/([^/]+)/i);
+      if (m) {
+        try {
+          return decodeURIComponent(m[1]);
+        } catch {
+          return m[1];
+        }
+      }
+    } catch {
+      /* pas une URL valide */
+    }
+  }
+
+  return s;
+}
+
+/** Code article depuis l’URL /inventaire/articles/CODE (ouverture QR mobile). */
+export function parseInventaireArticlePath(pathname) {
+  const path = pathname || (typeof window !== 'undefined' ? window.location.pathname : '');
+  const m = String(path).match(/^\/inventaire\/articles\/([^/]+)\/?$/i);
+  if (!m) return null;
+  try {
+    return decodeURIComponent(m[1]);
+  } catch {
+    return m[1];
+  }
+}
+
+/** Met à jour l’URL navigateur pour la fiche article (SPA). */
+export function syncArticleRoute(code, { replace = false } = {}) {
+  if (typeof window === 'undefined') return;
+  if (!code) {
+    if (window.location.pathname.startsWith('/inventaire/articles/')) {
+      window.history.replaceState({}, '', '/');
+    }
+    return;
+  }
+  const path = getArticleSharePath(code);
+  if (window.location.pathname === path) return;
+  if (replace) window.history.replaceState({}, '', path);
+  else window.history.pushState({}, '', path);
+}

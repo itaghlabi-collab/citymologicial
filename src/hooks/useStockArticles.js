@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 import { getSupabase, isSupabaseConfigured } from '../lib/supabase';
-import { formatSupabaseError } from '../services/supabase/formatError';
+import { parseScannedArticleCode } from '../services/inventaire/barcodeUtils';
 import { useAuth } from './useAuth';
 import {
   listStockArticles,
@@ -190,9 +190,9 @@ export function useStockArticles() {
   async function lookupByBarcode(code, localArticles = records) {
     setError(null);
     try {
-      const article = await findStockArticleByBarcode(code, localArticles);
+      const article = await findStockArticleByBarcode(parseScannedArticleCode(code), localArticles);
       if (!article) {
-        return { article: null, error: `Aucun article trouvé pour le code « ${code} ».` };
+        return { article: null, error: 'Aucun article trouvé pour ce code.' };
       }
       await recordStockArticleScan(article.id);
       return { article, error: null };

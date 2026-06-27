@@ -14,10 +14,12 @@ import { downloadStockArticleLabel, printStockArticleLabel, downloadStockArticle
 import BarcodeModal from './BarcodeModal';
 import BarcodeScannerModal from './BarcodeScannerModal';
 import BarcodeDisplay from './BarcodeDisplay';
+import QrCodeDisplay from './QrCodeDisplay';
+import ArticleScanBar from './ArticleScanBar';
 import ArticleQuickActions, { ArticleMovementHistory } from './ArticleQuickActions';
 import { canExecuteStockAction } from '../../services/inventaire/articleQuickActions';
 import { useAuth } from '../../hooks/useAuth';
-import { getArticleBarcodeValue } from '../../services/inventaire/barcodeUtils';
+import { getArticleBarcodeValue, getArticlePublicUrl, syncArticleRoute } from '../../services/inventaire/barcodeUtils';
 import {
   INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE, UNITES,
   TYPES_ARTICLE_STOCK, ETATS_ARTICLE_STOCK, STATUTS_ARTICLE_STOCK, EMPLACEMENTS_STOCK,
@@ -46,7 +48,7 @@ const EMPTY_FORM = {
   emplacement_initial: '',
 };
 
-function ArticleForm({ initial, categories, onSave, onCancel, saving }) {
+function ArticleForm({ initial, categories, onSave, onCancel, saving, emplacementsList = EMPLACEMENTS_STOCK }) {
   const [form, setForm] = useState(() => {
     if (!initial) return { ...EMPTY_FORM };
     return {
@@ -84,9 +86,10 @@ function ArticleForm({ initial, categories, onSave, onCancel, saving }) {
   }
 
   function emplacementOptions(current) {
+    const base = emplacementsList?.length ? emplacementsList : EMPLACEMENTS_STOCK;
     const v = (current || '').trim();
-    if (v && !EMPLACEMENTS_STOCK.includes(v)) return [v, ...EMPLACEMENTS_STOCK];
-    return EMPLACEMENTS_STOCK;
+    if (v && !base.includes(v)) return [v, ...base];
+    return base;
   }
 
   return (
@@ -212,6 +215,7 @@ function ArticleForm({ initial, categories, onSave, onCancel, saving }) {
 
 function DetailArticle({
   article, categories, movements, movementsLoading, onBack, onEdit, onHistory, onArchive, onBarcode, onRefresh, userName,
+  onScan, scanLoading, scanError,
 }) {
   const cat = (categories || []).find((c) => String(c.id) === String(article.categorie_id));
   const catName = cat ? (cat.nom || cat.name) : '';
@@ -238,6 +242,15 @@ function DetailArticle({
         )}
       </div>
 
+      <ArticleScanBar
+        onScan={onScan}
+        loading={scanLoading}
+        error={scanError}
+        compact
+        label="Scan rapide — changer d'article ou confirmer"
+        placeholder="Scannez un code-barres ou QR code…"
+      />
+
       <div className="finance-detail-grid">
         <div>
           <div className="card" style={{ marginBottom: 14 }}>
@@ -249,16 +262,17 @@ function DetailArticle({
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12, fontSize: '0.84rem' }}>
               {[
-                ['Code', article.code],
+                ['Code article', article.code],
+                ['Code-barres', getArticleBarcodeValue(article)],
                 ['Désignation', article.designation],
                 ['Catégorie', catName || '—'],
                 ['Type', article.type],
                 ['N° série', article.numero_serie],
-                ['Emplacement', article.emplacement],
-                ['Valeur', article.valeur ? formatMAD(article.valeur) : '—'],
-                ['Stock minimum', article.stock_minimum || '—'],
+                ['Emplacement actuel', article.emplacement],
                 ['État physique', article.etat],
+                ['Statut opérationnel', article.current_state || 'Disponible'],
                 ['Statut', article.statut],
+                ['Stock minimum', article.stock_minimum || '—'],
               ].map(([l, v]) => (
                 <div key={l}>
                   <span style={{ color: 'var(--text-3)', fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', display: 'block' }}>{l}</span>
@@ -279,6 +293,7 @@ function DetailArticle({
             article={article}
             userName={userName}
             onDone={onRefresh}
+            onHistory={onHistory}
             disabled={!canExecuteStockAction(article)}
           />
 
@@ -330,15 +345,27 @@ function DetailArticle({
             </div>
           </div>
           <div className="card">
-            <SectionTitle icon={<Barcode size={12} />}>Code-barres</SectionTitle>
-            <div style={{ padding: '8px 4px', background: '#fff', borderRadius: 6, border: '1px solid var(--border)' }}>
-              <BarcodeDisplay article={article} height={48} width={2.2} displayValue={false} />
-              <div style={{ textAlign: 'center', fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '0.78rem', marginTop: 6, letterSpacing: '0.05em' }}>
-                {article.code}
+            <SectionTitle icon={<Barcode size={12} />}>Code-barres & QR code</SectionTitle>
+            <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', flexWrap: 'wrap' }}>
+              <div style={{ flex: 1, minWidth: 160, padding: '8px 4px', background: '#fff', borderRadius: 6, border: '1px solid var(--border)' }}>
+                <BarcodeDisplay article={article} height={48} width={2.2} displayValue={false} />
+                <div style={{ textAlign: 'center', fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '0.78rem', marginTop: 6, letterSpacing: '0.05em' }}>
+                  {getArticleBarcodeValue(article)}
+                </div>
+                <div style={{ textAlign: 'center', fontSize: '0.68rem', color: 'var(--text-3)', marginTop: 4 }}>CODE128 — douchette</div>
+              </div>
+              <div style={{ textAlign: 'center', padding: 8, background: '#fff', borderRadius: 6, border: '1px solid var(--border)' }}>
+                <QrCodeDisplay article={article} size={96} style={{ margin: '0 auto' }} />
+                <div style={{ fontSize: '0.68rem', color: 'var(--text-3)', marginTop: 6, maxWidth: 120, wordBreak: 'break-all', lineHeight: 1.3 }}>
+                  QR — fiche mobile
+                </div>
               </div>
             </div>
+            <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 8, wordBreak: 'break-all' }}>
+              {getArticlePublicUrl(article.code)}
+            </div>
             <button type="button" className="btn btn-secondary btn-sm" style={{ width: '100%', marginTop: 10 }} onClick={onBarcode}>
-              Voir / imprimer
+              Voir / imprimer étiquette
             </button>
           </div>
         </div>
@@ -369,7 +396,12 @@ function MobileArticleRow({ item, catName, onView, onEdit, onArchive, onHistory,
   );
 }
 
-export default function ArticlesStock({ onArticlesChange }) {
+export default function ArticlesStock({
+  onArticlesChange,
+  emplacementsList = EMPLACEMENTS_STOCK,
+  initialArticleCode,
+  onArticleCodeConsumed,
+}) {
   const { user } = useAuth();
   const userName = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Utilisateur';
   const {
@@ -420,13 +452,21 @@ export default function ArticlesStock({ onArticlesChange }) {
   async function handleArchive(id) {
     if (!window.confirm('Archiver cet article ?')) return;
     const res = await archive(id);
-    if (res.success) { setDetailId(null); setHistoryId(null); }
+    if (res.success) {
+      setDetailId(null);
+      setHistoryId(null);
+      syncArticleRoute(null, { replace: true });
+    }
   }
 
   async function handleDelete(id) {
     if (!window.confirm('Supprimer définitivement cet article ? (impossible si mouvements ou stock)')) return;
     const res = await remove(id);
-    if (res.success) { setDetailId(null); setHistoryId(null); }
+    if (res.success) {
+      setDetailId(null);
+      setHistoryId(null);
+      syncArticleRoute(null, { replace: true });
+    }
   }
 
   const openHistory = useCallback((id) => {
@@ -502,6 +542,13 @@ export default function ArticlesStock({ onArticlesChange }) {
 
   const openBarcode = useCallback((article) => setBarcodeArticle(article), []);
 
+  const openArticleDetail = useCallback((article) => {
+    if (!article?.id) return;
+    setDetailId(article.id);
+    setScanError('');
+    syncArticleRoute(getArticleBarcodeValue(article));
+  }, []);
+
   const getCategoryName = useCallback((article) => {
     const cat = categories.find((c) => String(c.id) === String(article?.categorie_id));
     return cat ? (cat.nom || cat.name) : '';
@@ -513,13 +560,33 @@ export default function ArticlesStock({ onArticlesChange }) {
     const { article, error: lookupErr } = await lookupByBarcode(code, articles);
     setScanLoading(false);
     if (!article) {
-      setScanError(lookupErr || 'Article introuvable.');
+      setScanError(lookupErr || 'Aucun article trouvé pour ce code.');
       return;
     }
     setShowScanner(false);
     setScanError('');
-    setDetailId(article.id);
-  }, [lookupByBarcode, articles]);
+    openArticleDetail(article);
+  }, [lookupByBarcode, articles, openArticleDetail]);
+
+  useEffect(() => {
+    if (!initialArticleCode || loading) return undefined;
+    let cancelled = false;
+    (async () => {
+      setScanLoading(true);
+      setScanError('');
+      const { article, error: lookupErr } = await lookupByBarcode(initialArticleCode, articles);
+      if (cancelled) return;
+      setScanLoading(false);
+      onArticleCodeConsumed?.();
+      if (!article) {
+        setScanError(lookupErr || 'Aucun article trouvé pour ce code.');
+        syncArticleRoute(null, { replace: true });
+        return;
+      }
+      openArticleDetail(article);
+    })();
+    return () => { cancelled = true; };
+  }, [initialArticleCode, loading, articles, lookupByBarcode, onArticleCodeConsumed, openArticleDetail]);
 
   const filtered = useMemo(() => articles.filter((x) => {
     const q = search.toLowerCase();
@@ -579,13 +646,20 @@ export default function ArticlesStock({ onArticlesChange }) {
           categories={categories}
           movements={detailMovements}
           movementsLoading={detailMovementsLoading}
-          onBack={() => setDetailId(null)}
+          onBack={() => {
+            setDetailId(null);
+            setScanError('');
+            syncArticleRoute(null, { replace: true });
+          }}
           onEdit={() => { setEditItem(detailArt); setShowModal(true); }}
           onHistory={() => openHistory(detailArt.id)}
           onArchive={() => handleArchive(detailArt.id)}
           onBarcode={() => openBarcode(detailArt)}
           onRefresh={refreshDetail}
           userName={userName}
+          onScan={handleBarcodeScan}
+          scanLoading={scanLoading}
+          scanError={scanError}
         />
       )}
 
@@ -632,8 +706,8 @@ export default function ArticlesStock({ onArticlesChange }) {
           <p className="page-subtitle finance-sub-hide-mobile">Gestion des articles, états et niveaux de stock.</p>
         </div>
         <div className="finance-page-actions">
-          <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowScanner(true)}>
-            <ScanLine size={14} /> Scanner article
+          <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowScanner(true)} title="Scanner avec la caméra">
+            <ScanLine size={14} /> Caméra
           </button>
           {selectedArticles.length > 0 && (
             <>
@@ -665,6 +739,12 @@ export default function ArticlesStock({ onArticlesChange }) {
         <KpiCard icon={<Package size={17} />} label="Valeur totale" value={formatMAD(valeurTotale)} color="red" />
       </div>
 
+      <ArticleScanBar
+        onScan={handleBarcodeScan}
+        loading={scanLoading}
+        error={!detailId ? scanError : ''}
+      />
+
       {showFilters ? (
         <div className="card finance-toolbar" style={{ marginBottom: 16, padding: '14px 20px' }}>
           <div className="finance-toolbar-inner">
@@ -690,7 +770,7 @@ export default function ArticlesStock({ onArticlesChange }) {
             </select>
             <select value={filterEmplacement} onChange={(e) => setFilterEmplacement(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 200 }}>
               <option value="">Tous emplacements</option>
-              {EMPLACEMENTS_STOCK.map((e) => <option key={e} value={e}>{e}</option>)}
+              {emplacementsList.map((e) => <option key={e} value={e}>{e}</option>)}
             </select>
             <select value={filterCurrentState} onChange={(e) => setFilterCurrentState(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 170 }}>
               <option value="">Tous états opérationnels</option>
@@ -799,7 +879,7 @@ export default function ArticlesStock({ onArticlesChange }) {
                         </td>
                         <td>
                           <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
-                            <button type="button" className="btn btn-secondary btn-sm" title="Voir" onClick={() => setDetailId(x.id)}><Eye size={13} /></button>
+                            <button type="button" className="btn btn-secondary btn-sm" title="Voir" onClick={() => openArticleDetail(x)}><Eye size={13} /></button>
                             <button type="button" className="btn btn-ghost btn-sm" title="Code-barres" onClick={() => openBarcode(x)}><Barcode size={13} /></button>
                             <button type="button" className="btn btn-ghost btn-sm" title="Modifier" onClick={() => { setEditItem(x); setShowModal(true); }}><Edit2 size={13} /></button>
                             <button type="button" className="btn btn-ghost btn-sm" title="Historique" onClick={() => openHistory(x.id)}><History size={13} /></button>
@@ -823,7 +903,7 @@ export default function ArticlesStock({ onArticlesChange }) {
                   key={x.id}
                   item={x}
                   catName={cat ? (cat.nom || cat.name) : '—'}
-                  onView={() => setDetailId(x.id)}
+                  onView={() => openArticleDetail(x)}
                   onBarcode={() => openBarcode(x)}
                   onEdit={() => { setEditItem(x); setShowModal(true); }}
                   onHistory={() => openHistory(x.id)}
@@ -853,6 +933,7 @@ export default function ArticlesStock({ onArticlesChange }) {
           onSave={handleSave}
           onCancel={() => { if (!saving) { setShowModal(false); setEditItem(null); } }}
           saving={saving}
+          emplacementsList={emplacementsList}
         />
       </Modal>
 
