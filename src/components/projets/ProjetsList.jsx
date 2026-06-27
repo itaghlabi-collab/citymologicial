@@ -497,6 +497,7 @@ function ProjectEquipeTab({ projet, compact = false }) {
   const [subAssignments, setSubAssignments] = useState([]);
   const [recruitments, setRecruitments] = useState([]);
   const [uncoveredPosts, setUncoveredPosts] = useState([]);
+  const [linkedRequests, setLinkedRequests] = useState([]);
   const [allSubcontractors, setAllSubcontractors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -510,13 +511,14 @@ function ProjectEquipeTab({ projet, compact = false }) {
     setLoadError(null);
     try {
       const [overview, sa, subs] = await Promise.all([
-        listProjectEquipeOverview(projet.id, { projectRef: projet.ref }),
+        listProjectEquipeOverview(projet.id, { projectRef: projet.ref, projectName: projet.nom }),
         listAssignmentsByProject(projet.id).catch(() => []),
         listSubcontractors().catch(() => []),
       ]);
       setWorkerAssignments(overview.workers || []);
       setUncoveredPosts(overview.uncoveredPosts || []);
       setRecruitments(overview.recruitments || []);
+      setLinkedRequests(overview.linkedRequests || []);
       setSubAssignments((sa || []).filter((s) => s.status === 'active'));
       setAllSubcontractors(subs);
     } catch (err) {
@@ -651,10 +653,21 @@ function ProjectEquipeTab({ projet, compact = false }) {
 
         {workerAssignments.length === 0 ? (
           <div style={{ padding: '20px 0', color: 'var(--text-3)', fontSize: '0.85rem', textAlign: 'center', marginBottom: 24 }}>
-            Aucun ouvrier affecté pour le moment.
-            <div style={{ fontSize: '0.78rem', marginTop: 8 }}>
-              Vérifiez que les demandes ressources du projet ont des ouvriers affectés et validés.
-            </div>
+            {linkedRequests.length === 0 ? (
+              <>
+                Aucune demande RH liée à ce projet.
+                <div style={{ fontSize: '0.78rem', marginTop: 8 }}>
+                  Déclarez un besoin dans l&apos;onglet <strong>Besoins</strong> pour créer une demande ressources.
+                </div>
+              </>
+            ) : (
+              <>
+                {linkedRequests.length} demande(s) RH liée(s) — aucun ouvrier affecté pour le moment.
+                <div style={{ fontSize: '0.78rem', marginTop: 8 }}>
+                  Affectez et <strong>validez</strong> les ouvriers dans <strong>RH → Demandes ressources</strong>.
+                </div>
+              </>
+            )}
           </div>
         ) : (
           <div className="table-wrap" style={{ marginBottom: 24 }}>
@@ -685,7 +698,11 @@ function ProjectEquipeTab({ projet, compact = false }) {
         <div style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--red)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
           C. Postes manquants et recrutements en cours
         </div>
-        {uncoveredPosts.length === 0 && recruitments.length === 0 ? (
+        {linkedRequests.length === 0 ? (
+          <div style={{ padding: '20px 0', color: 'var(--text-3)', fontSize: '0.85rem', textAlign: 'center', marginBottom: 24 }}>
+            Aucune demande RH — section inactive tant qu&apos;un besoin n&apos;est pas envoyé au service RH.
+          </div>
+        ) : uncoveredPosts.length === 0 && recruitments.length === 0 ? (
           <div style={{ padding: '20px 0', color: 'var(--text-3)', fontSize: '0.85rem', textAlign: 'center', marginBottom: 24 }}>
             Tous les besoins RH sont couverts — aucun recrutement en cours.
           </div>

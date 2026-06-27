@@ -4,14 +4,12 @@
 import { getSupabase } from '../../lib/supabase';
 import { workerFullName } from './attendance';
 import { emitRhAssignmentsUpdated } from './resourceRequestCoverage';
+import {
+  listRhWorkersForProject,
+  collectRhWorkerIdsForProject,
+} from './projectRhLink';
 
 const TABLE = 'worker_project_assignments';
-const RH_REQUESTS = 'resource_requests';
-const RH_WORKERS = 'resource_request_workers';
-
-/** Demandes RH ouvertes dont les affectations alimentent l'équipe projet */
-const SYNCABLE_RH_STATUTS = ['en_cours', 'partielle', 'affectee', 'recrutement_en_cours'];
-const CLOSED_RH_STATUTS = ['cloturee', 'refusee'];
 
 export function normalizeWorkerAssignment(row) {
   if (!row) return null;
@@ -72,89 +70,12 @@ export async function listWorkersByProject(projectId) {
   return (data || []).map(normalizeWorkerAssignment);
 }
 
-async function loadOpenRhRequestIds(projectId, projectRef) {
-  const base = () => getSupabase()
-    .from(RH_REQUESTS)
-    .select('id, statut, project_id, project_ref')
-    .or('request_type.eq.ressource,request_type.is.null')
-    .is('parent_request_id', null)
-    .not('statut', 'in', '("cloturee","refusee")');
-
-  let { data, error } = await base().eq('project_id', projectId);
-  if (error) throw error;
-
-  if (!(data || []).length && projectRef) {
-    const byRef = await base().eq('project_ref', projectRef);
-    if (byRef.error) throw byRef.error;
-    data = byRef.data || [];
-  }
-
-  return (data || []).map((r) => r.id).filter(Boolean);
+/** @deprecated utilise listRhWorkersForProject */
+export async function listRhAssignedWorkersForProject(projectId, projectRef = '', projectName = '') {
+  return listRhWorkersForProject(projectId, { projectRef, projectName });
 }
 
-/**
- * Ouvriers affectés via demandes RH — source de vérité (resource_request_workers).
- */
-export async function listRhAssignedWorkersForProject(projectId, projectRef = '') {
-  if (!projectId) return [];
-  await getAuthUserId();
-
-  const { data: requests, error: reqErr } = await getSupabase()
-    .from(RH_REQUESTS)
-    .select('id, statut, ref_demande, fonction, project_id, project_ref')
-    .or('request_type.eq.ressource,request_type.is.null')
-    .is('parent_request_id', null)
-    .not('statut', 'in', '("cloturee","refusee")')
-    .eq('project_id', projectId);
-  if (reqErr) throw reqErr;
-
-  let requestRows = requests || [];
-  if (!requestRows.length && projectRef) {
-    const { data: byRef, error: refErr } = await getSupabase()
-      .from(RH_REQUESTS)
-      .select('id, statut, ref_demande, fonction, project_id, project_ref')
-      .or('request_type.eq.ressource,request_type.is.null')
-      .is('parent_request_id', null)
-      .not('statut', 'in', '("cloturee","refusee")')
-      .eq('project_ref', projectRef);
-    if (refErr) throw refErr;
-    requestRows = byRef || [];
-  }
-
-  const requestMap = new Map(requestRows.map((r) => [r.id, r]));
-  const requestIds = [...requestMap.keys()];
-  if (!requestIds.length) return [];
-
-  const { data: rows, error } = await getSupabase()
-    .from(RH_WORKERS)
-    .select('worker_id, assigned_at, request_id, workers(id, prenom, nom, fonction, statut)')
-    .in('request_id', requestIds);
-  if (error) throw error;
-
-  const seen = new Map();
-  (rows || []).forEach((row) => {
-    if (!row.worker_id) return;
-    const wid = String(row.worker_id);
-    const req = requestMap.get(row.request_id);
-    if (!req) return;
-    const entry = {
-      id: `rh-${row.request_id}-${wid}`,
-      workerId: wid,
-      projectId: String(projectId),
-      status: 'active',
-      assignedAt: row.assigned_at,
-      workerName: workerFullName(row.workers) || '—',
-      workerFonction: row.workers?.fonction || req.fonction || '',
-      workerStatut: row.workers?.statut || '',
-      requestRef: req.ref_demande || '',
-      requestFonction: req.fonction || '',
-      requestStatut: req.statut || '',
-      source: 'rh',
-    };
-    if (!seen.has(wid)) seen.set(wid, entry);
-  });
-  return [...seen.values()];
-}
+/** Map workerId → [projectId, ...] */
 export function buildWorkerProjectIdsMap(assignments) {
   const map = new Map();
   (assignments || []).forEach((a) => {
@@ -271,41 +192,20 @@ async function syncStaffNeedsAfterAssignment(projectId) {
 /**
  * Recalcule worker_project_assignments depuis resource_request_workers (miroir pour planning / paie).
  */
-export async function syncProjectTeamFromRhRequests(projectId, projectRef = '') {
+export async function syncProjectTeamFromRhRequests(projectId, projectRef = '', projectName = '') {
   if (!projectId) return [];
   await getAuthUserId();
 
-  const requestIds = await loadOpenRhRequestIds(projectId, projectRef);
-  if (!requestIds.length) {
+  const workerIds = await collectRhWorkerIdsForProject(projectId, { projectRef, projectName });
+  if (workerIds === null) {
     return listWorkersByProject(projectId);
   }
 
-  const { data: requestRows, error: statErr } = await getSupabase()
-    .from(RH_REQUESTS)
-    .select('id, statut')
-    .in('id', requestIds);
-  if (statErr) throw statErr;
-
-  const syncableIds = (requestRows || [])
-    .filter((r) => SYNCABLE_RH_STATUTS.includes(r.statut))
-    .map((r) => r.id);
-
-  if (!syncableIds.length) {
-    return listWorkersByProject(projectId);
-  }
-
-  const { data: workerRows, error: wErr } = await getSupabase()
-    .from(RH_WORKERS)
-    .select('worker_id')
-    .in('request_id', syncableIds);
-  if (wErr) throw wErr;
-
-  const workerIds = [...new Set((workerRows || []).map((r) => String(r.worker_id)).filter(Boolean))];
   try {
     return await saveProjectWorkerAssignments(projectId, workerIds);
   } catch (err) {
     console.warn('[CITYMO] sync WPA from RH — table absente ou erreur, lecture RH seule', err);
-    return listRhAssignedWorkersForProject(projectId, projectRef);
+    return listRhWorkersForProject(projectId, { projectRef, projectName });
   }
 }
 

@@ -5,8 +5,8 @@ import { getSupabase } from '../../lib/supabase';
 import {
   syncProjectTeamFromRhRequests,
   listWorkersByProject,
-  listRhAssignedWorkersForProject,
 } from '../rh/workerProjectAssignments';
+import { findProjectRhRequestRows, listRhWorkersForProject } from './projectRhLink';
 import { listWorkers } from '../rh/workers';
 import { workerFullName } from '../rh/attendance';
 import {
@@ -204,10 +204,15 @@ async function loadRequestHistory(requestId) {
   return data || [];
 }
 
-export async function listResourceRequests({ statut = '', projectId = '', projectRef = '' } = {}) {
+export async function listResourceRequests({ statut = '', projectId = '', projectRef = '', projectName = '' } = {}) {
   await requireUser();
 
-  async function fetchRows(filterFn) {
+  let rows = [];
+  if (projectId || projectRef || projectName) {
+    rows = await findProjectRhRequestRows(projectId, { projectRef, projectName });
+    if (statut) rows = rows.filter((r) => r.statut === statut);
+    rows.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+  } else {
     let q = getSupabase()
       .from(TABLE)
       .select('*')
@@ -215,22 +220,9 @@ export async function listResourceRequests({ statut = '', projectId = '', projec
       .is('parent_request_id', null)
       .order('created_at', { ascending: false });
     if (statut) q = q.eq('statut', statut);
-    q = filterFn(q);
     const { data, error } = await q;
     if (error) throw error;
-    return data || [];
-  }
-
-  let rows = [];
-  if (projectId) {
-    rows = await fetchRows((q) => q.eq('project_id', projectId));
-    if (!rows.length && projectRef) {
-      rows = await fetchRows((q) => q.eq('project_ref', projectRef));
-    }
-  } else if (projectRef) {
-    rows = await fetchRows((q) => q.eq('project_ref', projectRef));
-  } else {
-    rows = await fetchRows((q) => q);
+    rows = data || [];
   }
 
   const [counts, openRecruitments] = await Promise.all([
@@ -260,21 +252,23 @@ export async function listProjectRecruitments(projectId) {
 }
 
 /** Vue unifiée équipe projet : ouvriers RH + postes manquants / recrutements */
-export async function listProjectEquipeOverview(projectId, { projectRef = '' } = {}) {
-  if (!projectId) return { workers: [], uncoveredPosts: [], recruitments: [] };
+export async function listProjectEquipeOverview(projectId, { projectRef = '', projectName = '' } = {}) {
+  if (!projectId) return { workers: [], uncoveredPosts: [], recruitments: [], linkedRequests: [] };
   await requireUser();
 
+  const linkOpts = { projectRef, projectName };
+
   const [rhWorkers, requests, recruitments] = await Promise.all([
-    listRhAssignedWorkersForProject(projectId, projectRef).catch((err) => {
-      console.warn('[CITYMO] listRhAssignedWorkersForProject', err);
+    listRhWorkersForProject(projectId, linkOpts).catch((err) => {
+      console.warn('[CITYMO] listRhWorkersForProject', err);
       return [];
     }),
-    listResourceRequests({ projectId, projectRef }),
+    listResourceRequests({ projectId, projectRef, projectName }),
     listProjectRecruitments(projectId),
   ]);
 
   try {
-    await syncProjectTeamFromRhRequests(projectId, projectRef);
+    await syncProjectTeamFromRhRequests(projectId, projectRef, projectName);
   } catch (err) {
     console.warn('[CITYMO] syncProjectTeamFromRhRequests', err);
   }
@@ -314,7 +308,14 @@ export async function listProjectEquipeOverview(projectId, { projectRef = '' } =
     });
   });
 
-  return { workers, uncoveredPosts, recruitments: recruitments || [], rhWorkers, wpaWorkers };
+  return {
+    workers,
+    uncoveredPosts,
+    recruitments: recruitments || [],
+    linkedRequests: requests || [],
+    rhWorkers,
+    wpaWorkers,
+  };
 }
 
 export async function getResourceRequest(id) {
