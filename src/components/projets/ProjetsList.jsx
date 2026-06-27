@@ -22,10 +22,8 @@ import ProjectDocuments from './ProjectDocuments';
 import ProjectPlanningModule from './ProjectPlanningModule';
 import ProjectBesoinsModule from './ProjectBesoinsModule';
 import {
-  listWorkersByProject,
-  syncProjectTeamFromRhRequests,
-} from '../../services/rh/workerProjectAssignments';
-import { listProjectRecruitments } from '../../services/rh/resourceRequests';
+  listProjectEquipeOverview,
+} from '../../services/rh/resourceRequests';
 import { recruitmentStatutBadge, recruitmentStatutLabel } from '../../constants/projectBesoins';
 import { listAssignmentsByProject, listSubcontractors, saveProjectSubcontractorAssignments, removeSubcontractorFromProject, subcontractorFullName } from '../../services/rh/subcontractors';
 import { listActiveEmployees, employeeSelectLabel, findEmployeeByStoredLabel, filterChefsProjet, filterChefsChantierEmployees, withSelectedEmployee } from '../../services/rh/employees';
@@ -498,6 +496,7 @@ function ProjectEquipeTab({ projet, compact = false }) {
   const [workerAssignments, setWorkerAssignments] = useState([]);
   const [subAssignments, setSubAssignments] = useState([]);
   const [recruitments, setRecruitments] = useState([]);
+  const [uncoveredPosts, setUncoveredPosts] = useState([]);
   const [allSubcontractors, setAllSubcontractors] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -510,17 +509,16 @@ function ProjectEquipeTab({ projet, compact = false }) {
     setLoading(true);
     setLoadError(null);
     try {
-      await syncProjectTeamFromRhRequests(projet.id);
-      const [wa, sa, subs, rec] = await Promise.all([
-        listWorkersByProject(projet.id),
+      const [overview, sa, subs] = await Promise.all([
+        listProjectEquipeOverview(projet.id),
         listAssignmentsByProject(projet.id).catch(() => []),
         listSubcontractors().catch(() => []),
-        listProjectRecruitments(projet.id).catch(() => []),
       ]);
-      setWorkerAssignments(wa);
+      setWorkerAssignments(overview.workers || []);
+      setUncoveredPosts(overview.uncoveredPosts || []);
+      setRecruitments(overview.recruitments || []);
       setSubAssignments((sa || []).filter((s) => s.status === 'active'));
       setAllSubcontractors(subs);
-      setRecruitments(rec || []);
     } catch (err) {
       console.error('[CITYMO] ProjectEquipeTab load', err);
       const msg = err?.message || '';
@@ -535,6 +533,15 @@ function ProjectEquipeTab({ projet, compact = false }) {
   }, [projet?.id]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    const handler = (e) => {
+      const pid = e?.detail?.projectId;
+      if (!pid || String(pid) === String(projet?.id)) load();
+    };
+    window.addEventListener('citymo:rh-assignments-updated', handler);
+    return () => window.removeEventListener('citymo:rh-assignments-updated', handler);
+  }, [load, projet?.id]);
 
   const assignableSubcontractors = useMemo(
     () => (allSubcontractors || []).filter((s) => s.statut === 'actif'),
@@ -609,7 +616,15 @@ function ProjectEquipeTab({ projet, compact = false }) {
   return (
     <>
       <div className={compact ? '' : 'card'} style={wrapStyle}>
-        {!compact && <SectionTitle icon={<Users size={13} />}>Équipe du projet</SectionTitle>}
+        {!compact && (
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
+            <SectionTitle icon={<Users size={13} />}>Équipe du projet</SectionTitle>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={load} disabled={loading || saving}>
+              <RefreshCw size={13} /> Actualiser
+            </button>
+          </div>
+        )}
+        {compact && <SectionTitle icon={<Users size={13} />}>Équipe du projet</SectionTitle>}
 
         {/* A. Encadrement */}
         <div style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--red)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
@@ -659,36 +674,58 @@ function ProjectEquipeTab({ projet, compact = false }) {
           </div>
         )}
 
-        {/* C. Postes en recrutement */}
+        {/* C. Postes manquants / recrutement */}
         <div style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--red)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
-          C. Postes en cours de recrutement
+          C. Postes manquants et recrutements en cours
         </div>
-        {recruitments.length === 0 ? (
+        {uncoveredPosts.length === 0 && recruitments.length === 0 ? (
           <div style={{ padding: '20px 0', color: 'var(--text-3)', fontSize: '0.85rem', textAlign: 'center', marginBottom: 24 }}>
-            Aucun poste en cours de recrutement.
+            Tous les besoins RH sont couverts — aucun recrutement en cours.
           </div>
         ) : (
           <div className="table-wrap" style={{ marginBottom: 24 }}>
             <table>
               <thead>
                 <tr>
+                  <th>Demande RH</th>
                   <th>Fonction</th>
-                  <th>Quantité</th>
-                  <th>Statut</th>
-                  <th>Date demande</th>
+                  <th>Couverture</th>
+                  <th>Manquant</th>
+                  <th>Recrutement</th>
+                  <th>Priorité</th>
                 </tr>
               </thead>
               <tbody>
-                {recruitments.map((r) => (
+                {uncoveredPosts.map((p) => (
+                  <tr key={p.requestId}>
+                    <td style={{ fontWeight: 700, color: 'var(--red)' }}>{p.ref || '—'}</td>
+                    <td style={{ fontWeight: 600 }}>{p.fonction}</td>
+                    <td>{p.assigned}/{p.demanded}</td>
+                    <td style={{ fontWeight: 700, color: 'var(--red)' }}>{p.manque}</td>
+                    <td>
+                      {p.hasRecruitment ? (
+                        <span className={`badge ${recruitmentStatutBadge(p.recruitment?.recruitment_statut)}`}>
+                          {recruitmentStatutLabel(p.recruitment?.recruitment_statut)}
+                        </span>
+                      ) : (
+                        <span className="badge badge-orange">En attente recrutement</span>
+                      )}
+                    </td>
+                    <td>{p.priorite || '—'}</td>
+                  </tr>
+                ))}
+                {uncoveredPosts.length === 0 && recruitments.map((r) => (
                   <tr key={r.id}>
+                    <td style={{ fontWeight: 700, color: 'var(--red)' }}>{r.ref || '—'}</td>
                     <td style={{ fontWeight: 600 }}>{r.fonction}</td>
-                    <td>{r.quantite} poste{r.quantite > 1 ? 's' : ''}</td>
+                    <td>—</td>
+                    <td style={{ fontWeight: 700 }}>{r.quantite}</td>
                     <td>
                       <span className={`badge ${recruitmentStatutBadge(r.recruitment_statut)}`}>
                         {recruitmentStatutLabel(r.recruitment_statut)}
                       </span>
                     </td>
-                    <td>{r.created_at ? new Date(r.created_at).toLocaleDateString('fr-FR') : '—'}</td>
+                    <td>{r.priorite || '—'}</td>
                   </tr>
                 ))}
               </tbody>

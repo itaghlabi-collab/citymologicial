@@ -4,9 +4,15 @@
 import { getSupabase } from '../../lib/supabase';
 import {
   syncProjectTeamFromRhRequests,
+  listWorkersByProject,
 } from '../rh/workerProjectAssignments';
 import { listWorkers } from '../rh/workers';
 import { workerFullName } from '../rh/attendance';
+import {
+  countAssignedWorkers,
+  computeRequestCoverage,
+  emitRhAssignmentsUpdated,
+} from './resourceRequestCoverage';
 import {
   BESOIN_REQUEST_STATUTS,
   RECRUITMENT_STATUTS,
@@ -149,11 +155,28 @@ async function loadWorkerCounts(requestIds = []) {
   return counts;
 }
 
+async function loadOpenRecruitmentCounts(requestIds = []) {
+  if (!requestIds.length) return {};
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .select('parent_request_id')
+    .in('parent_request_id', requestIds)
+    .eq('request_type', 'recrutement')
+    .not('recruitment_statut', 'in', '("cloture","annule","valide")');
+  if (error) return {};
+  const counts = {};
+  (data || []).forEach((r) => {
+    if (!r.parent_request_id) return;
+    counts[r.parent_request_id] = (counts[r.parent_request_id] || 0) + 1;
+  });
+  return counts;
+}
+
 async function syncRequestCoverageStatut(requestId) {
   if (!requestId) return;
   const request = await getResourceRequest(requestId);
   if (!request || request.request_type === 'recrutement') return;
-  const assigned = request.workers?.length || 0;
+  const assigned = countAssignedWorkers(request);
   const needed = Number(request.quantite) || 0;
   const openRecruitments = (request.recruitments || []).filter(
     (r) => !['cloture', 'annule', 'valide'].includes(r.recruitment_statut),
@@ -192,10 +215,14 @@ export async function listResourceRequests({ statut = '', projectId = '' } = {})
   const { data, error } = await q;
   if (error) throw error;
   const rows = data || [];
-  const counts = await loadWorkerCounts(rows.map((r) => r.id));
+  const [counts, openRecruitments] = await Promise.all([
+    loadWorkerCounts(rows.map((r) => r.id)),
+    loadOpenRecruitmentCounts(rows.map((r) => r.id)),
+  ]);
   return rows.map((row) => {
     const req = normalizeRequest(row);
     req.workers_count = counts[row.id] || 0;
+    req.open_recruitments_count = openRecruitments[row.id] || 0;
     return req;
   });
 }
@@ -208,10 +235,50 @@ export async function listProjectRecruitments(projectId) {
     .select('*')
     .eq('project_id', projectId)
     .eq('request_type', 'recrutement')
-    .not('recruitment_statut', 'in', '("cloture","annule")')
+    .not('recruitment_statut', 'in', '("cloture","annule","valide")')
     .order('created_at', { ascending: false });
   if (error) throw error;
   return (data || []).map((row) => normalizeRequest(row));
+}
+
+/** Vue unifiée équipe projet : ouvriers validés + postes manquants / recrutements */
+export async function listProjectEquipeOverview(projectId) {
+  if (!projectId) return { workers: [], uncoveredPosts: [], recruitments: [] };
+  await requireUser();
+  await syncProjectTeamFromRhRequests(projectId);
+
+  const [workers, requests, recruitments] = await Promise.all([
+    listWorkersByProject(projectId),
+    listResourceRequests({ projectId }),
+    listProjectRecruitments(projectId),
+  ]);
+
+  const recruitmentByParent = new Map();
+  (recruitments || []).forEach((r) => {
+    if (r.parent_request_id) recruitmentByParent.set(r.parent_request_id, r);
+  });
+
+  const uncoveredPosts = [];
+  (requests || []).forEach((req) => {
+    if (['cloturee', 'refusee'].includes(req.statut)) return;
+    const cov = computeRequestCoverage(req);
+    if (cov.manque <= 0) return;
+    const recruitment = recruitmentByParent.get(req.id) || null;
+    uncoveredPosts.push({
+      requestId: req.id,
+      ref: req.ref,
+      fonction: req.fonction,
+      demanded: cov.demanded,
+      assigned: cov.assigned,
+      manque: cov.manque,
+      priorite: req.priorite,
+      date_souhaitee: req.date_souhaitee,
+      recruitment,
+      hasRecruitment: !!recruitment,
+    });
+  });
+
+  return { workers: workers || [], uncoveredPosts, recruitments: recruitments || [] };
 }
 
 export async function getResourceRequest(id) {
@@ -224,7 +291,12 @@ export async function getResourceRequest(id) {
     data.request_type === 'recrutement' ? Promise.resolve([]) : loadChildRecruitments(id),
     loadProjectMeta(data.project_id),
   ]);
-  return normalizeRequest(data, workers, history, recruitments, projectMeta);
+  const req = normalizeRequest(data, workers, history, recruitments, projectMeta);
+  req.workers_count = workers.length;
+  req.open_recruitments_count = (recruitments || []).filter(
+    (r) => !['cloture', 'annule', 'valide'].includes(r.recruitment_statut),
+  ).length;
+  return req;
 }
 
 async function loadProjectMeta(projectId) {
@@ -376,8 +448,6 @@ export async function validateResourceRequest(id, { allowPartial = true } = {}) 
     throw new Error(`Il manque ${needed - assignedCount} ressource(s) pour valider complètement.`);
   }
 
-  await syncProjectTeamFromRhRequests(request.project_id);
-
   const isPartial = assignedCount > 0 && assignedCount < needed;
   const newStatut = isPartial ? 'partielle' : 'affectee';
 
@@ -391,6 +461,9 @@ export async function validateResourceRequest(id, { allowPartial = true } = {}) 
     })
     .eq('id', id);
   if (error) throw error;
+
+  await syncProjectTeamFromRhRequests(request.project_id);
+  emitRhAssignmentsUpdated(request.project_id);
 
   const detailMsg = isPartial
     ? `Affectation partielle — ${assignedCount}/${needed} ouvrier(s) affecté(s)`
@@ -460,7 +533,7 @@ export async function createRecruitmentRequestFromRequest(id) {
   if (!request) throw new Error('Demande introuvable.');
   if (request.request_type === 'recrutement') throw new Error('Impossible depuis une demande de recrutement.');
 
-  const assigned = (request.workers || []).length;
+  const assigned = countAssignedWorkers(request);
   const manque = Math.max(0, (Number(request.quantite) || 0) - assigned);
   if (manque <= 0) throw new Error('Aucun poste manquant — recrutement non nécessaire.');
 
@@ -497,6 +570,7 @@ export async function createRecruitmentRequestFromRequest(id) {
 
   await logHistory(id, 'recruitment_created', `Demande recrutement ${ref} pour ${manque} poste(s)`, user.id, actorName);
   await logHistory(data.id, 'created', `Recrutement lié à ${request.ref}`, user.id, actorName);
+  emitRhAssignmentsUpdated(request.project_id);
 
   if (request.staff_need_id) {
     try {
@@ -554,14 +628,8 @@ export async function removeWorkerFromResourceRequest(requestId, workerId) {
     .eq('worker_id', workerId);
   if (delErr) throw delErr;
 
-  try {
-    await syncProjectTeamFromRhRequests(request.project_id);
-  } catch (err) {
-    console.warn('[CITYMO] sync project team after remove worker', err);
-  }
-
   const updated = await getResourceRequest(requestId);
-  const count = updated.workers?.length || 0;
+  const count = countAssignedWorkers(updated);
   const needed = Number(request.quantite) || 0;
   let newStatut = 'en_cours';
   if (count === 0) newStatut = 'en_attente';
@@ -572,6 +640,13 @@ export async function removeWorkerFromResourceRequest(requestId, workerId) {
     .from(TABLE)
     .update({ statut: newStatut, updated_at: new Date().toISOString() })
     .eq('id', requestId);
+
+  try {
+    await syncProjectTeamFromRhRequests(request.project_id);
+    emitRhAssignmentsUpdated(request.project_id);
+  } catch (err) {
+    console.warn('[CITYMO] sync project team after remove worker', err);
+  }
 
   await logHistory(requestId, 'worker_removed', `Ouvrier retiré de la demande`, user.id, actorName);
 
@@ -614,6 +689,7 @@ export async function deleteResourceRequestTree(requestId) {
   if (projectId) {
     try {
       await syncProjectTeamFromRhRequests(projectId);
+      emitRhAssignmentsUpdated(projectId);
     } catch (err) {
       console.warn('[CITYMO] sync project team after delete request', err);
     }

@@ -1,5 +1,9 @@
 /** Helpers UI — Demandes ressources RH */
-import { BESOIN_REQUEST_STATUTS } from '../../constants/projectBesoins';
+import {
+  computeRequestCoverage,
+  deriveRequestStatut,
+  deriveRequestStatutLabel,
+} from '../../services/rh/resourceRequestCoverage';
 
 export const RH_REQUEST_TABS = [
   { key: 'all', label: 'Toutes', statuts: null },
@@ -12,42 +16,38 @@ export const RH_REQUEST_TABS = [
 ];
 
 export function getRequestCoverage(r) {
-  const demanded = Number(r?.quantite) || 0;
-  const assigned = r?.workers?.length ?? r?.workers_count ?? 0;
-  const manque = Math.max(0, demanded - assigned);
-  const taux = demanded > 0 ? Math.round((assigned / demanded) * 100) : 0;
+  return computeRequestCoverage(r);
+}
 
-  if (r?.statut === 'recrutement_en_cours') {
-    return { demanded, assigned, manque, taux, label: 'Recrutement en cours', badge: 'badge-purple', color: '#7B1FA2' };
-  }
-  if (manque === 0 && assigned > 0) {
-    return { demanded, assigned, manque, taux, label: 'Couvert', badge: 'badge-green', color: '#2E7D32' };
-  }
-  if (assigned > 0) {
-    return { demanded, assigned, manque, taux, label: 'Partiellement couvert', badge: 'badge-orange', color: '#F57C00' };
-  }
-  return { demanded, assigned, manque, taux, label: 'Non couvert', badge: 'badge-red', color: '#C62828' };
+export function getDerivedRequestStatut(r) {
+  const cov = computeRequestCoverage(r);
+  return {
+    statut: deriveRequestStatut(r, cov),
+    label: deriveRequestStatutLabel(r, cov),
+    coverage: cov,
+  };
 }
 
 export function computeResourceRequestStats(requests = []) {
-  const open = requests.filter((r) => !['cloturee', 'refusee'].includes(r.statut));
-  const totalDemandes = open.reduce((s, r) => s + (Number(r.quantite) || 0), 0);
-  const totalAffectes = open.reduce((s, r) => s + getRequestCoverage(r).assigned, 0);
+  const enriched = requests.map((r) => ({ r, cov: computeRequestCoverage(r), derived: deriveRequestStatut(r) }));
+  const open = enriched.filter(({ derived }) => !['cloturee', 'refusee'].includes(derived));
+  const totalDemandes = open.reduce((s, { cov }) => s + cov.demanded, 0);
+  const totalAffectes = open.reduce((s, { cov }) => s + cov.assigned, 0);
   return {
     total: requests.length,
-    enAttente: requests.filter((r) => r.statut === 'en_attente').length,
-    enCoursPartiel: requests.filter((r) => ['en_cours', 'partielle'].includes(r.statut)).length,
-    couvertes: requests.filter((r) => r.statut === 'affectee').length,
-    recrutement: requests.filter((r) => r.statut === 'recrutement_en_cours').length,
-    aRecruter: open.reduce((s, r) => s + getRequestCoverage(r).manque, 0),
-    urgentes: requests.filter((r) => ['Urgente', 'Critique'].includes(r.priorite) && !['cloturee', 'refusee'].includes(r.statut)).length,
-    cloturees: requests.filter((r) => ['cloturee', 'refusee'].includes(r.statut)).length,
+    enAttente: enriched.filter(({ derived }) => derived === 'en_attente').length,
+    enCoursPartiel: enriched.filter(({ derived }) => ['en_cours', 'partielle'].includes(derived)).length,
+    couvertes: enriched.filter(({ derived }) => derived === 'affectee').length,
+    recrutement: enriched.filter(({ derived }) => derived === 'recrutement_en_cours').length,
+    aRecruter: open.reduce((s, { cov }) => s + cov.manque, 0),
+    urgentes: enriched.filter(({ r, derived }) => ['Urgente', 'Critique'].includes(r.priorite) && !['cloturee', 'refusee'].includes(derived)).length,
+    cloturees: enriched.filter(({ derived }) => ['cloturee', 'refusee'].includes(derived)).length,
     taux: totalDemandes > 0 ? Math.round((totalAffectes / totalDemandes) * 100) : 0,
   };
 }
 
 export function deleteResourceRequestWarnMessage(r) {
-  const cov = getRequestCoverage(r);
+  const cov = computeRequestCoverage(r);
   if (cov.assigned > 0) {
     return `Des ouvriers sont affectés (${cov.assigned}). Supprimer définitivement cette demande RH et le besoin projet lié ?`;
   }
@@ -61,7 +61,7 @@ export function canDeleteRequest() {
 export function filterRequestsByTab(requests, tabKey) {
   const tab = RH_REQUEST_TABS.find((t) => t.key === tabKey) || RH_REQUEST_TABS[0];
   if (!tab.statuts) return requests;
-  return requests.filter((r) => tab.statuts.includes(r.statut));
+  return requests.filter((r) => tab.statuts.includes(deriveRequestStatut(r, computeRequestCoverage(r))));
 }
 
 export function statutBadgeClass(statut) {
@@ -70,7 +70,6 @@ export function statutBadgeClass(statut) {
   if (statut === 'en_cours') return 'badge-blue';
   if (statut === 'recrutement_en_cours') return 'badge-purple';
   if (statut === 'refusee') return 'badge-red';
-  if (!BESOIN_REQUEST_STATUTS.find((s) => s.value === statut)) return 'badge-grey';
   return 'badge-grey';
 }
 
@@ -81,15 +80,17 @@ export function prioriteBadgeClass(priorite) {
 }
 
 export function canAssignRequest(r) {
-  return ['en_attente', 'en_cours', 'partielle', 'recrutement_en_cours'].includes(r?.statut);
+  const statut = deriveRequestStatut(r, computeRequestCoverage(r));
+  return ['en_attente', 'en_cours', 'partielle', 'recrutement_en_cours'].includes(statut);
 }
 
 export function canCloseRequest(r) {
-  return ['affectee', 'partielle', 'recrutement_en_cours'].includes(r?.statut);
+  const statut = deriveRequestStatut(r, computeRequestCoverage(r));
+  return ['affectee', 'partielle', 'recrutement_en_cours'].includes(statut);
 }
 
 export function canRecruitRequest(r) {
-  return getRequestCoverage(r).manque > 0 && canAssignRequest(r);
+  return computeRequestCoverage(r).manque > 0 && canAssignRequest(r);
 }
 
 export function CoverageProgressBar({ taux, color = '#1565C0' }) {

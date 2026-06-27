@@ -8,7 +8,7 @@ import {
   recruitmentStatutBadge, recruitmentStatutColor,
 } from '../../constants/projectBesoins';
 import { requestStatutColor } from '../../services/rh/resourceRequests';
-import { getRequestCoverage, CoverageProgressBar, CoverageBadge } from './resourceRequestUi';
+import { getRequestCoverage, getDerivedRequestStatut, canAssignRequest, canCloseRequest, CoverageProgressBar, CoverageBadge } from './resourceRequestUi';
 
 function fmtDate(d) {
   if (!d) return '—';
@@ -76,7 +76,8 @@ export default function ResourceRequestDetailView({
   if (!detail) return null;
 
   const coverage = getRequestCoverage(detail);
-  const canAssign = ['en_attente', 'en_cours', 'partielle', 'recrutement_en_cours'].includes(detail.statut);
+  const derived = getDerivedRequestStatut(detail);
+  const canAssign = canAssignRequest(detail);
   const openRecruitments = (detail.recruitments || []).filter(
     (r) => !['cloture', 'annule'].includes(r.recruitment_statut),
   );
@@ -101,7 +102,7 @@ export default function ResourceRequestDetailView({
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             <CoverageBadge coverage={coverage} />
-            <span className="badge" style={{ background: requestStatutColor(detail.statut), color: '#fff' }}>{detail.statutLabel}</span>
+            <span className="badge" style={{ background: requestStatutColor(derived.statut), color: '#fff' }}>{derived.label}</span>
           </div>
         </div>
         <div style={{ padding: '12px 20px', display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap' }}>
@@ -130,7 +131,7 @@ export default function ResourceRequestDetailView({
           <InfoCell label="Date souhaitée">{fmtDate(detail.date_souhaitee)}</InfoCell>
           <InfoCell label="Demandeur">{detail.requested_by_name || '—'}</InfoCell>
           <InfoCell label="Statut">
-            <span className="badge" style={{ background: requestStatutColor(detail.statut), color: '#fff' }}>{detail.statutLabel}</span>
+            <span className="badge" style={{ background: requestStatutColor(derived.statut), color: '#fff' }}>{derived.label}</span>
           </InfoCell>
         </div>
         {detail.commentaire && (
@@ -138,7 +139,7 @@ export default function ResourceRequestDetailView({
             {detail.commentaire}
           </div>
         )}
-        {detail.statut === 'en_attente' && (
+        {derived.statut === 'en_attente' && (
           <div style={{ marginTop: 16, paddingTop: 16, borderTop: '1px dashed var(--border)' }}>
             <button type="button" className="btn btn-secondary btn-sm" disabled={saving} onClick={onTakeCharge}>
               Prendre en charge
@@ -296,7 +297,7 @@ export default function ResourceRequestDetailView({
               <XCircle size={13} /> Refuser
             </button>
           )}
-          {['affectee', 'partielle', 'recrutement_en_cours'].includes(detail.statut) && (
+          {canCloseRequest(detail) && (
             <button type="button" className="btn btn-primary btn-sm" disabled={saving} onClick={onCloseRequest}>
               <CheckCircle size={13} /> Clôturer la demande
             </button>

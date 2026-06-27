@@ -29,6 +29,7 @@ import {
   computeResourceRequestStats,
   filterRequestsByTab,
   getRequestCoverage,
+  getDerivedRequestStatut,
   statutBadgeClass,
   prioriteBadgeClass,
   canAssignRequest,
@@ -77,6 +78,21 @@ export default function DemandesRessources() {
   }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    const handler = async () => {
+      await load();
+      if (detail?.id) {
+        try {
+          setDetail(await getResourceRequest(detail.id));
+        } catch (err) {
+          console.warn('[CITYMO] refresh detail after RH sync', err);
+        }
+      }
+    };
+    window.addEventListener('citymo:rh-assignments-updated', handler);
+    return () => window.removeEventListener('citymo:rh-assignments-updated', handler);
+  }, [load, detail?.id]);
 
   const stats = useMemo(() => computeResourceRequestStats(requests), [requests]);
 
@@ -435,6 +451,7 @@ export default function DemandesRessources() {
               <tbody>
                 {filtered.map((r) => {
                   const cov = getRequestCoverage(r);
+                  const derived = getDerivedRequestStatut(r);
                   return (
                     <tr key={r.id}>
                       <td data-label="Référence"><strong>{r.ref || '—'}</strong></td>
@@ -455,7 +472,7 @@ export default function DemandesRessources() {
                       </td>
                       <td data-label="Date souhaitée">{fmtDate(r.date_souhaitee)}</td>
                       <td data-label="Statut">
-                        <span className={`badge ${statutBadgeClass(r.statut)}`}>{r.statutLabel}</span>
+                        <span className={`badge ${statutBadgeClass(derived.statut)}`}>{derived.label}</span>
                       </td>
                       <td data-label="Actions">
                         <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>

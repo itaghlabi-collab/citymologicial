@@ -3,8 +3,14 @@
  */
 import { getSupabase } from '../../lib/supabase';
 import { workerFullName } from './attendance';
+import { emitRhAssignmentsUpdated } from './resourceRequestCoverage';
 
 const TABLE = 'worker_project_assignments';
+const RH_REQUESTS = 'resource_requests';
+const RH_WORKERS = 'resource_request_workers';
+
+/** Demandes RH dont les affectations sont validées (source → équipe projet) */
+const VALIDATED_RH_STATUTS = ['partielle', 'affectee', 'recrutement_en_cours'];
 
 export function normalizeWorkerAssignment(row) {
   if (!row) return null;
@@ -158,6 +164,7 @@ export async function saveProjectWorkerAssignments(projectId, workerIds = []) {
   }
 
   await syncStaffNeedsAfterAssignment(pid);
+  emitRhAssignmentsUpdated(pid);
   return listWorkersByProject(pid);
 }
 
@@ -179,29 +186,35 @@ async function syncStaffNeedsAfterAssignment(projectId) {
 }
 
 /**
- * Recalcule l'équipe projet depuis les demandes RH validées (source de vérité).
- * Évite les ouvriers fantômes laissés par d'anciens tests ou affectations manuelles.
+ * Recalcule l'équipe projet depuis les affectations RH validées (resource_request_workers).
+ * Seules les demandes validées (partielle / affectée / recrutement) alimentent l'équipe projet.
  */
 export async function syncProjectTeamFromRhRequests(projectId) {
   if (!projectId) return [];
   await getAuthUserId();
 
-  const { data, error } = await getSupabase()
-    .from('resource_requests')
-    .select('id, resource_request_workers(worker_id)')
+  const { data: requests, error } = await getSupabase()
+    .from(RH_REQUESTS)
+    .select('id')
     .eq('project_id', projectId)
     .or('request_type.eq.ressource,request_type.is.null')
-    .in('statut', ['en_cours', 'partielle', 'affectee', 'recrutement_en_cours']);
+    .is('parent_request_id', null)
+    .in('statut', VALIDATED_RH_STATUTS);
   if (error) throw error;
 
-  const workerIds = new Set();
-  (data || []).forEach((req) => {
-    (req.resource_request_workers || []).forEach((w) => {
-      if (w.worker_id) workerIds.add(String(w.worker_id));
-    });
-  });
+  const requestIds = (requests || []).map((r) => r.id).filter(Boolean);
+  if (!requestIds.length) {
+    return saveProjectWorkerAssignments(projectId, []);
+  }
 
-  return saveProjectWorkerAssignments(projectId, [...workerIds]);
+  const { data: workerRows, error: wErr } = await getSupabase()
+    .from(RH_WORKERS)
+    .select('worker_id')
+    .in('request_id', requestIds);
+  if (wErr) throw wErr;
+
+  const workerIds = [...new Set((workerRows || []).map((r) => String(r.worker_id)).filter(Boolean))];
+  return saveProjectWorkerAssignments(projectId, workerIds);
 }
 
 export async function removeWorkerFromProject(projectId, workerId) {
