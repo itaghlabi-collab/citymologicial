@@ -11,7 +11,7 @@ import {
   AlertTriangle, Settings, Archive, ChevronDown, DollarSign,
   HardHat, Users, ClipboardList, Layers, Gauge, Wrench
 } from 'lucide-react';
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useProjects } from '../../hooks/useProjects';
 import { listClients, clientDisplayName } from '../../services/crm/clients';
 import { TYPE_PROJET_VALUES, TYPE_PROJET_LABEL } from '../../constants/commercial';
@@ -504,10 +504,13 @@ function ProjectEquipeTab({ projet, compact = false }) {
   const [loadError, setLoadError] = useState(null);
   const [showSubModal, setShowSubModal] = useState(false);
   const [selectedSubIds, setSelectedSubIds] = useState(() => new Set());
+  const loadInFlight = useRef(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async ({ silent = false } = {}) => {
     if (!projet?.id) return;
-    setLoading(true);
+    if (loadInFlight.current) return;
+    loadInFlight.current = true;
+    if (!silent) setLoading(true);
     setLoadError(null);
     try {
       const [overview, sa, subs] = await Promise.all([
@@ -530,16 +533,17 @@ function ProjectEquipeTab({ projet, compact = false }) {
         setLoadError(err.message || 'Impossible de charger l\'équipe.');
       }
     } finally {
-      setLoading(false);
+      loadInFlight.current = false;
+      if (!silent) setLoading(false);
     }
-  }, [projet?.id]);
+  }, [projet?.id, projet?.ref, projet?.nom]);
 
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => {
     const handler = (e) => {
       const pid = e?.detail?.projectId;
-      if (!pid || String(pid) === String(projet?.id)) load();
+      if (!pid || String(pid) === String(projet?.id)) load({ silent: true });
     };
     window.addEventListener('citymo:rh-assignments-updated', handler);
     return () => window.removeEventListener('citymo:rh-assignments-updated', handler);

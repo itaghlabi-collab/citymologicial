@@ -120,7 +120,7 @@ export function enrichWorkersWithProjectIds(workers, assignmentMap) {
  * Synchronise les ouvriers affectés à un projet (checkbox modale).
  * workerIds = liste complète des ouvriers actifs cochés.
  */
-export async function saveProjectWorkerAssignments(projectId, workerIds = []) {
+export async function saveProjectWorkerAssignments(projectId, workerIds = [], { notify = false } = {}) {
   if (!projectId) {
     const err = new Error('Projet requis.');
     err.code = 'VALIDATION';
@@ -168,7 +168,7 @@ export async function saveProjectWorkerAssignments(projectId, workerIds = []) {
   }
 
   await syncStaffNeedsAfterAssignment(pid);
-  emitRhAssignmentsUpdated(pid);
+  if (notify) emitRhAssignmentsUpdated(pid);
   return listWorkersByProject(pid);
 }
 
@@ -202,7 +202,7 @@ export async function syncProjectTeamFromRhRequests(projectId, projectRef = '', 
   }
 
   try {
-    return await saveProjectWorkerAssignments(projectId, workerIds);
+    return await saveProjectWorkerAssignments(projectId, workerIds, { notify: false });
   } catch (err) {
     console.warn('[CITYMO] sync WPA from RH — table absente ou erreur, lecture RH seule', err);
     return listRhWorkersForProject(projectId, { projectRef, projectName });
