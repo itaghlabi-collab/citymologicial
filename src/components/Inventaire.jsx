@@ -2,7 +2,7 @@
  * Inventaire.jsx — Router module Inventaire & Dépôt ERP CITYMO
  * État partagé entre sous-modules : articles (sync Supabase), dépôts (UI local)
  */
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import CategoriesStock from './inventaire/CategoriesStock.jsx';
 import ArticlesStock   from './inventaire/ArticlesStock.jsx';
 import Depots          from './inventaire/Depots.jsx';
@@ -36,10 +36,10 @@ export default function Inventaire({ activeTab, initialArticleCode, onArticleCod
       .catch(() => {});
   }, [tab]);
 
-  function handleDepotsChange(list) {
+  const handleDepotsChange = useCallback((list) => {
     setDepots(list);
     if (list?.length) setEmplacementNoms(list.map((d) => d.nom));
-  }
+  }, []);
 
   return (
     <div className="inventaire-module">

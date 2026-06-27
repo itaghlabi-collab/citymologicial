@@ -1,7 +1,7 @@
 /**
  * Depots.jsx — Emplacements de stock ERP CITYMO
  */
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { MapPin, Search, Filter, Eye, ChevronLeft, Plus, Trash2, Loader2 } from 'lucide-react';
 import {
   INPUT_STYLE, SELECT_STYLE, EMPLACEMENTS_STOCK,
@@ -98,6 +98,8 @@ export default function Depots({ articles, onDepotsChange }) {
   const [detailId, setDetailId] = useState(null);
   const [formOpen, setFormOpen] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
+  const onDepotsChangeRef = useRef(onDepotsChange);
+  onDepotsChangeRef.current = onDepotsChange;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -114,7 +116,7 @@ export default function Depots({ articles, onDepotsChange }) {
         statut: w.statut || 'Actif',
       }));
       setEmplacements(mapped);
-      onDepotsChange?.(mapped);
+      onDepotsChangeRef.current?.(mapped);
     } catch (err) {
       console.warn('[CITYMO] Depots load', err);
       const fallback = EMPLACEMENTS_STOCK.map((nom, index) => ({
@@ -125,12 +127,12 @@ export default function Depots({ articles, onDepotsChange }) {
         local: true,
       }));
       setEmplacements(fallback);
-      onDepotsChange?.(fallback);
+      onDepotsChangeRef.current?.(fallback);
       setError('Base Supabase indisponible — mode lecture seule (exécutez le script stock_warehouses).');
     } finally {
       setLoading(false);
     }
-  }, [onDepotsChange]);
+  }, []);
 
   useEffect(() => { load(); }, [load]);
 
@@ -277,9 +279,9 @@ export default function Depots({ articles, onDepotsChange }) {
       )}
 
       <div className="card" style={{ padding: 0 }}>
-        {loading ? (
+        {loading && emplacements.length === 0 ? (
           <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-3)' }}>
-            <Loader2 size={22} style={{ animation: 'spin 0.8s linear infinite' }} />
+            <Loader2 size={22} className="cin-spin" />
           </div>
         ) : filtered.length === 0 ? (
           <EmptyState icon={<MapPin size={24} />} title="Aucun emplacement" sub="Aucun résultat pour cette recherche" action="Ajouter un emplacement" onAction={openCreate} />
