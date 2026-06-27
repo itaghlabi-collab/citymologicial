@@ -510,7 +510,7 @@ function ProjectEquipeTab({ projet, compact = false }) {
     setLoadError(null);
     try {
       const [overview, sa, subs] = await Promise.all([
-        listProjectEquipeOverview(projet.id),
+        listProjectEquipeOverview(projet.id, { projectRef: projet.ref }),
         listAssignmentsByProject(projet.id).catch(() => []),
         listSubcontractors().catch(() => []),
       ]);
@@ -646,12 +646,15 @@ function ProjectEquipeTab({ projet, compact = false }) {
           B. Ouvriers affectés
         </div>
         <div style={{ padding: '10px 12px', background: '#E8F5E9', borderRadius: 8, fontSize: '0.82rem', color: '#2E7D32', marginBottom: 12 }}>
-          Affectation validée par le service RH — lecture seule.
+          Ouvriers issus des demandes RH — lecture seule. Source : affectations validées par le service RH.
         </div>
 
         {workerAssignments.length === 0 ? (
           <div style={{ padding: '20px 0', color: 'var(--text-3)', fontSize: '0.85rem', textAlign: 'center', marginBottom: 24 }}>
             Aucun ouvrier affecté pour le moment.
+            <div style={{ fontSize: '0.78rem', marginTop: 8 }}>
+              Vérifiez que les demandes ressources du projet ont des ouvriers affectés et validés.
+            </div>
           </div>
         ) : (
           <div className="table-wrap" style={{ marginBottom: 24 }}>
@@ -660,13 +663,17 @@ function ProjectEquipeTab({ projet, compact = false }) {
                 <tr>
                   <th>Nom</th>
                   <th>Fonction</th>
+                  <th>Demande RH</th>
                 </tr>
               </thead>
               <tbody>
                 {workerAssignments.map((a) => (
-                  <tr key={a.id}>
+                  <tr key={a.id || `${a.workerId}-${a.requestRef}`}>
                     <td style={{ fontWeight: 700 }}>{a.workerName || '—'}</td>
-                    <td>{a.workerFonction || '—'}</td>
+                    <td>{a.workerFonction || a.requestFonction || '—'}</td>
+                    <td style={{ fontFamily: 'var(--font-head)', fontWeight: 600, color: 'var(--red)', fontSize: '0.82rem' }}>
+                      {a.requestRef || '—'}
+                    </td>
                   </tr>
                 ))}
               </tbody>

@@ -5,12 +5,14 @@ import { getSupabase } from '../../lib/supabase';
 import {
   syncProjectTeamFromRhRequests,
   listWorkersByProject,
+  listRhAssignedWorkersForProject,
 } from '../rh/workerProjectAssignments';
 import { listWorkers } from '../rh/workers';
 import { workerFullName } from '../rh/attendance';
 import {
   countAssignedWorkers,
   computeRequestCoverage,
+  deriveRequestStatut,
   emitRhAssignmentsUpdated,
 } from './resourceRequestCoverage';
 import {
@@ -202,19 +204,35 @@ async function loadRequestHistory(requestId) {
   return data || [];
 }
 
-export async function listResourceRequests({ statut = '', projectId = '' } = {}) {
+export async function listResourceRequests({ statut = '', projectId = '', projectRef = '' } = {}) {
   await requireUser();
-  let q = getSupabase()
-    .from(TABLE)
-    .select('*')
-    .or('request_type.eq.ressource,request_type.is.null')
-    .is('parent_request_id', null)
-    .order('created_at', { ascending: false });
-  if (statut) q = q.eq('statut', statut);
-  if (projectId) q = q.eq('project_id', projectId);
-  const { data, error } = await q;
-  if (error) throw error;
-  const rows = data || [];
+
+  async function fetchRows(filterFn) {
+    let q = getSupabase()
+      .from(TABLE)
+      .select('*')
+      .or('request_type.eq.ressource,request_type.is.null')
+      .is('parent_request_id', null)
+      .order('created_at', { ascending: false });
+    if (statut) q = q.eq('statut', statut);
+    q = filterFn(q);
+    const { data, error } = await q;
+    if (error) throw error;
+    return data || [];
+  }
+
+  let rows = [];
+  if (projectId) {
+    rows = await fetchRows((q) => q.eq('project_id', projectId));
+    if (!rows.length && projectRef) {
+      rows = await fetchRows((q) => q.eq('project_ref', projectRef));
+    }
+  } else if (projectRef) {
+    rows = await fetchRows((q) => q.eq('project_ref', projectRef));
+  } else {
+    rows = await fetchRows((q) => q);
+  }
+
   const [counts, openRecruitments] = await Promise.all([
     loadWorkerCounts(rows.map((r) => r.id)),
     loadOpenRecruitmentCounts(rows.map((r) => r.id)),
@@ -241,17 +259,34 @@ export async function listProjectRecruitments(projectId) {
   return (data || []).map((row) => normalizeRequest(row));
 }
 
-/** Vue unifiée équipe projet : ouvriers validés + postes manquants / recrutements */
-export async function listProjectEquipeOverview(projectId) {
+/** Vue unifiée équipe projet : ouvriers RH + postes manquants / recrutements */
+export async function listProjectEquipeOverview(projectId, { projectRef = '' } = {}) {
   if (!projectId) return { workers: [], uncoveredPosts: [], recruitments: [] };
   await requireUser();
-  await syncProjectTeamFromRhRequests(projectId);
 
-  const [workers, requests, recruitments] = await Promise.all([
-    listWorkersByProject(projectId),
-    listResourceRequests({ projectId }),
+  const [rhWorkers, requests, recruitments] = await Promise.all([
+    listRhAssignedWorkersForProject(projectId, projectRef).catch((err) => {
+      console.warn('[CITYMO] listRhAssignedWorkersForProject', err);
+      return [];
+    }),
+    listResourceRequests({ projectId, projectRef }),
     listProjectRecruitments(projectId),
   ]);
+
+  try {
+    await syncProjectTeamFromRhRequests(projectId, projectRef);
+  } catch (err) {
+    console.warn('[CITYMO] syncProjectTeamFromRhRequests', err);
+  }
+
+  let wpaWorkers = [];
+  try {
+    wpaWorkers = await listWorkersByProject(projectId);
+  } catch (err) {
+    console.warn('[CITYMO] listWorkersByProject', err);
+  }
+
+  const workers = rhWorkers.length > 0 ? rhWorkers : wpaWorkers;
 
   const recruitmentByParent = new Map();
   (recruitments || []).forEach((r) => {
@@ -260,8 +295,9 @@ export async function listProjectEquipeOverview(projectId) {
 
   const uncoveredPosts = [];
   (requests || []).forEach((req) => {
-    if (['cloturee', 'refusee'].includes(req.statut)) return;
     const cov = computeRequestCoverage(req);
+    const derived = deriveRequestStatut(req, cov);
+    if (['cloturee', 'refusee'].includes(derived)) return;
     if (cov.manque <= 0) return;
     const recruitment = recruitmentByParent.get(req.id) || null;
     uncoveredPosts.push({
@@ -278,7 +314,7 @@ export async function listProjectEquipeOverview(projectId) {
     });
   });
 
-  return { workers: workers || [], uncoveredPosts, recruitments: recruitments || [] };
+  return { workers, uncoveredPosts, recruitments: recruitments || [], rhWorkers, wpaWorkers };
 }
 
 export async function getResourceRequest(id) {
@@ -462,7 +498,7 @@ export async function validateResourceRequest(id, { allowPartial = true } = {}) 
     .eq('id', id);
   if (error) throw error;
 
-  await syncProjectTeamFromRhRequests(request.project_id);
+  await syncProjectTeamFromRhRequests(request.project_id, request.project_ref);
   emitRhAssignmentsUpdated(request.project_id);
 
   const detailMsg = isPartial
@@ -642,7 +678,7 @@ export async function removeWorkerFromResourceRequest(requestId, workerId) {
     .eq('id', requestId);
 
   try {
-    await syncProjectTeamFromRhRequests(request.project_id);
+    await syncProjectTeamFromRhRequests(request.project_id, request.project_ref);
     emitRhAssignmentsUpdated(request.project_id);
   } catch (err) {
     console.warn('[CITYMO] sync project team after remove worker', err);
@@ -670,10 +706,11 @@ export async function deleteResourceRequestTree(requestId) {
   await requireUser();
   const { data: row } = await getSupabase()
     .from(TABLE)
-    .select('project_id')
+    .select('project_id, project_ref')
     .eq('id', requestId)
     .maybeSingle();
   const projectId = row?.project_id;
+  const projectRef = row?.project_ref || '';
 
   const { data: children, error: childQ } = await getSupabase()
     .from(TABLE)
@@ -688,7 +725,7 @@ export async function deleteResourceRequestTree(requestId) {
 
   if (projectId) {
     try {
-      await syncProjectTeamFromRhRequests(projectId);
+      await syncProjectTeamFromRhRequests(projectId, projectRef);
       emitRhAssignmentsUpdated(projectId);
     } catch (err) {
       console.warn('[CITYMO] sync project team after delete request', err);
