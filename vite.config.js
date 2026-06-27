@@ -57,7 +57,18 @@ export default defineConfig(async ({ mode }) => {
   const buildId = trim(process.env.VERCEL_GIT_COMMIT_SHA || process.env.VITE_BUILD_ID || fileEnv.VITE_BUILD_ID)
     || new Date().toISOString().slice(0, 19)
 
-  const plugins = [react()]
+  const plugins = [
+    react(),
+    {
+      name: 'citymo-build-meta',
+      transformIndexHtml(html) {
+        return html.replace(
+          '</head>',
+          `    <meta name="citymo-build" content="${buildId}" />\n  </head>`,
+        );
+      },
+    },
+  ]
   if (mode !== 'production') {
     plugins.push(...(await devPlugins()))
   }

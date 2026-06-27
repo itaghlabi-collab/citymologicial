@@ -5692,6 +5692,20 @@ tbody tr:last-child td { border-bottom: none; }
     height: 16px;
   }
 
+  .inventaire-module .depots-page-actions {
+    grid-template-columns: 1fr auto;
+    align-items: center;
+  }
+
+  .inventaire-module .depots-page-actions .btn-primary {
+    grid-column: auto;
+    font-size: 0.82rem;
+  }
+
+  .inventaire-module .depots-page-actions .btn-ghost .btn-label {
+    font-size: 0.75rem;
+  }
+
   .inventaire-module .finance-detail-actions {
     display: flex;
     align-items: center;

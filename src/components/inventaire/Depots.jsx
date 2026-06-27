@@ -230,12 +230,12 @@ export default function Depots({ articles, onDepotsChange }) {
           <h1 className="page-title">EMPLACEMENTS</h1>
           <p className="page-subtitle finance-sub-hide-mobile">Lieux de stockage CITYMO — dépôts, chantiers et ateliers.</p>
         </div>
-        <div className="finance-page-actions" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button type="button" className="btn btn-ghost btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => setShowFilters((f) => !f)}>
-            <Filter size={14} /> Filtres
+        <div className="finance-page-actions depots-page-actions">
+          <button type="button" className="btn btn-primary" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={openCreate}>
+            <Plus size={15} /> <span className="btn-label">Nouvel emplacement</span>
           </button>
-          <button type="button" className="btn btn-primary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={openCreate}>
-            <Plus size={14} /> Nouvel emplacement
+          <button type="button" className="btn btn-ghost btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => setShowFilters((f) => !f)}>
+            <Filter size={14} /> <span className="btn-label">Filtres</span>
           </button>
         </div>
       </div>
@@ -324,7 +324,7 @@ export default function Depots({ articles, onDepotsChange }) {
                               style={{ color: 'var(--red)' }}
                               onClick={() => handleDelete(x)}
                             >
-                              <Trash2 size={13} />
+                              <Trash2 size={13} /> <span className="btn-label">Supprimer</span>
                             </button>
                           </div>
                         </td>
