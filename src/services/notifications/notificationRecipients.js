@@ -10,6 +10,10 @@ const DG_EMAILS = new Set([DG_EMAIL.toLowerCase(), 'selim.moumni@gmail.com', SUP
 const SUPER_ADMIN_ROLES = new Set(['super_admin', 'super admin']);
 const DG_ROLES = new Set(['dg', 'directeur_general', 'directeur general', 'directeur_général']);
 const RH_ROLES = new Set(['rh', 'ressources_humaines', 'ressources humaines', 'rh_manager']);
+const INVENTAIRE_ROLES = new Set([
+  'magasinier', 'inventaire', 'logistique', 'depot', 'stock', 'gestionnaire_stock',
+  'gestionnaire stock', 'responsable_depot', 'responsable depot',
+]);
 
 function normRole(role) {
   return String(role || '').toLowerCase().normalize('NFD').replace(/\p{M}/gu, '').replace(/\s+/g, '_').trim();
@@ -33,6 +37,14 @@ function isRhProfile(p) {
   if (!p) return false;
   const r = normRole(p.role);
   return RH_ROLES.has(r.replace(/_/g, ' ')) || RH_ROLES.has(r);
+}
+
+function isInventaireProfile(p) {
+  if (!p) return false;
+  const r = normRole(p.role);
+  const spaced = r.replace(/_/g, ' ');
+  if (INVENTAIRE_ROLES.has(spaced) || INVENTAIRE_ROLES.has(r)) return true;
+  return r.includes('magasin') || r.includes('inventaire') || r.includes('depot') || r.includes('logistique');
 }
 
 let profilesCache = null;
@@ -63,6 +75,11 @@ export async function listSuperAdminAndDGRecipients() {
 export async function listRhRecipients() {
   const profiles = await fetchProfiles();
   return profiles.filter((p) => isRhProfile(p));
+}
+
+export async function listInventaireRecipients() {
+  const profiles = await fetchProfiles();
+  return profiles.filter((p) => isInventaireProfile(p));
 }
 
 export async function findProfileById(userId) {

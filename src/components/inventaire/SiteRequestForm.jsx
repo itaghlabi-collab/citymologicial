@@ -156,6 +156,7 @@ function RequestSummary({ lines, form }) {
 
 export default function SiteRequestForm({
   form, setForm, lines, setLines, projects = [], stockArticles = [], readOnly = false,
+  lockProject = false,
   layout = 'drawer',
 }) {
   const [search, setSearch] = useState('');
@@ -247,7 +248,7 @@ export default function SiteRequestForm({
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 14 }}>
         <div>
           <Label required>Projet</Label>
-          <select value={form.project_id || ''} onChange={(e) => onProjectChange(e.target.value)} style={IS()} disabled={readOnly} required>
+          <select value={form.project_id || ''} onChange={(e) => onProjectChange(e.target.value)} style={IS()} disabled={readOnly || lockProject} required>
             <option value="">— Sélectionner un projet —</option>
             {projects.map((p) => <option key={p.id} value={p.id}>{p.ref} — {p.nom}</option>)}
           </select>

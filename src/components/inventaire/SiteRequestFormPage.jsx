@@ -16,6 +16,10 @@ export default function SiteRequestFormPage({
   error,
   onBack,
   onSave,
+  lockProject = false,
+  backLabel = 'Retour aux demandes',
+  formTitle,
+  formSubtitle,
 }) {
   const isEdit = !!editId;
 
@@ -42,16 +46,16 @@ export default function SiteRequestFormPage({
           marginBottom: 16, padding: 0,
         }}
       >
-        <ChevronLeft size={16} /> Retour aux demandes
+        <ChevronLeft size={16} /> {backLabel}
       </button>
 
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
         <div>
           <h1 className="page-title" style={{ marginBottom: 4 }}>
-            {isEdit ? 'Modifier la demande chantier' : 'Nouvelle demande chantier'}
+            {formTitle || (isEdit ? 'Modifier la demande chantier' : 'Nouvelle demande chantier')}
           </h1>
           <p className="page-subtitle">
-            Bon de demande matériel — consommables, équipements et EPI pour le chantier
+            {formSubtitle || 'Bon de demande matériel — consommables, équipements et EPI pour le chantier'}
           </p>
         </div>
       </div>
@@ -74,6 +78,7 @@ export default function SiteRequestFormPage({
         projects={projects}
         stockArticles={stockArticles}
         layout="page"
+        lockProject={lockProject}
       />
 
       <div style={{

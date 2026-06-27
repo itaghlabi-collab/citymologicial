@@ -9,7 +9,7 @@ import {
   X, ChevronLeft, RefreshCw, AlertCircle, CheckCircle, FileText,
   User, Calendar, MapPin, TrendingUp, BarChart3, Clock,
   AlertTriangle, Settings, Archive, ChevronDown, DollarSign,
-  HardHat, Users, ClipboardList, Layers, Gauge, Wrench
+  HardHat, Users, ClipboardList, Layers, Gauge, Wrench, Loader2
 } from 'lucide-react';
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { useProjects } from '../../hooks/useProjects';
@@ -493,68 +493,151 @@ function FormulaireProjet({ initial, onSave, onCancel, saving, clients = [] }) {
 // ── Onglet Équipe projet ─────────────────────────────────────────────────────
 
 function ProjectEquipeTab({ projet, compact = false }) {
+  const projectId = projet?.id ? String(projet.id) : '';
+  const metaRef = useRef({ ref: '', nom: '' });
+  metaRef.current = { ref: projet?.ref || '', nom: projet?.nom || '' };
+
   const [workerAssignments, setWorkerAssignments] = useState([]);
   const [subAssignments, setSubAssignments] = useState([]);
   const [recruitments, setRecruitments] = useState([]);
   const [uncoveredPosts, setUncoveredPosts] = useState([]);
   const [linkedRequests, setLinkedRequests] = useState([]);
   const [allSubcontractors, setAllSubcontractors] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [ready, setReady] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState(null);
   const [showSubModal, setShowSubModal] = useState(false);
   const [selectedSubIds, setSelectedSubIds] = useState(() => new Set());
-  const loadInFlight = useRef(false);
+  const fetchGenRef = useRef(0);
 
-  const load = useCallback(async ({ silent = false } = {}) => {
-    if (!projet?.id) return;
-    if (loadInFlight.current) return;
-    loadInFlight.current = true;
-    if (!silent) setLoading(true);
-    setLoadError(null);
-    try {
-      const [overview, sa, subs] = await Promise.all([
-        listProjectEquipeOverview(projet.id, { projectRef: projet.ref, projectName: projet.nom }),
-        listAssignmentsByProject(projet.id).catch(() => []),
-        listSubcontractors().catch(() => []),
-      ]);
-      setWorkerAssignments(overview.workers || []);
-      setUncoveredPosts(overview.uncoveredPosts || []);
-      setRecruitments(overview.recruitments || []);
-      setLinkedRequests(overview.linkedRequests || []);
-      setSubAssignments((sa || []).filter((s) => s.status === 'active'));
-      setAllSubcontractors(subs);
-    } catch (err) {
-      console.error('[CITYMO] ProjectEquipeTab load', err);
-      const msg = err?.message || '';
-      if (/worker_project_assignments|42P01|does not exist/i.test(msg)) {
-        setLoadError('Table worker_project_assignments absente — exécutez supabase/RUN_WORKER_PROJECT_ASSIGNMENTS.sql dans Supabase.');
-      } else {
-        setLoadError(err.message || 'Impossible de charger l\'équipe.');
-      }
-    } finally {
-      loadInFlight.current = false;
-      if (!silent) setLoading(false);
-    }
-  }, [projet?.id, projet?.ref, projet?.nom]);
+  const applyPayload = useCallback((overview, sa) => {
+    setWorkerAssignments(overview?.workers || []);
+    setUncoveredPosts(overview?.uncoveredPosts || []);
+    setRecruitments(overview?.recruitments || []);
+    setLinkedRequests(overview?.linkedRequests || []);
+    setSubAssignments((sa || []).filter((s) => s.status === 'active'));
+  }, []);
 
-  useEffect(() => { load(); }, [load]);
+  const fetchEquipeCore = useCallback(async () => {
+    const meta = metaRef.current;
+    const [overview, sa] = await Promise.all([
+      listProjectEquipeOverview(projectId, { projectRef: meta.ref, projectName: meta.nom }),
+      listAssignmentsByProject(projectId).catch(() => []),
+    ]);
+    return { overview, sa };
+  }, [projectId]);
 
   useEffect(() => {
+    if (!projectId) {
+      setReady(true);
+      setRefreshing(false);
+      setLoadError(null);
+      return undefined;
+    }
+
+    const gen = ++fetchGenRef.current;
+    setReady(false);
+    setRefreshing(true);
+    setLoadError(null);
+
+    let timedOut = false;
+    const timeoutId = setTimeout(() => {
+      if (gen !== fetchGenRef.current) return;
+      timedOut = true;
+      setLoadError('Le chargement a pris trop de temps. Cliquez sur Actualiser ou vérifiez la connexion Supabase.');
+      setReady(true);
+      setRefreshing(false);
+    }, 20000);
+
+    (async () => {
+      try {
+        const { overview, sa } = await fetchEquipeCore();
+        if (gen !== fetchGenRef.current || timedOut) return;
+        applyPayload(overview, sa);
+        setReady(true);
+      } catch (err) {
+        if (gen !== fetchGenRef.current || timedOut) return;
+        console.error('[CITYMO] ProjectEquipeTab load', err);
+        const msg = err?.message || '';
+        if (/worker_project_assignments|42P01|does not exist/i.test(msg)) {
+          setLoadError('Table worker_project_assignments absente — exécutez supabase/RUN_WORKER_PROJECT_ASSIGNMENTS.sql dans Supabase.');
+        } else {
+          setLoadError(msg || 'Impossible de charger l\'équipe.');
+        }
+        setReady(true);
+      } finally {
+        clearTimeout(timeoutId);
+        if (gen === fetchGenRef.current && !timedOut) setRefreshing(false);
+      }
+    })();
+
+    return () => {
+      clearTimeout(timeoutId);
+    };
+  }, [projectId, fetchEquipeCore, applyPayload]);
+
+  useEffect(() => {
+    if (!projectId) return undefined;
+    let debounceId;
     const handler = (e) => {
       const pid = e?.detail?.projectId;
-      if (!pid || String(pid) === String(projet?.id)) load({ silent: true });
+      if (!pid || String(pid) !== projectId) return;
+      clearTimeout(debounceId);
+      debounceId = setTimeout(async () => {
+        const gen = ++fetchGenRef.current;
+        try {
+          const { overview, sa } = await fetchEquipeCore();
+          if (gen !== fetchGenRef.current) return;
+          applyPayload(overview, sa);
+          setReady(true);
+          setLoadError(null);
+        } catch (err) {
+          console.warn('[CITYMO] ProjectEquipeTab silent refresh', err);
+        }
+      }, 400);
     };
     window.addEventListener('citymo:rh-assignments-updated', handler);
-    return () => window.removeEventListener('citymo:rh-assignments-updated', handler);
-  }, [load, projet?.id]);
+    return () => {
+      clearTimeout(debounceId);
+      window.removeEventListener('citymo:rh-assignments-updated', handler);
+    };
+  }, [projectId, fetchEquipeCore, applyPayload]);
+
+  const handleManualRefresh = useCallback(async () => {
+    if (!projectId || refreshing) return;
+    const gen = ++fetchGenRef.current;
+    setRefreshing(true);
+    setLoadError(null);
+    try {
+      const { overview, sa } = await fetchEquipeCore();
+      if (gen !== fetchGenRef.current) return;
+      applyPayload(overview, sa);
+      setReady(true);
+    } catch (err) {
+      if (gen !== fetchGenRef.current) return;
+      setLoadError(err?.message || 'Impossible de charger l\'équipe.');
+    } finally {
+      if (gen === fetchGenRef.current) setRefreshing(false);
+    }
+  }, [projectId, refreshing, fetchEquipeCore, applyPayload]);
+
+  const ensureSubcontractorsLoaded = useCallback(async () => {
+    if (allSubcontractors.length > 0) return;
+    try {
+      setAllSubcontractors(await listSubcontractors());
+    } catch {
+      setAllSubcontractors([]);
+    }
+  }, [allSubcontractors.length]);
 
   const assignableSubcontractors = useMemo(
     () => (allSubcontractors || []).filter((s) => s.statut === 'actif'),
     [allSubcontractors],
   );
 
-  function openSubModal() {
+  async function openSubModal() {
+    await ensureSubcontractorsLoaded();
     setSelectedSubIds(new Set(subAssignments.map((a) => String(a.subcontractorId))));
     setShowSubModal(true);
   }
@@ -591,7 +674,8 @@ function ProjectEquipeTab({ projet, compact = false }) {
     setSaving(true);
     try {
       await removeSubcontractorFromProject(projet.id, subcontractorId);
-      await load();
+      const { sa } = await fetchEquipeCore();
+      setSubAssignments((sa || []).filter((s) => s.status === 'active'));
     } catch (err) {
       alert(err.message || 'Erreur.');
     } finally {
@@ -599,18 +683,22 @@ function ProjectEquipeTab({ projet, compact = false }) {
     }
   }
 
-  if (loading) {
+  if (!ready) {
     return (
       <div className={compact ? '' : 'card'} style={{ padding: compact ? '16px 0' : 32, textAlign: 'center', color: 'var(--text-3)' }}>
+        <Loader2 size={20} style={{ animation: 'spin 0.8s linear infinite', margin: '0 auto 8px', display: 'block' }} />
         Chargement de l&apos;équipe…
       </div>
     );
   }
 
-  if (loadError) {
+  if (loadError && !workerAssignments.length && !linkedRequests.length) {
     return (
       <div style={{ padding: '12px 14px', background: '#FFF8E1', border: '1px solid #FFCC80', borderRadius: 8, color: '#E65100', fontSize: '0.84rem' }}>
         {loadError}
+        <button type="button" className="btn btn-ghost btn-sm" onClick={handleManualRefresh} style={{ marginTop: 8 }}>
+          <RefreshCw size={13} /> Réessayer
+        </button>
       </div>
     );
   }
@@ -621,12 +709,17 @@ function ProjectEquipeTab({ projet, compact = false }) {
 
   return (
     <>
+      {loadError && (
+        <div style={{ padding: '10px 12px', background: '#FFF8E1', border: '1px solid #FFCC80', borderRadius: 8, color: '#E65100', fontSize: '0.82rem', marginBottom: 12 }}>
+          {loadError}
+        </div>
+      )}
       <div className={compact ? '' : 'card'} style={wrapStyle}>
         {!compact && (
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14, flexWrap: 'wrap', gap: 8 }}>
             <SectionTitle icon={<Users size={13} />}>Équipe du projet</SectionTitle>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={load} disabled={loading || saving}>
-              <RefreshCw size={13} /> Actualiser
+            <button type="button" className="btn btn-ghost btn-sm" onClick={handleManualRefresh} disabled={refreshing || saving}>
+              <RefreshCw size={13} className={refreshing ? 'spin' : ''} /> Actualiser
             </button>
           </div>
         )}
@@ -1006,10 +1099,10 @@ function DetailProjet({ projet, onBack, onEdit, onCreateSAV, initialTab = 'gener
         </div>
       )}
 
-      {/* Tab: équipe */}
-      {activeTab === 'equipe' && (
+      {/* Tab: équipe — gardé monté pour éviter rechargement à chaque changement d'onglet */}
+      <div style={{ display: activeTab === 'equipe' ? 'block' : 'none' }}>
         <ProjectEquipeTab projet={projet} />
-      )}
+      </div>
 
       {/* Tab: historique */}
       {activeTab === 'historique' && (

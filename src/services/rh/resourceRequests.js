@@ -252,7 +252,7 @@ export async function listProjectRecruitments(projectId) {
 }
 
 /** Vue unifiée équipe projet : ouvriers RH + postes manquants / recrutements */
-export async function listProjectEquipeOverview(projectId, { projectRef = '', projectName = '' } = {}) {
+export async function listProjectEquipeOverview(projectId, { projectRef = '', projectName = '', syncMirror = false } = {}) {
   if (!projectId) return { workers: [], uncoveredPosts: [], recruitments: [], linkedRequests: [] };
   await requireUser();
 
@@ -268,7 +268,9 @@ export async function listProjectEquipeOverview(projectId, { projectRef = '', pr
   ]);
 
   try {
-    await syncProjectTeamFromRhRequests(projectId, projectRef, projectName);
+    if (syncMirror) {
+      await syncProjectTeamFromRhRequests(projectId, projectRef, projectName);
+    }
   } catch (err) {
     console.warn('[CITYMO] syncProjectTeamFromRhRequests', err);
   }

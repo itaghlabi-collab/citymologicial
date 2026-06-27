@@ -5,6 +5,7 @@ import {
   notifySuperAdmins,
   notifySuperAdminsOnceDaily,
   notifyExecutivesAndRh,
+  notifyInventaireAndAdmins,
   notifyUser,
   NOTIFICATION_TYPES,
   NOTIFICATION_PRIORITIES,
@@ -242,7 +243,7 @@ export async function notifyResourceRequestValidated(request) {
 /** Demande chantier soumise → magasinier / logistique. */
 export async function notifySiteRequestSubmitted(request) {
   if (!request?.id) return;
-  return notifySuperAdmins({
+  const payload = {
     title: 'Nouvelle demande chantier',
     message: `${request.ref} — ${request.project_name || 'Projet'} (${request.priorite}). ${request.distinct_articles || 0} article(s) demandé(s).`,
     type: NOTIFICATION_TYPES.SITE_MATERIAL_REQUEST,
@@ -254,7 +255,8 @@ export async function notifySiteRequestSubmitted(request) {
     entityType: 'site_material_request',
     entityId: request.id,
     actionUrl: moduleActionUrl('demandes-chantier'),
-  });
+  };
+  return notifyInventaireAndAdmins(payload);
 }
 
 /** Demande chantier — validation DG requise. */
@@ -312,4 +314,41 @@ export async function notifySiteRequestReceived(request) {
     entityId: request.id,
     actionUrl: moduleActionUrl('demandes-chantier'),
   });
+}
+
+/** Demande chantier traitée par le magasinier (préparation totale ou partielle). */
+export async function notifySiteRequestPrepared(request, { partial = false } = {}) {
+  if (!request?.id || !request.requested_by) return;
+  const title = partial ? 'Demande chantier — préparation partielle' : 'Demande chantier — en préparation';
+  const message = partial
+    ? `Votre demande ${request.ref} a été partiellement préparée. Certains articles peuvent nécessiter un achat.`
+    : `Votre demande ${request.ref} est en cours de préparation au dépôt.`;
+  return notifyUser(request.requested_by, {
+    title,
+    message,
+    type: NOTIFICATION_TYPES.SITE_MATERIAL_REQUEST,
+    priority: NOTIFICATION_PRIORITIES.NORMAL,
+    entityType: partial ? 'site_material_request_partial' : 'site_material_request_prepared',
+    entityId: request.id,
+    actionUrl: moduleActionUrl('demandes-chantier'),
+  });
+}
+
+/** Rupture stock → demande d'achat créée (chef de projet / demandeur). */
+export async function notifySiteRequestPurchaseCreated(siteRequest, purchaseRequest) {
+  if (!siteRequest?.id || !purchaseRequest?.id) return;
+  const recipients = new Set();
+  if (siteRequest.requested_by) recipients.add(siteRequest.requested_by);
+  const results = await Promise.all(
+    [...recipients].map((userId) => notifyUser(userId, {
+      title: 'Demande d\'achat générée',
+      message: `Rupture de stock sur ${siteRequest.ref} — demande d'achat ${purchaseRequest.ref || ''} créée pour le projet ${siteRequest.project_name || ''}.`,
+      type: NOTIFICATION_TYPES.PURCHASE_REQUEST,
+      priority: NOTIFICATION_PRIORITIES.HIGH,
+      entityType: 'purchase_request_from_site',
+      entityId: purchaseRequest.id,
+      actionUrl: moduleActionUrl('demandes-achat'),
+    })),
+  );
+  return results.filter(Boolean);
 }

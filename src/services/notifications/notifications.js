@@ -5,6 +5,7 @@ import { getSupabase } from '../../lib/supabase';
 import {
   listSuperAdminAndDGRecipients,
   listRhRecipients,
+  listInventaireRecipients,
 } from './notificationRecipients';
 
 const TABLE = 'notifications';
@@ -157,6 +158,18 @@ export async function notifyExecutivesAndRh(payload) {
   const rh = await listRhRecipients();
   const map = new Map();
   [...exec, ...rh].forEach((p) => map.set(p.id, p));
+  const results = await Promise.all(
+    [...map.values()].map((p) => notifyUser(p.id, payload)),
+  );
+  return results.filter(Boolean);
+}
+
+/** Notifie Super Admin + DG + magasiniers / inventaire. */
+export async function notifyInventaireAndAdmins(payload) {
+  const exec = await listSuperAdminAndDGRecipients();
+  const inv = await listInventaireRecipients();
+  const map = new Map();
+  [...exec, ...inv].forEach((p) => map.set(p.id, p));
   const results = await Promise.all(
     [...map.values()].map((p) => notifyUser(p.id, payload)),
   );

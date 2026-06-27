@@ -375,7 +375,19 @@ export async function prepareSiteMaterialRequest(id, lineUpdates = [], {
   }).eq('id', id).select().single();
   if (error) throw error;
   await logHistory(id, 'preparation', partial ? 'Préparation partielle' : 'Préparation en cours', user.id, actorName, actorRole, ipAddress);
-  return normalizeRequest(data, enrichLinesWithStock(await loadLines(id), stockArticles), await loadHistory(id));
+  const result = normalizeRequest(data, enrichLinesWithStock(await loadLines(id), stockArticles), await loadHistory(id));
+  const {
+    notifySiteRequestPrepared,
+    notifySiteRequestPurchaseCreated,
+  } = await import('../notifications/notificationEvents');
+  notifySiteRequestPrepared(result, { partial }).catch(() => {});
+  const { createPurchaseRequestFromSiteRuptures } = await import('../achats/purchaseRequests');
+  createPurchaseRequestFromSiteRuptures(result)
+    .then((purchase) => {
+      if (purchase) notifySiteRequestPurchaseCreated(result, purchase).catch(() => {});
+    })
+    .catch(() => {});
+  return result;
 }
 
 export async function requestDgValidation(id, { ipAddress } = {}) {

@@ -4,7 +4,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   Users, Plus, Trash2, Send, Loader2, AlertCircle, RefreshCw, Info,
-  Eye, Edit2, Download, ClipboardList, TrendingUp,
+  Eye, Edit2, Download, ClipboardList, TrendingUp, Package,
 } from 'lucide-react';
 import { prioriteBadgeClass, deleteProjectNeedWarnMessage } from '../../constants/projectBesoins';
 import {
@@ -20,6 +20,7 @@ import { generateBesoinPdf } from '../../services/projects/projectBesoinPdf';
 import { getBesoinActions } from './besoins/besoinActions';
 import BesoinFormModal from './besoins/BesoinFormModal';
 import BesoinDetailModal from './besoins/BesoinDetailModal';
+import DemandesChantier from '../inventaire/DemandesChantier.jsx';
 
 function KpiCard({ icon, label, value, sub, color = 'grey' }) {
   const colors = { red: 'var(--red)', blue: '#1565C0', green: '#2E7D32', orange: '#E65100', grey: 'var(--text-3)', purple: '#6A1B9A' };
@@ -170,17 +171,6 @@ export default function ProjectBesoinsModule({ projet }) {
         </div>
       </div>
 
-      <div style={{
-        display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 16,
-        padding: '12px 14px', background: '#E3F2FD', borderRadius: 8, fontSize: '0.82rem', color: '#1565C0',
-      }}
-      >
-        <Info size={16} style={{ flexShrink: 0, marginTop: 1 }} />
-        <div>
-          <strong>Matériel</strong> — utilisez <em>Inventaire &amp; Dépôt → Demandes chantier</em> pour le matériel.
-        </div>
-      </div>
-
       <div className="stat-grid finance-kpi-grid" style={{ marginBottom: 16 }}>
         <KpiCard icon={<ClipboardList size={17} />} label="Total besoins" value={stats.total} color="grey" />
         <KpiCard icon={<Users size={17} />} label="Total affectés" value={stats.totalAffectes} sub={`sur ${stats.totalDemandes} demandés`} color="blue" />
@@ -306,6 +296,31 @@ export default function ProjectBesoinsModule({ projet }) {
         onEdit={(n) => { setDetailNeed(null); setEditNeed(n); setFormOpen(true); }}
         onDelete={(n) => handleAction('delete', n)}
       />
+
+      <div style={{ marginTop: 32, paddingTop: 24, borderTop: '1px solid var(--border)' }}>
+        <div style={{
+          display: 'flex', gap: 10, alignItems: 'flex-start', marginBottom: 16,
+          padding: '12px 14px', background: '#E3F2FD', borderRadius: 8, fontSize: '0.82rem', color: '#1565C0',
+        }}
+        >
+          <Info size={16} style={{ flexShrink: 0, marginTop: 1 }} />
+          <div>
+            <strong>Workflow matériel</strong> — les besoins matériel créés ici sont des demandes chantier
+            transmises au magasinier (<em>Inventaire &amp; Dépôt → Demandes chantier</em>).
+            En cas de rupture de stock, une demande d&apos;achat est générée automatiquement.
+          </div>
+        </div>
+
+        <div style={{
+          fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase',
+          display: 'flex', alignItems: 'center', gap: 6, marginBottom: 12,
+        }}
+        >
+          <Package size={14} /> Besoins matériel / matériaux
+        </div>
+
+        <DemandesChantier projet={projet} embedded />
+      </div>
     </div>
   );
 }

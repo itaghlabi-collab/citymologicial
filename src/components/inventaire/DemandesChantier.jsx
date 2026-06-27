@@ -64,7 +64,7 @@ function livBadgeClass(statut) {
   return 'badge-grey';
 }
 
-function getRowActions(r, handlers) {
+function getRowActions(r, handlers, { embedded = false } = {}) {
   const actions = [
     { key: 'view', label: 'Voir', icon: Eye, onClick: () => handlers.openDetail(r.id) },
     { key: 'pdf', label: 'Télécharger PDF', icon: Download, onClick: () => handlers.handlePdf(r.id) },
@@ -72,6 +72,7 @@ function getRowActions(r, handlers) {
   if (r.statut === 'brouillon') {
     actions.push({ key: 'edit', label: 'Modifier', icon: Edit2, onClick: () => handlers.openEdit(r.id) });
   }
+  if (embedded) return actions;
   if (r.statut === 'soumise') {
     actions.push({ key: 'prepare', label: 'Préparer', icon: Package, onClick: () => handlers.openDetail(r.id) });
   }
@@ -84,7 +85,20 @@ function getRowActions(r, handlers) {
   return actions;
 }
 
-export default function DemandesChantier() {
+function projectFormFromProjet(projet) {
+  if (!projet) return {};
+  return {
+    project_id: projet.id,
+    project_ref: projet.ref || '',
+    project_name: projet.nom || projet.name || '',
+    client_name: projet.client || projet.client_nom || '',
+    chef_projet: projet.chef_projet || projet.responsable || '',
+    chef_chantier: projet.chef_chantier || '',
+  };
+}
+
+export default function DemandesChantier({ projet, embedded = false }) {
+  const embeddedProjectId = embedded && projet?.id ? String(projet.id) : null;
   const [requests, setRequests] = useState([]);
   const [projects, setProjects] = useState([]);
   const [stockArticles, setStockArticles] = useState([]);
@@ -105,8 +119,12 @@ export default function DemandesChantier() {
     setError('');
     try {
       const [rows, projs, arts] = await Promise.all([
-        listSiteMaterialRequests({ statut: statutFilter, priorite: prioriteFilter }),
-        listProjects(),
+        listSiteMaterialRequests({
+          statut: statutFilter,
+          priorite: prioriteFilter,
+          projectId: embeddedProjectId || undefined,
+        }),
+        embedded ? Promise.resolve(projet ? [projet] : []) : listProjects(),
         listStockArticles(),
       ]);
       setRequests(rows);
@@ -117,7 +135,7 @@ export default function DemandesChantier() {
     } finally {
       setLoading(false);
     }
-  }, [statutFilter, prioriteFilter]);
+  }, [statutFilter, prioriteFilter, embeddedProjectId, embedded, projet]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -128,7 +146,8 @@ export default function DemandesChantier() {
       (r.ref || '').toLowerCase().includes(q)
       || (r.project_name || '').toLowerCase().includes(q)
       || (r.client_name || '').toLowerCase().includes(q)
-      || (r.chef_chantier || '').toLowerCase().includes(q),
+      || (r.chef_chantier || '').toLowerCase().includes(q)
+      || (r.chef_projet || '').toLowerCase().includes(q),
     );
   }, [requests, search]);
 
@@ -141,7 +160,9 @@ export default function DemandesChantier() {
 
   function openCreate() {
     setEditId(null);
-    setForm({ ...EMPTY_FORM, date_demande: new Date().toISOString().slice(0, 10) });
+    const base = { ...EMPTY_FORM, date_demande: new Date().toISOString().slice(0, 10) };
+    if (embedded && projet) Object.assign(base, projectFormFromProjet(projet));
+    setForm(base);
     setLines(buildInitialLines());
     setError('');
     setView('form');
@@ -210,6 +231,9 @@ export default function DemandesChantier() {
       }
       if (submitAfter) {
         await submitSiteMaterialRequest(req.id);
+        if (embedded) {
+          alert('Besoin matériel soumis — la demande a été transmise au magasinier.');
+        }
       }
       closeForm();
       await load();
@@ -284,33 +308,52 @@ export default function DemandesChantier() {
         error={error}
         onBack={closeForm}
         onSave={handleSave}
+        lockProject={embedded && !!projet?.id}
+        backLabel={embedded ? 'Retour aux besoins matériel' : 'Retour aux demandes'}
+        formTitle={embedded ? 'Nouveau besoin matériel' : undefined}
+        formSubtitle={embedded ? 'Demande transmise au magasinier — même workflow que Inventaire & Dépôt → Demandes chantier' : undefined}
       />
     );
   }
 
   return (
-    <div className="animate-fade-in">
-      <div className="page-header flex-between finance-page-header">
-        <div>
-          <h1 className="page-title">DEMANDES CHANTIER</h1>
-          <p className="page-subtitle">Demandes de matériel, consommables, équipements et EPI — remplace les fiches papier.</p>
+    <div className={embedded ? '' : 'animate-fade-in'}>
+      {!embedded && (
+        <div className="page-header flex-between finance-page-header">
+          <div>
+            <h1 className="page-title">DEMANDES CHANTIER</h1>
+            <p className="page-subtitle">Demandes de matériel, consommables, équipements et EPI — remplace les fiches papier.</p>
+          </div>
+          <div className="finance-page-actions">
+            <button type="button" className="btn btn-secondary btn-sm" onClick={load} disabled={loading}>
+              <RefreshCw size={14} /> Actualiser
+            </button>
+            <button type="button" className="btn btn-primary" onClick={openCreate}>
+              <Plus size={15} /> Nouvelle demande
+            </button>
+          </div>
         </div>
-        <div className="finance-page-actions">
-          <button type="button" className="btn btn-secondary btn-sm" onClick={load} disabled={loading}>
-            <RefreshCw size={14} /> Actualiser
-          </button>
-          <button type="button" className="btn btn-primary" onClick={openCreate}>
-            <Plus size={15} /> Nouvelle demande
-          </button>
-        </div>
-      </div>
+      )}
 
-      <div className="stat-grid finance-kpi-grid" style={{ marginBottom: 16 }}>
-        <KpiCard icon={<ClipboardList size={17} />} label="Total demandes" value={stats.total} color="grey" />
-        <KpiCard icon={<Package size={17} />} label="Soumises" value={stats.soumises} color="blue" />
-        <KpiCard icon={<Loader2 size={17} />} label="En préparation" value={stats.preparation} color="orange" />
-        <KpiCard icon={<CheckCircle size={17} />} label="Prêtes" value={stats.pretes} color="green" />
-      </div>
+      {embedded && (
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12, alignItems: 'center' }}>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={load} disabled={loading} style={{ marginLeft: 'auto' }}>
+            <RefreshCw size={13} /> Actualiser
+          </button>
+          <button type="button" className="btn btn-primary btn-sm" onClick={openCreate}>
+            <Plus size={13} /> Ajouter un besoin matériel
+          </button>
+        </div>
+      )}
+
+      {!embedded && (
+        <div className="stat-grid finance-kpi-grid" style={{ marginBottom: 16 }}>
+          <KpiCard icon={<ClipboardList size={17} />} label="Total demandes" value={stats.total} color="grey" />
+          <KpiCard icon={<Package size={17} />} label="Soumises" value={stats.soumises} color="blue" />
+          <KpiCard icon={<Loader2 size={17} />} label="En préparation" value={stats.preparation} color="orange" />
+          <KpiCard icon={<CheckCircle size={17} />} label="Prêtes" value={stats.pretes} color="green" />
+        </div>
+      )}
 
       <div className="card finance-toolbar" style={{ marginBottom: 16, padding: '14px 20px' }}>
         <div className="finance-toolbar-inner" style={{ flexWrap: 'wrap', gap: 10 }}>
@@ -338,17 +381,19 @@ export default function DemandesChantier() {
       {loading ? (
         <div style={{ textAlign: 'center', padding: 40 }}><Loader2 size={24} className="spin" /></div>
       ) : filtered.length === 0 ? (
-        <div className="card" style={{ padding: 40, textAlign: 'center', color: 'var(--text-3)' }}>
-          Aucune demande chantier. Créez la première demande de matériel.
+        <div className="card" style={{ padding: embedded ? 28 : 40, textAlign: 'center', color: 'var(--text-3)' }}>
+          {embedded
+            ? 'Aucun besoin matériel pour ce projet. Cliquez sur « Ajouter un besoin matériel ».'
+            : 'Aucune demande chantier. Créez la première demande de matériel.'}
         </div>
       ) : (
         <div className="card" style={{ padding: 0 }}>
           <div className="table-wrap" style={{ overflowX: 'auto' }}>
-            <table style={{ minWidth: 1100 }}>
+            <table style={{ minWidth: embedded ? 900 : 1100 }}>
               <thead>
                 <tr>
                   <th>Référence</th>
-                  <th>Projet</th>
+                  {!embedded && <th>Projet</th>}
                   <th>Client</th>
                   <th>Nb articles</th>
                   <th>Qté totale</th>
@@ -365,7 +410,7 @@ export default function DemandesChantier() {
                 {filtered.map((r) => (
                   <tr key={r.id}>
                     <td data-label="Référence"><strong>{r.ref}</strong></td>
-                    <td data-label="Projet">{r.project_name || '—'}</td>
+                    {!embedded && <td data-label="Projet">{r.project_name || '—'}</td>}
                     <td data-label="Client">{r.client_name || '—'}</td>
                     <td data-label="Nb articles">{r.distinct_articles}</td>
                     <td data-label="Qté totale">{r.total_articles}</td>
@@ -389,7 +434,7 @@ export default function DemandesChantier() {
                     </td>
                     <td data-label="Actions">
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, minWidth: 120 }}>
-                        {getRowActions(r, rowHandlers).map((action) => {
+                        {getRowActions(r, rowHandlers, { embedded }).map((action) => {
                           const Icon = action.icon;
                           return (
                             <button
@@ -454,7 +499,7 @@ export default function DemandesChantier() {
                         <th>Demandé</th>
                         <th>Préparé</th>
                         <th>Stock</th>
-                        <th>Remarque magasin</th>
+                        {!embedded && <th>Remarque magasin</th>}
                       </tr>
                     </thead>
                     <tbody>
@@ -463,24 +508,30 @@ export default function DemandesChantier() {
                           <td>{l.article_name}</td>
                           <td>{l.quantite_demandee}</td>
                           <td>
-                            <input
-                              type="number"
-                              min="0"
-                              value={l.quantite_preparee ?? l.quantite_demandee ?? ''}
-                              onChange={(e) => updateDetailLine(l.id, { quantite_preparee: Number(e.target.value) || 0 })}
-                              style={{ ...INPUT_STYLE, padding: '4px 8px', width: 70 }}
-                              disabled={['prete', 'livree', 'annulee'].includes(detail.statut)}
-                            />
+                            {embedded ? (
+                              l.quantite_preparee ?? '—'
+                            ) : (
+                              <input
+                                type="number"
+                                min="0"
+                                value={l.quantite_preparee ?? l.quantite_demandee ?? ''}
+                                onChange={(e) => updateDetailLine(l.id, { quantite_preparee: Number(e.target.value) || 0 })}
+                                style={{ ...INPUT_STYLE, padding: '4px 8px', width: 70 }}
+                                disabled={['prete', 'livree', 'annulee'].includes(detail.statut)}
+                              />
+                            )}
                           </td>
                           <td>{l.stock_actuel ?? '—'}</td>
-                          <td>
-                            <input
-                              value={l.remarque_magasinier || ''}
-                              onChange={(e) => updateDetailLine(l.id, { remarque_magasinier: e.target.value })}
-                              style={{ ...INPUT_STYLE, padding: '4px 8px' }}
-                              disabled={['prete', 'livree', 'annulee'].includes(detail.statut)}
-                            />
-                          </td>
+                          {!embedded && (
+                            <td>
+                              <input
+                                value={l.remarque_magasinier || ''}
+                                onChange={(e) => updateDetailLine(l.id, { remarque_magasinier: e.target.value })}
+                                style={{ ...INPUT_STYLE, padding: '4px 8px' }}
+                                disabled={['prete', 'livree', 'annulee'].includes(detail.statut)}
+                              />
+                            </td>
+                          )}
                         </tr>
                       ))}
                     </tbody>
@@ -502,12 +553,12 @@ export default function DemandesChantier() {
 
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
                 <button type="button" className="btn btn-secondary btn-sm" onClick={() => handlePdf(detail.id)}><Download size={14} /> Télécharger PDF</button>
-                {detail.statut === 'soumise' && (
+                {!embedded && detail.statut === 'soumise' && (
                   <button type="button" className="btn btn-primary btn-sm" disabled={saving} onClick={() => runAction((id) => prepareSiteMaterialRequest(id, detail.lines))}>
                     <Package size={14} /> Prendre en charge
                   </button>
                 )}
-                {['en_preparation', 'preparation_partielle'].includes(detail.statut) && (
+                {!embedded && ['en_preparation', 'preparation_partielle'].includes(detail.statut) && (
                   <>
                     <button type="button" className="btn btn-secondary btn-sm" disabled={saving} onClick={() => runAction((id) => prepareSiteMaterialRequest(id, detail.lines, { partial: true }))}>Préparation partielle</button>
                     {detail.requires_dg ? (
@@ -519,12 +570,12 @@ export default function DemandesChantier() {
                     )}
                   </>
                 )}
-                {detail.statut === 'en_attente_dg' && (
+                {!embedded && detail.statut === 'en_attente_dg' && (
                   <button type="button" className="btn btn-primary btn-sm" disabled={saving} onClick={() => runAction((id) => validateSiteRequestDg(id).then(() => markSiteRequestReady(id)))}>
                     Valider DG
                   </button>
                 )}
-                {['prete', 'validee_dg'].includes(detail.statut) && (
+                {!embedded && ['prete', 'validee_dg'].includes(detail.statut) && (
                   <button type="button" className="btn btn-primary btn-sm" disabled={saving} onClick={() => runAction(async (id) => {
                     await prepareSiteMaterialRequest(id, detail.lines);
                     return deliverSiteMaterialRequest(id);
@@ -533,7 +584,7 @@ export default function DemandesChantier() {
                     <Truck size={14} /> Livrer & générer bon de sortie
                   </button>
                 )}
-                {!['livree', 'annulee'].includes(detail.statut) && (
+                {!embedded && !['livree', 'annulee'].includes(detail.statut) && (
                   <button type="button" className="btn btn-ghost btn-sm" style={{ color: 'var(--red)' }} disabled={saving} onClick={() => {
                     const reason = window.prompt('Motif d\'annulation :');
                     if (reason) runAction((id) => cancelSiteMaterialRequest(id, reason));
