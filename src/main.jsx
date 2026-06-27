@@ -6,6 +6,10 @@ import { AuthProvider } from './context/AuthContext';
 import { ToastProvider } from './utils/toast';
 import './index.css';
 
+if (import.meta.env.PROD && import.meta.env.VITE_BUILD_ID) {
+  console.info(`[CITYMO] build ${import.meta.env.VITE_BUILD_ID}`);
+}
+
 const root = document.getElementById('root');
 if (!root) throw new Error('Missing #root');
 

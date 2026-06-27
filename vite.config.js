@@ -54,6 +54,8 @@ export default defineConfig(async ({ mode }) => {
 
   const viteSupabaseUrl = trim(process.env.VITE_SUPABASE_URL || fileEnv.VITE_SUPABASE_URL)
   const viteSupabaseAnonKey = trim(process.env.VITE_SUPABASE_ANON_KEY || fileEnv.VITE_SUPABASE_ANON_KEY)
+  const buildId = trim(process.env.VERCEL_GIT_COMMIT_SHA || process.env.VITE_BUILD_ID || fileEnv.VITE_BUILD_ID)
+    || new Date().toISOString().slice(0, 19)
 
   const plugins = [react()]
   if (mode !== 'production') {
@@ -66,6 +68,7 @@ export default defineConfig(async ({ mode }) => {
     define: {
       'import.meta.env.VITE_SUPABASE_URL': JSON.stringify(viteSupabaseUrl),
       'import.meta.env.VITE_SUPABASE_ANON_KEY': JSON.stringify(viteSupabaseAnonKey),
+      'import.meta.env.VITE_BUILD_ID': JSON.stringify(buildId),
     },
     server: mode === 'production' ? undefined : {
       https: true,
