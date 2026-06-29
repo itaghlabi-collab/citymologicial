@@ -6,6 +6,8 @@ import { requireSupabaseUserId } from '../supabase/requireUser';
 import { buildSeedRows } from './stockArticlesSeed';
 import { listStockCategories } from './stockCategories';
 
+const DEFAULT_STOCK_EMPLACEMENT = 'DEPOT LAKHYAYTA';
+
 const TABLE = 'stock_articles';
 const LEVELS = 'stock_levels';
 const MOVEMENTS = 'stock_movements';
@@ -115,7 +117,7 @@ export function toStockArticleRow(form) {
     category_id: form.categorie_id || form.category_id || null,
     numero_serie: (form.numero_serie || '').trim() || null,
     unite: form.unite || 'U',
-    prix_unitaire: Number(form.valeur ?? form.prix_unitaire) || 0,
+    prix_unitaire: Number(form.valeur ?? form.prix_unitaire ?? form.prix_achat_unitaire) || 0,
     seuil_alerte: Number(form.stock_minimum ?? form.seuil_alerte) || 0,
     etat: form.etat || 'Neuf',
     statut: statutToDb(form.statut),
@@ -410,52 +412,164 @@ export async function getStockArticleById(id) {
   return withStock;
 }
 
-async function createInitialStock(articleId, form, qty, uid) {
-  const locRaw = form.localisation_initiale || form.localisation_id || '';
-  let warehouseId = null;
-  let projectId = null;
-  if (String(locRaw).startsWith('depot:')) warehouseId = locRaw.replace('depot:', '');
-  else if (String(locRaw).startsWith('project:')) projectId = locRaw.replace('project:', '');
-  else {
-    const parsed = parseLocalisation({
-      ...form,
-      localisation_id: locRaw || form.localisation_id,
-      localisation_kind: form.localisation_initiale_kind || form.localisation_kind,
-    });
-    warehouseId = parsed.warehouseId;
-    projectId = parsed.projectId;
+async function getAuthUserContext() {
+  const uid = await requireSupabaseUserId();
+  const { data: { user }, error } = await getSupabase().auth.getUser();
+  if (error || !user) throw new Error('Session requise.');
+  const userName = user.user_metadata?.full_name || user.email?.split('@')[0] || 'Utilisateur';
+  return { uid, userName };
+}
+
+function resolveStockEmplacement(form) {
+  return (
+    (form.stock_emplacement || form.emplacement_initial || form.emplacement || '').trim()
+    || DEFAULT_STOCK_EMPLACEMENT
+  );
+}
+
+function stockMovementNote(form) {
+  const parts = [];
+  if (form.fournisseur_stock?.trim()) parts.push(`Fournisseur : ${form.fournisseur_stock.trim()}`);
+  if (form.reference_facture_bl?.trim()) parts.push(`Réf. facture/BL : ${form.reference_facture_bl.trim()}`);
+  if (form.prix_achat_unitaire !== '' && form.prix_achat_unitaire != null) {
+    parts.push(`Prix achat unitaire : ${form.prix_achat_unitaire} MAD`);
   }
+  if (form.observation_stock?.trim()) parts.push(form.observation_stock.trim());
+  return parts.join(' — ') || '';
+}
 
-  const emplacement = (form.emplacement_initial || form.emplacement || '').trim() || null;
-  const levelRow = {
-    article_id: articleId,
-    warehouse_id: warehouseId || null,
-    project_id: projectId || null,
-    emplacement,
-    quantite: qty,
+async function enrichMovementBonPayload(ref, extra) {
+  const { data, error } = await getSupabase()
+    .from(MOVEMENTS)
+    .select('id, payload')
+    .eq('ref_mouvement', ref);
+  if (error) throw error;
+  await Promise.all((data || []).map((row) => getSupabase()
+    .from(MOVEMENTS)
+    .update({ payload: { ...(row.payload || {}), ...extra } })
+    .eq('id', row.id)));
+}
+
+async function recordValidatedStockBon({
+  article,
+  type,
+  qty,
+  emplacementDestination,
+  emplacementSource = '',
+  motif,
+  actionLabel,
+  dateMouvement,
+  userName,
+  payloadExtra = {},
+  ligneNotes = '',
+}) {
+  const { saveStockMovementBon } = await import('./stockMovements');
+  const bon = {
+    type_mouvement: type,
+    emplacement_source: emplacementSource,
+    emplacement_destination: emplacementDestination,
+    date_creation: dateMouvement || new Date().toISOString().slice(0, 10),
+    cree_par: userName,
+    motif,
+    note: ligneNotes,
+    statut: 'Validé',
+    lignes: [{
+      article_id: article.id,
+      article_code: article.code || article.reference,
+      article_designation: article.designation || article.nom,
+      quantite: qty,
+      notes: ligneNotes,
+    }],
   };
+  const saved = await saveStockMovementBon(bon);
+  await enrichMovementBonPayload(saved.ref, {
+    action_label: actionLabel,
+    applied: true,
+    ...payloadExtra,
+  });
+  return saved;
+}
 
-  const { error: levelErr } = await getSupabase().from(LEVELS).insert([levelRow]);
-  if (levelErr && levelErr.code !== '42P01') throw levelErr;
+async function createInitialStockMovement(article, form, qty, userName) {
+  const emplacement = resolveStockEmplacement(form);
+  const note = stockMovementNote(form);
+  return recordValidatedStockBon({
+    article,
+    type: 'Entrée',
+    qty,
+    emplacementDestination: emplacement,
+    motif: 'Création de l\'article',
+    actionLabel: 'Entrée de stock — Stock initial',
+    dateMouvement: form.date_entree_stock || new Date().toISOString().slice(0, 10),
+    userName,
+    ligneNotes: note,
+    payloadExtra: {
+      origine: 'Stock initial',
+      emplacement_destination: emplacement,
+      source: 'article_creation',
+      fournisseur: (form.fournisseur_stock || '').trim() || null,
+      reference_facture: (form.reference_facture_bl || '').trim() || null,
+      prix_achat_unitaire: form.prix_achat_unitaire !== '' && form.prix_achat_unitaire != null
+        ? Number(form.prix_achat_unitaire)
+        : null,
+    },
+  });
+}
 
-  const y = new Date().getFullYear();
-  const ref = `MVT-${y}-${String(Date.now()).slice(-6)}`;
-  const { error: mvtErr } = await getSupabase().from(MOVEMENTS).insert([{
-    ref_mouvement: ref,
-    type_mouvement: 'Entree',
-    article_id: articleId,
-    warehouse_id: warehouseId || null,
-    quantite: qty,
-    date_mouvement: new Date().toISOString().slice(0, 10),
-    motif: 'Stock initial à la création article',
-    payload: { project_id: projectId, emplacement, source: 'article_creation' },
-    created_by: uid,
-  }]);
-  if (mvtErr) throw mvtErr;
+async function createInventoryAdjustmentMovement(article, form, previousQty, targetQty, userName) {
+  const diff = targetQty - previousQty;
+  if (!diff) return null;
+
+  const emplacement = resolveStockEmplacement(form);
+  const type = diff > 0 ? 'Entrée' : 'Sortie';
+  const qty = Math.abs(diff);
+  const note = stockMovementNote(form);
+
+  return recordValidatedStockBon({
+    article,
+    type,
+    qty,
+    emplacementDestination: diff > 0 ? emplacement : '',
+    emplacementSource: diff < 0 ? emplacement : '',
+    motif: 'Ajustement d\'inventaire',
+    actionLabel: 'Ajustement d\'inventaire',
+    dateMouvement: form.date_entree_stock || new Date().toISOString().slice(0, 10),
+    userName,
+    ligneNotes: note || `Ancienne : ${previousQty} → Nouvelle : ${targetQty}`,
+    payloadExtra: {
+      source: 'inventory_adjustment',
+      origine: 'Ajustement d\'inventaire',
+      ancienne_quantite: previousQty,
+      nouvelle_quantite: targetQty,
+      difference: diff,
+      emplacement,
+      fournisseur: (form.fournisseur_stock || '').trim() || null,
+      reference_facture: (form.reference_facture_bl || '').trim() || null,
+    },
+  });
+}
+
+function parseTargetStockQty(form) {
+  if (form.quantite_initiale === '' || form.quantite_initiale == null) return null;
+  const qty = Number(form.quantite_initiale);
+  if (Number.isNaN(qty) || qty < 0) {
+    const err = new Error('La quantité en stock doit être un nombre positif ou zéro.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  return qty;
+}
+
+function assertStockEmplacementIfQty(form, qty) {
+  if (qty > 0 && !resolveStockEmplacement(form)) {
+    const err = new Error('Renseignez l\'emplacement de stockage pour une quantité initiale.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
 }
 
 export async function createStockArticle(form) {
-  const uid = await requireSupabaseUserId();
+  const { userName } = await getAuthUserContext();
   const row = toStockArticleRow(form);
   if (!row.reference) row.reference = await generateStockArticleCode();
   row.barcode_value = row.reference;
@@ -464,28 +578,50 @@ export async function createStockArticle(form) {
     err.code = 'VALIDATION';
     throw err;
   }
+  if (!row.emplacement && (form.stock_emplacement || form.emplacement_initial)) {
+    row.emplacement = resolveStockEmplacement(form);
+  }
+
+  const targetQty = parseTargetStockQty(form);
+  if (targetQty != null) assertStockEmplacementIfQty(form, targetQty);
 
   const data = await insertArticleRow(row);
 
   const article = normalizeStockArticle(data);
-  const qty = Number(form.quantite_initiale) || 0;
-  if (qty > 0) {
-    await createInitialStock(article.id, form, qty, uid);
+  if (targetQty != null && targetQty > 0) {
+    await createInitialStockMovement(article, form, targetQty, userName);
   }
   const [withStock] = await attachStockQuantities([article]);
   return withStock;
 }
 
 export async function updateStockArticle(id, form) {
-  await requireSupabaseUserId();
+  const { userName } = await getAuthUserContext();
+  const existing = await getStockArticleById(id);
+  const previousQty = Number(existing?.stock_actuel ?? 0);
+
   const row = toStockArticleRow(form);
   if (!row.nom) {
     const err = new Error('La désignation est obligatoire.');
     err.code = 'VALIDATION';
     throw err;
   }
+
+  const targetQty = parseTargetStockQty(form);
+  if (targetQty != null) assertStockEmplacementIfQty(form, targetQty);
+
   const data = await updateArticleRow(id, row);
-  const [withStock] = await attachStockQuantities([normalizeStockArticle(data)]);
+  const article = normalizeStockArticle(data);
+
+  if (targetQty != null && targetQty !== previousQty) {
+    if (previousQty === 0 && targetQty > 0) {
+      await createInitialStockMovement(article, form, targetQty, userName);
+    } else {
+      await createInventoryAdjustmentMovement(article, form, previousQty, targetQty, userName);
+    }
+  }
+
+  const [withStock] = await attachStockQuantities([article]);
   return withStock;
 }
 
@@ -547,6 +683,22 @@ export function formatArticleMovementHistory(m) {
     Reparation: 'Réparation',
     Reforme: 'Réforme',
   }[m.type_mouvement] || m.type_mouvement || '';
+
+  let action = p.action_label || m.motif || typeLabel || 'Mouvement';
+  let observation = p.note || p.ligne_notes || '';
+  if (p.source === 'inventory_adjustment') {
+    action = 'Ajustement d\'inventaire';
+    const ancienne = p.ancienne_quantite ?? '—';
+    const nouvelle = p.nouvelle_quantite ?? '—';
+    const diff = p.difference ?? '—';
+    observation = [
+      observation,
+      `Ancienne : ${ancienne} — Nouvelle : ${nouvelle} (Δ ${diff})`,
+    ].filter(Boolean).join(' — ');
+  } else if (p.source === 'article_creation' || p.origine === 'Stock initial') {
+    action = 'Entrée de stock — Stock initial';
+  }
+
   return {
     id: m.id,
     ref: m.ref_mouvement || '',
@@ -557,10 +709,10 @@ export function formatArticleMovementHistory(m) {
     date_label: fmtMvtDate(m.date_mouvement),
     motif: m.motif || '',
     utilisateur: p.cree_par || p.utilisateur || '—',
-    action: p.action_label || m.motif || typeLabel || 'Mouvement',
-    origine: p.emplacement_source || '',
+    action,
+    origine: p.origine || p.emplacement_source || (p.source === 'article_creation' ? 'Stock initial' : ''),
     destination: p.emplacement_destination || '',
-    observation: p.note || p.ligne_notes || '',
+    observation,
     warehouse_id: m.warehouse_id,
     payload: p,
     created_at: m.created_at,

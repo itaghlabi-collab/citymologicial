@@ -149,16 +149,29 @@ const EMPTY_FORM = {
   description: '',
   notes: '',
   quantite_initiale: '',
+  stock_emplacement: '',
   emplacement_initial: '',
+  date_entree_stock: '',
+  fournisseur_stock: '',
+  reference_facture_bl: '',
+  prix_achat_unitaire: '',
+  observation_stock: '',
 };
+
+function todayInputDate() {
+  return new Date().toISOString().slice(0, 10);
+}
 
 function ArticleForm({ initial, categories, onSave, onCancel, saving, emplacementsList = EMPLACEMENTS_STOCK }) {
   const [form, setForm] = useState(() => {
-    if (!initial) return { ...EMPTY_FORM };
+    if (!initial) return { ...EMPTY_FORM, date_entree_stock: todayInputDate() };
     return {
       ...EMPTY_FORM,
       ...initial,
       code: initial.code || initial.reference || '',
+      stock_emplacement: initial.stock_emplacement || initial.emplacement || '',
+      date_entree_stock: initial.date_entree_stock || todayInputDate(),
+      quantite_initiale: '',
     };
   });
   const [errors, setErrors] = useState({});
@@ -179,6 +192,11 @@ function ArticleForm({ initial, categories, onSave, onCancel, saving, emplacemen
     const e = {};
     if (!form.designation?.trim()) e.designation = 'Requis';
     if (!form.code?.trim()) e.code = 'Requis';
+    const qty = form.quantite_initiale !== '' && form.quantite_initiale != null ? Number(form.quantite_initiale) : null;
+    if (qty != null && !Number.isNaN(qty) && qty < 0) e.quantite_initiale = 'Quantité invalide';
+    if (qty != null && qty > 0 && !(form.stock_emplacement || form.emplacement || '').trim()) {
+      e.stock_emplacement = 'Requis avec une quantité';
+    }
     return e;
   }
 
@@ -243,7 +261,7 @@ function ArticleForm({ initial, categories, onSave, onCancel, saving, emplacemen
         </FField>
       </FRow>
 
-      <SectionTitle>Valeur & Stock</SectionTitle>
+      <SectionTitle>Valeur & seuil d&apos;alerte</SectionTitle>
       <FRow>
         <FField label="Valeur unitaire (MAD)">
           <input type="number" step="0.01" min="0" value={form.valeur} onChange={(e) => set('valeur', e.target.value)} placeholder="0.00" style={INPUT_STYLE} />
@@ -263,9 +281,9 @@ function ArticleForm({ initial, categories, onSave, onCancel, saving, emplacemen
         </FField>
       </FRow>
 
-      <SectionTitle>Emplacement</SectionTitle>
+      <SectionTitle>Emplacement par défaut (fiche)</SectionTitle>
       <FRow>
-        <FField label="Emplacement">
+        <FField label="Emplacement fiche article">
           <select value={form.emplacement} onChange={(e) => set('emplacement', e.target.value)} style={SELECT_STYLE}>
             <option value="">— Sélectionner —</option>
             {emplacementOptions(form.emplacement).map((e) => (
@@ -275,23 +293,68 @@ function ArticleForm({ initial, categories, onSave, onCancel, saving, emplacemen
         </FField>
       </FRow>
 
+      <SectionTitle icon={<Package size={12} />}>Gestion du stock</SectionTitle>
+      {isEdit && (
+        <div style={{ marginBottom: 12, padding: '10px 12px', background: 'var(--surface-2)', borderRadius: 8, fontSize: '0.82rem' }}>
+          Stock actuel (calculé) : <strong>{initial?.stock_actuel ?? 0} {initial?.unite || 'U'}</strong>
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-3)', marginTop: 4 }}>
+            Le stock n&apos;est jamais saisi directement — seule une nouvelle quantité cible génère un mouvement.
+          </div>
+        </div>
+      )}
+      <FRow>
+        <FField label={isEdit ? 'Nouvelle quantité en stock' : 'Quantité initiale'}>
+          <input
+            type="number"
+            min="0"
+            step="0.001"
+            value={form.quantite_initiale}
+            onChange={(e) => set('quantite_initiale', e.target.value)}
+            placeholder={isEdit ? `Actuel : ${initial?.stock_actuel ?? 0}` : '0'}
+            style={{ ...INPUT_STYLE, borderColor: errors.quantite_initiale ? 'var(--red)' : 'var(--border)' }}
+          />
+          {errors.quantite_initiale && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.quantite_initiale}</div>}
+        </FField>
+        <FField label="Emplacement de stockage" required={form.quantite_initiale !== '' && Number(form.quantite_initiale) > 0}>
+          <select
+            value={form.stock_emplacement}
+            onChange={(e) => set('stock_emplacement', e.target.value)}
+            style={{ ...SELECT_STYLE, borderColor: errors.stock_emplacement ? 'var(--red)' : 'var(--border)' }}
+          >
+            <option value="">— Sélectionner —</option>
+            {emplacementOptions(form.stock_emplacement || form.emplacement).map((e) => (
+              <option key={`stock-${e}`} value={e}>{e}</option>
+            ))}
+          </select>
+          {errors.stock_emplacement && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.stock_emplacement}</div>}
+        </FField>
+        <FField label="Date d'entrée en stock">
+          <input type="date" value={form.date_entree_stock || todayInputDate()} onChange={(e) => set('date_entree_stock', e.target.value)} style={INPUT_STYLE} />
+        </FField>
+        <FField label="Fournisseur (optionnel)">
+          <input value={form.fournisseur_stock} onChange={(e) => set('fournisseur_stock', e.target.value)} placeholder="Nom fournisseur..." style={INPUT_STYLE} />
+        </FField>
+        <FField label="Réf. facture / BL (optionnel)">
+          <input value={form.reference_facture_bl} onChange={(e) => set('reference_facture_bl', e.target.value)} placeholder="FAC-… / BL-…" style={INPUT_STYLE} />
+        </FField>
+        <FField label="Prix d'achat unitaire (optionnel)">
+          <input type="number" step="0.01" min="0" value={form.prix_achat_unitaire} onChange={(e) => set('prix_achat_unitaire', e.target.value)} placeholder="MAD" style={INPUT_STYLE} />
+        </FField>
+      </FRow>
+      <div style={{ marginBottom: 14 }}>
+        <FField label="Observation">
+          <textarea value={form.observation_stock} onChange={(e) => set('observation_stock', e.target.value)} placeholder="Commentaire sur l'entrée en stock..." style={{ ...TEXTAREA_STYLE, minHeight: 56 }} />
+        </FField>
+      </div>
       {!isEdit && (
-        <>
-          <SectionTitle>Stock initial (optionnel)</SectionTitle>
-          <FRow>
-            <FField label="Quantité initiale">
-              <input type="number" min="0" step="0.001" value={form.quantite_initiale} onChange={(e) => set('quantite_initiale', e.target.value)} placeholder="0" style={INPUT_STYLE} />
-            </FField>
-            <FField label="Emplacement initial">
-              <select value={form.emplacement_initial} onChange={(e) => set('emplacement_initial', e.target.value)} style={SELECT_STYLE}>
-                <option value="">— Même que défaut —</option>
-                {emplacementOptions(form.emplacement_initial).map((e) => (
-                  <option key={`init-${e}`} value={e}>{e}</option>
-                ))}
-              </select>
-            </FField>
-          </FRow>
-        </>
+        <div style={{ marginBottom: 14, fontSize: '0.78rem', color: 'var(--text-3)' }}>
+          Une quantité initiale &gt; 0 crée automatiquement un mouvement <strong>Entrée de stock</strong> (origine : Stock initial).
+        </div>
+      )}
+      {isEdit && (
+        <div style={{ marginBottom: 14, fontSize: '0.78rem', color: 'var(--text-3)' }}>
+          Si la nouvelle quantité diffère du stock actuel, un mouvement <strong>Ajustement d&apos;inventaire</strong> sera enregistré dans l&apos;historique.
+        </div>
       )}
 
       <SectionTitle>Description & Notes</SectionTitle>
