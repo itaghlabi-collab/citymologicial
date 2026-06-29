@@ -132,15 +132,29 @@ function QuoteComparisonTable({
 
 function QuoteForm({ suppliers, initial, onSave, onCancel, saving }) {
   const [form, setForm] = useState(() => (initial ? { ...EMPTY_QUOTE, ...initial, ref_devis_fournisseur: initial.ref_devis || initial.ref_devis_fournisseur || '' } : EMPTY_QUOTE));
+  const [errors, setErrors] = useState({});
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
+  const fournActifs = suppliers.filter((f) => f.statut === 'Actif' || f.status === 'active');
+
   function handleSupplierChange(id) {
-    const s = suppliers.find((x) => x.id === id);
+    const s = fournActifs.find((x) => x.id === id);
     setForm((p) => ({
       ...p,
-      supplier_id: id,
+      supplier_id: id || '',
       supplier_name: s ? (s.company_name || s.nom || s.raison_sociale) : '',
     }));
+    if (id) setErrors((e) => ({ ...e, supplier_name: undefined }));
+  }
+
+  function handleSubmit(e) {
+    e.preventDefault();
+    if (!(form.supplier_name || '').trim()) {
+      setErrors({ supplier_name: 'Sélectionnez ou saisissez un fournisseur' });
+      return;
+    }
+    setErrors({});
+    onSave(form);
   }
 
   function handleHtChange(val) {
@@ -164,15 +178,33 @@ function QuoteForm({ suppliers, initial, onSave, onCancel, saving }) {
   }
 
   return (
-    <form onSubmit={(e) => { e.preventDefault(); onSave(form); }}>
+    <form onSubmit={handleSubmit}>
       <FRow>
         <FField label="Fournisseur" required>
-          <select value={form.supplier_id} onChange={(e) => handleSupplierChange(e.target.value)} style={SELECT_STYLE} required>
-            <option value="">— Sélectionner —</option>
-            {suppliers.map((s) => (
-              <option key={s.id} value={s.id}>{s.company_name || s.nom || s.raison_sociale}</option>
-            ))}
-          </select>
+          {fournActifs.length > 0 && (
+            <select
+              value={form.supplier_id || ''}
+              onChange={(e) => handleSupplierChange(e.target.value)}
+              style={{ ...SELECT_STYLE, marginBottom: 8, borderColor: errors.supplier_name ? 'var(--red)' : 'var(--border)' }}
+            >
+              <option value="">— Sélectionner un fournisseur —</option>
+              {fournActifs.map((s) => (
+                <option key={s.id} value={s.id}>{s.company_name || s.nom || s.raison_sociale}</option>
+              ))}
+            </select>
+          )}
+          <input
+            value={form.supplier_name}
+            onChange={(e) => setForm((p) => ({
+              ...p,
+              supplier_name: e.target.value,
+              supplier_id: '',
+            }))}
+            placeholder="Ou saisir le nom du fournisseur..."
+            style={{ ...INPUT_STYLE, borderColor: errors.supplier_name ? 'var(--red)' : 'var(--border)' }}
+            required
+          />
+          {errors.supplier_name && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.supplier_name}</div>}
         </FField>
         <FField label="Réf. devis fournisseur">
           <input value={form.ref_devis_fournisseur} onChange={(e) => set('ref_devis_fournisseur', e.target.value)} style={INPUT_STYLE} placeholder="Réf. fournisseur" />
