@@ -74,6 +74,13 @@ function syncTaskDates(form) {
   let date_fin = fmtDate(form.date_fin) || null;
   let duree_jours = Number(form.duree_jours);
 
+  if (!date_debut && !date_fin) {
+    date_debut = isoDateLocal(new Date());
+    duree_jours = duree_jours > 0 ? duree_jours : 7;
+    date_fin = endDateFromStartAndDuration(date_debut, duree_jours);
+    return { date_debut, date_fin, duree_jours };
+  }
+
   if (date_debut && date_fin) {
     duree_jours = daysBetweenInclusive(date_debut, date_fin);
   } else if (date_debut && duree_jours > 0) {
@@ -81,11 +88,47 @@ function syncTaskDates(form) {
   } else if (date_debut && !date_fin) {
     date_fin = date_debut;
     duree_jours = 1;
+  } else if (!date_debut && date_fin) {
+    date_debut = date_fin;
+    duree_jours = 1;
   } else {
-    duree_jours = duree_jours > 0 ? duree_jours : 1;
+    date_debut = isoDateLocal(new Date());
+    duree_jours = duree_jours > 0 ? duree_jours : 7;
+    date_fin = endDateFromStartAndDuration(date_debut, duree_jours);
   }
 
   return { date_debut, date_fin, duree_jours };
+}
+
+/** Garantit des dates affichables pour chaque tâche (barres Gantt). */
+export function withDefaultPlanningDates(task) {
+  if (!task) return task;
+  let date_debut = fmtDate(task.date_debut);
+  let date_fin = fmtDate(task.date_fin);
+  let duree_jours = Number(task.duree_jours);
+
+  if (!date_debut && !date_fin) {
+    date_debut = isoDateLocal(new Date());
+    duree_jours = duree_jours > 0 ? duree_jours : 7;
+    date_fin = endDateFromStartAndDuration(date_debut, duree_jours);
+  } else if (date_debut && !date_fin) {
+    duree_jours = duree_jours > 0 ? duree_jours : 1;
+    date_fin = endDateFromStartAndDuration(date_debut, duree_jours);
+  } else if (!date_debut && date_fin) {
+    date_debut = date_fin;
+    duree_jours = 1;
+  } else {
+    duree_jours = duree_jours > 0
+      ? duree_jours
+      : daysBetweenInclusive(date_debut, date_fin);
+  }
+
+  return {
+    ...task,
+    date_debut,
+    date_fin,
+    duree_jours,
+  };
 }
 
 export function normalizePlanningTask(row) {
@@ -96,7 +139,7 @@ export function normalizePlanningTask(row) {
     ? Number(row.duree_jours)
     : daysBetweenInclusive(date_debut, date_fin);
 
-  return {
+  return withDefaultPlanningDates({
     id: row.id,
     project_id: row.project_id,
     nom: row.nom || '',
@@ -114,7 +157,7 @@ export function normalizePlanningTask(row) {
     ordre: Number(row.ordre ?? 0),
     created_at: row.created_at,
     updated_at: row.updated_at,
-  };
+  });
 }
 
 export function toPlanningTaskRow(form) {
@@ -264,8 +307,9 @@ export function filterPlanningTasks(tasks, filters = {}) {
 export function computeTimelineBounds(tasks, project = {}) {
   const taskDates = [];
   (tasks || []).forEach((t) => {
-    const deb = fmtDate(t.date_debut);
-    const fin = fmtDate(t.date_fin) || deb;
+    const resolved = withDefaultPlanningDates(t);
+    const deb = fmtDate(resolved.date_debut);
+    const fin = fmtDate(resolved.date_fin) || deb;
     if (deb) taskDates.push(deb);
     if (fin) taskDates.push(fin);
   });
@@ -288,6 +332,31 @@ export function computeTimelineBounds(tasks, project = {}) {
     minDate: addDaysIso(start, -3),
     maxDate: addDaysIso(end, 7),
   };
+}
+
+/** Timeline Gantt complète (bornes + jours + groupes mois). */
+export function buildGanttTimeline(rows = [], project = {}, dayWidth = 28) {
+  const { minDate, maxDate } = computeTimelineBounds(rows, project);
+  const days = buildDailyTimeline(minDate, maxDate);
+  const monthGroups = buildMonthGroups(days);
+  return {
+    minDate,
+    maxDate,
+    days,
+    monthGroups,
+    timelineWidth: Math.max(dayWidth, days.length * dayWidth),
+  };
+}
+
+/** Scroll horizontal vers la première barre visible. */
+export function ganttScrollTargetLeft(rows, minDate, dayWidth = 28) {
+  let minLeft = Infinity;
+  (rows || []).forEach((row) => {
+    const bar = taskBarPx(withDefaultPlanningDates(row), minDate, dayWidth);
+    if (bar) minLeft = Math.min(minLeft, bar.left);
+  });
+  if (!Number.isFinite(minLeft)) return 0;
+  return Math.max(0, minLeft - dayWidth);
 }
 
 export function buildTimelineColumns(minDate, maxDate) {
@@ -397,14 +466,18 @@ export function buildMonthGroups(days) {
 
 /** Position barre en pixels (timeline fixe jour/jour) */
 export function taskBarPx(task, minDate, dayWidth) {
-  if (!task.date_debut) return null;
+  const resolved = withDefaultPlanningDates(task);
+  const deb = fmtDate(resolved.date_debut);
+  if (!deb || !minDate) return null;
+  const fin = fmtDate(resolved.date_fin) || deb;
   const t0 = new Date(`${minDate}T12:00:00`);
-  const start = new Date(`${task.date_debut}T12:00:00`);
+  const start = new Date(`${deb}T12:00:00`);
   const startOffset = Math.round((start - t0) / 86400000);
-  const duration = daysBetweenInclusive(task.date_debut, task.date_fin || task.date_debut);
+  const duration = daysBetweenInclusive(deb, fin);
+  if (duration < 1) return null;
   return {
     left: startOffset * dayWidth,
-    width: Math.max(dayWidth * 0.6, duration * dayWidth - 2),
+    width: Math.max(dayWidth * 0.85, duration * dayWidth - 2),
     startOffset,
     duration,
   };
@@ -414,7 +487,7 @@ export function taskBarPx(task, minDate, dayWidth) {
 /** Lignes affichage : résumé par lot + sous-tâches (style WBS) */
 export function buildGanttDisplayRows(tasks, collapsedLots = new Set()) {
   const byLot = {};
-  tasks.forEach((t) => {
+  tasks.map(withDefaultPlanningDates).forEach((t) => {
     const lot = t.lot || 'Autre';
     if (!byLot[lot]) byLot[lot] = [];
     byLot[lot].push(t);

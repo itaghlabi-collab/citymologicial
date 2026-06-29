@@ -13,13 +13,14 @@ import {
   deleteProjectPlanningTask,
   shiftPlanningTaskDates,
   filterPlanningTasks,
-  computeTimelineBounds,
-  buildDailyTimeline,
-  buildMonthGroups,
+  buildGanttTimeline,
+  ganttScrollTargetLeft,
   buildGanttDisplayRows,
   taskBarPx,
   daysBetweenInclusive,
   endDateFromStartAndDuration,
+  isoDateLocal,
+  withDefaultPlanningDates,
 } from '../../services/projects/projectPlanningTasks';
 import { generateProjectPlanningPdfSynthesis, generateProjectPlanningPdfDetailed } from '../../services/projects/projectPlanningPdf';
 import {
@@ -53,7 +54,7 @@ const EMPTY_TASK = {
   lot: 'Gros œuvre',
   date_debut: '',
   date_fin: '',
-  duree_jours: 1,
+  duree_jours: 7,
   responsable: '',
   avancement: 0,
   statut: 'a_faire',
@@ -62,6 +63,16 @@ const EMPTY_TASK = {
   parent_id: '',
   couleur: '',
 };
+
+function defaultTaskForm() {
+  const today = isoDateLocal(new Date());
+  return {
+    ...EMPTY_TASK,
+    date_debut: today,
+    date_fin: endDateFromStartAndDuration(today, 7),
+    duree_jours: 7,
+  };
+}
 
 const GANTT_HDR = {
   background: 'linear-gradient(135deg, var(--red-dark) 0%, var(--red) 100%)',
@@ -144,7 +155,9 @@ function TaskModal({ open, task, tasks, employees, saving, onClose, onSave, defa
 
   useEffect(() => {
     if (open) {
-      const base = task ? { ...EMPTY_TASK, ...task } : { ...EMPTY_TASK };
+      const base = task
+        ? withDefaultPlanningDates({ ...EMPTY_TASK, ...task })
+        : defaultTaskForm();
       if (defaultParentId && !task) base.parent_id = defaultParentId;
       setForm(base);
       setErr('');
@@ -324,10 +337,10 @@ function GanttBar({ row, minDate, dayWidth, onEdit, onShift, onBarChange }) {
   const bar = taskBarPx(row, minDate, dayWidth);
   const dragRef = useRef({ mode: null, startX: 0 });
 
-  if (!bar) return null;
+  if (!bar || bar.width < 2) return null;
 
   const isSummary = row.type === 'summary';
-  const color = isSummary ? 'var(--red-dark)' : planningTaskBarColor(row);
+  const color = isSummary ? '#B71C1C' : planningTaskBarColor(row);
   const pct = Math.min(100, Math.max(0, Number(row.avancement) || 0));
   const h = isSummary ? 10 : 14;
   const top = isSummary ? 12 : 10;
@@ -366,12 +379,12 @@ function GanttBar({ row, minDate, dayWidth, onEdit, onShift, onBarChange }) {
           width: bar.width,
           top,
           height: h,
+          zIndex: 3,
           background: color,
-          borderRadius: isSummary ? 2 : 3,
+          borderRadius: isSummary ? 4 : 3,
           cursor: isSummary ? 'default' : 'grab',
-          boxShadow: '0 1px 2px rgba(0,0,0,0.15)',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.22)',
           overflow: 'hidden',
-          clipPath: isSummary ? 'polygon(6px 0, calc(100% - 6px) 0, 100% 50%, calc(100% - 6px) 100%, 6px 100%, 0 50%)' : undefined,
           opacity: row.statut === 'termine' ? 0.75 : 1,
           border: row.statut === 'bloque' ? '1.5px dashed #fff' : 'none',
         }}
@@ -472,18 +485,16 @@ function GanttChart({
   useEffect(() => {
     const body = rightBodyRef.current;
     const hdr = rightHdrRef.current;
-    if (!body) return;
+    if (!body || !displayRows.length) return undefined;
 
-    const anchor = displayRows.find((row) => row.date_debut);
-    if (!anchor) return;
+    const frame = requestAnimationFrame(() => {
+      const target = ganttScrollTargetLeft(displayRows, minDate, DAY_W);
+      body.scrollLeft = target;
+      if (hdr) hdr.scrollLeft = target;
+    });
 
-    const bar = taskBarPx(anchor, minDate, DAY_W);
-    if (!bar) return;
-
-    const target = Math.max(0, bar.left - DAY_W * 2);
-    body.scrollLeft = target;
-    if (hdr) hdr.scrollLeft = target;
-  }, [displayRows, minDate, days.length]);
+    return () => cancelAnimationFrame(frame);
+  }, [displayRows, minDate, timelineWidth]);
 
   function syncScroll(source, target) {
     if (syncing.current) return;
@@ -747,7 +758,10 @@ export default function ProjectPlanningGantt({
     [employees],
   );
 
-  const filtered = useMemo(() => filterPlanningTasks(tasks, filters), [tasks, filters]);
+  const filtered = useMemo(
+    () => filterPlanningTasks(tasks, filters).map(withDefaultPlanningDates),
+    [tasks, filters],
+  );
 
   const taskById = useMemo(() => {
     const m = {};
@@ -765,14 +779,11 @@ export default function ProjectPlanningGantt({
     return [...s].sort();
   }, [tasks]);
 
-  const { minDate, maxDate } = useMemo(
-    () => computeTimelineBounds(filtered),
-    [filtered],
+  const timeline = useMemo(
+    () => buildGanttTimeline(displayRows, projet, DAY_W),
+    [displayRows, projet],
   );
-
-  const days = useMemo(() => buildDailyTimeline(minDate, maxDate), [minDate, maxDate]);
-  const monthGroups = useMemo(() => buildMonthGroups(days), [days]);
-  const timelineWidth = days.length * DAY_W;
+  const { minDate, days, monthGroups, timelineWidth } = timeline;
 
   function toggleLot(lot) {
     setCollapsedLots((prev) => {
@@ -795,7 +806,7 @@ export default function ProjectPlanningGantt({
           ? { ...form, parent_id: addChildParent.id, lot: form.lot || addChildParent.lot }
           : form;
         const created = await createProjectPlanningTask(projectId, formWithParent);
-        setTasks((prev) => [...prev, created]);
+        setTasks((prev) => [...prev, withDefaultPlanningDates(created)]);
         setToast('Tâche ajoutée.');
       }
       onReload?.();
