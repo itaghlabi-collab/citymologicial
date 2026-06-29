@@ -8,6 +8,8 @@ import {
 } from 'lucide-react';
 import { useAcquisitionOrders } from '../../hooks/useAcquisitionOrders';
 import { updateAcquisitionOrder, updateAcquisitionOrderStatus } from '../../services/achats/purchaseAcquisitionOrders';
+import { getPurchaseRequestQuote } from '../../services/achats/purchaseRequestQuotes';
+import { generateAcquisitionOrderPdf } from '../../services/achats/purchaseAcquisitionOrderPdf';
 import { listPurchaseRequestHistory } from '../../services/achats/purchaseRequestHistory';
 import { PURCHASE_ASSIGNEE } from '../../constants/purchaseWorkflow';
 import {
@@ -25,6 +27,7 @@ const NEXT_STATUS = {
 
 function DetailOA({ ordre, history, onBack, onStatusChange, onSave, saving }) {
   const [editMode, setEditMode] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState(false);
   const [form, setForm] = useState({
     delai: ordre.delai || '',
     conditions_paiement: ordre.conditions_paiement || '',
@@ -32,6 +35,19 @@ function DetailOA({ ordre, history, onBack, onStatusChange, onSave, saving }) {
     date_livraison: ordre.date_livraison || '',
   });
   const next = NEXT_STATUS[ordre.statut];
+
+  async function handlePdf() {
+    setPdfLoading(true);
+    try {
+      let quote = null;
+      if (ordre.quote_id) quote = await getPurchaseRequestQuote(ordre.quote_id);
+      await generateAcquisitionOrderPdf(ordre, { quote });
+    } catch (err) {
+      window.alert(err.message || 'Erreur génération PDF');
+    } finally {
+      setPdfLoading(false);
+    }
+  }
 
   return (
     <div className="animate-fade-in">
@@ -75,7 +91,9 @@ function DetailOA({ ordre, history, onBack, onStatusChange, onSave, saving }) {
           <SectionTitle>Actions</SectionTitle>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditMode((v) => !v)}><Edit2 size={13} /> Modifier</button>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => window.print()}><FileText size={13} /> Télécharger PDF</button>
+            <button type="button" className="btn btn-ghost btn-sm" disabled={pdfLoading} onClick={handlePdf}>
+              {pdfLoading ? <Loader2 size={13} className="cin-spin" /> : <FileText size={13} />} Télécharger PDF
+            </button>
             {next && (
               <button type="button" className="btn btn-primary btn-sm" disabled={saving} onClick={() => onStatusChange(ordre.id, next)}>
                 {ordre.statut === 'Brouillon' && <><CheckCircle size={13} /> Valider</>}
@@ -126,6 +144,7 @@ export default function OrdresAchat() {
   const [detail, setDetail] = useState(null);
   const [history, setHistory] = useState([]);
   const [saving, setSaving] = useState(false);
+  const [pdfLoadingId, setPdfLoadingId] = useState(null);
 
   const filtered = ordres.filter((o) => {
     const q = search.toLowerCase();
@@ -166,6 +185,21 @@ export default function OrdresAchat() {
       await reload();
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleListPdf(id) {
+    setPdfLoadingId(id);
+    try {
+      const ordre = ordres.find((o) => o.id === id);
+      if (!ordre) return;
+      let quote = null;
+      if (ordre.quote_id) quote = await getPurchaseRequestQuote(ordre.quote_id);
+      await generateAcquisitionOrderPdf(ordre, { quote });
+    } catch (err) {
+      window.alert(err.message || 'Erreur génération PDF');
+    } finally {
+      setPdfLoadingId(null);
     }
   }
 
@@ -230,7 +264,7 @@ export default function OrdresAchat() {
             <table>
               <thead>
                 <tr>
-                  <th>Réf.</th><th>Demande</th><th>Objet</th><th>Fournisseur</th><th>Projet</th><th>TTC</th><th>Statut</th><th />
+                  <th>Réf.</th><th>Demande</th><th>Objet</th><th>Fournisseur</th><th>Projet</th><th>TTC</th><th>Statut</th><th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -243,7 +277,14 @@ export default function OrdresAchat() {
                     <td>{o.project_ref || '—'}</td>
                     <td>{formatMAD(o.montant_ttc)}</td>
                     <td><span className={`badge ${BADGE_ORDRE[o.statut] || 'badge-grey'}`}>{o.statut}</span></td>
-                    <td><button type="button" className="btn btn-secondary btn-sm" onClick={() => openDetail(o.id)}><Eye size={13} /></button></td>
+                    <td>
+                      <div style={{ display: 'flex', gap: 3 }}>
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => openDetail(o.id)}><Eye size={13} /></button>
+                        <button type="button" className="btn btn-ghost btn-sm" title="PDF" disabled={pdfLoadingId === o.id} onClick={() => handleListPdf(o.id)}>
+                          {pdfLoadingId === o.id ? <Loader2 size={12} className="cin-spin" /> : <FileText size={12} />}
+                        </button>
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>

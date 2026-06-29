@@ -12,7 +12,8 @@ import { useSuppliers } from '../../hooks/useSuppliers';
 import { useAuth } from '../../hooks/useAuth';
 import { PURCHASE_ASSIGNEE } from '../../constants/purchaseWorkflow';
 import { canEditPurchaseRequest, canDeletePurchaseRequest, normalizePurchaseStatus, canSubmitPurchaseRequest, canAddQuoteToRequest, canValidateQuoteOnRequest } from '../../constants/purchaseWorkflow';
-import { submitPurchaseRequest } from '../../services/achats/purchaseWorkflow';
+import { submitPurchaseRequest, getPurchaseRequestBundle } from '../../services/achats/purchaseWorkflow';
+import { generatePurchaseRequestPdf } from '../../services/achats/purchaseRequestPdf';
 import { resolveCurrentPurchaseRole, purchasePermissions, canViewPurchaseRequest } from '../../services/achats/purchaseWorkflowRoles';
 import DemandeAchatDetail from './DemandeAchatDetail';
 import {
@@ -158,6 +159,7 @@ export default function DemandesAchat() {
   const [detailId, setDetailId] = useState(null);
   const [detailAddQuote, setDetailAddQuote] = useState(false);
   const [submittingId, setSubmittingId] = useState(null);
+  const [pdfLoadingId, setPdfLoadingId] = useState(null);
   const [role, setRole] = useState(null);
 
   useEffect(() => {
@@ -190,9 +192,16 @@ export default function DemandesAchat() {
     if (result.success) setDetailId(null);
   }
 
-  function handlePrintPdf(item) {
-    window.open(`#achats-da-${item.id}`, '_blank');
-    window.print();
+  async function handlePrintPdf(item) {
+    setPdfLoadingId(item.id);
+    try {
+      const bundle = await getPurchaseRequestBundle(item.id);
+      await generatePurchaseRequestPdf(bundle.request);
+    } catch (err) {
+      window.alert(err.message || 'Erreur génération PDF');
+    } finally {
+      setPdfLoadingId(null);
+    }
   }
 
   const filtered = visibleItems.filter((x) => {
@@ -335,7 +344,9 @@ export default function DemandesAchat() {
                         {canEditPurchaseRequest(x.statut) && (
                           <button type="button" className="btn btn-ghost btn-sm" title="Modifier" onClick={() => { setEditItem(x); setShowModal(true); }}><Edit2 size={13} /></button>
                         )}
-                        <button type="button" className="btn btn-ghost btn-sm" title="PDF" onClick={() => handlePrintPdf(x)}><FileText size={13} /></button>
+                        <button type="button" className="btn btn-ghost btn-sm" title="PDF" disabled={pdfLoadingId === x.id} onClick={() => handlePrintPdf(x)}>
+                          {pdfLoadingId === x.id ? <Loader2 size={12} className="cin-spin" /> : <FileText size={13} />}
+                        </button>
                         <button type="button" className="btn btn-ghost btn-sm" title="Historique" onClick={() => setDetailId(x.id)}><History size={13} /></button>
                         {canSubmitPurchaseRequest(x.statut) && (
                           <button type="button" className="btn btn-primary btn-sm" title="Soumettre" disabled={submittingId === x.id} onClick={() => handleSubmit(x.id)}>

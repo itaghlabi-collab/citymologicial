@@ -23,6 +23,7 @@ import {
 import { resolveCurrentPurchaseRole, purchasePermissions } from '../../services/achats/purchaseWorkflowRoles';
 import { PURCHASE_ASSIGNEE } from '../../constants/purchaseWorkflow';
 import { canEditPurchaseRequest, canAddQuoteToRequest } from '../../constants/purchaseWorkflow';
+import { generatePurchaseRequestPdf } from '../../services/achats/purchaseRequestPdf';
 import {
   SectionTitle, FField, FRow, INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE,
   BADGE_DEMANDE, BADGE_PRIORITE, TVA_OPTIONS, UploadField, formatMAD, Modal,
@@ -222,6 +223,7 @@ export default function DemandeAchatDetail({
   const [viewQuote, setViewQuote] = useState(null);
   const [showHistory, setShowHistory] = useState(false);
   const [validatingId, setValidatingId] = useState(null);
+  const [pdfLoading, setPdfLoading] = useState(false);
 
   const load = useCallback(async () => {
     if (!requestId) return;
@@ -304,6 +306,23 @@ export default function DemandeAchatDetail({
           {canEdit && (
             <button type="button" className="btn btn-secondary btn-sm" onClick={onEdit}>Modifier</button>
           )}
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            disabled={pdfLoading}
+            onClick={async () => {
+              setPdfLoading(true);
+              try {
+                await generatePurchaseRequestPdf(request);
+              } catch (err) {
+                setError(err.message || 'Erreur PDF');
+              } finally {
+                setPdfLoading(false);
+              }
+            }}
+          >
+            {pdfLoading ? <Loader2 size={13} className="cin-spin" /> : <FileText size={13} />} PDF
+          </button>
           {request.statut === 'Brouillon' && (
             <button type="button" className="btn btn-primary btn-sm" disabled={saving} onClick={() => runAction(() => submitPurchaseRequest(request.id))}>
               <Send size={13} /> Soumettre

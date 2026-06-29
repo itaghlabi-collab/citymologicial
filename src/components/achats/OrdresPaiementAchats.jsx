@@ -16,6 +16,8 @@ import {
   markAchatsPaymentOrderPaid,
   submitAchatsPaymentForDgValidation,
 } from '../../services/achats/purchasePaymentOrdersAchats';
+import { getSupplierById } from '../../services/achats/suppliers';
+import { generateAchatsPaymentOrderPdf } from '../../services/achats/purchasePaymentOrderAchatsPdf';
 import { listPurchaseRequestHistory } from '../../services/achats/purchaseRequestHistory';
 import {
   INPUT_STYLE, SELECT_STYLE, STATUTS_OP_ACHATS, BADGE_OP_ACHATS,
@@ -24,12 +26,26 @@ import {
 
 function DetailOP({ op, history, onBack, perms, onAction, saving }) {
   const [editMode, setEditMode] = useState(false);
+  const [pdfLoading, setPdfLoading] = useState(false);
   const [form, setForm] = useState({
     mode_paiement: op.mode_paiement || 'Virement',
     date_prevue: op.date_prevue || op.date || '',
     observation: op.observation || '',
     commentaire: op.commentaire || '',
   });
+
+  async function handlePdf() {
+    setPdfLoading(true);
+    try {
+      let supplier = null;
+      if (op.supplier_id) supplier = await getSupplierById(op.supplier_id);
+      await generateAchatsPaymentOrderPdf(op, { supplier });
+    } catch (err) {
+      window.alert(err.message || 'Erreur génération PDF');
+    } finally {
+      setPdfLoading(false);
+    }
+  }
 
   return (
     <div className="animate-fade-in">
@@ -77,8 +93,8 @@ function DetailOP({ op, history, onBack, perms, onAction, saving }) {
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => setEditMode((v) => !v)}>
               Modifier
             </button>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => window.print()}>
-              <FileText size={13} /> Télécharger PDF
+            <button type="button" className="btn btn-ghost btn-sm" disabled={pdfLoading} onClick={handlePdf}>
+              {pdfLoading ? <Loader2 size={13} className="cin-spin" /> : <FileText size={13} />} Télécharger PDF
             </button>
             {op.statut === 'À préparer' && (
               <button type="button" className="btn btn-secondary btn-sm" disabled={saving} onClick={() => onAction('submit', op.id)}>
@@ -149,6 +165,7 @@ export default function OrdresPaiementAchats() {
   const [history, setHistory] = useState([]);
   const [role, setRole] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [pdfLoadingId, setPdfLoadingId] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -208,6 +225,20 @@ export default function OrdresPaiementAchats() {
     return (!q || o.ref?.toLowerCase().includes(q) || o.beneficiaire?.toLowerCase().includes(q) || o.purchase_request_ref?.toLowerCase().includes(q))
       && (!filterStatut || o.statut === filterStatut);
   });
+
+  async function handleListPdf(id) {
+    setPdfLoadingId(id);
+    try {
+      const op = items.find((x) => x.id === id) || await getAchatsPaymentOrder(id);
+      let supplier = null;
+      if (op?.supplier_id) supplier = await getSupplierById(op.supplier_id);
+      await generateAchatsPaymentOrderPdf(op, { supplier });
+    } catch (err) {
+      window.alert(err.message || 'Erreur génération PDF');
+    } finally {
+      setPdfLoadingId(null);
+    }
+  }
 
   if (detailId && detail) {
     return (
@@ -291,7 +322,12 @@ export default function OrdresPaiementAchats() {
                     <td>{o.date_prevue || o.date || '—'}</td>
                     <td><span className={`badge ${BADGE_OP_ACHATS[o.statut] || 'badge-grey'}`}>{o.statut}</span></td>
                     <td>
-                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => openDetail(o.id)}><Eye size={13} /></button>
+                      <div style={{ display: 'flex', gap: 3 }}>
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => openDetail(o.id)}><Eye size={13} /></button>
+                        <button type="button" className="btn btn-ghost btn-sm" title="PDF" disabled={pdfLoadingId === o.id} onClick={() => handleListPdf(o.id)}>
+                          {pdfLoadingId === o.id ? <Loader2 size={12} className="cin-spin" /> : <FileText size={12} />}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
