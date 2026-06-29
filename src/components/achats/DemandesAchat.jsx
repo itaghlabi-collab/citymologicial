@@ -206,10 +206,11 @@ function DemandeForm({ initial, onSave, onCancel, saving, suppliers = [] }) {
 
 function computeDashboardKpis(items) {
   const norm = (s) => normalizePurchaseStatus(s);
-  const ouvertes = items.filter((x) => !['Clôturée', 'Refusée'].includes(norm(x.statut))).length;
-  const enEtude = items.filter((x) => ['Soumise', 'En étude'].includes(norm(x.statut))).length;
-  const devisAttente = items.filter((x) => ['Devis reçus', 'En attente validation DG'].includes(norm(x.statut))).length;
-  const devisValides = items.filter((x) => ['Devis validé', 'Ordre d\'achat créé'].includes(norm(x.statut))).length;
+  const ouvertes = items.filter((x) => !['Clôturée', 'Refusée', 'Brouillon'].includes(norm(x.statut))).length;
+  const soumises = items.filter((x) => norm(x.statut) === 'Soumise').length;
+  const rechercheDevis = items.filter((x) => ['En étude', 'Devis reçus'].includes(norm(x.statut))).length;
+  const attenteDg = items.filter((x) => norm(x.statut) === 'En attente validation DG').length;
+  const devisValides = items.filter((x) => norm(x.statut) === 'Devis validé').length;
   const oaEnCours = items.filter((x) => ['Ordre d\'achat créé', 'Commande envoyée'].includes(norm(x.statut))).length;
   const enAttenteReception = items.filter((x) => norm(x.statut) === 'En attente réception').length;
   const receptionnees = items.filter((x) => ['Réceptionnée', 'Clôturée'].includes(norm(x.statut))).length;
@@ -219,10 +220,15 @@ function computeDashboardKpis(items) {
     return d && d.getMonth() === now.getMonth() && d.getFullYear() === now.getFullYear();
   });
   return {
-    ouvertes, enEtude, devisAttente, devisValides, oaEnCours,
-    enAttenteReception, receptionnees,
+    ouvertes,
+    soumises,
+    rechercheDevis,
+    attenteDg,
+    devisValides,
+    oaEnCours,
+    enAttenteReception,
+    receptionnees,
     depensesMois: monthItems.length,
-    budgetEngage: devisValides + oaEnCours,
   };
 }
 
@@ -362,10 +368,11 @@ export default function DemandesAchat() {
         </div>
       )}
 
-      <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', marginBottom: 20 }}>
+      <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', marginBottom: 20 }}>
         <KpiCard icon={<ClipboardList size={17} />} label="Ouvertes" value={kpis.ouvertes} color="blue" />
-        <KpiCard icon={<Clock size={17} />} label="En étude" value={kpis.enEtude} color="orange" />
-        <KpiCard icon={<BarChart2 size={17} />} label="Devis en attente" value={kpis.devisAttente} color="purple" />
+        <KpiCard icon={<Send size={17} />} label="Soumises" value={kpis.soumises} sub="En attente prise en charge" color="blue" />
+        <KpiCard icon={<Clock size={17} />} label="Recherche devis" value={kpis.rechercheDevis} sub="En étude / devis reçus" color="orange" />
+        <KpiCard icon={<BarChart2 size={17} />} label="Attente validation DG" value={kpis.attenteDg} color="purple" />
         <KpiCard icon={<CheckCircle size={17} />} label="Devis validés" value={kpis.devisValides} color="green" />
         <KpiCard icon={<Package size={17} />} label="OA en cours" value={kpis.oaEnCours} color="blue" />
         <KpiCard icon={<AlertTriangle size={17} />} label="En attente réception" value={kpis.enAttenteReception} color="orange" />
