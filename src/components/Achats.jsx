@@ -8,6 +8,7 @@ import BonsCommande     from './achats/BonsCommande.jsx';
 import Fournisseurs     from './achats/Fournisseurs.jsx';
 import ComparaisonDevis from './achats/ComparaisonDevis.jsx';
 import OrdresAchat      from './achats/OrdresAchat.jsx';
+import OrdresPaiementAchats from './achats/OrdresPaiementAchats.jsx';
 
 export default function Achats({ activeTab }) {
   const tab = activeTab || 'demandes-achat';
@@ -22,6 +23,7 @@ export default function Achats({ activeTab }) {
       {tab === 'fournisseurs'      && <Fournisseurs onFournisseursChange={setFournisseursList} />}
       {tab === 'comparaison-devis' && <ComparaisonDevis />}
       {tab === 'ordres-achat'      && <OrdresAchat />}
+      {tab === 'ordres-paiement-achats' && <OrdresPaiementAchats />}
     </div>
   );
 }

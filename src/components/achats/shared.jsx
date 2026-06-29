@@ -14,19 +14,20 @@ export const TEXTAREA_STYLE = { ...INPUT_STYLE, minHeight: 72, resize: 'vertical
 export const MODES_PAIEMENT   = ['Espèces', 'Virement', 'Chèque', 'Carte bancaire', 'Mobile payment', 'Autre'];
 export const STATUTS_DEMANDE  = [
   'Brouillon', 'Soumise', 'En étude Achats', 'Devis reçus', 'En validation DG',
-  'Validée', 'Ordre d\'achat créé', 'Commande en cours', 'Commande reçue', 'Clôturée', 'Refusée',
+  'Devis validé', 'Ordre d\'achat créé', 'Commande en cours', 'Commande reçue', 'Clôturée', 'Refusée',
 ];
 export const PRIORITES        = ['Faible', 'Normale', 'Haute', 'Urgente'];
 export const STATUTS_BC       = ['Brouillon', 'Envoyé', 'Validé', 'Partiellement reçu', 'Reçu', 'Annulé'];
-export const STATUTS_ORDRE    = ['Brouillon', 'En attente validation', 'Validé', 'Refusé', 'Commandé', 'Clôturé'];
+export const STATUTS_ORDRE    = ['Brouillon', 'Validé', 'Envoyé fournisseur', 'En attente réception', 'Réceptionné', 'Clôturé'];
+export const STATUTS_OP_ACHATS = ['À préparer', 'En attente validation DG', 'Validé', 'Payé', 'Annulé'];
 export const DEVISES          = ['MAD', 'EUR', 'USD'];
 export const TVA_OPTIONS      = [0, 7, 10, 14, 20];
 export const CATEGORIES_FOURN = ['Matériaux', 'Équipements', 'Services', 'Fournitures', 'Transport', 'Sous-traitance', 'Informatique', 'Autre'];
 
 export const BADGE_DEMANDE = {
   'Brouillon': 'badge-grey', 'Soumise': 'badge-blue', 'En étude Achats': 'badge-orange',
-  'Devis reçus': 'badge-purple', 'En validation DG': 'badge-orange', 'Validée': 'badge-green',
-  'Ordre d\'achat créé': 'badge-green', 'Commande en cours': 'badge-blue',
+  'Devis reçus': 'badge-purple', 'En validation DG': 'badge-orange', 'Devis validé': 'badge-green',
+  'Validée': 'badge-green', 'Ordre d\'achat créé': 'badge-green', 'Commande en cours': 'badge-blue',
   'Commande reçue': 'badge-purple', 'Clôturée': 'badge-grey', 'Refusée': 'badge-red',
   'En attente': 'badge-orange', 'En cours': 'badge-blue', 'Terminée': 'badge-purple',
 };
@@ -35,8 +36,13 @@ export const BADGE_BC = {
   'Partiellement reçu': 'badge-orange', 'Reçu': 'badge-purple', 'Annulé': 'badge-red',
 };
 export const BADGE_ORDRE = {
-  'Brouillon': 'badge-grey', 'En attente validation': 'badge-orange', 'Validé': 'badge-green',
-  'Refusé': 'badge-red', 'Commandé': 'badge-blue', 'Clôturé': 'badge-purple',
+  'Brouillon': 'badge-grey', 'Validé': 'badge-green', 'Envoyé fournisseur': 'badge-blue',
+  'En attente réception': 'badge-orange', 'Réceptionné': 'badge-purple', 'Clôturé': 'badge-grey',
+  'En attente validation': 'badge-orange', 'Refusé': 'badge-red', 'Commandé': 'badge-blue',
+};
+export const BADGE_OP_ACHATS = {
+  'À préparer': 'badge-grey', 'En attente validation DG': 'badge-orange', 'Validé': 'badge-green',
+  'Payé': 'badge-purple', 'Annulé': 'badge-red', Brouillon: 'badge-grey', 'En attente': 'badge-orange',
 };
 export const BADGE_PRIORITE = {
   'Faible': 'badge-grey', 'Normale': 'badge-blue', 'Haute': 'badge-orange', 'Urgente': 'badge-red',

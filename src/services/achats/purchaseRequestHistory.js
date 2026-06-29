@@ -13,6 +13,7 @@ export function normalizeHistoryRow(row) {
     purchase_request_id: row.purchase_request_id,
     action: row.action || '',
     detail: row.detail || '',
+    commentaire: row.commentaire || '',
     user_id: row.user_id,
     user_name: row.user_name || 'Système',
     created_at: row.created_at,
@@ -39,23 +40,34 @@ export async function appendPurchaseRequestHistory({
   purchaseRequestId,
   action,
   detail = '',
+  commentaire = '',
   userId = null,
   userName = 'Système',
 }) {
   if (!purchaseRequestId || !action) return null;
+  const row = {
+    purchase_request_id: purchaseRequestId,
+    action,
+    detail,
+    user_id: userId,
+    user_name: userName,
+  };
+  try {
+    row.commentaire = commentaire || null;
+  } catch { /* colonne optionnelle */ }
   const { data, error } = await getSupabase()
     .from(TABLE)
-    .insert([{
-      purchase_request_id: purchaseRequestId,
-      action,
-      detail,
-      user_id: userId,
-      user_name: userName,
-    }])
+    .insert([row])
     .select()
     .single();
   if (error) {
     if (error.code === '42P01') return null;
+    if (error.message?.includes('commentaire')) {
+      const { detail: _d, ...without } = row;
+      const { data: d2, error: e2 } = await getSupabase().from(TABLE).insert([without]).select().single();
+      if (e2) throw e2;
+      return normalizeHistoryRow(d2);
+    }
     throw error;
   }
   return normalizeHistoryRow(data);

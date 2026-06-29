@@ -4,7 +4,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   ChevronLeft, ClipboardList, History, FileText, CheckCircle, Send,
-  Plus, Loader2, Star, Lock, Package, CreditCard, Truck,
+  Plus, Loader2, Star, Lock, Package, CreditCard, Truck, Eye, Edit2, Trash2, Download,
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { projectOptionLabel } from '../../services/achats/purchaseRequests';
@@ -12,6 +12,9 @@ import { getPurchaseRequestBundle } from '../../services/achats/purchaseWorkflow
 import {
   submitPurchaseRequest,
   addQuoteToRequest,
+  updateQuoteOnRequest,
+  removeQuoteFromRequest,
+  takeInChargePurchaseRequest,
   sendRequestToDgValidation,
   validateSupplierQuote,
   markPurchaseCommandInProgress,
@@ -20,7 +23,7 @@ import {
 } from '../../services/achats/purchaseWorkflow';
 import { resolveCurrentPurchaseRole, purchasePermissions } from '../../services/achats/purchaseWorkflowRoles';
 import { PURCHASE_ASSIGNEE } from '../../constants/purchaseWorkflow';
-import { canEditPurchaseRequest } from '../../constants/purchaseWorkflow';
+import { canEditPurchaseRequest, canAddQuoteToRequest } from '../../constants/purchaseWorkflow';
 import {
   SectionTitle, FField, FRow, INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE,
   BADGE_DEMANDE, BADGE_PRIORITE, TVA_OPTIONS, UploadField, formatMAD, Modal,
@@ -29,6 +32,7 @@ import {
 const EMPTY_QUOTE = {
   supplier_id: '',
   supplier_name: '',
+  ref_devis_fournisseur: '',
   montant_ht: '',
   tva_rate: 20,
   montant_ttc: '',
@@ -37,9 +41,12 @@ const EMPTY_QUOTE = {
   conditions_paiement: '',
   garantie: '',
   observations: '',
+  attachment_url: '',
 };
 
-function QuoteComparisonTable({ quotes, onValidate, canValidate, validatingId }) {
+function QuoteComparisonTable({
+  quotes, onValidate, canValidate, validatingId, canManage, onEdit, onDelete, onView,
+}) {
   if (!quotes?.length) {
     return (
       <div style={{ fontSize: '0.84rem', color: 'var(--text-3)', padding: 16, textAlign: 'center' }}>
@@ -53,6 +60,7 @@ function QuoteComparisonTable({ quotes, onValidate, canValidate, validatingId })
         <thead>
           <tr>
             <th>Fournisseur</th>
+            <th>Réf. devis</th>
             <th>HT</th>
             <th>TVA</th>
             <th>TTC</th>
@@ -60,7 +68,8 @@ function QuoteComparisonTable({ quotes, onValidate, canValidate, validatingId })
             <th>Garantie</th>
             <th>Conditions</th>
             <th>Observations</th>
-            {canValidate && <th>Action</th>}
+            {canManage && <th>Gestion</th>}
+            {canValidate && <th>Validation DG</th>}
           </tr>
         </thead>
         <tbody>
@@ -71,6 +80,7 @@ function QuoteComparisonTable({ quotes, onValidate, canValidate, validatingId })
                 {q.selected && <span className="badge badge-green" style={{ fontSize: '0.65rem' }}>Retenu</span>}
                 {q.verrouille && !q.selected && <span className="badge badge-grey" style={{ fontSize: '0.65rem' }}><Lock size={10} /> Verrouillé</span>}
               </td>
+              <td>{q.ref_devis || '—'}</td>
               <td>{formatMAD(q.montant_ht)}</td>
               <td>{q.tva_rate}%</td>
               <td style={{ fontWeight: 700 }}>{formatMAD(q.montant_ttc)}</td>
@@ -78,6 +88,24 @@ function QuoteComparisonTable({ quotes, onValidate, canValidate, validatingId })
               <td>{q.garantie || '—'}</td>
               <td>{q.conditions_paiement || '—'}</td>
               <td style={{ maxWidth: 140, fontSize: '0.78rem' }}>{q.observations || '—'}</td>
+              {canManage && (
+                <td>
+                  <div style={{ display: 'flex', gap: 3 }}>
+                    <button type="button" className="btn btn-ghost btn-sm" title="Voir" onClick={() => onView(q)}><Eye size={12} /></button>
+                    {!q.selected && !q.verrouille && (
+                      <>
+                        <button type="button" className="btn btn-ghost btn-sm" title="Modifier" onClick={() => onEdit(q)}><Edit2 size={12} /></button>
+                        <button type="button" className="btn btn-ghost btn-sm" title="Supprimer" style={{ color: 'var(--red)' }} onClick={() => onDelete(q.id)}><Trash2 size={12} /></button>
+                      </>
+                    )}
+                    {q.attachment_url && (
+                      <a href={q.attachment_url} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm" title="Télécharger PDF">
+                        <Download size={12} />
+                      </a>
+                    )}
+                  </div>
+                </td>
+              )}
               {canValidate && (
                 <td>
                   {!q.selected && !q.verrouille && (
@@ -89,7 +117,7 @@ function QuoteComparisonTable({ quotes, onValidate, canValidate, validatingId })
                       style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
                     >
                       {validatingId === q.id ? <Loader2 size={12} className="cin-spin" /> : <CheckCircle size={12} />}
-                      Valider
+                      Valider ce devis
                     </button>
                   )}
                 </td>
@@ -102,8 +130,8 @@ function QuoteComparisonTable({ quotes, onValidate, canValidate, validatingId })
   );
 }
 
-function QuoteForm({ suppliers, onSave, onCancel, saving }) {
-  const [form, setForm] = useState(EMPTY_QUOTE);
+function QuoteForm({ suppliers, initial, onSave, onCancel, saving }) {
+  const [form, setForm] = useState(() => (initial ? { ...EMPTY_QUOTE, ...initial, ref_devis_fournisseur: initial.ref_devis || initial.ref_devis_fournisseur || '' } : EMPTY_QUOTE));
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
   function handleSupplierChange(id) {
@@ -146,6 +174,9 @@ function QuoteForm({ suppliers, onSave, onCancel, saving }) {
             ))}
           </select>
         </FField>
+        <FField label="Réf. devis fournisseur">
+          <input value={form.ref_devis_fournisseur} onChange={(e) => set('ref_devis_fournisseur', e.target.value)} style={INPUT_STYLE} placeholder="Réf. fournisseur" />
+        </FField>
         <FField label="Montant HT">
           <input type="number" step="0.01" min="0" value={form.montant_ht} onChange={(e) => handleHtChange(e.target.value)} style={INPUT_STYLE} />
         </FField>
@@ -171,7 +202,7 @@ function QuoteForm({ suppliers, onSave, onCancel, saving }) {
       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
         <button type="button" className="btn btn-secondary btn-sm" onClick={onCancel} disabled={saving}>Annuler</button>
         <button type="submit" className="btn btn-primary btn-sm" disabled={saving}>
-          {saving ? <Loader2 size={13} className="cin-spin" /> : <Plus size={13} />} Ajouter devis
+          {saving ? <Loader2 size={13} className="cin-spin" /> : <Plus size={13} />} {initial ? 'Enregistrer' : 'Ajouter devis'}
         </button>
       </div>
     </form>
@@ -179,7 +210,7 @@ function QuoteForm({ suppliers, onSave, onCancel, saving }) {
 }
 
 export default function DemandeAchatDetail({
-  requestId, onBack, onEdit, onRefresh, suppliers = [],
+  requestId, onBack, onEdit, onRefresh, suppliers = [], initialShowQuoteForm = false,
 }) {
   const { user } = useAuth();
   const [bundle, setBundle] = useState(null);
@@ -187,7 +218,9 @@ export default function DemandeAchatDetail({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [role, setRole] = useState(null);
-  const [showQuoteForm, setShowQuoteForm] = useState(false);
+  const [showQuoteForm, setShowQuoteForm] = useState(initialShowQuoteForm);
+  const [editQuote, setEditQuote] = useState(null);
+  const [viewQuote, setViewQuote] = useState(null);
   const [showHistory, setShowHistory] = useState(false);
   const [validatingId, setValidatingId] = useState(null);
 
@@ -252,7 +285,8 @@ export default function DemandeAchatDetail({
     : request.projet_lie || '—';
 
   const canEdit = canEditPurchaseRequest(request.statut);
-  const showQuotesBlock = perms.canManageQuotes && !['Brouillon', 'Clôturée', 'Refusée'].includes(request.statut);
+  const canManageQuotesOnRequest = perms.canManageQuotes && canAddQuoteToRequest(request.statut);
+  const showQuotesSection = quotes.length > 0 || canManageQuotesOnRequest;
   const canValidateDg = perms.canValidateSupplier && ['Devis reçus', 'En validation DG'].includes(request.statut);
 
   return (
@@ -275,6 +309,11 @@ export default function DemandeAchatDetail({
           {request.statut === 'Brouillon' && (
             <button type="button" className="btn btn-primary btn-sm" disabled={saving} onClick={() => runAction(() => submitPurchaseRequest(request.id))}>
               <Send size={13} /> Soumettre
+            </button>
+          )}
+          {request.statut === 'Soumise' && perms.canManageQuotes && (
+            <button type="button" className="btn btn-secondary btn-sm" disabled={saving} onClick={() => runAction(() => takeInChargePurchaseRequest(request.id))}>
+              Prendre en charge
             </button>
           )}
         </div>
@@ -310,12 +349,12 @@ export default function DemandeAchatDetail({
             )}
           </div>
 
-          {showQuotesBlock && (
+          {showQuotesSection && (
             <div className="card">
               <div className="flex-between" style={{ marginBottom: 12 }}>
                 <SectionTitle icon={<Star size={12} />}>Devis fournisseurs</SectionTitle>
-                {!showQuoteForm && !['Ordre d\'achat créé', 'Commande en cours', 'Commande reçue', 'Clôturée'].includes(request.statut) && (
-                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowQuoteForm(true)}>
+                {!showQuoteForm && canManageQuotesOnRequest && (
+                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setEditQuote(null); setShowQuoteForm(true); }}>
                     <Plus size={13} /> Ajouter devis
                   </button>
                 )}
@@ -324,11 +363,17 @@ export default function DemandeAchatDetail({
                 <div style={{ marginBottom: 16, padding: 12, border: '1px solid var(--border)', borderRadius: 8 }}>
                   <QuoteForm
                     suppliers={suppliers}
+                    initial={editQuote}
                     saving={saving}
-                    onCancel={() => setShowQuoteForm(false)}
+                    onCancel={() => { setShowQuoteForm(false); setEditQuote(null); }}
                     onSave={(form) => runAction(async () => {
-                      await addQuoteToRequest(request.id, form);
+                      if (editQuote?.id) {
+                        await updateQuoteOnRequest(request.id, editQuote.id, form);
+                      } else {
+                        await addQuoteToRequest(request.id, form);
+                      }
                       setShowQuoteForm(false);
+                      setEditQuote(null);
                     })}
                   />
                 </div>
@@ -336,8 +381,16 @@ export default function DemandeAchatDetail({
               <QuoteComparisonTable
                 quotes={quotes}
                 canValidate={canValidateDg}
+                canManage={canManageQuotesOnRequest}
                 validatingId={validatingId}
+                onView={setViewQuote}
+                onEdit={(q) => { setEditQuote(q); setShowQuoteForm(true); }}
+                onDelete={(quoteId) => {
+                  if (!window.confirm('Supprimer ce devis ?')) return;
+                  runAction(() => removeQuoteFromRequest(request.id, quoteId));
+                }}
                 onValidate={(quoteId) => runAction(async () => {
+                  if (!window.confirm('Valider ce devis ? OA et OP seront créés automatiquement.')) return;
                   setValidatingId(quoteId);
                   try {
                     await validateSupplierQuote(request.id, quoteId);
@@ -360,13 +413,6 @@ export default function DemandeAchatDetail({
             </div>
           )}
 
-          {!showQuotesBlock && quotes.length > 0 && (
-            <div className="card">
-              <SectionTitle icon={<Star size={12} />}>Comparatif devis</SectionTitle>
-              <QuoteComparisonTable quotes={quotes} canValidate={canValidateDg} validatingId={validatingId} onValidate={(quoteId) => runAction(() => validateSupplierQuote(request.id, quoteId))} />
-            </div>
-          )}
-
           <div className="card">
             <SectionTitle icon={<History size={12} />}>Historique</SectionTitle>
             {history.length === 0 ? (
@@ -381,6 +427,7 @@ export default function DemandeAchatDetail({
                     <div style={{ flex: 1 }}>
                       <strong>{h.action}</strong>
                       {h.detail && <div style={{ color: 'var(--text-2)' }}>{h.detail}</div>}
+                      {h.commentaire && <div style={{ fontSize: '0.75rem', color: 'var(--text-3)', fontStyle: 'italic' }}>{h.commentaire}</div>}
                       <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>{h.user_name}</div>
                     </div>
                   </div>
@@ -417,7 +464,7 @@ export default function DemandeAchatDetail({
                   <div style={{ color: 'var(--text-3)' }}>{bundle.paymentOrder.statut}</div>
                 </div>
               )}
-              {request.statut === 'Ordre d\'achat créé' && perms.canMarkReceived && (
+              {['Devis validé', 'Ordre d\'achat créé'].includes(request.statut) && perms.canMarkReceived && (
                 <button type="button" className="btn btn-secondary btn-sm" disabled={saving} onClick={() => runAction(() => markPurchaseCommandInProgress(request.id))}>
                   <Truck size={13} /> Lancer commande
                 </button>
@@ -444,12 +491,33 @@ export default function DemandeAchatDetail({
         </div>
       </div>
 
+      <Modal open={!!viewQuote} onClose={() => setViewQuote(null)} title="Détail devis fournisseur" width={520}>
+        {viewQuote && (
+          <div style={{ fontSize: '0.84rem', display: 'grid', gap: 10 }}>
+            {[
+              ['Fournisseur', viewQuote.supplier_name],
+              ['Réf. devis', viewQuote.ref_devis || '—'],
+              ['HT', formatMAD(viewQuote.montant_ht)],
+              ['TVA', `${viewQuote.tva_rate}%`],
+              ['TTC', formatMAD(viewQuote.montant_ttc)],
+              ['Délai', viewQuote.delai],
+              ['Validité', viewQuote.validite],
+              ['Conditions paiement', viewQuote.conditions_paiement],
+              ['Observations', viewQuote.observations],
+            ].map(([l, v]) => (
+              <div key={l}><span style={{ color: 'var(--text-3)', fontSize: '0.72rem', fontWeight: 700 }}>{l}</span><div>{v || '—'}</div></div>
+            ))}
+          </div>
+        )}
+      </Modal>
+
       <Modal open={showHistory} onClose={() => setShowHistory(false)} title="Historique complet" width={560}>
         <div style={{ maxHeight: 400, overflowY: 'auto' }}>
           {history.map((h) => (
             <div key={h.id} style={{ padding: '10px 0', borderBottom: '1px solid var(--border)', fontSize: '0.84rem' }}>
               <div style={{ fontWeight: 700 }}>{h.action} <span style={{ fontWeight: 400, color: 'var(--text-3)' }}>— {h.date_label} {h.time_label}</span></div>
               {h.detail && <div>{h.detail}</div>}
+              {h.commentaire && <div style={{ fontSize: '0.75rem', color: 'var(--text-3)' }}>{h.commentaire}</div>}
               <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>{h.user_name}</div>
             </div>
           ))}

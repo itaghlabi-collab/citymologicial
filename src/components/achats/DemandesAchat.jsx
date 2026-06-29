@@ -5,14 +5,15 @@ import { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   ClipboardList, Plus, Eye, Edit2, Trash2, Search, Filter,
   Download, AlertTriangle, Clock, Loader2, RefreshCw, History, FileText,
-  BarChart2, Package, CreditCard, CheckCircle,
+  BarChart2, Package, CreditCard, CheckCircle, Send, Star,
 } from 'lucide-react';
 import { usePurchaseRequests } from '../../hooks/usePurchaseRequests';
 import { useSuppliers } from '../../hooks/useSuppliers';
 import { useAuth } from '../../hooks/useAuth';
 import { projectOptionLabel } from '../../services/achats/purchaseRequests';
 import { PURCHASE_ASSIGNEE } from '../../constants/purchaseWorkflow';
-import { canEditPurchaseRequest, canDeletePurchaseRequest, normalizePurchaseStatus } from '../../constants/purchaseWorkflow';
+import { canEditPurchaseRequest, canDeletePurchaseRequest, normalizePurchaseStatus, canSubmitPurchaseRequest, canAddQuoteToRequest, canValidateQuoteOnRequest } from '../../constants/purchaseWorkflow';
+import { submitPurchaseRequest } from '../../services/achats/purchaseWorkflow';
 import { resolveCurrentPurchaseRole, purchasePermissions, canViewPurchaseRequest } from '../../services/achats/purchaseWorkflowRoles';
 import DemandeAchatDetail from './DemandeAchatDetail';
 import {
@@ -152,7 +153,7 @@ function computeDashboardKpis(items) {
   const ouvertes = items.filter((x) => !['Clôturée', 'Refusée'].includes(norm(x.statut))).length;
   const enEtude = items.filter((x) => ['Soumise', 'En étude Achats'].includes(norm(x.statut))).length;
   const devisAttente = items.filter((x) => ['Devis reçus', 'En validation DG'].includes(norm(x.statut))).length;
-  const devisValides = items.filter((x) => ['Validée', 'Ordre d\'achat créé'].includes(norm(x.statut))).length;
+  const devisValides = items.filter((x) => ['Devis validé', 'Ordre d\'achat créé'].includes(norm(x.statut))).length;
   const oaEnCours = items.filter((x) => ['Ordre d\'achat créé', 'Commande en cours'].includes(norm(x.statut))).length;
   const enAttenteReception = items.filter((x) => norm(x.statut) === 'Commande en cours').length;
   const receptionnees = items.filter((x) => ['Commande reçue', 'Clôturée'].includes(norm(x.statut))).length;
@@ -184,6 +185,8 @@ export default function DemandesAchat() {
   const [showModal, setShowModal] = useState(false);
   const [editItem, setEditItem] = useState(null);
   const [detailId, setDetailId] = useState(null);
+  const [detailAddQuote, setDetailAddQuote] = useState(false);
+  const [submittingId, setSubmittingId] = useState(null);
   const [role, setRole] = useState(null);
 
   useEffect(() => {
@@ -232,12 +235,25 @@ export default function DemandesAchat() {
 
   const kpis = computeDashboardKpis(visibleItems);
 
+  async function handleSubmit(id) {
+    setSubmittingId(id);
+    try {
+      await submitPurchaseRequest(id);
+      await reload();
+    } catch (err) {
+      window.alert(err.message || 'Erreur soumission');
+    } finally {
+      setSubmittingId(null);
+    }
+  }
+
   if (detailId) {
     return (
       <DemandeAchatDetail
         requestId={detailId}
         suppliers={suppliers}
-        onBack={() => setDetailId(null)}
+        onBack={() => { setDetailId(null); setDetailAddQuote(false); }}
+        initialShowQuoteForm={detailAddQuote}
         onEdit={() => {
           const item = items.find((x) => x.id === detailId);
           if (item && canEditPurchaseRequest(item.statut)) {
@@ -341,16 +357,27 @@ export default function DemandesAchat() {
                     <td data-label="Date">{x.date_limite || '—'}</td>
                     <td data-label="Statut"><span className={`badge ${BADGE_DEMANDE[x.statut] || 'badge-grey'}`} style={{ fontSize: '0.72rem' }}>{x.statut}</span></td>
                     <td>
-                      <div style={{ display: 'flex', gap: 3 }}>
-                        <button type="button" className="btn btn-secondary btn-sm" title="Visualiser" onClick={() => setDetailId(x.id)}><Eye size={13} /></button>
+                      <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+                        <button type="button" className="btn btn-secondary btn-sm" title="Voir" onClick={() => setDetailId(x.id)}><Eye size={13} /></button>
                         {canEditPurchaseRequest(x.statut) && (
                           <button type="button" className="btn btn-ghost btn-sm" title="Modifier" onClick={() => { setEditItem(x); setShowModal(true); }}><Edit2 size={13} /></button>
+                        )}
+                        <button type="button" className="btn btn-ghost btn-sm" title="PDF" onClick={() => handlePrintPdf(x)}><FileText size={13} /></button>
+                        <button type="button" className="btn btn-ghost btn-sm" title="Historique" onClick={() => setDetailId(x.id)}><History size={13} /></button>
+                        {canSubmitPurchaseRequest(x.statut) && (
+                          <button type="button" className="btn btn-primary btn-sm" title="Soumettre" disabled={submittingId === x.id} onClick={() => handleSubmit(x.id)}>
+                            {submittingId === x.id ? <Loader2 size={12} className="cin-spin" /> : <Send size={12} />}
+                          </button>
+                        )}
+                        {perms.canManageQuotes && canAddQuoteToRequest(x.statut) && (
+                          <button type="button" className="btn btn-ghost btn-sm" title="Ajouter devis" onClick={() => { setDetailAddQuote(true); setDetailId(x.id); }}><Star size={12} /></button>
+                        )}
+                        {perms.canValidateSupplier && canValidateQuoteOnRequest(x.statut) && (
+                          <button type="button" className="btn btn-primary btn-sm" title="Valider (DG)" onClick={() => setDetailId(x.id)}><CheckCircle size={12} /></button>
                         )}
                         {canDeletePurchaseRequest(x.statut) && (
                           <button type="button" className="btn btn-ghost btn-sm" title="Supprimer" onClick={() => handleDelete(x.id)} style={{ color: 'var(--red)' }}><Trash2 size={13} /></button>
                         )}
-                        <button type="button" className="btn btn-ghost btn-sm" title="PDF" onClick={() => handlePrintPdf(x)}><FileText size={13} /></button>
-                        <button type="button" className="btn btn-ghost btn-sm" title="Historique" onClick={() => setDetailId(x.id)}><History size={13} /></button>
                       </div>
                     </td>
                   </tr>

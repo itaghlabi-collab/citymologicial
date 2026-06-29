@@ -144,6 +144,7 @@ export const ERP_RUBRIQUES = Object.freeze([
       { code: 'fournisseurs', label: 'Fournisseurs' },
       { code: 'comparaison-devis', label: 'Comparaison devis' },
       { code: 'ordres-achat', label: "Ordre d'achat" },
+      { code: 'ordres-paiement-achats', label: 'Ordre de paiement' },
     ],
   },
   {

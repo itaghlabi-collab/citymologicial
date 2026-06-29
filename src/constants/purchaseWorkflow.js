@@ -14,7 +14,7 @@ export const PURCHASE_STATUSES = [
   'En étude Achats',
   'Devis reçus',
   'En validation DG',
-  'Validée',
+  'Devis validé',
   'Ordre d\'achat créé',
   'Commande en cours',
   'Commande reçue',
@@ -28,6 +28,7 @@ export const PURCHASE_STATUS_BADGE = {
   'En étude Achats': 'badge-orange',
   'Devis reçus': 'badge-purple',
   'En validation DG': 'badge-orange',
+  'Devis validé': 'badge-green',
   Validée: 'badge-green',
   'Ordre d\'achat créé': 'badge-green',
   'Commande en cours': 'badge-blue',
@@ -36,10 +37,10 @@ export const PURCHASE_STATUS_BADGE = {
   Refusée: 'badge-red',
 };
 
-/** Anciens statuts → nouveau workflow (affichage rétrocompat.) */
 export const LEGACY_STATUS_MAP = {
   'En attente': 'Soumise',
   'En cours': 'En étude Achats',
+  Validée: 'Devis validé',
   Terminée: 'Clôturée',
 };
 
@@ -57,12 +58,42 @@ export const QUOTE_STATUSES = {
 
 export const OA_STATUSES = [
   'Brouillon',
-  'En attente validation',
   'Validé',
-  'Refusé',
-  'Commandé',
+  'Envoyé fournisseur',
+  'En attente réception',
+  'Réceptionné',
   'Clôturé',
 ];
+
+export const OA_STATUS_BADGE = {
+  Brouillon: 'badge-grey',
+  Validé: 'badge-green',
+  'Envoyé fournisseur': 'badge-blue',
+  'En attente réception': 'badge-orange',
+  Réceptionné: 'badge-purple',
+  Clôturé: 'badge-grey',
+  'En attente validation': 'badge-orange',
+  Refusé: 'badge-red',
+  Commandé: 'badge-blue',
+};
+
+export const OP_ACHATS_STATUSES = [
+  'À préparer',
+  'En attente validation DG',
+  'Validé',
+  'Payé',
+  'Annulé',
+];
+
+export const OP_ACHATS_STATUS_BADGE = {
+  'À préparer': 'badge-grey',
+  'En attente validation DG': 'badge-orange',
+  Validé: 'badge-green',
+  Payé: 'badge-purple',
+  Annulé: 'badge-red',
+  Brouillon: 'badge-grey',
+  'En attente': 'badge-orange',
+};
 
 export function canEditPurchaseRequest(statut) {
   return normalizePurchaseStatus(statut) === 'Brouillon';
@@ -70,4 +101,17 @@ export function canEditPurchaseRequest(statut) {
 
 export function canDeletePurchaseRequest(statut) {
   return normalizePurchaseStatus(statut) === 'Brouillon';
+}
+
+export function canSubmitPurchaseRequest(statut) {
+  return normalizePurchaseStatus(statut) === 'Brouillon';
+}
+
+export function canAddQuoteToRequest(statut) {
+  return ['Soumise', 'En étude Achats', 'Devis reçus', 'En validation DG'].includes(normalizePurchaseStatus(statut));
+}
+
+export function canValidateQuoteOnRequest(statut) {
+  const s = normalizePurchaseStatus(statut);
+  return ['Devis reçus', 'En validation DG'].includes(s);
 }

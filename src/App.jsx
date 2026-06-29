@@ -166,6 +166,7 @@ const NAV = [
       { id: 'fournisseurs',       label: 'Fournisseurs',         icon: UserCog },
       { id: 'comparaison-devis',  label: 'Comparaison devis',    icon: Scale },
       { id: 'ordres-achat',       label: "Ordre d'achat",        icon: FileCheck },
+      { id: 'ordres-paiement-achats', label: "Ordre de paiement", icon: CreditCard },
     ],
   },
   {
@@ -238,6 +239,7 @@ const MODULE_LABELS = {
   fournisseurs:        'Fournisseurs',
   'comparaison-devis': 'Comparaison devis',
   'ordres-achat':      "Ordre d'achat",
+  'ordres-paiement-achats': "Ordre de paiement",
   'categories-stock':  'Categories stock',
   'articles-stock':    'Articles de stock',
   depots:              'Emplacements',
@@ -312,6 +314,7 @@ function PageContent({ module, onNavigate, inventaireArticleCode, onInventaireAr
     case 'fournisseurs':        return <Achats activeTab="fournisseurs" />;
     case 'comparaison-devis':   return <Achats activeTab="comparaison-devis" />;
     case 'ordres-achat':        return <Achats activeTab="ordres-achat" />;
+    case 'ordres-paiement-achats': return <Achats activeTab="ordres-paiement-achats" />;
     /* Inventaire & Depot */
     case 'categories-stock':    return <Inventaire activeTab="categories-stock" />;
     case 'articles-stock':      return (

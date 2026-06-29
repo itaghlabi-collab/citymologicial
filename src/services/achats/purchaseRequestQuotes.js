@@ -15,6 +15,8 @@ export function normalizeQuote(row) {
     id: row.id,
     purchase_request_id: row.purchase_request_id,
     supplier_id: row.supplier_id || null,
+    ref_devis_fournisseur: row.ref_devis_fournisseur || '',
+    ref_devis: row.ref_devis_fournisseur || '',
     supplier_name: row.supplier_name || '',
     fournisseur: row.supplier_name || '',
     montant_ht: ht,
@@ -44,6 +46,7 @@ export function toQuoteRow(form, purchaseRequestId) {
     purchase_request_id: purchaseRequestId,
     supplier_id: form.supplier_id || null,
     supplier_name: (form.supplier_name || form.fournisseur || '').trim(),
+    ref_devis_fournisseur: (form.ref_devis_fournisseur || form.ref_devis || '').trim() || null,
     montant_ht: ht,
     tva_rate: tva,
     montant_ttc: ttc,
@@ -111,6 +114,44 @@ export async function deletePurchaseRequestQuote(id) {
   await requireUser();
   const { error } = await getSupabase().from(TABLE).delete().eq('id', id);
   if (error) throw error;
+}
+
+export async function getPurchaseRequestQuote(id) {
+  if (!id) return null;
+  const { data, error } = await getSupabase().from(TABLE).select('*').eq('id', id).maybeSingle();
+  if (error) throw error;
+  return normalizeQuote(data);
+}
+
+/** Tous les devis avec infos demande — pour Comparaison devis */
+export async function listAllQuotesForComparison() {
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .select(`
+      *,
+      purchase_requests (
+        id, ref_demande, titre, statut, project_ref, project_name, requester_name
+      )
+    `)
+    .order('created_at', { ascending: false });
+  if (error) {
+    if (error.code === '42P01') return [];
+    throw error;
+  }
+  return (data || []).map((row) => {
+    const q = normalizeQuote(row);
+    const req = row.purchase_requests || {};
+    return {
+      ...q,
+      request_id: req.id || row.purchase_request_id,
+      request_ref: req.ref_demande || '',
+      request_titre: req.titre || '',
+      request_statut: req.statut || '',
+      project_ref: req.project_ref || '',
+      project_name: req.project_name || '',
+      requester_name: req.requester_name || '',
+    };
+  });
 }
 
 export async function lockOtherQuotes(purchaseRequestId, selectedQuoteId) {

@@ -8,16 +8,20 @@ import {
   createPurchaseRequestQuote,
   listQuotesForRequest,
   lockOtherQuotes,
+  updatePurchaseRequestQuote,
+  deletePurchaseRequestQuote,
 } from './purchaseRequestQuotes';
-import { createAcquisitionOrderFromQuote } from './purchaseAcquisitionOrders';
-import { createPaymentOrder } from '../finance/paymentOrders';
+import { createAcquisitionOrderFromQuote, updateAcquisitionOrder } from './purchaseAcquisitionOrders';
+import { createAchatsPaymentOrderFromAcquisition } from './purchasePaymentOrdersAchats';
 import { normalizePurchaseRequest, toPurchaseRequestRow, generatePurchaseRequestRef } from './purchaseRequests';
+import { resolveCurrentPurchaseRole, purchasePermissions, PURCHASE_ROLES } from './purchaseWorkflowRoles';
 import {
   notifyPurchaseRequestSubmitted,
   notifyPurchaseQuoteAdded,
   notifyPurchaseReadyForDg,
   notifyPurchaseSupplierValidated,
   notifyPurchaseReceived,
+  notifyOaCreated,
 } from '../notifications/purchaseWorkflowNotifications';
 
 const TABLE = 'purchase_requests';
@@ -39,7 +43,7 @@ async function fetchRequest(id) {
   return normalizePurchaseRequest(data);
 }
 
-async function patchRequest(id, patch, historyAction, historyDetail, ctx) {
+async function patchRequest(id, patch, historyAction, historyDetail, ctx, commentaire = '') {
   const { user, userName } = ctx || await getAuthContext();
   const { data, error } = await getSupabase()
     .from(TABLE)
@@ -53,11 +57,21 @@ async function patchRequest(id, patch, historyAction, historyDetail, ctx) {
       purchaseRequestId: id,
       action: historyAction,
       detail: historyDetail || '',
+      commentaire,
       userId: user.id,
       userName,
     });
   }
   return normalizePurchaseRequest(data);
+}
+
+async function assertDgRole(ctx) {
+  const role = await resolveCurrentPurchaseRole(ctx?.user || (await getAuthContext()).user);
+  if (role !== PURCHASE_ROLES.DG) {
+    const err = new Error('Seul le Directeur Général peut valider un devis fournisseur.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
 }
 
 export async function resolveAchatsAssignee() {
@@ -145,9 +159,20 @@ export async function submitPurchaseRequest(id) {
     err.code = 'VALIDATION';
     throw err;
   }
-  const request = await patchRequest(id, { statut: 'En étude Achats' }, 'Soumission', 'Demande soumise — prise en charge Achats', ctx);
+  const request = await patchRequest(id, { statut: 'Soumise' }, 'Soumission', 'Demande soumise à la Chargée d\'Achats', ctx);
   await notifyPurchaseRequestSubmitted(request);
   return request;
+}
+
+export async function takeInChargePurchaseRequest(id) {
+  const ctx = await getAuthContext();
+  const existing = await fetchRequest(id);
+  if (normalizePurchaseStatus(existing.statut) !== 'Soumise') {
+    const err = new Error('Seules les demandes soumises peuvent être prises en charge.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  return patchRequest(id, { statut: 'En étude Achats' }, 'Prise en charge', PURCHASE_ASSIGNEE.label, ctx);
 }
 
 export async function addQuoteToRequest(id, quoteForm) {
@@ -160,16 +185,56 @@ export async function addQuoteToRequest(id, quoteForm) {
     throw err;
   }
   const quote = await createPurchaseRequestQuote(id, quoteForm);
-  const nextStatus = ['Soumise', 'En étude Achats'].includes(statut) ? 'Devis reçus' : statut;
+  const wasEarly = ['Soumise', 'En étude Achats'].includes(statut);
+  const nextStatus = wasEarly || statut === 'Soumise' ? 'Devis reçus' : statut;
   const request = await patchRequest(
     id,
     { statut: nextStatus },
     'Ajout devis',
-    `Devis ${quote.supplier_name} — ${quote.montant_ttc.toLocaleString('fr-FR')} MAD TTC`,
+    `${quote.supplier_name}${quote.ref_devis ? ` (${quote.ref_devis})` : ''} — ${quote.montant_ttc.toLocaleString('fr-FR')} MAD TTC`,
     ctx,
   );
   await notifyPurchaseQuoteAdded(request);
   return { request, quote };
+}
+
+export async function updateQuoteOnRequest(requestId, quoteId, quoteForm) {
+  const ctx = await getAuthContext();
+  const quotes = await listQuotesForRequest(requestId);
+  const quote = quotes.find((q) => q.id === quoteId);
+  if (!quote || quote.verrouille || quote.selected) {
+    const err = new Error('Ce devis ne peut plus être modifié.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  const updated = await updatePurchaseRequestQuote(quoteId, { ...quoteForm, purchase_request_id: requestId });
+  await appendPurchaseRequestHistory({
+    purchaseRequestId: requestId,
+    action: 'Modification devis',
+    detail: updated.supplier_name,
+    userId: ctx.user.id,
+    userName: ctx.userName,
+  });
+  return updated;
+}
+
+export async function removeQuoteFromRequest(requestId, quoteId) {
+  const ctx = await getAuthContext();
+  const quotes = await listQuotesForRequest(requestId);
+  const quote = quotes.find((q) => q.id === quoteId);
+  if (!quote || quote.verrouille || quote.selected) {
+    const err = new Error('Ce devis ne peut plus être supprimé.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  await deletePurchaseRequestQuote(quoteId);
+  await appendPurchaseRequestHistory({
+    purchaseRequestId: requestId,
+    action: 'Suppression devis',
+    detail: quote.supplier_name,
+    userId: ctx.user.id,
+    userName: ctx.userName,
+  });
 }
 
 export async function sendRequestToDgValidation(id) {
@@ -187,7 +252,16 @@ export async function sendRequestToDgValidation(id) {
 
 export async function validateSupplierQuote(requestId, quoteId) {
   const ctx = await getAuthContext();
+  await assertDgRole(ctx);
+
   const request = await fetchRequest(requestId);
+  const statut = normalizePurchaseStatus(request.statut);
+  if (!['Devis reçus', 'En validation DG', 'Devis validé'].includes(statut) && statut !== 'Validée') {
+    const err = new Error('Validation impossible à ce stade du workflow.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+
   const quotes = await listQuotesForRequest(requestId);
   const quote = quotes.find((q) => q.id === quoteId);
   if (!quote) {
@@ -199,54 +273,39 @@ export async function validateSupplierQuote(requestId, quoteId) {
   await lockOtherQuotes(requestId, quoteId);
 
   const oa = await createAcquisitionOrderFromQuote({ request, quote, userId: ctx.user.id });
-
-  const op = await createPaymentOrder({
-    ref: null,
-    beneficiaire: quote.supplier_name,
-    type_benef: 'Fournisseur',
-    fournisseur_lie: quote.supplier_name,
-    montant: quote.montant_ttc,
-    date: new Date().toISOString().slice(0, 10),
-    date_prevue: new Date().toISOString().slice(0, 10),
-    statut: 'En attente',
-    mode_paiement: 'Virement',
-    motif: `Achat — ${request.ref} — ${request.titre}`,
-    commentaire: `OA ${oa.ref} — Demande ${request.ref}`,
-    project_id: request.project_id,
-    supplier_id: quote.supplier_id,
-    purchase_request_id: requestId,
-    purchase_acquisition_order_id: oa.id,
+  const op = await createAchatsPaymentOrderFromAcquisition({
+    request,
+    oa,
+    quote,
+    userId: ctx.user.id,
   });
+
+  await updateAcquisitionOrder(oa.id, { payment_order_id: op.id });
 
   const updated = await patchRequest(
     requestId,
     {
-      statut: 'Ordre d\'achat créé',
+      statut: 'Devis validé',
       selected_quote_id: quoteId,
       acquisition_order_id: oa.id,
       payment_order_id: op.id,
     },
-    'Validation fournisseur',
-    `Fournisseur retenu : ${quote.supplier_name} — OA ${oa.ref} — OP ${op.ref}`,
+    'Validation devis',
+    `Fournisseur retenu : ${quote.supplier_name} — ${quote.ref_devis || 'sans réf.'}`,
     ctx,
+    `OA ${oa.ref} / OP ${op.ref}`,
   );
 
   await appendPurchaseRequestHistory({
     purchaseRequestId: requestId,
-    action: 'Création OA',
+    action: 'Création ordre d\'achat',
     detail: oa.ref,
-    userId: ctx.user.id,
-    userName: ctx.userName,
-  });
-  await appendPurchaseRequestHistory({
-    purchaseRequestId: requestId,
-    action: 'Création OP',
-    detail: op.ref,
     userId: ctx.user.id,
     userName: ctx.userName,
   });
 
   await notifyPurchaseSupplierValidated(updated, { quote, oa, op });
+  await notifyOaCreated(updated, oa);
   return { request: updated, quote, oa, op };
 }
 

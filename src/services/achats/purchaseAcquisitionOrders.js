@@ -3,6 +3,8 @@
  */
 import { getSupabase } from '../../lib/supabase';
 
+import { PURCHASE_ASSIGNEE } from '../../constants/purchaseWorkflow';
+
 const TABLE = 'purchase_acquisition_orders';
 
 export function normalizeAcquisitionOrder(row) {
@@ -32,6 +34,9 @@ export function normalizeAcquisitionOrder(row) {
     date_livraison: row.date_livraison || '',
     statut: row.statut || 'Brouillon',
     payment_order_id: row.payment_order_id,
+    purchase_request_ref: row.purchase_request_ref || row.payload?.purchase_request_ref || '',
+    responsable_achats: row.responsable_achats || PURCHASE_ASSIGNEE.label,
+    attachment_url: row.attachment_url || '',
     lines: row.lines || [],
     date_creation: row.created_at ? String(row.created_at).slice(0, 10) : '',
     created_at: row.created_at,
@@ -97,8 +102,11 @@ export async function createAcquisitionOrderFromQuote({ request, quote, userId }
     conditions_paiement: quote.conditions_paiement || null,
     garantie: quote.garantie || null,
     mode_paiement: quote.conditions_paiement || null,
-    statut: 'En attente validation',
+    statut: 'Brouillon',
     lines: request.payload?.lines || [],
+    purchase_request_ref: request.ref,
+    responsable_achats: PURCHASE_ASSIGNEE.label,
+    attachment_url: quote.attachment_url || null,
     payload: {
       purchase_request_ref: request.ref,
       quote_id: quote.id,
@@ -114,15 +122,19 @@ export async function createAcquisitionOrderFromQuote({ request, quote, userId }
   return normalizeAcquisitionOrder(data);
 }
 
-export async function updateAcquisitionOrderStatus(id, statut) {
+export async function updateAcquisitionOrder(id, patch) {
   const { data, error } = await getSupabase()
     .from(TABLE)
-    .update({ statut })
+    .update(patch)
     .eq('id', id)
     .select()
     .single();
   if (error) throw error;
   return normalizeAcquisitionOrder(data);
+}
+
+export async function updateAcquisitionOrderStatus(id, statut) {
+  return updateAcquisitionOrder(id, { statut });
 }
 
 export async function linkPaymentOrderToAcquisition(acquisitionOrderId, paymentOrderId) {

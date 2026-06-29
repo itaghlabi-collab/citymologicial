@@ -71,16 +71,7 @@ export async function notifyPurchaseQuoteAdded(request) {
     priority: NOTIFICATION_PRIORITIES.HIGH,
     entityType: 'purchase_quotes_ready',
     entityId: request.id,
-    actionUrl: moduleUrl(),
-  });
-  await notifyRequester(request, {
-    title: 'Devis reçus',
-    message: `Des devis ont été enregistrés pour votre demande ${request.ref}.`,
-    type: NOTIFICATION_TYPES.PURCHASE_REQUEST,
-    priority: NOTIFICATION_PRIORITIES.NORMAL,
-    entityType: 'purchase_quotes_added',
-    entityId: request.id,
-    actionUrl: moduleUrl(),
+    actionUrl: '/?module=achats&tab=comparaison-devis',
   });
 }
 
@@ -100,7 +91,7 @@ export async function notifyPurchaseReadyForDg(request) {
 export async function notifyPurchaseSupplierValidated(request, { quote, oa, op } = {}) {
   if (!request?.id) return;
   await notifyRequester(request, {
-    title: 'Demande validée',
+    title: 'Devis validé',
     message: `Votre demande ${request.ref} a été validée.\nFournisseur : ${quote?.supplier_name || '—'}\nOA : ${oa?.ref || '—'}`,
     type: NOTIFICATION_TYPES.PURCHASE_REQUEST,
     priority: NOTIFICATION_PRIORITIES.NORMAL,
@@ -109,13 +100,50 @@ export async function notifyPurchaseSupplierValidated(request, { quote, oa, op }
     actionUrl: moduleUrl(),
   });
   await notifyChargeeAchats({
-    title: 'Fournisseur validé par le DG',
+    title: 'Devis validé par le DG',
     message: `${request.ref} — OA ${oa?.ref || ''} / OP ${op?.ref || ''} créés automatiquement.`,
     type: NOTIFICATION_TYPES.PURCHASE_REQUEST,
     priority: NOTIFICATION_PRIORITIES.NORMAL,
     entityType: 'purchase_oa_created',
     entityId: request.id,
-    actionUrl: moduleUrl(),
+    actionUrl: '/?module=achats&tab=ordres-achat',
+  });
+}
+
+export async function notifyOaCreated(request, oa) {
+  if (!request?.id) return;
+  await notifyChargeeAchats({
+    title: 'Ordre d\'achat créé',
+    message: `OA ${oa?.ref || ''} créé pour la demande ${request.ref}.`,
+    type: NOTIFICATION_TYPES.PURCHASE_REQUEST,
+    priority: NOTIFICATION_PRIORITIES.NORMAL,
+    entityType: 'purchase_oa_created',
+    entityId: request.id,
+    actionUrl: '/?module=achats&tab=ordres-achat',
+  });
+}
+
+export async function notifyPaymentOrderCreated(request, oa, op) {
+  await notifyDg({
+    title: 'Ordre de paiement créé',
+    message: `OP ${op?.ref || ''} — OA ${oa?.ref || ''} — Demande ${request?.ref || ''}.`,
+    type: NOTIFICATION_TYPES.PAYMENT,
+    priority: NOTIFICATION_PRIORITIES.HIGH,
+    entityType: 'purchase_payment_created',
+    entityId: op?.id,
+    actionUrl: '/?module=achats&tab=ordres-paiement-achats',
+  });
+}
+
+export async function notifyPaymentValidated(op) {
+  await notifyChargeeAchats({
+    title: 'Paiement validé',
+    message: `L'ordre de paiement ${op?.ref || ''} a été validé par le DG.`,
+    type: NOTIFICATION_TYPES.PAYMENT,
+    priority: NOTIFICATION_PRIORITIES.NORMAL,
+    entityType: 'purchase_payment_validated',
+    entityId: op?.id,
+    actionUrl: '/?module=achats&tab=ordres-paiement-achats',
   });
 }
 
