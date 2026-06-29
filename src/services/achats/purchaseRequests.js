@@ -3,6 +3,7 @@
  */
 import { getSupabase } from '../../lib/supabase';
 import { employeeFullName } from '../rh/employees';
+import { PURCHASE_ASSIGNEE, normalizePurchaseStatus } from '../../constants/purchaseWorkflow';
 import { listProjects } from '../projects/projects';
 
 const TABLE = 'purchase_requests';
@@ -25,7 +26,7 @@ export function normalizePurchaseRequest(row) {
     ref: row.ref_demande || '',
     titre: row.titre || '',
     priorite: row.priorite || 'Normale',
-    statut: row.statut || 'Brouillon',
+    statut: normalizePurchaseStatus(row.statut || 'Brouillon'),
     date_debut: row.date_debut || '',
     date_limite: row.date_limite || '',
     description: row.description || '',
@@ -36,11 +37,20 @@ export function normalizePurchaseRequest(row) {
     project_name: row.project_name || '',
     projet_lie: projectLabel,
     assigned_employee_id: row.assigned_employee_id || null,
-    assigned_employee_name: row.assigned_employee_name || '',
-    assignes: row.assigned_employee_name || '',
+    assigned_employee_name: row.assigned_employee_name || PURCHASE_ASSIGNEE.label,
+    assignes: row.assigned_employee_name || PURCHASE_ASSIGNEE.label,
+    requester_user_id: row.requester_user_id || row.created_by || null,
+    requester_name: row.requester_name || '',
+    demandeur: row.requester_name || '',
+    selected_quote_id: row.selected_quote_id || null,
+    acquisition_order_id: row.acquisition_order_id || null,
+    payment_order_id: row.payment_order_id || null,
+    commentaires_internes: row.commentaires_internes || '',
+    created_by: row.created_by || null,
     date_creation: row.created_at ? String(row.created_at).slice(0, 10) : '',
     created_at: row.created_at,
     updated_at: row.updated_at,
+    payload: row.payload || {},
   };
 }
 
@@ -58,7 +68,8 @@ export function toPurchaseRequestRow(form) {
     project_ref: form.project_ref || null,
     project_name: form.project_name || null,
     assigned_employee_id: form.assigned_employee_id || null,
-    assigned_employee_name: form.assigned_employee_name || null,
+    assigned_employee_name: form.assigned_employee_name || PURCHASE_ASSIGNEE.label,
+    commentaires_internes: form.commentaires_internes?.trim() || null,
     payload: form.payload || {},
   };
 }
@@ -92,8 +103,16 @@ export async function listPurchaseRequests() {
 }
 
 export async function createPurchaseRequest(form) {
-  const uid = await requireUser();
-  const row = toPurchaseRequestRow(form);
+  const { data: { user }, error: authErr } = await getSupabase().auth.getUser();
+  if (authErr || !user) throw new Error('Session requise.');
+  const uid = user.id;
+  const assignee = await import('./purchaseWorkflow').then((m) => m.resolveAchatsAssignee());
+  const row = {
+    ...toPurchaseRequestRow(form),
+    ...assignee,
+    requester_user_id: uid,
+    requester_name: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Système',
+  };
   if (!row.ref_demande) row.ref_demande = await generatePurchaseRequestRef();
   const { data, error } = await getSupabase()
     .from(TABLE)
@@ -146,7 +165,7 @@ export async function createPurchaseRequestFromSiteRuptures(siteRequest) {
   return createPurchaseRequest({
     titre: `Rupture stock — ${siteRequest.ref}`,
     priorite: siteRequest.priorite === 'Critique' ? 'Urgente' : (siteRequest.priorite || 'Normale'),
-    statut: 'En attente',
+    statut: 'En étude Achats',
     project_id: siteRequest.project_id || null,
     project_ref: siteRequest.project_ref || null,
     project_name: siteRequest.project_name || null,

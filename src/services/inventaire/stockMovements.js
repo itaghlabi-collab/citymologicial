@@ -3,7 +3,7 @@
  */
 import { getSupabase } from '../../lib/supabase';
 import { requireSupabaseUserId } from '../supabase/requireUser';
-import { movementDelta } from './stockArticles';
+import { movementDelta, computeArticleStock } from './stockArticles';
 
 const TABLE = 'stock_movements';
 const LEVELS = 'stock_levels';
@@ -190,7 +190,7 @@ async function findLevel(articleId, emplacement) {
     .from(LEVELS)
     .select('*')
     .eq('article_id', articleId)
-    .eq('emplacement', emp)
+    .ilike('emplacement', emp)
     .limit(1);
   if (error) {
     if (error.code === '42P01') return null;
@@ -199,10 +199,110 @@ async function findLevel(articleId, emplacement) {
   return data?.[0] || null;
 }
 
-async function adjustLevel(articleId, emplacement, delta) {
+async function listArticleStockLevels(articleId) {
+  if (!articleId) return [];
+  const { data, error } = await getSupabase()
+    .from(LEVELS)
+    .select('*')
+    .eq('article_id', articleId);
+  if (error) {
+    if (error.code === '42P01') return [];
+    throw error;
+  }
+  return data || [];
+}
+
+async function insertLevel(articleId, emplacement, quantite) {
   const emp = (emplacement || '').trim();
+  const qty = Math.max(0, Number(quantite) || 0);
+  if (!articleId || !emp || qty <= 0) return null;
+  const { data, error } = await getSupabase()
+    .from(LEVELS)
+    .insert([{
+      article_id: articleId,
+      warehouse_id: null,
+      project_id: null,
+      emplacement: emp,
+      quantite: qty,
+    }])
+    .select('*')
+    .single();
+  if (error) {
+    if (error.code === '42P01') return null;
+    throw error;
+  }
+  return data;
+}
+
+/**
+ * Où déduire le stock quand l'emplacement affiché (article.emplacement) n'a pas
+ * de ligne stock_levels correspondante — évite le décalage stock global vs par emplacement.
+ */
+async function resolveDeductionEmplacement(articleId, preferredEmp, qtyNeeded) {
+  const preferred = (preferredEmp || '').trim();
+  const qty = Math.max(0, Number(qtyNeeded) || 0);
+  if (!articleId || qty <= 0) return preferred;
+
+  const preferredLevel = preferred ? await findLevel(articleId, preferred) : null;
+  if (preferredLevel && Number(preferredLevel.quantite) >= qty) {
+    return (preferredLevel.emplacement || preferred).trim();
+  }
+
+  const levels = await listArticleStockLevels(articleId);
+  const withStock = levels
+    .filter((l) => Number(l.quantite) > 0)
+    .sort((a, b) => Number(b.quantite) - Number(a.quantite));
+
+  const enough = withStock.find((l) => Number(l.quantite) >= qty);
+  if (enough) return (enough.emplacement || '').trim();
+
+  const totalAtLevels = withStock.reduce((s, l) => s + Number(l.quantite), 0);
+  if (totalAtLevels >= qty && withStock.length) {
+    return (withStock[0].emplacement || '').trim();
+  }
+
+  if (levels.length === 0 && preferred) {
+    const total = await computeArticleStock(articleId);
+    if (total >= qty) {
+      await insertLevel(articleId, preferred, total);
+      return preferred;
+    }
+  }
+
+  return preferred;
+}
+
+async function adjustLevel(articleId, emplacement, delta) {
+  let emp = (emplacement || '').trim();
   const d = Number(delta) || 0;
-  if (!articleId || !emp || !d) return;
+  if (!articleId || !emp || !d) return emp;
+
+  if (d < 0) {
+    const qtyNeeded = Math.abs(d);
+    let existing = await findLevel(articleId, emp);
+    if (!existing || Number(existing.quantite) < qtyNeeded) {
+      const resolved = await resolveDeductionEmplacement(articleId, emp, qtyNeeded);
+      if (resolved && resolved !== emp) emp = resolved;
+      existing = await findLevel(articleId, emp);
+    }
+    if (!existing) {
+      const err = new Error(`Aucun stock à l'emplacement « ${emplacement || emp} ».`);
+      err.code = 'VALIDATION';
+      throw err;
+    }
+    const newQty = Number(existing.quantite || 0) + d;
+    if (newQty < 0) {
+      const err = new Error(`Stock insuffisant à l'emplacement « ${emp} ».`);
+      err.code = 'VALIDATION';
+      throw err;
+    }
+    const { error } = await getSupabase()
+      .from(LEVELS)
+      .update({ quantite: newQty })
+      .eq('id', existing.id);
+    if (error) throw error;
+    return emp;
+  }
 
   const existing = await findLevel(articleId, emp);
   if (existing) {
@@ -217,13 +317,7 @@ async function adjustLevel(articleId, emplacement, delta) {
       .update({ quantite: newQty })
       .eq('id', existing.id);
     if (error) throw error;
-    return;
-  }
-
-  if (d < 0) {
-    const err = new Error(`Aucun stock à l'emplacement « ${emp} ».`);
-    err.code = 'VALIDATION';
-    throw err;
+    return emp;
   }
 
   const { error } = await getSupabase().from(LEVELS).insert([{
@@ -234,6 +328,7 @@ async function adjustLevel(articleId, emplacement, delta) {
     quantite: d,
   }]);
   if (error && error.code !== '42P01') throw error;
+  return emp;
 }
 
 async function updateArticleEmplacement(articleId, emplacement) {

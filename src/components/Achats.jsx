@@ -21,7 +21,7 @@ export default function Achats({ activeTab }) {
       {tab === 'bons-commande'     && <BonsCommande />}
       {tab === 'fournisseurs'      && <Fournisseurs onFournisseursChange={setFournisseursList} />}
       {tab === 'comparaison-devis' && <ComparaisonDevis />}
-      {tab === 'ordres-achat'      && <OrdresAchat fournisseurs={fournisseursList} />}
+      {tab === 'ordres-achat'      && <OrdresAchat />}
     </div>
   );
 }

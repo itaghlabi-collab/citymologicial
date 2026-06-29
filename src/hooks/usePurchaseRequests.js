@@ -3,16 +3,17 @@ import { isSupabaseConfigured } from '../lib/supabase';
 import { formatSupabaseError } from '../services/supabase/formatError';
 import {
   listPurchaseRequests,
-  createPurchaseRequest,
-  updatePurchaseRequest,
   deletePurchaseRequest,
   loadPurchaseRequestFormOptions,
 } from '../services/achats/purchaseRequests';
+import {
+  createPurchaseRequestWorkflow,
+  updatePurchaseRequestDraft,
+} from '../services/achats/purchaseWorkflow';
 
 export function usePurchaseRequests() {
   const [records, setRecords] = useState([]);
   const [projects, setProjects] = useState([]);
-  const [employees, setEmployees] = useState([]);
   const [loading, setLoading] = useState(true);
   const [optionsLoading, setOptionsLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -26,9 +27,8 @@ export function usePurchaseRequests() {
     }
     setOptionsLoading(true);
     try {
-      const { projects: p, employees: e } = await loadPurchaseRequestFormOptions();
+      const { projects: p } = await loadPurchaseRequestFormOptions();
       setProjects(p);
-      setEmployees(e);
     } catch (err) {
       console.error('[CITYMO] usePurchaseRequests options', err);
     } finally {
@@ -63,8 +63,8 @@ export function usePurchaseRequests() {
     setSaving(true);
     setError(null);
     try {
-      if (id) await updatePurchaseRequest(id, form);
-      else await createPurchaseRequest(form);
+      if (id) await updatePurchaseRequestDraft(id, form);
+      else await createPurchaseRequestWorkflow(form);
       await load();
       return { success: true };
     } catch (err) {
@@ -92,16 +92,9 @@ export function usePurchaseRequests() {
     }
   }
 
-  async function updateStatus(id, statut) {
-    const item = records.find((r) => r.id === id);
-    if (!item) return { success: false };
-    return save({ ...item, statut }, id);
-  }
-
   return {
     records,
     projects,
-    employees,
     loading,
     optionsLoading,
     saving,
@@ -111,6 +104,5 @@ export function usePurchaseRequests() {
     reloadOptions: loadOptions,
     save,
     remove,
-    updateStatus,
   };
 }

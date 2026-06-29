@@ -12,7 +12,10 @@ export const SELECT_STYLE = { ...INPUT_STYLE, cursor: 'pointer' };
 export const TEXTAREA_STYLE = { ...INPUT_STYLE, minHeight: 72, resize: 'vertical' };
 
 export const MODES_PAIEMENT   = ['Espèces', 'Virement', 'Chèque', 'Carte bancaire', 'Mobile payment', 'Autre'];
-export const STATUTS_DEMANDE  = ['Brouillon', 'En attente', 'Validée', 'Refusée', 'En cours', 'Terminée'];
+export const STATUTS_DEMANDE  = [
+  'Brouillon', 'Soumise', 'En étude Achats', 'Devis reçus', 'En validation DG',
+  'Validée', 'Ordre d\'achat créé', 'Commande en cours', 'Commande reçue', 'Clôturée', 'Refusée',
+];
 export const PRIORITES        = ['Faible', 'Normale', 'Haute', 'Urgente'];
 export const STATUTS_BC       = ['Brouillon', 'Envoyé', 'Validé', 'Partiellement reçu', 'Reçu', 'Annulé'];
 export const STATUTS_ORDRE    = ['Brouillon', 'En attente validation', 'Validé', 'Refusé', 'Commandé', 'Clôturé'];
@@ -21,8 +24,11 @@ export const TVA_OPTIONS      = [0, 7, 10, 14, 20];
 export const CATEGORIES_FOURN = ['Matériaux', 'Équipements', 'Services', 'Fournitures', 'Transport', 'Sous-traitance', 'Informatique', 'Autre'];
 
 export const BADGE_DEMANDE = {
-  'Brouillon': 'badge-grey', 'En attente': 'badge-orange', 'Validée': 'badge-green',
-  'Refusée': 'badge-red', 'En cours': 'badge-blue', 'Terminée': 'badge-purple',
+  'Brouillon': 'badge-grey', 'Soumise': 'badge-blue', 'En étude Achats': 'badge-orange',
+  'Devis reçus': 'badge-purple', 'En validation DG': 'badge-orange', 'Validée': 'badge-green',
+  'Ordre d\'achat créé': 'badge-green', 'Commande en cours': 'badge-blue',
+  'Commande reçue': 'badge-purple', 'Clôturée': 'badge-grey', 'Refusée': 'badge-red',
+  'En attente': 'badge-orange', 'En cours': 'badge-blue', 'Terminée': 'badge-purple',
 };
 export const BADGE_BC = {
   'Brouillon': 'badge-grey', 'Envoyé': 'badge-blue', 'Validé': 'badge-green',

@@ -5,11 +5,11 @@ import { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   Package, Plus, Edit2, Trash2, Eye, Search, Filter, Download,
   ChevronLeft, Loader2, RefreshCw, Archive, History, CheckCircle2,
-  Barcode, ScanLine, Printer,
+  Barcode, ScanLine, Printer, MapPin, AlertTriangle,
 } from 'lucide-react';
 import { useStockArticles } from '../../hooks/useStockArticles';
 import { useStockCategories } from '../../hooks/useStockCategories';
-import { generateStockArticleCode } from '../../services/inventaire/stockArticles';
+import { generateStockArticleCode, listStockLevelsForArticle } from '../../services/inventaire/stockArticles';
 import { downloadStockArticleLabel, printStockArticleLabel, downloadStockArticleLabelsA4, LABEL_FORMATS } from '../../services/inventaire/stockArticleLabelPdf';
 import BarcodeModal from './BarcodeModal';
 import BarcodeScannerModal from './BarcodeScannerModal';
@@ -29,6 +29,99 @@ import {
 } from './shared.jsx';
 
 const PAGE_SIZE = 15;
+
+function emplacementMatch(a, b) {
+  return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+}
+
+function ArticleStockByLocation({ article, levels, loading }) {
+  const declared = (article?.emplacement || '').trim();
+  const unite = article?.unite || 'U';
+  const totalLevels = (levels || []).reduce((s, l) => s + Number(l.quantite || 0), 0);
+  const qtyAtDeclared = declared
+    ? (levels || []).find((l) => emplacementMatch(l.emplacement, declared))?.quantite ?? 0
+    : 0;
+  const positiveLevels = (levels || []).filter((l) => Number(l.quantite) > 0);
+  const showMismatch = declared && Number(article?.stock_actuel) > 0 && qtyAtDeclared <= 0 && positiveLevels.length > 0;
+
+  return (
+    <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
+      <span style={{ color: 'var(--text-3)', fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: 5, marginBottom: 8 }}>
+        <MapPin size={11} /> Stock par emplacement
+      </span>
+
+      {loading ? (
+        <div style={{ fontSize: '0.8rem', color: 'var(--text-3)', display: 'flex', alignItems: 'center', gap: 6 }}>
+          <Loader2 size={13} className="cin-spin" /> Chargement…
+        </div>
+      ) : positiveLevels.length > 0 ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {positiveLevels.map((l) => {
+            const isDeclared = declared && emplacementMatch(l.emplacement, declared);
+            return (
+              <div
+                key={l.id || l.emplacement}
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: '6px 8px',
+                  borderRadius: 6,
+                  background: isDeclared ? 'var(--bg-2)' : 'transparent',
+                  border: isDeclared ? '1px solid var(--border)' : '1px solid transparent',
+                  fontSize: '0.82rem',
+                }}
+              >
+                <span style={{ fontWeight: isDeclared ? 600 : 500, color: 'var(--text-2)', minWidth: 0, wordBreak: 'break-word' }}>
+                  {l.emplacement}
+                  {isDeclared && (
+                    <span style={{ marginLeft: 6, fontSize: '0.68rem', color: 'var(--text-3)', fontWeight: 700 }}>fiche</span>
+                  )}
+                </span>
+                <span style={{ fontFamily: 'var(--font-head)', fontWeight: 800, whiteSpace: 'nowrap' }}>
+                  {l.quantite} {unite}
+                </span>
+              </div>
+            );
+          })}
+          {totalLevels !== Number(article?.stock_actuel) && (
+            <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>
+              Total emplacements : {totalLevels} {unite}
+            </div>
+          )}
+        </div>
+      ) : Number(article?.stock_actuel) > 0 ? (
+        <div style={{ fontSize: '0.8rem', color: 'var(--text-2)' }}>
+          Aucune répartition détaillée — stock issu de l&apos;historique des mouvements ({article.stock_actuel} {unite}).
+        </div>
+      ) : (
+        <div style={{ fontSize: '0.8rem', color: 'var(--text-3)' }}>Aucun stock enregistré.</div>
+      )}
+
+      {showMismatch && (
+        <div style={{
+          marginTop: 10,
+          padding: '8px 10px',
+          borderRadius: 6,
+          background: 'rgba(234, 179, 8, 0.12)',
+          border: '1px solid rgba(234, 179, 8, 0.35)',
+          fontSize: '0.76rem',
+          color: 'var(--text-2)',
+          display: 'flex',
+          gap: 8,
+          alignItems: 'flex-start',
+        }}>
+          <AlertTriangle size={14} style={{ flexShrink: 0, marginTop: 1, color: '#ca8a04' }} />
+          <span>
+            La fiche indique <strong>{declared}</strong> mais le stock physique s&apos;y trouve à <strong>0 {unite}</strong>.
+            Les affectations partiront de l&apos;emplacement qui contient réellement le stock.
+          </span>
+        </div>
+      )}
+    </div>
+  );
+}
 
 const EMPTY_FORM = {
   code: '',
@@ -214,7 +307,8 @@ function ArticleForm({ initial, categories, onSave, onCancel, saving, emplacemen
 }
 
 function DetailArticle({
-  article, categories, movements, movementsLoading, onBack, onEdit, onHistory, onArchive, onBarcode, onRefresh, userName,
+  article, categories, movements, movementsLoading, stockLevels, stockLevelsLoading,
+  onBack, onEdit, onHistory, onArchive, onBarcode, onRefresh, userName,
   onScan, scanLoading, scanError,
 }) {
   const cat = (categories || []).find((c) => String(c.id) === String(article.categorie_id));
@@ -334,6 +428,11 @@ function DetailArticle({
                   {(article.valeur && article.stock_actuel) ? formatMAD(Number(article.valeur) * Number(article.stock_actuel)) : '—'}
                 </div>
               </div>
+              <ArticleStockByLocation
+                article={article}
+                levels={stockLevels}
+                loading={stockLevelsLoading}
+              />
             </div>
           </div>
           <div className="card">
@@ -433,6 +532,8 @@ export default function ArticlesStock({
   const [scanError, setScanError] = useState('');
   const [selectedIds, setSelectedIds] = useState([]);
   const [detailMovementsLoading, setDetailMovementsLoading] = useState(false);
+  const [detailStockLevels, setDetailStockLevels] = useState([]);
+  const [detailStockLevelsLoading, setDetailStockLevelsLoading] = useState(false);
 
   useEffect(() => {
     if (onArticlesChange) onArticlesChange(articles);
@@ -526,17 +627,48 @@ export default function ArticlesStock({
     return () => { cancelled = true; };
   }, [detailId, getMovements]);
 
+  useEffect(() => {
+    if (!detailId) {
+      setDetailStockLevels([]);
+      setDetailStockLevelsLoading(false);
+      return undefined;
+    }
+    let cancelled = false;
+    setDetailStockLevelsLoading(true);
+    listStockLevelsForArticle(detailId)
+      .then((rows) => {
+        if (!cancelled) {
+          setDetailStockLevels(rows);
+          setDetailStockLevelsLoading(false);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setDetailStockLevels([]);
+          setDetailStockLevelsLoading(false);
+        }
+      });
+    return () => { cancelled = true; };
+  }, [detailId]);
+
   const refreshDetail = useCallback(async () => {
     await reload();
     if (!detailId) return;
     setDetailMovementsLoading(true);
+    setDetailStockLevelsLoading(true);
     try {
-      const rows = await getMovements(detailId);
+      const [rows, levels] = await Promise.all([
+        getMovements(detailId),
+        listStockLevelsForArticle(detailId),
+      ]);
       setDetailMovements(rows);
+      setDetailStockLevels(levels);
     } catch {
       setDetailMovements([]);
+      setDetailStockLevels([]);
     } finally {
       setDetailMovementsLoading(false);
+      setDetailStockLevelsLoading(false);
     }
   }, [reload, detailId, getMovements]);
 
@@ -646,6 +778,8 @@ export default function ArticlesStock({
           categories={categories}
           movements={detailMovements}
           movementsLoading={detailMovementsLoading}
+          stockLevels={detailStockLevels}
+          stockLevelsLoading={detailStockLevelsLoading}
           onBack={() => {
             setDetailId(null);
             setScanError('');

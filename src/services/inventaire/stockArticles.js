@@ -595,6 +595,27 @@ export async function computeArticleStock(articleId) {
   return Math.max(0, Number(fromMvts[articleId] ?? 0));
 }
 
+/** Quantités par emplacement (stock_levels) pour la fiche article. */
+export async function listStockLevelsForArticle(articleId) {
+  if (!articleId) return [];
+  const { data, error } = await getSupabase()
+    .from(LEVELS)
+    .select('id, emplacement, quantite')
+    .eq('article_id', articleId)
+    .order('quantite', { ascending: false });
+  if (error) {
+    if (error.code === '42P01') return [];
+    throw error;
+  }
+  return (data || [])
+    .map((l) => ({
+      id: l.id,
+      emplacement: (l.emplacement || '').trim() || '—',
+      quantite: Math.max(0, Number(l.quantite) || 0),
+    }))
+    .sort((a, b) => b.quantite - a.quantite);
+}
+
 function matchBarcodeArticle(article, code) {
   const norm = String(code || '').trim().toLowerCase();
   if (!norm) return false;
