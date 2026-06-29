@@ -349,6 +349,12 @@ export default function DemandeAchatDetail({
                 ['Projet', projectDisplay],
                 ['Demandeur', request.requester_name || request.demandeur || '—'],
                 ['Responsable Achats', request.assigned_employee_name || PURCHASE_ASSIGNEE.label],
+                ['Fournisseur souhaité', request.payload?.fournisseur_souhaite || request.payload?.lines?.[0]?.fournisseur || '—'],
+                ['Quantité', (() => {
+                  const l = request.payload?.lines?.[0];
+                  if (!l?.quantite && l?.quantite !== 0) return '—';
+                  return `${l.quantite} ${l.unite || 'u'}`;
+                })()],
                 ['Priorité', request.priorite],
                 ['Date souhaitée', request.date_limite || '—'],
                 ['Créée le', request.date_creation || '—'],

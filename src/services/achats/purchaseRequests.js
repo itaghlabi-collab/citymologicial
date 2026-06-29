@@ -75,6 +75,15 @@ export function toPurchaseRequestRow(form) {
   };
 }
 
+export function getPurchaseRequestLineSummary(request) {
+  const line = request?.payload?.lines?.[0];
+  return {
+    fournisseur: request?.payload?.fournisseur_souhaite || line?.fournisseur || '',
+    quantite: line?.quantite ?? line?.quantite_demandee ?? '',
+    unite: line?.unite || line?.unit || 'u',
+  };
+}
+
 async function requireUser() {
   const { data: { user }, error } = await getSupabase().auth.getUser();
   if (error || !user) throw new Error('Session requise.');

@@ -27,32 +27,68 @@ const EMPTY_FORM = {
   priorite: 'Normale',
   date_limite: '',
   projet_lie: '',
+  fournisseur: '',
+  supplier_id: '',
+  quantite: '',
+  unite: 'u',
   description: '',
   commentaires_internes: '',
 };
 
 function toFormState(item) {
   if (!item) return EMPTY_FORM;
+  const line = item.payload?.lines?.[0] || {};
   return {
     ...EMPTY_FORM,
     titre: item.titre || '',
     priorite: item.priorite || 'Normale',
     date_limite: item.date_limite || '',
     projet_lie: item.projet_lie || item.project_name || '',
+    fournisseur: item.payload?.fournisseur_souhaite || line.fournisseur || '',
+    supplier_id: item.payload?.supplier_id || '',
+    quantite: line.quantite ?? line.quantite_demandee ?? '',
+    unite: line.unite || line.unit || 'u',
     description: item.description || '',
     commentaires_internes: item.commentaires_internes || '',
   };
 }
 
-function DemandeForm({ initial, onSave, onCancel, saving }) {
+function buildFormPayload(form, existingPayload = {}) {
+  const fournisseur = (form.fournisseur || '').trim();
+  return {
+    ...existingPayload,
+    supplier_id: form.supplier_id || null,
+    fournisseur_souhaite: fournisseur || null,
+    lines: [{
+      designation: form.titre?.trim() || '—',
+      quantite: form.quantite !== '' && form.quantite != null ? Number(form.quantite) : null,
+      unite: (form.unite || 'u').trim(),
+      fournisseur: fournisseur || null,
+      observation: form.description?.trim() || null,
+    }],
+  };
+}
+
+function DemandeForm({ initial, onSave, onCancel, saving, suppliers = [] }) {
   const [form, setForm] = useState(() => toFormState(initial));
   const [errors, setErrors] = useState({});
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+
+  const fournActifs = suppliers.filter((f) => f.statut === 'Actif' || f.status === 'active');
 
   useEffect(() => {
     setForm(toFormState(initial));
     setErrors({});
   }, [initial]);
+
+  function handleSupplierChange(supplierId) {
+    const s = fournActifs.find((x) => x.id === supplierId);
+    setForm((p) => ({
+      ...p,
+      supplier_id: supplierId || '',
+      fournisseur: s ? (s.company_name || s.raison_sociale || s.nom || '') : p.fournisseur,
+    }));
+  }
 
   function handleSubmit(ev) {
     ev.preventDefault();
@@ -61,7 +97,10 @@ function DemandeForm({ initial, onSave, onCancel, saving }) {
     if (!form.projet_lie.trim()) e.projet_lie = 'Requis';
     if (Object.keys(e).length) { setErrors(e); return; }
     setErrors({});
-    onSave(form);
+    onSave({
+      ...form,
+      payload: buildFormPayload(form, initial?.payload),
+    });
   }
 
   return (
@@ -98,6 +137,47 @@ function DemandeForm({ initial, onSave, onCancel, saving }) {
         </FField>
         <FField label="Responsable Achats">
           <input value={PURCHASE_ASSIGNEE.label} readOnly style={{ ...INPUT_STYLE, background: 'var(--surface-2)', cursor: 'not-allowed' }} />
+        </FField>
+      </FRow>
+      <FRow>
+        <FField label="Fournisseur souhaité">
+          {fournActifs.length > 0 ? (
+            <select
+              value={form.supplier_id || ''}
+              onChange={(e) => handleSupplierChange(e.target.value)}
+              style={SELECT_STYLE}
+            >
+              <option value="">— Sélectionner ou saisir ci-dessous —</option>
+              {fournActifs.map((s) => (
+                <option key={s.id} value={s.id}>{s.company_name || s.raison_sociale || s.nom}</option>
+              ))}
+            </select>
+          ) : null}
+          <input
+            value={form.fournisseur}
+            onChange={(e) => setForm((p) => ({ ...p, fournisseur: e.target.value, supplier_id: '' }))}
+            placeholder="Nom du fournisseur (libre ou complément)"
+            style={{ ...INPUT_STYLE, marginTop: fournActifs.length ? 8 : 0 }}
+          />
+        </FField>
+        <FField label="Quantité">
+          <input
+            type="number"
+            min="0"
+            step="any"
+            value={form.quantite}
+            onChange={(e) => set('quantite', e.target.value)}
+            placeholder="ex. 100"
+            style={INPUT_STYLE}
+          />
+        </FField>
+        <FField label="Unité">
+          <input
+            value={form.unite}
+            onChange={(e) => set('unite', e.target.value)}
+            placeholder="u, m, kg, lot..."
+            style={INPUT_STYLE}
+          />
         </FField>
       </FRow>
       <SectionTitle>Description</SectionTitle>
@@ -378,6 +458,7 @@ export default function DemandesAchat() {
           onSave={handleSave}
           onCancel={() => { setShowModal(false); setEditItem(null); }}
           saving={saving}
+          suppliers={suppliers}
         />
       </Modal>
     </div>
