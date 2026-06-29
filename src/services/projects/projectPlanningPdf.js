@@ -2,7 +2,7 @@
  * projectPlanningPdf.js — Export PDF planning Gantt (1 page, timeline condensée)
  */
 import { jsPDF } from 'jspdf';
-import { planningLotColor, planningTaskBarColor } from '../../constants/projectPlanning';
+import { hexToRgb, darkenRgb, lightenRgb, planningGanttBarColor, planningTaskBarColor } from '../../constants/projectPlanning';
 import { loadCompanyLogoFit } from '../finance/pdfShared';
 import {
   buildGanttDisplayRows,
@@ -20,7 +20,6 @@ const HEADER_BG = [248, 248, 248];
 const GRID = [230, 230, 230];
 const DEP_COLOR = [90, 90, 90];
 const CRITICAL = [198, 40, 40];
-const PROGRESS = [46, 125, 50];
 
 const M = 10;
 const LEFT_W = 98;
@@ -99,12 +98,6 @@ function fmtMonthShort(d) {
   } catch {
     return '';
   }
-}
-
-function hexToRgb(hex) {
-  const h = (hex || '#757575').replace('#', '');
-  const n = parseInt(h, 16);
-  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
 }
 
 function globalAvancement(projet, tasks) {
@@ -213,16 +206,6 @@ export function computeCriticalPathIds(tasks = []) {
     if (ES.get(t.id) === LS.get(t.id)) critical.add(t.id);
   });
   return critical;
-}
-
-function isSummaryCritical(row, tasks, criticalIds) {
-  const lot = row.lot || row.nom;
-  return tasks.some((t) => (t.lot || 'Autre') === lot && criticalIds.has(t.id));
-}
-
-function measureTextWidth(doc, text, fontSize) {
-  doc.setFontSize(fontSize);
-  return doc.getTextWidth(String(text || ''));
 }
 
 /** Échelle temporelle : jours / semaines / mois selon la durée totale. */
@@ -355,10 +338,21 @@ function buildMilestonePdfRows(milestones = []) {
 }
 
 function buildPdfRows(tasks, mode, milestones = []) {
-  const rows = buildGanttDisplayRows(tasks, new Set());
+  const taskById = new Map((tasks || []).map((t) => [t.id, t]));
+  const rows = buildGanttDisplayRows(tasks, new Set()).map((row) => {
+    if (row.type !== 'task' || !row.id) return row;
+    const src = taskById.get(row.id);
+    if (!src) return row;
+    const couleur = planningTaskBarColor(src);
+    return { ...row, couleur: src.couleur || row.couleur || '', _barColor: couleur };
+  });
   const base = mode === 'synthesis' ? rows.filter((r) => r.type === 'summary') : rows;
   const msRows = buildMilestonePdfRows(milestones);
   return msRows.length ? [...base, ...msRows] : base;
+}
+
+function rowBarColor(row) {
+  return row._barColor || planningGanttBarColor(row);
 }
 
 function pickPageLayout(rowCount, rows = []) {
@@ -665,11 +659,17 @@ function drawDiamond(doc, cx, cy, r) {
   doc.triangle(cx, cy - r, cx - r, cy, cx, cy + r, 'F');
 }
 
-function drawBarProgress(doc, bar, barY, barH, pct) {
+function drawBarProgress(doc, bar, barY, barH, pct, baseRgb, isSummary) {
   if (pct <= 0 || pct >= 100) return;
-  doc.setFillColor(...PROGRESS);
-  const h = Math.max(1.6, barH * 0.48);
-  doc.rect(bar.x, barY + barH - h, (bar.w * pct) / 100, h, 'F');
+  const progressW = Math.max(0.5, (bar.w * pct) / 100);
+  if (isSummary) {
+    doc.setFillColor(...lightenRgb(baseRgb, 0.22));
+    doc.rect(bar.x, barY, progressW, barH, 'F');
+    return;
+  }
+  doc.setFillColor(...darkenRgb(baseRgb, 0.72));
+  const h = Math.max(1.4, barH * 0.45);
+  doc.rect(bar.x, barY + barH - h, progressW, h, 'F');
 }
 
 function drawBarDateLabels(doc, bar, row, barY, barH) {
@@ -723,7 +723,12 @@ function drawSummaryBar(doc, bar, barY, barH, rgb) {
   doc.triangle(bar.x + bar.w, y + h / 2, bar.x + bar.w - cap, y, bar.x + bar.w - cap, y + h, 'F');
 }
 
-function drawRow(doc, layout, row, y, minDate, maxDate, rowH, criticalIds, tasks) {
+function measureTextWidth(doc, text, fontSize) {
+  doc.setFontSize(fontSize);
+  return doc.getTextWidth(String(text || ''));
+}
+
+function drawRow(doc, layout, row, y, minDate, maxDate, rowH) {
   const { ganttX, ganttW, pageW } = layout;
   const isSummary = row.type === 'summary';
   const isMilestone = row.type === 'milestone';
@@ -773,10 +778,7 @@ function drawRow(doc, layout, row, y, minDate, maxDate, rowH, criticalIds, tasks
     return { bar, barY, barH, rowCenterY: y + rowH / 2 };
   }
 
-  const isCritical = isSummary
-    ? isSummaryCritical(row, tasks, criticalIds)
-    : (row.id && criticalIds.has(row.id));
-  const rgb = isCritical ? CRITICAL : hexToRgb(planningTaskBarColor(row));
+  const rgb = hexToRgb(rowBarColor(row));
 
   if (isSummary) {
     drawSummaryBar(doc, bar, barY, barH, rgb);
@@ -789,7 +791,7 @@ function drawRow(doc, layout, row, y, minDate, maxDate, rowH, criticalIds, tasks
     }
   }
 
-  drawBarProgress(doc, bar, barY, barH, pct);
+  drawBarProgress(doc, bar, barY, barH, pct, rgb, isSummary);
   drawBarDateLabels(doc, bar, row, barY, barH);
 
   return { bar, barY, barH, rowCenterY: y + rowH / 2 };
@@ -823,20 +825,20 @@ function drawLegend(doc, layout) {
   const y = layout.pageH - FOOTER_H - 3.5;
   doc.setFontSize(6);
   doc.setFont('helvetica', 'normal');
-  doc.setFillColor(...CRITICAL);
-  doc.rect(M, y - 2, 4, 2, 'F');
-  doc.setTextColor(...MUTED);
-  doc.text('Chemin critique', M + 5.5, y);
   doc.setFillColor(0, 0, 0);
-  drawDiamond(doc, M + 38, y - 1, 1.2);
-  doc.text('Jalon', M + 41.5, y);
-  doc.setFillColor(...hexToRgb(planningLotColor('Gros œuvre')));
-  doc.rect(M + 54, y - 2, 4, 2, 'F');
-  doc.text('Tâche standard', M + 59.5, y);
+  drawDiamond(doc, M + 2, y - 1, 1.2);
+  doc.setTextColor(...MUTED);
+  doc.text('Jalon', M + 5.5, y);
+  doc.setFillColor(...hexToRgb(planningGanttBarColor({ type: 'summary' })));
+  doc.rect(M + 20, y - 2, 4, 2, 'F');
+  doc.text('Lot (résumé)', M + 25.5, y);
+  doc.setFillColor(...hexToRgb(planningTaskBarColor({ lot: 'TCE', couleur: '#1565C0' })));
+  doc.rect(M + 46, y - 2, 4, 2, 'F');
+  doc.text('Tâche (nuancier)', M + 51.5, y);
   doc.setDrawColor(...CRITICAL);
   doc.setLineWidth(0.35);
-  doc.line(M + 82, y - 1.5, M + 86, y - 1.5);
-  doc.text('Aujourd\'hui', M + 88, y);
+  doc.line(M + 64, y - 1.5, M + 68, y - 1.5);
+  doc.text('Aujourd\'hui', M + 70, y);
 }
 
 function drawFooter(doc, layout) {
@@ -867,7 +869,6 @@ export async function generateProjectPlanningPdf(projet, tasks = [], options = {
   const rows = buildPdfRows(tasks, mode, milestones);
   const layout = pickPageLayout(Math.max(1, rows.length), rows);
   const projectDates = projectSpan(tasks, projet);
-  const criticalIds = computeCriticalPathIds(tasks);
 
   const doc = new jsPDF({ unit: 'mm', format: layout.format, orientation: 'landscape' });
 
@@ -901,7 +902,7 @@ export async function generateProjectPlanningPdf(projet, tasks = [], options = {
   let y = rowStartY;
   rows.forEach((row) => {
     const rh = row.type === 'summary' ? layout.rowH * SUMMARY_ROW_BOOST : layout.rowH;
-    const metric = drawRow(doc, layout, row, y, minDate, maxDate, rh, criticalIds, tasks);
+    const metric = drawRow(doc, layout, row, y, minDate, maxDate, rh);
     rowMetrics.push({ row, ...metric });
     y += rh + layout.rowGap;
   });

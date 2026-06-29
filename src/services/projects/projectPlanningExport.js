@@ -1,6 +1,10 @@
 /**
  * projectPlanningExport.js — Export CSV (Excel) planning
  */
+/**
+ * projectPlanningExport.js — Export CSV (Excel) planning
+ */
+import { planningTaskBarColor } from '../../constants/projectPlanning';
 
 function escCsv(val) {
   const s = String(val ?? '');
@@ -24,7 +28,7 @@ function downloadBlob(filename, content, mime) {
 }
 
 export function exportPlanningTasksCsv(projet, tasks = []) {
-  const headers = ['WBS', 'Tâche', 'Lot', 'Début', 'Fin', 'Durée (j)', 'Avancement %', 'Statut', 'Responsable', 'Couleur', 'Notes'];
+  const headers = ['WBS', 'Tâche', 'Lot', 'Début', 'Fin', 'Durée (j)', 'Avancement %', 'Statut', 'Responsable', 'Couleur nuancier', 'Couleur barre', 'Notes'];
   const lines = [headers.map(escCsv).join(';')];
   tasks.forEach((t, i) => {
     lines.push([
@@ -38,6 +42,7 @@ export function exportPlanningTasksCsv(projet, tasks = []) {
       t.statut,
       t.responsable,
       t.couleur || '',
+      planningTaskBarColor(t),
       t.notes,
     ].map(escCsv).join(';'));
   });

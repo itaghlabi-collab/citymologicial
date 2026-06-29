@@ -49,11 +49,60 @@ export const PLANNING_TASK_PALETTE = [
   '#7B1FA2', '#6D4C41', '#455A64', '#757575', '#212121',
 ];
 
-/** Couleur barre Gantt : personnalisée si définie, sinon couleur du lot. */
+/** Couleur barres résumé lot (Gantt + PDF). */
+export const PLANNING_SUMMARY_BAR_COLOR = '#B71C1C';
+
+export function hexToRgb(hex) {
+  const h = (hex || '#757575').replace('#', '');
+  const n = parseInt(h.length === 3 ? h.split('').map((c) => c + c).join('') : h, 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+/** Assombrit une couleur RGB (overlay avancement tâche — comme écran). */
+export function darkenRgb(rgb, factor = 0.72) {
+  const [r, g, b] = rgb;
+  return [Math.round(r * factor), Math.round(g * factor), Math.round(b * factor)];
+}
+
+/** Éclaircit une couleur RGB (overlay avancement résumé — comme écran). */
+export function lightenRgb(rgb, amount = 0.22) {
+  const [r, g, b] = rgb;
+  return [
+    Math.min(255, Math.round(r + (255 - r) * amount)),
+    Math.min(255, Math.round(g + (255 - g) * amount)),
+    Math.min(255, Math.round(b + (255 - b) * amount)),
+  ];
+}
+
+/** Normalise une couleur hex saisie (#RGB ou #RRGGBB). */
+export function normalizePlanningTaskColor(hex) {
+  const raw = (hex || '').trim();
+  if (!raw) return '';
+  let h = raw.startsWith('#') ? raw.slice(1) : raw;
+  if (/^[0-9A-Fa-f]{3}$/.test(h)) {
+    h = h.split('').map((c) => c + c).join('');
+  }
+  if (/^[0-9A-Fa-f]{6}$/.test(h)) return `#${h.toUpperCase()}`;
+  return '';
+}
+
+/** Lit la couleur personnalisée depuis les champs possibles (DB / formulaire). */
+export function extractPlanningTaskColor(task) {
+  if (!task) return '';
+  const raw = task.couleur ?? task.color ?? task.task_color ?? task.bar_color ?? '';
+  return normalizePlanningTaskColor(raw);
+}
+
+/** Couleur barre tâche : nuancier > lot > défaut. */
 export function planningTaskBarColor(task) {
-  const custom = (task?.couleur || '').trim();
-  if (custom && /^#[0-9A-Fa-f]{6}$/.test(custom)) return custom;
+  const custom = extractPlanningTaskColor(task);
+  if (custom) return custom;
   return planningLotColor(task?.lot);
+}
+
+export function planningGanttBarColor(row) {
+  if (row?.type === 'summary') return PLANNING_SUMMARY_BAR_COLOR;
+  return planningTaskBarColor(row);
 }
 
 export const RESOURCE_TYPES = [

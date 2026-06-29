@@ -9,6 +9,12 @@ ALTER TABLE public.project_planning_tasks
 
 CREATE INDEX IF NOT EXISTS idx_ppt_parent ON public.project_planning_tasks (parent_id);
 
+-- Couleur personnalisée barre Gantt (nuancier tâche)
+ALTER TABLE public.project_planning_tasks
+  ADD COLUMN IF NOT EXISTS couleur TEXT;
+
+COMMENT ON COLUMN public.project_planning_tasks.couleur IS 'Couleur hex (#RRGGBB) optionnelle pour la barre Gantt';
+
 -- Jalons projet
 CREATE TABLE IF NOT EXISTS public.project_planning_milestones (
   id          UUID PRIMARY KEY DEFAULT gen_random_uuid(),

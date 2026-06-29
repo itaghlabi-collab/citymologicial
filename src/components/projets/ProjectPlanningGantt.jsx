@@ -29,6 +29,7 @@ import {
   planningStatutMeta,
   planningLotColor,
   planningTaskBarColor,
+  planningGanttBarColor,
   PLANNING_TASK_PALETTE,
 } from '../../constants/projectPlanning';
 import { listActiveEmployees, employeeSelectLabel, filterPlanningResponsables } from '../../services/rh/employees';
@@ -340,7 +341,7 @@ function GanttBar({ row, minDate, dayWidth, onEdit, onShift, onBarChange }) {
   if (!bar || bar.width < 2) return null;
 
   const isSummary = row.type === 'summary';
-  const color = isSummary ? '#B71C1C' : planningTaskBarColor(row);
+  const color = planningGanttBarColor(row);
   const pct = Math.min(100, Math.max(0, Number(row.avancement) || 0));
   const h = isSummary ? 10 : 14;
   const top = isSummary ? 12 : 10;

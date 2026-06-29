@@ -2,7 +2,7 @@
  * projectPlanningTasks.js — Tâches planning chantier (Gantt) par projet
  */
 import { getSupabase } from '../../lib/supabase';
-import { PLANNING_LOTS } from '../../constants/projectPlanning';
+import { PLANNING_LOTS, extractPlanningTaskColor } from '../../constants/projectPlanning';
 
 const TABLE = 'project_planning_tasks';
 
@@ -150,7 +150,7 @@ export function normalizePlanningTask(row) {
     responsable: row.responsable || '',
     avancement: Number(row.avancement ?? 0),
     statut: row.statut || 'a_faire',
-    couleur: row.couleur || '',
+    couleur: extractPlanningTaskColor(row),
     notes: row.notes || '',
     predecessor_id: row.predecessor_id || '',
     parent_id: row.parent_id || '',
@@ -171,7 +171,7 @@ export function toPlanningTaskRow(form) {
     responsable: emptyToNull(form.responsable?.trim()),
     avancement: Math.min(100, Math.max(0, Number(form.avancement) || 0)),
     statut: form.statut || 'a_faire',
-    couleur: emptyToNull(form.couleur?.trim()),
+    couleur: emptyToNull(extractPlanningTaskColor(form)),
     notes: emptyToNull(form.notes?.trim()),
     predecessor_id: emptyToNull(form.predecessor_id),
     parent_id: emptyToNull(form.parent_id),
@@ -527,6 +527,7 @@ export function buildGanttDisplayRows(tasks, collapsedLots = new Set()) {
         rows.push({
           type: 'task',
           ...t,
+          couleur: extractPlanningTaskColor(t),
           wbs: `${idx}.${i + 1}`,
           indent: 1,
         });
