@@ -104,7 +104,7 @@ export async function createPurchaseRequestWorkflow(form) {
     ...assignee,
     commentaires_internes: form.commentaires_internes || null,
   };
-  if (!row.project_id) {
+  if (!row.project_name?.trim()) {
     const err = new Error('Le projet lié est obligatoire.');
     err.code = 'VALIDATION';
     throw err;
@@ -137,7 +137,7 @@ export async function updatePurchaseRequestDraft(id, form) {
     err.code = 'VALIDATION';
     throw err;
   }
-  if (!form.project_id) {
+  if (!(form.projet_lie || form.project_name || '').trim()) {
     const err = new Error('Le projet lié est obligatoire.');
     err.code = 'VALIDATION';
     throw err;
@@ -156,6 +156,11 @@ export async function submitPurchaseRequest(id) {
   const existing = await fetchRequest(id);
   if (normalizePurchaseStatus(existing.statut) !== 'Brouillon') {
     const err = new Error('Seules les demandes en brouillon peuvent être soumises.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  if (!(existing.project_name || existing.projet_lie || '').trim()) {
+    const err = new Error('Renseignez le projet lié avant de soumettre la demande.');
     err.code = 'VALIDATION';
     throw err;
   }

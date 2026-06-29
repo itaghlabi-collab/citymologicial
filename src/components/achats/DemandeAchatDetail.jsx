@@ -7,7 +7,6 @@ import {
   Plus, Loader2, Star, Lock, Package, CreditCard, Truck, Eye, Edit2, Trash2, Download,
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
-import { projectOptionLabel } from '../../services/achats/purchaseRequests';
 import { getPurchaseRequestBundle } from '../../services/achats/purchaseWorkflow';
 import {
   submitPurchaseRequest,
@@ -280,13 +279,12 @@ export default function DemandeAchatDetail({
     );
   }
 
-  const projectDisplay = request.project_ref && request.project_name
-    ? projectOptionLabel({ ref: request.project_ref, nom: request.project_name })
-    : request.projet_lie || '—';
+  const projectDisplay = request.projet_lie || request.project_name || request.project_ref || '—';
 
   const canEdit = canEditPurchaseRequest(request.statut);
+  const isTerminal = ['Clôturée', 'Refusée'].includes(request.statut);
   const canManageQuotesOnRequest = perms.canManageQuotes && canAddQuoteToRequest(request.statut);
-  const showQuotesSection = quotes.length > 0 || canManageQuotesOnRequest;
+  const showQuotesSection = !isTerminal;
   const canValidateDg = perms.canValidateSupplier && ['Devis reçus', 'En validation DG'].includes(request.statut);
 
   return (
@@ -359,6 +357,21 @@ export default function DemandeAchatDetail({
                   </button>
                 )}
               </div>
+              {request.statut === 'Brouillon' && perms.canManageQuotes && (
+                <div style={{ marginBottom: 12, padding: 10, background: '#FFF3E0', borderRadius: 8, fontSize: '0.82rem', color: '#E65100' }}>
+                  La demande doit être <strong>soumise</strong> avant d&apos;enregistrer les devis fournisseurs.
+                </div>
+              )}
+              {request.statut === 'Soumise' && perms.canManageQuotes && (
+                <div style={{ marginBottom: 12, padding: 10, background: 'var(--surface-2)', borderRadius: 8, fontSize: '0.82rem' }}>
+                  Ajoutez les devis reçus des fournisseurs. Le DG pourra ensuite valider le devis retenu.
+                </div>
+              )}
+              {!perms.canManageQuotes && quotes.length === 0 && (
+                <div style={{ marginBottom: 12, fontSize: '0.82rem', color: 'var(--text-3)' }}>
+                  Les devis seront saisis par la Chargée d&apos;Achats puis validés par le DG.
+                </div>
+              )}
               {showQuoteForm && (
                 <div style={{ marginBottom: 16, padding: 12, border: '1px solid var(--border)', borderRadius: 8 }}>
                   <QuoteForm

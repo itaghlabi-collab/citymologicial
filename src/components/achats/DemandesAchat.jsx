@@ -10,7 +10,6 @@ import {
 import { usePurchaseRequests } from '../../hooks/usePurchaseRequests';
 import { useSuppliers } from '../../hooks/useSuppliers';
 import { useAuth } from '../../hooks/useAuth';
-import { projectOptionLabel } from '../../services/achats/purchaseRequests';
 import { PURCHASE_ASSIGNEE } from '../../constants/purchaseWorkflow';
 import { canEditPurchaseRequest, canDeletePurchaseRequest, normalizePurchaseStatus, canSubmitPurchaseRequest, canAddQuoteToRequest, canValidateQuoteOnRequest } from '../../constants/purchaseWorkflow';
 import { submitPurchaseRequest } from '../../services/achats/purchaseWorkflow';
@@ -26,9 +25,7 @@ const EMPTY_FORM = {
   titre: '',
   priorite: 'Normale',
   date_limite: '',
-  project_id: '',
-  project_ref: '',
-  project_name: '',
+  projet_lie: '',
   description: '',
   commentaires_internes: '',
 };
@@ -40,15 +37,13 @@ function toFormState(item) {
     titre: item.titre || '',
     priorite: item.priorite || 'Normale',
     date_limite: item.date_limite || '',
-    project_id: item.project_id || '',
-    project_ref: item.project_ref || '',
-    project_name: item.project_name || '',
+    projet_lie: item.projet_lie || item.project_name || '',
     description: item.description || '',
     commentaires_internes: item.commentaires_internes || '',
   };
 }
 
-function DemandeForm({ initial, onSave, onCancel, saving, projects, optionsLoading }) {
+function DemandeForm({ initial, onSave, onCancel, saving }) {
   const [form, setForm] = useState(() => toFormState(initial));
   const [errors, setErrors] = useState({});
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
@@ -58,25 +53,11 @@ function DemandeForm({ initial, onSave, onCancel, saving, projects, optionsLoadi
     setErrors({});
   }, [initial]);
 
-  function handleProjectChange(projectId) {
-    const p = projects.find((x) => x.id === projectId);
-    if (p) {
-      setForm((prev) => ({
-        ...prev,
-        project_id: p.id,
-        project_ref: p.ref || '',
-        project_name: p.nom || '',
-      }));
-    } else {
-      setForm((prev) => ({ ...prev, project_id: '', project_ref: '', project_name: '' }));
-    }
-  }
-
   function handleSubmit(ev) {
     ev.preventDefault();
     const e = {};
     if (!form.titre.trim()) e.titre = 'Requis';
-    if (!form.project_id) e.project_id = 'Requis';
+    if (!form.projet_lie.trim()) e.projet_lie = 'Requis';
     if (Object.keys(e).length) { setErrors(e); return; }
     setErrors({});
     onSave(form);
@@ -106,23 +87,13 @@ function DemandeForm({ initial, onSave, onCancel, saving, projects, optionsLoadi
       </FRow>
       <FRow>
         <FField label="Projet lié" required>
-          {optionsLoading ? (
-            <div style={{ fontSize: '0.8rem', color: 'var(--text-3)', display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Loader2 size={14} className="cin-spin" /> Chargement...
-            </div>
-          ) : (
-            <select
-              value={form.project_id || ''}
-              onChange={(e) => handleProjectChange(e.target.value)}
-              style={{ ...SELECT_STYLE, borderColor: errors.project_id ? 'var(--red)' : 'var(--border)' }}
-            >
-              <option value="">Choisir un projet...</option>
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>{projectOptionLabel(p)}</option>
-              ))}
-            </select>
-          )}
-          {errors.project_id && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.project_id}</div>}
+          <input
+            value={form.projet_lie}
+            onChange={(e) => set('projet_lie', e.target.value)}
+            placeholder="ex. PRJ-2026-012 — Villa Anfa, chantier Lakhyayta..."
+            style={{ ...INPUT_STYLE, borderColor: errors.projet_lie ? 'var(--red)' : 'var(--border)' }}
+          />
+          {errors.projet_lie && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.projet_lie}</div>}
         </FField>
         <FField label="Responsable Achats">
           <input value={PURCHASE_ASSIGNEE.label} readOnly style={{ ...INPUT_STYLE, background: 'var(--surface-2)', cursor: 'not-allowed' }} />
@@ -174,7 +145,7 @@ export default function DemandesAchat() {
   const { user } = useAuth();
   const { records: suppliers } = useSuppliers();
   const {
-    records: items, projects, loading, optionsLoading, saving, error, configured, reload, save, remove,
+    records: items, loading, saving, error, configured, reload, save, remove,
   } = usePurchaseRequests();
 
   const [search, setSearch] = useState('');
@@ -226,11 +197,11 @@ export default function DemandesAchat() {
 
   const filtered = visibleItems.filter((x) => {
     const q = search.toLowerCase();
-    const projectLabel = x.project_ref || x.projet_lie || '';
-    return (!q || x.ref?.toLowerCase().includes(q) || x.titre?.toLowerCase().includes(q) || projectLabel.toLowerCase().includes(q) || (x.requester_name || '').toLowerCase().includes(q))
+    const projectLabel = (x.projet_lie || x.project_name || x.project_ref || '').toLowerCase();
+    return (!q || x.ref?.toLowerCase().includes(q) || x.titre?.toLowerCase().includes(q) || projectLabel.includes(q) || (x.requester_name || '').toLowerCase().includes(q))
       && (!filterStatut || normalizePurchaseStatus(x.statut) === filterStatut)
       && (!filterPrio || x.priorite === filterPrio)
-      && (!filterProjet || x.project_id === filterProjet);
+      && (!filterProjet || projectLabel.includes(filterProjet.toLowerCase()));
   });
 
   const kpis = computeDashboardKpis(visibleItems);
@@ -317,10 +288,12 @@ export default function DemandesAchat() {
               <option value="">Priorité</option>
               {PRIORITES.map((p) => <option key={p} value={p}>{p}</option>)}
             </select>
-            <select value={filterProjet} onChange={(e) => setFilterProjet(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 200 }}>
-              <option value="">Projet</option>
-              {projects.map((p) => <option key={p.id} value={p.id}>{projectOptionLabel(p)}</option>)}
-            </select>
+            <input
+              value={filterProjet}
+              onChange={(e) => setFilterProjet(e.target.value)}
+              placeholder="Filtrer par projet..."
+              style={{ ...INPUT_STYLE, maxWidth: 200 }}
+            />
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setFilterStatut(''); setFilterPrio(''); setFilterProjet(''); }}>Réinitialiser</button>
           </div>
         </div>
@@ -353,7 +326,7 @@ export default function DemandesAchat() {
                     <td data-label="Titre"><div style={{ fontWeight: 600, fontSize: '0.87rem', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{x.titre}</div></td>
                     <td data-label="Priorité"><span className={`badge ${BADGE_PRIORITE[x.priorite] || 'badge-grey'}`} style={{ fontSize: '0.72rem' }}>{x.priorite}</span></td>
                     <td data-label="Demandeur">{x.requester_name || x.demandeur || '—'}</td>
-                    <td data-label="Projet">{x.project_ref || x.projet_lie || '—'}</td>
+                    <td data-label="Projet">{x.projet_lie || x.project_name || x.project_ref || '—'}</td>
                     <td data-label="Date">{x.date_limite || '—'}</td>
                     <td data-label="Statut"><span className={`badge ${BADGE_DEMANDE[x.statut] || 'badge-grey'}`} style={{ fontSize: '0.72rem' }}>{x.statut}</span></td>
                     <td>
@@ -394,8 +367,6 @@ export default function DemandesAchat() {
           onSave={handleSave}
           onCancel={() => { setShowModal(false); setEditItem(null); }}
           saving={saving}
-          projects={projects}
-          optionsLoading={optionsLoading}
         />
       </Modal>
     </div>

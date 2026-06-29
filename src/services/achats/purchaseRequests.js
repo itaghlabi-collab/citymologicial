@@ -55,6 +55,7 @@ export function normalizePurchaseRequest(row) {
 }
 
 export function toPurchaseRequestRow(form) {
+  const projetLie = (form.projet_lie || form.project_name || '').trim();
   return {
     ref_demande: form.ref || form.ref_demande || null,
     titre: (form.titre || '').trim(),
@@ -66,7 +67,7 @@ export function toPurchaseRequestRow(form) {
     department: 'ACHATS',
     project_id: form.project_id || null,
     project_ref: form.project_ref || null,
-    project_name: form.project_name || null,
+    project_name: projetLie || null,
     assigned_employee_id: form.assigned_employee_id || null,
     assigned_employee_name: form.assigned_employee_name || PURCHASE_ASSIGNEE.label,
     commentaires_internes: form.commentaires_internes?.trim() || null,
