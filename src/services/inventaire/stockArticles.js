@@ -208,19 +208,19 @@ async function sumMovementsByArticle(articleIds) {
 async function attachStockQuantities(articles) {
   if (!articles.length) return articles;
   const ids = articles.map((a) => a.id);
-  let sums = await sumLevelsByArticle(ids);
+  const sums = await sumLevelsByArticle(ids);
   if (sums === null) {
-    sums = await sumMovementsByArticle(ids);
-  } else {
-    const empty = ids.filter((id) => sums[id] === undefined);
-    if (empty.length) {
-      const fromMvts = await sumMovementsByArticle(empty);
-      Object.assign(sums, fromMvts);
-    }
+    const fromMvts = await sumMovementsByArticle(ids);
+    return articles.map((a) => ({
+      ...a,
+      stock_actuel: Math.max(0, Number(fromMvts[a.id] ?? a.stock_actuel ?? 0)),
+      stock_source: 'movements',
+    }));
   }
   return articles.map((a) => ({
     ...a,
-    stock_actuel: Math.max(0, Number(sums[a.id] ?? a.stock_actuel ?? 0)),
+    stock_actuel: Math.max(0, Number(sums[a.id] ?? 0)),
+    stock_source: 'levels',
   }));
 }
 
@@ -588,11 +588,11 @@ export async function patchStockArticle(id, fields = {}) {
 
 export async function computeArticleStock(articleId) {
   const sums = await sumLevelsByArticle([articleId]);
-  if (sums && sums[articleId] !== undefined) {
-    return Math.max(0, Number(sums[articleId]));
+  if (sums === null) {
+    const fromMvts = await sumMovementsByArticle([articleId]);
+    return Math.max(0, Number(fromMvts[articleId] ?? 0));
   }
-  const fromMvts = await sumMovementsByArticle([articleId]);
-  return Math.max(0, Number(fromMvts[articleId] ?? 0));
+  return Math.max(0, Number(sums[articleId] ?? 0));
 }
 
 /** Quantités par emplacement (stock_levels) pour la fiche article. */

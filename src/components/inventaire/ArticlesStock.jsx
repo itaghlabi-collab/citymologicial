@@ -42,7 +42,14 @@ function ArticleStockByLocation({ article, levels, loading }) {
     ? (levels || []).find((l) => emplacementMatch(l.emplacement, declared))?.quantite ?? 0
     : 0;
   const positiveLevels = (levels || []).filter((l) => Number(l.quantite) > 0);
+  const zeroAtDeclared = declared
+    ? (levels || []).filter((l) => emplacementMatch(l.emplacement, declared) && Number(l.quantite) === 0)
+    : [];
+  const displayLevels = positiveLevels.length
+    ? positiveLevels
+    : zeroAtDeclared;
   const showMismatch = declared && Number(article?.stock_actuel) > 0 && qtyAtDeclared <= 0 && positiveLevels.length > 0;
+  const stockFromMovements = article?.stock_source === 'movements' && Number(article?.stock_actuel) > 0;
 
   return (
     <div style={{ marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
@@ -54,9 +61,9 @@ function ArticleStockByLocation({ article, levels, loading }) {
         <div style={{ fontSize: '0.8rem', color: 'var(--text-3)', display: 'flex', alignItems: 'center', gap: 6 }}>
           <Loader2 size={13} className="cin-spin" /> Chargement…
         </div>
-      ) : positiveLevels.length > 0 ? (
+      ) : displayLevels.length > 0 ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {positiveLevels.map((l) => {
+          {displayLevels.map((l) => {
             const isDeclared = declared && emplacementMatch(l.emplacement, declared);
             return (
               <div
@@ -91,9 +98,13 @@ function ArticleStockByLocation({ article, levels, loading }) {
             </div>
           )}
         </div>
+      ) : stockFromMovements ? (
+        <div style={{ fontSize: '0.8rem', color: 'var(--text-2)' }}>
+          Stock calculé depuis l&apos;historique des mouvements ({article.stock_actuel} {unite}) — exécutez la resynchronisation stock dans Supabase.
+        </div>
       ) : Number(article?.stock_actuel) > 0 ? (
         <div style={{ fontSize: '0.8rem', color: 'var(--text-2)' }}>
-          Aucune répartition détaillée — stock issu de l&apos;historique des mouvements ({article.stock_actuel} {unite}).
+          Stock disponible : {article.stock_actuel} {unite} (non réparti par emplacement).
         </div>
       ) : (
         <div style={{ fontSize: '0.8rem', color: 'var(--text-3)' }}>Aucun stock enregistré.</div>
@@ -417,6 +428,7 @@ function DetailArticle({
               <div>
                 <span style={{ color: 'var(--text-3)', fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', display: 'block' }}>Stock minimum</span>
                 <div style={{ fontWeight: 600 }}>{article.stock_minimum || '—'} {article.stock_minimum ? article.unite : ''}</div>
+                <div style={{ fontSize: '0.7rem', color: 'var(--text-3)', marginTop: 4 }}>Seuil d&apos;alerte — pas le stock actuel</div>
               </div>
               <div>
                 <span style={{ color: 'var(--text-3)', fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', display: 'block' }}>Valeur unitaire</span>
