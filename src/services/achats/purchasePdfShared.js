@@ -23,11 +23,20 @@ const COMPANY_LINES = [
 
 export function dash(v) {
   const s = v == null ? '' : String(v).trim();
-  return s || '—';
+  if (!s || s === '—' || s === '\u2014') return '-';
+  return s;
+}
+
+/** Valeurs sûres pour jsPDF (Helvetica standard = pas de glyphes Unicode étendus). */
+export function pdfSafeText(v) {
+  return dash(v)
+    .replace(/\u2014/g, '-')
+    .replace(/\u2013/g, '-')
+    .replace(/\u2026/g, '...');
 }
 
 export function fmtDate(d) {
-  if (!d) return '—';
+  if (!d) return '-';
   try {
     const raw = String(d).slice(0, 10);
     if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
@@ -114,7 +123,7 @@ export async function drawAchatsHeader(doc, title, metaRows = []) {
       doc.text(`${label} :`, x, my);
       doc.setFont('helvetica', 'normal');
       doc.setTextColor(...PDF_TEXT);
-      doc.text(dash(value), x + 28, my);
+      doc.text(pdfSafeText(dash(value)), x + 28, my);
     });
     y += Math.ceil(metaRows.length / 2) * 5.5 + 4;
   }
@@ -144,7 +153,7 @@ export function drawKeyValueTable(doc, rows, startY) {
   rows.forEach(([label, value]) => {
     const val = dash(value);
     doc.setFontSize(9);
-    const valueLines = val === '—' ? ['—'] : doc.splitTextToSize(val, col2W - 6);
+    const valueLines = val === '-' ? ['-'] : doc.splitTextToSize(val, col2W - 6);
     const rowH = Math.max(7, valueLines.length * 4 + 3);
 
     doc.setFillColor(...PDF_ROW_GRAY);
@@ -158,10 +167,10 @@ export function drawKeyValueTable(doc, rows, startY) {
 
     doc.setFont('helvetica', 'bold');
     doc.setTextColor(...PDF_MUTED);
-    doc.text(label, MARGIN + 3, y + 5);
+    doc.text(pdfSafeText(label), MARGIN + 3, y + 5);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(...PDF_TEXT);
-    doc.text(valueLines, MARGIN + col1W + 3, y + 5);
+    doc.text(valueLines.map((line) => pdfSafeText(line)), MARGIN + col1W + 3, y + 5);
     y += rowH;
   });
 
@@ -197,7 +206,7 @@ export function drawDataTable(doc, columns, rows, startY) {
     const cellTexts = columns.map((col, i) => {
       const raw = row[col.key];
       const val = col.format ? col.format(raw, row) : dash(raw);
-      return doc.splitTextToSize(String(val), widths[i] - 4);
+      return doc.splitTextToSize(pdfSafeText(val), Math.max(8, widths[i] - 4));
     });
     const rowH = Math.max(7, ...cellTexts.map((t) => t.length * 3.8 + 2));
 
@@ -212,7 +221,8 @@ export function drawDataTable(doc, columns, rows, startY) {
       doc.rect(x, y, widths[i], rowH);
       doc.setFont('helvetica', 'normal');
       doc.setTextColor(...PDF_TEXT);
-      doc.text(cellTexts[i], x + 2, y + 4.5);
+      const lines = cellTexts[i].map((line) => pdfSafeText(line));
+      doc.text(lines, x + 2, y + 4.5);
       x += widths[i];
     });
     y += rowH;

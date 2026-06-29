@@ -52,9 +52,9 @@ export async function generatePurchaseRequestPdf(request, { attachments = [] } =
     ? attachments.map((a) => a.name || a.url || a).join(', ')
     : (request.payload?.attachments?.length
       ? request.payload.attachments.map((a) => a.name || a).join(', ')
-      : '—');
+      : '-');
 
-  if (attachList !== '—') {
+  if (attachList !== '-') {
     y = drawKeyValueTable(doc, [['Pièces jointes', attachList]], y);
   }
 
