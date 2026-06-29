@@ -18,11 +18,14 @@ import {
 } from '../../services/achats/purchaseWorkflow';
 import { resolveCurrentPurchaseRole, purchasePermissions } from '../../services/achats/purchaseWorkflowRoles';
 import { PURCHASE_ASSIGNEE } from '../../constants/purchaseWorkflow';
-import { canEditPurchaseRequest, canAddQuoteToRequest, canValidateQuoteOnRequest } from '../../constants/purchaseWorkflow';
+import {
+  canEditPurchaseRequest, canAddQuoteToRequest, canValidateQuoteOnRequest,
+  normalizePurchaseStatus, getPurchaseStatusBadge,
+} from '../../constants/purchaseWorkflow';
 import { generatePurchaseRequestPdf } from '../../services/achats/purchaseRequestPdf';
 import {
   SectionTitle, FField, FRow, INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE,
-  BADGE_DEMANDE, BADGE_PRIORITE, TVA_OPTIONS, UploadField, formatMAD, Modal,
+  BADGE_PRIORITE, TVA_OPTIONS, UploadField, formatMAD, Modal,
 } from './shared.jsx';
 
 const EMPTY_QUOTE = {
@@ -330,7 +333,7 @@ export default function DemandeAchatDetail({
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <span className={`badge ${BADGE_PRIORITE[request.priorite] || 'badge-grey'}`}>{request.priorite}</span>
-          <span className={`badge ${BADGE_DEMANDE[request.statut] || 'badge-grey'}`}>{request.statut}</span>
+          <span className={`badge ${getPurchaseStatusBadge(request.statut)}`}>{normalizePurchaseStatus(request.statut)}</span>
           {canEdit && (
             <button type="button" className="btn btn-secondary btn-sm" onClick={onEdit}>Modifier</button>
           )}

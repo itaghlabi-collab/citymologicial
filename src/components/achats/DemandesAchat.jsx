@@ -11,7 +11,11 @@ import { usePurchaseRequests } from '../../hooks/usePurchaseRequests';
 import { useSuppliers } from '../../hooks/useSuppliers';
 import { useAuth } from '../../hooks/useAuth';
 import { PURCHASE_ASSIGNEE } from '../../constants/purchaseWorkflow';
-import { canEditPurchaseRequest, canDeletePurchaseRequest, normalizePurchaseStatus, canSubmitPurchaseRequest, canAddQuoteToRequest, canValidateQuoteOnRequest } from '../../constants/purchaseWorkflow';
+import {
+  canEditPurchaseRequest, canDeletePurchaseRequest, normalizePurchaseStatus,
+  canSubmitPurchaseRequest, canAddQuoteToRequest, canValidateQuoteOnRequest,
+  getPurchaseStatusBadge,
+} from '../../constants/purchaseWorkflow';
 import { submitPurchaseRequest, getPurchaseRequestBundle } from '../../services/achats/purchaseWorkflow';
 import { generatePurchaseRequestPdf } from '../../services/achats/purchaseRequestPdf';
 import { resolveCurrentPurchaseRole, purchasePermissions, canViewPurchaseRequest } from '../../services/achats/purchaseWorkflowRoles';
@@ -331,7 +335,14 @@ export default function DemandesAchat() {
       <div className="page-header flex-between" style={{ flexWrap: 'wrap', gap: 10 }}>
         <div>
           <h1 className="page-title">TABLEAU DE BORD ACHATS</h1>
-          <p className="page-subtitle">Demandes d&apos;achat — workflow sécurisé de la demande à la réception.</p>
+          <p className="page-subtitle">
+            Demandes d&apos;achat — workflow sécurisé de la demande à la réception.
+            {import.meta.env.VITE_BUILD_ID && (
+              <span style={{ display: 'block', fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 4 }}>
+                Build {String(import.meta.env.VITE_BUILD_ID).slice(0, 7)}
+              </span>
+            )}
+          </p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowFilters((f) => !f)}><Filter size={14} /> Filtres</button>
@@ -347,7 +358,7 @@ export default function DemandesAchat() {
       {error && (
         <div className="card" style={{ marginBottom: 16, padding: '12px 16px', borderColor: 'var(--red)', color: 'var(--red)', fontSize: '0.85rem' }}>
           {error}
-          {!configured && <div style={{ marginTop: 6, fontSize: '0.78rem' }}>Exécutez <code>supabase/RUN_PURCHASE_WORKFLOW.sql</code> dans Supabase.</div>}
+          {!configured && <div style={{ marginTop: 6, fontSize: '0.78rem' }}>Exécutez <code>supabase/RUN_PURCHASE_WORKFLOW_COMPLET.sql</code> dans Supabase SQL Editor.</div>}
         </div>
       )}
 
@@ -417,7 +428,11 @@ export default function DemandesAchat() {
                     <td data-label="Demandeur">{x.requester_name || x.demandeur || '—'}</td>
                     <td data-label="Projet">{x.projet_lie || x.project_name || x.project_ref || '—'}</td>
                     <td data-label="Date">{x.date_limite || '—'}</td>
-                    <td data-label="Statut"><span className={`badge ${BADGE_DEMANDE[x.statut] || 'badge-grey'}`} style={{ fontSize: '0.72rem' }}>{x.statut}</span></td>
+                    <td data-label="Statut">
+                      <span className={`badge ${getPurchaseStatusBadge(x.statut)}`} style={{ fontSize: '0.72rem' }}>
+                        {normalizePurchaseStatus(x.statut)}
+                      </span>
+                    </td>
                     <td>
                       <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
                         <button type="button" className="btn btn-secondary btn-sm" title="Voir" onClick={() => setDetailId(x.id)}><Eye size={13} /></button>

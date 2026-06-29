@@ -1,7 +1,8 @@
 /**
  * purchaseRequestPdf.js — PDF métier Demande d'achat CITYMO
  */
-import { PURCHASE_ASSIGNEE } from '../../constants/purchaseWorkflow';
+import { PURCHASE_ASSIGNEE, normalizePurchaseStatus } from '../../constants/purchaseWorkflow';
+import { getPurchaseRequestLineSummary } from './purchaseRequests';
 import {
   createAchatsPdfDoc,
   drawAchatsHeader,
@@ -21,6 +22,12 @@ export async function generatePurchaseRequestPdf(request, { attachments = [] } =
   const doc = createAchatsPdfDoc();
 
   const projet = request.projet_lie || request.project_name || request.project_ref || '—';
+  const lineSummary = getPurchaseRequestLineSummary(request);
+  const fournisseur = lineSummary.fournisseur || '—';
+  const quantiteLabel = lineSummary.quantite !== '' && lineSummary.quantite != null
+    ? `${lineSummary.quantite} ${lineSummary.unite || 'u'}`
+    : '—';
+
   let y = await drawAchatsHeader(doc, 'DEMANDE D\'ACHAT', [
     ['Référence', request.ref],
     ['Date', fmtDate(request.date_creation || request.created_at)],
@@ -28,12 +35,14 @@ export async function generatePurchaseRequestPdf(request, { attachments = [] } =
     ['Demandeur', request.requester_name || request.demandeur],
     ['Resp. Achats', request.assigned_employee_name || PURCHASE_ASSIGNEE.label],
     ['Priorité', request.priorite],
-    ['Statut', request.statut],
+    ['Statut', normalizePurchaseStatus(request.statut)],
   ]);
 
   y = drawSectionTitle(doc, 'OBJET DE LA DEMANDE', y);
   y = drawKeyValueTable(doc, [
     ['Titre', request.titre],
+    ['Fournisseur souhaité', fournisseur],
+    ['Quantité demandée', quantiteLabel],
     ['Description du besoin', request.description],
     ['Date souhaitée', fmtDate(request.date_limite)],
     ['Commentaires internes', request.commentaires_internes],
@@ -51,11 +60,15 @@ export async function generatePurchaseRequestPdf(request, { attachments = [] } =
 
   y = drawSectionTitle(doc, 'ARTICLES / BESOINS', y);
   y = drawDataTable(doc, [
-    { label: 'Désignation', key: 'designation', width: 70 },
-    { label: 'Quantité', key: 'quantite', width: 25 },
-    { label: 'Unité', key: 'unite', width: 25 },
-    { label: 'Observation', key: 'observation', width: 60 },
-  ], normalizeRequestLines(request), y);
+    { label: 'Désignation', key: 'designation', width: 52 },
+    { label: 'Qté', key: 'quantite', width: 18 },
+    { label: 'Unité', key: 'unite', width: 18 },
+    { label: 'Fournisseur', key: 'fournisseur', width: 38 },
+    { label: 'Observation', key: 'observation', width: 54 },
+  ], normalizeRequestLines(request).map((line) => ({
+    ...line,
+    fournisseur: line.fournisseur || fournisseur,
+  })), y);
 
   y = drawSectionTitle(doc, 'VALIDATION', y + 2);
   y = drawSignatureBoxes(doc, [

@@ -265,7 +265,8 @@ export function normalizeRequestLines(request) {
     designation: l.designation || l.article_name || l.libelle || l.titre || '—',
     quantite: l.quantite ?? l.quantite_demandee ?? l.qty ?? '—',
     unite: l.unite || l.unit || 'u',
-    observation: l.observation || l.observations || l.rupture ? 'Rupture stock' : '—',
+    fournisseur: l.fournisseur || '—',
+    observation: l.observation || l.observations || (l.rupture ? 'Rupture stock' : '—'),
   }));
 }
 
