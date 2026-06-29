@@ -469,6 +469,22 @@ function GanttChart({
   const rightHdrRef = useRef(null);
   const syncing = useRef(false);
 
+  useEffect(() => {
+    const body = rightBodyRef.current;
+    const hdr = rightHdrRef.current;
+    if (!body) return;
+
+    const anchor = displayRows.find((row) => row.date_debut);
+    if (!anchor) return;
+
+    const bar = taskBarPx(anchor, minDate, DAY_W);
+    if (!bar) return;
+
+    const target = Math.max(0, bar.left - DAY_W * 2);
+    body.scrollLeft = target;
+    if (hdr) hdr.scrollLeft = target;
+  }, [displayRows, minDate, days.length]);
+
   function syncScroll(source, target) {
     if (syncing.current) return;
     syncing.current = true;
@@ -750,8 +766,8 @@ export default function ProjectPlanningGantt({
   }, [tasks]);
 
   const { minDate, maxDate } = useMemo(
-    () => computeTimelineBounds(filtered, projet),
-    [filtered, projet],
+    () => computeTimelineBounds(filtered),
+    [filtered],
   );
 
   const days = useMemo(() => buildDailyTimeline(minDate, maxDate), [minDate, maxDate]);

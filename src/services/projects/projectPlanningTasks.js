@@ -262,33 +262,31 @@ export function filterPlanningTasks(tasks, filters = {}) {
 }
 
 export function computeTimelineBounds(tasks, project = {}) {
-  const dates = [];
-  tasks.forEach((t) => {
-    if (t.date_debut) dates.push(t.date_debut);
-    if (t.date_fin) dates.push(t.date_fin);
+  const taskDates = [];
+  (tasks || []).forEach((t) => {
+    const deb = fmtDate(t.date_debut);
+    const fin = fmtDate(t.date_fin) || deb;
+    if (deb) taskDates.push(deb);
+    if (fin) taskDates.push(fin);
   });
-  if (project.date_debut) dates.push(fmtDate(project.date_debut));
-  if (project.date_fin_prevue) dates.push(fmtDate(project.date_fin_prevue));
 
-  const today = new Date().toISOString().slice(0, 10);
-  if (!dates.length) {
-    const start = project.date_debut ? fmtDate(project.date_debut) : today;
-    const end = endDateFromStartAndDuration(start, 30);
-    return { minDate: start, maxDate: end };
+  if (taskDates.length) {
+    taskDates.sort();
+    return {
+      minDate: addDaysIso(taskDates[0], -3),
+      maxDate: addDaysIso(taskDates[taskDates.length - 1], 7),
+    };
   }
 
-  dates.sort();
-  let minDate = dates[0];
-  let maxDate = dates[dates.length - 1];
-
-  const minD = new Date(`${minDate}T12:00:00`);
-  minD.setDate(minD.getDate() - 3);
-  const maxD = new Date(`${maxDate}T12:00:00`);
-  maxD.setDate(maxD.getDate() + 7);
+  const today = isoDateLocal(new Date());
+  const start = project.date_debut ? fmtDate(project.date_debut) : today;
+  const end = project.date_fin_prevue
+    ? fmtDate(project.date_fin_prevue)
+    : endDateFromStartAndDuration(start, 30);
 
   return {
-    minDate: minD.toISOString().slice(0, 10),
-    maxDate: maxD.toISOString().slice(0, 10),
+    minDate: addDaysIso(start, -3),
+    maxDate: addDaysIso(end, 7),
   };
 }
 
