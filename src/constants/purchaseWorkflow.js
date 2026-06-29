@@ -11,42 +11,72 @@ export const PURCHASE_ASSIGNEE = {
 export const PURCHASE_STATUSES = [
   'Brouillon',
   'Soumise',
-  'En étude Achats',
+  'En étude',
   'Devis reçus',
-  'En validation DG',
+  'En attente validation DG',
   'Devis validé',
   'Ordre d\'achat créé',
-  'Commande en cours',
-  'Commande reçue',
+  'Commande envoyée',
+  'En attente réception',
+  'Réceptionnée',
   'Clôturée',
   'Refusée',
+];
+
+export const PURCHASE_STATUS_ORDER = [
+  'Brouillon',
+  'Soumise',
+  'En étude',
+  'Devis reçus',
+  'En attente validation DG',
+  'Devis validé',
+  'Ordre d\'achat créé',
+  'Commande envoyée',
+  'En attente réception',
+  'Réceptionnée',
+  'Clôturée',
 ];
 
 export const PURCHASE_STATUS_BADGE = {
   Brouillon: 'badge-grey',
   Soumise: 'badge-blue',
-  'En étude Achats': 'badge-orange',
+  'En étude': 'badge-orange',
   'Devis reçus': 'badge-purple',
-  'En validation DG': 'badge-orange',
+  'En attente validation DG': 'badge-orange',
   'Devis validé': 'badge-green',
   Validée: 'badge-green',
   'Ordre d\'achat créé': 'badge-green',
-  'Commande en cours': 'badge-blue',
-  'Commande reçue': 'badge-purple',
+  'Commande envoyée': 'badge-blue',
+  'En attente réception': 'badge-orange',
+  Réceptionnée: 'badge-purple',
   Clôturée: 'badge-grey',
   Refusée: 'badge-red',
 };
 
 export const LEGACY_STATUS_MAP = {
   'En attente': 'Soumise',
-  'En cours': 'En étude Achats',
+  'En cours': 'En étude',
+  'En étude Achats': 'En étude',
+  'En validation DG': 'En attente validation DG',
   Validée: 'Devis validé',
+  'Commande en cours': 'Commande envoyée',
+  'Commande reçue': 'Réceptionnée',
   Terminée: 'Clôturée',
 };
 
 export function normalizePurchaseStatus(statut) {
   const s = String(statut || 'Brouillon').trim();
   return LEGACY_STATUS_MAP[s] || s;
+}
+
+export function purchaseStatusRank(statut) {
+  const normalized = normalizePurchaseStatus(statut);
+  const index = PURCHASE_STATUS_ORDER.indexOf(normalized);
+  return index >= 0 ? index : 0;
+}
+
+export function getPurchaseStatusBadge(statut) {
+  return PURCHASE_STATUS_BADGE[normalizePurchaseStatus(statut)] || 'badge-grey';
 }
 
 export const QUOTE_STATUSES = {
@@ -64,6 +94,13 @@ export const OA_STATUSES = [
   'Réceptionné',
   'Clôturé',
 ];
+
+export const OA_TO_REQUEST_STATUS = {
+  'Envoyé fournisseur': 'Commande envoyée',
+  'En attente réception': 'En attente réception',
+  Réceptionné: 'Réceptionnée',
+  Clôturé: 'Clôturée',
+};
 
 export const OA_STATUS_BADGE = {
   Brouillon: 'badge-grey',
@@ -108,10 +145,10 @@ export function canSubmitPurchaseRequest(statut) {
 }
 
 export function canAddQuoteToRequest(statut) {
-  return ['Soumise', 'En étude Achats', 'Devis reçus', 'En validation DG'].includes(normalizePurchaseStatus(statut));
+  return ['Soumise', 'En étude', 'Devis reçus', 'En attente validation DG'].includes(normalizePurchaseStatus(statut));
 }
 
 export function canValidateQuoteOnRequest(statut) {
   const s = normalizePurchaseStatus(statut);
-  return ['Devis reçus', 'En validation DG'].includes(s);
+  return ['Devis reçus', 'En attente validation DG'].includes(s);
 }

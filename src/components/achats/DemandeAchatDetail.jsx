@@ -4,7 +4,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   ChevronLeft, ClipboardList, History, FileText, CheckCircle, Send,
-  Plus, Loader2, Star, Lock, Package, CreditCard, Truck, Eye, Edit2, Trash2, Download,
+  Plus, Loader2, Star, Lock, Package, CreditCard, Eye, Edit2, Trash2,
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { getPurchaseRequestBundle } from '../../services/achats/purchaseWorkflow';
@@ -14,15 +14,11 @@ import {
   updateQuoteOnRequest,
   removeQuoteFromRequest,
   takeInChargePurchaseRequest,
-  sendRequestToDgValidation,
   validateSupplierQuote,
-  markPurchaseCommandInProgress,
-  markPurchaseReceived,
-  closePurchaseRequest,
 } from '../../services/achats/purchaseWorkflow';
 import { resolveCurrentPurchaseRole, purchasePermissions } from '../../services/achats/purchaseWorkflowRoles';
 import { PURCHASE_ASSIGNEE } from '../../constants/purchaseWorkflow';
-import { canEditPurchaseRequest, canAddQuoteToRequest } from '../../constants/purchaseWorkflow';
+import { canEditPurchaseRequest, canAddQuoteToRequest, canValidateQuoteOnRequest } from '../../constants/purchaseWorkflow';
 import { generatePurchaseRequestPdf } from '../../services/achats/purchaseRequestPdf';
 import {
   SectionTitle, FField, FRow, INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE,
@@ -319,7 +315,7 @@ export default function DemandeAchatDetail({
   const isTerminal = ['Clôturée', 'Refusée'].includes(request.statut);
   const canManageQuotesOnRequest = perms.canManageQuotes && canAddQuoteToRequest(request.statut);
   const showQuotesSection = !isTerminal;
-  const canValidateDg = perms.canValidateSupplier && ['Devis reçus', 'En validation DG'].includes(request.statut);
+  const canValidateDg = perms.canValidateSupplier && canValidateQuoteOnRequest(request.statut);
 
   return (
     <div className="animate-fade-in">
@@ -421,7 +417,7 @@ export default function DemandeAchatDetail({
               )}
               {request.statut === 'Soumise' && perms.canManageQuotes && (
                 <div style={{ marginBottom: 12, padding: 10, background: 'var(--surface-2)', borderRadius: 8, fontSize: '0.82rem' }}>
-                  Ajoutez les devis reçus des fournisseurs. Le DG pourra ensuite valider le devis retenu.
+                  Prenez en charge la demande ou ajoutez un devis — le statut évoluera automatiquement.
                 </div>
               )}
               {!perms.canManageQuotes && quotes.length === 0 && (
@@ -469,17 +465,6 @@ export default function DemandeAchatDetail({
                   }
                 })}
               />
-              {perms.canSendToDg && quotes.length > 0 && request.statut === 'Devis reçus' && (
-                <button
-                  type="button"
-                  className="btn btn-primary btn-sm"
-                  style={{ marginTop: 12 }}
-                  disabled={saving}
-                  onClick={() => runAction(() => sendRequestToDgValidation(request.id))}
-                >
-                  Envoyer au DG pour validation
-                </button>
-              )}
             </div>
           )}
 
@@ -534,20 +519,10 @@ export default function DemandeAchatDetail({
                   <div style={{ color: 'var(--text-3)' }}>{bundle.paymentOrder.statut}</div>
                 </div>
               )}
-              {['Devis validé', 'Ordre d\'achat créé'].includes(request.statut) && perms.canMarkReceived && (
-                <button type="button" className="btn btn-secondary btn-sm" disabled={saving} onClick={() => runAction(() => markPurchaseCommandInProgress(request.id))}>
-                  <Truck size={13} /> Lancer commande
-                </button>
-              )}
-              {request.statut === 'Commande en cours' && perms.canMarkReceived && (
-                <button type="button" className="btn btn-primary btn-sm" disabled={saving} onClick={() => runAction(() => markPurchaseReceived(request.id))}>
-                  <CheckCircle size={13} /> Marquer réceptionnée
-                </button>
-              )}
-              {request.statut === 'Commande reçue' && perms.canClose && (
-                <button type="button" className="btn btn-ghost btn-sm" disabled={saving} onClick={() => runAction(() => closePurchaseRequest(request.id))}>
-                  Clôturer
-                </button>
+              {['Ordre d\'achat créé', 'Commande envoyée', 'En attente réception', 'Réceptionnée'].includes(request.statut) && (
+                <p style={{ fontSize: '0.78rem', color: 'var(--text-3)', margin: 0 }}>
+                  Les statuts commande et réception sont mis à jour automatiquement depuis l&apos;ordre d&apos;achat.
+                </p>
               )}
             </div>
           </div>

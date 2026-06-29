@@ -2,7 +2,7 @@
  * purchaseWorkflow.js — Orchestration workflow demandes d'achat
  */
 import { getSupabase } from '../../lib/supabase';
-import { PURCHASE_ASSIGNEE, normalizePurchaseStatus } from '../../constants/purchaseWorkflow';
+import { PURCHASE_ASSIGNEE, normalizePurchaseStatus, OA_TO_REQUEST_STATUS, purchaseStatusRank } from '../../constants/purchaseWorkflow';
 import { appendPurchaseRequestHistory } from './purchaseRequestHistory';
 import {
   createPurchaseRequestQuote,
@@ -177,30 +177,59 @@ export async function takeInChargePurchaseRequest(id) {
     err.code = 'VALIDATION';
     throw err;
   }
-  return patchRequest(id, { statut: 'En étude Achats' }, 'Prise en charge', PURCHASE_ASSIGNEE.label, ctx);
+  return patchRequest(id, { statut: 'En étude' }, 'Prise en charge', PURCHASE_ASSIGNEE.label, ctx);
 }
+
+const POST_DG_STATUSES = [
+  'En attente validation DG', 'Devis validé', 'Ordre d\'achat créé',
+  'Commande envoyée', 'En attente réception', 'Réceptionnée', 'Clôturée',
+];
 
 export async function addQuoteToRequest(id, quoteForm) {
   const ctx = await getAuthContext();
-  const existing = await fetchRequest(id);
-  const statut = normalizePurchaseStatus(existing.statut);
-  if (!['Soumise', 'En étude Achats', 'Devis reçus', 'En validation DG'].includes(statut)) {
+  let existing = await fetchRequest(id);
+  let statut = normalizePurchaseStatus(existing.statut);
+  if (!['Soumise', 'En étude', 'Devis reçus', 'En attente validation DG'].includes(statut)) {
     const err = new Error('Impossible d\'ajouter un devis à ce stade.');
     err.code = 'VALIDATION';
     throw err;
   }
+
+  if (statut === 'Soumise') {
+    existing = await patchRequest(id, { statut: 'En étude' }, 'Prise en charge', PURCHASE_ASSIGNEE.label, ctx);
+    statut = 'En étude';
+  }
+
   const quote = await createPurchaseRequestQuote(id, quoteForm);
-  const wasEarly = ['Soumise', 'En étude Achats'].includes(statut);
-  const nextStatus = wasEarly || statut === 'Soumise' ? 'Devis reçus' : statut;
-  const request = await patchRequest(
-    id,
-    { statut: nextStatus },
-    'Ajout devis',
-    `${quote.supplier_name}${quote.ref_devis ? ` (${quote.ref_devis})` : ''} — ${quote.montant_ttc.toLocaleString('fr-FR')} MAD TTC`,
-    ctx,
-  );
-  await notifyPurchaseQuoteAdded(request);
-  return { request, quote };
+  const quoteDetail = `${quote.supplier_name}${quote.ref_devis ? ` (${quote.ref_devis})` : ''} — ${quote.montant_ttc.toLocaleString('fr-FR')} MAD TTC`;
+
+  if (purchaseStatusRank(statut) < purchaseStatusRank('Devis reçus')) {
+    existing = await patchRequest(id, { statut: 'Devis reçus' }, 'Ajout devis', quoteDetail, ctx);
+    statut = 'Devis reçus';
+  } else {
+    await appendPurchaseRequestHistory({
+      purchaseRequestId: id,
+      action: 'Ajout devis',
+      detail: quoteDetail,
+      userId: ctx.user.id,
+      userName: ctx.userName,
+    });
+  }
+
+  await notifyPurchaseQuoteAdded(existing);
+
+  if (!POST_DG_STATUSES.includes(statut)) {
+    existing = await patchRequest(
+      id,
+      { statut: 'En attente validation DG' },
+      'Envoi validation DG',
+      'Notification envoyée au Directeur Général',
+      ctx,
+    );
+    await notifyPurchaseReadyForDg(existing);
+  }
+
+  return { request: existing, quote };
 }
 
 export async function updateQuoteOnRequest(requestId, quoteId, quoteForm) {
@@ -244,13 +273,24 @@ export async function removeQuoteFromRequest(requestId, quoteId) {
 
 export async function sendRequestToDgValidation(id) {
   const ctx = await getAuthContext();
+  const existing = await fetchRequest(id);
+  const statut = normalizePurchaseStatus(existing.statut);
   const quotes = await listQuotesForRequest(id);
   if (!quotes.length) {
     const err = new Error('Ajoutez au moins un devis avant l\'envoi au DG.');
     err.code = 'VALIDATION';
     throw err;
   }
-  const request = await patchRequest(id, { statut: 'En validation DG' }, 'Envoi validation DG', `${quotes.length} devis à comparer`, ctx);
+  if (purchaseStatusRank(statut) >= purchaseStatusRank('En attente validation DG')) {
+    return existing;
+  }
+  const request = await patchRequest(
+    id,
+    { statut: 'En attente validation DG' },
+    'Envoi validation DG',
+    `${quotes.length} devis à comparer`,
+    ctx,
+  );
   await notifyPurchaseReadyForDg(request);
   return request;
 }
@@ -261,7 +301,7 @@ export async function validateSupplierQuote(requestId, quoteId) {
 
   const request = await fetchRequest(requestId);
   const statut = normalizePurchaseStatus(request.statut);
-  if (!['Devis reçus', 'En validation DG', 'Devis validé'].includes(statut) && statut !== 'Validée') {
+  if (!['Devis reçus', 'En attente validation DG', 'Devis validé'].includes(statut) && statut !== 'Validée') {
     const err = new Error('Validation impossible à ce stade du workflow.');
     err.code = 'VALIDATION';
     throw err;
@@ -287,42 +327,62 @@ export async function validateSupplierQuote(requestId, quoteId) {
 
   await updateAcquisitionOrder(oa.id, { payment_order_id: op.id });
 
-  const updated = await patchRequest(
+  let updated = await patchRequest(
     requestId,
-    {
-      statut: 'Devis validé',
-      selected_quote_id: quoteId,
-      acquisition_order_id: oa.id,
-      payment_order_id: op.id,
-    },
+    { statut: 'Devis validé', selected_quote_id: quoteId },
     'Validation devis',
     `Fournisseur retenu : ${quote.supplier_name} — ${quote.ref_devis || 'sans réf.'}`,
     ctx,
     `OA ${oa.ref} / OP ${op.ref}`,
   );
 
-  await appendPurchaseRequestHistory({
-    purchaseRequestId: requestId,
-    action: 'Création ordre d\'achat',
-    detail: oa.ref,
-    userId: ctx.user.id,
-    userName: ctx.userName,
-  });
+  updated = await patchRequest(
+    requestId,
+    {
+      statut: 'Ordre d\'achat créé',
+      acquisition_order_id: oa.id,
+      payment_order_id: op.id,
+    },
+    'Création ordre d\'achat',
+    oa.ref,
+    ctx,
+  );
 
   await notifyPurchaseSupplierValidated(updated, { quote, oa, op });
   await notifyOaCreated(updated, oa);
   return { request: updated, quote, oa, op };
 }
 
-export async function markPurchaseCommandInProgress(id) {
-  const ctx = await getAuthContext();
-  return patchRequest(id, { statut: 'Commande en cours' }, 'Commande lancée', '', ctx);
-}
+const OA_SYNC_HISTORY = {
+  'Commande envoyée': 'Commande envoyée au fournisseur',
+  'En attente réception': 'Commande expédiée — en attente de réception',
+  Réceptionnée: 'Réception enregistrée',
+  Clôturée: 'Processus terminé',
+};
 
-export async function markPurchaseReceived(id) {
+export async function syncPurchaseRequestFromAcquisitionOrder(oa) {
+  if (!oa?.purchase_request_id) return null;
+  const requestStatus = OA_TO_REQUEST_STATUS[oa.statut];
+  if (!requestStatus) return null;
+
   const ctx = await getAuthContext();
-  const request = await patchRequest(id, { statut: 'Commande reçue' }, 'Réception', 'Commande réceptionnée', ctx);
-  await notifyPurchaseReceived(request);
+  const existing = await fetchRequest(oa.purchase_request_id);
+  if (purchaseStatusRank(requestStatus) <= purchaseStatusRank(existing.statut)) {
+    return existing;
+  }
+
+  const request = await patchRequest(
+    oa.purchase_request_id,
+    { statut: requestStatus },
+    OA_SYNC_HISTORY[requestStatus] || `Statut OA : ${oa.statut}`,
+    oa.ref_oa || oa.ref || '',
+    ctx,
+  );
+
+  if (requestStatus === 'Réceptionnée') {
+    await notifyPurchaseReceived(request);
+  }
+
   return request;
 }
 

@@ -203,12 +203,12 @@ function DemandeForm({ initial, onSave, onCancel, saving, suppliers = [] }) {
 function computeDashboardKpis(items) {
   const norm = (s) => normalizePurchaseStatus(s);
   const ouvertes = items.filter((x) => !['Clôturée', 'Refusée'].includes(norm(x.statut))).length;
-  const enEtude = items.filter((x) => ['Soumise', 'En étude Achats'].includes(norm(x.statut))).length;
-  const devisAttente = items.filter((x) => ['Devis reçus', 'En validation DG'].includes(norm(x.statut))).length;
+  const enEtude = items.filter((x) => ['Soumise', 'En étude'].includes(norm(x.statut))).length;
+  const devisAttente = items.filter((x) => ['Devis reçus', 'En attente validation DG'].includes(norm(x.statut))).length;
   const devisValides = items.filter((x) => ['Devis validé', 'Ordre d\'achat créé'].includes(norm(x.statut))).length;
-  const oaEnCours = items.filter((x) => ['Ordre d\'achat créé', 'Commande en cours'].includes(norm(x.statut))).length;
-  const enAttenteReception = items.filter((x) => norm(x.statut) === 'Commande en cours').length;
-  const receptionnees = items.filter((x) => ['Commande reçue', 'Clôturée'].includes(norm(x.statut))).length;
+  const oaEnCours = items.filter((x) => ['Ordre d\'achat créé', 'Commande envoyée'].includes(norm(x.statut))).length;
+  const enAttenteReception = items.filter((x) => norm(x.statut) === 'En attente réception').length;
+  const receptionnees = items.filter((x) => ['Réceptionnée', 'Clôturée'].includes(norm(x.statut))).length;
   const now = new Date();
   const monthItems = items.filter((x) => {
     const d = x.created_at ? new Date(x.created_at) : null;

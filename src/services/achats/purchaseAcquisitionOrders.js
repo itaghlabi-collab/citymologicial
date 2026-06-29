@@ -134,7 +134,14 @@ export async function updateAcquisitionOrder(id, patch) {
 }
 
 export async function updateAcquisitionOrderStatus(id, statut) {
-  return updateAcquisitionOrder(id, { statut });
+  const oa = await updateAcquisitionOrder(id, { statut });
+  try {
+    const { syncPurchaseRequestFromAcquisitionOrder } = await import('./purchaseWorkflow');
+    await syncPurchaseRequestFromAcquisitionOrder(oa);
+  } catch (err) {
+    console.warn('[CITYMO] syncPurchaseRequestFromAcquisitionOrder', err);
+  }
+  return oa;
 }
 
 export async function linkPaymentOrderToAcquisition(acquisitionOrderId, paymentOrderId) {

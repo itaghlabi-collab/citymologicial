@@ -175,7 +175,7 @@ export async function createPurchaseRequestFromSiteRuptures(siteRequest) {
   return createPurchaseRequest({
     titre: `Rupture stock — ${siteRequest.ref}`,
     priorite: siteRequest.priorite === 'Critique' ? 'Urgente' : (siteRequest.priorite || 'Normale'),
-    statut: 'En étude Achats',
+    statut: 'En étude',
     project_id: siteRequest.project_id || null,
     project_ref: siteRequest.project_ref || null,
     project_name: siteRequest.project_name || null,
@@ -206,9 +206,11 @@ export async function createPurchaseRequestFromSiteRuptures(siteRequest) {
 
 export async function updatePurchaseRequest(id, form) {
   await requireUser();
+  const row = toPurchaseRequestRow(form);
+  delete row.statut;
   const { data, error } = await getSupabase()
     .from(TABLE)
-    .update(toPurchaseRequestRow(form))
+    .update(row)
     .eq('id', id)
     .select()
     .single();
