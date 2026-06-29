@@ -1,34 +1,48 @@
 /**
- * ArticleScanBar.jsx — Zone scan douchette / QR (agit comme clavier + Entrée)
+ * ArticleScanBar.jsx — Zone scan douchette HID (clavier + Entrée)
  */
-import { useEffect, useRef, useState } from 'react';
-import { Loader2, ScanLine } from 'lucide-react';
+import { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react';
+import { Loader2, ScanLine, CheckCircle2 } from 'lucide-react';
 import { INPUT_STYLE } from './shared.jsx';
 import { parseScannedArticleCode } from '../../services/inventaire/barcodeUtils';
 
-export default function ArticleScanBar({
+const ArticleScanBar = forwardRef(function ArticleScanBar({
   onScan,
   loading = false,
   error = '',
+  success = '',
   autoFocus = true,
-  label = 'Scanner ou rechercher un article',
+  label = 'Scanner un article',
   placeholder = 'Scannez le code-barres ou le QR code, puis Entrée…',
   compact = false,
-}) {
+  disabled = false,
+}, ref) {
   const inputRef = useRef(null);
   const [value, setValue] = useState('');
 
+  useImperativeHandle(ref, () => ({
+    focus: () => inputRef.current?.focus(),
+    clear: () => setValue(''),
+  }));
+
   useEffect(() => {
-    if (!autoFocus) return undefined;
+    if (!autoFocus || disabled) return undefined;
     const t = setTimeout(() => inputRef.current?.focus(), 80);
     return () => clearTimeout(t);
-  }, [autoFocus]);
+  }, [autoFocus, disabled]);
+
+  useEffect(() => {
+    if (loading || disabled) return undefined;
+    const t = setTimeout(() => inputRef.current?.focus(), 40);
+    return () => clearTimeout(t);
+  }, [loading, error, success, disabled]);
 
   function submit(raw) {
     const code = parseScannedArticleCode(raw);
-    if (!code || loading) return;
+    if (!code || loading || disabled) return;
     setValue('');
     onScan(code);
+    setTimeout(() => inputRef.current?.focus(), 20);
   }
 
   function handleKeyDown(ev) {
@@ -37,18 +51,25 @@ export default function ArticleScanBar({
     submit(ev.target.value);
   }
 
+  const borderColor = error ? '#EF9A9A' : success ? '#A5D6A7' : 'var(--border)';
+  const bg = error ? '#FFF8F8' : success ? '#F1F8E9' : undefined;
+
   return (
     <div
       className="card"
       style={{
         marginBottom: compact ? 14 : 16,
         padding: compact ? '10px 14px' : '12px 16px',
-        border: error ? '1px solid #EF9A9A' : '1px solid var(--border)',
-        background: error ? '#FFF8F8' : undefined,
+        border: `1px solid ${borderColor}`,
+        background: bg,
       }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: compact ? 6 : 8 }}>
-        <ScanLine size={compact ? 15 : 16} style={{ color: 'var(--red)', flexShrink: 0 }} />
+        {success ? (
+          <CheckCircle2 size={compact ? 15 : 16} style={{ color: '#2E7D32', flexShrink: 0 }} />
+        ) : (
+          <ScanLine size={compact ? 15 : 16} style={{ color: 'var(--red)', flexShrink: 0 }} />
+        )}
         <span style={{ fontWeight: 800, fontSize: compact ? '0.78rem' : '0.82rem', letterSpacing: '0.02em' }}>
           {label}
         </span>
@@ -73,7 +94,7 @@ export default function ArticleScanBar({
           value={value}
           onChange={(e) => setValue(e.target.value)}
           onKeyDown={handleKeyDown}
-          disabled={loading}
+          disabled={loading || disabled}
           placeholder={placeholder}
           aria-label={label}
           style={{
@@ -90,6 +111,13 @@ export default function ArticleScanBar({
           {error}
         </div>
       )}
+      {success && !error && (
+        <div style={{ marginTop: 8, fontSize: '0.82rem', color: '#2E7D32', fontWeight: 600 }}>
+          {success}
+        </div>
+      )}
     </div>
   );
-}
+});
+
+export default ArticleScanBar;

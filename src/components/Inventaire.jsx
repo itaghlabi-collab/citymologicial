@@ -9,6 +9,8 @@ import Depots          from './inventaire/Depots.jsx';
 import BonsMouvements  from './inventaire/BonsMouvements.jsx';
 import DemandesChantier from './inventaire/DemandesChantier.jsx';
 import Stocks          from './inventaire/Stocks.jsx';
+import InventairePhysiqueScan from './inventaire/InventairePhysiqueScan.jsx';
+import AffectationMaterielScan from './inventaire/AffectationMaterielScan.jsx';
 import { listStockArticles } from '../services/inventaire/stockArticles';
 import { listStockCategories } from '../services/inventaire/stockCategories';
 import { ensureStockWarehousesSeeded } from '../services/inventaire/stockWarehouses';
@@ -71,6 +73,12 @@ export default function Inventaire({ activeTab, initialArticleCode, onArticleCod
           categories={categories}
           depots={depots}
         />
+      )}
+      {tab === 'inventaire-physique' && (
+        <InventairePhysiqueScan emplacementsList={emplacementNoms} />
+      )}
+      {tab === 'affectation-materiel' && (
+        <AffectationMaterielScan />
       )}
     </div>
   );

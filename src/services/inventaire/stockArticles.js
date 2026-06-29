@@ -603,32 +603,26 @@ function matchBarcodeArticle(article, code) {
   return ref === norm || bc === norm;
 }
 
-/** Recherche locale dans la liste déjà chargée. */
+/** Recherche locale : barcode_value puis référence. */
 export function findStockArticleInList(articles, rawCode) {
   const code = String(rawCode || '').trim();
   if (!code) return null;
-  return articles.find((a) => matchBarcodeArticle(a, code)) || null;
+  const norm = code.toLowerCase();
+  const byBarcode = articles.find((a) => String(a.barcode_value || '').trim().toLowerCase() === norm);
+  if (byBarcode) return byBarcode;
+  return articles.find((a) => {
+    const ref = String(a.reference || a.code || '').trim().toLowerCase();
+    return ref === norm;
+  }) || null;
 }
 
-/** Recherche article par code-barres (référence / barcode_value). */
+/** Recherche article par scan : Code128 / QR → barcode_value, puis référence. */
 export async function findStockArticleByBarcode(rawCode, localArticles = []) {
   const code = String(rawCode || '').trim();
   if (!code) return null;
 
   const local = findStockArticleInList(localArticles, code);
   if (local) return local;
-
-  const { data: byRef, error: refErr } = await getSupabase()
-    .from(TABLE)
-    .select('*')
-    .ilike('reference', code)
-    .limit(1)
-    .maybeSingle();
-  if (refErr) throw refErr;
-  if (byRef) {
-    const [withStock] = await attachStockQuantities([normalizeStockArticle(byRef)]);
-    return withStock;
-  }
 
   const { data: byBc, error: bcErr } = await getSupabase()
     .from(TABLE)
@@ -637,11 +631,21 @@ export async function findStockArticleByBarcode(rawCode, localArticles = []) {
     .limit(1)
     .maybeSingle();
   if (bcErr) {
-    if (isMissingBarcodeColumn(bcErr)) return null;
-    throw bcErr;
+    if (!isMissingBarcodeColumn(bcErr)) throw bcErr;
+  } else if (byBc) {
+    const [withStock] = await attachStockQuantities([normalizeStockArticle(byBc)]);
+    return withStock;
   }
-  if (!byBc) return null;
-  const [withStock] = await attachStockQuantities([normalizeStockArticle(byBc)]);
+
+  const { data: byRef, error: refErr } = await getSupabase()
+    .from(TABLE)
+    .select('*')
+    .ilike('reference', code)
+    .limit(1)
+    .maybeSingle();
+  if (refErr) throw refErr;
+  if (!byRef) return null;
+  const [withStock] = await attachStockQuantities([normalizeStockArticle(byRef)]);
   return withStock;
 }
 

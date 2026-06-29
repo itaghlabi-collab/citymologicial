@@ -8,6 +8,9 @@ import {
 import { generateMovementRef } from '../../services/inventaire/stockMovements';
 import { generateMouvementPdf } from '../../services/inventaire/mouvementPdf';
 import { listEmployees, employeeFullName } from '../../services/rh/employees';
+import { useArticleScanner } from '../../hooks/useArticleScanner';
+import { addOrIncrementMovementLine } from '../../services/inventaire/articleScanWorkflow';
+import ArticleScanBar from './ArticleScanBar.jsx';
 import { EMPLACEMENTS_STOCK, TYPES_MOUVEMENT } from './shared.jsx';
 
 const CITYMO_LOGO = 'https://i.ibb.co/N6SbC06M/logopng.png';
@@ -130,6 +133,24 @@ export default function BonMouvementForm({
   const [employees, setEmployees] = useState([]);
   const [error, setError] = useState('');
   const [pdfLoading, setPdfLoading] = useState(false);
+
+  const {
+    handleScan,
+    scanning,
+    scanError,
+    scanSuccess,
+  } = useArticleScanner({
+    articles: articles || [],
+    onFound: (article) => {
+      setForm((p) => {
+        if (p.applied) return p;
+        return {
+          ...p,
+          lignes: addOrIncrementMovementLine(p.lignes, article.id, 1, EMPTY_LIGNE),
+        };
+      });
+    },
+  });
 
   const setField = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
@@ -298,6 +319,18 @@ export default function BonMouvementForm({
         <div style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 14 }}>
           Lignes de mouvement
         </div>
+
+        {!form.applied && (
+          <ArticleScanBar
+            onScan={handleScan}
+            loading={scanning}
+            error={scanError}
+            success={scanSuccess}
+            label="Scanner un article"
+            placeholder="Scannez un article pour l'ajouter à l'entrée / sortie…"
+            compact
+          />
+        )}
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {form.lignes.map((ligne, idx) => {

@@ -1,7 +1,7 @@
 /**
  * DemandesChantier.jsx — Demandes matériel chantier (Inventaire & Dépôt)
  */
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   ClipboardList, Plus, Search, RefreshCw, Loader2, Eye, Edit2, Trash2,
   Download, CheckCircle, Truck, Package, X,
@@ -31,6 +31,13 @@ import {
 import { generateSiteRequestPdf } from '../../services/inventaire/siteRequestPdf';
 import SiteRequestForm, { buildInitialLines } from './SiteRequestForm.jsx';
 import SiteRequestFormPage from './SiteRequestFormPage.jsx';
+import ArticleScanBar from './ArticleScanBar.jsx';
+import { useArticleScanner } from '../../hooks/useArticleScanner';
+import {
+  matchRequestLineByArticle,
+  incrementPreparedLine,
+  isLineFullyPrepared,
+} from '../../services/inventaire/articleScanWorkflow';
 import { KpiCard, INPUT_STYLE, SELECT_STYLE } from './shared.jsx';
 
 const EMPTY_FORM = {
@@ -294,6 +301,38 @@ export default function DemandesChantier({ projet, embedded = false }) {
     }));
   }
 
+  const canScanPreparation = detail
+    && !embedded
+    && ['soumise', 'en_preparation', 'preparation_partielle', 'en_attente_dg', 'validee_dg'].includes(detail.statut)
+    && !['prete', 'livree', 'annulee'].includes(detail.statut);
+
+  const detailRef = useRef(detail);
+  detailRef.current = detail;
+
+  const {
+    handleScan: handlePrepScan,
+    scanning: prepScanning,
+    scanError: prepScanError,
+    scanSuccess: prepScanSuccess,
+  } = useArticleScanner({
+    articles: stockArticles,
+    validateFound: (article) => {
+      const d = detailRef.current;
+      if (!d) return false;
+      const active = (d.lines || []).filter((l) => Number(l.quantite_demandee) > 0);
+      return !!matchRequestLineByArticle(active, article);
+    },
+    onFound: (article) => {
+      const d = detailRef.current;
+      if (!d) return;
+      const active = (d.lines || []).filter((l) => Number(l.quantite_demandee) > 0);
+      const line = matchRequestLineByArticle(active, article);
+      if (!line) return;
+      const updated = incrementPreparedLine(line);
+      updateDetailLine(line.id, { quantite_preparee: updated.quantite_preparee });
+    },
+  });
+
   if (view === 'form') {
     return (
       <SiteRequestFormPage
@@ -491,6 +530,18 @@ export default function DemandesChantier({ projet, embedded = false }) {
               </div>
 
               {['soumise', 'en_preparation', 'preparation_partielle', 'en_attente_dg', 'validee_dg'].includes(detail.statut) && (
+                <>
+                  {canScanPreparation && (
+                    <ArticleScanBar
+                      onScan={handlePrepScan}
+                      loading={prepScanning}
+                      error={prepScanError}
+                      success={prepScanSuccess}
+                      label="Scanner un article à préparer"
+                      placeholder="Scannez chaque article préparé…"
+                      compact
+                    />
+                  )}
                 <div className="table-wrap" style={{ marginBottom: 16 }}>
                   <table style={{ fontSize: '0.82rem' }}>
                     <thead>
@@ -503,9 +554,14 @@ export default function DemandesChantier({ projet, embedded = false }) {
                       </tr>
                     </thead>
                     <tbody>
-                      {(detail.lines || []).filter((l) => Number(l.quantite_demandee) > 0).map((l) => (
-                        <tr key={l.id || `${l.category_id}-${l.article_name}`}>
-                          <td>{l.article_name}</td>
+                      {(detail.lines || []).filter((l) => Number(l.quantite_demandee) > 0).map((l) => {
+                        const prepared = isLineFullyPrepared(l);
+                        return (
+                        <tr key={l.id || `${l.category_id}-${l.article_name}`} style={prepared ? { background: '#F1F8E9' } : undefined}>
+                          <td>
+                            {prepared && <span style={{ color: '#2E7D32', marginRight: 6 }} title="Préparée">✓</span>}
+                            {l.article_name}
+                          </td>
                           <td>{l.quantite_demandee}</td>
                           <td>
                             {embedded ? (
@@ -533,10 +589,12 @@ export default function DemandesChantier({ projet, embedded = false }) {
                             </td>
                           )}
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 </div>
+                </>
               )}
 
               {detail.observation && (

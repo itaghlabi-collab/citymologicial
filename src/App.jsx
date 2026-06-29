@@ -325,6 +325,8 @@ function PageContent({ module, onNavigate, inventaireArticleCode, onInventaireAr
     case 'bons-mouvements':     return <Inventaire activeTab="bons-mouvements" />;
     case 'demandes-chantier':   return <Inventaire activeTab="demandes-chantier" />;
     case 'stocks':              return <Inventaire activeTab="stocks" />;
+    case 'inventaire-physique': return <Inventaire activeTab="inventaire-physique" />;
+    case 'affectation-materiel': return <Inventaire activeTab="affectation-materiel" />;
     /* Administration */
     case 'utilisateurs':        return <Administration activeTab="utilisateurs" />;
     case 'sauvegardes':         return <Administration activeTab="sauvegardes" />;
