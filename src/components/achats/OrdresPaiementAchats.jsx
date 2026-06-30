@@ -4,7 +4,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   CreditCard, Eye, Search, ChevronLeft, Loader2, RefreshCw,
-  CheckCircle, DollarSign, FileText, History, Send,
+  CheckCircle, DollarSign, FileText, History, Send, Trash2,
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { resolveCurrentPurchaseRole, purchasePermissions } from '../../services/achats/purchaseWorkflowRoles';
@@ -15,6 +15,7 @@ import {
   validateAchatsPaymentOrder,
   markAchatsPaymentOrderPaid,
   submitAchatsPaymentForDgValidation,
+  deleteAchatsPaymentOrder,
 } from '../../services/achats/purchasePaymentOrdersAchats';
 import { getSupplierById } from '../../services/achats/suppliers';
 import { generateAchatsPaymentOrderPdf } from '../../services/achats/purchasePaymentOrderAchatsPdf';
@@ -166,6 +167,7 @@ export default function OrdresPaiementAchats() {
   const [role, setRole] = useState(null);
   const [saving, setSaving] = useState(false);
   const [pdfLoadingId, setPdfLoadingId] = useState(null);
+  const [actionId, setActionId] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -205,19 +207,30 @@ export default function OrdresPaiementAchats() {
 
   async function handleAction(type, id, form) {
     setSaving(true);
+    setActionId(id);
     try {
       const userName = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Utilisateur';
       if (type === 'validate') await validateAchatsPaymentOrder(id, userName);
       else if (type === 'paid') await markAchatsPaymentOrderPaid(id, userName);
       else if (type === 'submit') await submitAchatsPaymentForDgValidation(id);
+      else if (type === 'delete') await deleteAchatsPaymentOrder(id);
       else if (type === 'update') await updateAchatsPaymentOrder(id, form);
       await load();
-      if (detailId === id) await openDetail(id);
+      if (detailId === id && type === 'delete') {
+        setDetailId(null);
+        setDetail(null);
+      } else if (detailId === id) await openDetail(id);
     } catch (err) {
       setError(err.message);
     } finally {
       setSaving(false);
+      setActionId(null);
     }
+  }
+
+  async function handleDelete(id) {
+    if (!window.confirm('Supprimer cet ordre de paiement ?')) return;
+    await handleAction('delete', id);
   }
 
   const filtered = items.filter((o) => {
@@ -308,7 +321,7 @@ export default function OrdresPaiementAchats() {
                   <th>TTC</th>
                   <th>Date prévue</th>
                   <th>Statut</th>
-                  <th />
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -322,11 +335,57 @@ export default function OrdresPaiementAchats() {
                     <td>{o.date_prevue || o.date || '—'}</td>
                     <td><span className={`badge ${BADGE_OP_ACHATS[o.statut] || 'badge-grey'}`}>{o.statut}</span></td>
                     <td>
-                      <div style={{ display: 'flex', gap: 3 }}>
-                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => openDetail(o.id)}><Eye size={13} /></button>
+                      <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+                        <button type="button" className="btn btn-secondary btn-sm" title="Voir" onClick={() => openDetail(o.id)}><Eye size={13} /></button>
                         <button type="button" className="btn btn-ghost btn-sm" title="PDF" disabled={pdfLoadingId === o.id} onClick={() => handleListPdf(o.id)}>
                           {pdfLoadingId === o.id ? <Loader2 size={12} className="cin-spin" /> : <FileText size={12} />}
                         </button>
+                        {o.statut === 'À préparer' && (
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-sm"
+                            title="Soumettre validation DG"
+                            disabled={actionId === o.id}
+                            onClick={() => handleAction('submit', o.id)}
+                          >
+                            {actionId === o.id ? <Loader2 size={12} className="cin-spin" /> : <Send size={12} />}
+                          </button>
+                        )}
+                        {perms.canValidatePayment && o.statut === 'En attente validation DG' && (
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-sm"
+                            title="Valider (DG)"
+                            disabled={actionId === o.id}
+                            onClick={() => handleAction('validate', o.id)}
+                          >
+                            {actionId === o.id ? <Loader2 size={12} className="cin-spin" /> : <CheckCircle size={12} />}
+                          </button>
+                        )}
+                        {perms.canValidatePayment && o.statut === 'Validé' && (
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            title="Marquer payé"
+                            disabled={actionId === o.id}
+                            onClick={() => handleAction('paid', o.id)}
+                            style={{ color: '#2E7D32' }}
+                          >
+                            {actionId === o.id ? <Loader2 size={12} className="cin-spin" /> : <DollarSign size={12} />}
+                          </button>
+                        )}
+                        {['À préparer', 'Annulé'].includes(o.statut) && (
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            title="Supprimer"
+                            disabled={actionId === o.id}
+                            onClick={() => handleDelete(o.id)}
+                            style={{ color: 'var(--red)' }}
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

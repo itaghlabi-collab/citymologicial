@@ -4,10 +4,10 @@
 import { useState } from 'react';
 import {
   ShoppingBag, Eye, Search, ChevronLeft, Loader2, RefreshCw, CheckCircle,
-  Send, Package, FileText, History, Edit2,
+  Send, Package, FileText, History, Edit2, Trash2,
 } from 'lucide-react';
 import { useAcquisitionOrders } from '../../hooks/useAcquisitionOrders';
-import { updateAcquisitionOrder, updateAcquisitionOrderStatus } from '../../services/achats/purchaseAcquisitionOrders';
+import { updateAcquisitionOrder, updateAcquisitionOrderStatus, deleteAcquisitionOrder } from '../../services/achats/purchaseAcquisitionOrders';
 import { getPurchaseRequestQuote } from '../../services/achats/purchaseRequestQuotes';
 import { generateAcquisitionOrderPdf } from '../../services/achats/purchaseAcquisitionOrderPdf';
 import { listPurchaseRequestHistory } from '../../services/achats/purchaseRequestHistory';
@@ -145,6 +145,7 @@ export default function OrdresAchat() {
   const [history, setHistory] = useState([]);
   const [saving, setSaving] = useState(false);
   const [pdfLoadingId, setPdfLoadingId] = useState(null);
+  const [actionId, setActionId] = useState(null);
 
   const filtered = ordres.filter((o) => {
     const q = search.toLowerCase();
@@ -166,6 +167,7 @@ export default function OrdresAchat() {
 
   async function handleStatusChange(id, statut) {
     setSaving(true);
+    setActionId(id);
     try {
       await updateAcquisitionOrderStatus(id, statut);
       await reload();
@@ -175,6 +177,7 @@ export default function OrdresAchat() {
       }
     } finally {
       setSaving(false);
+      setActionId(null);
     }
   }
 
@@ -185,6 +188,23 @@ export default function OrdresAchat() {
       await reload();
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function handleDelete(id) {
+    if (!window.confirm('Supprimer cet ordre d\'achat ?')) return;
+    setActionId(id);
+    try {
+      await deleteAcquisitionOrder(id);
+      await reload();
+      if (detailId === id) {
+        setDetailId(null);
+        setDetail(null);
+      }
+    } catch (err) {
+      window.alert(err.message || 'Erreur suppression');
+    } finally {
+      setActionId(null);
     }
   }
 
@@ -278,11 +298,45 @@ export default function OrdresAchat() {
                     <td>{formatMAD(o.montant_ttc)}</td>
                     <td><span className={`badge ${BADGE_ORDRE[o.statut] || 'badge-grey'}`}>{o.statut}</span></td>
                     <td>
-                      <div style={{ display: 'flex', gap: 3 }}>
-                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => openDetail(o.id)}><Eye size={13} /></button>
+                      <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+                        <button type="button" className="btn btn-secondary btn-sm" title="Voir" onClick={() => openDetail(o.id)}><Eye size={13} /></button>
                         <button type="button" className="btn btn-ghost btn-sm" title="PDF" disabled={pdfLoadingId === o.id} onClick={() => handleListPdf(o.id)}>
                           {pdfLoadingId === o.id ? <Loader2 size={12} className="cin-spin" /> : <FileText size={12} />}
                         </button>
+                        {o.statut === 'Brouillon' && (
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-sm"
+                            title="Valider l'ordre d'achat"
+                            disabled={actionId === o.id}
+                            onClick={() => handleStatusChange(o.id, 'Validé')}
+                          >
+                            {actionId === o.id ? <Loader2 size={12} className="cin-spin" /> : <CheckCircle size={12} />}
+                          </button>
+                        )}
+                        {o.statut === 'Validé' && (
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-sm"
+                            title="Envoyer au fournisseur"
+                            disabled={actionId === o.id}
+                            onClick={() => handleStatusChange(o.id, 'Envoyé fournisseur')}
+                          >
+                            {actionId === o.id ? <Loader2 size={12} className="cin-spin" /> : <Send size={12} />}
+                          </button>
+                        )}
+                        {o.statut === 'Brouillon' && (
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            title="Supprimer"
+                            disabled={actionId === o.id}
+                            onClick={() => handleDelete(o.id)}
+                            style={{ color: 'var(--red)' }}
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        )}
                       </div>
                     </td>
                   </tr>

@@ -153,3 +153,28 @@ export async function submitAchatsPaymentForDgValidation(id) {
   if (error) throw error;
   return normalizeAchatsPaymentOrder(data);
 }
+
+export async function deleteAchatsPaymentOrder(id) {
+  const { data: { user }, error: authError } = await getSupabase().auth.getUser();
+  if (authError || !user) throw new Error('Session requise.');
+  const op = await getAchatsPaymentOrder(id);
+  if (!op) {
+    const err = new Error('Ordre de paiement introuvable.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  if (!['À préparer', 'Annulé'].includes(op.statut)) {
+    const err = new Error('Seuls les ordres de paiement « À préparer » ou « Annulé » peuvent être supprimés.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  const { error } = await getSupabase().from(TABLE).delete().eq('id', id);
+  if (error) throw error;
+  if (op.purchase_request_id) {
+    await getSupabase()
+      .from('purchase_requests')
+      .update({ payment_order_id: null })
+      .eq('id', op.purchase_request_id)
+      .eq('payment_order_id', id);
+  }
+}

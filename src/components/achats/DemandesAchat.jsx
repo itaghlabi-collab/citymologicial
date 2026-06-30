@@ -484,7 +484,7 @@ export default function DemandesAchat() {
                           <button type="button" className="btn btn-primary btn-sm" title="Valider (DG)" onClick={() => setDetailId(x.id)}><CheckCircle size={12} /></button>
                         )}
                         {canDeletePurchaseRequest(x.statut) && (
-                          <button type="button" className="btn btn-ghost btn-sm" title="Supprimer" onClick={() => handleDelete(x.id)} style={{ color: 'var(--red)' }}><Trash2 size={13} /></button>
+                          <button type="button" className="btn btn-ghost btn-sm" title="Supprimer" onClick={() => handleDelete(x.id)} style={{ color: 'var(--red)' }}><Trash2 size={12} /></button>
                         )}
                       </div>
                     </td>

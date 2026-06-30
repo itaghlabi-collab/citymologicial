@@ -151,3 +151,27 @@ export async function linkPaymentOrderToAcquisition(acquisitionOrderId, paymentO
     .eq('id', acquisitionOrderId);
   if (error) throw error;
 }
+
+export async function deleteAcquisitionOrder(id) {
+  await requireUser();
+  const oa = await getAcquisitionOrder(id);
+  if (!oa) {
+    const err = new Error('Ordre d\'achat introuvable.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  if (oa.statut !== 'Brouillon') {
+    const err = new Error('Seuls les ordres d\'achat en brouillon peuvent être supprimés.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  const { error } = await getSupabase().from(TABLE).delete().eq('id', id);
+  if (error) throw error;
+  if (oa.purchase_request_id) {
+    await getSupabase()
+      .from('purchase_requests')
+      .update({ acquisition_order_id: null })
+      .eq('id', oa.purchase_request_id)
+      .eq('acquisition_order_id', id);
+  }
+}
