@@ -228,8 +228,11 @@ export default function OrdresPaiementAchats() {
     }
   }
 
-  async function handleDelete(id) {
-    if (!window.confirm('Supprimer cet ordre de paiement ?')) return;
+  async function handleDelete(id, statut) {
+    const msg = ['À préparer', 'Annulé'].includes(statut)
+      ? 'Supprimer cet ordre de paiement ?'
+      : 'Cet ordre de paiement est validé ou en cours. Confirmer la suppression ?';
+    if (!window.confirm(msg)) return;
     await handleAction('delete', id);
   }
 
@@ -374,18 +377,16 @@ export default function OrdresPaiementAchats() {
                             {actionId === o.id ? <Loader2 size={12} className="cin-spin" /> : <DollarSign size={12} />}
                           </button>
                         )}
-                        {['À préparer', 'Annulé'].includes(o.statut) && (
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-sm"
-                            title="Supprimer"
-                            disabled={actionId === o.id}
-                            onClick={() => handleDelete(o.id)}
-                            style={{ color: 'var(--red)' }}
-                          >
-                            <Trash2 size={12} />
-                          </button>
-                        )}
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          title="Supprimer"
+                          disabled={actionId === o.id}
+                          onClick={() => handleDelete(o.id, o.statut)}
+                          style={{ color: 'var(--red)' }}
+                        >
+                          <Trash2 size={12} />
+                        </button>
                       </div>
                     </td>
                   </tr>

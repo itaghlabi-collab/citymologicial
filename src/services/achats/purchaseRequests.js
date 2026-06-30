@@ -220,7 +220,42 @@ export async function updatePurchaseRequest(id, form) {
 
 export async function deletePurchaseRequest(id) {
   await requireUser();
-  const { error } = await getSupabase().from(TABLE).delete().eq('id', id);
+  const sb = getSupabase();
+  const { data: req, error: fetchError } = await sb
+    .from(TABLE)
+    .select('id, acquisition_order_id, payment_order_id')
+    .eq('id', id)
+    .maybeSingle();
+  if (fetchError) throw fetchError;
+  if (!req) {
+    const err = new Error('Demande d\'achat introuvable.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+
+  await sb.from(TABLE).update({
+    acquisition_order_id: null,
+    payment_order_id: null,
+    selected_quote_id: null,
+  }).eq('id', id);
+
+  if (req.payment_order_id) {
+    await sb.from('payment_orders').delete().eq('id', req.payment_order_id);
+  }
+  if (req.acquisition_order_id) {
+    await sb.from('purchase_acquisition_orders').delete().eq('id', req.acquisition_order_id);
+  }
+
+  const { data: orphanOps } = await sb.from('payment_orders').select('id').eq('purchase_request_id', id);
+  if (orphanOps?.length) {
+    await sb.from('payment_orders').delete().in('id', orphanOps.map((o) => o.id));
+  }
+  const { data: orphanOas } = await sb.from('purchase_acquisition_orders').select('id').eq('purchase_request_id', id);
+  if (orphanOas?.length) {
+    await sb.from('purchase_acquisition_orders').delete().in('id', orphanOas.map((o) => o.id));
+  }
+
+  const { error } = await sb.from(TABLE).delete().eq('id', id);
   if (error) throw error;
 }
 

@@ -153,8 +153,8 @@ export function canEditPurchaseRequest(statut) {
   return normalizePurchaseStatus(statut) === 'Brouillon';
 }
 
-export function canDeletePurchaseRequest(statut) {
-  return normalizePurchaseStatus(statut) === 'Brouillon';
+export function canDeletePurchaseRequest() {
+  return true;
 }
 
 export function canSubmitPurchaseRequest(statut) {

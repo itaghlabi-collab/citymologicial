@@ -294,11 +294,11 @@ export default function DemandesAchat() {
 
   async function handleDelete(id) {
     const item = items.find((x) => x.id === id);
-    if (!canDeletePurchaseRequest(item?.statut)) {
-      window.alert('Seules les demandes en brouillon peuvent être supprimées.');
-      return;
-    }
-    if (!window.confirm('Supprimer cette demande ?')) return;
+    const isDraft = normalizePurchaseStatus(item?.statut) === 'Brouillon';
+    const msg = isDraft
+      ? 'Supprimer cette demande ?'
+      : 'Cette demande est validée ou en cours. Supprimer la demande et les ordres liés (OA, OP) ?';
+    if (!window.confirm(msg)) return;
     const result = await remove(id);
     if (result.success) setDetailId(null);
   }
@@ -483,7 +483,7 @@ export default function DemandesAchat() {
                         {perms.canValidateSupplier && canValidateQuoteOnRequest(x.statut) && (
                           <button type="button" className="btn btn-primary btn-sm" title="Valider (DG)" onClick={() => setDetailId(x.id)}><CheckCircle size={12} /></button>
                         )}
-                        {canDeletePurchaseRequest(x.statut) && (
+                        {canDeletePurchaseRequest() && (
                           <button type="button" className="btn btn-ghost btn-sm" title="Supprimer" onClick={() => handleDelete(x.id)} style={{ color: 'var(--red)' }}><Trash2 size={12} /></button>
                         )}
                       </div>

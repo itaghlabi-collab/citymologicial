@@ -191,8 +191,11 @@ export default function OrdresAchat() {
     }
   }
 
-  async function handleDelete(id) {
-    if (!window.confirm('Supprimer cet ordre d\'achat ?')) return;
+  async function handleDelete(id, statut) {
+    const msg = statut === 'Brouillon'
+      ? 'Supprimer cet ordre d\'achat ?'
+      : 'Cet ordre d\'achat est validé ou en cours. Confirmer la suppression ?';
+    if (!window.confirm(msg)) return;
     setActionId(id);
     try {
       await deleteAcquisitionOrder(id);
@@ -325,18 +328,16 @@ export default function OrdresAchat() {
                             {actionId === o.id ? <Loader2 size={12} className="cin-spin" /> : <Send size={12} />}
                           </button>
                         )}
-                        {o.statut === 'Brouillon' && (
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-sm"
-                            title="Supprimer"
-                            disabled={actionId === o.id}
-                            onClick={() => handleDelete(o.id)}
-                            style={{ color: 'var(--red)' }}
-                          >
-                            <Trash2 size={12} />
-                          </button>
-                        )}
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          title="Supprimer"
+                          disabled={actionId === o.id}
+                          onClick={() => handleDelete(o.id, o.statut)}
+                          style={{ color: 'var(--red)' }}
+                        >
+                          <Trash2 size={12} />
+                        </button>
                       </div>
                     </td>
                   </tr>

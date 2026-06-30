@@ -160,18 +160,16 @@ export async function deleteAcquisitionOrder(id) {
     err.code = 'VALIDATION';
     throw err;
   }
-  if (oa.statut !== 'Brouillon') {
-    const err = new Error('Seuls les ordres d\'achat en brouillon peuvent être supprimés.');
-    err.code = 'VALIDATION';
-    throw err;
+  const sb = getSupabase();
+  if (oa.payment_order_id) {
+    await sb.from('payment_orders').delete().eq('id', oa.payment_order_id);
   }
-  const { error } = await getSupabase().from(TABLE).delete().eq('id', id);
+  const { error } = await sb.from(TABLE).delete().eq('id', id);
   if (error) throw error;
   if (oa.purchase_request_id) {
-    await getSupabase()
+    await sb
       .from('purchase_requests')
-      .update({ acquisition_order_id: null })
-      .eq('id', oa.purchase_request_id)
-      .eq('acquisition_order_id', id);
+      .update({ acquisition_order_id: null, payment_order_id: null })
+      .eq('id', oa.purchase_request_id);
   }
 }

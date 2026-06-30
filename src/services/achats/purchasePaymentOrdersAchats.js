@@ -163,18 +163,12 @@ export async function deleteAchatsPaymentOrder(id) {
     err.code = 'VALIDATION';
     throw err;
   }
-  if (!['À préparer', 'Annulé'].includes(op.statut)) {
-    const err = new Error('Seuls les ordres de paiement « À préparer » ou « Annulé » peuvent être supprimés.');
-    err.code = 'VALIDATION';
-    throw err;
-  }
   const { error } = await getSupabase().from(TABLE).delete().eq('id', id);
   if (error) throw error;
   if (op.purchase_request_id) {
     await getSupabase()
       .from('purchase_requests')
       .update({ payment_order_id: null })
-      .eq('id', op.purchase_request_id)
-      .eq('payment_order_id', id);
+      .eq('id', op.purchase_request_id);
   }
 }
