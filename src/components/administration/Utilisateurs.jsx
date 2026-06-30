@@ -344,7 +344,7 @@ function UserForm({ initial, roles, employees, onSave, onCancel, saving }) {
       <FRow>
         {!initial ? (
           <>
-            <FField label="Mot de passe temporaire" required>
+            <FField label="Mot de passe" required>
               <div style={{ display: 'flex', gap: 8 }}>
                 <input type="text" value={form.password} onChange={(e) => set('password', e.target.value)} style={{ ...fieldStyle('password'), flex: 1 }} autoComplete="new-password" />
                 <button type="button" className="btn btn-secondary btn-sm" onClick={generatePassword}>Générer</button>
@@ -354,6 +354,12 @@ function UserForm({ initial, roles, employees, onSave, onCancel, saving }) {
             <FField label="Confirmer mot de passe">
               <input type="text" value={form.password_confirm} onChange={(e) => set('password_confirm', e.target.value)} style={fieldStyle('password_confirm')} />
               {errors.password_confirm && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.password_confirm}</div>}
+            </FField>
+            <FField label="À la prochaine connexion">
+              <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, fontSize: '0.85rem', cursor: 'pointer' }}>
+                <input type="checkbox" checked={form.force_change_on_login} onChange={(e) => set('force_change_on_login', e.target.checked)} />
+                Forcer le changement de mot de passe
+              </label>
             </FField>
           </>
         ) : (
@@ -578,6 +584,7 @@ export default function Utilisateurs({
           await saveUserSubmoduleAccess(editUser.id, allCodes);
         }
       } else {
+        const forceChange = Boolean(data.force_change_on_login);
         saved = await createUser({
           employee: data.employee,
           role_id: data.role_id,
@@ -585,10 +592,15 @@ export default function Utilisateurs({
           statut: data.statut,
           password: data.password,
           notes: data.notes,
-          mustChangePassword: true,
+          mustChangePassword: forceChange,
         });
         if (!data.est_super_admin) {
           await saveUserSubmoduleAccess(saved.id, data.submoduleCodes || []);
+        }
+        try {
+          await adminSetPassword(saved.id, data.password, { mustChangePassword: forceChange });
+        } catch (pwdErr) {
+          setMsg(`Utilisateur créé, mais mot de passe non confirmé côté serveur : ${pwdErr.message}`);
         }
         setCreatedCreds({ email: saved.email, password: tempPwd, nom: [saved.prenom, saved.nom].filter(Boolean).join(' ') });
       }

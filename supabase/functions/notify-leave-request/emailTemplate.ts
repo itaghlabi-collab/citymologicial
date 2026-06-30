@@ -33,7 +33,7 @@ export function buildLeaveRequestEmailHtml(
   const ctaBlock = appUrl
     ? `<p style="margin:28px 0 0;text-align:center;">
         <a href="${escapeHtml(appUrl)}" style="display:inline-block;background:#C62828;color:#fff;text-decoration:none;padding:12px 28px;border-radius:8px;font-weight:700;font-size:14px;">
-          Ouvrir CITYMO ERP
+          Ouvrir CITYMO APP
         </a>
       </p>`
     : '';
@@ -53,7 +53,7 @@ export function buildLeaveRequestEmailHtml(
           <tr>
             <td style="background:#C62828;padding:24px 32px;text-align:center;">
               <div style="font-size:22px;font-weight:800;letter-spacing:0.08em;color:#fff;text-transform:uppercase;">CITYMO</div>
-              <div style="font-size:13px;color:#FFCDD2;margin-top:6px;">Plateforme ERP Construction</div>
+              <div style="font-size:13px;color:#FFCDD2;margin-top:6px;">CITYMO APP</div>
             </td>
           </tr>
           <tr>
@@ -107,7 +107,7 @@ export function buildLeaveRequestEmailHtml(
             <td style="padding:16px 32px 24px;border-top:1px solid #F3F4F6;text-align:center;">
               <p style="margin:0;font-size:11px;color:#9CA3AF;line-height:1.5;">
                 Réf. demande : ${requestId}<br />
-                Email automatique CITYMO ERP — ne pas répondre.
+                Email automatique CITYMO APP — ne pas répondre.
               </p>
             </td>
           </tr>

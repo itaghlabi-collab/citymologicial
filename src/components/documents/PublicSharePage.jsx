@@ -85,7 +85,7 @@ export default function PublicSharePage({ token }) {
           <div style={{ textAlign: 'center', padding: '20px 8px' }}>
             <AlertTriangle size={36} style={{ color: 'var(--red)', marginBottom: 12 }} />
             <div style={{ fontWeight: 700, marginBottom: 8 }}>{error}</div>
-            <a href="/" style={{ fontSize: '0.84rem', color: 'var(--red)' }}>Retour à CITYMO ERP</a>
+            <a href="/" style={{ fontSize: '0.84rem', color: 'var(--red)' }}>Retour à CITYMO APP</a>
           </div>
         ) : verified ? (
           <div>
@@ -110,7 +110,7 @@ export default function PublicSharePage({ token }) {
               </div>
             )}
             <div style={{ marginTop: 20, padding: 12, background: '#E3F2FD', borderRadius: 8, fontSize: '0.8rem', color: '#1565C0' }}>
-              Connectez-vous à CITYMO ERP avec vos identifiants pour télécharger le fichier depuis Mes documents.
+              Connectez-vous à CITYMO APP avec vos identifiants pour télécharger le fichier depuis Mes documents.
             </div>
           </div>
         ) : meta?.has_password ? (

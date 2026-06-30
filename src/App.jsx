@@ -373,7 +373,7 @@ function LoginPage() {
         <div className="login-brand">
           <img src="https://i.ibb.co/1tszCjBk/CITYMO-LOGO-2.png" alt="CITYMO" className="login-brand-logo" />
           <div className="login-brand-sep" />
-          <div className="login-brand-tagline">Plateforme ERP Construction</div>
+          <div className="login-brand-tagline">CITYMO APP</div>
         </div>
 
         <div className="login-card">

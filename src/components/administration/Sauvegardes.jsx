@@ -248,7 +248,7 @@ export default function Sauvegardes({ backups = [], setBackups, reload, canManag
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12 }}>
           <InfraCard icon={<Server size={16} />} title="Supabase Storage" value="citymo-backups" color="green" description="Copie principale — fichiers gzip horodatés" />
-          <InfraCard icon={<Cloud size={16} />} title="Google Drive" value="citymo-erp-sauvegardes" color="blue" description="2e copie — dossier CITYMO ERP Sauvegardes" />
+          <InfraCard icon={<Cloud size={16} />} title="Google Drive" value="citymo-erp-sauvegardes" color="blue" description="2e copie — dossier CITYMO APP Sauvegardes" />
           <InfraCard icon={<HardDrive size={16} />} title="Historique" value={`${backups.length} entrées`} color="grey" description="Journal + audit des opérations" />
         </div>
       </div>

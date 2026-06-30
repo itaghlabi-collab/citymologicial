@@ -267,7 +267,7 @@ export async function exportCashSheetPdf({ year, month, transactions, totals, ba
     title: `Feuille de caisse ${periodLabel}`,
     subject: 'CITYMO Finance & Trésorerie',
     keywords: `citymo,finance,caisse,v${CASH_SHEET_PDF_VERSION}`,
-    creator: 'CITYMO ERP',
+    creator: 'CITYMO APP',
   });
 
   drawCompanyHeader(doc, logo, logoSize);

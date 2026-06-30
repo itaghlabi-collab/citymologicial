@@ -181,7 +181,7 @@ export async function linkExistingProfileByEmail(email, form, employee) {
 }
 
 export async function createUserFromEmployee({
-  employee, role_id, department_id, statut, password, notes, mustChangePassword = true,
+  employee, role_id, department_id, statut, password, notes, mustChangePassword = false,
 }) {
   const sb = getSupabase();
   const email = employee.email?.trim()?.toLowerCase();

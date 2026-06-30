@@ -60,7 +60,7 @@ export default function ForcePasswordChangeModal({ user, onComplete }) {
             <KeyRound size={18} /> Changement de mot de passe requis
           </h2>
           <p style={{ margin: 0, fontSize: '0.84rem', color: 'var(--text-2)' }}>
-            Pour des raisons de sécurité, définissez un nouveau mot de passe avant d&apos;accéder à l&apos;ERP.
+            Pour des raisons de sécurité, définissez un nouveau mot de passe avant d&apos;accéder à l&apos;application.
           </p>
         </div>
 
