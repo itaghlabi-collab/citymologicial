@@ -456,6 +456,41 @@ CREATE INDEX IF NOT EXISTS notifications_recipient_role_idx
   WHERE recipient_role IS NOT NULL;
 CREATE INDEX IF NOT EXISTS notifications_created_at_idx
   ON public.notifications (created_at DESC);
+
+-- Doublons existants : garder la notification la plus récente avant index unique
+DELETE FROM public.notifications
+WHERE id IN (
+  SELECT id FROM (
+    SELECT id,
+      ROW_NUMBER() OVER (
+        PARTITION BY recipient_user_id, entity_type, entity_id, type
+        ORDER BY created_at DESC, id DESC
+      ) AS rn
+    FROM public.notifications
+    WHERE recipient_user_id IS NOT NULL
+      AND entity_type IS NOT NULL
+      AND entity_id IS NOT NULL
+  ) sub
+  WHERE sub.rn > 1
+);
+
+DELETE FROM public.notifications
+WHERE id IN (
+  SELECT id FROM (
+    SELECT id,
+      ROW_NUMBER() OVER (
+        PARTITION BY recipient_role, entity_type, entity_id, type
+        ORDER BY created_at DESC, id DESC
+      ) AS rn
+    FROM public.notifications
+    WHERE recipient_user_id IS NULL
+      AND recipient_role IS NOT NULL
+      AND entity_type IS NOT NULL
+      AND entity_id IS NOT NULL
+  ) sub
+  WHERE sub.rn > 1
+);
+
 CREATE UNIQUE INDEX IF NOT EXISTS notifications_dedup_user_idx
   ON public.notifications (recipient_user_id, entity_type, entity_id, type)
   WHERE recipient_user_id IS NOT NULL AND entity_type IS NOT NULL AND entity_id IS NOT NULL;
