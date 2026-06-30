@@ -7,7 +7,12 @@ import { listSuperAdminAndDGRecipients } from './notificationRecipients';
 import { getSupabase } from '../../lib/supabase';
 import { PURCHASE_ASSIGNEE } from '../../constants/purchaseWorkflow';
 
-function moduleUrl() {
+function purchaseRequestDetailUrl(requestId) {
+  return `/?module=achats&tab=demandes-achat&requestId=${requestId}`;
+}
+
+function moduleUrl(requestId) {
+  if (requestId) return purchaseRequestDetailUrl(requestId);
   return '/?module=achats&tab=demandes-achat';
 }
 
@@ -58,7 +63,7 @@ export async function notifyPurchaseRequestSubmitted(request) {
     priority: NOTIFICATION_PRIORITIES.HIGH,
     entityType: 'purchase_request_submitted',
     entityId: request.id,
-    actionUrl: moduleUrl(),
+    actionUrl: moduleUrl(request.id),
   });
 }
 
@@ -71,7 +76,7 @@ export async function notifyPurchaseQuoteAdded(request) {
     priority: NOTIFICATION_PRIORITIES.HIGH,
     entityType: 'purchase_quotes_ready',
     entityId: request.id,
-    actionUrl: '/?module=achats&tab=comparaison-devis',
+    actionUrl: purchaseRequestDetailUrl(request.id),
   });
 }
 
@@ -84,7 +89,7 @@ export async function notifyPurchaseReadyForDg(request) {
     priority: NOTIFICATION_PRIORITIES.URGENT,
     entityType: 'purchase_dg_validation',
     entityId: request.id,
-    actionUrl: moduleUrl(),
+    actionUrl: moduleUrl(request.id),
   });
 }
 
@@ -97,7 +102,7 @@ export async function notifyPurchaseSupplierValidated(request, { quote, oa, op }
     priority: NOTIFICATION_PRIORITIES.NORMAL,
     entityType: 'purchase_validated',
     entityId: request.id,
-    actionUrl: moduleUrl(),
+    actionUrl: moduleUrl(request.id),
   });
   await notifyChargeeAchats({
     title: 'Devis validé par le DG',
@@ -156,7 +161,7 @@ export async function notifyPurchaseReceived(request) {
     priority: NOTIFICATION_PRIORITIES.NORMAL,
     entityType: 'purchase_received',
     entityId: request.id,
-    actionUrl: moduleUrl(),
+    actionUrl: moduleUrl(request.id),
   });
   const { listInventaireRecipients } = await import('./notificationRecipients');
   const magasiniers = await listInventaireRecipients();
@@ -167,6 +172,6 @@ export async function notifyPurchaseReceived(request) {
     priority: NOTIFICATION_PRIORITIES.NORMAL,
     entityType: 'purchase_received_magasin',
     entityId: request.id,
-    actionUrl: moduleUrl(),
+    actionUrl: moduleUrl(request.id),
   })));
 }

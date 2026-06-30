@@ -258,6 +258,18 @@ export default function DemandesAchat() {
     if (user) resolveCurrentPurchaseRole(user).then(setRole);
   }, [user]);
 
+  useEffect(() => {
+    const fromSession = sessionStorage.getItem('citymo_purchase_request_detail');
+    if (fromSession) {
+      sessionStorage.removeItem('citymo_purchase_request_detail');
+      setDetailId(fromSession);
+      return;
+    }
+    const params = new URLSearchParams(window.location.search);
+    const requestId = params.get('requestId');
+    if (requestId) setDetailId(requestId);
+  }, []);
+
   const perms = useMemo(() => purchasePermissions(role), [role]);
 
   useEffect(() => {

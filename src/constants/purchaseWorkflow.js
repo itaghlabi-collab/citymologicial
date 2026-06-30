@@ -96,6 +96,13 @@ export const QUOTE_STATUSES = {
   REFUSE: 'Refusé',
 };
 
+export const QUOTE_STATUS_BADGE = {
+  Actif: 'badge-blue',
+  Retenu: 'badge-green',
+  'Verrouillé': 'badge-grey',
+  Refusé: 'badge-red',
+};
+
 export const OA_STATUSES = [
   'Brouillon',
   'Validé',

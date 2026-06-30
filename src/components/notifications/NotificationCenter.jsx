@@ -69,7 +69,19 @@ export default function NotificationCenter({ user, onNavigate }) {
     if (!n.isRead) await markRead(n.id);
     const mod = parseActionUrl(n.actionUrl);
     if (mod && onNavigate) {
-      onNavigate(mod);
+      let target = mod;
+      if (mod.startsWith('/?') || mod.startsWith('http')) {
+        try {
+          const url = new URL(mod, window.location.origin);
+          const tab = url.searchParams.get('tab');
+          const requestId = url.searchParams.get('requestId');
+          if (requestId) sessionStorage.setItem('citymo_purchase_request_detail', requestId);
+          target = tab || 'demandes-achat';
+        } catch {
+          target = 'demandes-achat';
+        }
+      }
+      onNavigate(target);
       setOpen(false);
     }
   }

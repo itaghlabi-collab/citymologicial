@@ -56,7 +56,7 @@ import {
   MessageSquare,
   FolderClosed, Share2, Link, Trash2,
   ListFilter, TrendingDown, CreditCard, PiggyBank, Wallet,
-  ClipboardList, ShoppingCart, UserCog, Scale, FileCheck,
+  ClipboardList, ShoppingCart, UserCog, FileCheck,
   Boxes, Package, ArrowUpDown,
   Database,
   Search, Menu, ChevronRight, X as XIcon
@@ -164,7 +164,6 @@ const NAV = [
       { id: 'demandes-achat',     label: "Demandes d'achat",     icon: ClipboardList },
       { id: 'bons-commande',      label: 'Bon de commande',      icon: ShoppingCart },
       { id: 'fournisseurs',       label: 'Fournisseurs',         icon: UserCog },
-      { id: 'comparaison-devis',  label: 'Comparaison devis',    icon: Scale },
       { id: 'ordres-achat',       label: "Ordre d'achat",        icon: FileCheck },
       { id: 'ordres-paiement-achats', label: "Ordre de paiement", icon: CreditCard },
     ],
@@ -237,7 +236,6 @@ const MODULE_LABELS = {
   'demandes-achat':    "Demandes d'achat",
   'bons-commande':     'Bon de commande',
   fournisseurs:        'Fournisseurs',
-  'comparaison-devis': 'Comparaison devis',
   'ordres-achat':      "Ordre d'achat",
   'ordres-paiement-achats': "Ordre de paiement",
   'categories-stock':  'Categories stock',
@@ -312,7 +310,7 @@ function PageContent({ module, onNavigate, inventaireArticleCode, onInventaireAr
     case 'demandes-achat':      return <Achats activeTab="demandes-achat" />;
     case 'bons-commande':       return <Achats activeTab="bons-commande" />;
     case 'fournisseurs':        return <Achats activeTab="fournisseurs" />;
-    case 'comparaison-devis':   return <Achats activeTab="comparaison-devis" />;
+    case 'comparaison-devis':   return <Achats activeTab="demandes-achat" />;
     case 'ordres-achat':        return <Achats activeTab="ordres-achat" />;
     case 'ordres-paiement-achats': return <Achats activeTab="ordres-paiement-achats" />;
     /* Inventaire & Depot */

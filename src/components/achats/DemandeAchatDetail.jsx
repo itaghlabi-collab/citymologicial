@@ -4,7 +4,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   ChevronLeft, ClipboardList, History, FileText, CheckCircle, Send,
-  Plus, Loader2, Star, Lock, Package, CreditCard, Eye, Edit2, Trash2,
+  Plus, Loader2, Star, Lock, Package, CreditCard, Eye, Edit2, Trash2, Download,
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { getPurchaseRequestBundle } from '../../services/achats/purchaseWorkflow';
@@ -20,7 +20,8 @@ import { resolveCurrentPurchaseRole, purchasePermissions } from '../../services/
 import { PURCHASE_ASSIGNEE } from '../../constants/purchaseWorkflow';
 import {
   canEditPurchaseRequest, canAddQuoteToRequest, canValidateQuoteOnRequest,
-  normalizePurchaseStatus, getPurchaseStatusBadge, getPurchaseStatusLabel,
+  getPurchaseStatusBadge, getPurchaseStatusLabel,
+  QUOTE_STATUS_BADGE,
 } from '../../constants/purchaseWorkflow';
 import { generatePurchaseRequestPdf } from '../../services/achats/purchaseRequestPdf';
 import {
@@ -59,70 +60,95 @@ function QuoteComparisonTable({
         <thead>
           <tr>
             <th>Fournisseur</th>
-            <th>Réf. devis</th>
-            <th>HT</th>
+            <th>Référence devis</th>
+            <th>Montant HT</th>
             <th>TVA</th>
             <th>TTC</th>
             <th>Délai</th>
             <th>Garantie</th>
             <th>Conditions</th>
             <th>Observations</th>
-            {canManage && <th>Gestion</th>}
-            {canValidate && <th>Validation DG</th>}
+            <th>Pièce jointe</th>
+            <th>Statut</th>
+            <th>Devis retenu</th>
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
-          {quotes.map((q) => (
-            <tr key={q.id} style={q.selected ? { background: 'rgba(46, 125, 50, 0.08)' } : undefined}>
-              <td>
-                <div style={{ fontWeight: 700 }}>{q.supplier_name}</div>
-                {q.selected && <span className="badge badge-green" style={{ fontSize: '0.65rem' }}>Retenu</span>}
-                {q.verrouille && !q.selected && <span className="badge badge-grey" style={{ fontSize: '0.65rem' }}><Lock size={10} /> Verrouillé</span>}
-              </td>
-              <td>{q.ref_devis || '—'}</td>
-              <td>{formatMAD(q.montant_ht)}</td>
-              <td>{q.tva_rate}%</td>
-              <td style={{ fontWeight: 700 }}>{formatMAD(q.montant_ttc)}</td>
-              <td>{q.delai || '—'}</td>
-              <td>{q.garantie || '—'}</td>
-              <td>{q.conditions_paiement || '—'}</td>
-              <td style={{ maxWidth: 140, fontSize: '0.78rem' }}>{q.observations || '—'}</td>
-              {canManage && (
+          {quotes.map((q) => {
+            const locked = q.selected || q.verrouille;
+            return (
+              <tr key={q.id} style={q.selected ? { background: 'rgba(46, 125, 50, 0.08)' } : undefined}>
+                <td style={{ fontWeight: 700 }}>{q.supplier_name}</td>
+                <td>{q.ref_devis || '-'}</td>
+                <td>{formatMAD(q.montant_ht)}</td>
+                <td>{q.tva_rate}%</td>
+                <td style={{ fontWeight: 700 }}>{formatMAD(q.montant_ttc)}</td>
+                <td>{q.delai || '-'}</td>
+                <td>{q.garantie || '-'}</td>
+                <td style={{ maxWidth: 120, fontSize: '0.78rem' }}>{q.conditions_paiement || '-'}</td>
+                <td style={{ maxWidth: 140, fontSize: '0.78rem' }}>{q.observations || '-'}</td>
                 <td>
-                  <div style={{ display: 'flex', gap: 3 }}>
-                    <button type="button" className="btn btn-ghost btn-sm" title="Voir" onClick={() => onView(q)}><Eye size={12} /></button>
-                    {!q.selected && !q.verrouille && (
-                      <>
-                        <button type="button" className="btn btn-ghost btn-sm" title="Modifier" onClick={() => onEdit(q)}><Edit2 size={12} /></button>
-                        <button type="button" className="btn btn-ghost btn-sm" title="Supprimer" style={{ color: 'var(--red)' }} onClick={() => onDelete(q.id)}><Trash2 size={12} /></button>
-                      </>
+                  {q.attachment_url ? (
+                    <a href={q.attachment_url} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm" title="Voir PDF">
+                      <FileText size={12} />
+                    </a>
+                  ) : '-'}
+                </td>
+                <td>
+                  <span className={`badge ${QUOTE_STATUS_BADGE[q.statut] || 'badge-grey'}`} style={{ fontSize: '0.68rem' }}>
+                    {q.statut}
+                  </span>
+                </td>
+                <td style={{ fontWeight: 700, color: q.selected ? 'var(--green)' : 'var(--text-3)' }}>
+                  {q.selected ? 'Oui' : 'Non'}
+                </td>
+                <td>
+                  <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
+                    <button type="button" className="btn btn-ghost btn-sm" title="Voir détail" onClick={() => onView(q)}>
+                      <Eye size={12} />
+                    </button>
+                    {canManage && !locked && (
+                      <button type="button" className="btn btn-ghost btn-sm" title="Modifier" onClick={() => onEdit(q)}>
+                        <Edit2 size={12} />
+                      </button>
                     )}
                     {q.attachment_url && (
                       <a href={q.attachment_url} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm" title="Télécharger PDF">
                         <Download size={12} />
                       </a>
                     )}
+                    {canManage && !locked && (
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        title="Supprimer"
+                        style={{ color: 'var(--red)' }}
+                        onClick={() => onDelete(q.id)}
+                      >
+                        <Trash2 size={12} />
+                      </button>
+                    )}
+                    {canValidate && !locked && (
+                      <button
+                        type="button"
+                        className="btn btn-primary btn-sm"
+                        disabled={validatingId === q.id}
+                        onClick={() => onValidate(q.id)}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                      >
+                        {validatingId === q.id ? <Loader2 size={12} className="cin-spin" /> : <CheckCircle size={12} />}
+                        Valider
+                      </button>
+                    )}
+                    {q.verrouille && !q.selected && (
+                      <span className="badge badge-grey" style={{ fontSize: '0.65rem' }}><Lock size={10} /> Verrouillé</span>
+                    )}
                   </div>
                 </td>
-              )}
-              {canValidate && (
-                <td>
-                  {!q.selected && !q.verrouille && (
-                    <button
-                      type="button"
-                      className="btn btn-primary btn-sm"
-                      disabled={validatingId === q.id}
-                      onClick={() => onValidate(q.id)}
-                      style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}
-                    >
-                      {validatingId === q.id ? <Loader2 size={12} className="cin-spin" /> : <CheckCircle size={12} />}
-                      Valider ce devis
-                    </button>
-                  )}
-                </td>
-              )}
-            </tr>
-          ))}
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>
@@ -317,7 +343,8 @@ export default function DemandeAchatDetail({
   const canEdit = canEditPurchaseRequest(request.statut);
   const isTerminal = ['Clôturée', 'Refusée'].includes(request.statut);
   const canManageQuotesOnRequest = perms.canManageQuotes && canAddQuoteToRequest(request.statut);
-  const showQuotesSection = !isTerminal;
+  const showQuotesSection = request.statut !== 'Refusée';
+  const quotesReadOnly = isTerminal || !canManageQuotesOnRequest;
   const canValidateDg = perms.canValidateSupplier && canValidateQuoteOnRequest(request.statut);
 
   return (
@@ -406,7 +433,7 @@ export default function DemandeAchatDetail({
           {showQuotesSection && (
             <div className="card">
               <div className="flex-between" style={{ marginBottom: 12 }}>
-                <SectionTitle icon={<Star size={12} />}>Devis fournisseurs</SectionTitle>
+                <SectionTitle icon={<Star size={12} />}>Devis fournisseurs / Comparatif</SectionTitle>
                 {!showQuoteForm && canManageQuotesOnRequest && (
                   <button type="button" className="btn btn-secondary btn-sm" onClick={() => { setEditQuote(null); setShowQuoteForm(true); }}>
                     <Plus size={13} /> Ajouter devis
@@ -425,7 +452,12 @@ export default function DemandeAchatDetail({
               )}
               {!perms.canManageQuotes && quotes.length === 0 && (
                 <div style={{ marginBottom: 12, fontSize: '0.82rem', color: 'var(--text-3)' }}>
-                  Les devis seront saisis par la Chargée d&apos;Achats puis validés par le DG.
+                  Les devis seront saisis par la Chargée d&apos;Achats puis validés par le DG depuis ce comparatif.
+                </div>
+              )}
+              {quotesReadOnly && quotes.length > 0 && (
+                <div style={{ marginBottom: 12, fontSize: '0.82rem', color: 'var(--text-3)' }}>
+                  Comparatif en lecture seule — validation et saisie effectuées depuis cette demande.
                 </div>
               )}
               {showQuoteForm && (

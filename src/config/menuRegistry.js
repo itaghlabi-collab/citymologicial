@@ -142,7 +142,6 @@ export const ERP_RUBRIQUES = Object.freeze([
       { code: 'demandes-achat', label: "Demandes d'achat" },
       { code: 'bons-commande', label: 'Bon de commande' },
       { code: 'fournisseurs', label: 'Fournisseurs' },
-      { code: 'comparaison-devis', label: 'Comparaison devis' },
       { code: 'ordres-achat', label: "Ordre d'achat" },
       { code: 'ordres-paiement-achats', label: 'Ordre de paiement' },
     ],
