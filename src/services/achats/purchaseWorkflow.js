@@ -164,7 +164,13 @@ export async function submitPurchaseRequest(id) {
     err.code = 'VALIDATION';
     throw err;
   }
-  const request = await patchRequest(id, { statut: 'Soumise' }, 'Soumission', 'Demande soumise à la Chargée d\'Achats', ctx);
+  const request = await patchRequest(
+    id,
+    { statut: 'En étude' },
+    'Soumission',
+    `Demande soumise — ${PURCHASE_ASSIGNEE.label} (prise en charge automatique)`,
+    ctx,
+  );
   await notifyPurchaseRequestSubmitted(request);
   return request;
 }
@@ -178,6 +184,30 @@ export async function takeInChargePurchaseRequest(id) {
     throw err;
   }
   return patchRequest(id, { statut: 'En étude' }, 'Prise en charge', PURCHASE_ASSIGNEE.label, ctx);
+}
+
+/** Anciennes DA restées « Soumise » — passage auto en « En étude ». */
+export async function reconcileLegacySoumiseRequests() {
+  const ctx = await getAuthContext();
+  const role = await resolveCurrentPurchaseRole(ctx.user);
+  if (!purchasePermissions(role).canManageQuotes) return 0;
+
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .select('id')
+    .eq('statut', 'Soumise');
+  if (error || !data?.length) return 0;
+
+  await Promise.all(
+    data.map((row) => patchRequest(
+      row.id,
+      { statut: 'En étude' },
+      'Prise en charge',
+      `${PURCHASE_ASSIGNEE.label} (synchronisation automatique)`,
+      ctx,
+    )),
+  );
+  return data.length;
 }
 
 const POST_DG_STATUSES = [

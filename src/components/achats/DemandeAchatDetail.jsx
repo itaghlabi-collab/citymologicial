@@ -20,7 +20,7 @@ import { resolveCurrentPurchaseRole, purchasePermissions } from '../../services/
 import { PURCHASE_ASSIGNEE } from '../../constants/purchaseWorkflow';
 import {
   canEditPurchaseRequest, canAddQuoteToRequest, canValidateQuoteOnRequest,
-  normalizePurchaseStatus, getPurchaseStatusBadge,
+  normalizePurchaseStatus, getPurchaseStatusBadge, getPurchaseStatusLabel,
 } from '../../constants/purchaseWorkflow';
 import { generatePurchaseRequestPdf } from '../../services/achats/purchaseRequestPdf';
 import {
@@ -333,7 +333,7 @@ export default function DemandeAchatDetail({
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <span className={`badge ${BADGE_PRIORITE[request.priorite] || 'badge-grey'}`}>{request.priorite}</span>
-          <span className={`badge ${getPurchaseStatusBadge(request.statut)}`}>{normalizePurchaseStatus(request.statut)}</span>
+          <span className={`badge ${getPurchaseStatusBadge(request.statut)}`}>{getPurchaseStatusLabel(request.statut)}</span>
           {canEdit && (
             <button type="button" className="btn btn-secondary btn-sm" onClick={onEdit}>Modifier</button>
           )}
@@ -418,9 +418,9 @@ export default function DemandeAchatDetail({
                   La demande doit être <strong>soumise</strong> avant d&apos;enregistrer les devis fournisseurs.
                 </div>
               )}
-              {request.statut === 'Soumise' && perms.canManageQuotes && (
+              {request.statut === 'En étude' && perms.canManageQuotes && (
                 <div style={{ marginBottom: 12, padding: 10, background: 'var(--surface-2)', borderRadius: 8, fontSize: '0.82rem' }}>
-                  Prenez en charge la demande ou ajoutez un devis — le statut évoluera automatiquement.
+                  Demande en cours de traitement — vous pouvez enregistrer les devis fournisseurs.
                 </div>
               )}
               {!perms.canManageQuotes && quotes.length === 0 && (

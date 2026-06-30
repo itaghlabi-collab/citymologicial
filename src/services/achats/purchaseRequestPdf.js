@@ -1,7 +1,7 @@
 /**
  * purchaseRequestPdf.js — PDF métier Demande d'achat CITYMO
  */
-import { PURCHASE_ASSIGNEE, normalizePurchaseStatus } from '../../constants/purchaseWorkflow';
+import { PURCHASE_ASSIGNEE, normalizePurchaseStatus, getPurchaseStatusLabel } from '../../constants/purchaseWorkflow';
 import { getPurchaseRequestLineSummary } from './purchaseRequests';
 import {
   createAchatsPdfDoc,
@@ -35,7 +35,7 @@ export async function generatePurchaseRequestPdf(request, { attachments = [] } =
     ['Demandeur', request.requester_name || request.demandeur],
     ['Resp. Achats', request.assigned_employee_name || PURCHASE_ASSIGNEE.label],
     ['Priorité', request.priorite],
-    ['Statut', normalizePurchaseStatus(request.statut)],
+    ['Statut', getPurchaseStatusLabel(request.statut)],
   ]);
 
   y = drawSectionTitle(doc, 'OBJET DE LA DEMANDE', y);

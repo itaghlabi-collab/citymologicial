@@ -79,6 +79,16 @@ export function getPurchaseStatusBadge(statut) {
   return PURCHASE_STATUS_BADGE[normalizePurchaseStatus(statut)] || 'badge-grey';
 }
 
+/** Libellé affiché dans l'UI (le statut en base reste normalisé). */
+export const PURCHASE_STATUS_LABEL = {
+  'En étude': 'En cours de traitement',
+};
+
+export function getPurchaseStatusLabel(statut) {
+  const normalized = normalizePurchaseStatus(statut);
+  return PURCHASE_STATUS_LABEL[normalized] || normalized;
+}
+
 export const QUOTE_STATUSES = {
   ACTIF: 'Actif',
   RETENU: 'Retenu',

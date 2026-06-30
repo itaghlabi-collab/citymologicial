@@ -14,9 +14,9 @@ import { PURCHASE_ASSIGNEE } from '../../constants/purchaseWorkflow';
 import {
   canEditPurchaseRequest, canDeletePurchaseRequest, normalizePurchaseStatus,
   canSubmitPurchaseRequest, canAddQuoteToRequest, canValidateQuoteOnRequest,
-  getPurchaseStatusBadge,
+  getPurchaseStatusBadge, getPurchaseStatusLabel,
 } from '../../constants/purchaseWorkflow';
-import { submitPurchaseRequest, getPurchaseRequestBundle } from '../../services/achats/purchaseWorkflow';
+import { submitPurchaseRequest, getPurchaseRequestBundle, reconcileLegacySoumiseRequests } from '../../services/achats/purchaseWorkflow';
 import { generatePurchaseRequestPdf } from '../../services/achats/purchaseRequestPdf';
 import { resolveCurrentPurchaseRole, purchasePermissions, canViewPurchaseRequest } from '../../services/achats/purchaseWorkflowRoles';
 import DemandeAchatDetail from './DemandeAchatDetail';
@@ -208,7 +208,8 @@ function computeDashboardKpis(items) {
   const norm = (s) => normalizePurchaseStatus(s);
   const ouvertes = items.filter((x) => !['Clôturée', 'Refusée', 'Brouillon'].includes(norm(x.statut))).length;
   const soumises = items.filter((x) => norm(x.statut) === 'Soumise').length;
-  const rechercheDevis = items.filter((x) => ['En étude', 'Devis reçus'].includes(norm(x.statut))).length;
+  const enCoursTraitement = items.filter((x) => norm(x.statut) === 'En étude').length;
+  const rechercheDevis = items.filter((x) => norm(x.statut) === 'Devis reçus').length;
   const attenteDg = items.filter((x) => norm(x.statut) === 'En attente validation DG').length;
   const devisValides = items.filter((x) => norm(x.statut) === 'Devis validé').length;
   const oaEnCours = items.filter((x) => ['Ordre d\'achat créé', 'Commande envoyée'].includes(norm(x.statut))).length;
@@ -222,6 +223,7 @@ function computeDashboardKpis(items) {
   return {
     ouvertes,
     soumises,
+    enCoursTraitement,
     rechercheDevis,
     attenteDg,
     devisValides,
@@ -257,6 +259,13 @@ export default function DemandesAchat() {
   }, [user]);
 
   const perms = useMemo(() => purchasePermissions(role), [role]);
+
+  useEffect(() => {
+    if (!configured || !perms.canManageQuotes) return;
+    reconcileLegacySoumiseRequests()
+      .then((n) => { if (n > 0) reload(); })
+      .catch(() => {});
+  }, [configured, perms.canManageQuotes, reload]);
 
   const visibleItems = useMemo(() => {
     if (perms.canViewAll) return items;
@@ -371,7 +380,8 @@ export default function DemandesAchat() {
       <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', marginBottom: 20 }}>
         <KpiCard icon={<ClipboardList size={17} />} label="Ouvertes" value={kpis.ouvertes} color="blue" />
         <KpiCard icon={<Send size={17} />} label="Soumises" value={kpis.soumises} sub="En attente prise en charge" color="blue" />
-        <KpiCard icon={<Clock size={17} />} label="Recherche devis" value={kpis.rechercheDevis} sub="En étude / devis reçus" color="orange" />
+        <KpiCard icon={<Clock size={17} />} label="En cours de traitement" value={kpis.enCoursTraitement} sub="Prise en charge Achats" color="orange" />
+        <KpiCard icon={<BarChart2 size={17} />} label="Recherche devis" value={kpis.rechercheDevis} sub="Devis fournisseurs reçus" color="purple" />
         <KpiCard icon={<BarChart2 size={17} />} label="Attente validation DG" value={kpis.attenteDg} color="purple" />
         <KpiCard icon={<CheckCircle size={17} />} label="Devis validés" value={kpis.devisValides} color="green" />
         <KpiCard icon={<Package size={17} />} label="OA en cours" value={kpis.oaEnCours} color="blue" />
@@ -389,7 +399,7 @@ export default function DemandesAchat() {
             </div>
             <select value={filterStatut} onChange={(e) => setFilterStatut(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 180 }}>
               <option value="">Tous statuts</option>
-              {STATUTS_DEMANDE.map((s) => <option key={s} value={s}>{s}</option>)}
+              {STATUTS_DEMANDE.map((s) => <option key={s} value={s}>{getPurchaseStatusLabel(s)}</option>)}
             </select>
             <select value={filterPrio} onChange={(e) => setFilterPrio(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 140 }}>
               <option value="">Priorité</option>
@@ -437,7 +447,7 @@ export default function DemandesAchat() {
                     <td data-label="Date">{x.date_limite || '—'}</td>
                     <td data-label="Statut">
                       <span className={`badge ${getPurchaseStatusBadge(x.statut)}`} style={{ fontSize: '0.72rem' }}>
-                        {normalizePurchaseStatus(x.statut)}
+                        {getPurchaseStatusLabel(x.statut)}
                       </span>
                     </td>
                     <td>
