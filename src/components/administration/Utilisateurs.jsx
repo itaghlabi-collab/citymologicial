@@ -28,7 +28,6 @@ const EMPTY_FORM = {
   employee_id: '',
   prenom: '', nom: '', email: '', telephone: '', poste: '',
   password: '', password_confirm: '',
-  new_password: '', new_password_confirm: '',
   force_change_on_login: false,
   department_id: '', statut: 'Actif',
   est_super_admin: false,
@@ -189,8 +188,6 @@ function UserForm({ initial, roles, employees, onSave, onCancel, saving }) {
     ...initial,
     password: '',
     password_confirm: '',
-    new_password: '',
-    new_password_confirm: '',
     submoduleCodes: initial.submoduleCodes || [],
     est_super_admin: Boolean(initial.est_super_admin),
   } : EMPTY_FORM);
@@ -252,9 +249,8 @@ function UserForm({ initial, roles, employees, onSave, onCancel, saving }) {
     if (!form.employee_id && !initial) e.employee_id = 'Sélectionnez un employé RH';
     if (!form.email?.trim()) e.email = 'Requis';
     if (!initial && !form.password) e.password = 'Requis';
-    if (!initial && form.password !== form.password_confirm) e.password_confirm = 'Les mots de passe ne correspondent pas';
-    if (initial && form.new_password && form.new_password !== form.new_password_confirm) {
-      e.new_password_confirm = 'Les mots de passe ne correspondent pas';
+    if (form.password && form.password !== form.password_confirm) {
+      e.password_confirm = 'Les mots de passe ne correspondent pas';
     }
     if (!form.est_super_admin && !(form.submoduleCodes?.length)) {
       e.submoduleCodes = 'Sélectionnez au moins une sous-rubrique ou cochez Super Admin';
@@ -267,14 +263,14 @@ function UserForm({ initial, roles, employees, onSave, onCancel, saving }) {
     const e = validate();
     if (Object.keys(e).length) { setErrors(e); return; }
     const {
-      password_confirm, new_password_confirm, departement, submoduleCodes, est_super_admin,
-      new_password, force_change_on_login, ...data
+      password_confirm, departement, submoduleCodes, est_super_admin,
+      force_change_on_login, ...data
     } = form;
     onSave({
       ...data,
+      password: form.password?.trim() || '',
       submoduleCodes,
       est_super_admin,
-      new_password: new_password?.trim() || '',
       force_change_on_login,
       role_id: resolveRoleId(roles, { estSuperAdmin: est_super_admin }),
       employee: selectedEmployee,
@@ -342,43 +338,30 @@ function UserForm({ initial, roles, employees, onSave, onCancel, saving }) {
 
       <SectionTitle icon={<Key size={12} />}>Compte & Accès</SectionTitle>
       <FRow>
-        {!initial ? (
-          <>
-            <FField label="Mot de passe" required>
-              <div style={{ display: 'flex', gap: 8 }}>
-                <input type="text" value={form.password} onChange={(e) => set('password', e.target.value)} style={{ ...fieldStyle('password'), flex: 1 }} autoComplete="new-password" />
-                <button type="button" className="btn btn-secondary btn-sm" onClick={generatePassword}>Générer</button>
-              </div>
-              {errors.password && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.password}</div>}
-            </FField>
-            <FField label="Confirmer mot de passe">
-              <input type="text" value={form.password_confirm} onChange={(e) => set('password_confirm', e.target.value)} style={fieldStyle('password_confirm')} />
-              {errors.password_confirm && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.password_confirm}</div>}
-            </FField>
-            <FField label="À la prochaine connexion">
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, fontSize: '0.85rem', cursor: 'pointer' }}>
-                <input type="checkbox" checked={form.force_change_on_login} onChange={(e) => set('force_change_on_login', e.target.checked)} />
-                Forcer le changement de mot de passe
-              </label>
-            </FField>
-          </>
-        ) : (
-          <>
-            <FField label="Nouveau mot de passe">
-              <input type="text" value={form.new_password} onChange={(e) => set('new_password', e.target.value)} placeholder="Laisser vide pour ne pas changer" style={fieldStyle('new_password')} autoComplete="new-password" />
-            </FField>
-            <FField label="Confirmer nouveau mot de passe">
-              <input type="text" value={form.new_password_confirm} onChange={(e) => set('new_password_confirm', e.target.value)} style={fieldStyle('new_password_confirm')} />
-              {errors.new_password_confirm && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.new_password_confirm}</div>}
-            </FField>
-            <FField label="À la prochaine connexion">
-              <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, fontSize: '0.85rem', cursor: 'pointer' }}>
-                <input type="checkbox" checked={form.force_change_on_login} onChange={(e) => set('force_change_on_login', e.target.checked)} />
-                Forcer le changement de mot de passe
-              </label>
-            </FField>
-          </>
-        )}
+        <FField label={initial ? 'Nouveau mot de passe' : 'Mot de passe'} required={!initial}>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <input
+              type="text"
+              value={form.password}
+              onChange={(e) => set('password', e.target.value)}
+              placeholder={initial ? 'Laisser vide pour ne pas changer' : undefined}
+              style={{ ...fieldStyle('password'), flex: 1 }}
+              autoComplete="new-password"
+            />
+            <button type="button" className="btn btn-secondary btn-sm" onClick={generatePassword}>Générer</button>
+          </div>
+          {errors.password && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.password}</div>}
+        </FField>
+        <FField label="Confirmer mot de passe">
+          <input type="text" value={form.password_confirm} onChange={(e) => set('password_confirm', e.target.value)} style={fieldStyle('password_confirm')} />
+          {errors.password_confirm && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.password_confirm}</div>}
+        </FField>
+        <FField label="À la prochaine connexion">
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 8, fontSize: '0.85rem', cursor: 'pointer' }}>
+            <input type="checkbox" checked={form.force_change_on_login} onChange={(e) => set('force_change_on_login', e.target.checked)} />
+            Forcer le changement de mot de passe
+          </label>
+        </FField>
         <FField label="Statut">
           <select value={form.statut} onChange={(e) => set('statut', e.target.value)} style={SELECT_STYLE}>
             {STATUTS_USER.map((s) => <option key={s} value={s}>{s}</option>)}
@@ -571,10 +554,10 @@ export default function Utilisateurs({
     setSaving(true);
     setMsg('');
     const editingId = editUser?.id;
-    const newPassword = data.new_password?.trim() || '';
+    const passwordToSet = data.password?.trim() || '';
+    const forceChange = Boolean(data.force_change_on_login);
     try {
       let saved;
-      const tempPwd = data.password;
       if (editUser) {
         saved = await updateUser(editUser.id, data, null);
         if (!data.est_super_admin) {
@@ -583,26 +566,30 @@ export default function Utilisateurs({
           const allCodes = ERP_RUBRIQUES.flatMap((r) => visibleSubmodules(r).map((s) => s.code));
           await saveUserSubmoduleAccess(editUser.id, allCodes);
         }
+        if (passwordToSet) {
+          await adminSetPassword(editUser.id, passwordToSet, { mustChangePassword: forceChange });
+        }
       } else {
-        const forceChange = Boolean(data.force_change_on_login);
+        if (!passwordToSet) throw new Error('Mot de passe requis pour créer le compte.');
         saved = await createUser({
           employee: data.employee,
           role_id: data.role_id,
           department_id: data.department_id,
           statut: data.statut,
-          password: data.password,
+          password: passwordToSet,
           notes: data.notes,
           mustChangePassword: forceChange,
         });
         if (!data.est_super_admin) {
           await saveUserSubmoduleAccess(saved.id, data.submoduleCodes || []);
         }
-        try {
-          await adminSetPassword(saved.id, data.password, { mustChangePassword: forceChange });
-        } catch (pwdErr) {
-          setMsg(`Utilisateur créé, mais mot de passe non confirmé côté serveur : ${pwdErr.message}`);
-        }
-        setCreatedCreds({ email: saved.email, password: tempPwd, nom: [saved.prenom, saved.nom].filter(Boolean).join(' ') });
+        await adminSetPassword(saved.id, passwordToSet, { mustChangePassword: forceChange });
+        setCreatedCreds({
+          email: saved.email,
+          password: passwordToSet,
+          nom: [saved.prenom, saved.nom].filter(Boolean).join(' '),
+          forceChange,
+        });
       }
       setUsers((prev) => {
         const exists = prev.some((u) => u.id === saved.id);
@@ -611,16 +598,6 @@ export default function Utilisateurs({
       setShowModal(false);
       setEditUser(null);
       reload?.();
-
-      if (editingId && newPassword) {
-        try {
-          await adminSetPassword(editingId, newPassword, {
-            mustChangePassword: Boolean(data.force_change_on_login),
-          });
-        } catch (pwdErr) {
-          setMsg(`Utilisateur enregistré, mais mot de passe non modifié : ${pwdErr.message}`);
-        }
-      }
     } catch (err) {
       setMsg(err.message || 'Erreur enregistrement');
     } finally {
@@ -799,13 +776,15 @@ export default function Utilisateurs({
         {createdCreds && (
           <div>
             <p style={{ fontSize: '0.88rem', color: 'var(--text-2)' }}>
-              Transmettez ces identifiants à <strong>{createdCreds.nom}</strong>. Le mot de passe est géré par Supabase Auth et ne sera pas stocké dans l&apos;ERP.
+              Transmettez ces identifiants à <strong>{createdCreds.nom}</strong>. Le mot de passe est actif immédiatement.
             </p>
             <div style={{ background: 'var(--surface-2)', borderRadius: 8, padding: 14, marginBottom: 16, fontFamily: 'monospace', fontSize: '0.85rem' }}>
               <div>Email : {createdCreds.email}</div>
-              <div>Mot de passe temporaire : {createdCreds.password}</div>
+              <div>Mot de passe : {createdCreds.password}</div>
             </div>
-            <p style={{ fontSize: '0.78rem', color: '#E65100' }}>Changement de mot de passe obligatoire à la première connexion.</p>
+            {createdCreds.forceChange && (
+              <p style={{ fontSize: '0.78rem', color: '#E65100' }}>Changement de mot de passe obligatoire à la première connexion.</p>
+            )}
             <button type="button" className="btn btn-primary" style={{ width: '100%', marginTop: 8 }} onClick={() => setCreatedCreds(null)}>Fermer</button>
           </div>
         )}
