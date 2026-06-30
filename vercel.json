@@ -43,6 +43,10 @@
     "api/admin/users/[...path].js": {
       "maxDuration": 60,
       "memory": 512
+    },
+    "api/admin/users/[id]/password.js": {
+      "maxDuration": 60,
+      "memory": 512
     }
   }
 }
