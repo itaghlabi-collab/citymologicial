@@ -57,12 +57,18 @@ function toFormState(item) {
   };
 }
 
-function buildFormPayload(form, existingPayload = {}) {
+function buildFormPayload(form, existingPayload = {}, attachments = []) {
   const fournisseur = (form.fournisseur || '').trim();
   return {
     ...existingPayload,
     supplier_id: form.supplier_id || null,
     fournisseur_souhaite: fournisseur || null,
+    attachments: attachments.map((a) => ({
+      name: a.name,
+      size: a.size,
+      type: a.type,
+      storage_path: a.storage_path,
+    })),
     lines: [{
       designation: form.titre?.trim() || '—',
       quantite: form.quantite !== '' && form.quantite != null ? Number(form.quantite) : null,
@@ -75,6 +81,7 @@ function buildFormPayload(form, existingPayload = {}) {
 
 function DemandeForm({ initial, onSave, onCancel, saving, suppliers = [] }) {
   const [form, setForm] = useState(() => toFormState(initial));
+  const [attachments, setAttachments] = useState(() => initial?.payload?.attachments || []);
   const [errors, setErrors] = useState({});
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
@@ -83,6 +90,18 @@ function DemandeForm({ initial, onSave, onCancel, saving, suppliers = [] }) {
   useEffect(() => {
     setForm(toFormState(initial));
     setErrors({});
+    let cancelled = false;
+    (async () => {
+      const raw = initial?.payload?.attachments || [];
+      if (!raw.length) {
+        if (!cancelled) setAttachments([]);
+        return;
+      }
+      const { resolvePurchaseAttachments } = await import('../../services/achats/purchaseStorage');
+      const resolved = await resolvePurchaseAttachments(raw);
+      if (!cancelled) setAttachments(resolved);
+    })();
+    return () => { cancelled = true; };
   }, [initial]);
 
   function handleSupplierChange(supplierId) {
@@ -103,7 +122,7 @@ function DemandeForm({ initial, onSave, onCancel, saving, suppliers = [] }) {
     setErrors({});
     onSave({
       ...form,
-      payload: buildFormPayload(form, initial?.payload),
+      payload: buildFormPayload(form, initial?.payload, attachments),
     });
   }
 
@@ -192,7 +211,15 @@ function DemandeForm({ initial, onSave, onCancel, saving, suppliers = [] }) {
       <FField label="Commentaires">
         <textarea value={form.commentaires_internes} onChange={(e) => set('commentaires_internes', e.target.value)} placeholder="Notes internes..." style={{ ...TEXTAREA_STYLE, minHeight: 56 }} />
       </FField>
-      <div style={{ marginBottom: 20 }}><UploadField label="Pièces jointes" /></div>
+      <div style={{ marginBottom: 20 }}>
+        <UploadField
+          label="Pièces jointes"
+          value={attachments}
+          onChange={setAttachments}
+          scope="requests"
+          scopeId={initial?.id || 'new'}
+        />
+      </div>
       <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
         <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={saving}>Annuler</button>
         <button type="submit" className="btn btn-primary" disabled={saving} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
@@ -340,20 +367,37 @@ export default function DemandesAchat() {
 
   if (detailId) {
     return (
-      <DemandeAchatDetail
-        requestId={detailId}
-        suppliers={suppliers}
-        onBack={() => { setDetailId(null); setDetailAddQuote(false); }}
-        initialShowQuoteForm={detailAddQuote}
-        onEdit={() => {
-          const item = items.find((x) => x.id === detailId);
-          if (item && canEditPurchaseRequest(item.statut)) {
+      <>
+        <DemandeAchatDetail
+          requestId={detailId}
+          suppliers={suppliers}
+          onBack={() => { setDetailId(null); setDetailAddQuote(false); }}
+          initialShowQuoteForm={detailAddQuote}
+          onEdit={() => {
+            const item = items.find((x) => x.id === detailId);
+            if (!item) {
+              window.alert('Demande introuvable.');
+              return;
+            }
+            if (!canEditPurchaseRequest(item.statut)) {
+              window.alert('Cette demande ne peut être modifiée qu\'en statut Brouillon.');
+              return;
+            }
             setEditItem(item);
             setShowModal(true);
-          }
-        }}
-        onRefresh={reload}
-      />
+          }}
+          onRefresh={reload}
+        />
+        <Modal open={showModal} onClose={() => { setShowModal(false); setEditItem(null); }} title={editItem ? 'Modifier la demande' : "Nouvelle demande d'achat"} width={680}>
+          <DemandeForm
+            initial={editItem}
+            onSave={handleSave}
+            onCancel={() => { setShowModal(false); setEditItem(null); }}
+            saving={saving}
+            suppliers={suppliers}
+          />
+        </Modal>
+      </>
     );
   }
 

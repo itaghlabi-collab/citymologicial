@@ -422,9 +422,11 @@ export async function closePurchaseRequest(id) {
 }
 
 export async function getPurchaseRequestBundle(id) {
-  const request = await fetchRequest(id);
+  const rawRequest = await fetchRequest(id);
+  const { enrichPurchaseRequestFiles, enrichPurchaseQuotesFiles } = await import('./purchaseStorage');
+  const request = await enrichPurchaseRequestFiles(rawRequest);
   const [quotes, history] = await Promise.all([
-    listQuotesForRequest(id),
+    listQuotesForRequest(id).then(enrichPurchaseQuotesFiles),
     import('./purchaseRequestHistory').then((m) => m.listPurchaseRequestHistory(id)),
   ]);
   let acquisitionOrder = null;

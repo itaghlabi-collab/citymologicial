@@ -541,6 +541,29 @@ CREATE POLICY notifications_update ON public.notifications
 GRANT ALL ON public.notifications TO authenticated, service_role;
 ALTER TABLE public.notifications REPLICA IDENTITY FULL;
 
+-- Bucket pièces jointes achats (préfixe achats/ dans citymo-documents)
+INSERT INTO storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+VALUES (
+  'citymo-documents',
+  'citymo-documents',
+  false,
+  52428800,
+  ARRAY['application/pdf','image/jpeg','image/png','image/webp','image/gif','application/msword','application/vnd.openxmlformats-officedocument.wordprocessingml.document']
+)
+ON CONFLICT (id) DO NOTHING;
+
+DROP POLICY IF EXISTS citymo_documents_storage_select ON storage.objects;
+CREATE POLICY citymo_documents_storage_select ON storage.objects
+  FOR SELECT TO authenticated USING (bucket_id = 'citymo-documents');
+
+DROP POLICY IF EXISTS citymo_documents_storage_insert ON storage.objects;
+CREATE POLICY citymo_documents_storage_insert ON storage.objects
+  FOR INSERT TO authenticated WITH CHECK (bucket_id = 'citymo-documents');
+
+DROP POLICY IF EXISTS citymo_documents_storage_delete ON storage.objects;
+CREATE POLICY citymo_documents_storage_delete ON storage.objects
+  FOR DELETE TO authenticated USING (bucket_id = 'citymo-documents');
+
 -- ═══════════════════════════════════════════════════════════════════════════
 -- FIN — rechargement API + contrôle
 -- ═══════════════════════════════════════════════════════════════════════════

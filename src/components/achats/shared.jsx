@@ -1,7 +1,10 @@
 /**
  * achats/shared.jsx — Composants partagés module Achats ERP CITYMO
  */
-import { X, Plus } from 'lucide-react';
+import { useState, useRef } from 'react';
+import { X, Plus, Loader2, FileText, Image as ImageIcon, Trash2 } from 'lucide-react';
+import { uploadPurchaseFile } from '../../services/achats/purchaseStorage';
+import { formatFileSize } from '../../services/uploadService';
 
 export const INPUT_STYLE = {
   width: '100%', padding: '8px 11px', border: '1.5px solid var(--border)',
@@ -136,14 +139,112 @@ export function FRow({ children }) {
   return <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(210px, 1fr))', gap: 14, marginBottom: 14 }}>{children}</div>;
 }
 
-export function UploadField({ label }) {
+function fileIcon(mime) {
+  if (mime?.startsWith('image/')) return <ImageIcon size={13} />;
+  return <FileText size={13} />;
+}
+
+export function UploadField({
+  label,
+  value = [],
+  onChange,
+  multiple = true,
+  accept = '.pdf,.jpg,.jpeg,.png,.webp,.gif',
+  scope = 'requests',
+  scopeId,
+  disabled = false,
+}) {
+  const inputRef = useRef(null);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState('');
+  const files = Array.isArray(value) ? value : (value ? [value] : []);
+
+  async function handleFiles(selected) {
+    if (!selected?.length || disabled) return;
+    setUploading(true);
+    setError('');
+    try {
+      const uploaded = [];
+      for (const file of selected) {
+        const storage_path = await uploadPurchaseFile(file, { scope, scopeId: scopeId || 'draft' });
+        uploaded.push({
+          name: file.name,
+          size: file.size,
+          type: file.type,
+          storage_path,
+        });
+      }
+      const next = multiple ? [...files, ...uploaded] : uploaded.slice(0, 1);
+      onChange?.(multiple ? next : next[0] || null);
+    } catch (err) {
+      setError(err.message || 'Erreur upload');
+    } finally {
+      setUploading(false);
+      if (inputRef.current) inputRef.current.value = '';
+    }
+  }
+
+  function removeAt(index) {
+    const next = files.filter((_, i) => i !== index);
+    onChange?.(multiple ? next : next[0] || null);
+  }
+
   return (
     <div>
-      {label && <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: 800, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 5 }}>{label}</label>}
-      <label style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', border: '1.5px dashed var(--border)', borderRadius: 6, cursor: 'pointer', background: 'var(--surface-2)', fontSize: '0.82rem', color: 'var(--text-3)' }}>
-        <Plus size={14} /><span>Cliquer pour ajouter un fichier</span>
-        <input type="file" multiple style={{ display: 'none' }} />
+      {label && (
+        <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: 800, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 5 }}>
+          {label}
+        </label>
+      )}
+      <label
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px',
+          border: '1.5px dashed var(--border)', borderRadius: 6,
+          cursor: disabled || uploading ? 'not-allowed' : 'pointer',
+          background: 'var(--surface-2)', fontSize: '0.82rem', color: 'var(--text-3)',
+          opacity: disabled || uploading ? 0.65 : 1,
+        }}
+      >
+        {uploading ? <Loader2 size={14} className="cin-spin" /> : <Plus size={14} />}
+        <span>{uploading ? 'Envoi en cours…' : 'Cliquer pour ajouter un fichier (PDF, image)'}</span>
+        <input
+          ref={inputRef}
+          type="file"
+          multiple={multiple}
+          accept={accept}
+          style={{ display: 'none' }}
+          disabled={disabled || uploading}
+          onChange={(e) => handleFiles(Array.from(e.target.files || []))}
+        />
       </label>
+      {error && <div style={{ color: 'var(--red)', fontSize: '0.72rem', marginTop: 4 }}>{error}</div>}
+      {files.length > 0 && (
+        <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {files.map((f, i) => (
+            <div
+              key={`${f.storage_path || f.name}-${i}`}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 8, padding: '6px 10px',
+                background: '#fff', border: '1px solid var(--border)', borderRadius: 6, fontSize: '0.8rem',
+              }}
+            >
+              {fileIcon(f.type)}
+              <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{f.name}</span>
+              {f.size ? <span style={{ color: 'var(--text-3)', fontSize: '0.72rem' }}>{formatFileSize(f.size)}</span> : null}
+              {f.url && (
+                <a href={f.url} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm" style={{ padding: '2px 6px' }}>
+                  Voir
+                </a>
+              )}
+              {!disabled && (
+                <button type="button" className="btn btn-ghost btn-sm" style={{ color: 'var(--red)', padding: '2px 6px' }} onClick={() => removeAt(i)}>
+                  <Trash2 size={12} />
+                </button>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

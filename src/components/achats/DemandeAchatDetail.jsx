@@ -155,8 +155,16 @@ function QuoteComparisonTable({
   );
 }
 
-function QuoteForm({ suppliers, initial, onSave, onCancel, saving }) {
+function QuoteForm({ suppliers, initial, onSave, onCancel, saving, requestId }) {
   const [form, setForm] = useState(() => (initial ? { ...EMPTY_QUOTE, ...initial, ref_devis_fournisseur: initial.ref_devis || initial.ref_devis_fournisseur || '' } : EMPTY_QUOTE));
+  const [attachment, setAttachment] = useState(() => {
+    if (!initial?.attachment_url && !initial?.attachment_storage_path) return null;
+    return {
+      name: initial.attachment_name || 'Pièce jointe',
+      storage_path: initial.attachment_storage_path || initial.attachment_url,
+      url: initial.attachment_storage_path ? '' : initial.attachment_url,
+    };
+  });
   const [errors, setErrors] = useState({});
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
@@ -179,7 +187,10 @@ function QuoteForm({ suppliers, initial, onSave, onCancel, saving }) {
       return;
     }
     setErrors({});
-    onSave(form);
+    onSave({
+      ...form,
+      attachment_url: attachment?.storage_path || attachment?.url || form.attachment_url || '',
+    });
   }
 
   function handleHtChange(val) {
@@ -255,7 +266,16 @@ function QuoteForm({ suppliers, initial, onSave, onCancel, saving }) {
       <FField label="Observations">
         <textarea value={form.observations} onChange={(e) => set('observations', e.target.value)} style={TEXTAREA_STYLE} />
       </FField>
-      <div style={{ marginBottom: 14 }}><UploadField label="Pièce jointe PDF" /></div>
+      <div style={{ marginBottom: 14 }}>
+        <UploadField
+          label="Pièce jointe (PDF / image)"
+          value={attachment}
+          onChange={setAttachment}
+          multiple={false}
+          scope="quotes"
+          scopeId={requestId || 'draft'}
+        />
+      </div>
       <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
         <button type="button" className="btn btn-secondary btn-sm" onClick={onCancel} disabled={saving}>Annuler</button>
         <button type="submit" className="btn btn-primary btn-sm" disabled={saving}>
@@ -428,6 +448,37 @@ export default function DemandeAchatDetail({
                 {request.description}
               </div>
             )}
+            {(request.payload?.attachments?.length > 0) && (
+              <div style={{ marginTop: 14 }}>
+                <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 8 }}>Pièces jointes</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {request.payload.attachments.map((a, i) => (
+                    <div
+                      key={a.storage_path || a.name || i}
+                      style={{
+                        display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.84rem',
+                        padding: '8px 10px', background: 'var(--surface-2)', borderRadius: 6,
+                      }}
+                    >
+                      <FileText size={14} />
+                      <span style={{ flex: 1, fontWeight: 600 }}>{a.name || 'Fichier'}</span>
+                      {a.url ? (
+                        <>
+                          <a href={a.url} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm" title="Voir">
+                            <Eye size={12} />
+                          </a>
+                          <a href={a.url} download={a.name || 'piece-jointe'} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm" title="Télécharger">
+                            <Download size={12} />
+                          </a>
+                        </>
+                      ) : (
+                        <span style={{ fontSize: '0.75rem', color: 'var(--text-3)' }}>Lien indisponible</span>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {showQuotesSection && (
@@ -466,6 +517,7 @@ export default function DemandeAchatDetail({
                     suppliers={suppliers}
                     initial={editQuote}
                     saving={saving}
+                    requestId={request.id}
                     onCancel={() => { setShowQuoteForm(false); setEditQuote(null); }}
                     onSave={(form) => runAction(async () => {
                       if (editQuote?.id) {
