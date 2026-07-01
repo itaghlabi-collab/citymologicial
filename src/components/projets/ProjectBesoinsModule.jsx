@@ -21,6 +21,7 @@ import { getBesoinActions } from './besoins/besoinActions';
 import BesoinFormModal from './besoins/BesoinFormModal';
 import BesoinDetailModal from './besoins/BesoinDetailModal';
 import DemandesChantier from '../inventaire/DemandesChantier.jsx';
+import MaterialBesoinsSection from './besoins/MaterialBesoinsSection.jsx';
 
 function KpiCard({ icon, label, value, sub, color = 'grey' }) {
   const colors = { red: 'var(--red)', blue: '#1565C0', green: '#2E7D32', orange: '#E65100', grey: 'var(--text-3)', purple: '#6A1B9A' };
@@ -317,6 +318,16 @@ export default function ProjectBesoinsModule({ projet }) {
         }}
         >
           <Package size={14} /> Besoins matériel / matériaux
+        </div>
+
+        <MaterialBesoinsSection projet={projet} />
+
+        <div style={{
+          margin: '20px 0 12px', paddingTop: 16, borderTop: '1px dashed var(--border)',
+          fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase',
+        }}
+        >
+          Demandes chantier — catalogue stock &amp; magasinier
         </div>
 
         <DemandesChantier projet={projet} embedded />
