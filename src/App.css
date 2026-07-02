@@ -7296,8 +7296,11 @@ tbody tr:last-child td { border-bottom: none; }
   border-radius: 10px;
   box-shadow: 0 12px 36px rgba(0, 0, 0, 0.14);
   padding: 6px;
-  max-height: min(70vh, 420px);
+  max-height: min(75vh, 420px);
   overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .crm-devis-menu-item {

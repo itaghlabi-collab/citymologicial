@@ -56,10 +56,38 @@ export default function DevisActionsMenu({
     if (!btnRef.current) return;
     const r = btnRef.current.getBoundingClientRect();
     const menuW = 248;
+    const gap = 6;
+    const margin = 8;
     let left = r.right - menuW;
-    if (left < 8) left = 8;
-    if (left + menuW > window.innerWidth - 8) left = window.innerWidth - menuW - 8;
-    setRect({ top: r.bottom + 6, left, width: menuW });
+    if (left < margin) left = margin;
+    if (left + menuW > window.innerWidth - margin) left = window.innerWidth - menuW - margin;
+
+    const spaceBelow = window.innerHeight - r.bottom - gap - margin;
+    const spaceAbove = r.top - gap - margin;
+    const openBelow = spaceBelow >= 220 || spaceBelow >= spaceAbove;
+    const maxHeight = Math.max(
+      160,
+      Math.min(openBelow ? spaceBelow : spaceAbove, 420, window.innerHeight * 0.75),
+    );
+
+    if (openBelow) {
+      setRect({
+        left,
+        width: menuW,
+        maxHeight,
+        top: r.bottom + gap,
+        bottom: null,
+      });
+      return;
+    }
+
+    setRect({
+      left,
+      width: menuW,
+      maxHeight,
+      top: null,
+      bottom: window.innerHeight - r.top + gap,
+    });
   }
 
   useEffect(() => {
@@ -72,7 +100,7 @@ export default function DevisActionsMenu({
       window.removeEventListener('scroll', onReposition, true);
       window.removeEventListener('resize', onReposition);
     };
-  }, [open]);
+  }, [open, showStatuts]);
 
   useEffect(() => {
     function onDocClick(e) {
@@ -97,7 +125,15 @@ export default function DevisActionsMenu({
     <div
       ref={menuRef}
       className="crm-devis-actions-menu"
-      style={{ position: 'fixed', top: rect.top, left: rect.left, width: rect.width, zIndex: 10000 }}
+      style={{
+        position: 'fixed',
+        left: rect.left,
+        width: rect.width,
+        zIndex: 10000,
+        maxHeight: rect.maxHeight,
+        overflowY: 'auto',
+        ...(rect.top != null ? { top: rect.top } : { bottom: rect.bottom }),
+      }}
     >
       <MenuItem icon={Eye} label="Aperçu" onClick={closeAnd(onPreview)} />
       <MenuItem icon={Download} label="Télécharger PDF" onClick={closeAnd(onPdf)} disabled={pdfLoading} />
