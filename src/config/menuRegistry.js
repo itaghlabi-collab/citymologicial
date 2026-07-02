@@ -89,7 +89,6 @@ export const ERP_RUBRIQUES = Object.freeze([
       { code: 'devis', label: 'Devis' },
       { code: 'factures', label: 'Factures' },
       { code: 'bon-livraison', label: 'Bon de livraison' },
-      { code: 'crm-archives', label: 'Archives' },
     ],
   },
   {

@@ -25,7 +25,6 @@ import Categories from './components/crm/Categories';
 import Devis from './components/crm/Devis';
 import Factures from './components/crm/Factures';
 import BonLivraison from './components/crm/BonLivraison';
-import Archives from './components/crm/Archives';
 import Prospects from './components/commercial/Prospects';
 import DevisAttente from './components/commercial/DevisAttente';
 import PlanningCommercial from './components/commercial/PlanningCommercial';
@@ -51,7 +50,7 @@ import {
   HardHat, ClockIcon, Banknote, BarChart3, Handshake,
   UserSquare, FileEdit, CalendarRange, Megaphone,
   NotebookPen, Receipt, Lightbulb,
-  Contact, ShoppingBag, Tag, FileText, ScrollText, PackageCheck, Archive,
+  Contact, ShoppingBag, Tag, FileText, ScrollText, PackageCheck,
   Truck, Wrench, History,
   FolderOpen, AlertCircle, ClipboardCheck,
   MessageSquare,
@@ -122,7 +121,6 @@ const NAV = [
       { id: 'devis',              label: 'Devis',                icon: FileText },
       { id: 'factures',           label: 'Factures',             icon: ScrollText },
       { id: 'bon-livraison',      label: 'Bon de livraison',     icon: PackageCheck },
-      { id: 'crm-archives',       label: 'Archives',             icon: Archive },
     ],
   },
   {
@@ -219,7 +217,6 @@ const MODULE_LABELS = {
   devis:               'Devis',
   factures:            'Factures',
   'bon-livraison':     'Bon de livraison',
-  'crm-archives':      'Archives CRM',
   vehicules:           'Vehicules',
   interventions:       "Demandes d'intervention",
   'historique-interv': "Historique d'intervention",
@@ -287,7 +284,6 @@ function PageContent({ module, onNavigate, inventaireArticleCode, onInventaireAr
     case 'devis':               return <Devis />;
     case 'factures':            return <Factures />;
     case 'bon-livraison':       return <BonLivraison />;
-    case 'crm-archives':        return <Archives />;
     /* Logistique */
     case 'vehicules':           return <Logistique activeTab="vehicules" />;
     case 'interventions':       return <Logistique activeTab="interventions" />;
