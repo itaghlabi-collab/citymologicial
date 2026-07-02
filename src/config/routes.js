@@ -69,6 +69,7 @@ export const ROUTES = {
   FEUILLE_CAISSE:     'feuille-caisse',
   CATEGORIES_CHARGE:  'categories-charge',
   CHARGES:            'charges',
+  DEPENSES_PAR_PROJET: 'depenses-par-projet',
   ORDRES_PAIEMENT:    'ordres-paiement',
 
   // Achats

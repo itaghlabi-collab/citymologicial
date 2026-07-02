@@ -55,7 +55,7 @@ import {
   FolderOpen, AlertCircle, ClipboardCheck,
   MessageSquare,
   FolderClosed, Share2, Link, Trash2,
-  ListFilter, TrendingDown, CreditCard, PiggyBank, Wallet,
+  ListFilter, TrendingDown, CreditCard, PiggyBank, Wallet, BarChart2,
   ClipboardList, ShoppingCart, UserCog, FileCheck,
   Boxes, Package, ArrowUpDown,
   Database,
@@ -155,6 +155,7 @@ const NAV = [
       { id: 'feuille-caisse',     label: 'Feuille de caisse',    icon: Wallet },
       { id: 'categories-charge',  label: 'Categories charge',    icon: ListFilter },
       { id: 'charges',            label: 'Charges',              icon: TrendingDown },
+      { id: 'depenses-par-projet', label: 'Dépenses par projet', icon: BarChart2 },
       { id: 'ordres-paiement',    label: 'Ordre de paiement',    icon: CreditCard },
     ],
   },
@@ -231,6 +232,7 @@ const MODULE_LABELS = {
   'feuille-caisse':    'Feuille de caisse',
   'categories-charge': 'Categories charge',
   charges:             'Charges',
+  'depenses-par-projet': 'Dépenses par projet',
   'ordres-paiement':   'Ordre de paiement',
   'demandes-achat':    "Demandes d'achat",
   'bons-commande':     'Bon de commande',
@@ -304,6 +306,7 @@ function PageContent({ module, onNavigate, inventaireArticleCode, onInventaireAr
     case 'feuille-caisse':      return <Finance activeTab="feuille-caisse" />;
     case 'categories-charge':   return <Finance activeTab="categories-charge" />;
     case 'charges':             return <Finance activeTab="charges" />;
+    case 'depenses-par-projet': return <Finance activeTab="depenses-par-projet" />;
     case 'ordres-paiement-achats':
     case 'ordres-paiement':     return <Finance activeTab="ordres-paiement" />;
     /* Achats */

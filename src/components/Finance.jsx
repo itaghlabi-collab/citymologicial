@@ -7,6 +7,7 @@ import CategoriesCharge from './finance/CategoriesCharge.jsx';
 import Charges from './finance/Charges.jsx';
 import FeuilleCaisse from './finance/FeuilleCaisse.jsx';
 import OrdresPaiement from './finance/OrdresPaiement.jsx';
+import DepensesParProjet from './finance/DepensesParProjet.jsx';
 import { useChargeCategories } from '../hooks/useChargeCategories';
 
 export default function Finance({ activeTab }) {
@@ -25,6 +26,7 @@ export default function Finance({ activeTab }) {
       {tab === 'charges' && <Charges categories={categories} />}
       {tab === 'feuille-caisse' && <FeuilleCaisse />}
       {tab === 'ordres-paiement' && <OrdresPaiement categories={categories} />}
+      {tab === 'depenses-par-projet' && <DepensesParProjet />}
     </div>
   );
 }

@@ -131,6 +131,7 @@ export const ERP_RUBRIQUES = Object.freeze([
       { code: 'feuille-caisse', label: 'Feuille de caisse' },
       { code: 'categories-charge', label: 'Catégories charge' },
       { code: 'charges', label: 'Charges' },
+      { code: 'depenses-par-projet', label: 'Dépenses par projet' },
       { code: 'ordres-paiement', label: 'Ordre de paiement' },
     ],
   },
@@ -234,7 +235,7 @@ export const ROLE_TEMPLATES = Object.freeze({
     departmentId: 6,
     permissions: () => {
       const m = emptySubmodulePermissions();
-      ['finance-dashboard', 'feuille-caisse', 'categories-charge', 'charges', 'ordres-paiement'].forEach((code) => {
+      ['finance-dashboard', 'feuille-caisse', 'categories-charge', 'charges', 'depenses-par-projet', 'ordres-paiement'].forEach((code) => {
         m[code] = { voir: true, creer: true, modifier: true, supprimer: false, valider: true, exporter: true };
       });
       return m;
