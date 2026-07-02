@@ -165,7 +165,6 @@ const NAV = [
       { id: 'bons-commande',      label: 'Bon de commande',      icon: ShoppingCart },
       { id: 'fournisseurs',       label: 'Fournisseurs',         icon: UserCog },
       { id: 'ordres-achat',       label: "Ordre d'achat",        icon: FileCheck },
-      { id: 'ordres-paiement-achats', label: "Ordre de paiement", icon: CreditCard },
     ],
   },
   {
@@ -305,6 +304,7 @@ function PageContent({ module, onNavigate, inventaireArticleCode, onInventaireAr
     case 'feuille-caisse':      return <Finance activeTab="feuille-caisse" />;
     case 'categories-charge':   return <Finance activeTab="categories-charge" />;
     case 'charges':             return <Finance activeTab="charges" />;
+    case 'ordres-paiement-achats':
     case 'ordres-paiement':     return <Finance activeTab="ordres-paiement" />;
     /* Achats */
     case 'demandes-achat':      return <Achats activeTab="demandes-achat" />;
@@ -312,7 +312,6 @@ function PageContent({ module, onNavigate, inventaireArticleCode, onInventaireAr
     case 'fournisseurs':        return <Achats activeTab="fournisseurs" />;
     case 'comparaison-devis':   return <Achats activeTab="demandes-achat" />;
     case 'ordres-achat':        return <Achats activeTab="ordres-achat" />;
-    case 'ordres-paiement-achats': return <Achats activeTab="ordres-paiement-achats" />;
     /* Inventaire & Depot */
     case 'categories-stock':    return <Inventaire activeTab="categories-stock" />;
     case 'articles-stock':      return (

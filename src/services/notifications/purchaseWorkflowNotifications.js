@@ -136,7 +136,7 @@ export async function notifyPaymentOrderCreated(request, oa, op) {
     priority: NOTIFICATION_PRIORITIES.HIGH,
     entityType: 'purchase_payment_created',
     entityId: op?.id,
-    actionUrl: '/?module=achats&tab=ordres-paiement-achats',
+    actionUrl: 'module:ordres-paiement',
   });
 }
 
@@ -148,7 +148,7 @@ export async function notifyPaymentValidated(op) {
     priority: NOTIFICATION_PRIORITIES.NORMAL,
     entityType: 'purchase_payment_validated',
     entityId: op?.id,
-    actionUrl: '/?module=achats&tab=ordres-paiement-achats',
+    actionUrl: 'module:ordres-paiement',
   });
 }
 

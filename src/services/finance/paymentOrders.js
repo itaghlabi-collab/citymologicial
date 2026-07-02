@@ -45,8 +45,20 @@ export function normalizePaymentOrder(row) {
     charge_id: row.charge_id || null,
     justificatifs: row.justificatifs || [],
     date_creation: row.created_at ? String(row.created_at).slice(0, 10) : '',
+    origine: resolvePaymentOrderOrigin(row),
     created_at: row.created_at,
   };
+}
+
+/** Libellé d'origine pour l'UI (liste Finance unique) */
+export function resolvePaymentOrderOrigin(row) {
+  if (!row) return 'Autre';
+  if (row.purchase_request_id || row.purchase_acquisition_order_id || row.purchase_request_ref) {
+    return 'Achats';
+  }
+  if (row.charge_id) return 'Finance / Trésorerie';
+  if (row.worker_id || row.client_id) return 'Autre';
+  return 'Manuel';
 }
 
 export function toPaymentOrderRow(form) {

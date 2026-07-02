@@ -181,6 +181,7 @@ function DetailOrdre({ ordre, onBack, onEdit, onDelete, onValider, onExecuter, o
             <SectionTitle icon={<CreditCard size={13} />}>Informations ordre</SectionTitle>
             <div className="finance-detail-fields">
               {[
+                ['Origine', ordre.origine || '—'],
                 ['Bénéficiaire', ordre.beneficiaire],
                 ['Type', ordre.type_benef || '—'],
                 ['Fournisseur lié', ordre.fournisseur_lie || '—'],
@@ -189,6 +190,10 @@ function DetailOrdre({ ordre, onBack, onEdit, onDelete, onValider, onExecuter, o
                 ['Référence règl.', ordre.ref_reglement || '—'],
                 ['Date prévue', ordre.date_prevue || '—'],
                 ['Motif', ordre.motif || '—'],
+                ...(ordre.origine === 'Achats' ? [
+                  ['Demande d\'achat', ordre.purchase_request_ref || '—'],
+                  ['Ordre d\'achat', ordre.purchase_oa_ref || '—'],
+                ] : []),
               ].map(([lbl, val]) => (
                 <div key={lbl} style={{ paddingBottom: 10, borderBottom: '1px solid var(--surface-2)' }}>
                   <div style={{ fontSize: '0.68rem', fontWeight: 800, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 3 }}>{lbl}</div>
@@ -243,6 +248,7 @@ export default function OrdresPaiement({ categories = [] }) {
   const [filterStatut, setFilterStatut] = useState('');
   const [filterMode, setFilterMode] = useState('');
   const [filterCompta, setFilterCompta] = useState('');
+  const [filterOrigine, setFilterOrigine] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [showModal, setShowModal] = useState(false);
   const [editOrdre, setEditOrdre] = useState(null);
@@ -280,11 +286,12 @@ export default function OrdresPaiement({ categories = [] }) {
 
   const filtered = ordres.filter(o => {
     const q = search.toLowerCase();
-    const matchQ = !q || o.ref?.toLowerCase().includes(q) || o.beneficiaire?.toLowerCase().includes(q) || (o.motif || '').toLowerCase().includes(q) || (o.fournisseur_lie || '').toLowerCase().includes(q);
+    const matchQ = !q || o.ref?.toLowerCase().includes(q) || o.beneficiaire?.toLowerCase().includes(q) || (o.motif || '').toLowerCase().includes(q) || (o.fournisseur_lie || '').toLowerCase().includes(q) || (o.purchase_request_ref || '').toLowerCase().includes(q) || (o.purchase_oa_ref || '').toLowerCase().includes(q);
     const matchS = !filterStatut || o.statut === filterStatut;
     const matchM = !filterMode || o.mode_paiement === filterMode;
     const matchC = !filterCompta || o.comptabilise === filterCompta;
-    return matchQ && matchS && matchM && matchC;
+    const matchO = !filterOrigine || o.origine === filterOrigine;
+    return matchQ && matchS && matchM && matchC && matchO;
   });
 
   const enAttente = ordres.filter((o) => ['En attente', 'Brouillon', 'Soumis'].includes(o.statut)).length;
@@ -371,7 +378,14 @@ export default function OrdresPaiement({ categories = [] }) {
               <option value="Oui">Comptabilisé</option>
               <option value="Non">Non comptabilisé</option>
             </select>
-            <button className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setFilterStatut(''); setFilterMode(''); setFilterCompta(''); }}>
+            <select value={filterOrigine} onChange={e => setFilterOrigine(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 180 }}>
+              <option value="">Toutes origines</option>
+              <option value="Achats">Achats</option>
+              <option value="Finance / Trésorerie">Finance / Trésorerie</option>
+              <option value="Manuel">Manuel</option>
+              <option value="Autre">Autre</option>
+            </select>
+            <button className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setFilterStatut(''); setFilterMode(''); setFilterCompta(''); setFilterOrigine(''); }}>
               Réinitialiser
             </button>
           </div>
@@ -403,6 +417,7 @@ export default function OrdresPaiement({ categories = [] }) {
               <thead>
                 <tr>
                   <th>Référence</th>
+                  <th>Origine</th>
                   <th>Bénéficiaire</th>
                   <th>Montant</th>
                   <th>Mode</th>
@@ -417,6 +432,9 @@ export default function OrdresPaiement({ categories = [] }) {
                   <tr key={o.id}>
                     <td data-label="Référence">
                       <span style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.82rem', color: 'var(--red)' }}>{o.ref}</span>
+                    </td>
+                    <td data-label="Origine">
+                      <span style={{ fontSize: '0.8rem', color: 'var(--text-2)' }}>{o.origine || '—'}</span>
                     </td>
                     <td data-label="Bénéficiaire">
                       <div>
