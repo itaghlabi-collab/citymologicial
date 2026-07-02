@@ -5,7 +5,6 @@ import { useState, useMemo, useEffect } from 'react';
 import { Search, X, Loader2 } from 'lucide-react';
 import { listWorkers } from '../../services/rh/workers';
 import { workerFullName } from '../../services/rh/attendance';
-import { normBesoinFonction } from '../../constants/projectBesoins';
 
 const IS = { padding: '7px 10px', border: '1.5px solid var(--border)', borderRadius: 6, fontSize: '0.84rem', width: '100%', boxSizing: 'border-box' };
 
@@ -24,13 +23,6 @@ function workerDisponible(w, projectId) {
   return { label: 'Disponible', ok: true };
 }
 
-function matchFonction(workerFonction, targetFonction) {
-  const f = (targetFonction || '').trim();
-  if (!f || f === 'Ouvriers') return true;
-  return normBesoinFonction(workerFonction) === normBesoinFonction(f)
-    || normBesoinFonction(workerFonction).includes(normBesoinFonction(f));
-}
-
 export default function RhAssignWorkersModal({
   open, onClose, request, initialSelected = [], onConfirm, saving = false,
 }) {
@@ -42,16 +34,19 @@ export default function RhAssignWorkersModal({
   });
 
   const projectId = request?.project_id;
-  const targetFonction = request?.fonction || '';
 
   useEffect(() => {
-    if (!open || !projectId) return;
+    if (!open) return;
     setLoading(true);
     listWorkers()
       .then((all) => setWorkers(all || []))
+      .catch((err) => {
+        console.error('[CITYMO] RhAssignWorkersModal listWorkers', err);
+        setWorkers([]);
+      })
       .finally(() => setLoading(false));
     setSelected(new Set((initialSelected || []).map(String)));
-  }, [open, projectId, initialSelected]);
+  }, [open, initialSelected]);
 
   const fonctions = useMemo(() => {
     const s = new Set((workers || []).map((w) => w.fonction).filter(Boolean));
@@ -60,7 +55,6 @@ export default function RhAssignWorkersModal({
 
   const filtered = useMemo(() => (workers || []).filter((w) => {
     if (w.statut === 'inactif') return false;
-    if (!matchFonction(w.fonction, targetFonction)) return false;
     const name = workerFullName(w).toLowerCase();
     const q = filters.search.toLowerCase().trim();
     if (q && !name.includes(q) && !(w.fonction || '').toLowerCase().includes(q)) return false;
@@ -71,7 +65,7 @@ export default function RhAssignWorkersModal({
     if (filters.ville && !workerVille(w).toLowerCase().includes(filters.ville.toLowerCase())) return false;
     if (filters.qualification && (w.experience || '') !== filters.qualification) return false;
     return true;
-  }), [workers, filters, targetFonction, projectId]);
+  }), [workers, filters, projectId]);
 
   function toggle(id) {
     const sid = String(id);
