@@ -31,7 +31,7 @@ const COMPANY = {
   address: '228 Bd Mohammed V, Casablanca 20000',
   phone: 'Tél : +212 52 231 0043',
   email: 'contact@citymo.ma',
-  legal: 'Capital de 200000 MAD RC: 401959',
+  legal: 'Capital de 2 000 000 mad RC: 401959',
   patente: 'Patente: 32173075',
   fiscal: 'IF: 25080805 - ICE: 002023116000060',
 };
