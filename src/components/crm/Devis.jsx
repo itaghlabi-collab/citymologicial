@@ -3,7 +3,7 @@ import {
   Plus, Search,
   FileText, Send, CheckCircle, TrendingUp, Clock,
   XCircle, AlertCircle, ChevronLeft, ChevronRight,
-  RefreshCw, ArrowUpDown, FolderKanban,
+  RefreshCw, ArrowUpDown, FolderKanban, Download, Eye,
 } from 'lucide-react';
 import { useCrmDevis } from '../../hooks/useCrmDevis';
 import { listCategories } from '../../services/crm/categories';
@@ -15,6 +15,14 @@ import { enrichLignesDescriptions } from '../../utils/crm/devisLineDescription';
 import DevisForm from './DevisForm';
 import DevisPreviewModal from './DevisPreviewModal';
 import DevisActionsMenu from './DevisActionsMenu';
+import { listImportedCrmArchives } from '../../services/crm/crmArchives';
+import {
+  archiveToDevisRow,
+  archiveMatchesDevisFilters,
+  openArchivePdf,
+  downloadArchivePdf,
+  ARCHIVE_IMPORTED_BADGE,
+} from './crmArchiveDisplay';
 
 /* ── Helpers ── */
 function fmtMAD(v) {
@@ -43,6 +51,7 @@ const STATUT_CONFIG = {
   expire:     { label: 'Expire',      cls: 'badge-orange', icon: AlertCircle },
   en_attente: { label: 'En attente',  cls: 'badge-orange', icon: Clock },
   converti:   { label: 'Converti',    cls: 'badge-orange', icon: FolderKanban },
+  archive_importee: { label: 'Archive importee', cls: 'badge-orange', icon: FileText },
 };
 
 function StatutBadge({ statut }) {
@@ -136,6 +145,7 @@ export default function Devis() {
   const [previewDevis, setPreviewDevis] = useState(null);
   const [previewArticles, setPreviewArticles] = useState([]);
   const [convertedIds, setConvertedIds] = useState(() => new Set());
+  const [importedArchives, setImportedArchives] = useState([]);
 
   /* Filters */
   const [search, setSearch] = useState('');
@@ -161,11 +171,23 @@ export default function Devis() {
     fetchConvertedIds().then(setConvertedIds);
   }, [configured, loading, devis.length, fetchConvertedIds]);
 
+  useEffect(() => {
+    if (!configured) return;
+    listImportedCrmArchives('devis').then(setImportedArchives).catch(() => setImportedArchives([]));
+  }, [configured, loading, devis.length]);
+
   /* Derived lists */
   const commerciaux = [...new Set(devis.map(d => d.commercial).filter(Boolean))];
 
   /* Filter + sort */
-  const filtered = filterCrmDevis(devis, { search, statut: filterStatut, commercial: filterCommercial }).sort((a, b) => {
+  const archiveRows = importedArchives
+    .filter((a) => archiveMatchesDevisFilters(a, { search, statut: filterStatut, commercial: filterCommercial }))
+    .map(archiveToDevisRow);
+
+  const filtered = [
+    ...filterCrmDevis(devis, { search, statut: filterStatut, commercial: filterCommercial }),
+    ...(filterStatut && filterStatut !== 'archive_importee' ? [] : archiveRows),
+  ].sort((a, b) => {
     let va = a[sortField] ?? '';
     let vb = b[sortField] ?? '';
     if (sortField === 'total_ttc' || sortField === 'total_ht') { va = Number(va); vb = Number(vb); }
@@ -344,6 +366,21 @@ export default function Devis() {
   }
 
   function renderActionsMenu(d) {
+    if (d.__isImportedArchive) {
+      const archive = d.__archive;
+      return (
+        <div style={{ display: 'flex', gap: 2 }}>
+          <button type="button" title="Voir PDF archive" className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }}
+            onClick={() => openArchivePdf(archive).catch((e) => showToast(e.message, 'error'))}>
+            <Eye size={13} />
+          </button>
+          <button type="button" title="Telecharger PDF" className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }}
+            onClick={() => downloadArchivePdf(archive).catch((e) => showToast(e.message, 'error'))}>
+            <Download size={13} />
+          </button>
+        </div>
+      );
+    }
     return (
       <DevisActionsMenu
         devis={d}
@@ -447,6 +484,7 @@ export default function Devis() {
             {Object.entries(STATUT_CONFIG).map(([k, v]) => (
               <option key={k} value={k}>{v.label}</option>
             ))}
+            <option value="archive_importee">{ARCHIVE_IMPORTED_BADGE.label}</option>
           </select>
           <select className="crm-filter-select" value={filterCommercial} onChange={e => { setFilterCommercial(e.target.value); setPage(1); }}>
             <option value="">Tous commerciaux</option>

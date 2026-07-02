@@ -3,7 +3,7 @@ import {
   Plus, Search, Edit2, Copy, Trash2, FileText,
   CheckCircle, Clock, XCircle, AlertCircle, TrendingUp,
   ChevronLeft, ChevronRight, RefreshCw, ArrowUpDown,
-  CreditCard, Send, Ban, DollarSign, X, Download
+  CreditCard, Send, Ban, DollarSign, X, Download, Eye
 } from 'lucide-react';
 import { useCrmFactures } from '../../hooks/useCrmFactures';
 import { listClients } from '../../services/crm/clients';
@@ -11,6 +11,14 @@ import { listCategories } from '../../services/crm/categories';
 import { generateFacturePdf } from '../../services/crm/facturePdf';
 import FactureForm from './FactureForm';
 import FactureAcompte from './FactureAcompte';
+import { listImportedCrmArchives } from '../../services/crm/crmArchives';
+import {
+  archiveToFactureRow,
+  archiveMatchesFactureFilters,
+  openArchivePdf,
+  downloadArchivePdf,
+  ARCHIVE_IMPORTED_BADGE,
+} from './crmArchiveDisplay';
 
 /* ── Helpers ── */
 function fmtMAD(v) {
@@ -42,6 +50,7 @@ const STATUT_CFG = {
   impayee:             { label: 'Impayee',          cls: 'badge-red',    icon: XCircle },
   en_retard:           { label: 'En retard',        cls: 'badge-red',    icon: AlertCircle },
   annulee:             { label: 'Annulee',          cls: 'badge-grey',   icon: Ban },
+  archive_importee:    { label: 'Archive importee', cls: 'badge-orange', icon: FileText },
 };
 function StatutBadge({ statut }) {
   const cfg = STATUT_CFG[statut] || { label: statut, cls: 'badge-grey' };
@@ -130,6 +139,7 @@ export default function Factures() {
   const [editingFacture, setEditing]  = useState(null);
   const [pdfLoadingId, setPdfLoadingId] = useState(null);
   const [clientsList, setClientsList] = useState([]);
+  const [importedArchives, setImportedArchives] = useState([]);
 
   /* Filters */
   const [search, setSearch]           = useState('');
@@ -155,18 +165,37 @@ export default function Factures() {
     listClients().then(setClientsList).catch(() => {});
   }, []);
 
+  useEffect(() => {
+    if (!configured) return;
+    listImportedCrmArchives('facture').then(setImportedArchives).catch(() => setImportedArchives([]));
+  }, [configured, loading, factures.length]);
+
   /* Derived */
   const commerciaux = [...new Set(factures.map(f => f.commercial).filter(Boolean))];
 
   /* Filter + sort */
-  const filtered = filterCrmFactures(factures, {
-    search,
-    statut: filterStatut,
-    commercial: filterCommercial,
-    client_id: filterClient,
-    date: filterDate,
-    montant_min: filterMontantMin,
-  }).sort((a, b) => {
+  const archiveRows = importedArchives
+    .filter((a) => archiveMatchesFactureFilters(a, {
+      search,
+      statut: filterStatut,
+      commercial: filterCommercial,
+      client_id: filterClient,
+      date: filterDate,
+      montant_min: filterMontantMin,
+    }))
+    .map(archiveToFactureRow);
+
+  const filtered = [
+    ...filterCrmFactures(factures, {
+      search,
+      statut: filterStatut,
+      commercial: filterCommercial,
+      client_id: filterClient,
+      date: filterDate,
+      montant_min: filterMontantMin,
+    }),
+    ...(filterStatut && filterStatut !== 'archive_importee' ? [] : archiveRows),
+  ].sort((a, b) => {
     let va = a[sortField] ?? '';
     let vb = b[sortField] ?? '';
     const numFields = ['total_ttc', 'total_ht', 'total_paye', 'reste_a_payer'];
@@ -509,6 +538,18 @@ export default function Factures() {
 
                       {/* Actions */}
                       <td style={{ padding: '10px 10px', whiteSpace: 'nowrap' }}>
+                        {f.__isImportedArchive ? (
+                          <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                            <button title="Voir PDF archive" onClick={() => openArchivePdf(f.__archive).catch((e) => showToast(e.message, 'error'))}
+                              className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }}>
+                              <Eye size={13} />
+                            </button>
+                            <button title="Telecharger PDF" onClick={() => downloadArchivePdf(f.__archive).catch((e) => showToast(e.message, 'error'))}
+                              className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }}>
+                              <Download size={13} />
+                            </button>
+                          </div>
+                        ) : (
                         <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
                           <button title="PDF" onClick={() => handlePdf(f)} disabled={pdfLoadingId === f.id}
                             className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }}>
@@ -527,6 +568,7 @@ export default function Factures() {
                             <Trash2 size={13} />
                           </button>
                         </div>
+                        )}
                       </td>
                     </tr>
                   );
@@ -563,6 +605,15 @@ export default function Factures() {
                       </span>
                     </div>
                     <div className="crm-doc-actions">
+                      {f.__isImportedArchive ? (
+                        <>
+                          <button type="button" title="Voir PDF" onClick={() => openArchivePdf(f.__archive).catch((e) => showToast(e.message, 'error'))}
+                            className="btn btn-ghost btn-sm crm-icon-btn"><Eye size={14} /></button>
+                          <button type="button" title="Telecharger" onClick={() => downloadArchivePdf(f.__archive).catch((e) => showToast(e.message, 'error'))}
+                            className="btn btn-ghost btn-sm crm-icon-btn"><Download size={14} /></button>
+                        </>
+                      ) : (
+                        <>
                       <button type="button" title="PDF" onClick={() => handlePdf(f)} disabled={pdfLoadingId === f.id}
                         className="btn btn-ghost btn-sm crm-icon-btn"><Download size={14} /></button>
                       <button type="button" title="Modifier" onClick={() => openEdit(f)}
@@ -571,6 +622,8 @@ export default function Factures() {
                         className="btn btn-ghost btn-sm crm-icon-btn"><Copy size={14} /></button>
                       <button type="button" title="Supprimer" onClick={() => handleDelete(f.id)}
                         className="btn btn-ghost btn-sm crm-icon-btn"><Trash2 size={14} style={{ color: 'var(--red)' }} /></button>
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>

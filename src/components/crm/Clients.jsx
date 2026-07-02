@@ -3,10 +3,12 @@ import {
   Users, Plus, Search, Edit2, Trash2, Eye, FileText, Receipt,
   X, ChevronLeft, Building2, Phone, Mail, MapPin, User,
   TrendingUp, DollarSign, FolderOpen, Clock, CheckCircle,
-  AlertCircle, Zap, CreditCard, Activity, Loader2
+  AlertCircle, Zap, CreditCard, Activity, Loader2, Archive, Download
 } from 'lucide-react';
 import { TYPE_PROJET_VALUES, TYPE_PROJET_LABEL } from '../../constants/commercial';
 import { useClients } from '../../hooks/useClients';
+import { listClientImportedArchives } from '../../services/crm/crmArchives';
+import { openArchivePdf, downloadArchivePdf } from './crmArchiveDisplay';
 
 /* ── Helpers ── */
 function fmtMAD(v) {
@@ -113,6 +115,11 @@ function ClientDetail({ client, initialTab = 'overview', onBack, onEdit, onDevis
   const [devis] = useState(SEED_DEVIS.filter(d => d.client_id === client.id));
   const [factures] = useState(SEED_FACTURES.filter(f => f.client_id === client.id));
   const [paiements] = useState(SEED_PAIEMENTS.filter(p => p.client_id === client.id));
+  const [clientArchives, setClientArchives] = useState([]);
+
+  useEffect(() => {
+    listClientImportedArchives(client.id).then(setClientArchives).catch(() => setClientArchives([]));
+  }, [client.id]);
 
   /* KPI calculs */
   const totalFacture = factures.reduce((s, f) => s + f.montant_total, 0);
@@ -136,6 +143,14 @@ function ClientDetail({ client, initialTab = 'overview', onBack, onEdit, onDevis
     ...factures.map(f => ({ icon: Receipt, color: 'var(--red)', label: 'Facture creee', date: f.echeance, desc: f.ref + ' — ' + fmtMAD(f.montant_total) })),
     ...paiements.map(p => ({ icon: CreditCard, color: '#2E7D32', label: 'Paiement recu', date: p.date, desc: fmtMAD(p.montant) + ' via ' + p.moyen })),
     ...projets.map(p => ({ icon: FolderOpen, color: '#F57C00', label: 'Projet ajoute', date: p.date_debut, desc: p.titre })),
+    ...clientArchives.map((a) => ({
+      icon: Archive,
+      color: '#5D4037',
+      label: a.doc_type === 'facture' ? 'Facture archive importee' : 'Devis archive importe',
+      date: a.date_document || a.imported_at,
+      desc: `${a.reference || a.file_name} — ${fmtMAD(a.total_ttc)}`,
+      archive: a,
+    })),
   ].sort((a, b) => (b.date || '').localeCompare(a.date || ''));
 
   const nomComplet = [client.prenom, client.nom].filter(Boolean).join(' ') || client.nom;
@@ -258,6 +273,34 @@ function ClientDetail({ client, initialTab = 'overview', onBack, onEdit, onDevis
               );
             })}
           </div>
+          {clientArchives.length > 0 && (
+            <div className="card" style={{ gridColumn: '1 / -1' }}>
+              <div className="card-title" style={{ marginBottom: 14 }}><Archive size={15} /> Documents archives ({clientArchives.length})</div>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr><th>Type</th><th>Reference</th><th>Date</th><th>Montant TTC</th><th>Actions</th></tr>
+                  </thead>
+                  <tbody>
+                    {clientArchives.map((a) => (
+                      <tr key={a.id}>
+                        <td><span className="badge badge-orange">{a.doc_type === 'facture' ? 'Facture' : 'Devis'}</span></td>
+                        <td style={{ fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--red)' }}>{a.reference || '—'}</td>
+                        <td>{a.date_document || '—'}</td>
+                        <td>{fmtMAD(a.total_ttc)}</td>
+                        <td>
+                          <div style={{ display: 'flex', gap: 4 }}>
+                            <button type="button" className="btn btn-ghost btn-sm" title="Voir PDF" onClick={() => openArchivePdf(a)}><Eye size={13} /></button>
+                            <button type="button" className="btn btn-ghost btn-sm" title="Telecharger" onClick={() => downloadArchivePdf(a)}><Download size={13} /></button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

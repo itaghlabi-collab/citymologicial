@@ -46,6 +46,7 @@ export const ROUTES = {
   DEVIS:              'devis',
   FACTURES:           'factures',
   BON_LIVRAISON:      'bon-livraison',
+  CRM_ARCHIVES:       'crm-archives',
 
   // Logistique
   VEHICULES:          'vehicules',
