@@ -74,25 +74,44 @@ export function parseArchiveMetadata(text, fileName = '') {
   if (
     /\bFACTURE\b/i.test(text)
     || /\bFA-\d{4}-\d{2}-\d+/i.test(text)
+    || /\bFAC-\d{4}-/i.test(text)
     || /N[°º]?\s*FA/i.test(text)
+    || /^FAC-/i.test(fileName)
+    || /facture/i.test(fileName)
   ) {
     docType = 'facture';
   } else if (
     /\bDEVIS\b/i.test(text)
     || /\bPR-\d{4}-\d{2}-\d+/i.test(text)
     || /N[°º]?\s*PR/i.test(text)
+    || /^PR-/i.test(fileName)
   ) {
     docType = 'devis';
-  } else if (/facture/i.test(fileName)) {
-    docType = 'facture';
   }
 
-  const reference = firstMatch(text, [
-    /\b(PR-\d{4}-\d{2}-\d+)\b/i,
-    /\b(FA-\d{4}-\d{2}-\d+)\b/i,
-    /(?:DEVIS|FACTURE)\s*N[°º]?\s*:?\s*([A-Z0-9][\w\-\/]+)/i,
-    /R[ée]f(?:[ée]rence)?\s*:?\s*([A-Z0-9][\w\-\/]+)/i,
-  ]) || firstMatch(fileName, [/([A-Z]{2,}-\d{4}-\d{2}-\d+)/i]);
+  let reference = '';
+  if (docType === 'facture') {
+    reference = firstMatch(text, [
+      /\b(FA-\d{4}-\d{2}-\d+)\b/i,
+      /\b(FAC-\d{4}-\d{3,})\b/i,
+      /FACTURE\s*N[°º]?\s*:?\s*([A-Z0-9][\w\-\/]+)/i,
+      /N[°º]?\s*Facture\s*:?\s*([A-Z0-9][\w\-\/]+)/i,
+    ]) || firstMatch(fileName, [
+      /\b(FAC-\d{4}-\d{3,})\b/i,
+      /\b(FA-\d{4}-\d{2}-\d+)\b/i,
+    ]);
+    if (!reference) {
+      reference = firstMatch(text, [
+        /R[ée]f(?:[ée]rence)?\s*(?:facture)?\s*:?\s*([A-Z0-9][\w\-\/]+)/i,
+      ]);
+    }
+  } else {
+    reference = firstMatch(text, [
+      /\b(PR-\d{4}-\d{2}-\d+)\b/i,
+      /DEVIS\s*N[°º]?\s*:?\s*([A-Z0-9][\w\-\/]+)/i,
+      /R[ée]f(?:[ée]rence)?\s*:?\s*([A-Z0-9][\w\-\/]+)/i,
+    ]) || firstMatch(fileName, [/\b(PR-\d{4}-\d{2}-\d+)\b/i]);
+  }
 
   const dateStr = firstMatch(text, [
     /Date\s*:?\s*(\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4})/i,

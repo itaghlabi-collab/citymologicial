@@ -116,20 +116,21 @@ export async function checkArchiveDuplicate(reference, docType, excludeId = null
   if (!reference) return null;
   const ref = reference.trim();
   const sb = getSupabase();
+  const type = docType === 'facture' ? 'facture' : 'devis';
 
-  let archQ = sb.from(TABLE).select('id, reference, statut').eq('reference', ref);
+  let archQ = sb.from(TABLE).select('id, reference, statut, doc_type').eq('reference', ref).eq('doc_type', type);
   if (excludeId) archQ = archQ.neq('id', excludeId);
   const { data: archRows } = await archQ;
   if ((archRows || []).some((r) => r.statut !== 'erreur_lecture')) {
     return { source: 'archives', reference: ref };
   }
 
-  if (docType === 'devis' || !docType) {
+  if (type === 'devis') {
     const { data: devis } = await sb.from('crm_devis').select('id, reference').eq('reference', ref).maybeSingle();
     if (devis) return { source: 'devis', reference: ref };
   }
 
-  if (docType === 'facture' || !docType) {
+  if (type === 'facture') {
     const { data: fac } = await sb.from('crm_factures').select('id, numero').eq('numero', ref).maybeSingle();
     if (fac) return { source: 'factures', reference: ref };
   }
