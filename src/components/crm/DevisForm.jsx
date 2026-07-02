@@ -13,6 +13,7 @@ import { generateReceptionChecklistPdf } from '../../services/crm/receptionCheck
 import { formatCategoryDisplayName } from '../../utils/crm/categoryDisplay';
 import { enrichLignesDescriptions, resolveLigneDescription } from '../../utils/crm/devisLineDescription';
 import { TYPE_PROJET_VALUES, TYPE_PROJET_LABEL } from '../../constants/commercial';
+import { useAuth } from '../../hooks/useAuth';
 
 const CITYMO_LOGO = 'https://i.ibb.co/N6SbC06M/logopng.png';
 const CITYMO_COMPANY = {
@@ -201,6 +202,11 @@ function rowDragStyle(isDragging, isOver) {
 
 function clientLabel(c) {
   return [c?.prenom, c?.nom].filter(Boolean).join(' ') || c?.nom || '';
+}
+
+function commercialFromSession(user) {
+  if (!user) return '';
+  return (user.nom || '').trim() || user.email?.split('@')[0] || '';
 }
 
 function clientMatchesQuery(c, rawQuery) {
@@ -770,6 +776,7 @@ function LigneComposer({ draft, setDraft, categories, articles, onArticleSelect,
    DEVIS FORM
    ════════════════════════════════════════════════ */
 export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
+  const { user } = useAuth();
   const isEdit = !!devis;
   const showCreateLabel = !devis;
   const [form, setForm] = useState(() => (devis ? {
@@ -797,6 +804,13 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
   const [saveToast, setSaveToast] = useState('');
   const isSaving = saving || savingLocal;
   const isPersisted = !!(devis?.id || form.id);
+
+  useEffect(() => {
+    if (isEdit || !user) return;
+    const label = commercialFromSession(user);
+    if (!label) return;
+    setForm((p) => (p.commercial?.trim() ? p : { ...p, commercial: label }));
+  }, [isEdit, user]);
 
   useEffect(() => {
     Promise.all([listClients(), listArticles(), listCategories()]).then(([cl, ar, ca]) => {
