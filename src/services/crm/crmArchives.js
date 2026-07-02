@@ -121,22 +121,48 @@ export function archiveNeedsRepair(row) {
   return false;
 }
 
-export async function listImportedCrmArchives(docType, { autoRepair = true } = {}) {
-  let rows = await listCrmArchives({ doc_type: docType, imported_only: true });
+export async function listImportedCrmArchives(docType, { autoRepair = false } = {}) {
+  const rows = await listCrmArchives({ doc_type: docType, imported_only: true });
   if (!autoRepair) return rows;
 
   const broken = rows.filter(archiveNeedsRepair);
   if (!broken.length) return rows;
 
   const clients = await listClients();
-  for (const row of broken) {
-    try {
-      await reanalyzeCrmArchive(row.id, clients, { preserveImported: true });
-    } catch (err) {
-      console.warn('[CITYMO] archive auto-repair', row.id, err.message);
-    }
-  }
+  await Promise.all(broken.map((row) =>
+    reanalyzeCrmArchive(row.id, clients, { preserveImported: true }).catch((err) => {
+      console.warn('[CITYMO] archive repair', row.id, err.message);
+    }),
+  ));
   return listCrmArchives({ doc_type: docType, imported_only: true });
+}
+
+/** Affichage immédiat + réparation PDF en arrière-plan (sans bloquer l'UI) */
+export function repairImportedArchivesInBackground(docType, onUpdated) {
+  if (!onUpdated) return () => {};
+
+  let cancelled = false;
+  (async () => {
+    try {
+      const clients = await listClients();
+      const rows = await listCrmArchives({ doc_type: docType, imported_only: true });
+      const broken = rows.filter(archiveNeedsRepair);
+      if (!broken.length || cancelled) return;
+
+      await Promise.all(broken.map((row) =>
+        reanalyzeCrmArchive(row.id, clients, { preserveImported: true }).catch((err) => {
+          console.warn('[CITYMO] archive bg repair', row.id, err.message);
+        }),
+      ));
+      if (cancelled) return;
+      const updated = await listCrmArchives({ doc_type: docType, imported_only: true });
+      onUpdated(updated);
+    } catch (err) {
+      console.warn('[CITYMO] archive bg repair batch', err.message);
+    }
+  })();
+
+  return () => { cancelled = true; };
 }
 
 export async function listClientImportedArchives(clientId) {

@@ -11,13 +11,14 @@ import { listCategories } from '../../services/crm/categories';
 import { generateFacturePdf } from '../../services/crm/facturePdf';
 import FactureForm from './FactureForm';
 import FactureAcompte from './FactureAcompte';
-import { listImportedCrmArchives } from '../../services/crm/crmArchives';
+import { listImportedCrmArchives, repairImportedArchivesInBackground } from '../../services/crm/crmArchives';
 import {
   archiveToFactureRow,
   archiveMatchesFactureFilters,
   openArchivePdf,
   downloadArchivePdf,
   ARCHIVE_IMPORTED_BADGE,
+  normalizeArchiveAmounts,
 } from './crmArchiveDisplay';
 
 /* ── Helpers ── */
@@ -167,10 +168,23 @@ export default function Factures() {
 
   useEffect(() => {
     if (!configured) return;
-    listImportedCrmArchives('facture', { autoRepair: true })
-      .then(setImportedArchives)
-      .catch(() => setImportedArchives([]));
-  }, [configured, loading, factures.length]);
+    let cancelled = false;
+    let stopRepair = () => {};
+
+    listImportedCrmArchives('facture', { autoRepair: false })
+      .then((rows) => {
+        if (!cancelled) setImportedArchives(rows);
+        stopRepair = repairImportedArchivesInBackground('facture', (updated) => {
+          if (!cancelled) setImportedArchives(updated);
+        });
+      })
+      .catch(() => { if (!cancelled) setImportedArchives([]); });
+
+    return () => {
+      cancelled = true;
+      stopRepair();
+    };
+  }, [configured, factures.length]);
 
   /* Derived */
   const commerciaux = [...new Set(factures.map(f => f.commercial).filter(Boolean))];
@@ -219,7 +233,10 @@ export default function Factures() {
 
   /* KPIs */
   const kpi = computeCrmFactureStats(factures);
-  const archiveMontantTotal = importedArchives.reduce((s, a) => s + (Number(a.total_ttc) || 0), 0);
+  const archiveMontantTotal = importedArchives.reduce(
+    (s, a) => s + (normalizeArchiveAmounts(a).total_ttc || 0),
+    0,
+  );
   const totalFactureCount = factures.length + importedArchives.length;
   const totalFacture   = kpi.totalFacture + archiveMontantTotal;
   const totalEncaisse  = kpi.totalEncaisse;

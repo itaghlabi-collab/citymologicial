@@ -5,11 +5,32 @@ import { getArchivePdfUrl } from '../../services/crm/crmArchives';
 
 export const ARCHIVE_IMPORTED_BADGE = { label: 'Archive importée', cls: 'badge-orange' };
 
+/** Montants cohérents à l'affichage même si la base n'a pas encore été réparée */
+export function normalizeArchiveAmounts(archive) {
+  let ht = Number(archive?.total_ht) || 0;
+  let tva = Number(archive?.total_tva) || 0;
+  let ttc = Number(archive?.total_ttc) || 0;
+
+  const incoherent = ttc > 0 && (ht <= 0 || tva <= 0 || (ht > 0 && ht < ttc * 0.1));
+  if (incoherent && ttc > 0) {
+    if (tva > 0 && ht <= 0) {
+      ht = Math.round((ttc - tva) * 100) / 100;
+    } else if (ht > 0 && tva <= 0) {
+      tva = Math.round((ttc - ht) * 100) / 100;
+    } else {
+      ht = Math.round((ttc / 1.2) * 100) / 100;
+      tva = Math.round((ttc - ht) * 100) / 100;
+    }
+  }
+
+  if (!ttc && ht > 0) ttc = Math.round((ht + tva) * 100) / 100;
+  if (ttc > 0 && ht > 0 && !tva) tva = Math.round((ttc - ht) * 100) / 100;
+
+  return { total_ht: ht, total_tva: tva, total_ttc: ttc };
+}
+
 export function archiveToDevisRow(archive) {
-  const ht = Number(archive.total_ht) || 0;
-  const tva = Number(archive.total_tva) || 0;
-  let ttc = Number(archive.total_ttc) || 0;
-  if (!ttc && ht) ttc = ht + tva;
+  const amounts = normalizeArchiveAmounts(archive);
 
   return {
     id: `archive-${archive.id}`,
@@ -19,9 +40,9 @@ export function archiveToDevisRow(archive) {
     client_nom: archive.client_nom,
     client_id: archive.client_id,
     commercial: '—',
-    total_ht: ht || archive.total_ht,
-    total_tva: tva || archive.total_tva,
-    total_ttc: ttc || archive.total_ttc,
+    total_ht: amounts.total_ht,
+    total_tva: amounts.total_tva,
+    total_ttc: amounts.total_ttc,
     statut: 'archive_importee',
     date_creation: archive.date_document,
     date_validite: archive.date_echeance || null,
@@ -31,10 +52,7 @@ export function archiveToDevisRow(archive) {
 }
 
 export function archiveToFactureRow(archive) {
-  const ht = Number(archive.total_ht) || 0;
-  const tva = Number(archive.total_tva) || 0;
-  let ttc = Number(archive.total_ttc) || 0;
-  if (!ttc && ht) ttc = ht + tva;
+  const amounts = normalizeArchiveAmounts(archive);
 
   return {
     id: `archive-${archive.id}`,
@@ -45,11 +63,11 @@ export function archiveToFactureRow(archive) {
     client_id: archive.client_id,
     devis_reference: archive.devis_reference,
     commercial: '—',
-    total_ht: ht || archive.total_ht,
-    total_tva: tva || archive.total_tva,
-    total_ttc: ttc || archive.total_ttc,
+    total_ht: amounts.total_ht,
+    total_tva: amounts.total_tva,
+    total_ttc: amounts.total_ttc,
     total_paye: 0,
-    reste_a_payer: ttc || archive.total_ttc || ht,
+    reste_a_payer: amounts.total_ttc,
     statut: 'archive_importee',
     date_emission: archive.date_document,
     date_echeance: archive.date_echeance,

@@ -15,13 +15,14 @@ import { enrichLignesDescriptions } from '../../utils/crm/devisLineDescription';
 import DevisForm from './DevisForm';
 import DevisPreviewModal from './DevisPreviewModal';
 import DevisActionsMenu from './DevisActionsMenu';
-import { listImportedCrmArchives } from '../../services/crm/crmArchives';
+import { listImportedCrmArchives, repairImportedArchivesInBackground } from '../../services/crm/crmArchives';
 import {
   archiveToDevisRow,
   archiveMatchesDevisFilters,
   openArchivePdf,
   downloadArchivePdf,
   ARCHIVE_IMPORTED_BADGE,
+  normalizeArchiveAmounts,
 } from './crmArchiveDisplay';
 
 /* ── Helpers ── */
@@ -173,8 +174,23 @@ export default function Devis() {
 
   useEffect(() => {
     if (!configured) return;
-    listImportedCrmArchives('devis', { autoRepair: true }).then(setImportedArchives).catch(() => setImportedArchives([]));
-  }, [configured, loading, devis.length]);
+    let cancelled = false;
+    let stopRepair = () => {};
+
+    listImportedCrmArchives('devis', { autoRepair: false })
+      .then((rows) => {
+        if (!cancelled) setImportedArchives(rows);
+        stopRepair = repairImportedArchivesInBackground('devis', (updated) => {
+          if (!cancelled) setImportedArchives(updated);
+        });
+      })
+      .catch(() => { if (!cancelled) setImportedArchives([]); });
+
+    return () => {
+      cancelled = true;
+      stopRepair();
+    };
+  }, [configured, devis.length]);
 
   /* Derived lists */
   const commerciaux = [...new Set(devis.map(d => d.commercial).filter(Boolean))];
@@ -208,7 +224,10 @@ export default function Devis() {
 
   /* KPIs */
   const kpi = computeCrmDevisStats(devis);
-  const archiveMontantTotal = importedArchives.reduce((s, a) => s + (Number(a.total_ttc) || 0), 0);
+  const archiveMontantTotal = importedArchives.reduce(
+    (s, a) => s + (normalizeArchiveAmounts(a).total_ttc || 0),
+    0,
+  );
   const totalDevisCount = devis.length + importedArchives.length;
   const totalMontant   = kpi.montantTotal + archiveMontantTotal;
   const nValides       = kpi.valides;
