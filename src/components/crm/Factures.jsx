@@ -217,7 +217,9 @@ export default function Factures() {
 
   /* KPIs */
   const kpi = computeCrmFactureStats(factures);
-  const totalFacture   = kpi.totalFacture;
+  const archiveMontantTotal = importedArchives.reduce((s, a) => s + (Number(a.total_ttc) || 0), 0);
+  const totalFactureCount = factures.length + importedArchives.length;
+  const totalFacture   = kpi.totalFacture + archiveMontantTotal;
   const totalEncaisse  = kpi.totalEncaisse;
   const totalReste     = kpi.totalReste;
   const nImpayees      = kpi.nImpayees;
@@ -330,7 +332,7 @@ export default function Factures() {
 
       {/* KPI Cards */}
       <div className="stats-grid" style={{ marginBottom: 20 }}>
-        <KpiCard label="Total facture" value={loading ? '—' : fmtMAD(totalFacture)} sub={factures.length + ' facture(s)'} icon={FileText} color="var(--red)" />
+        <KpiCard label="Total facture" value={loading ? '—' : fmtMAD(totalFacture)} sub={totalFactureCount + ' facture(s)'} icon={FileText} color="var(--red)" />
         <KpiCard label="Total encaisse" value={loading ? '—' : fmtMAD(totalEncaisse)} sub="paiements recus" icon={CheckCircle} color="#388E3C" />
         <KpiCard label="Reste a payer" value={loading ? '—' : fmtMAD(totalReste)} sub="en attente" icon={DollarSign} color="#1976D2" />
         <KpiCard label="Factures impayees" value={loading ? '—' : nImpayees} sub="a relancer" icon={XCircle} color="#E65100" />

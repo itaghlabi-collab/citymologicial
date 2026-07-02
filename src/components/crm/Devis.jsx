@@ -208,7 +208,9 @@ export default function Devis() {
 
   /* KPIs */
   const kpi = computeCrmDevisStats(devis);
-  const totalMontant   = kpi.montantTotal;
+  const archiveMontantTotal = importedArchives.reduce((s, a) => s + (Number(a.total_ttc) || 0), 0);
+  const totalDevisCount = devis.length + importedArchives.length;
+  const totalMontant   = kpi.montantTotal + archiveMontantTotal;
   const nValides       = kpi.valides;
   const nEnAttente     = kpi.enAttente;
   const nRefuses       = kpi.refuses;
@@ -460,7 +462,7 @@ export default function Devis() {
 
       {/* KPI Cards */}
       <div className="stats-grid" style={{ marginBottom: 20 }}>
-        <KpiCard label="Total devis" value={loading ? '—' : devis.length} sub={fmtMAD(totalMontant)} icon={FileText} color="var(--red)" />
+        <KpiCard label="Total devis" value={loading ? '—' : totalDevisCount} sub={fmtMAD(totalMontant)} icon={FileText} color="var(--red)" />
         <KpiCard label="Valides" value={loading ? '—' : nValides} sub={fmtMAD(montantValides)} icon={CheckCircle} color="#388E3C" />
         <KpiCard label="En cours / Envoyes" value={loading ? '—' : nEnAttente} sub={fmtMAD(montantAttente)} icon={Clock} color="#1976D2" />
         <KpiCard label="Refuses / Expires" value={loading ? '—' : nRefuses} sub="a relancer" icon={XCircle} color="#E65100" />
