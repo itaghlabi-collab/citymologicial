@@ -210,6 +210,10 @@ function buildPdfRows(devis, catMap) {
       currentCat = null;
       return;
     }
+    if (l.type === 'sous_titre') {
+      rows.push({ kind: 'sous_titre', text: l.designation || '' });
+      return;
+    }
     if (l.type === 'note') {
       rows.push({ kind: 'note', text: l.designation || '' });
       return;
@@ -266,6 +270,7 @@ function measureRowHeight(doc, row) {
   if (row.kind === 'empty') return 12;
   if (row.kind === 'section') return CAT_ROW_H;
   if (row.kind === 'titre') return 8;
+  if (row.kind === 'sous_titre') return 7;
   if (row.kind === 'note') {
     doc.setFontSize(7);
     const lines = doc.splitTextToSize(row.text || '', CONTENT_W - 4);
@@ -457,6 +462,13 @@ export async function generateDevisPdf(devis, catMap = {}) {
       doc.text(row.text, M, startY + 5);
       return startY + 8;
     }
+    if (row.kind === 'sous_titre') {
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(8);
+      doc.setTextColor(...TEXT);
+      doc.text(row.text, M + 4, startY + 4.5);
+      return startY + 7;
+    }
     doc.setFont('helvetica', 'italic');
     doc.setFontSize(7);
     doc.setTextColor(...MUTED);
@@ -617,7 +629,7 @@ export async function generateDevisPdf(devis, catMap = {}) {
     y = drawEmptyRow(y);
   } else {
     rows.forEach((row) => {
-      if (row.kind === 'titre' || row.kind === 'note') {
+      if (row.kind === 'titre' || row.kind === 'sous_titre' || row.kind === 'note') {
         const h = measureRowHeight(doc, row);
         ensureSpace(h);
         y = drawExtraRow(row, y);

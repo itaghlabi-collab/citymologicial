@@ -134,6 +134,9 @@ function draftToLigne(draft, articles = []) {
   if (draft.mode === 'titre') {
     return EMPTY_LIGNE({ type: 'titre', designation: draft.designation.trim() });
   }
+  if (draft.mode === 'sous_titre') {
+    return EMPTY_LIGNE({ type: 'sous_titre', designation: draft.designation.trim() });
+  }
   let description = draft.description?.trim() || '';
   if (!description && draft.mode === 'article' && draft.article_id) {
     const art = articles.find((a) => String(a.id) === String(draft.article_id));
@@ -157,6 +160,9 @@ function draftToLigne(draft, articles = []) {
 function ligneToDraft(ligne, articles = []) {
   if (ligne.type === 'titre') {
     return { ...EMPTY_DRAFT(), mode: 'titre', designation: ligne.designation || '' };
+  }
+  if (ligne.type === 'sous_titre') {
+    return { ...EMPTY_DRAFT(), mode: 'sous_titre', designation: ligne.designation || '' };
   }
   return {
     ...EMPTY_DRAFT(),
@@ -491,6 +497,22 @@ function DevisLineDisplay({ ligne, lineNum, idx, articles, onDelete, onDuplicate
     );
   }
 
+  if (ligne.type === 'sous_titre') {
+    return (
+      <tr {...dragProps}>
+        <td colSpan={8} style={{ padding: '8px 14px 8px 28px', background: '#FAFAFA', borderTop: '1px solid var(--border)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <DragHandle {...handleProps} />
+            <span style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.88rem', color: 'var(--text)', flex: 1 }}>
+              {ligne.designation || 'Sous-titre'}
+            </span>
+            {actions}
+          </div>
+        </td>
+      </tr>
+    );
+  }
+
   if (ligne.type === 'note') {
     return (
       <tr {...dragProps}>
@@ -540,6 +562,17 @@ function DevisLineCard({ ligne, lineNum, idx, articles, onDelete, onDuplicate, o
       </div>
     );
   }
+  if (ligne.type === 'sous_titre') {
+    return (
+      <div className="devis-line-card devis-line-card--sous-titre">
+        <div style={{ fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--text)' }}>{ligne.designation}</div>
+        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>{[
+          <button key="e" type="button" className="btn btn-ghost btn-sm" onClick={() => onEdit(idx)}>Modifier</button>,
+          <button key="d" type="button" className="btn btn-ghost btn-sm" onClick={() => onDelete(idx)} style={{ color: 'var(--red)' }}>Supprimer</button>,
+        ]}</div>
+      </div>
+    );
+  }
   if (ligne.type !== 'article') return null;
   const ht = ligneSousTotalHt(ligne);
   const description = resolveLigneDescription(ligne, articles);
@@ -566,7 +599,7 @@ function DevisLineCard({ ligne, lineNum, idx, articles, onDelete, onDuplicate, o
 }
 
 /* ── Composer ajout ligne ── */
-function LigneComposer({ draft, setDraft, categories, articles, onArticleSelect, onOk, onClear, onAddTitre, editingIdx, draftError }) {
+function LigneComposer({ draft, setDraft, categories, articles, onArticleSelect, onOk, onClear, onAddTitre, onAddSousTitre, editingIdx, draftError }) {
   const catArticles = draft.categorie_id
     ? articles.filter((a) => String(a.categorie_id) === String(draft.categorie_id))
     : [];
@@ -582,12 +615,23 @@ function LigneComposer({ draft, setDraft, categories, articles, onArticleSelect,
   }
 
   const isTitre = draft.mode === 'titre';
+  const isSousTitre = draft.mode === 'sous_titre';
   const isHorsCatalogue = draft.mode === 'hors_catalogue';
+
+  const composerTitle = editingIdx != null
+    ? 'Modifier la ligne'
+    : isTitre
+      ? 'Ajouter un titre'
+      : isSousTitre
+        ? 'Ajouter un sous-titre'
+        : isHorsCatalogue
+          ? 'Ajouter un article hors catalogue'
+          : 'Ajouter une ligne';
 
   return (
     <div className="devis-composer" style={{ marginTop: 16, padding: '18px 20px', background: '#F8F9FA', borderRadius: 10, border: '1.5px solid var(--border)' }}>
       <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '0.88rem', marginBottom: 14, color: 'var(--text)' }}>
-        {editingIdx != null ? 'Modifier la ligne' : 'Ajouter une ligne'}
+        {composerTitle}
       </div>
 
       {draftError && (
@@ -602,6 +646,16 @@ function LigneComposer({ draft, setDraft, categories, articles, onArticleSelect,
             onChange={(e) => setF('designation', e.target.value)}
             placeholder="Ex : GROS ŒUVRE, PEINTURE…"
             style={{ ...IS(false), fontFamily: 'var(--font-head)', fontWeight: 700 }}
+          />
+        </div>
+      ) : isSousTitre ? (
+        <div style={{ marginBottom: 14 }}>
+          <Label required>Sous-titre</Label>
+          <input
+            value={draft.designation}
+            onChange={(e) => setF('designation', e.target.value)}
+            placeholder="Ex : Cloisons, Électricité…"
+            style={{ ...IS(false), fontFamily: 'var(--font-head)', fontWeight: 600 }}
           />
         </div>
       ) : (
@@ -686,20 +740,23 @@ function LigneComposer({ draft, setDraft, categories, articles, onArticleSelect,
           OK
         </button>
         <button type="button" className="btn btn-ghost" onClick={onClear}>Effacer</button>
-        {!isTitre && (
-          <button type="button" className="btn btn-ghost btn-sm" onClick={onAddTitre}>Ajouter Titre</button>
+        {!isTitre && !isSousTitre && (
+          <>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={onAddTitre}>Ajouter Titre</button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={onAddSousTitre}>Ajouter Sous-titre</button>
+          </>
         )}
-        {!isTitre && draft.mode !== 'hors_catalogue' && (
+        {!isTitre && !isSousTitre && draft.mode !== 'hors_catalogue' && (
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDraft({ ...EMPTY_DRAFT(), mode: 'hors_catalogue' })} style={{ color: '#E65100' }}>
             Article hors catalogue
           </button>
         )}
-        {!isTitre && draft.mode === 'hors_catalogue' && (
+        {!isTitre && !isSousTitre && draft.mode === 'hors_catalogue' && (
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDraft({ ...EMPTY_DRAFT(), mode: 'article' })}>
             Article catalogue
           </button>
         )}
-        {isTitre && (
+        {(isTitre || isSousTitre) && (
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDraft({ ...EMPTY_DRAFT(), mode: 'article' })}>
             Ligne article
           </button>
@@ -861,9 +918,18 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
     setDraftError('');
   }
 
+  function handleDraftModeChange(mode) {
+    setDraft({ ...EMPTY_DRAFT(), mode });
+    setDraftError('');
+  }
+
   function validateDraft() {
     if (draft.mode === 'titre') {
       if (!draft.designation?.trim()) return 'Titre requis';
+      return '';
+    }
+    if (draft.mode === 'sous_titre') {
+      if (!draft.designation?.trim()) return 'Sous-titre requis';
       return '';
     }
     if (!draft.designation?.trim()) return 'Désignation requise';
@@ -1219,7 +1285,8 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
                 onArticleSelect={handleArticleSelect}
                 onOk={commitDraft}
                 onClear={resetDraft}
-                onAddTitre={() => { setDraft({ ...EMPTY_DRAFT(), mode: 'titre' }); setDraftError(''); }}
+                onAddTitre={() => handleDraftModeChange('titre')}
+                onAddSousTitre={() => handleDraftModeChange('sous_titre')}
                 editingIdx={editingIdx}
                 draftError={draftError}
               />

@@ -7466,6 +7466,15 @@ tbody tr:last-child td { border-bottom: none; }
   color: var(--red);
 }
 
+.crm-devis-preview-line--sous-titre {
+  background: #FAFAFA;
+  border-left: 3px solid var(--border);
+  font-weight: 700;
+  font-size: 0.82rem;
+  color: var(--text);
+  padding-left: 14px;
+}
+
 .crm-devis-preview-line-head {
   display: flex;
   justify-content: space-between;

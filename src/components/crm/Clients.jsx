@@ -445,7 +445,6 @@ function ClientModal({ client, onClose, onSave, saving }) {
   function validate() {
     const e = {};
     if (!form.nom?.trim()) e.nom = 'Requis';
-    if (!form.telephone?.trim()) e.telephone = 'Requis';
     return e;
   }
 
@@ -473,9 +472,8 @@ function ClientModal({ client, onClose, onSave, saving }) {
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
           <div className="form-group">
-            <label>Telephone *</label>
-            <input value={form.telephone} onChange={e => setField('telephone', e.target.value)} placeholder="+212 600 000 000" style={IS(errors.telephone)} />
-            {errors.telephone && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.telephone}</span>}
+            <label>Telephone</label>
+            <input value={form.telephone} onChange={e => setField('telephone', e.target.value)} placeholder="+212 600 000 000" style={IS(false)} />
           </div>
           <div className="form-group">
             <label>Email</label>

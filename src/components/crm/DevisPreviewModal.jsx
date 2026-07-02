@@ -73,6 +73,13 @@ export default function DevisPreviewModal({ devis, articles = [], onClose }) {
                       </div>
                     );
                   }
+                  if (l.type === 'sous_titre') {
+                    return (
+                      <div key={l._id || l.id || i} className="crm-devis-preview-line crm-devis-preview-line--sous-titre">
+                        {l.designation}
+                      </div>
+                    );
+                  }
                   if (l.type !== 'article') return null;
                   articleNum += 1;
                   const ht = Number(l.quantite) * Number(l.prix_ht) * (1 - Number(l.remise || 0) / 100);

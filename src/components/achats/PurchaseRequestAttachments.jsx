@@ -160,7 +160,7 @@ export default function PurchaseRequestAttachments({
                   {a.added_by_name ? ` · ${a.added_by_name}` : ''}
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: 4, alignItems: 'center' }}>
+              <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexShrink: 0 }}>
                 {a.url ? (
                   <>
                     <a href={a.url} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm" title="Voir">
@@ -173,18 +173,16 @@ export default function PurchaseRequestAttachments({
                 ) : (
                   <span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>—</span>
                 )}
-                {canEdit && (
-                  <button
-                    type="button"
-                    className="btn btn-ghost btn-sm"
-                    title="Supprimer"
-                    style={{ color: 'var(--red)' }}
-                    disabled={saving}
-                    onClick={() => handleDelete(i)}
-                  >
-                    <Trash2 size={12} />
-                  </button>
-                )}
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  title={canEdit ? 'Supprimer' : 'Suppression possible uniquement en brouillon'}
+                  style={{ color: canEdit ? 'var(--red)' : 'var(--text-3)', opacity: canEdit ? 1 : 0.45 }}
+                  disabled={saving || !canEdit}
+                  onClick={() => handleDelete(i)}
+                >
+                  <Trash2 size={12} />
+                </button>
               </div>
             </div>
           ))}
