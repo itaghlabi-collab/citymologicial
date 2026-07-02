@@ -167,7 +167,9 @@ export default function Factures() {
 
   useEffect(() => {
     if (!configured) return;
-    listImportedCrmArchives('facture').then(setImportedArchives).catch(() => setImportedArchives([]));
+    listImportedCrmArchives('facture', { autoRepair: true })
+      .then(setImportedArchives)
+      .catch(() => setImportedArchives([]));
   }, [configured, loading, factures.length]);
 
   /* Derived */

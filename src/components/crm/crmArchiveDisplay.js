@@ -26,20 +26,25 @@ export function archiveToDevisRow(archive) {
 }
 
 export function archiveToFactureRow(archive) {
+  const ht = Number(archive.total_ht) || 0;
+  const tva = Number(archive.total_tva) || 0;
+  let ttc = Number(archive.total_ttc) || 0;
+  if (!ttc && ht) ttc = ht + tva;
+
   return {
     id: `archive-${archive.id}`,
     archive_id: archive.id,
-    numero: archive.reference || '—',
+    numero: archive.reference || archive.file_name?.match(/FAC-\d{4}-\d{3,}/i)?.[0] || '—',
     titre: archive.intitule || archive.file_name,
     client_nom: archive.client_nom,
     client_id: archive.client_id,
     devis_reference: archive.devis_reference,
     commercial: '—',
-    total_ht: archive.total_ht,
-    total_tva: archive.total_tva,
-    total_ttc: archive.total_ttc,
+    total_ht: ht || archive.total_ht,
+    total_tva: tva || archive.total_tva,
+    total_ttc: ttc || archive.total_ttc,
     total_paye: 0,
-    reste_a_payer: archive.total_ttc,
+    reste_a_payer: ttc || archive.total_ttc || ht,
     statut: 'archive_importee',
     date_emission: archive.date_document,
     date_echeance: archive.date_echeance,

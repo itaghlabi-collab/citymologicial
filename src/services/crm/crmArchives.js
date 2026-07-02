@@ -106,7 +106,30 @@ export async function listCrmArchives(filters = {}) {
   return (data || []).map((r) => normalizeCrmArchive(r));
 }
 
-export async function listImportedCrmArchives(docType) {
+export function archiveNeedsRepair(row) {
+  if (!row || row.statut !== 'importe') return false;
+  const ht = Number(row.total_ht) || 0;
+  const ttc = Number(row.total_ttc) || 0;
+  const tva = Number(row.total_tva) || 0;
+  if (ttc > 0 && (ht > 0 || tva > 0)) return false;
+  return ht > 0 || !row.reference;
+}
+
+export async function listImportedCrmArchives(docType, { autoRepair = true } = {}) {
+  let rows = await listCrmArchives({ doc_type: docType, imported_only: true });
+  if (!autoRepair) return rows;
+
+  const broken = rows.filter(archiveNeedsRepair);
+  if (!broken.length) return rows;
+
+  const clients = await listClients();
+  for (const row of broken) {
+    try {
+      await reanalyzeCrmArchive(row.id, clients, { preserveImported: true });
+    } catch (err) {
+      console.warn('[CITYMO] archive auto-repair', row.id, err.message);
+    }
+  }
   return listCrmArchives({ doc_type: docType, imported_only: true });
 }
 
@@ -220,7 +243,7 @@ export async function updateCrmArchive(id, patch) {
   return normalizeCrmArchive(data);
 }
 
-export async function reanalyzeCrmArchive(id, clients = []) {
+export async function reanalyzeCrmArchive(id, clients = [], options = {}) {
   const sb = getSupabase();
   const { data: row, error } = await sb.from(TABLE).select('*').eq('id', id).single();
   if (error || !row) throw new Error('Archive introuvable.');
@@ -230,27 +253,29 @@ export async function reanalyzeCrmArchive(id, clients = []) {
 
   const file = new File([blob], row.file_name, { type: 'application/pdf' });
   const built = await buildArchiveRowFromFile(file, clients);
+  const keepImported = options.preserveImported || row.statut === 'importe';
 
   return updateCrmArchive(id, {
     doc_type: built.meta.doc_type,
-    reference: built.meta.reference,
-    date_document: built.meta.date_document,
-    date_echeance: built.meta.date_echeance,
-    devis_reference: built.meta.devis_reference,
-    intitule: built.meta.intitule,
-    client_id: built.client_id,
-    client_detected_name: built.meta.client_detected_name,
-    client_ice: built.meta.client_ice,
-    client_email: built.meta.client_email,
-    client_telephone: built.meta.client_telephone,
-    total_ht: built.meta.total_ht,
-    total_tva: built.meta.total_tva,
-    total_ttc: built.meta.total_ttc,
-    statut: built.statut,
-    match_confidence: built.match_confidence,
-    duplicate_ref: built.duplicate_ref,
+    reference: built.meta.reference || row.reference,
+    date_document: built.meta.date_document || row.date_document,
+    date_echeance: built.meta.date_echeance || row.date_echeance,
+    devis_reference: built.meta.devis_reference || row.devis_reference,
+    intitule: built.meta.intitule || row.intitule,
+    client_id: built.client_id ?? row.client_id,
+    client_detected_name: built.meta.client_detected_name || row.client_detected_name,
+    client_ice: built.meta.client_ice || row.client_ice,
+    client_email: built.meta.client_email || row.client_email,
+    client_telephone: built.meta.client_telephone || row.client_telephone,
+    total_ht: built.meta.total_ht != null ? built.meta.total_ht : row.total_ht,
+    total_tva: built.meta.total_tva != null ? built.meta.total_tva : row.total_tva,
+    total_ttc: built.meta.total_ttc != null ? built.meta.total_ttc : row.total_ttc,
+    statut: keepImported ? 'importe' : built.statut,
+    match_confidence: built.match_confidence || row.match_confidence,
+    duplicate_ref: keepImported ? null : built.duplicate_ref,
     detection_errors: built.meta.detection_errors,
     extraction_snippet: built.meta.extraction_snippet,
+    ...(keepImported ? { imported_at: row.imported_at, validated_by: row.validated_by } : {}),
   });
 }
 
@@ -263,7 +288,7 @@ export async function reanalyzeImportedArchives(docType = null) {
   const results = [];
   for (const row of rows) {
     try {
-      const updated = await reanalyzeCrmArchive(row.id, clients);
+      const updated = await reanalyzeCrmArchive(row.id, clients, { preserveImported: true });
       results.push({ success: true, id: row.id, data: updated });
     } catch (err) {
       results.push({ success: false, id: row.id, error: err.message });

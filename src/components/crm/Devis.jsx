@@ -173,7 +173,7 @@ export default function Devis() {
 
   useEffect(() => {
     if (!configured) return;
-    listImportedCrmArchives('devis').then(setImportedArchives).catch(() => setImportedArchives([]));
+    listImportedCrmArchives('devis', { autoRepair: true }).then(setImportedArchives).catch(() => setImportedArchives([]));
   }, [configured, loading, devis.length]);
 
   /* Derived lists */
