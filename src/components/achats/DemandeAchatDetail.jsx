@@ -24,6 +24,7 @@ import {
   QUOTE_STATUS_BADGE,
 } from '../../constants/purchaseWorkflow';
 import { generatePurchaseRequestPdf } from '../../services/achats/purchaseRequestPdf';
+import PurchaseRequestAttachments from './PurchaseRequestAttachments';
 import {
   SectionTitle, FField, FRow, INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE,
   BADGE_PRIORITE, TVA_OPTIONS, UploadField, formatMAD, Modal,
@@ -287,7 +288,7 @@ function QuoteForm({ suppliers, initial, onSave, onCancel, saving, requestId }) 
 }
 
 export default function DemandeAchatDetail({
-  requestId, onBack, onEdit, onRefresh, suppliers = [], initialShowQuoteForm = false,
+  requestId, onBack, onEdit, onRefresh, suppliers = [], initialShowQuoteForm = false, refreshKey = 0,
 }) {
   const { user } = useAuth();
   const [bundle, setBundle] = useState(null);
@@ -318,7 +319,7 @@ export default function DemandeAchatDetail({
     } finally {
       setLoading(false);
     }
-  }, [requestId, user]);
+  }, [requestId, user, refreshKey]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -448,37 +449,22 @@ export default function DemandeAchatDetail({
                 {request.description}
               </div>
             )}
-            {(request.payload?.attachments?.length > 0) && (
-              <div style={{ marginTop: 14 }}>
-                <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 8 }}>Pièces jointes</div>
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                  {request.payload.attachments.map((a, i) => (
-                    <div
-                      key={a.storage_path || a.name || i}
-                      style={{
-                        display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.84rem',
-                        padding: '8px 10px', background: 'var(--surface-2)', borderRadius: 6,
-                      }}
-                    >
-                      <FileText size={14} />
-                      <span style={{ flex: 1, fontWeight: 600 }}>{a.name || 'Fichier'}</span>
-                      {a.url ? (
-                        <>
-                          <a href={a.url} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm" title="Voir">
-                            <Eye size={12} />
-                          </a>
-                          <a href={a.url} download={a.name || 'piece-jointe'} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm" title="Télécharger">
-                            <Download size={12} />
-                          </a>
-                        </>
-                      ) : (
-                        <span style={{ fontSize: '0.75rem', color: 'var(--text-3)' }}>Lien indisponible</span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+            <PurchaseRequestAttachments
+              request={request}
+              canEdit={canEdit}
+              user={user}
+              refreshKey={refreshKey}
+              onError={setError}
+              onUpdated={(updated, resolved) => {
+                setBundle((b) => (b ? {
+                  ...b,
+                  request: {
+                    ...updated,
+                    payload: { ...updated.payload, attachments: resolved },
+                  },
+                } : b));
+              }}
+            />
           </div>
 
           {showQuotesSection && (

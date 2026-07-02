@@ -100,3 +100,15 @@ export async function enrichPurchaseQuotesFiles(quotes = []) {
     return { ...q, attachment_url: url || q.attachment_url, attachment_storage_path: q.attachment_url };
   }));
 }
+
+export function formatPurchaseAttachmentType(mimeOrName) {
+  const mime = String(mimeOrName || '').toLowerCase();
+  if (mime.startsWith('image/') || ['jpg', 'jpeg', 'png', 'webp', 'gif'].some((e) => mime.endsWith(e))) return 'Image';
+  if (mime === 'application/pdf' || mime.endsWith('.pdf')) return 'PDF';
+  if (mime.includes('word') || mime.endsWith('.doc') || mime.endsWith('.docx')) return 'Word';
+  return mime ? mime.split('/').pop()?.toUpperCase() || 'Fichier' : 'Fichier';
+}
+
+export function stripAttachmentUrls(attachments = []) {
+  return (attachments || []).map(({ url, ...rest }) => rest);
+}

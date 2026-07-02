@@ -68,6 +68,9 @@ function buildFormPayload(form, existingPayload = {}, attachments = []) {
       size: a.size,
       type: a.type,
       storage_path: a.storage_path,
+      added_at: a.added_at || null,
+      added_by_name: a.added_by_name || null,
+      added_by: a.added_by || null,
     })),
     lines: [{
       designation: form.titre?.trim() || '—',
@@ -277,6 +280,7 @@ export default function DemandesAchat() {
   const [editItem, setEditItem] = useState(null);
   const [detailId, setDetailId] = useState(null);
   const [detailAddQuote, setDetailAddQuote] = useState(false);
+  const [detailRefreshKey, setDetailRefreshKey] = useState(0);
   const [submittingId, setSubmittingId] = useState(null);
   const [pdfLoadingId, setPdfLoadingId] = useState(null);
   const [role, setRole] = useState(null);
@@ -316,8 +320,9 @@ export default function DemandesAchat() {
     if (result.success) {
       setShowModal(false);
       setEditItem(null);
+      if (detailId) setDetailRefreshKey((k) => k + 1);
     }
-  }, [editItem, save]);
+  }, [editItem, save, detailId]);
 
   async function handleDelete(id) {
     const item = items.find((x) => x.id === id);
@@ -371,6 +376,7 @@ export default function DemandesAchat() {
         <DemandeAchatDetail
           requestId={detailId}
           suppliers={suppliers}
+          refreshKey={detailRefreshKey}
           onBack={() => { setDetailId(null); setDetailAddQuote(false); }}
           initialShowQuoteForm={detailAddQuote}
           onEdit={() => {

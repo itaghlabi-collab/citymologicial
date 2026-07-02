@@ -286,3 +286,47 @@ export async function loadPurchaseRequestFormOptions() {
   ]);
   return { projects, employees };
 }
+
+export function serializePurchaseAttachments(attachments = []) {
+  return (attachments || []).map((a) => ({
+    name: a.name,
+    size: a.size ?? null,
+    type: a.type || null,
+    storage_path: a.storage_path,
+    added_at: a.added_at || null,
+    added_by_name: a.added_by_name || null,
+    added_by: a.added_by || null,
+  }));
+}
+
+/** Met à jour uniquement les pièces jointes (demande en brouillon). */
+export async function updatePurchaseRequestAttachments(id, attachments) {
+  const { data: { user }, error: authErr } = await getSupabase().auth.getUser();
+  if (authErr || !user) throw new Error('Session requise.');
+
+  const { data: existing, error: fetchErr } = await getSupabase()
+    .from(TABLE)
+    .select('statut, payload')
+    .eq('id', id)
+    .single();
+  if (fetchErr) throw fetchErr;
+  if (normalizePurchaseStatus(existing.statut) !== 'Brouillon') {
+    const err = new Error('Les pièces jointes ne peuvent être modifiées qu\'en brouillon.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+
+  const payload = {
+    ...(existing.payload || {}),
+    attachments: serializePurchaseAttachments(attachments),
+  };
+
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .update({ payload })
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+  return normalizePurchaseRequest(data);
+}
