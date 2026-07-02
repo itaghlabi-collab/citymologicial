@@ -108,11 +108,17 @@ export async function listCrmArchives(filters = {}) {
 
 export function archiveNeedsRepair(row) {
   if (!row || row.statut !== 'importe') return false;
+  if (!row.reference) return true;
+
   const ht = Number(row.total_ht) || 0;
   const ttc = Number(row.total_ttc) || 0;
   const tva = Number(row.total_tva) || 0;
-  if (ttc > 0 && (ht > 0 || tva > 0)) return false;
-  return ht > 0 || !row.reference;
+
+  if (ttc > 0 && (ht <= 0 || tva <= 0)) return true;
+  if (ht > 0 && ttc <= 0) return true;
+  if (ttc > 1000 && ht > 0 && ht < ttc * 0.1) return true;
+
+  return false;
 }
 
 export async function listImportedCrmArchives(docType, { autoRepair = true } = {}) {

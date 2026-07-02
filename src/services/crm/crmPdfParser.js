@@ -68,36 +68,54 @@ function lastMatch(text, patterns) {
   return found;
 }
 
-/** Bloc totaux CITYMO : « Total HT : 85 896,00 MAD » (pas les colonnes du tableau) */
+/** Bloc totaux CITYMO : « Total HT : 65 422,00 MAD » (pas les colonnes du tableau) */
 function extractCitymoTotals(text) {
   const total_ht = parseAmount(lastMatch(text, [
     /Total\s*HT\s*:\s*([\d\s.,]+)\s*MAD/gi,
   ]));
   const total_tva = parseAmount(lastMatch(text, [
+    /TVA(?:\s*\([^)]*\))?\s*:\s*([\d\s.,]+)\s*MAD/gi,
     /TVA\s*:\s*([\d\s.,]+)\s*MAD/gi,
   ]));
   const total_ttc = parseAmount(lastMatch(text, [
     /Total\s*TTC\s*:\s*([\d\s.,]+)\s*MAD/gi,
   ]));
 
-  if (total_ht != null || total_tva != null || total_ttc != null) {
-    return { total_ht, total_tva, total_ttc };
+  let ht = total_ht;
+  let tva = total_tva;
+  let ttc = total_ttc;
+
+  if (ttc != null && ht != null && (tva == null || tva === 0) && ttc > ht) {
+    tva = Math.round((ttc - ht) * 100) / 100;
+  }
+  if (ht != null && tva != null && (ttc == null || ttc === 0)) {
+    ttc = Math.round((ht + tva) * 100) / 100;
+  }
+
+  if (ht != null || tva != null || ttc != null) {
+    return { total_ht: ht, total_tva: tva, total_ttc: ttc };
   }
 
   return {
     total_ht: parseAmount(firstMatch(text, [/Total\s*HT\s*:?\s*([\d\s.,]+)\s*MAD/i])),
-    total_tva: parseAmount(firstMatch(text, [/TVA\s*:\s*([\d\s.,]+)\s*MAD/i])),
+    total_tva: parseAmount(firstMatch(text, [/TVA(?:\s*\([^)]*\))?\s*:?\s*([\d\s.,]+)\s*MAD/i])),
     total_ttc: parseAmount(firstMatch(text, [/Total\s*TTC\s*:?\s*([\d\s.,]+)\s*MAD/i])),
   };
 }
 
-function extractClientNameFromFileName(fileName) {
-  const m = String(fileName || '').match(/^(?:FAC|PR|FA)-[\w-]+\s*-\s*(.+?)\.pdf$/i);
+function extractClientNameFromFileName(fileName, docType = 'facture') {
+  if (docType !== 'facture') return '';
+  const m = String(fileName || '').match(/^(?:FAC|FA)-[\w-]+\s*-\s*(.+?)\.pdf$/i);
   return m ? m[1].trim() : '';
 }
 
-function extractCitymoClientName(text, fileName) {
-  const fromFile = extractClientNameFromFileName(fileName);
+function extractDevisIntituleFromFileName(fileName) {
+  const m = String(fileName || '').match(/^PR-[\w-]+\s*-\s*(.+?)\.pdf$/i);
+  return m ? m[1].trim() : '';
+}
+
+function extractCitymoClientName(text, fileName, docType = 'devis') {
+  const fromFile = extractClientNameFromFileName(fileName, docType);
   if (fromFile) return fromFile.slice(0, 200);
 
   const afterCompany = text.match(
@@ -137,8 +155,17 @@ function extractDevisReference(text) {
 }
 
 function extractIntitule(text, fileName, docType) {
+  if (docType === 'devis') {
+    const fromLabel = firstMatch(text, [
+      /Intitul[ée]\s*:\s*([A-Z0-9ÉÈÀÂÊÎÔÛ][A-Z0-9ÉÈÀÂÊÎÔÛ '\-&.]+?)(?:\s+R[ée]alis[ée]|\s+Conditions|\s+Date|$)/i,
+    ]);
+    if (fromLabel) return fromLabel.trim().slice(0, 300);
+    const fromFile = extractDevisIntituleFromFileName(fileName);
+    if (fromFile) return fromFile.slice(0, 300);
+  }
+
   const fromObjet = firstMatch(text, [
-    /(?:Objet|Intitul[ée]|Titre)\s*:?\s*([^\n]+)/i,
+    /(?:Objet|Titre)\s*:?\s*([^\n]+)/i,
     /(?:Projet|Prestation)\s*:?\s*([^\n]+)/i,
   ]);
   if (fromObjet) return fromObjet.slice(0, 300);
@@ -217,10 +244,11 @@ export function parseArchiveMetadata(text, fileName = '') {
 
   const echeanceStr = firstMatch(text, [
     /[ÉE]ch[ée]ance\s*:\s*(\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4})/i,
+    /Valable jusqu'?au\s*:\s*(\d{1,2}[\/\-.]\d{1,2}[\/\-.]\d{2,4})/i,
   ]);
   const date_echeance = parseDate(echeanceStr);
 
-  const client_detected_name = extractCitymoClientName(text, fileName);
+  const client_detected_name = extractCitymoClientName(text, fileName, docType);
   const client_ice = extractCitymoClientIce(text);
 
   const client_email = firstMatch(text, [
