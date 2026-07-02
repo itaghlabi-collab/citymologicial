@@ -57,9 +57,10 @@ export function useEmployees() {
     setSaving(true);
     setError(null);
     try {
-      await createEmployee(form);
+      const created = await createEmployee(form);
+      setEmployees((prev) => [created, ...prev.filter((e) => e.id !== created.id)]);
       await load();
-      return { success: true };
+      return { success: true, data: created };
     } catch (err) {
       const msg = formatSupabaseError(err, 'Erreur enregistrement.');
       setError(msg);
@@ -73,9 +74,10 @@ export function useEmployees() {
     setSaving(true);
     setError(null);
     try {
-      await updateEmployee(id, form);
+      const updated = await updateEmployee(id, form);
+      setEmployees((prev) => prev.map((e) => (e.id === id ? updated : e)));
       await load();
-      return { success: true };
+      return { success: true, data: updated };
     } catch (err) {
       const msg = formatSupabaseError(err, 'Erreur enregistrement.');
       setError(msg);

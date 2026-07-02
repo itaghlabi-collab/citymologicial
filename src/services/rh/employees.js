@@ -7,6 +7,62 @@ import { purgeEmployeeDocuments } from './employeeDocuments';
 
 const TABLE = 'employees';
 
+function normDateInput(v) {
+  if (!v) return '';
+  const s = String(v).trim();
+  if (/^\d{4}-\d{2}-\d{2}/.test(s)) return s.slice(0, 10);
+  try {
+    const d = new Date(s);
+    if (!Number.isNaN(d.getTime())) return d.toISOString().slice(0, 10);
+  } catch (_) { /* ignore */ }
+  return s;
+}
+
+export function getEmployeeDepartmentLabel(emp) {
+  if (!emp) return '';
+  if (emp.department) return emp.department;
+  const dept = DEPARTMENTS.find((d) => d.id === emp.department_id);
+  return dept?.nom || '';
+}
+
+/** Normalise une ligne DB pour affichage / liste */
+export function normalizeEmployee(row) {
+  if (!row) return null;
+  return {
+    ...row,
+    department: getEmployeeDepartmentLabel(row),
+    date_embauche: normDateInput(row.date_embauche),
+    date_naissance: normDateInput(row.date_naissance),
+    salaire: row.salaire != null ? Number(row.salaire) : 0,
+  };
+}
+
+/** Map DB row → état formulaire RH.jsx */
+export function employeeToForm(emp) {
+  const e = normalizeEmployee(emp) || {};
+  return {
+    firstname: e.firstname || '',
+    lastname: e.lastname || '',
+    email: e.email || '',
+    poste: e.poste || '',
+    department: e.department || '',
+    department_id: e.department_id ?? null,
+    telephone: e.telephone || '',
+    date_embauche: e.date_embauche || '',
+    date_naissance: e.date_naissance || '',
+    type_contrat: e.type_contrat || '',
+    contact_urgence: e.contact_urgence || '',
+    salaire: e.salaire ?? '',
+    statut: e.statut || 'Actif',
+    adresse: e.adresse || '',
+    numero_cin: e.numero_cin || '',
+    cnss: e.cnss || '',
+    rib: e.rib || '',
+    banque: e.banque || '',
+    situation_familiale: e.situation_familiale || '',
+  };
+}
+
 /** Map form payload → DB row (RH.jsx fields) */
 export function toEmployeeRow(form) {
   const dept = DEPARTMENTS.find(
@@ -18,17 +74,20 @@ export function toEmployeeRow(form) {
     return s || null;
   };
 
-  return {
+  const row = {
     firstname: form.firstname?.trim(),
     lastname: form.lastname?.trim(),
     email: form.email?.trim(),
     poste: form.poste?.trim(),
     department: form.department || null,
-    department_id: dept?.id ?? null,
+    department_id: dept?.id ?? form.department_id ?? null,
     telephone: trimOrNull(form.telephone),
     salaire: Number(form.salaire) || 0,
     statut: form.statut || 'Actif',
-    date_embauche: form.date_embauche || null,
+    date_embauche: normDateInput(form.date_embauche) || null,
+    date_naissance: normDateInput(form.date_naissance) || null,
+    type_contrat: trimOrNull(form.type_contrat),
+    contact_urgence: trimOrNull(form.contact_urgence),
     adresse: trimOrNull(form.adresse),
     numero_cin: trimOrNull(form.numero_cin)?.toUpperCase() || null,
     cnss: trimOrNull(form.cnss),
@@ -36,6 +95,47 @@ export function toEmployeeRow(form) {
     banque: trimOrNull(form.banque),
     situation_familiale: trimOrNull(form.situation_familiale),
   };
+
+  if (!form.department && form.department_id) {
+    const byId = DEPARTMENTS.find((d) => d.id === form.department_id);
+    if (byId) {
+      row.department = byId.nom;
+      row.department_id = byId.id;
+    }
+  }
+
+  return row;
+}
+
+const OPTIONAL_PROFILE_COLUMNS = ['date_naissance', 'type_contrat', 'contact_urgence'];
+
+function stripOptionalProfileFields(row) {
+  const next = { ...row };
+  for (const key of OPTIONAL_PROFILE_COLUMNS) delete next[key];
+  return next;
+}
+
+function isMissingColumnError(err) {
+  const msg = String(err?.message || '').toLowerCase();
+  return err?.code === 'PGRST204' || /column/.test(msg) || /schema cache/.test(msg);
+}
+
+async function persistEmployeeRow(row, { id } = {}) {
+  const sb = getSupabase();
+  const query = id
+    ? sb.from(TABLE).update(row).eq('id', id).select().single()
+    : sb.from(TABLE).insert([row]).select().single();
+
+  let { data, error } = await query;
+  if (error && isMissingColumnError(error)) {
+    const fallback = stripOptionalProfileFields(row);
+    const retry = id
+      ? sb.from(TABLE).update(fallback).eq('id', id).select().single()
+      : sb.from(TABLE).insert([fallback]).select().single();
+    ({ data, error } = await retry);
+  }
+  if (error) throw error;
+  return normalizeEmployee(data);
 }
 
 export function employeeFullName(emp) {
@@ -192,30 +292,25 @@ export async function listEmployees() {
     .order('created_at', { ascending: false });
 
   if (error) throw error;
-  return data || [];
+  return (data || []).map(normalizeEmployee);
+}
+
+export async function getEmployee(id) {
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .select('*')
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw error;
+  return normalizeEmployee(data);
 }
 
 export async function createEmployee(form) {
-  const { data, error } = await getSupabase()
-    .from(TABLE)
-    .insert([toEmployeeRow(form)])
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data;
+  return persistEmployeeRow(toEmployeeRow(form));
 }
 
 export async function updateEmployee(id, form) {
-  const { data, error } = await getSupabase()
-    .from(TABLE)
-    .update(toEmployeeRow(form))
-    .eq('id', id)
-    .select()
-    .single();
-
-  if (error) throw error;
-  return data;
+  return persistEmployeeRow(toEmployeeRow(form), { id });
 }
 
 export async function deleteEmployee(id) {

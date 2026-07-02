@@ -2,8 +2,10 @@ import { Users, Plus, Edit2, Trash2, Search, UserCheck, X, Upload, Download, Loa
 import { useState, useRef } from 'react';
 import { DEPARTMENTS } from '../data/departments';
 import { useEmployees } from '../hooks/useEmployees';
+import { employeeToForm } from '../services/rh/employees';
 import { generateEmployeePdf } from '../services/rh/employeePdf';
 import EmployeeDocuments from './rh/EmployeeDocuments';
+import EmployeeProfileView from './rh/EmployeeProfileView';
 
 const EMPTY_EMP = {
   firstname: '',
@@ -11,10 +13,14 @@ const EMPTY_EMP = {
   email: '',
   poste: '',
   department: '',
+  department_id: null,
   telephone: '',
   date_embauche: '',
+  date_naissance: '',
+  type_contrat: '',
+  contact_urgence: '',
   salaire: '',
-  statut: 'Actif', /* conservé en base, non affiché dans le formulaire */
+  statut: 'Actif',
   adresse: '',
   numero_cin: '',
   cnss: '',
@@ -22,6 +28,8 @@ const EMPTY_EMP = {
   banque: '',
   situation_familiale: '',
 };
+
+const CONTRACT_TYPES = ['CDI', 'CDD', 'Stage', 'Alternance', 'Freelance', 'Autre'];
 
 function fieldStyle(hasError) {
   return {
@@ -81,6 +89,7 @@ function validateForm(form) {
 
 export default function RH() {
   const {
+    employees,
     filtered,
     stats,
     loading,
@@ -104,8 +113,8 @@ export default function RH() {
   const [errors, setErrors] = useState({});
   const [toast, setToast] = useState(null);
   const [pdfLoadingId, setPdfLoadingId] = useState(null);
+  const [viewEmployee, setViewEmployee] = useState(null);
   const [docsEmployee, setDocsEmployee] = useState(null);
-  const [docsMode, setDocsMode] = useState('manage');
   const toastTimer = useRef(null);
 
   function showToast(type, msg) {
@@ -123,25 +132,13 @@ export default function RH() {
 
   function openEdit(emp) {
     setEditingId(emp.id);
-    setForm({
-      firstname: emp.firstname || '',
-      lastname: emp.lastname || '',
-      email: emp.email || '',
-      poste: emp.poste || '',
-      department: emp.department || '',
-      telephone: emp.telephone || '',
-      date_embauche: emp.date_embauche || '',
-      salaire: emp.salaire ?? '',
-      statut: emp.statut || 'Actif',
-      adresse: emp.adresse || '',
-      numero_cin: emp.numero_cin || '',
-      cnss: emp.cnss || '',
-      rib: emp.rib || '',
-      banque: emp.banque || '',
-      situation_familiale: emp.situation_familiale || '',
-    });
+    setForm(employeeToForm(emp));
     setErrors({});
     setShowModal(true);
+  }
+
+  function openView(emp) {
+    setViewEmployee(emp);
   }
 
   function closeModal() {
@@ -204,6 +201,10 @@ export default function RH() {
       : await create(form);
 
     if (result.success) {
+      const saved = result.data;
+      if (saved) {
+        setViewEmployee((prev) => (prev?.id === saved.id ? saved : prev));
+      }
       showToast('success', editingId ? 'Employé modifié avec succès.' : 'Employé créé avec succès.');
       closeModal();
     } else {
@@ -389,6 +390,7 @@ export default function RH() {
                 <tr>
                   <th>Nom</th>
                   <th>Email</th>
+                  <th>Téléphone</th>
                   <th>CIN</th>
                   <th>Poste</th>
                   <th>Département</th>
@@ -406,6 +408,8 @@ export default function RH() {
                     </td>
 
                     <td style={{ fontSize: '0.85rem' }}>{emp.email || '—'}</td>
+
+                    <td style={{ fontSize: '0.85rem' }}>{emp.telephone || '—'}</td>
 
                     <td style={{ fontFamily: 'var(--font-head)', fontSize: '0.85rem' }}>
                       {emp.numero_cin || '—'}
@@ -459,8 +463,8 @@ export default function RH() {
                           type="button"
                           className="btn btn-ghost btn-sm"
                           style={{ padding: '4px 8px' }}
-                          title="Dossier administratif"
-                          onClick={() => { setDocsMode('view'); setDocsEmployee(emp); }}
+                          title="Voir la fiche employé"
+                          onClick={() => openView(emp)}
                         >
                           <Eye size={13} />
                         </button>
@@ -470,7 +474,7 @@ export default function RH() {
                           className="btn btn-ghost btn-sm"
                           style={{ padding: '4px 8px' }}
                           title="Gérer les documents"
-                          onClick={() => { setDocsMode('manage'); setDocsEmployee(emp); }}
+                          onClick={() => { setDocsEmployee(emp); }}
                         >
                           <FolderOpen size={13} />
                         </button>
@@ -612,6 +616,60 @@ export default function RH() {
                 </div>
               </div>
 
+              <div className="rh-emp-modal-row">
+                <div className="form-group">
+                  <label>Date de naissance</label>
+                  <input
+                    type="date"
+                    className="rh-emp-field rh-emp-field-date"
+                    value={form.date_naissance}
+                    onChange={(e) => setForm((p) => ({ ...p, date_naissance: e.target.value }))}
+                    style={fieldStyle(false)}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Type de contrat</label>
+                  <select
+                    className="rh-emp-field"
+                    value={form.type_contrat}
+                    onChange={(e) => setForm((p) => ({ ...p, type_contrat: e.target.value }))}
+                    style={fieldStyle(false)}
+                  >
+                    <option value="">— Choisir —</option>
+                    {CONTRACT_TYPES.map((t) => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              <div className="rh-emp-modal-row">
+                <div className="form-group">
+                  <label>Statut</label>
+                  <select
+                    className="rh-emp-field"
+                    value={form.statut}
+                    onChange={(e) => setForm((p) => ({ ...p, statut: e.target.value }))}
+                    style={fieldStyle(false)}
+                  >
+                    <option value="Actif">Actif</option>
+                    <option value="Conge">Congé</option>
+                    <option value="Inactif">Inactif</option>
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label>Contact d&apos;urgence</label>
+                  <input
+                    type="text"
+                    className="rh-emp-field"
+                    placeholder="Nom — +212 600..."
+                    value={form.contact_urgence}
+                    onChange={(e) => setForm((p) => ({ ...p, contact_urgence: e.target.value }))}
+                    style={fieldStyle(false)}
+                  />
+                </div>
+              </div>
+
               <div className="form-group">
                 <label>Salaire mensuel (MAD)</label>
                 <input
@@ -720,11 +778,23 @@ export default function RH() {
         </div>
       )}
 
+      {viewEmployee && (
+        <EmployeeProfileView
+          employee={employees.find((e) => e.id === viewEmployee.id) || viewEmployee}
+          onClose={() => setViewEmployee(null)}
+          onOpenDocuments={() => {
+            const emp = employees.find((e) => e.id === viewEmployee.id) || viewEmployee;
+            setViewEmployee(null);
+            setDocsEmployee(emp);
+          }}
+        />
+      )}
+
       {docsEmployee && (
         <EmployeeDocuments
-          employee={docsEmployee}
-          mode={docsMode}
-          onClose={() => { setDocsEmployee(null); setDocsMode('manage'); }}
+          employee={employees.find((e) => e.id === docsEmployee.id) || docsEmployee}
+          mode="manage"
+          onClose={() => { setDocsEmployee(null); }}
         />
       )}
     </div>
