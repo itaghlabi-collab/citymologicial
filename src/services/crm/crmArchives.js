@@ -11,6 +11,7 @@ import {
 } from './crmArchiveStorage';
 import { analyzeArchivePdf } from './crmPdfParser';
 import { matchClientForArchive, resolveArchiveStatutAfterMatch } from './crmArchiveMatch';
+import { listClients } from './clients';
 
 const TABLE = 'crm_archives';
 
@@ -53,6 +54,8 @@ export function normalizeCrmArchive(row, client = null) {
     doc_type: row.doc_type,
     reference: row.reference,
     date_document: row.date_document,
+    date_echeance: row.date_echeance,
+    devis_reference: row.devis_reference,
     intitule: row.intitule,
     client_id: row.client_id,
     client_nom: c ? clientDisplayName(c) : (row.client_detected_name || 'Client à associer manuellement'),
@@ -176,6 +179,8 @@ export async function uploadAndAnalyzeArchives(files, clients = []) {
         doc_type: meta.doc_type,
         reference: meta.reference,
         date_document: meta.date_document,
+        date_echeance: meta.date_echeance,
+        devis_reference: meta.devis_reference,
         intitule: meta.intitule,
         client_id,
         client_detected_name: meta.client_detected_name,
@@ -230,6 +235,8 @@ export async function reanalyzeCrmArchive(id, clients = []) {
     doc_type: built.meta.doc_type,
     reference: built.meta.reference,
     date_document: built.meta.date_document,
+    date_echeance: built.meta.date_echeance,
+    devis_reference: built.meta.devis_reference,
     intitule: built.meta.intitule,
     client_id: built.client_id,
     client_detected_name: built.meta.client_detected_name,
@@ -245,6 +252,24 @@ export async function reanalyzeCrmArchive(id, clients = []) {
     detection_errors: built.meta.detection_errors,
     extraction_snippet: built.meta.extraction_snippet,
   });
+}
+
+export async function reanalyzeImportedArchives(docType = null) {
+  const filters = { imported_only: true };
+  if (docType) filters.doc_type = docType;
+  const rows = await listCrmArchives(filters);
+  const clients = await listClients();
+
+  const results = [];
+  for (const row of rows) {
+    try {
+      const updated = await reanalyzeCrmArchive(row.id, clients);
+      results.push({ success: true, id: row.id, data: updated });
+    } catch (err) {
+      results.push({ success: false, id: row.id, error: err.message });
+    }
+  }
+  return results;
 }
 
 export async function validateCrmArchiveImport(id, clients = []) {

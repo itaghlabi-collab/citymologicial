@@ -64,3 +64,7 @@ FROM public.erp_roles r
 CROSS JOIN (VALUES ('voir'), ('creer'), ('modifier'), ('supprimer')) AS a(code)
 WHERE r.nom IN ('super_admin', 'commercial')
 ON CONFLICT ON CONSTRAINT role_permissions_role_submodule_action_key DO NOTHING;
+
+ALTER TABLE public.crm_archives ADD COLUMN IF NOT EXISTS devis_reference TEXT;
+ALTER TABLE public.crm_archives ADD COLUMN IF NOT EXISTS date_echeance DATE;
+CREATE INDEX IF NOT EXISTS idx_crm_archives_devis_reference ON public.crm_archives(devis_reference);

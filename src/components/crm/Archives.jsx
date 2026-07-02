@@ -62,6 +62,7 @@ export default function Archives() {
     validateImport,
     remove,
     reanalyze,
+    reanalyzeImported,
     filterCrmArchives,
     sortCrmArchives,
   } = useCrmArchives();
@@ -178,6 +179,23 @@ export default function Archives() {
         <div style={{ display: 'flex', gap: 8 }}>
           <button type="button" className="btn btn-ghost" onClick={load} disabled={loading}>
             <RefreshCw size={14} />
+          </button>
+          <button
+            type="button"
+            className="btn btn-ghost"
+            disabled={!configured || saving}
+            onClick={async () => {
+              const result = await reanalyzeImported();
+              showToast(
+                result.success
+                  ? `${result.ok} archive(s) réanalysée(s).`
+                  : `${result.ok} OK, ${result.ko} erreur(s).`,
+                result.success ? 'success' : 'error',
+              );
+            }}
+            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+          >
+            <RotateCcw size={14} /> Réanalyser importés
           </button>
           <button
             type="button"

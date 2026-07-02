@@ -33,6 +33,7 @@ export function archiveToFactureRow(archive) {
     titre: archive.intitule || archive.file_name,
     client_nom: archive.client_nom,
     client_id: archive.client_id,
+    devis_reference: archive.devis_reference,
     commercial: '—',
     total_ht: archive.total_ht,
     total_tva: archive.total_tva,
@@ -41,7 +42,7 @@ export function archiveToFactureRow(archive) {
     reste_a_payer: archive.total_ttc,
     statut: 'archive_importee',
     date_emission: archive.date_document,
-    date_echeance: null,
+    date_echeance: archive.date_echeance,
     __isImportedArchive: true,
     __archive: archive,
   };

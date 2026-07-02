@@ -7,6 +7,7 @@ import {
   validateCrmArchiveImport,
   deleteCrmArchive,
   reanalyzeCrmArchive,
+  reanalyzeImportedArchives,
   filterCrmArchives,
   sortCrmArchives,
   checkArchiveDuplicate,
@@ -146,6 +147,21 @@ export function useCrmArchives() {
     }
   }
 
+  async function reanalyzeImported(docType = null) {
+    setSaving(true);
+    try {
+      const results = await reanalyzeImportedArchives(docType);
+      await load();
+      const ok = results.filter((r) => r.success).length;
+      const ko = results.filter((r) => !r.success).length;
+      return { success: ko === 0, ok, ko, results };
+    } catch (err) {
+      return { success: false, error: err.message };
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return {
     records,
     clients,
@@ -161,6 +177,7 @@ export function useCrmArchives() {
     validateImport,
     remove,
     reanalyze,
+    reanalyzeImported,
     filterCrmArchives,
     sortCrmArchives,
   };
