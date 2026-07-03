@@ -8,6 +8,7 @@ import {
   createProjectExpense,
   updateProjectExpense,
   deleteProjectExpense,
+  purgeImportedTotalSummaryRows,
 } from '../services/finance/projectExpenses';
 import { syncProjectExpensesFromErp } from '../services/finance/projectExpenseSync';
 import {
@@ -39,6 +40,7 @@ export function useProjectExpenses() {
         await syncProjectExpensesFromErp().catch(() => {});
         setSyncing(false);
       }
+      await purgeImportedTotalSummaryRows().catch(() => {});
       const [projs, exps, ctx] = await Promise.all([
         listProjects(),
         listProjectExpenses(),

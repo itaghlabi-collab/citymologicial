@@ -2,6 +2,7 @@
  * projectExpenses.js — Dépenses par projet (Supabase public.project_expenses)
  */
 import { getSupabase } from '../../lib/supabase';
+import { isTotalSummaryRow } from './projectExpenseImportUtils';
 
 const TABLE = 'project_expenses';
 
@@ -193,6 +194,30 @@ export async function findImportDuplicate({ project_id, date_depense, element_de
     .eq('montant', montant)
     .maybeSingle();
   return data?.id || null;
+}
+
+/** Supprime les lignes TOTAL importées par erreur (synthèse Excel, pas une dépense) */
+export async function purgeImportedTotalSummaryRows() {
+  await getAuthUserId();
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .select('id, element_depense, categorie, description')
+    .eq('origine', 'import_excel');
+  if (error) throw error;
+
+  const ids = (data || [])
+    .filter((row) => isTotalSummaryRow({
+      element: row.element_depense,
+      description: row.description,
+      categorie: row.categorie,
+    }))
+    .map((row) => row.id);
+
+  if (!ids.length) return { deleted: 0 };
+
+  const { error: delErr } = await getSupabase().from(TABLE).delete().in('id', ids);
+  if (delErr) throw delErr;
+  return { deleted: ids.length };
 }
 
 export function filterProjectExpenses(rows, { search = '', origine = '', statut = '' } = {}) {

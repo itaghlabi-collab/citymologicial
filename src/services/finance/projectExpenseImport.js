@@ -6,6 +6,7 @@ import {
   bulkInsertProjectExpenses,
   findImportDuplicate,
 } from './projectExpenses';
+import { isTotalSummaryRow } from './projectExpenseImportUtils';
 
 const EXCLUDED_SHEETS = new Set([
   'GENERAL',
@@ -105,7 +106,6 @@ function parseMontant(val) {
 function rowIsEmpty(vals) {
   return !vals.some((v) => v != null && String(v).trim() !== '');
 }
-
 export async function parseDepenseChantierWorkbook(arrayBuffer, projects) {
   const wb = XLSX.read(arrayBuffer, { type: 'array', cellDates: true });
   const report = {
@@ -150,6 +150,11 @@ export async function parseDepenseChantierWorkbook(arrayBuffer, projects) {
       let date = parseExcelDate(row[iDate]);
       const montant = parseMontant(row[iMontant]);
       const element = String(row[iElement >= 0 ? iElement : iDesc] || '').trim() || 'Dépense';
+      const description = iDesc >= 0 ? String(row[iDesc] || '').trim() : '';
+
+      if (isTotalSummaryRow({ element, description, categorie: element })) {
+        continue;
+      }
 
       if (date) lastDate = date;
       else if (montant > 0 && element && lastDate) date = lastDate;
@@ -168,7 +173,7 @@ export async function parseDepenseChantierWorkbook(arrayBuffer, projects) {
         date_depense: date,
         categorie: element,
         element_depense: element,
-        description: iDesc >= 0 ? String(row[iDesc] || '').trim() || null : null,
+        description: description || null,
         fournisseur: iFour >= 0 ? String(row[iFour] || '').trim() || null : null,
         montant,
         observation: iObs >= 0 ? String(row[iObs] || '').trim() || null : null,
