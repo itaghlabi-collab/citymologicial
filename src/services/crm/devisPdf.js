@@ -8,6 +8,7 @@ import { formatCategoryDisplayName } from '../../utils/crm/categoryDisplay';
 const LOGO_URL = 'https://i.ibb.co/N6SbC06M/logopng.png';
 const ICON_URL = 'https://i.ibb.co/S79nbLdm/icone.png';
 const QR_URL = 'https://i.ibb.co/rRrG27n3/Capture-d-e-cran-2026-06-02-a-15-32-23.png';
+const SIGNATURE_URL = 'https://i.ibb.co/nMVcsDqS/signature.png';
 
 const RED = [198, 40, 40];
 const TEXT = [33, 33, 33];
@@ -121,6 +122,18 @@ function containImage(naturalW, naturalH, maxW, maxH) {
 function imgFmt(dataUrl) {
   if (!dataUrl?.includes('jpeg') && !dataUrl?.includes('jpg')) return 'PNG';
   return 'JPEG';
+}
+
+function isDevisApproved(devis) {
+  const s = String(devis?.statut || '').toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
+  return s === 'valide' || s === 'approuve';
+}
+
+function getDevisTvaPercent(devis) {
+  const ht = Number(devis?.total_ht) || 0;
+  const tva = Number(devis?.total_tva) || 0;
+  if (ht <= 0) return 20;
+  return Math.round((tva / ht) * 100);
 }
 
 function fmtDate(d) {
@@ -302,10 +315,12 @@ function drawCellBorder(doc, x, y, w, h) {
 }
 
 export async function generateDevisPdf(devis, catMap = {}) {
-  const [logoMeta, iconMeta, qrMeta] = await Promise.all([
+  const showSignature = isDevisApproved(devis);
+  const [logoMeta, iconMeta, qrMeta, signatureMeta] = await Promise.all([
     loadImageWithSize(LOGO_URL),
     loadImageWithSize(ICON_URL),
     loadImageWithSize(QR_URL),
+    showSignature ? loadImageWithSize(SIGNATURE_URL) : Promise.resolve(null),
   ]);
 
   const client = devis.client || {};
@@ -453,6 +468,72 @@ export async function generateDevisPdf(devis, catMap = {}) {
   };
 
   const drawTotalsBlock = (startY) => {
+    if (showSignature) {
+      const blockH = TOTAL_ROW_H * 3;
+      const splitX = M + CONTENT_W / 2;
+      const leftW = CONTENT_W / 2;
+      const rightW = CONTENT_W / 2;
+      const tvaPct = getDevisTvaPercent(devis);
+
+      doc.setDrawColor(...BORDER);
+      doc.setLineWidth(0.25);
+      doc.rect(M, startY, CONTENT_W, blockH);
+      doc.line(splitX, startY, splitX, startY + blockH);
+
+      if (signatureMeta?.dataUrl) {
+        const pad = 3;
+        const sigSize = containImage(
+          signatureMeta.width,
+          signatureMeta.height,
+          leftW - pad * 2,
+          blockH - pad * 2,
+        );
+        const sigX = M + (leftW - sigSize.width) / 2;
+        const sigY = startY + (blockH - sigSize.height) / 2;
+        try {
+          doc.addImage(
+            signatureMeta.dataUrl,
+            imgFmt(signatureMeta.dataUrl),
+            sigX,
+            sigY,
+            sigSize.width,
+            sigSize.height,
+          );
+        } catch { /* skip */ }
+      }
+
+      const items = [
+        { label: 'Total HT :', value: devis.total_ht, bold: false, fs: 8 },
+        { label: `TVA (${tvaPct}%) :`, value: devis.total_tva, bold: false, fs: 8 },
+        { label: 'Total TTC :', value: devis.total_ttc, bold: true, fs: 9, ttc: true },
+      ];
+
+      items.forEach((item, i) => {
+        const cy = startY + i * TOTAL_ROW_H;
+        if (item.ttc) {
+          doc.setFillColor(245, 245, 245);
+          doc.rect(splitX, cy, rightW, TOTAL_ROW_H, 'F');
+          doc.setDrawColor(...BORDER);
+          doc.line(splitX, cy, splitX + rightW, cy);
+        } else if (i > 0) {
+          doc.setDrawColor(...BORDER);
+          doc.line(splitX, cy, splitX + rightW, cy);
+        }
+        const mid = cy + TOTAL_ROW_H / 2 + 1;
+        doc.setFont('helvetica', item.bold ? 'bold' : 'normal');
+        doc.setFontSize(item.fs);
+        doc.setTextColor(...TEXT);
+        doc.text(item.label, splitX + 3, mid);
+        textRight(doc, `${fmtNum(item.value)} MAD`, splitX + rightW - 3, mid);
+      });
+
+      doc.setDrawColor(...BORDER);
+      doc.setLineWidth(0.25);
+      doc.rect(M, startY, CONTENT_W, blockH);
+
+      return startY + blockH;
+    }
+
     const items = [
       { label: 'Total HT', value: devis.total_ht, bold: true, red: false, fs: 8 },
       { label: 'TVA', value: devis.total_tva, bold: false, red: false, fs: 8 },
