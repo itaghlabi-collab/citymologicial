@@ -24,13 +24,20 @@ const MAX_Y = PAGE_H - FOOTER_H;
 const BODY_TOP = M;
 const BODY_BOTTOM = PAGE_H - FOOTER_H;
 
-/** Footer fixe : QR ~80 px (≈21 mm), gap sécurité 6 mm (~17–23 px) avant le QR */
-const QR_SIZE_MM = 21;
-const QR_MARGIN_RIGHT = M;
-const FOOTER_LINE_Y = PAGE_H - FOOTER_H + 4;
-const QR_X = PAGE_W - QR_MARGIN_RIGHT - QR_SIZE_MM;
-const FOOTER_LINE_END_X = QR_X - 6;
-const QR_Y = FOOTER_LINE_Y - QR_SIZE_MM + 1;
+/** Footer fixe page — QR bas-droite, ligne rouge s’arrête avant (gap H + V) */
+const FOOTER_QR_SIZE = 22;
+const FOOTER_QR_MARGIN_RIGHT = M;
+const FOOTER_QR_MARGIN_BOTTOM = 11;
+const FOOTER_QR_LINE_GAP_H = 7;
+const FOOTER_QR_LINE_GAP_V = 5;
+
+function getFooterLayout() {
+  const qrX = PAGE_W - FOOTER_QR_MARGIN_RIGHT - FOOTER_QR_SIZE;
+  const qrY = PAGE_H - FOOTER_QR_MARGIN_BOTTOM - FOOTER_QR_SIZE;
+  const lineY = qrY - FOOTER_QR_LINE_GAP_V;
+  const lineEndX = qrX - FOOTER_QR_LINE_GAP_H;
+  return { qrX, qrY, lineY, lineEndX };
+}
 
 const CLIENT_W = 58;
 const LOGO_MAX_W = 42;
@@ -326,19 +333,27 @@ export async function generateDevisPdf(devis, catMap = {}) {
   };
 
   const drawFooter = (pageNum, totalPages) => {
+    const { qrX, qrY, lineY, lineEndX } = getFooterLayout();
+
+    // Masque footer droit : évite chevauchement visuel tableau / ligne / QR
+    doc.setFillColor(...WHITE);
+    doc.rect(lineEndX, lineY - 2, PAGE_W - M - lineEndX, PAGE_H - lineY + 2, 'F');
+
     doc.setDrawColor(...RED);
     doc.setLineWidth(0.7);
-    doc.line(M, FOOTER_LINE_Y, FOOTER_LINE_END_X, FOOTER_LINE_Y);
+    doc.line(M, lineY, lineEndX, lineY);
 
     if (qrMeta?.dataUrl) {
       try {
+        doc.setFillColor(...WHITE);
+        doc.rect(qrX - 1, qrY - 1, FOOTER_QR_SIZE + 2, FOOTER_QR_SIZE + 2, 'F');
         doc.addImage(
           qrMeta.dataUrl,
           imgFmt(qrMeta.dataUrl),
-          QR_X,
-          QR_Y,
-          QR_SIZE_MM,
-          QR_SIZE_MM,
+          qrX,
+          qrY,
+          FOOTER_QR_SIZE,
+          FOOTER_QR_SIZE,
         );
       } catch { /* skip */ }
     }
