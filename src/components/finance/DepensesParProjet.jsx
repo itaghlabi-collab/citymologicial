@@ -113,13 +113,14 @@ function ScrollableSearchList({ items, placeholder = 'Rechercher…', emptyLabel
   return (
     <div className="dpp-scroll-list">
       <div className="dpp-scroll-list-toolbar">
-        <div className="dpp-scroll-list-search">
-          <Search size={14} />
+        <div style={{ flex: 1, minWidth: 160, position: 'relative' }}>
+          <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
           <input
             type="search"
             placeholder={placeholder}
             value={q}
             onChange={(e) => setQ(e.target.value)}
+            style={{ ...INPUT_STYLE, paddingLeft: 32 }}
           />
         </div>
         <span className="dpp-scroll-list-count">{filtered.length} / {items.length}</span>
@@ -509,13 +510,15 @@ export default function DepensesParProjet() {
                       <td>{p.nb_depenses}</td>
                       <td>{p.nb_fournisseurs}</td>
                       <td><span className="badge badge-blue">{p.statut}</span></td>
-                      <td className="dpp-actions">
-                        <button type="button" className="btn-icon" title="Voir" onClick={() => { setSelectedProject(p); setView('projets'); }}>
-                          <Eye size={15} />
-                        </button>
-                        <button type="button" className="btn-icon" title="PDF" onClick={() => exportProjectExpensesPdf({ project: p, expenses: expenses.filter((e) => e.project_id === p.id) })}>
-                          <Download size={15} />
-                        </button>
+                      <td>
+                        <div style={{ display: 'flex', gap: 3 }}>
+                          <button type="button" className="btn btn-secondary btn-sm" title="Voir" onClick={() => { setSelectedProject(p); setView('projets'); }}>
+                            <Eye size={13} />
+                          </button>
+                          <button type="button" className="btn btn-ghost btn-sm" title="PDF" onClick={() => exportProjectExpensesPdf({ project: p, expenses: expenses.filter((e) => e.project_id === p.id) })}>
+                            <Download size={13} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -604,21 +607,23 @@ export default function DepensesParProjet() {
       {view === 'depenses' && (
         <div className="dpp-view dpp-fade-in">
           <SectionHeader icon={CreditCard} title="Toutes les dépenses" subtitle="Journal complet des opérations" />
-          <div className="dpp-filters-bar card dpp-block">
-            <div className="dpp-filter-search">
-              <Search size={16} />
-              <input
-                className="search-input"
-                placeholder="Rechercher référence, projet, fournisseur…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
+          <div className="card finance-toolbar dpp-block" style={{ padding: '14px 20px' }}>
+            <div className="finance-toolbar-inner">
+              <div style={{ flex: 1, minWidth: 200, position: 'relative' }}>
+                <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
+                <input
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Rechercher référence, projet, fournisseur…"
+                  style={{ ...INPUT_STYLE, paddingLeft: 32 }}
+                />
+              </div>
+              <select value={filterOrigine} onChange={(e) => setFilterOrigine(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 200 }}>
+                <option value="">Toutes origines</option>
+                {Object.entries(ORIGINE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
+              </select>
+              <span className="text-muted" style={{ fontSize: '0.8125rem', whiteSpace: 'nowrap' }}>{filteredExpenses.length} résultat(s)</span>
             </div>
-            <select value={filterOrigine} onChange={(e) => setFilterOrigine(e.target.value)} style={SELECT_STYLE}>
-              <option value="">Toutes origines</option>
-              {Object.entries(ORIGINE_LABELS).map(([k, v]) => <option key={k} value={k}>{v}</option>)}
-            </select>
-            <span className="dpp-result-count">{filteredExpenses.length} résultat(s)</span>
           </div>
           <div className="dpp-table-card card dpp-block">
             <div className="table-wrap dpp-table-wrap dpp-table-wrap--scroll-lg">
@@ -793,20 +798,7 @@ export default function DepensesParProjet() {
         .dpp-table--compact tbody td { padding: 12px 16px; font-size: 0.8125rem; }
         .dpp-num { font-variant-numeric: tabular-nums; text-align: right; }
         .dpp-cell-muted { color: var(--text-3); max-width: 200px; }
-        .dpp-actions { white-space: nowrap; }
         .dpp-badge-inline { margin-left: 8px; font-size: 0.65rem; }
-
-        /* Filters */
-        .dpp-filters-bar {
-          display: flex; align-items: center; gap: 16px; flex-wrap: wrap;
-          padding: 16px 20px;
-        }
-        .dpp-filter-search {
-          flex: 1; min-width: 220px; display: flex; align-items: center; gap: 10px;
-          background: #F4F5F7; border-radius: 10px; padding: 0 14px;
-        }
-        .dpp-filter-search input { border: none; background: transparent; flex: 1; }
-        .dpp-result-count { font-size: 0.8125rem; color: var(--text-3); white-space: nowrap; }
 
         /* Project detail */
         .dpp-back-btn { margin-bottom: 24px; }
@@ -851,13 +843,6 @@ export default function DepensesParProjet() {
         .dpp-scroll-list-toolbar {
           display: flex; align-items: center; justify-content: space-between;
           gap: 12px; margin-bottom: 12px;
-        }
-        .dpp-scroll-list-search {
-          flex: 1; display: flex; align-items: center; gap: 8px;
-          background: #F4F5F7; border-radius: 8px; padding: 8px 12px;
-        }
-        .dpp-scroll-list-search input {
-          border: none; background: transparent; flex: 1; font-size: 0.8125rem; outline: none;
         }
         .dpp-scroll-list-count { font-size: 0.75rem; color: var(--text-3); white-space: nowrap; }
         .dpp-scroll-list-items {
