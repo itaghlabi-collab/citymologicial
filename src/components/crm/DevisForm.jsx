@@ -541,7 +541,9 @@ function DevisLineDisplay({ ligne, lineNum, idx, articles, onDelete, onDuplicate
       <td style={{ padding: '10px 6px', width: 28, verticalAlign: 'top' }}><DragHandle {...handleProps} /></td>
       <td style={{ padding: '10px 8px', width: 36, fontWeight: 700, color: 'var(--text-3)', fontSize: '0.82rem', verticalAlign: 'top' }}>{lineNum}</td>
       <td style={{ padding: '10px 8px', minWidth: 200, verticalAlign: 'top' }}>
-        <div style={{ fontWeight: 700, fontSize: '0.9rem', marginBottom: 4 }}>{ligne.designation || '—'}</div>
+        {ligne.designation?.trim() ? (
+          <div style={{ fontWeight: 700, fontSize: '0.9rem', marginBottom: 4 }}>{ligne.designation}</div>
+        ) : null}
         {ligne.ephemeral && (
           <span style={{ fontSize: '0.68rem', color: '#E65100', fontWeight: 600, background: '#FFF3E0', padding: '2px 6px', borderRadius: 4 }}>Hors catalogue</span>
         )}
@@ -588,7 +590,9 @@ function DevisLineCard({ ligne, lineNum, idx, articles, onDelete, onDuplicate, o
         <span style={{ fontWeight: 800, color: 'var(--text-3)', fontSize: '0.8rem' }}>#{lineNum}</span>
         {ligne.ephemeral && <span style={{ fontSize: '0.68rem', color: '#E65100', fontWeight: 600 }}>Hors catalogue</span>}
       </div>
-      <div style={{ fontWeight: 700, marginBottom: 6 }}>{ligne.designation}</div>
+      <div style={{ fontWeight: 700, marginBottom: ligne.designation?.trim() ? 6 : 0 }}>
+        {ligne.designation?.trim() || null}
+      </div>
       <LigneDescriptionText description={description} />
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, fontSize: '0.82rem', marginBottom: 10 }}>
         <div><span style={{ color: 'var(--text-3)' }}>Qté </span><strong>{ligne.quantite} {ligne.unite}</strong></div>
@@ -691,13 +695,12 @@ function LigneComposer({ draft, setDraft, categories, articles, onArticleSelect,
           )}
 
           <div style={{ marginBottom: 12 }}>
-            <Label required>{isHorsCatalogue ? 'Désignation' : 'Désignation'}</Label>
+            <Label>Désignation</Label>
             <input
               value={draft.designation}
               onChange={(e) => setF('designation', e.target.value)}
-              placeholder={isHorsCatalogue ? 'Ex : Démolition cloison BA13' : 'Nom de la ligne'}
+              placeholder={isHorsCatalogue ? 'Ex : Démolition cloison BA13 (facultatif)' : 'Nom de la ligne (facultatif si la catégorie suffit)'}
               style={IS(false)}
-              readOnly={!isHorsCatalogue && !!draft.article_id}
             />
           </div>
 
@@ -913,7 +916,6 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
         if (String(p.article_id) !== String(articleId)) return p;
         return {
           ...p,
-          designation: fresh.nom || p.designation,
           description: fresh.description?.trim() ? fresh.description : p.description,
           unite: fresh.unite || p.unite,
           prix_ht: fresh.prix_ht ?? p.prix_ht,
@@ -945,10 +947,6 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
     if (draft.mode === 'sous_titre') {
       if (!draft.designation?.trim()) return 'Sous-titre requis';
       return '';
-    }
-    if (!draft.designation?.trim()) return 'Désignation requise';
-    if (draft.mode === 'article' && !draft.article_id && !draft.designation?.trim()) {
-      return 'Sélectionnez un article ou saisissez une désignation';
     }
     if (Number(draft.quantite) <= 0) return 'Quantité invalide';
     return '';

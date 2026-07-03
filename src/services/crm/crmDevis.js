@@ -214,8 +214,7 @@ async function upsertLignes(devisId, lignes) {
   const rows = (lignes || [])
     .filter((l) => {
       if (l.type !== 'article') return true;
-      if (l.ephemeral) return !!l.designation?.trim();
-      return !!l.article_id || !!l.designation?.trim();
+      return Number(l.quantite) > 0;
     })
     .map((l, i) => toLigneRow(l, devisId, i));
   if (rows.length === 0) return;
