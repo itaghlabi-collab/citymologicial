@@ -201,23 +201,49 @@ export async function purgeImportedTotalSummaryRows() {
   await getAuthUserId();
   const { data, error } = await getSupabase()
     .from(TABLE)
-    .select('id, element_depense, categorie, description')
+    .select('id, project_id, element_depense, categorie, description, fournisseur, montant')
     .eq('origine', 'import_excel');
   if (error) throw error;
 
-  const ids = (data || [])
-    .filter((row) => isTotalSummaryRow({
+  const rows = data || [];
+  const ids = new Set();
+
+  rows.forEach((row) => {
+    if (isTotalSummaryRow({
       element: row.element_depense,
       description: row.description,
       categorie: row.categorie,
-    }))
-    .map((row) => row.id);
+    })) {
+      ids.add(row.id);
+    }
+  });
 
-  if (!ids.length) return { deleted: 0 };
+  // TOTAL en colonne DATE → importé comme "Dépense" avec montant = somme des autres lignes
+  const byProject = {};
+  rows.forEach((row) => {
+    if (!row.project_id || ids.has(row.id)) return;
+    if (!byProject[row.project_id]) byProject[row.project_id] = [];
+    byProject[row.project_id].push(row);
+  });
 
-  const { error: delErr } = await getSupabase().from(TABLE).delete().in('id', ids);
+  Object.values(byProject).forEach((projectRows) => {
+    projectRows.forEach((row) => {
+      if (row.element_depense !== 'Dépense') return;
+      if (row.description || row.fournisseur) return;
+      const others = projectRows.filter((r) => r.id !== row.id && !ids.has(r.id));
+      if (!others.length) return;
+      const sumOthers = others.reduce((s, r) => s + (Number(r.montant) || 0), 0);
+      if (Math.abs((Number(row.montant) || 0) - sumOthers) < 0.05) {
+        ids.add(row.id);
+      }
+    });
+  });
+
+  if (!ids.size) return { deleted: 0 };
+
+  const { error: delErr } = await getSupabase().from(TABLE).delete().in('id', [...ids]);
   if (delErr) throw delErr;
-  return { deleted: ids.length };
+  return { deleted: ids.size };
 }
 
 export function filterProjectExpenses(rows, { search = '', origine = '', statut = '' } = {}) {

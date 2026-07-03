@@ -6,7 +6,7 @@ import {
   bulkInsertProjectExpenses,
   findImportDuplicate,
 } from './projectExpenses';
-import { isTotalSummaryRow } from './projectExpenseImportUtils';
+import { isExcelTotalSummaryLine } from './projectExpenseImportUtils';
 
 const EXCLUDED_SHEETS = new Set([
   'GENERAL',
@@ -147,14 +147,14 @@ export async function parseDepenseChantierWorkbook(arrayBuffer, projects) {
       const row = rows[r] || [];
       if (rowIsEmpty(row)) continue;
 
+      if (isExcelTotalSummaryLine(row, { iDate, iElement, iDesc })) {
+        continue;
+      }
+
       let date = parseExcelDate(row[iDate]);
       const montant = parseMontant(row[iMontant]);
       const element = String(row[iElement >= 0 ? iElement : iDesc] || '').trim() || 'Dépense';
       const description = iDesc >= 0 ? String(row[iDesc] || '').trim() : '';
-
-      if (isTotalSummaryRow({ element, description, categorie: element })) {
-        continue;
-      }
 
       if (date) lastDate = date;
       else if (montant > 0 && element && lastDate) date = lastDate;
