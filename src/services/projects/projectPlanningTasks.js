@@ -3,6 +3,7 @@
  */
 import { getSupabase } from '../../lib/supabase';
 import { PLANNING_LOTS, extractPlanningTaskColor } from '../../constants/projectPlanning';
+import { PLANNING_WBS_TEMPLATES } from '../../constants/projectPlanningWbsTemplates';
 
 const TABLE = 'project_planning_tasks';
 
@@ -154,6 +155,7 @@ export function normalizePlanningTask(row) {
     notes: row.notes || '',
     predecessor_id: row.predecessor_id || '',
     parent_id: row.parent_id || '',
+    wbs_code: row.wbs_code || '',
     ordre: Number(row.ordre ?? 0),
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -175,6 +177,7 @@ export function toPlanningTaskRow(form) {
     notes: emptyToNull(form.notes?.trim()),
     predecessor_id: emptyToNull(form.predecessor_id),
     parent_id: emptyToNull(form.parent_id),
+    wbs_code: emptyToNull(form.wbs_code?.trim()),
     ordre: Number(form.ordre) || 0,
   };
 }
@@ -278,6 +281,69 @@ export async function shiftPlanningTaskDates(id, newStart, newEnd) {
     .single();
   if (error) throw error;
   return normalizePlanningTask(data);
+}
+
+/** Importe les tâches types d'un lot (modèle WBS) sans modifier les tâches existantes. */
+export async function importPlanningWbsTemplate(projectId, lot) {
+  const template = PLANNING_WBS_TEMPLATES[lot];
+  if (!template?.length) {
+    throw new Error('Aucun modèle WBS disponible pour ce lot.');
+  }
+
+  const start = isoDateLocal(new Date());
+  let dayOffset = 0;
+  const created = [];
+
+  for (const item of template) {
+    const parentStart = addDaysIso(start, dayOffset);
+    const parentDur = item.duree_jours || 7;
+    const parent = await createProjectPlanningTask(projectId, {
+      nom: item.nom,
+      lot,
+      wbs_code: item.wbs_code || '',
+      date_debut: parentStart,
+      date_fin: endDateFromStartAndDuration(parentStart, parentDur),
+      duree_jours: parentDur,
+      statut: 'a_faire',
+      avancement: 0,
+    });
+    created.push(parent);
+    dayOffset += parentDur;
+
+    for (const child of item.children || []) {
+      const childDur = child.duree_jours || 5;
+      const childStart = addDaysIso(start, dayOffset);
+      const childTask = await createProjectPlanningTask(projectId, {
+        nom: child.nom,
+        lot,
+        parent_id: parent.id,
+        wbs_code: child.wbs_code || '',
+        date_debut: childStart,
+        date_fin: endDateFromStartAndDuration(childStart, childDur),
+        duree_jours: childDur,
+        statut: 'a_faire',
+        avancement: 0,
+      });
+      created.push(childTask);
+      dayOffset += childDur;
+    }
+  }
+
+  return created;
+}
+
+export function planningTaskLabel(task) {
+  if (!task) return '';
+  const code = (task.wbs_code || '').trim();
+  return code ? `${code} — ${task.nom}` : task.nom;
+}
+
+export function filterPlanningParentTasks(tasks, lot, excludeId) {
+  return (tasks || []).filter((t) => {
+    if (excludeId && t.id === excludeId) return false;
+    if (lot && t.lot !== lot) return false;
+    return true;
+  });
 }
 
 export function filterPlanningTasks(tasks, filters = {}) {
@@ -556,7 +622,7 @@ export function buildWbsTree(tasks) {
 
   function assignWbs(list, prefix = '') {
     list.forEach((node, i) => {
-      const wbs = prefix ? `${prefix}.${i + 1}` : String(i + 1);
+      const wbs = (node.wbs_code || '').trim() || (prefix ? `${prefix}.${i + 1}` : String(i + 1));
       node.wbs = wbs;
       if (node.children.length) assignWbs(node.children, wbs);
     });

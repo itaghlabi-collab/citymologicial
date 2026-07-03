@@ -1,5 +1,9 @@
 /** Lots / catégories planning chantier */
 export const PLANNING_LOTS = [
+  'Études et préparation',
+  'Installation chantier',
+  'Topographie et implantation',
+  'Terrassement',
   'Gros œuvre',
   'Second œuvre',
   'TCE',
@@ -13,6 +17,15 @@ export const PLANNING_LOTS = [
   'Autre',
 ];
 
+/** Lots historiques conservés pour l'affichage des tâches existantes */
+export const PLANNING_LOTS_LEGACY = [];
+
+export function mergePlanningLots(existingTasks = []) {
+  const fromTasks = [...new Set((existingTasks || []).map((t) => t.lot).filter(Boolean))];
+  const extras = fromTasks.filter((l) => !PLANNING_LOTS.includes(l) && !PLANNING_LOTS_LEGACY.includes(l));
+  return [...PLANNING_LOTS, ...PLANNING_LOTS_LEGACY, ...extras];
+}
+
 export const PLANNING_STATUTS = [
   { value: 'a_faire', label: 'À faire', color: '#9E9E9E', bg: '#F5F5F5' },
   { value: 'en_cours', label: 'En cours', color: '#E65100', bg: '#FFF3E0' },
@@ -21,6 +34,10 @@ export const PLANNING_STATUTS = [
 ];
 
 export const LOT_COLORS = {
+  'Études et préparation': '#5C6BC0',
+  'Installation chantier': '#78909C',
+  'Topographie et implantation': '#26A69A',
+  Terrassement: '#8D6E63',
   'Gros œuvre': '#795548',
   'Second œuvre': '#5D4037',
   TCE: '#1565C0',

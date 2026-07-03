@@ -13,6 +13,9 @@ import {
   deleteProjectPlanningTask,
   shiftPlanningTaskDates,
   filterPlanningTasks,
+  importPlanningWbsTemplate,
+  planningTaskLabel,
+  filterPlanningParentTasks,
   buildGanttTimeline,
   ganttScrollTargetLeft,
   buildGanttDisplayRows,
@@ -26,12 +29,14 @@ import { generateProjectPlanningPdfSynthesis, generateProjectPlanningPdfDetailed
 import {
   PLANNING_LOTS,
   PLANNING_STATUTS,
+  mergePlanningLots,
   planningStatutMeta,
   planningLotColor,
   planningTaskBarColor,
   planningGanttBarColor,
   PLANNING_TASK_PALETTE,
 } from '../../constants/projectPlanning';
+import { hasPlanningWbsTemplate, countPlanningWbsTemplateTasks } from '../../constants/projectPlanningWbsTemplates';
 import { listActiveEmployees, employeeSelectLabel, filterPlanningResponsables } from '../../services/rh/employees';
 
 const ROW_H = 34;
@@ -62,6 +67,7 @@ const EMPTY_TASK = {
   notes: '',
   predecessor_id: '',
   parent_id: '',
+  wbs_code: '',
   couleur: '',
 };
 
@@ -150,7 +156,7 @@ function TaskColorPicker({ lot, value, onChange }) {
   );
 }
 
-function TaskModal({ open, task, tasks, employees, saving, onClose, onSave, defaultParentId }) {
+function TaskModal({ open, task, tasks, employees, saving, importingTemplate, onClose, onSave, onImportTemplate, defaultParentId }) {
   const [form, setForm] = useState(EMPTY_TASK);
   const [err, setErr] = useState('');
 
@@ -167,9 +173,16 @@ function TaskModal({ open, task, tasks, employees, saving, onClose, onSave, defa
 
   if (!open) return null;
 
+  const parentOptions = filterPlanningParentTasks(tasks, form.lot, task?.id);
+  const showWbsTemplate = !task && hasPlanningWbsTemplate(form.lot);
+
   function setField(key, val) {
     setForm((prev) => {
       const next = { ...prev, [key]: val };
+      if (key === 'lot') {
+        const parent = tasks.find((t) => t.id === prev.parent_id);
+        if (parent && parent.lot !== val) next.parent_id = '';
+      }
       if (key === 'date_debut' || key === 'date_fin' || key === 'duree_jours') {
         if (next.date_debut && next.date_fin) {
           next.duree_jours = daysBetweenInclusive(next.date_debut, next.date_fin);
@@ -204,6 +217,21 @@ function TaskModal({ open, task, tasks, employees, saving, onClose, onSave, defa
 
   const predecessors = tasks.filter((t) => t.id !== task?.id);
 
+  async function handleImportTemplate() {
+    if (!showWbsTemplate || !onImportTemplate) return;
+    const n = countPlanningWbsTemplateTasks(form.lot);
+    const ok = window.confirm(
+      `Importer le modèle WBS pour « ${form.lot} » (${n} tâche(s) proposées) ?\n\nLes tâches existantes ne seront pas modifiées. Vous pourrez ensuite les ajuster librement.`,
+    );
+    if (!ok) return;
+    try {
+      await onImportTemplate(form.lot);
+      onClose();
+    } catch (ex) {
+      setErr(ex.message || 'Erreur import modèle WBS.');
+    }
+  }
+
   return (
     <div style={{
       position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 8000,
@@ -236,17 +264,53 @@ function TaskModal({ open, task, tasks, employees, saving, onClose, onSave, defa
           )}
 
           <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase' }}>Nom de la tâche *</span>
-            <input value={form.nom} onChange={(e) => setField('nom', e.target.value)} style={IS} required />
+            <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase' }}>Lot / catégorie</span>
+            <select value={form.lot} onChange={(e) => setField('lot', e.target.value)} style={{ ...IS, cursor: 'pointer' }}>
+              {PLANNING_LOTS.map((l) => <option key={l} value={l}>{l}</option>)}
+            </select>
+          </label>
+          {showWbsTemplate && (
+            <button
+              type="button"
+              disabled={importingTemplate || saving}
+              onClick={handleImportTemplate}
+              style={{
+                padding: '8px 12px', borderRadius: 6, border: '1.5px solid var(--border)',
+                background: '#fff', cursor: importingTemplate ? 'wait' : 'pointer',
+                fontWeight: 600, fontSize: '0.8rem', textAlign: 'left',
+              }}
+            >
+              {importingTemplate ? 'Import en cours…' : 'Créer depuis modèle WBS'}
+            </button>
+          )}
+
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase' }}>Lot de travaux (parent)</span>
+            <select value={form.parent_id} onChange={(e) => setField('parent_id', e.target.value)} style={{ ...IS, cursor: 'pointer' }}>
+              <option value="">— Racine —</option>
+              {parentOptions.map((t) => (
+                <option key={t.id} value={t.id}>{planningTaskLabel(t)}</option>
+              ))}
+            </select>
           </label>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: '120px 1fr', gap: 10 }}>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-              <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase' }}>Lot / catégorie</span>
-              <select value={form.lot} onChange={(e) => setField('lot', e.target.value)} style={{ ...IS, cursor: 'pointer' }}>
-                {PLANNING_LOTS.map((l) => <option key={l} value={l}>{l}</option>)}
-              </select>
+              <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase' }}>Code WBS</span>
+              <input
+                value={form.wbs_code || ''}
+                onChange={(e) => setField('wbs_code', e.target.value)}
+                placeholder="ex. 1.1"
+                style={IS}
+              />
             </label>
+            <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+              <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase' }}>Nom de la tâche *</span>
+              <input value={form.nom} onChange={(e) => setField('nom', e.target.value)} style={IS} required />
+            </label>
+          </div>
+
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
             <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
               <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase' }}>Statut</span>
               <select value={form.statut} onChange={(e) => setField('statut', e.target.value)} style={{ ...IS, cursor: 'pointer' }}>
@@ -296,21 +360,11 @@ function TaskModal({ open, task, tasks, employees, saving, onClose, onSave, defa
           />
 
           <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase' }}>Lot de travaux</span>
-            <select value={form.parent_id} onChange={(e) => setField('parent_id', e.target.value)} style={{ ...IS, cursor: 'pointer' }}>
-              <option value="">— Racine —</option>
-              {predecessors.map((t) => (
-                <option key={t.id} value={t.id}>{t.nom}</option>
-              ))}
-            </select>
-          </label>
-
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase' }}>Dépend de (tâche précédente)</span>
             <select value={form.predecessor_id} onChange={(e) => setField('predecessor_id', e.target.value)} style={{ ...IS, cursor: 'pointer' }}>
               <option value="">Aucune</option>
               {predecessors.map((t) => (
-                <option key={t.id} value={t.id}>{t.nom}</option>
+                <option key={t.id} value={t.id}>{planningTaskLabel(t)}</option>
               ))}
             </select>
           </label>
@@ -555,7 +609,7 @@ function GanttChart({
                     fontSize: '0.78rem',
                   }}
                 >
-                  <span style={{ color: 'var(--text-3)', fontWeight: 700, fontSize: '0.72rem' }}>{row.wbs}</span>
+                  <span style={{ fontWeight: 700, color: 'var(--text-3)', fontSize: '0.72rem' }}>{row.wbs_code || row.wbs}</span>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0, paddingLeft: isSummary ? 0 : 14 }}>
                     {isSummary ? (
                       <button
@@ -709,6 +763,7 @@ export default function ProjectPlanningGantt({
   const employees = externalEmployees || internalEmployees;
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [importingTemplate, setImportingTemplate] = useState(false);
   const [error, setError] = useState('');
   const [toast, setToast] = useState('');
   const [modalOpen, setModalOpen] = useState(false);
@@ -759,6 +814,8 @@ export default function ProjectPlanningGantt({
     [employees],
   );
 
+  const lotOptions = useMemo(() => mergePlanningLots(tasks), [tasks]);
+
   const filtered = useMemo(
     () => filterPlanningTasks(tasks, filters).map(withDefaultPlanningDates),
     [tasks, filters],
@@ -793,6 +850,19 @@ export default function ProjectPlanningGantt({
       else next.add(lot);
       return next;
     });
+  }
+
+  async function handleImportTemplate(lot) {
+    if (!projectId) return;
+    setImportingTemplate(true);
+    try {
+      const created = await importPlanningWbsTemplate(projectId, lot);
+      setTasks((prev) => [...prev, ...created.map(withDefaultPlanningDates)]);
+      setToast(`${created.length} tâche(s) importée(s) depuis le modèle WBS.`);
+      onReload?.();
+    } finally {
+      setImportingTemplate(false);
+    }
   }
 
   async function handleSave(form) {
@@ -894,7 +964,7 @@ export default function ProjectPlanningGantt({
           <Filter size={14} style={{ color: 'var(--text-3)' }} />
           <select value={filters.lot} onChange={(e) => setFilters((f) => ({ ...f, lot: e.target.value }))} style={{ ...IS, width: 'auto', minWidth: 130, cursor: 'pointer' }}>
             <option value="">Tous les lots</option>
-            {PLANNING_LOTS.map((l) => <option key={l} value={l}>{l}</option>)}
+            {lotOptions.map((l) => <option key={l} value={l}>{l}</option>)}
           </select>
           <select value={filters.statut} onChange={(e) => setFilters((f) => ({ ...f, statut: e.target.value }))} style={{ ...IS, width: 'auto', minWidth: 120, cursor: 'pointer' }}>
             <option value="">Tous statuts</option>
@@ -973,9 +1043,11 @@ export default function ProjectPlanningGantt({
         tasks={tasks}
         employees={responsableEmployees}
         saving={saving}
+        importingTemplate={importingTemplate}
         defaultParentId={addChildParent?.id}
         onClose={() => { setModalOpen(false); setEditTask(null); onExternalEditClear?.(); }}
         onSave={handleSave}
+        onImportTemplate={handleImportTemplate}
       />
     </div>
   );

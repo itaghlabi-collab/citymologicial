@@ -71,7 +71,7 @@ export default function PlanningWbsView({ tasks, onEdit, onAddChild }) {
               fontSize: '0.8rem',
             }}
           >
-            <span style={{ fontWeight: 700, color: 'var(--text-3)' }}>{row.wbs}</span>
+            <span style={{ fontWeight: 700, color: 'var(--text-3)' }}>{row.wbs_code || row.wbs}</span>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingLeft: (row.depth || 0) * 18, minWidth: 0 }}>
               {row.hasChildren ? (
                 <button type="button" onClick={() => toggle(row.id)} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 0, color: 'var(--text-2)' }}>
