@@ -692,7 +692,7 @@ export default function DemandeAchatDetail({
                   <div style={{ color: 'var(--text-3)' }}>{bundle.paymentOrder.statut}</div>
                 </div>
               )}
-              {['Ordre d\'achat créé', 'Commande envoyée', 'En attente réception', 'Réceptionnée'].includes(request.statut) && (
+              {['Ordre d\'achat créé', 'Ordre de paiement créé', 'Commande envoyée', 'En attente réception', 'Réceptionnée'].includes(request.statut) && (
                 <p style={{ fontSize: '0.78rem', color: 'var(--text-3)', margin: 0 }}>
                   Les statuts commande et réception sont mis à jour automatiquement depuis l&apos;ordre d&apos;achat.
                 </p>

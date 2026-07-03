@@ -216,7 +216,7 @@ export async function reconcileLegacySoumiseRequests() {
 }
 
 const POST_DG_STATUSES = [
-  'En attente validation DG', 'Devis validé', 'Ordre d\'achat créé',
+  'En attente validation DG', 'Devis validé', 'Ordre d\'achat créé', 'Ordre de paiement créé',
   'Commande envoyée', 'En attente réception', 'Réceptionnée', 'Clôturée',
 ];
 
@@ -376,10 +376,20 @@ export async function validateSupplierQuote(requestId, quoteId) {
     {
       statut: 'Ordre d\'achat créé',
       acquisition_order_id: oa.id,
-      payment_order_id: op.id,
     },
     'Création ordre d\'achat',
     oa.ref,
+    ctx,
+  );
+
+  updated = await patchRequest(
+    requestId,
+    {
+      statut: 'Ordre de paiement créé',
+      payment_order_id: op.id,
+    },
+    'Ordre de paiement créé',
+    op.ref,
     ctx,
   );
 
@@ -389,7 +399,7 @@ export async function validateSupplierQuote(requestId, quoteId) {
 }
 
 const OA_SYNC_HISTORY = {
-  'Commande envoyée': 'Commande envoyée au fournisseur',
+  'Commande envoyée': 'Commande envoyée',
   'En attente réception': 'Commande expédiée — en attente de réception',
   Réceptionnée: 'Réception enregistrée',
   Clôturée: 'Processus terminé',
@@ -419,6 +429,32 @@ export async function syncPurchaseRequestFromAcquisitionOrder(oa) {
   }
 
   return request;
+}
+
+/** Corrige les DA dont le statut « Commande envoyée » ne correspond pas à un envoi réel au fournisseur. */
+export async function reconcilePurchaseRequestSentStatus() {
+  const { data: requests, error } = await getSupabase()
+    .from(TABLE)
+    .select('id, statut, acquisition_order_id')
+    .eq('statut', 'Commande envoyée');
+  if (error || !requests?.length) return 0;
+
+  let fixed = 0;
+  for (const req of requests) {
+    if (!req.acquisition_order_id) continue;
+    const { data: oa } = await getSupabase()
+      .from('purchase_acquisition_orders')
+      .select('statut')
+      .eq('id', req.acquisition_order_id)
+      .maybeSingle();
+    if (!oa || oa.statut === 'Envoyé fournisseur') continue;
+    await getSupabase()
+      .from(TABLE)
+      .update({ statut: 'Ordre de paiement créé' })
+      .eq('id', req.id);
+    fixed += 1;
+  }
+  return fixed;
 }
 
 export async function closePurchaseRequest(id) {

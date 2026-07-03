@@ -16,7 +16,7 @@ import {
   canSubmitPurchaseRequest, canAddQuoteToRequest, canValidateQuoteOnRequest,
   getPurchaseStatusBadge, getPurchaseStatusLabel,
 } from '../../constants/purchaseWorkflow';
-import { submitPurchaseRequest, getPurchaseRequestBundle, reconcileLegacySoumiseRequests } from '../../services/achats/purchaseWorkflow';
+import { submitPurchaseRequest, getPurchaseRequestBundle, reconcileLegacySoumiseRequests, reconcilePurchaseRequestSentStatus } from '../../services/achats/purchaseWorkflow';
 import { projectOptionLabel, purchaseRequestProjectLabel } from '../../services/achats/purchaseRequests';
 import { generatePurchaseRequestPdf } from '../../services/achats/purchaseRequestPdf';
 import { resolveCurrentPurchaseRole, purchasePermissions, canViewPurchaseRequest } from '../../services/achats/purchaseWorkflowRoles';
@@ -320,7 +320,7 @@ function computeDashboardKpis(items) {
   const rechercheDevis = items.filter((x) => norm(x.statut) === 'Devis reçus').length;
   const attenteDg = items.filter((x) => norm(x.statut) === 'En attente validation DG').length;
   const devisValides = items.filter((x) => norm(x.statut) === 'Devis validé').length;
-  const oaEnCours = items.filter((x) => ['Ordre d\'achat créé', 'Commande envoyée'].includes(norm(x.statut))).length;
+  const oaEnCours = items.filter((x) => ['Ordre d\'achat créé', 'Ordre de paiement créé', 'Commande envoyée'].includes(norm(x.statut))).length;
   const enAttenteReception = items.filter((x) => norm(x.statut) === 'En attente réception').length;
   const receptionnees = items.filter((x) => ['Réceptionnée', 'Clôturée'].includes(norm(x.statut))).length;
   const now = new Date();
@@ -383,8 +383,11 @@ export default function DemandesAchat() {
 
   useEffect(() => {
     if (!configured || !perms.canManageQuotes) return;
-    reconcileLegacySoumiseRequests()
-      .then((n) => { if (n > 0) reload(); })
+    Promise.all([
+      reconcileLegacySoumiseRequests(),
+      reconcilePurchaseRequestSentStatus(),
+    ])
+      .then(([legacy, sent]) => { if ((legacy || 0) + (sent || 0) > 0) reload(); })
       .catch(() => {});
   }, [configured, perms.canManageQuotes, reload]);
 

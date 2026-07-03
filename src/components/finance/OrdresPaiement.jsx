@@ -6,6 +6,7 @@ import { useState, useCallback } from 'react';
 import { Loader2 } from 'lucide-react';
 import { usePaymentOrders } from '../../hooks/usePaymentOrders';
 import { exportPaymentOrderPdf } from '../../services/finance/paymentOrderPdf';
+import { normalizePaymentOrderStatut } from '../../services/finance/paymentOrders';
 import {
   CreditCard, Plus, Eye, Edit2, Trash2, Download,
   CheckCircle, XCircle, Search, Filter, FileText,
@@ -23,7 +24,7 @@ const EMPTY_FORM = {
   montant: '', mode_paiement: 'Virement', ref_reglement: '',
   comptabilise: 'Non', motif: '', commentaire: '', observation: '',
   date: '', date_prevue: '', prepare_par: '', valide_par: '',
-  category_id: '', project_id: '', statut: 'Brouillon', justificatifs: [],
+  category_id: '', project_id: '', statut: 'À préparer', justificatifs: [],
 };
 
 function OrdreForm({ initial, categories, onSave, onCancel }) {
@@ -154,12 +155,12 @@ function DetailOrdre({ ordre, onBack, onEdit, onDelete, onValider, onExecuter, o
           <button className="btn btn-secondary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => exportPaymentOrderPdf(ordre)}>
             <Download size={13} /> PDF
           </button>
-          {(['En attente', 'Brouillon', 'Soumis'].includes(ordre.statut)) && (
+          {(['À préparer', 'Brouillon', 'En attente', 'Soumis'].includes(normalizePaymentOrderStatut(ordre.statut))) && (
             <button className="btn btn-primary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => onValider(ordre)}>
-              <CheckCircle size={13} /> Valider
+              <CheckCircle size={13} /> Préparer
             </button>
           )}
-          {ordre.statut === 'Validé' && (
+          {normalizePaymentOrderStatut(ordre.statut) === 'Préparé' && (
             <button className="btn btn-secondary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => onExecuter(ordre)}>
               <PlayCircle size={13} /> Marquer payé
             </button>
@@ -220,7 +221,7 @@ function DetailOrdre({ ordre, onBack, onEdit, onDelete, onValider, onExecuter, o
             {[
               ['Référence', ordre.ref],
               ['Montant', <span style={{ fontFamily: 'var(--font-head)', fontSize: '1.2rem', fontWeight: 800, color: 'var(--red)' }}>{formatMAD(ordre.montant)}</span>],
-              ['Statut', <span className={"badge " + (BADGE_STATUT_ORDRE[ordre.statut] || 'badge-grey')}>{ordre.statut}</span>],
+              ['Statut', <span className={"badge " + (BADGE_STATUT_ORDRE[normalizePaymentOrderStatut(ordre.statut)] || 'badge-grey')}>{normalizePaymentOrderStatut(ordre.statut)}</span>],
               ['Comptabilisé', <span className={"badge " + (ordre.comptabilise === 'Oui' ? 'badge-green' : 'badge-grey')}>{ordre.comptabilise}</span>],
               ['Créé le', ordre.date_creation || '—'],
             ].map(([lbl, val]) => (
@@ -273,11 +274,25 @@ export default function OrdresPaiement({ categories = [] }) {
   }
 
   async function handleValider(ordre) {
-    await save({ ...ordre, statut: 'Validé' }, ordre.id);
+    await save({ ...ordre, statut: 'Préparé' }, ordre.id);
   }
 
   async function handleExecuter(ordre) {
-    await save({ ...ordre, statut: 'Payé', comptabilise: 'Oui' }, ordre.id);
+    await save({
+      ...ordre,
+      statut: 'Payé',
+      comptabilise: 'Oui',
+      date_paiement: ordre.date_paiement || today,
+    }, ordre.id);
+  }
+
+  async function handleStatusChange(ordre, newStatut) {
+    const payload = { ...ordre, statut: newStatut };
+    if (newStatut === 'Payé') {
+      payload.comptabilise = 'Oui';
+      payload.date_paiement = ordre.date_paiement || today;
+    }
+    await save(payload, ordre.id);
   }
 
   async function handleComptabiliser(ordre) {
@@ -287,17 +302,19 @@ export default function OrdresPaiement({ categories = [] }) {
   const filtered = ordres.filter(o => {
     const q = search.toLowerCase();
     const matchQ = !q || o.ref?.toLowerCase().includes(q) || o.beneficiaire?.toLowerCase().includes(q) || (o.motif || '').toLowerCase().includes(q) || (o.fournisseur_lie || '').toLowerCase().includes(q) || (o.purchase_request_ref || '').toLowerCase().includes(q) || (o.purchase_oa_ref || '').toLowerCase().includes(q);
-    const matchS = !filterStatut || o.statut === filterStatut;
+    const matchS = !filterStatut || normalizePaymentOrderStatut(o.statut) === filterStatut;
     const matchM = !filterMode || o.mode_paiement === filterMode;
     const matchC = !filterCompta || o.comptabilise === filterCompta;
     const matchO = !filterOrigine || o.origine === filterOrigine;
     return matchQ && matchS && matchM && matchC && matchO;
   });
 
-  const enAttente = ordres.filter((o) => ['En attente', 'Brouillon', 'Soumis'].includes(o.statut)).length;
-  const valides = ordres.filter((o) => o.statut === 'Validé').length;
-  const executes = ordres.filter((o) => ['Payé', 'Exécuté', 'Comptabilisé'].includes(o.statut)).length;
-  const montantAttente = ordres.filter((o) => ['En attente', 'Brouillon', 'Soumis'].includes(o.statut)).reduce((s, o) => s + (o.montant || 0), 0);
+  const enAttente = ordres.filter((o) => normalizePaymentOrderStatut(o.statut) === 'À préparer').length;
+  const valides = ordres.filter((o) => normalizePaymentOrderStatut(o.statut) === 'Préparé').length;
+  const executes = ordres.filter((o) => normalizePaymentOrderStatut(o.statut) === 'Payé').length;
+  const montantAttente = ordres
+    .filter((o) => normalizePaymentOrderStatut(o.statut) === 'À préparer')
+    .reduce((s, o) => s + (o.montant || 0), 0);
   const comptabilises = ordres.filter((o) => o.comptabilise === 'Oui' || o.statut === 'Comptabilisé').length;
 
   if (loading && !ordres.length) {
@@ -451,17 +468,23 @@ export default function OrdresPaiement({ categories = [] }) {
                     </td>
                     <td data-label="Date prévue">{o.date_prevue || '—'}</td>
                     <td data-label="Statut">
-                      <span className={"badge " + (BADGE_STATUT_ORDRE[o.statut] || 'badge-grey')} style={{ fontSize: '0.72rem' }}>{o.statut}</span>
+                      <select
+                        value={normalizePaymentOrderStatut(o.statut)}
+                        onChange={(e) => handleStatusChange(o, e.target.value)}
+                        style={{ ...SELECT_STYLE, maxWidth: 140, fontSize: '0.78rem', padding: '5px 8px' }}
+                      >
+                        {STATUTS_ORDRE.map((s) => <option key={s} value={s}>{s}</option>)}
+                      </select>
                     </td>
                     <td>
                       <div style={{ display: 'flex', gap: 3 }}>
                         <button className="btn btn-secondary btn-sm" title="Voir" onClick={() => setDetailId(o.id)}><Eye size={13} /></button>
                         <button className="btn btn-ghost btn-sm" title="Modifier" onClick={() => { setEditOrdre(o); setShowModal(true); }}><Edit2 size={13} /></button>
                         <button className="btn btn-ghost btn-sm" title="PDF" onClick={() => exportPaymentOrderPdf(o)}><Download size={13} /></button>
-                        {(['En attente', 'Brouillon', 'Soumis'].includes(o.statut)) && (
-                          <button className="btn btn-ghost btn-sm" title="Valider" onClick={() => handleValider(o)} style={{ color: '#2E7D32' }}><CheckCircle size={13} /></button>
+                        {normalizePaymentOrderStatut(o.statut) === 'À préparer' && (
+                          <button className="btn btn-ghost btn-sm" title="Marquer préparé" onClick={() => handleValider(o)} style={{ color: '#2E7D32' }}><CheckCircle size={13} /></button>
                         )}
-                        {o.statut === 'Validé' && (
+                        {normalizePaymentOrderStatut(o.statut) === 'Préparé' && (
                           <button className="btn btn-ghost btn-sm" title="Marquer payé" onClick={() => handleExecuter(o)} style={{ color: '#1565C0' }}><PlayCircle size={13} /></button>
                         )}
                         <button className="btn btn-ghost btn-sm" title="Supprimer" onClick={() => handleDelete(o.id)} style={{ color: 'var(--red)' }}><Trash2 size={13} /></button>

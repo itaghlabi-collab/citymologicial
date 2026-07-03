@@ -17,7 +17,7 @@ export const TEXTAREA_STYLE = { ...INPUT_STYLE, minHeight: 72, resize: 'vertical
 export const MODES_PAIEMENT   = ['Espèces', 'Virement', 'Chèque', 'Carte bancaire', 'Mobile payment', 'Autre'];
 export const STATUTS_DEMANDE  = [
   'Brouillon', 'Soumise', 'En étude', 'Devis reçus', 'En attente validation DG',
-  'Devis validé', 'Ordre d\'achat créé', 'Commande envoyée', 'En attente réception', 'Réceptionnée', 'Clôturée', 'Refusée',
+  'Devis validé', 'Ordre d\'achat créé', 'Ordre de paiement créé', 'Commande envoyée', 'En attente réception', 'Réceptionnée', 'Clôturée', 'Refusée',
 ];
 export const PRIORITES        = ['Faible', 'Normale', 'Haute', 'Urgente'];
 export const STATUTS_BC       = ['Brouillon', 'Envoyé', 'Validé', 'Partiellement reçu', 'Reçu', 'Annulé'];
@@ -30,7 +30,7 @@ export const CATEGORIES_FOURN = ['Matériaux', 'Équipements', 'Services', 'Four
 export const BADGE_DEMANDE = {
   'Brouillon': 'badge-grey', 'Soumise': 'badge-blue', 'En étude': 'badge-orange',
   'Devis reçus': 'badge-purple', 'En attente validation DG': 'badge-orange', 'Devis validé': 'badge-green',
-  'Validée': 'badge-green', 'Ordre d\'achat créé': 'badge-green', 'Commande envoyée': 'badge-blue',
+  'Validée': 'badge-green', 'Ordre d\'achat créé': 'badge-green', 'Ordre de paiement créé': 'badge-green', 'Commande envoyée': 'badge-blue',
   'En attente réception': 'badge-orange', 'Réceptionnée': 'badge-purple', 'Clôturée': 'badge-grey', 'Refusée': 'badge-red',
   'En attente': 'badge-orange', 'En cours': 'badge-blue', 'Terminée': 'badge-purple',
   'En étude Achats': 'badge-orange', 'En validation DG': 'badge-orange',

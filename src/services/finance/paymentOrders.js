@@ -3,8 +3,20 @@
  */
 import { getSupabase } from '../../lib/supabase';
 import { syncPaymentOrderToTransaction } from './financeTransactions';
+import { syncPaymentOrderPaidOutcome } from './paymentOrderPaidSync';
 
 const TABLE = 'payment_orders';
+
+export const PAYMENT_ORDER_STATUTS = ['À préparer', 'Préparé', 'Payé'];
+
+export function normalizePaymentOrderStatut(statut) {
+  const s = String(statut || '').trim();
+  if (s === 'Payé') return 'Payé';
+  if (['Préparé', 'Validé', 'Soumis', 'Exécuté', 'Comptabilisé', 'En attente validation DG'].includes(s)) {
+    return 'Préparé';
+  }
+  return 'À préparer';
+}
 
 export function normalizePaymentOrder(row) {
   if (!row) return null;
@@ -20,7 +32,7 @@ export function normalizePaymentOrder(row) {
     date_paiement: row.date_paiement || '',
     date_prevue: row.date_echeance || '',
     updated_at: row.updated_at || null,
-    statut: row.statut || 'Brouillon',
+    statut: normalizePaymentOrderStatut(row.statut),
     mode_paiement: row.mode_paiement || 'Virement',
     banque: row.banque || '',
     rib: row.rib || '',
@@ -73,7 +85,8 @@ export function toPaymentOrderRow(form) {
     tva_rate: form.tva_rate != null ? Number(form.tva_rate) : null,
     date_ordre: form.date || form.date_prevue || null,
     date_echeance: form.date_prevue || null,
-    statut: form.statut || 'Brouillon',
+    date_paiement: form.date_paiement || null,
+    statut: form.statut || 'À préparer',
     mode_paiement: form.mode_paiement || 'Virement',
     banque: form.banque || null,
     rib: form.rib || null,
@@ -129,6 +142,7 @@ export async function createPaymentOrder(form) {
 
 export async function updatePaymentOrder(id, form) {
   await requireUser();
+  const { data: prev } = await getSupabase().from(TABLE).select('statut').eq('id', id).maybeSingle();
   const { data, error } = await getSupabase()
     .from(TABLE)
     .update(toPaymentOrderRow(form))
@@ -138,6 +152,9 @@ export async function updatePaymentOrder(id, form) {
   if (error) throw error;
   const order = normalizePaymentOrder(data);
   await syncPaymentOrderToTransaction(order);
+  if (order.statut === 'Payé' && normalizePaymentOrderStatut(prev?.statut) !== 'Payé') {
+    await syncPaymentOrderPaidOutcome(order);
+  }
   return order;
 }
 

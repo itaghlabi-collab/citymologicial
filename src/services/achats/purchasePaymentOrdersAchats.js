@@ -3,6 +3,7 @@
  */
 import { getSupabase } from '../../lib/supabase';
 import { normalizePaymentOrder, toPaymentOrderRow } from '../finance/paymentOrders';
+import { syncPaymentOrderPaidOutcome } from '../finance/paymentOrderPaidSync';
 import { appendPurchaseRequestHistory } from './purchaseRequestHistory';
 import { PURCHASE_ASSIGNEE } from '../../constants/purchaseWorkflow';
 import { notifyPaymentOrderCreated, notifyPaymentValidated } from '../notifications/purchaseWorkflowNotifications';
@@ -132,6 +133,9 @@ export async function markAchatsPaymentOrderPaid(id, userName) {
     .single();
   if (error) throw error;
   const updated = normalizeAchatsPaymentOrder(data);
+  const { syncPaymentOrderToTransaction } = await import('../finance/financeTransactions');
+  await syncPaymentOrderToTransaction(updated);
+  await syncPaymentOrderPaidOutcome(updated);
   if (op.purchase_request_id) {
     await appendPurchaseRequestHistory({
       purchaseRequestId: op.purchase_request_id,
