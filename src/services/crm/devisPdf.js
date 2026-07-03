@@ -24,6 +24,14 @@ const MAX_Y = PAGE_H - FOOTER_H;
 const BODY_TOP = M;
 const BODY_BOTTOM = PAGE_H - FOOTER_H;
 
+/** Footer fixe : QR ~80 px (≈21 mm), gap sécurité 6 mm (~17–23 px) avant le QR */
+const QR_SIZE_MM = 21;
+const QR_MARGIN_RIGHT = M;
+const FOOTER_LINE_Y = PAGE_H - FOOTER_H + 4;
+const QR_X = PAGE_W - QR_MARGIN_RIGHT - QR_SIZE_MM;
+const FOOTER_LINE_END_X = QR_X - 6;
+const QR_Y = FOOTER_LINE_Y - QR_SIZE_MM + 1;
+
 const CLIENT_W = 58;
 const LOGO_MAX_W = 42;
 const LOGO_MAX_H = 20;
@@ -318,24 +326,19 @@ export async function generateDevisPdf(devis, catMap = {}) {
   };
 
   const drawFooter = (pageNum, totalPages) => {
-    const lineY = PAGE_H - FOOTER_H + 4;
     doc.setDrawColor(...RED);
     doc.setLineWidth(0.7);
-    const qrSize = qrMeta
-      ? containImage(qrMeta.width, qrMeta.height, 18, 18)
-      : { width: 0, height: 0 };
-    const lineEnd = qrMeta ? PAGE_W - M - qrSize.width - 2 : PAGE_W - M;
-    doc.line(M, lineY, lineEnd, lineY);
+    doc.line(M, FOOTER_LINE_Y, FOOTER_LINE_END_X, FOOTER_LINE_Y);
 
     if (qrMeta?.dataUrl) {
       try {
         doc.addImage(
           qrMeta.dataUrl,
           imgFmt(qrMeta.dataUrl),
-          PAGE_W - M - qrSize.width,
-          lineY - qrSize.height + 1,
-          qrSize.width,
-          qrSize.height,
+          QR_X,
+          QR_Y,
+          QR_SIZE_MM,
+          QR_SIZE_MM,
         );
       } catch { /* skip */ }
     }
