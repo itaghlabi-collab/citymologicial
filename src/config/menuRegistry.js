@@ -130,7 +130,7 @@ export const ERP_RUBRIQUES = Object.freeze([
       { code: 'finance-dashboard', label: 'Tableau finance' },
       { code: 'feuille-caisse', label: 'Feuille de caisse' },
       { code: 'categories-charge', label: 'Catégories charge' },
-      { code: 'charges', label: 'Charges' },
+      { code: 'charges', label: 'Dépenses générales' },
       { code: 'depenses-par-projet', label: 'Dépenses par projet' },
       { code: 'ordres-paiement', label: 'Ordre de paiement' },
     ],

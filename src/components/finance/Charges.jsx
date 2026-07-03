@@ -304,7 +304,7 @@ export default function Charges({ categories }) {
       {/* Header */}
       <div className="page-header flex-between finance-page-header">
         <div>
-          <h1 className="page-title">CHARGES</h1>
+          <h1 className="page-title">DÉPENSES GÉNÉRALES</h1>
           <p className="page-subtitle finance-sub-hide-mobile">Gestion des dépenses et affectations financières.</p>
         </div>
         <div className="finance-page-actions">
