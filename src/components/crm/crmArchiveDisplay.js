@@ -58,7 +58,7 @@ export function archiveToFactureRow(archive) {
     id: `archive-${archive.id}`,
     archive_id: archive.id,
     numero: archive.reference || archive.file_name?.match(/FAC-\d{4}-\d{3,}/i)?.[0] || '—',
-    titre: archive.intitule || archive.file_name,
+    titre: '',
     client_nom: archive.client_nom,
     client_id: archive.client_id,
     devis_reference: archive.devis_reference,

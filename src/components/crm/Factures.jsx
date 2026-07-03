@@ -610,7 +610,7 @@ export default function Factures() {
                     <span className="crm-doc-ref">{f.numero || '—'}</span>
                     <StatutBadge statut={f.statut} />
                   </div>
-                  <div className="crm-doc-title">{f.titre || clientNom}</div>
+                  <div className="crm-doc-title">{f.__isImportedArchive ? (f.titre || '—') : (f.titre || clientNom)}</div>
                   <div className="crm-doc-meta">
                     <span>{clientNom}</span>
                     {f.commercial && <span>· {f.commercial}</span>}
