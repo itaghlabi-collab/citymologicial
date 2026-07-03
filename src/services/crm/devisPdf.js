@@ -24,19 +24,20 @@ const MAX_Y = PAGE_H - FOOTER_H;
 const BODY_TOP = M;
 const BODY_BOTTOM = PAGE_H - FOOTER_H;
 
-/** Footer fixe page — QR bas-droite, ligne rouge s’arrête avant (gap H + V) */
-const FOOTER_QR_SIZE = 22;
-const FOOTER_QR_MARGIN_RIGHT = M;
-const FOOTER_QR_MARGIN_BOTTOM = 11;
-const FOOTER_QR_LINE_GAP_H = 7;
-const FOOTER_QR_LINE_GAP_V = 5;
+/** Footer devis — ligne rouge + QR (référence CITYMO) */
+const FOOTER_LINE_Y = PAGE_H - FOOTER_H + 4;
+const FOOTER_QR_MAX = 18;
+const FOOTER_QR_GAP = 6;
 
-function getFooterLayout() {
-  const qrX = PAGE_W - FOOTER_QR_MARGIN_RIGHT - FOOTER_QR_SIZE;
-  const qrY = PAGE_H - FOOTER_QR_MARGIN_BOTTOM - FOOTER_QR_SIZE;
-  const lineY = qrY - FOOTER_QR_LINE_GAP_V;
-  const lineEndX = qrX - FOOTER_QR_LINE_GAP_H;
-  return { qrX, qrY, lineY, lineEndX };
+function getFooterQrLayout(qrMeta) {
+  const qrSize = qrMeta
+    ? containImage(qrMeta.width, qrMeta.height, FOOTER_QR_MAX, FOOTER_QR_MAX)
+    : { width: 0, height: 0 };
+  const qrX = PAGE_W - M - qrSize.width;
+  const qrY = FOOTER_LINE_Y - qrSize.height;
+  const lineEndX = qrMeta?.dataUrl ? qrX - FOOTER_QR_GAP : PAGE_W - M;
+  const contentMaxY = qrMeta?.dataUrl ? qrY - 2 : MAX_Y;
+  return { qrSize, qrX, qrY, lineEndX, contentMaxY };
 }
 
 const CLIENT_W = 58;
@@ -311,6 +312,7 @@ export async function generateDevisPdf(devis, catMap = {}) {
   const clientNom = devis.client_nom || clientDisplayName(client) || 'CLIENT';
   const rows = buildPdfRows(devis, catMap);
   const conditionsText = devis.conditions?.trim() || devis.modalites_paiement?.trim() || DEFAULT_CONDITIONS;
+  const footerLayout = getFooterQrLayout(qrMeta);
 
   const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
   let y = M;
@@ -333,27 +335,26 @@ export async function generateDevisPdf(devis, catMap = {}) {
   };
 
   const drawFooter = (pageNum, totalPages) => {
-    const { qrX, qrY, lineY, lineEndX } = getFooterLayout();
+    const { qrSize, qrX, qrY, lineEndX } = footerLayout;
 
-    // Masque footer droit : évite chevauchement visuel tableau / ligne / QR
-    doc.setFillColor(...WHITE);
-    doc.rect(lineEndX, lineY - 2, PAGE_W - M - lineEndX, PAGE_H - lineY + 2, 'F');
+    if (qrMeta?.dataUrl) {
+      doc.setFillColor(...WHITE);
+      doc.rect(lineEndX, qrY - 1, PAGE_W - M - lineEndX, PAGE_H - qrY + 1, 'F');
+    }
 
     doc.setDrawColor(...RED);
     doc.setLineWidth(0.7);
-    doc.line(M, lineY, lineEndX, lineY);
+    doc.line(M, FOOTER_LINE_Y, lineEndX, FOOTER_LINE_Y);
 
     if (qrMeta?.dataUrl) {
       try {
-        doc.setFillColor(...WHITE);
-        doc.rect(qrX - 1, qrY - 1, FOOTER_QR_SIZE + 2, FOOTER_QR_SIZE + 2, 'F');
         doc.addImage(
           qrMeta.dataUrl,
           imgFmt(qrMeta.dataUrl),
           qrX,
           qrY,
-          FOOTER_QR_SIZE,
-          FOOTER_QR_SIZE,
+          qrSize.width,
+          qrSize.height,
         );
       } catch { /* skip */ }
     }
@@ -630,7 +631,7 @@ export async function generateDevisPdf(devis, catMap = {}) {
   };
 
   const ensureSpace = (needed) => {
-    if (y + needed > MAX_Y) newPage();
+    if (y + needed > footerLayout.contentMaxY) newPage();
   };
 
   const ensureTableHeader = () => {
