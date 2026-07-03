@@ -6,9 +6,69 @@ import { QUOTE_STATUSES } from '../../constants/purchaseWorkflow';
 
 const TABLE = 'purchase_request_quotes';
 
+function lineId() {
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+}
+
+export const EMPTY_QUOTE_LINE = () => ({
+  id: lineId(),
+  reference: '',
+  designation: '',
+  quantite: '',
+  unite: 'u',
+  prix_unitaire_ht: '',
+  remise_pct: '',
+  montant_ht: '',
+});
+
+export function computeQuoteLineTotal(line) {
+  const qty = Number(line?.quantite) || 0;
+  const pu = Number(line?.prix_unitaire_ht) || 0;
+  const remise = Number(line?.remise_pct) || 0;
+  if (!qty || !pu) return 0;
+  const brut = qty * pu;
+  return Math.round(brut * (1 - remise / 100) * 100) / 100;
+}
+
+export function normalizeQuoteLines(raw) {
+  const arr = Array.isArray(raw) ? raw : [];
+  if (!arr.length) return [];
+  return arr.map((l) => {
+    const montant = l.montant_ht != null && l.montant_ht !== ''
+      ? Number(l.montant_ht) || 0
+      : computeQuoteLineTotal(l);
+    return {
+      id: l.id || lineId(),
+      reference: l.reference || '',
+      designation: l.designation || '',
+      quantite: l.quantite ?? '',
+      unite: l.unite || 'u',
+      prix_unitaire_ht: l.prix_unitaire_ht ?? '',
+      remise_pct: l.remise_pct ?? '',
+      montant_ht: montant,
+    };
+  });
+}
+
+export function sumQuoteLinesHt(lines) {
+  return normalizeQuoteLines(lines).reduce((s, l) => s + (Number(l.montant_ht) || 0), 0);
+}
+
+export function formatQuoteReferencesSummary(lines) {
+  const normalized = normalizeQuoteLines(lines);
+  if (!normalized.length) return '';
+  const labels = normalized
+    .map((l) => l.reference || l.designation)
+    .filter(Boolean);
+  if (labels.length) return labels.join(', ');
+  return `${normalized.length} réf.`;
+}
+
 export function normalizeQuote(row) {
   if (!row) return null;
-  const ht = Number(row.montant_ht) || 0;
+  const lines = normalizeQuoteLines(row.lines);
+  const htFromLines = lines.length ? sumQuoteLinesHt(lines) : 0;
+  const ht = htFromLines > 0 ? htFromLines : (Number(row.montant_ht) || 0);
   const tva = Number(row.tva_rate) ?? 20;
   const ttc = Number(row.montant_ttc) || ht * (1 + tva / 100);
   return {
@@ -19,6 +79,7 @@ export function normalizeQuote(row) {
     ref_devis: row.ref_devis_fournisseur || '',
     supplier_name: row.supplier_name || '',
     fournisseur: row.supplier_name || '',
+    lines,
     montant_ht: ht,
     tva_rate: tva,
     tva: tva,
@@ -37,7 +98,9 @@ export function normalizeQuote(row) {
 }
 
 export function toQuoteRow(form, purchaseRequestId) {
-  const ht = Number(form.montant_ht) || 0;
+  const lines = normalizeQuoteLines(form.lines);
+  const htFromLines = sumQuoteLinesHt(lines);
+  const ht = htFromLines > 0 ? htFromLines : (Number(form.montant_ht) || 0);
   const tva = Number(form.tva_rate ?? form.tva) || 0;
   const ttc = form.montant_ttc != null && form.montant_ttc !== ''
     ? Number(form.montant_ttc)
@@ -47,6 +110,7 @@ export function toQuoteRow(form, purchaseRequestId) {
     supplier_id: form.supplier_id || null,
     supplier_name: (form.supplier_name || form.fournisseur || '').trim(),
     ref_devis_fournisseur: (form.ref_devis_fournisseur || form.ref_devis || '').trim() || null,
+    lines,
     montant_ht: ht,
     tva_rate: tva,
     montant_ttc: ttc,

@@ -15,6 +15,18 @@ export function projectOptionLabel(p) {
   return [p.ref, p.nom, client].filter(Boolean).join(' — ');
 }
 
+export function isOffProjectPurchaseRequest(formOrRequest) {
+  if (!formOrRequest) return false;
+  return formOrRequest.link_type === 'hors_projet'
+    || formOrRequest.payload?.off_project === true;
+}
+
+export function purchaseRequestProjectLabel(request) {
+  if (!request) return '—';
+  if (isOffProjectPurchaseRequest(request)) return 'Hors projet';
+  return request.projet_lie || request.project_name || request.project_ref || '—';
+}
+
 export function normalizePurchaseRequest(row) {
   if (!row) return null;
   const projectLabel = row.project_ref && row.project_name
@@ -51,11 +63,17 @@ export function normalizePurchaseRequest(row) {
     created_at: row.created_at,
     updated_at: row.updated_at,
     payload: row.payload || {},
+    off_project: row.payload?.off_project === true,
   };
 }
 
 export function toPurchaseRequestRow(form) {
-  const projetLie = (form.projet_lie || form.project_name || '').trim();
+  const offProject = isOffProjectPurchaseRequest(form);
+  const projetLie = offProject ? '' : (form.projet_lie || form.project_name || '').trim();
+  const payload = {
+    ...(form.payload || {}),
+    off_project: offProject,
+  };
   return {
     ref_demande: form.ref || form.ref_demande || null,
     titre: (form.titre || '').trim(),
@@ -65,13 +83,13 @@ export function toPurchaseRequestRow(form) {
     date_limite: form.date_limite || null,
     description: form.description?.trim() || null,
     department: 'ACHATS',
-    project_id: form.project_id || null,
-    project_ref: form.project_ref || null,
-    project_name: projetLie || null,
+    project_id: offProject ? null : (form.project_id || null),
+    project_ref: offProject ? null : (form.project_ref || null),
+    project_name: offProject ? null : (projetLie || null),
     assigned_employee_id: form.assigned_employee_id || null,
     assigned_employee_name: form.assigned_employee_name || PURCHASE_ASSIGNEE.label,
     commentaires_internes: form.commentaires_internes?.trim() || null,
-    payload: form.payload || {},
+    payload,
   };
 }
 

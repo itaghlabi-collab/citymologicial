@@ -13,7 +13,7 @@ import {
 } from './purchaseRequestQuotes';
 import { createAcquisitionOrderFromQuote, updateAcquisitionOrder } from './purchaseAcquisitionOrders';
 import { createAchatsPaymentOrderFromAcquisition } from './purchasePaymentOrdersAchats';
-import { normalizePurchaseRequest, toPurchaseRequestRow, generatePurchaseRequestRef } from './purchaseRequests';
+import { normalizePurchaseRequest, toPurchaseRequestRow, generatePurchaseRequestRef, isOffProjectPurchaseRequest } from './purchaseRequests';
 import { resolveCurrentPurchaseRole, purchasePermissions, PURCHASE_ROLES } from './purchaseWorkflowRoles';
 import {
   notifyPurchaseRequestSubmitted,
@@ -104,7 +104,12 @@ export async function createPurchaseRequestWorkflow(form) {
     ...assignee,
     commentaires_internes: form.commentaires_internes || null,
   };
-  if (!row.project_name?.trim()) {
+  if (!row.titre?.trim()) {
+    const err = new Error('Le titre de la demande est obligatoire.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  if (!isOffProjectPurchaseRequest(form) && !row.project_name?.trim()) {
     const err = new Error('Le projet lié est obligatoire.');
     err.code = 'VALIDATION';
     throw err;
@@ -137,7 +142,7 @@ export async function updatePurchaseRequestDraft(id, form) {
     err.code = 'VALIDATION';
     throw err;
   }
-  if (!(form.projet_lie || form.project_name || '').trim()) {
+  if (!isOffProjectPurchaseRequest(form) && !(form.projet_lie || form.project_name || '').trim()) {
     const err = new Error('Le projet lié est obligatoire.');
     err.code = 'VALIDATION';
     throw err;
@@ -159,7 +164,7 @@ export async function submitPurchaseRequest(id) {
     err.code = 'VALIDATION';
     throw err;
   }
-  if (!(existing.project_name || existing.projet_lie || '').trim()) {
+  if (!isOffProjectPurchaseRequest(existing) && !(existing.project_name || existing.projet_lie || '').trim()) {
     const err = new Error('Renseignez le projet lié avant de soumettre la demande.');
     err.code = 'VALIDATION';
     throw err;

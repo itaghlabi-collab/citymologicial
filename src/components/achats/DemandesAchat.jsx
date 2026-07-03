@@ -17,6 +17,7 @@ import {
   getPurchaseStatusBadge, getPurchaseStatusLabel,
 } from '../../constants/purchaseWorkflow';
 import { submitPurchaseRequest, getPurchaseRequestBundle, reconcileLegacySoumiseRequests } from '../../services/achats/purchaseWorkflow';
+import { projectOptionLabel, purchaseRequestProjectLabel } from '../../services/achats/purchaseRequests';
 import { generatePurchaseRequestPdf } from '../../services/achats/purchaseRequestPdf';
 import { resolveCurrentPurchaseRole, purchasePermissions, canViewPurchaseRequest } from '../../services/achats/purchaseWorkflowRoles';
 import DemandeAchatDetail from './DemandeAchatDetail';
@@ -27,9 +28,12 @@ import {
 } from './shared.jsx';
 
 const EMPTY_FORM = {
+  link_type: 'projet',
   titre: '',
   priorite: 'Normale',
   date_limite: '',
+  project_id: '',
+  project_ref: '',
   projet_lie: '',
   fournisseur: '',
   supplier_id: '',
@@ -42,11 +46,15 @@ const EMPTY_FORM = {
 function toFormState(item) {
   if (!item) return EMPTY_FORM;
   const line = item.payload?.lines?.[0] || {};
+  const offProject = item.payload?.off_project === true;
   return {
     ...EMPTY_FORM,
+    link_type: offProject ? 'hors_projet' : 'projet',
     titre: item.titre || '',
     priorite: item.priorite || 'Normale',
     date_limite: item.date_limite || '',
+    project_id: item.project_id || '',
+    project_ref: item.project_ref || '',
     projet_lie: item.projet_lie || item.project_name || '',
     fournisseur: item.payload?.fournisseur_souhaite || line.fournisseur || '',
     supplier_id: item.payload?.supplier_id || '',
@@ -59,8 +67,10 @@ function toFormState(item) {
 
 function buildFormPayload(form, existingPayload = {}, attachments = []) {
   const fournisseur = (form.fournisseur || '').trim();
+  const offProject = form.link_type === 'hors_projet';
   return {
     ...existingPayload,
+    off_project: offProject,
     supplier_id: form.supplier_id || null,
     fournisseur_souhaite: fournisseur || null,
     attachments: attachments.map((a) => ({
@@ -82,11 +92,12 @@ function buildFormPayload(form, existingPayload = {}, attachments = []) {
   };
 }
 
-function DemandeForm({ initial, onSave, onCancel, saving, suppliers = [] }) {
+function DemandeForm({ initial, onSave, onCancel, saving, suppliers = [], projects = [] }) {
   const [form, setForm] = useState(() => toFormState(initial));
   const [attachments, setAttachments] = useState(() => initial?.payload?.attachments || []);
   const [errors, setErrors] = useState({});
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+  const isHorsProjet = form.link_type === 'hors_projet';
 
   const fournActifs = suppliers.filter((f) => f.statut === 'Actif' || f.status === 'active');
 
@@ -116,11 +127,34 @@ function DemandeForm({ initial, onSave, onCancel, saving, suppliers = [] }) {
     }));
   }
 
+  function handleProjectChange(projectId) {
+    const p = projects.find((x) => x.id === projectId);
+    setForm((prev) => ({
+      ...prev,
+      project_id: projectId || '',
+      project_ref: p?.ref || '',
+      projet_lie: p ? projectOptionLabel(p) : '',
+      project_name: p?.nom || '',
+    }));
+    if (projectId) setErrors((e) => ({ ...e, projet_lie: undefined }));
+  }
+
+  function handleLinkTypeChange(linkType) {
+    setForm((prev) => ({
+      ...prev,
+      link_type: linkType,
+      ...(linkType === 'hors_projet'
+        ? { project_id: '', project_ref: '', projet_lie: '', project_name: '' }
+        : {}),
+    }));
+    setErrors((e) => ({ ...e, projet_lie: undefined }));
+  }
+
   function handleSubmit(ev) {
     ev.preventDefault();
     const e = {};
     if (!form.titre.trim()) e.titre = 'Requis';
-    if (!form.projet_lie.trim()) e.projet_lie = 'Requis';
+    if (!isHorsProjet && !form.projet_lie.trim() && !form.project_id) e.projet_lie = 'Requis';
     if (Object.keys(e).length) { setErrors(e); return; }
     setErrors({});
     onSave({
@@ -131,13 +165,35 @@ function DemandeForm({ initial, onSave, onCancel, saving, suppliers = [] }) {
 
   return (
     <form onSubmit={handleSubmit}>
+      <SectionTitle icon={<ClipboardList size={12} />}>Type de demande</SectionTitle>
+      <div style={{ display: 'flex', gap: 20, marginBottom: 16, flexWrap: 'wrap' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: '0.85rem' }}>
+          <input
+            type="radio"
+            name="link_type"
+            checked={form.link_type === 'projet'}
+            onChange={() => handleLinkTypeChange('projet')}
+          />
+          Demande liée à un projet
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: '0.85rem' }}>
+          <input
+            type="radio"
+            name="link_type"
+            checked={isHorsProjet}
+            onChange={() => handleLinkTypeChange('hors_projet')}
+          />
+          Demande hors projet
+        </label>
+      </div>
+
       <SectionTitle icon={<ClipboardList size={12} />}>Informations générales</SectionTitle>
       <FRow>
-        <FField label="Titre" required>
+        <FField label={isHorsProjet ? 'Objet / Titre de la demande' : 'Titre'} required>
           <input
             value={form.titre}
             onChange={(e) => set('titre', e.target.value)}
-            placeholder="Titre de la demande..."
+            placeholder={isHorsProjet ? 'ex. Achat bureau, Consommables, Informatique...' : 'Titre de la demande...'}
             style={{ ...INPUT_STYLE, borderColor: errors.titre ? 'var(--red)' : 'var(--border)' }}
           />
           {errors.titre && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.titre}</div>}
@@ -151,20 +207,42 @@ function DemandeForm({ initial, onSave, onCancel, saving, suppliers = [] }) {
           <input type="date" value={form.date_limite} onChange={(e) => set('date_limite', e.target.value)} style={INPUT_STYLE} />
         </FField>
       </FRow>
-      <FRow>
-        <FField label="Projet lié" required>
-          <input
-            value={form.projet_lie}
-            onChange={(e) => set('projet_lie', e.target.value)}
-            placeholder="ex. PRJ-2026-012 — Villa Anfa, chantier Lakhyayta..."
-            style={{ ...INPUT_STYLE, borderColor: errors.projet_lie ? 'var(--red)' : 'var(--border)' }}
-          />
-          {errors.projet_lie && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.projet_lie}</div>}
-        </FField>
-        <FField label="Responsable Achats">
-          <input value={PURCHASE_ASSIGNEE.label} readOnly style={{ ...INPUT_STYLE, background: 'var(--surface-2)', cursor: 'not-allowed' }} />
-        </FField>
-      </FRow>
+      {!isHorsProjet && (
+        <FRow>
+          <FField label="Projet lié" required>
+            {projects.length > 0 ? (
+              <select
+                value={form.project_id || ''}
+                onChange={(e) => handleProjectChange(e.target.value)}
+                style={{ ...SELECT_STYLE, borderColor: errors.projet_lie ? 'var(--red)' : 'var(--border)' }}
+              >
+                <option value="">— Sélectionner un projet —</option>
+                {projects.map((p) => (
+                  <option key={p.id} value={p.id}>{projectOptionLabel(p)}</option>
+                ))}
+              </select>
+            ) : (
+              <input
+                value={form.projet_lie}
+                onChange={(e) => set('projet_lie', e.target.value)}
+                placeholder="ex. PRJ-2026-012 — Villa Anfa, chantier Lakhyayta..."
+                style={{ ...INPUT_STYLE, borderColor: errors.projet_lie ? 'var(--red)' : 'var(--border)' }}
+              />
+            )}
+            {errors.projet_lie && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.projet_lie}</div>}
+          </FField>
+          <FField label="Responsable Achats">
+            <input value={PURCHASE_ASSIGNEE.label} readOnly style={{ ...INPUT_STYLE, background: 'var(--surface-2)', cursor: 'not-allowed' }} />
+          </FField>
+        </FRow>
+      )}
+      {isHorsProjet && (
+        <FRow>
+          <FField label="Responsable Achats">
+            <input value={PURCHASE_ASSIGNEE.label} readOnly style={{ ...INPUT_STYLE, background: 'var(--surface-2)', cursor: 'not-allowed' }} />
+          </FField>
+        </FRow>
+      )}
       <FRow>
         <FField label="Fournisseur souhaité">
           {fournActifs.length > 0 ? (
@@ -268,7 +346,7 @@ export default function DemandesAchat() {
   const { user } = useAuth();
   const { records: suppliers } = useSuppliers();
   const {
-    records: items, loading, saving, error, configured, reload, save, remove,
+    records: items, projects, loading, saving, error, configured, reload, save, remove,
   } = usePurchaseRequests();
 
   const [search, setSearch] = useState('');
@@ -401,6 +479,7 @@ export default function DemandesAchat() {
             onCancel={() => { setShowModal(false); setEditItem(null); }}
             saving={saving}
             suppliers={suppliers}
+            projects={projects}
           />
         </Modal>
       </>
@@ -505,7 +584,7 @@ export default function DemandesAchat() {
                     <td data-label="Titre"><div style={{ fontWeight: 600, fontSize: '0.87rem', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{x.titre}</div></td>
                     <td data-label="Priorité"><span className={`badge ${BADGE_PRIORITE[x.priorite] || 'badge-grey'}`} style={{ fontSize: '0.72rem' }}>{x.priorite}</span></td>
                     <td data-label="Demandeur">{x.requester_name || x.demandeur || '—'}</td>
-                    <td data-label="Projet">{x.projet_lie || x.project_name || x.project_ref || '—'}</td>
+                    <td data-label="Projet">{purchaseRequestProjectLabel(x)}</td>
                     <td data-label="Date">{x.date_limite || '—'}</td>
                     <td data-label="Statut">
                       <span className={`badge ${getPurchaseStatusBadge(x.statut)}`} style={{ fontSize: '0.72rem' }}>
@@ -553,6 +632,7 @@ export default function DemandesAchat() {
           onCancel={() => { setShowModal(false); setEditItem(null); }}
           saving={saving}
           suppliers={suppliers}
+          projects={projects}
         />
       </Modal>
     </div>

@@ -24,6 +24,14 @@ import {
   QUOTE_STATUS_BADGE,
 } from '../../constants/purchaseWorkflow';
 import { generatePurchaseRequestPdf } from '../../services/achats/purchaseRequestPdf';
+import { purchaseRequestProjectLabel } from '../../services/achats/purchaseRequests';
+import {
+  EMPTY_QUOTE_LINE,
+  computeQuoteLineTotal,
+  normalizeQuoteLines,
+  formatQuoteReferencesSummary,
+  sumQuoteLinesHt,
+} from '../../services/achats/purchaseRequestQuotes';
 import PurchaseRequestAttachments from './PurchaseRequestAttachments';
 import {
   SectionTitle, FField, FRow, INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE,
@@ -81,7 +89,11 @@ function QuoteComparisonTable({
             return (
               <tr key={q.id} style={q.selected ? { background: 'rgba(46, 125, 50, 0.08)' } : undefined}>
                 <td style={{ fontWeight: 700 }}>{q.supplier_name}</td>
-                <td>{q.ref_devis || '-'}</td>
+                <td style={{ maxWidth: 160, fontSize: '0.78rem' }}>
+                  {q.lines?.length
+                    ? formatQuoteReferencesSummary(q.lines)
+                    : (q.ref_devis || '-')}
+                </td>
                 <td>{formatMAD(q.montant_ht)}</td>
                 <td>{q.tva_rate}%</td>
                 <td style={{ fontWeight: 700 }}>{formatMAD(q.montant_ttc)}</td>
@@ -158,6 +170,10 @@ function QuoteComparisonTable({
 
 function QuoteForm({ suppliers, initial, onSave, onCancel, saving, requestId }) {
   const [form, setForm] = useState(() => (initial ? { ...EMPTY_QUOTE, ...initial, ref_devis_fournisseur: initial.ref_devis || initial.ref_devis_fournisseur || '' } : EMPTY_QUOTE));
+  const [lines, setLines] = useState(() => {
+    const normalized = normalizeQuoteLines(initial?.lines);
+    return normalized.length ? normalized : [EMPTY_QUOTE_LINE()];
+  });
   const [attachment, setAttachment] = useState(() => {
     if (!initial?.attachment_url && !initial?.attachment_storage_path) return null;
     return {
@@ -170,6 +186,43 @@ function QuoteForm({ suppliers, initial, onSave, onCancel, saving, requestId }) 
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
 
   const fournActifs = suppliers.filter((f) => f.statut === 'Actif' || f.status === 'active');
+
+  function syncTotalsFromLines(nextLines) {
+    const normalized = normalizeQuoteLines(nextLines);
+    const ht = sumQuoteLinesHt(normalized);
+    if (ht <= 0) return;
+    const tva = parseFloat(form.tva_rate) || 0;
+    setForm((p) => ({
+      ...p,
+      montant_ht: ht.toFixed(2),
+      montant_ttc: (ht * (1 + tva / 100)).toFixed(2),
+    }));
+  }
+
+  function updateLine(idx, key, value) {
+    setLines((prev) => {
+      const next = prev.map((l, i) => {
+        if (i !== idx) return l;
+        const updated = { ...l, [key]: value };
+        updated.montant_ht = computeQuoteLineTotal(updated);
+        return updated;
+      });
+      syncTotalsFromLines(next);
+      return next;
+    });
+  }
+
+  function addLine() {
+    setLines((prev) => [...prev, EMPTY_QUOTE_LINE()]);
+  }
+
+  function removeLine(idx) {
+    setLines((prev) => {
+      const next = prev.length > 1 ? prev.filter((_, i) => i !== idx) : [EMPTY_QUOTE_LINE()];
+      syncTotalsFromLines(next);
+      return next;
+    });
+  }
 
   function handleSupplierChange(id) {
     const s = fournActifs.find((x) => x.id === id);
@@ -190,6 +243,7 @@ function QuoteForm({ suppliers, initial, onSave, onCancel, saving, requestId }) 
     setErrors({});
     onSave({
       ...form,
+      lines: normalizeQuoteLines(lines),
       attachment_url: attachment?.storage_path || attachment?.url || form.attachment_url || '',
     });
   }
@@ -244,8 +298,54 @@ function QuoteForm({ suppliers, initial, onSave, onCancel, saving, requestId }) 
           {errors.supplier_name && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.supplier_name}</div>}
         </FField>
         <FField label="Réf. devis fournisseur">
-          <input value={form.ref_devis_fournisseur} onChange={(e) => set('ref_devis_fournisseur', e.target.value)} style={INPUT_STYLE} placeholder="Réf. fournisseur" />
+          <input value={form.ref_devis_fournisseur} onChange={(e) => set('ref_devis_fournisseur', e.target.value)} style={INPUT_STYLE} placeholder="Réf. document fournisseur" />
         </FField>
+      </FRow>
+
+      <div style={{ marginBottom: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+          <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase' }}>Références / lignes</span>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={addLine}>
+            <Plus size={12} /> Ajouter une référence
+          </button>
+        </div>
+        <div className="table-wrap">
+          <table style={{ fontSize: '0.78rem' }}>
+            <thead>
+              <tr>
+                <th>Référence</th>
+                <th>Désignation</th>
+                <th>Qté</th>
+                <th>Unité</th>
+                <th>P.U. HT</th>
+                <th>Remise %</th>
+                <th>Total HT</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {lines.map((line, idx) => (
+                <tr key={line.id || idx}>
+                  <td><input value={line.reference} onChange={(e) => updateLine(idx, 'reference', e.target.value)} style={{ ...INPUT_STYLE, minWidth: 90 }} placeholder="Réf." /></td>
+                  <td><input value={line.designation} onChange={(e) => updateLine(idx, 'designation', e.target.value)} style={{ ...INPUT_STYLE, minWidth: 120 }} placeholder="Désignation" /></td>
+                  <td><input type="number" min="0" step="any" value={line.quantite} onChange={(e) => updateLine(idx, 'quantite', e.target.value)} style={{ ...INPUT_STYLE, width: 70 }} /></td>
+                  <td><input value={line.unite} onChange={(e) => updateLine(idx, 'unite', e.target.value)} style={{ ...INPUT_STYLE, width: 56 }} /></td>
+                  <td><input type="number" min="0" step="0.01" value={line.prix_unitaire_ht} onChange={(e) => updateLine(idx, 'prix_unitaire_ht', e.target.value)} style={{ ...INPUT_STYLE, width: 90 }} /></td>
+                  <td><input type="number" min="0" max="100" step="0.01" value={line.remise_pct} onChange={(e) => updateLine(idx, 'remise_pct', e.target.value)} style={{ ...INPUT_STYLE, width: 70 }} /></td>
+                  <td style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{formatMAD(line.montant_ht || computeQuoteLineTotal(line))}</td>
+                  <td>
+                    <button type="button" className="btn btn-ghost btn-sm" title="Supprimer la ligne" onClick={() => removeLine(idx)} style={{ color: 'var(--red)' }}>
+                      <Trash2 size={12} />
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <FRow>
         <FField label="Montant HT">
           <input type="number" step="0.01" min="0" value={form.montant_ht} onChange={(e) => handleHtChange(e.target.value)} style={INPUT_STYLE} />
         </FField>
@@ -359,7 +459,7 @@ export default function DemandeAchatDetail({
     );
   }
 
-  const projectDisplay = request.projet_lie || request.project_name || request.project_ref || '—';
+  const projectDisplay = purchaseRequestProjectLabel(request);
 
   const canEdit = canEditPurchaseRequest(request.statut);
   const isTerminal = ['Clôturée', 'Refusée'].includes(request.statut);
@@ -609,7 +709,7 @@ export default function DemandeAchatDetail({
         </div>
       </div>
 
-      <Modal open={!!viewQuote} onClose={() => setViewQuote(null)} title="Détail devis fournisseur" width={520}>
+      <Modal open={!!viewQuote} onClose={() => setViewQuote(null)} title="Détail devis fournisseur" width={640}>
         {viewQuote && (
           <div style={{ fontSize: '0.84rem', display: 'grid', gap: 10 }}>
             {[
@@ -625,6 +725,39 @@ export default function DemandeAchatDetail({
             ].map(([l, v]) => (
               <div key={l}><span style={{ color: 'var(--text-3)', fontSize: '0.72rem', fontWeight: 700 }}>{l}</span><div>{v || '—'}</div></div>
             ))}
+            {viewQuote.lines?.length > 0 && (
+              <div>
+                <span style={{ color: 'var(--text-3)', fontSize: '0.72rem', fontWeight: 700 }}>Références</span>
+                <div className="table-wrap" style={{ marginTop: 8 }}>
+                  <table style={{ fontSize: '0.78rem' }}>
+                    <thead>
+                      <tr>
+                        <th>Réf.</th>
+                        <th>Désignation</th>
+                        <th>Qté</th>
+                        <th>Unité</th>
+                        <th>P.U. HT</th>
+                        <th>Remise</th>
+                        <th>Total HT</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {viewQuote.lines.map((line) => (
+                        <tr key={line.id}>
+                          <td>{line.reference || '—'}</td>
+                          <td>{line.designation || '—'}</td>
+                          <td>{line.quantite || '—'}</td>
+                          <td>{line.unite || '—'}</td>
+                          <td>{line.prix_unitaire_ht ? formatMAD(line.prix_unitaire_ht) : '—'}</td>
+                          <td>{line.remise_pct ? `${line.remise_pct}%` : '—'}</td>
+                          <td style={{ fontWeight: 700 }}>{formatMAD(line.montant_ht)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </Modal>
