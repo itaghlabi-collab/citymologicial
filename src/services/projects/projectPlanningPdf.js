@@ -44,12 +44,16 @@ const FORMATS = {
 
 const LEFT_COLS = [
   { key: 'wbs', label: 'WBS', w: 9 },
-  { key: 'nom', label: 'Tâche', w: 30 },
-  { key: 'duree', label: 'Dur.', w: 10 },
-  { key: 'debut', label: 'Début', w: 17 },
-  { key: 'fin', label: 'Fin', w: 17 },
+  { key: 'nom', label: 'Tâche', w: 35 },
+  { key: 'duree', label: 'Dur.', w: 9 },
+  { key: 'debut', label: 'Début', w: 15 },
+  { key: 'fin', label: 'Fin', w: 15 },
   { key: 'avancement', label: 'Av. %', w: 13 },
 ];
+
+const NOM_FONT_SUMMARY = 7.8;
+const NOM_FONT_TASK = 6.8;
+const NOM_LINE_STEP_RATIO = 0.42;
 
 function rowDurationDays(row) {
   if (!row?.date_debut) return 0;
@@ -728,6 +732,64 @@ function measureTextWidth(doc, text, fontSize) {
   return doc.getTextWidth(String(text || ''));
 }
 
+function nomColumnWidth() {
+  return LEFT_COLS[1].w - 2;
+}
+
+function nomFontSizeForRow(row) {
+  return row.type === 'summary' ? NOM_FONT_SUMMARY : NOM_FONT_TASK;
+}
+
+function splitNomLines(doc, row) {
+  const fontSize = nomFontSizeForRow(row);
+  doc.setFontSize(fontSize);
+  return doc.splitTextToSize(String(row.nom || '—'), nomColumnWidth());
+}
+
+function nomLineStep(fontSize) {
+  return fontSize * NOM_LINE_STEP_RATIO;
+}
+
+/** Hauteur de ligne selon le retour à la ligne du libellé tâche */
+function computeRowHeight(doc, row, baseRowH) {
+  const isSummary = row.type === 'summary';
+  const minH = isSummary ? baseRowH * SUMMARY_ROW_BOOST : baseRowH;
+  const fontSize = nomFontSizeForRow(row);
+  const nomLines = splitNomLines(doc, row);
+  const lineStep = nomLineStep(fontSize);
+  const textH = nomLines.length * lineStep + 2.2;
+  return Math.max(MIN_ROW_H, minH, textH);
+}
+
+function computeRowHeights(doc, rows, baseRowH, bodyAvailable) {
+  const heights = rows.map((row) => computeRowHeight(doc, row, baseRowH));
+  let total = heights.reduce((s, h) => s + h, 0) + ROW_GAP * Math.max(0, rows.length - 1);
+  if (total <= bodyAvailable || !rows.length) return heights;
+
+  let gap = ROW_GAP;
+  while (total > bodyAvailable && gap > 0.15) {
+    gap -= 0.1;
+    total = heights.reduce((s, h) => s + h, 0) + gap * Math.max(0, rows.length - 1);
+  }
+  if (total <= bodyAvailable) return heights;
+
+  const singleLineIdx = rows
+    .map((row, i) => ({ i, lines: splitNomLines(doc, row).length }))
+    .filter(({ lines }) => lines <= 1)
+    .map(({ i }) => i);
+  let shrink = 0.2;
+  while (total > bodyAvailable && shrink < baseRowH - MIN_ROW_H && singleLineIdx.length) {
+    singleLineIdx.forEach((i) => {
+      if (rows[i].type !== 'summary') {
+        heights[i] = Math.max(MIN_ROW_H, baseRowH - shrink);
+      }
+    });
+    total = heights.reduce((s, h) => s + h, 0) + gap * Math.max(0, rows.length - 1);
+    shrink += 0.2;
+  }
+  return heights;
+}
+
 function drawRow(doc, layout, row, y, minDate, maxDate, rowH) {
   const { ganttX, ganttW, pageW } = layout;
   const isSummary = row.type === 'summary';
@@ -742,17 +804,28 @@ function drawRow(doc, layout, row, y, minDate, maxDate, rowH) {
 
   let x = M + 1;
   const nom = row.nom || '—';
-  const nomLines = doc.splitTextToSize(nom, LEFT_COLS[1].w - 2);
-  const fontSize = isSummary ? Math.min(7.8, rowH - 0.8) : Math.min(6.8, rowH - 1.2);
+  const nomFontSize = nomFontSizeForRow(row);
+  const nomLines = splitNomLines(doc, row);
+  const lineStep = nomLineStep(nomFontSize);
 
   doc.setFont('helvetica', isSummary || isMilestone ? 'bold' : 'normal');
-  doc.setFontSize(fontSize);
+  doc.setFontSize(nomFontSize);
   doc.setTextColor(...BLACK);
 
   doc.text(String(row.wbs || ''), x, y + rowH - 1.8);
   x += LEFT_COLS[0].w;
-  doc.text(nomLines.slice(0, 1), x, y + rowH - 1.8);
+
+  const nomX = x;
+  const nomBaseline = y + rowH - 1.8;
+  nomLines.forEach((line, i) => {
+    doc.text(line, nomX, nomBaseline - (nomLines.length - 1 - i) * lineStep);
+  });
   x += LEFT_COLS[1].w;
+
+  const metaFontSize = isSummary ? NOM_FONT_SUMMARY : NOM_FONT_TASK;
+  doc.setFont('helvetica', isSummary || isMilestone ? 'bold' : 'normal');
+  doc.setFontSize(metaFontSize);
+  doc.setTextColor(...BLACK);
   doc.text(row.duree_jours ? `${row.duree_jours}j` : (isMilestone ? '0j' : '—'), x, y + rowH - 1.8);
   x += LEFT_COLS[2].w;
   doc.text(fmtDate(row.date_debut), x, y + rowH - 1.8);
@@ -898,10 +971,13 @@ export async function generateProjectPlanningPdf(projet, tasks = [], options = {
   drawGanttGrid(doc, layout, scale, minDate, maxDate, rowStartY);
   drawTodayLine(doc, layout, minDate, maxDate, rowStartY);
 
+  const bodyAvailable = layout.bodyBottom - rowStartY;
+  const rowHeights = computeRowHeights(doc, rows, layout.rowH, bodyAvailable);
+
   const rowMetrics = [];
   let y = rowStartY;
-  rows.forEach((row) => {
-    const rh = row.type === 'summary' ? layout.rowH * SUMMARY_ROW_BOOST : layout.rowH;
+  rows.forEach((row, i) => {
+    const rh = rowHeights[i];
     const metric = drawRow(doc, layout, row, y, minDate, maxDate, rh);
     rowMetrics.push({ row, ...metric });
     y += rh + layout.rowGap;
