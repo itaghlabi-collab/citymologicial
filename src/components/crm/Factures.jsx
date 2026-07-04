@@ -32,6 +32,22 @@ function fmtDate(d) {
   try { return new Date(d).toLocaleDateString('fr-MA', { day: '2-digit', month: '2-digit', year: 'numeric' }); }
   catch { return d; }
 }
+
+function pdfOpenButtonStyle(disabled, extra = {}) {
+  return {
+    background: 'none',
+    border: 'none',
+    padding: 0,
+    margin: 0,
+    font: 'inherit',
+    color: 'inherit',
+    cursor: disabled ? 'wait' : 'pointer',
+    textAlign: 'inherit',
+    opacity: disabled ? 0.6 : 1,
+    ...extra,
+  };
+}
+
 function isOverdue(dateStr, statut) {
   if (!dateStr || statut === 'payee' || statut === 'annulee') return false;
   return new Date(dateStr) < new Date();
@@ -294,6 +310,30 @@ export default function Factures() {
     }
   }
 
+  async function handlePdfInTab(f) {
+    if (f.__isImportedArchive) {
+      try {
+        await openArchivePdf(f.__archive);
+      } catch (err) {
+        showToast(err.message || 'Erreur ouverture PDF.', 'error');
+      }
+      return;
+    }
+    const popup = window.open('', '_blank');
+    setPdfLoadingId(f.id);
+    try {
+      const full = await fetchOne(f.id);
+      const cats = await listCategories();
+      const catMap = Object.fromEntries(cats.map(c => [String(c.id), c.nom]));
+      await generateFacturePdf(full, catMap, { openInNewTab: true, popupWindow: popup });
+    } catch (err) {
+      popup?.close();
+      showToast(err.message || 'Erreur generation PDF.', 'error');
+    } finally {
+      setPdfLoadingId(null);
+    }
+  }
+
   /* ── Sub-views ── */
   if (view === 'form') {
     return <FactureForm facture={editingFacture} onBack={backToList} onSaved={handleSaved} saving={saving} />;
@@ -469,14 +509,28 @@ export default function Factures() {
 
                       {/* N° Facture */}
                       <td data-label="N° Facture" style={{ padding: '10px 12px', fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.88rem', color: 'var(--red)', whiteSpace: 'nowrap' }}>
-                        {f.numero || '—'}
+                        <button
+                          type="button"
+                          title="Ouvrir le PDF"
+                          disabled={pdfLoadingId === f.id}
+                          onClick={() => handlePdfInTab(f)}
+                          style={pdfOpenButtonStyle(pdfLoadingId === f.id, { fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.88rem', color: 'var(--red)' })}
+                        >
+                          {f.numero || '—'}
+                        </button>
                       </td>
 
                       {/* Titre */}
                       <td data-label="Titre" style={{ padding: '10px 12px', maxWidth: 180 }}>
-                        <div style={{ fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={f.titre}>
+                        <button
+                          type="button"
+                          title="Ouvrir le PDF"
+                          disabled={pdfLoadingId === f.id}
+                          onClick={() => handlePdfInTab(f)}
+                          style={pdfOpenButtonStyle(pdfLoadingId === f.id, { fontWeight: 600, color: 'var(--text)', width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' })}
+                        >
                           {f.titre || '—'}
-                        </div>
+                        </button>
                       </td>
 
                       {/* Devis lie */}
@@ -607,10 +661,28 @@ export default function Factures() {
               return (
                 <div key={f.id ?? i} className="crm-doc-card">
                   <div className="crm-doc-head">
-                    <span className="crm-doc-ref">{f.numero || '—'}</span>
+                    <button
+                      type="button"
+                      title="Ouvrir le PDF"
+                      disabled={pdfLoadingId === f.id}
+                      onClick={() => handlePdfInTab(f)}
+                      className="crm-doc-ref"
+                      style={pdfOpenButtonStyle(pdfLoadingId === f.id)}
+                    >
+                      {f.numero || '—'}
+                    </button>
                     <StatutBadge statut={f.statut} />
                   </div>
-                  <div className="crm-doc-title">{f.__isImportedArchive ? (f.titre || '—') : (f.titre || clientNom)}</div>
+                  <button
+                    type="button"
+                    title="Ouvrir le PDF"
+                    disabled={pdfLoadingId === f.id}
+                    onClick={() => handlePdfInTab(f)}
+                    className="crm-doc-title"
+                    style={pdfOpenButtonStyle(pdfLoadingId === f.id, { width: '100%', textAlign: 'left' })}
+                  >
+                    {f.__isImportedArchive ? (f.titre || '—') : (f.titre || clientNom)}
+                  </button>
                   <div className="crm-doc-meta">
                     <span>{clientNom}</span>
                     {f.commercial && <span>· {f.commercial}</span>}

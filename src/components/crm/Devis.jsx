@@ -37,6 +37,22 @@ function fmtDate(d) {
     return new Date(d).toLocaleDateString('fr-MA', { day: '2-digit', month: '2-digit', year: 'numeric' });
   } catch { return d; }
 }
+
+function pdfOpenButtonStyle(disabled, extra = {}) {
+  return {
+    background: 'none',
+    border: 'none',
+    padding: 0,
+    margin: 0,
+    font: 'inherit',
+    color: 'inherit',
+    cursor: disabled ? 'wait' : 'pointer',
+    textAlign: 'inherit',
+    opacity: disabled ? 0.6 : 1,
+    ...extra,
+  };
+}
+
 function isExpiringSoon(dateStr) {
   if (!dateStr) return false;
   const diff = (new Date(dateStr) - new Date()) / (1000 * 60 * 60 * 24);
@@ -285,6 +301,36 @@ export default function Devis() {
         lignes: enrichLignesDescriptions(full.lignes, articles),
       }, catMap);
     } catch (err) {
+      showToast(err.message || 'Erreur generation PDF.', 'error');
+    } finally {
+      setPdfLoadingId(null);
+    }
+  }
+
+  async function handlePdfInTab(d) {
+    if (d.__isImportedArchive) {
+      try {
+        await openArchivePdf(d.__archive);
+      } catch (err) {
+        showToast(err.message || 'Erreur ouverture PDF.', 'error');
+      }
+      return;
+    }
+    const popup = window.open('', '_blank');
+    setPdfLoadingId(d.id);
+    try {
+      const [full, cats, articles] = await Promise.all([
+        fetchOne(d.id),
+        listCategories(),
+        listArticles(),
+      ]);
+      const catMap = Object.fromEntries(cats.map(c => [String(c.id), formatCategoryDisplayName(c.nom)]));
+      await generateDevisPdf({
+        ...full,
+        lignes: enrichLignesDescriptions(full.lignes, articles),
+      }, catMap, { openInNewTab: true, popupWindow: popup });
+    } catch (err) {
+      popup?.close();
       showToast(err.message || 'Erreur generation PDF.', 'error');
     } finally {
       setPdfLoadingId(null);
@@ -573,14 +619,28 @@ export default function Devis() {
 
                       {/* Reference */}
                       <td data-label="Ref" style={{ padding: '10px 12px', fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.88rem', color: 'var(--red)', whiteSpace: 'nowrap' }}>
-                        {d.reference || '—'}
+                        <button
+                          type="button"
+                          title="Ouvrir le PDF"
+                          disabled={pdfLoadingId === d.id}
+                          onClick={() => handlePdfInTab(d)}
+                          style={pdfOpenButtonStyle(pdfLoadingId === d.id, { fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.88rem', color: 'var(--red)' })}
+                        >
+                          {d.reference || '—'}
+                        </button>
                       </td>
 
                       {/* Titre */}
                       <td data-label="Titre" style={{ padding: '10px 12px', maxWidth: 220 }}>
-                        <div style={{ fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title={d.titre}>
+                        <button
+                          type="button"
+                          title="Ouvrir le PDF"
+                          disabled={pdfLoadingId === d.id}
+                          onClick={() => handlePdfInTab(d)}
+                          style={pdfOpenButtonStyle(pdfLoadingId === d.id, { fontWeight: 600, color: 'var(--text)', width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' })}
+                        >
                           {d.titre || '—'}
-                        </div>
+                        </button>
                         {d.type_projet && (
                           <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 2 }}>{d.type_projet}</div>
                         )}
@@ -650,10 +710,28 @@ export default function Devis() {
               return (
                 <div key={d.id ?? i} className="crm-doc-card">
                   <div className="crm-doc-head">
-                    <span className="crm-doc-ref">{d.reference || '—'}</span>
+                    <button
+                      type="button"
+                      title="Ouvrir le PDF"
+                      disabled={pdfLoadingId === d.id}
+                      onClick={() => handlePdfInTab(d)}
+                      className="crm-doc-ref"
+                      style={pdfOpenButtonStyle(pdfLoadingId === d.id)}
+                    >
+                      {d.reference || '—'}
+                    </button>
                     <StatutBadge statut={d.statut} />
                   </div>
-                  <div className="crm-doc-title">{d.titre || '—'}</div>
+                  <button
+                    type="button"
+                    title="Ouvrir le PDF"
+                    disabled={pdfLoadingId === d.id}
+                    onClick={() => handlePdfInTab(d)}
+                    className="crm-doc-title"
+                    style={pdfOpenButtonStyle(pdfLoadingId === d.id, { width: '100%', textAlign: 'left' })}
+                  >
+                    {d.titre || '—'}
+                  </button>
                   <div className="crm-doc-meta">
                     <span>{clientNom}</span>
                     {d.commercial && <span>· {d.commercial}</span>}

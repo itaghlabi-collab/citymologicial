@@ -221,7 +221,22 @@ function drawCellBorder(doc, x, y, w, h) {
   doc.rect(x, y, w, h);
 }
 
-export async function generateFacturePdf(facture, catMap = {}) {
+function deliverPdf(doc, filename, options = {}) {
+  if (!options.openInNewTab) {
+    doc.save(filename);
+    return;
+  }
+  const url = URL.createObjectURL(doc.output('blob'));
+  const target = options.popupWindow;
+  if (target && !target.closed) {
+    target.location.href = url;
+  } else {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+  setTimeout(() => URL.revokeObjectURL(url), 120_000);
+}
+
+export async function generateFacturePdf(facture, catMap = {}, options = {}) {
   const [logoMeta, iconMeta, qrMeta] = await Promise.all([
     loadImageWithSize(LOGO_URL),
     loadImageWithSize(ICON_URL),
@@ -582,5 +597,5 @@ export async function generateFacturePdf(facture, catMap = {}) {
   }
 
   const pdfPrefix = isAcompte ? 'Facture_Acompte' : 'Facture';
-  doc.save(`${pdfPrefix}_${(facture.numero || 'facture').replace(/\s+/g, '_')}.pdf`);
+  deliverPdf(doc, `${pdfPrefix}_${(facture.numero || 'facture').replace(/\s+/g, '_')}.pdf`, options);
 }
