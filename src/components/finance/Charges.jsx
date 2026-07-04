@@ -2,10 +2,12 @@
  * Charges.jsx — Gestion des dépenses et charges ERP CITYMO
  * Backend-ready / Supabase/S3-ready
  */
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useFinanceCharges } from '../../hooks/useFinanceCharges';
+import { useProjects } from '../../hooks/useProjects';
 import { chargeDisplayRef } from '../../services/finance/charges';
+import { projectOptionLabel } from '../../services/achats/purchaseRequests';
 import {
   TrendingDown, Plus, Eye, Edit2, Trash2, Archive, Download,
   CheckCircle, XCircle, Search, Filter, FileText, Paperclip,
@@ -25,10 +27,30 @@ const EMPTY_FORM = {
   statut: 'Brouillon', commentaire: '', validateur: '', justificatifs: [],
 };
 
-function ChargeForm({ initial, categories, onSave, onCancel }) {
+function ChargeForm({ initial, categories, projects = [], onSave, onCancel }) {
   const [form, setForm] = useState(initial || EMPTY_FORM);
   const [errors, setErrors] = useState({});
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+
+  useEffect(() => {
+    if (!initial?.project_id && initial?.projet_lie && projects.length) {
+      const match = projects.find((p) => projectOptionLabel(p) === initial.projet_lie);
+      if (match) setForm((prev) => ({ ...prev, project_id: match.id }));
+    }
+  }, [initial, projects]);
+
+  function handleProjectChange(projectId) {
+    if (!projectId) {
+      setForm((prev) => ({ ...prev, project_id: '', projet_lie: '' }));
+      return;
+    }
+    const project = projects.find((p) => String(p.id) === String(projectId));
+    setForm((prev) => ({
+      ...prev,
+      project_id: projectId,
+      projet_lie: project ? projectOptionLabel(project) : '',
+    }));
+  }
 
   function validate() {
     const e = {};
@@ -82,7 +104,18 @@ function ChargeForm({ initial, categories, onSave, onCancel }) {
       <SectionTitle icon={<FileText size={12} />}>Affectation</SectionTitle>
       <FRow>
         <FField label="Fournisseur"><input value={form.fournisseur} onChange={e => set('fournisseur', e.target.value)} placeholder="Nom du fournisseur..." style={INPUT_STYLE} /></FField>
-        <FField label="Projet lié"><input value={form.projet_lie} onChange={e => set('projet_lie', e.target.value)} placeholder="Réf. projet..." style={INPUT_STYLE} /></FField>
+        <FField label="Projet lié">
+          <select
+            value={form.project_id || ''}
+            onChange={(e) => handleProjectChange(e.target.value)}
+            style={SELECT_STYLE}
+          >
+            <option value="">Hors projet</option>
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>{projectOptionLabel(p)}</option>
+            ))}
+          </select>
+        </FField>
         <FField label="Département"><input value={form.departement} onChange={e => set('departement', e.target.value)} placeholder="Département concerné..." style={INPUT_STYLE} /></FField>
       </FRow>
 
@@ -215,6 +248,7 @@ function DetailCharge({ charge, onBack, onEdit, onDelete, onValider, onComptabil
 
 export default function Charges({ categories }) {
   const { records: charges, loading, error, save, remove } = useFinanceCharges();
+  const { records: projects } = useProjects();
   const [search, setSearch] = useState('');
   const [filterStatut, setFilterStatut] = useState('');
   const [filterCat, setFilterCat] = useState('');
@@ -438,7 +472,7 @@ export default function Charges({ categories }) {
 
       {/* Modal */}
       <Modal open={showModal} onClose={() => { setShowModal(false); setEditCharge(null); }} title={editCharge ? 'Modifier la dépense' : 'Nouvelle dépense'} width={720}>
-        <ChargeForm initial={editCharge} categories={cats} onSave={handleSave} onCancel={() => { setShowModal(false); setEditCharge(null); }} />
+        <ChargeForm initial={editCharge} categories={cats} projects={projects} onSave={handleSave} onCancel={() => { setShowModal(false); setEditCharge(null); }} />
       </Modal>
     </div>
   );
