@@ -188,16 +188,46 @@ function QuoteForm({ suppliers, initial, onSave, onCancel, saving, requestId }) 
 
   const fournActifs = suppliers.filter((f) => f.statut === 'Actif' || f.status === 'active');
 
-  function syncTotalsFromLines(nextLines) {
+  function applyTtcToLines(nextLines, targetTtc, tvaRate) {
+    const factor = 1 + (parseFloat(tvaRate) || 0) / 100;
+    if (!factor || !targetTtc) return nextLines;
+    const targetHt = targetTtc / factor;
+    const normalized = normalizeQuoteLines(nextLines);
+    const currentHt = sumQuoteLinesHt(normalized);
+    if (!normalized.length) return nextLines;
+
+    if (normalized.length === 1 || currentHt <= 0) {
+      const line = normalized[0];
+      const qty = Number(line.quantite) || 1;
+      const remise = Number(line.remise_pct) || 0;
+      const divisor = qty * (1 - remise / 100) || 1;
+      const pu = targetHt / divisor;
+      return normalized.map((l, i) => {
+        if (i !== 0) return l;
+        const updated = { ...l, prix_unitaire_ht: pu > 0 ? String(Number(pu.toFixed(4))) : '' };
+        updated.montant_ht = computeQuoteLineTotal(updated);
+        return updated;
+      });
+    }
+
+    const ratio = targetHt / currentHt;
+    return normalized.map((l) => {
+      const pu = (Number(l.prix_unitaire_ht) || 0) * ratio;
+      const updated = { ...l, prix_unitaire_ht: pu > 0 ? String(Number(pu.toFixed(4))) : '' };
+      updated.montant_ht = computeQuoteLineTotal(updated);
+      return updated;
+    });
+  }
+
+  function syncTotalsFromLines(nextLines, tvaRate = form.tva_rate) {
     const normalized = normalizeQuoteLines(nextLines);
     const ht = sumQuoteLinesHt(normalized);
-    if (ht <= 0) return;
-    const tva = parseFloat(form.tva_rate) || 0;
+    const tva = parseFloat(tvaRate) || 0;
     setTotalEditSource('ht');
     setForm((p) => ({
       ...p,
-      montant_ht: ht.toFixed(2),
-      montant_ttc: (ht * (1 + tva / 100)).toFixed(2),
+      montant_ht: ht > 0 ? ht.toFixed(2) : '',
+      montant_ttc: ht > 0 ? (ht * (1 + tva / 100)).toFixed(2) : '',
     }));
   }
 
@@ -250,52 +280,38 @@ function QuoteForm({ suppliers, initial, onSave, onCancel, saving, requestId }) 
     });
   }
 
-  function handleHtChange(val) {
-    const ht = parseFloat(val);
-    const tva = parseFloat(form.tva_rate) || 0;
-    setTotalEditSource('ht');
-    setForm((p) => ({
-      ...p,
-      montant_ht: val,
-      montant_ttc: val !== '' && !Number.isNaN(ht) && ht >= 0
-        ? (ht * (1 + tva / 100)).toFixed(2)
-        : '',
-    }));
-  }
-
   function handleTtcChange(val) {
-    const ttc = parseFloat(val);
-    const tva = parseFloat(form.tva_rate) || 0;
-    const factor = 1 + tva / 100;
     setTotalEditSource('ttc');
+    const tva = parseFloat(form.tva_rate) || 0;
+    const ttc = parseFloat(val);
+    if (val === '' || Number.isNaN(ttc) || ttc < 0) {
+      setForm((p) => ({ ...p, montant_ttc: val }));
+      return;
+    }
+    const next = applyTtcToLines(lines, ttc, tva);
+    const ht = sumQuoteLinesHt(normalizeQuoteLines(next));
+    setLines(next);
     setForm((p) => ({
       ...p,
       montant_ttc: val,
-      montant_ht: val !== '' && !Number.isNaN(ttc) && ttc >= 0 && factor > 0
-        ? (ttc / factor).toFixed(2)
-        : '',
+      montant_ht: ht > 0 ? ht.toFixed(2) : '',
     }));
   }
 
   function handleTvaChange(val) {
     const tva = parseFloat(val) || 0;
-    const factor = 1 + tva / 100;
-    setForm((p) => {
-      if (totalEditSource === 'ttc') {
-        const ttc = parseFloat(p.montant_ttc) || 0;
-        return {
-          ...p,
-          tva_rate: val,
-          montant_ht: ttc > 0 && factor > 0 ? (ttc / factor).toFixed(2) : p.montant_ht,
-        };
+    if (totalEditSource === 'ttc') {
+      const ttc = parseFloat(form.montant_ttc) || 0;
+      if (ttc > 0) {
+        const next = applyTtcToLines(lines, ttc, tva);
+        const ht = sumQuoteLinesHt(normalizeQuoteLines(next));
+        setLines(next);
+        setForm((p) => ({ ...p, tva_rate: val, montant_ht: ht > 0 ? ht.toFixed(2) : '' }));
+        return;
       }
-      const ht = parseFloat(p.montant_ht) || 0;
-      return {
-        ...p,
-        tva_rate: val,
-        montant_ttc: ht > 0 ? (ht * factor).toFixed(2) : p.montant_ttc,
-      };
-    });
+    }
+    setForm((p) => ({ ...p, tva_rate: val }));
+    syncTotalsFromLines(lines, val);
   }
 
   return (
@@ -376,8 +392,8 @@ function QuoteForm({ suppliers, initial, onSave, onCancel, saving, requestId }) 
       </div>
 
       <FRow>
-        <FField label="Montant HT">
-          <input type="number" step="0.01" min="0" value={form.montant_ht} onChange={(e) => handleHtChange(e.target.value)} style={INPUT_STYLE} placeholder="Saisir HT ou TTC" />
+        <FField label="Total HT (lignes)">
+          <input value={form.montant_ht} readOnly style={{ ...INPUT_STYLE, background: 'var(--surface-2)' }} title="Calculé depuis P.U. HT × quantité" />
         </FField>
         <FField label="TVA %">
           <select value={form.tva_rate} onChange={(e) => handleTvaChange(e.target.value)} style={SELECT_STYLE}>
@@ -385,7 +401,7 @@ function QuoteForm({ suppliers, initial, onSave, onCancel, saving, requestId }) 
           </select>
         </FField>
         <FField label="Total TTC">
-          <input type="number" step="0.01" min="0" value={form.montant_ttc} onChange={(e) => handleTtcChange(e.target.value)} style={INPUT_STYLE} placeholder="Saisir HT ou TTC" />
+          <input type="number" step="0.01" min="0" value={form.montant_ttc} onChange={(e) => handleTtcChange(e.target.value)} style={INPUT_STYLE} placeholder="TTC fournisseur → calcule P.U. HT" />
         </FField>
       </FRow>
       <FRow>
