@@ -131,6 +131,34 @@ function profilePayloadFromForm(form, employee) {
   };
 }
 
+export async function adminSyncAuthEmail(userId, email) {
+  const token = await getAuthToken();
+  if (!token) throw new Error('Session expirée. Reconnectez-vous.');
+
+  const res = await fetch(`${resolveApiBaseUrl()}/admin/users/${userId}/email`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify({ email: email?.trim()?.toLowerCase() }),
+  });
+
+  if (!res.ok) {
+    let msg = `Erreur ${res.status}`;
+    try {
+      const err = await res.json();
+      msg = err.error || err.message || msg;
+    } catch { /* ignore */ }
+    if (res.status === 404 || res.status === 503) {
+      msg += ' — Vérifiez SUPABASE_SERVICE_ROLE_KEY sur Vercel.';
+    }
+    throw new Error(msg);
+  }
+
+  return res.json();
+}
+
 export async function updateAdminUser(userId, form, employee) {
   const sb = getSupabase();
   const payload = profilePayloadFromForm(form, employee);
@@ -152,6 +180,11 @@ export async function updateAdminUser(userId, form, employee) {
     .single();
 
   if (error) throw error;
+
+  if (payload.email) {
+    await adminSyncAuthEmail(userId, payload.email);
+  }
+
   clearPermissionCache();
   return mapAdminUser(data);
 }
