@@ -6,17 +6,17 @@ import { useState, useCallback } from 'react';
 import { Loader2 } from 'lucide-react';
 import { usePaymentOrders } from '../../hooks/usePaymentOrders';
 import { exportPaymentOrderPdf } from '../../services/finance/paymentOrderPdf';
-import { normalizePaymentOrderStatut, getPaymentOrderStatusLabel, getPaymentOrderStatusSelectValue, PAYMENT_ORDER_UI_STATUTS } from '../../services/finance/paymentOrders';
+import { normalizePaymentOrderStatut, getPaymentOrderStatusLabel, PAYMENT_ORDER_UI_STATUTS } from '../../services/finance/paymentOrders';
 import {
   CreditCard, Plus, Eye, Edit2, Trash2, Download,
-  CheckCircle, XCircle, Search, Filter, FileText,
-  Paperclip, BookOpen, Clock, PlayCircle, AlertTriangle,
+  CheckCircle, Search, Filter, FileText,
+  Paperclip, BookOpen, Clock, AlertTriangle,
 } from 'lucide-react';
 import {
   INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE,
-  MODES_PAIEMENT, BADGE_STATUT_ORDRE, TYPES_BENEF,
+  MODES_PAIEMENT, TYPES_BENEF,
   KpiCard, EmptyState, Modal, SectionTitle, FField, FRow, UploadField,
-  formatMAD, genRef, genId
+  formatMAD, genRef
 } from './shared.jsx';
 
 const EMPTY_FORM = {
@@ -24,8 +24,12 @@ const EMPTY_FORM = {
   montant: '', mode_paiement: 'Virement', ref_reglement: '',
   comptabilise: 'Non', motif: '', commentaire: '', observation: '',
   date: '', date_prevue: '', prepare_par: '', valide_par: '',
-  category_id: '', project_id: '', statut: 'À préparer', justificatifs: [],
+  category_id: '', project_id: '', justificatifs: [],
 };
+
+function paymentOrderStatusBadge(statut) {
+  return normalizePaymentOrderStatut(statut) === 'Payé' ? 'badge-green' : 'badge-orange';
+}
 
 function OrdreForm({ initial, categories, onSave, onCancel }) {
   const [form, setForm] = useState(initial || EMPTY_FORM);
@@ -96,11 +100,13 @@ function OrdreForm({ initial, categories, onSave, onCancel }) {
             <option value="Oui">Oui</option>
           </select>
         </FField>
-        <FField label="Statut validation">
-          <select value={form.statut} onChange={e => set('statut', e.target.value)} style={SELECT_STYLE}>
-            {PAYMENT_ORDER_UI_STATUTS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-          </select>
-        </FField>
+        {initial && (
+          <FField label="Statut">
+            <span className={`badge ${paymentOrderStatusBadge(initial.statut)}`} style={{ fontSize: '0.82rem', padding: '8px 12px' }}>
+              {getPaymentOrderStatusLabel(initial.statut)}
+            </span>
+          </FField>
+        )}
       </FRow>
 
       <SectionTitle icon={<Paperclip size={12} />}>Justificatifs</SectionTitle>
@@ -216,7 +222,7 @@ function DetailOrdre({ ordre, onBack, onEdit, onDelete, onExecuter, onComptabili
             {[
               ['Référence', ordre.ref],
               ['Montant', <span style={{ fontFamily: 'var(--font-head)', fontSize: '1.2rem', fontWeight: 800, color: 'var(--red)' }}>{formatMAD(ordre.montant)}</span>],
-              ['Statut', <span className={"badge " + (BADGE_STATUT_ORDRE[normalizePaymentOrderStatut(ordre.statut)] || 'badge-grey')}>{getPaymentOrderStatusLabel(ordre.statut)}</span>],
+              ['Statut', <span className={'badge ' + paymentOrderStatusBadge(ordre.statut)}>{getPaymentOrderStatusLabel(ordre.statut)}</span>],
               ['Comptabilisé', <span className={"badge " + (ordre.comptabilise === 'Oui' ? 'badge-green' : 'badge-grey')}>{ordre.comptabilise}</span>],
               ['Créé le', ordre.date_creation || '—'],
             ].map(([lbl, val]) => (
@@ -253,7 +259,9 @@ export default function OrdresPaiement({ categories = [] }) {
   const today = new Date().toISOString().slice(0, 10);
 
   const handleSave = useCallback(async (data) => {
-    const payload = editOrdre ? data : { ...data, ref: genRef('OP'), date: data.date || today };
+    const payload = editOrdre
+      ? { ...data, statut: editOrdre.statut }
+      : { ...data, ref: genRef('OP'), date: data.date || today, statut: 'À préparer' };
     const res = await save(payload, editOrdre?.id);
     if (res.success) {
       setShowModal(false);
@@ -268,10 +276,6 @@ export default function OrdresPaiement({ categories = [] }) {
     }
   }
 
-  async function handleValider(ordre) {
-    await save({ ...ordre, statut: 'Préparé' }, ordre.id);
-  }
-
   async function handleExecuter(ordre) {
     await save({
       ...ordre,
@@ -281,15 +285,6 @@ export default function OrdresPaiement({ categories = [] }) {
     }, ordre.id);
   }
 
-  async function handleStatusChange(ordre, newStatut) {
-    const payload = { ...ordre, statut: newStatut };
-    if (newStatut === 'Payé') {
-      payload.comptabilise = 'Oui';
-      payload.date_paiement = ordre.date_paiement || today;
-    }
-    await save(payload, ordre.id);
-  }
-
   async function handleComptabiliser(ordre) {
     await save({ ...ordre, statut: 'Comptabilisé', comptabilise: 'Oui' }, ordre.id);
   }
@@ -297,18 +292,19 @@ export default function OrdresPaiement({ categories = [] }) {
   const filtered = ordres.filter(o => {
     const q = search.toLowerCase();
     const matchQ = !q || o.ref?.toLowerCase().includes(q) || o.beneficiaire?.toLowerCase().includes(q) || (o.motif || '').toLowerCase().includes(q) || (o.fournisseur_lie || '').toLowerCase().includes(q) || (o.purchase_request_ref || '').toLowerCase().includes(q) || (o.purchase_oa_ref || '').toLowerCase().includes(q);
-    const matchS = !filterStatut || getPaymentOrderStatusSelectValue(o.statut) === filterStatut;
+    const matchS = !filterStatut || (filterStatut === 'Payé'
+      ? normalizePaymentOrderStatut(o.statut) === 'Payé'
+      : normalizePaymentOrderStatut(o.statut) !== 'Payé');
     const matchM = !filterMode || o.mode_paiement === filterMode;
     const matchC = !filterCompta || o.comptabilise === filterCompta;
     const matchO = !filterOrigine || o.origine === filterOrigine;
     return matchQ && matchS && matchM && matchC && matchO;
   });
 
-  const enAttente = ordres.filter((o) => normalizePaymentOrderStatut(o.statut) === 'À préparer').length;
-  const valides = ordres.filter((o) => normalizePaymentOrderStatut(o.statut) === 'Préparé').length;
+  const enAttente = ordres.filter((o) => normalizePaymentOrderStatut(o.statut) !== 'Payé').length;
   const executes = ordres.filter((o) => normalizePaymentOrderStatut(o.statut) === 'Payé').length;
   const montantAttente = ordres
-    .filter((o) => normalizePaymentOrderStatut(o.statut) === 'À préparer')
+    .filter((o) => normalizePaymentOrderStatut(o.statut) !== 'Payé')
     .reduce((s, o) => s + (o.montant || 0), 0);
   const comptabilises = ordres.filter((o) => o.comptabilise === 'Oui' || o.statut === 'Comptabilisé').length;
 
@@ -329,7 +325,6 @@ export default function OrdresPaiement({ categories = [] }) {
         onBack={() => setDetailId(null)}
         onEdit={() => { setEditOrdre(ordre); setShowModal(true); setDetailId(null); }}
         onDelete={handleDelete}
-        onValider={() => handleValider(ordre)}
         onExecuter={() => handleExecuter(ordre)}
         onComptabiliser={() => handleComptabiliser(ordre)}
       />
@@ -363,8 +358,7 @@ export default function OrdresPaiement({ categories = [] }) {
       {/* KPIs */}
       <div className="stat-grid finance-kpi-grid finance-kpi-strip">
         <KpiCard icon={<Clock size={17} />}        label="En attente"          value={enAttente}              color="orange" />
-        <KpiCard icon={<CheckCircle size={17} />}  label="Validés"             value={valides}                color="green"  />
-        <KpiCard icon={<PlayCircle size={17} />}   label="Exécutés"            value={executes}               color="blue"   />
+        <KpiCard icon={<CheckCircle size={17} />}  label="Payés"               value={executes}               color="green"  />
         <KpiCard icon={<AlertTriangle size={17} />} label="Montant en attente" value={formatMAD(montantAttente)} color="red"  />
         <KpiCard icon={<BookOpen size={17} />}     label="Comptabilisés"       value={comptabilises}          color="purple" />
       </div>
@@ -463,13 +457,9 @@ export default function OrdresPaiement({ categories = [] }) {
                     </td>
                     <td data-label="Date prévue">{o.date_prevue || '—'}</td>
                     <td data-label="Statut">
-                      <select
-                        value={getPaymentOrderStatusSelectValue(o.statut)}
-                        onChange={(e) => handleStatusChange(o, e.target.value)}
-                        style={{ ...SELECT_STYLE, maxWidth: 180, fontSize: '0.78rem', padding: '5px 8px' }}
-                      >
-                        {PAYMENT_ORDER_UI_STATUTS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-                      </select>
+                      <span className={`badge ${paymentOrderStatusBadge(o.statut)}`} style={{ fontSize: '0.72rem' }}>
+                        {getPaymentOrderStatusLabel(o.statut)}
+                      </span>
                     </td>
                     <td>
                       <div style={{ display: 'flex', gap: 3 }}>
