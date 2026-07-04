@@ -320,7 +320,7 @@ function measureLabelRowHeight(doc, text, options = {}) {
 function drawTableLabelRow(doc, text, startY, options = {}) {
   const { lines, h, lineH, fontSize, bold, italic, indent } = getLabelRowLayout(doc, text, options);
 
-  COL_W.forEach((w, i) => drawCellBorder(doc, COL_X[i], startY, w, h));
+  drawCellBorder(doc, M, startY, CONTENT_W, h);
 
   doc.setFont('helvetica', italic ? 'italic' : (bold ? 'bold' : 'normal'));
   doc.setFontSize(fontSize);
@@ -748,10 +748,10 @@ export async function generateDevisPdf(devis, catMap = {}, options = {}) {
     y = drawEmptyRow(y);
   } else {
     rows.forEach((row) => {
-      ensureTableHeader();
-
       const h = measureRowHeight(doc, row);
-      ensureSpace(h);
+      const headerH = tableHeaderOnPage ? 0 : TABLE_HDR_H;
+      ensureSpace(headerH + h);
+      ensureTableHeader();
 
       if (row.kind === 'section') {
         y = drawTableLabelRow(doc, row.text, y, { uppercase: true });
