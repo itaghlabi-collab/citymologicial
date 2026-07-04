@@ -295,16 +295,52 @@ function measureArticleHeight(doc, row) {
   return Math.max(h, 9);
 }
 
+function getLabelRowLayout(doc, text, options = {}) {
+  const {
+    fontSize = 7.5,
+    uppercase = false,
+    bold = true,
+    italic = false,
+    indent = 0,
+    minH = CAT_ROW_H,
+  } = options;
+  const displayText = uppercase ? String(text || '').toUpperCase() : String(text || '');
+  doc.setFont('helvetica', italic ? 'italic' : (bold ? 'bold' : 'normal'));
+  doc.setFontSize(fontSize);
+  const lines = doc.splitTextToSize(displayText, COL_W[1] - 4 - indent);
+  const lineH = fontSize >= 9 ? 3.8 : fontSize >= 8 ? 3.5 : italic ? 3.2 : 3.4;
+  const h = Math.max(PAD_TOP + lines.length * lineH + PAD_BOTTOM, minH);
+  return { lines, h, lineH, fontSize, bold, italic, indent };
+}
+
+function measureLabelRowHeight(doc, text, options = {}) {
+  return getLabelRowLayout(doc, text, options).h;
+}
+
+function drawTableLabelRow(doc, text, startY, options = {}) {
+  const { lines, h, lineH, fontSize, bold, italic, indent } = getLabelRowLayout(doc, text, options);
+
+  COL_W.forEach((w, i) => drawCellBorder(doc, COL_X[i], startY, w, h));
+
+  doc.setFont('helvetica', italic ? 'italic' : (bold ? 'bold' : 'normal'));
+  doc.setFontSize(fontSize);
+  doc.setTextColor(...(italic ? MUTED : TEXT));
+
+  let ty = startY + PAD_TOP + 2;
+  lines.forEach((line) => {
+    doc.text(line, COL_X[1] + 2 + indent, ty);
+    ty += lineH;
+  });
+
+  return startY + h;
+}
+
 function measureRowHeight(doc, row) {
   if (row.kind === 'empty') return 12;
-  if (row.kind === 'section') return CAT_ROW_H;
-  if (row.kind === 'titre') return 8;
-  if (row.kind === 'sous_titre') return 7;
-  if (row.kind === 'note') {
-    doc.setFontSize(7);
-    const lines = doc.splitTextToSize(row.text || '', CONTENT_W - 4);
-    return Math.max(lines.length * 3.2 + 3, 8);
-  }
+  if (row.kind === 'section') return measureLabelRowHeight(doc, row.text, { uppercase: true });
+  if (row.kind === 'titre') return measureLabelRowHeight(doc, row.text, { fontSize: 9, uppercase: true, minH: 8 });
+  if (row.kind === 'sous_titre') return measureLabelRowHeight(doc, row.text, { fontSize: 8, indent: 2, minH: 7 });
+  if (row.kind === 'note') return measureLabelRowHeight(doc, row.text, { fontSize: 7, bold: false, italic: true });
   return measureArticleHeight(doc, row);
 }
 
@@ -418,15 +454,6 @@ export async function generateDevisPdf(devis, catMap = {}, options = {}) {
     textRight(doc, 'PU HT', COL_R[4], mid);
     textRight(doc, 'TOTAL HT', COL_R[5], mid);
     return startY + TABLE_HDR_H;
-  };
-
-  const drawCategoryRow = (text, startY) => {
-    drawCellBorder(doc, M, startY, CONTENT_W, CAT_ROW_H);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7.5);
-    doc.setTextColor(...TEXT);
-    doc.text(String(text).toUpperCase(), M + 2.5, startY + CAT_ROW_H / 2 + 1);
-    return startY + CAT_ROW_H;
   };
 
   const drawEmptyRow = (startY) => {
@@ -567,29 +594,6 @@ export async function generateDevisPdf(devis, catMap = {}, options = {}) {
       cy += TOTAL_ROW_H;
     });
     return cy;
-  };
-
-  const drawExtraRow = (row, startY) => {
-    if (row.kind === 'titre') {
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(9);
-      doc.setTextColor(...TEXT);
-      doc.text(row.text, M, startY + 5);
-      return startY + 8;
-    }
-    if (row.kind === 'sous_titre') {
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(8);
-      doc.setTextColor(...TEXT);
-      doc.text(row.text, M + 4, startY + 4.5);
-      return startY + 7;
-    }
-    doc.setFont('helvetica', 'italic');
-    doc.setFontSize(7);
-    doc.setTextColor(...MUTED);
-    const lines = doc.splitTextToSize(row.text || '', CONTENT_W - 4);
-    lines.forEach((line, i) => doc.text(line, M, startY + 4 + i * 3.2));
-    return startY + Math.max(lines.length * 3.2 + 3, 8);
   };
 
   const drawConditionsBlock = (startY) => {
@@ -744,20 +748,19 @@ export async function generateDevisPdf(devis, catMap = {}, options = {}) {
     y = drawEmptyRow(y);
   } else {
     rows.forEach((row) => {
-      if (row.kind === 'titre' || row.kind === 'sous_titre' || row.kind === 'note') {
-        const h = measureRowHeight(doc, row);
-        ensureSpace(h);
-        y = drawExtraRow(row, y);
-        return;
-      }
-
       ensureTableHeader();
 
       const h = measureRowHeight(doc, row);
       ensureSpace(h);
 
       if (row.kind === 'section') {
-        y = drawCategoryRow(row.text, y);
+        y = drawTableLabelRow(doc, row.text, y, { uppercase: true });
+      } else if (row.kind === 'titre') {
+        y = drawTableLabelRow(doc, row.text, y, { fontSize: 9, uppercase: true, minH: 8 });
+      } else if (row.kind === 'sous_titre') {
+        y = drawTableLabelRow(doc, row.text, y, { fontSize: 8, indent: 2, minH: 7 });
+      } else if (row.kind === 'note') {
+        y = drawTableLabelRow(doc, row.text, y, { fontSize: 7, bold: false, italic: true });
       } else if (row.kind === 'article') {
         y = drawArticleRow(row, y);
       }
