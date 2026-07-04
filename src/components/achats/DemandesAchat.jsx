@@ -4,7 +4,7 @@
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   ClipboardList, Plus, Eye, Edit2, Trash2, Search, Filter,
-  Download, AlertTriangle, Clock, Loader2, RefreshCw, FolderOpen, FileText,
+  Download, AlertTriangle, Clock, Loader2, RefreshCw, FileText,
   BarChart2, Package, CreditCard, CheckCircle, Send,
 } from 'lucide-react';
 import { usePurchaseRequests } from '../../hooks/usePurchaseRequests';
@@ -17,7 +17,7 @@ import {
   getPurchaseStatusBadge, getPurchaseStatusLabel,
 } from '../../constants/purchaseWorkflow';
 import { submitPurchaseRequest, getPurchaseRequestBundle, reconcileLegacySoumiseRequests, reconcilePurchaseRequestSentStatus } from '../../services/achats/purchaseWorkflow';
-import { projectOptionLabel, purchaseRequestProjectLabel } from '../../services/achats/purchaseRequests';
+import { projectOptionLabel, purchaseRequestProjectLabel, updatePurchaseRequestTitle } from '../../services/achats/purchaseRequests';
 import { generatePurchaseRequestPdf } from '../../services/achats/purchaseRequestPdf';
 import { resolveCurrentPurchaseRole, purchasePermissions, canViewPurchaseRequest } from '../../services/achats/purchaseWorkflowRoles';
 import DemandeAchatDetail from './DemandeAchatDetail';
@@ -361,6 +361,9 @@ export default function DemandesAchat() {
   const [detailRefreshKey, setDetailRefreshKey] = useState(0);
   const [submittingId, setSubmittingId] = useState(null);
   const [pdfLoadingId, setPdfLoadingId] = useState(null);
+  const [titleEditId, setTitleEditId] = useState(null);
+  const [titleEditValue, setTitleEditValue] = useState('');
+  const [titleSavingId, setTitleSavingId] = useState(null);
   const [role, setRole] = useState(null);
 
   useEffect(() => {
@@ -426,6 +429,37 @@ export default function DemandesAchat() {
     } finally {
       setPdfLoadingId(null);
     }
+  }
+
+  function canEditTitle(item) {
+    if (perms.canManageQuotes) return true;
+    return item.requester_user_id === user?.id || item.created_by === user?.id;
+  }
+
+  function startTitleEdit(item) {
+    if (!canEditTitle(item) || titleSavingId) return;
+    setTitleEditId(item.id);
+    setTitleEditValue(item.titre || '');
+  }
+
+  async function commitTitleEdit(item) {
+    const trimmed = titleEditValue.trim();
+    setTitleEditId(null);
+    if (!trimmed || trimmed === (item.titre || '').trim()) return;
+    setTitleSavingId(item.id);
+    try {
+      await updatePurchaseRequestTitle(item.id, trimmed);
+      await reload();
+    } catch (err) {
+      window.alert(err.message || 'Erreur mise à jour du titre');
+    } finally {
+      setTitleSavingId(null);
+    }
+  }
+
+  function cancelTitleEdit() {
+    setTitleEditId(null);
+    setTitleEditValue('');
   }
 
   const filtered = visibleItems.filter((x) => {
@@ -584,7 +618,48 @@ export default function DemandesAchat() {
                 {filtered.map((x) => (
                   <tr key={x.id}>
                     <td><span style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.82rem', color: 'var(--red)' }}>{x.ref}</span></td>
-                    <td data-label="Titre"><div style={{ fontWeight: 600, fontSize: '0.87rem', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{x.titre}</div></td>
+                    <td data-label="Titre">
+                      {titleEditId === x.id ? (
+                        <input
+                          value={titleEditValue}
+                          onChange={(e) => setTitleEditValue(e.target.value)}
+                          onBlur={() => commitTitleEdit(x)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') { e.preventDefault(); commitTitleEdit(x); }
+                            if (e.key === 'Escape') { e.preventDefault(); cancelTitleEdit(); }
+                          }}
+                          autoFocus
+                          disabled={titleSavingId === x.id}
+                          style={{ ...INPUT_STYLE, fontWeight: 600, fontSize: '0.87rem', padding: '5px 8px' }}
+                        />
+                      ) : (
+                        <div
+                          role={canEditTitle(x) ? 'button' : undefined}
+                          tabIndex={canEditTitle(x) ? 0 : undefined}
+                          title={canEditTitle(x) ? 'Cliquer pour modifier le titre' : undefined}
+                          onClick={() => startTitleEdit(x)}
+                          onKeyDown={(e) => {
+                            if (canEditTitle(x) && (e.key === 'Enter' || e.key === ' ')) {
+                              e.preventDefault();
+                              startTitleEdit(x);
+                            }
+                          }}
+                          style={{
+                            fontWeight: 600,
+                            fontSize: '0.87rem',
+                            maxWidth: 200,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            cursor: canEditTitle(x) ? 'text' : 'default',
+                            opacity: titleSavingId === x.id ? 0.6 : 1,
+                          }}
+                        >
+                          {titleSavingId === x.id ? <Loader2 size={12} className="cin-spin" style={{ display: 'inline' }} /> : null}
+                          {x.titre}
+                        </div>
+                      )}
+                    </td>
                     <td data-label="Priorité"><span className={`badge ${BADGE_PRIORITE[x.priorite] || 'badge-grey'}`} style={{ fontSize: '0.72rem' }}>{x.priorite}</span></td>
                     <td data-label="Demandeur">{x.requester_name || x.demandeur || '—'}</td>
                     <td data-label="Projet">{purchaseRequestProjectLabel(x)}</td>
@@ -603,7 +678,6 @@ export default function DemandesAchat() {
                         <button type="button" className="btn btn-ghost btn-sm" title="PDF" disabled={pdfLoadingId === x.id} onClick={() => handlePrintPdf(x)}>
                           {pdfLoadingId === x.id ? <Loader2 size={12} className="cin-spin" /> : <FileText size={13} />}
                         </button>
-                        <button type="button" className="btn btn-ghost btn-sm" title="Ouvrir la demande" onClick={() => setDetailId(x.id)}><FolderOpen size={13} /></button>
                         {canSubmitPurchaseRequest(x.statut) && (
                           <button type="button" className="btn btn-primary btn-sm" title="Soumettre" disabled={submittingId === x.id} onClick={() => handleSubmit(x.id)}>
                             {submittingId === x.id ? <Loader2 size={12} className="cin-spin" /> : <Send size={12} />}

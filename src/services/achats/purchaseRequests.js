@@ -222,6 +222,24 @@ export async function createPurchaseRequestFromSiteRuptures(siteRequest) {
   });
 }
 
+export async function updatePurchaseRequestTitle(id, titre) {
+  await requireUser();
+  const trimmed = (titre || '').trim();
+  if (!trimmed) {
+    const err = new Error('Le titre est obligatoire.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .update({ titre: trimmed })
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+  return normalizePurchaseRequest(data);
+}
+
 export async function updatePurchaseRequest(id, form) {
   await requireUser();
   const row = toPurchaseRequestRow(form);
