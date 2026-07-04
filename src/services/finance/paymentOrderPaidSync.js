@@ -4,6 +4,7 @@
 import { getSupabase } from '../../lib/supabase';
 import { upsertPurchaseProjectExpense, upsertProjectExpenseFromSource } from './projectExpenses';
 import { normalizePaymentOrder } from './paymentOrders';
+import { assignChargeRefIfMissing, generateChargeRef } from './charges';
 
 const PAID_STATUT = 'Payé';
 
@@ -24,6 +25,7 @@ async function upsertOffProjectCharge(order) {
       .maybeSingle();
     if (error) throw error;
     if (existing) {
+      const refCharge = existing.ref_charge || await assignChargeRefIfMissing(existing.id, existing.ref_charge);
       const { data, error: updErr } = await sb
         .from('finance_charges')
         .update({
@@ -33,6 +35,7 @@ async function upsertOffProjectCharge(order) {
           fournisseur: order.fournisseur_lie || order.beneficiaire || existing.fournisseur,
           mode_paiement: order.mode_paiement || existing.mode_paiement,
           statut: 'Payé',
+          ref_charge: refCharge,
           ref_paiement: order.ref_reglement || order.ref || existing.ref_paiement,
           supplier_id: order.supplier_id || existing.supplier_id,
           category_id: order.category_id || existing.category_id,
@@ -47,7 +50,7 @@ async function upsertOffProjectCharge(order) {
 
   const { data: byRef, error: refErr } = await sb
     .from('finance_charges')
-    .select('id')
+    .select('id, ref_charge')
     .eq('ref_paiement', order.ref || '')
     .not('ref_paiement', 'is', null)
     .neq('ref_paiement', '')
@@ -70,9 +73,10 @@ async function upsertOffProjectCharge(order) {
   };
 
   if (byRef?.id) {
+    const existingRef = await assignChargeRefIfMissing(byRef.id, byRef.ref_charge);
     const { data, error } = await sb
       .from('finance_charges')
-      .update(chargeRow)
+      .update({ ...chargeRow, ref_charge: existingRef })
       .eq('id', byRef.id)
       .select()
       .single();
@@ -86,7 +90,7 @@ async function upsertOffProjectCharge(order) {
   const uid = (await sb.auth.getUser()).data?.user?.id;
   const { data, error } = await sb
     .from('finance_charges')
-    .insert([{ ...chargeRow, created_by: uid }])
+    .insert([{ ...chargeRow, ref_charge: await generateChargeRef(), created_by: uid }])
     .select()
     .single();
   if (error) throw error;

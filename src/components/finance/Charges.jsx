@@ -5,6 +5,7 @@
 import { useState, useCallback } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useFinanceCharges } from '../../hooks/useFinanceCharges';
+import { chargeDisplayRef } from '../../services/finance/charges';
 import {
   TrendingDown, Plus, Eye, Edit2, Trash2, Archive, Download,
   CheckCircle, XCircle, Search, Filter, FileText, Paperclip,
@@ -14,7 +15,7 @@ import {
   INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE,
   MODES_PAIEMENT, STATUTS_CHARGE, BADGE_STATUT_CHARGE,
   KpiCard, EmptyState, Modal, SectionTitle, FField, FRow, UploadField,
-  formatMAD, genRef, genId
+  formatMAD
 } from './shared.jsx';
 
 const EMPTY_FORM = {
@@ -130,7 +131,7 @@ function DetailCharge({ charge, onBack, onEdit, onDelete, onValider, onComptabil
       </button>
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12, marginBottom: 20 }}>
         <div>
-          <h1 className="page-title" style={{ marginBottom: 4 }}>{charge.ref}</h1>
+          <h1 className="page-title" style={{ marginBottom: 4 }}>{chargeDisplayRef(charge) || '—'}</h1>
           <p className="page-subtitle">{charge.libelle} — {charge.date}</p>
         </div>
         <div className="finance-page-actions">
@@ -189,7 +190,7 @@ function DetailCharge({ charge, onBack, onEdit, onDelete, onValider, onComptabil
           <SectionTitle icon={<BookOpen size={13} />}>Synthèse</SectionTitle>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
             {[
-              ['Référence', charge.ref],
+              ['Référence', chargeDisplayRef(charge) || '—'],
               ['Montant', <span style={{ fontFamily: 'var(--font-head)', fontSize: '1.2rem', fontWeight: 800, color: 'var(--red)' }}>{formatMAD(charge.montant)}</span>],
               ['Statut', <span className={"badge " + (BADGE_STATUT_CHARGE[charge.statut] || 'badge-grey')}>{charge.statut}</span>],
               ['Créé le', charge.date_creation || '—'],
@@ -230,8 +231,7 @@ export default function Charges({ categories }) {
   const handleSave = useCallback(async (data) => {
     const cat = cats.find((c) => c.id === data.category_id);
     const catName = cat?.nom || data.categorie || '';
-    const payload = editCharge ? data : { ...data, ref: genRef('CHG') };
-    const res = await save({ ...payload, categorie: catName }, editCharge?.id, catName);
+    const res = await save({ ...data, categorie: catName }, editCharge?.id, catName);
     if (res.success) {
       setShowModal(false);
       setEditCharge(null);
@@ -259,7 +259,7 @@ export default function Charges({ categories }) {
 
   const filtered = charges.filter(c => {
     const q = search.toLowerCase();
-    const matchQ = !q || c.ref?.toLowerCase().includes(q) || c.libelle?.toLowerCase().includes(q) || (c.fournisseur || '').toLowerCase().includes(q) || (c.projet_lie || '').toLowerCase().includes(q);
+    const matchQ = !q || chargeDisplayRef(c).toLowerCase().includes(q) || c.libelle?.toLowerCase().includes(q) || (c.fournisseur || '').toLowerCase().includes(q) || (c.projet_lie || '').toLowerCase().includes(q);
     const matchS = !filterStatut || c.statut === filterStatut;
     const matchC = !filterCat || c.categorie === filterCat;
     const matchM = !filterMode || c.mode_paiement === filterMode;
@@ -397,7 +397,7 @@ export default function Charges({ categories }) {
                 {filtered.map(c => (
                   <tr key={c.id}>
                     <td data-label="Référence">
-                      <span style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.82rem', color: 'var(--red)' }}>{c.ref}</span>
+                      <span style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.82rem', color: 'var(--red)' }}>{chargeDisplayRef(c) || '—'}</span>
                     </td>
                     <td data-label="Date">{c.date || '—'}</td>
                     <td data-label="Libellé">

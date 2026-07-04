@@ -67,8 +67,60 @@ async function requireUser() {
   return user.id;
 }
 
+export async function generateChargeRef() {
+  const year = new Date().getFullYear();
+  const prefix = `CHG-${year}-`;
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .select('ref_charge')
+    .like('ref_charge', `${prefix}%`);
+  if (error) throw error;
+  let maxSeq = 0;
+  for (const row of data || []) {
+    const match = String(row.ref_charge || '').match(/-(\d{3,})$/);
+    if (match) maxSeq = Math.max(maxSeq, parseInt(match[1], 10));
+  }
+  return `${prefix}${String(maxSeq + 1).padStart(3, '0')}`;
+}
+
+export async function assignChargeRefIfMissing(id, existingRef = '') {
+  const current = String(existingRef || '').trim();
+  if (current) return current;
+  const newRef = await generateChargeRef();
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .update({ ref_charge: newRef })
+    .eq('id', id)
+    .select('ref_charge')
+    .single();
+  if (error) throw error;
+  return data.ref_charge;
+}
+
+/** Attribue une référence CHG aux dépenses existantes sans ref_charge. */
+export async function reconcileMissingChargeRefs() {
+  await requireUser();
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .select('id, ref_charge, created_at')
+    .or('ref_charge.is.null,ref_charge.eq.')
+    .order('created_at', { ascending: true });
+  if (error || !data?.length) return 0;
+  let fixed = 0;
+  for (const row of data) {
+    await assignChargeRefIfMissing(row.id, row.ref_charge);
+    fixed += 1;
+  }
+  return fixed;
+}
+
+export function chargeDisplayRef(charge) {
+  return String(charge?.ref || charge?.ref_charge || '').trim();
+}
+
 export async function listFinanceCharges() {
   await requireUser();
+  await reconcileMissingChargeRefs();
   const { data, error } = await getSupabase()
     .from(TABLE)
     .select('*')
@@ -79,9 +131,13 @@ export async function listFinanceCharges() {
 
 export async function createFinanceCharge(form, categoryName) {
   const uid = await requireUser();
+  const row = { ...toChargeRow(form, categoryName), created_by: uid };
+  if (!String(row.ref_charge || '').trim()) {
+    row.ref_charge = await generateChargeRef();
+  }
   const { data, error } = await getSupabase()
     .from(TABLE)
-    .insert([{ ...toChargeRow(form, categoryName), created_by: uid }])
+    .insert([row])
     .select()
     .single();
   if (error) throw error;
@@ -92,9 +148,13 @@ export async function createFinanceCharge(form, categoryName) {
 
 export async function updateFinanceCharge(id, form, categoryName) {
   await requireUser();
+  const row = toChargeRow(form, categoryName);
+  if (!String(row.ref_charge || '').trim()) {
+    row.ref_charge = await assignChargeRefIfMissing(id, form.ref);
+  }
   const { data, error } = await getSupabase()
     .from(TABLE)
-    .update(toChargeRow(form, categoryName))
+    .update(row)
     .eq('id', id)
     .select()
     .single();
