@@ -649,7 +649,7 @@ export default function DepensesParProjet() {
                       <td className="dpp-cell-muted">{e.description || '—'}</td>
                       <td>{e.fournisseur || '—'}</td>
                       <td className="dpp-num"><strong>{formatMAD(e.montant)}</strong></td>
-                      <td><span className="badge badge-grey">{e.statut}</span></td>
+                      <td><span className="badge badge-grey">{e.statut_label || e.statut}</span></td>
                       <td className="dpp-cell-muted">{e.observation || '—'}</td>
                     </tr>
                   ))}

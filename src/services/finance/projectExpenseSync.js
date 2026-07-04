@@ -3,7 +3,11 @@
  * N'altère pas les workflows Achats / Finance / Projets
  */
 import { getSupabase } from '../../lib/supabase';
-import { upsertProjectExpenseFromSource } from './projectExpenses';
+import {
+  upsertProjectExpenseFromSource,
+  upsertPurchaseProjectExpense,
+  dedupePurchaseProjectExpenses,
+} from './projectExpenses';
 import { listProjects } from '../projects/projects';
 
 const PAID_STATUTS = ['Payé', 'Validé', 'Comptabilisée', 'Exécuté'];
@@ -25,7 +29,7 @@ export async function syncProjectExpensesFromErp() {
     projectByName[normalizeName(p.nom)] = p;
   });
 
-  const stats = { created: 0, updated: 0, skipped: 0, errors: 0 };
+  const stats = { created: 0, updated: 0, skipped: 0, errors: 0, deduped: 0 };
 
   const resolveProject = (row) => {
     if (row.project_id && projectById[row.project_id]) return projectById[row.project_id];
@@ -33,6 +37,13 @@ export async function syncProjectExpensesFromErp() {
     if (name) return projectByName[normalizeName(name)] || null;
     return null;
   };
+
+  try {
+    const dedupe = await dedupePurchaseProjectExpenses();
+    stats.deduped = dedupe.deleted;
+  } catch {
+    stats.errors++;
+  }
 
   await syncCharges(stats, resolveProject);
   await syncPaymentOrders(stats, resolveProject);
@@ -92,6 +103,10 @@ async function syncPaymentOrders(stats, resolveProject) {
 
   for (const o of data || []) {
     if (!isActiveStatut(o.statut)) { stats.skipped++; continue; }
+    if (o.purchase_request_id) {
+      stats.skipped++;
+      continue;
+    }
     try {
       const montant = Number(o.montant_ttc ?? o.montant) || 0;
       const result = await upsertProjectExpenseFromSource({
@@ -125,21 +140,29 @@ async function syncAcquisitionOrders(stats, resolveProject) {
 
   for (const o of data || []) {
     if (!isActiveStatut(o.statut)) { stats.skipped++; continue; }
+    if (!o.purchase_request_id) { stats.skipped++; continue; }
     try {
-      const result = await upsertProjectExpenseFromSource({
+      const { data: request } = await getSupabase()
+        .from('purchase_requests')
+        .select('ref_demande, titre, statut')
+        .eq('id', o.purchase_request_id)
+        .maybeSingle();
+      const result = await upsertPurchaseProjectExpense({
         project_id: o.project_id,
+        purchase_request_id: o.purchase_request_id,
+        purchase_acquisition_order_id: o.id,
+        payment_order_id: o.payment_order_id,
         date_depense: String(o.created_at || '').slice(0, 10) || new Date().toISOString().slice(0, 10),
         categorie: 'Bon de commande',
-        element_depense: o.objet || o.ref_oa || 'Bon de commande',
+        element_depense: null,
+        purchase_ref: request?.ref_demande || o.ref_oa,
+        purchase_titre: request?.titre || o.objet,
         description: o.conditions_paiement,
         fournisseur: o.supplier_name,
         montant: Number(o.montant_ttc) || 0,
-        origine: 'achat',
-        source_type: 'purchase_acquisition_order',
-        source_id: o.id,
-        statut: 'valide',
+        purchase_statut: request?.statut,
+        op_statut: o.payment_order_id ? 'Préparé' : null,
         mode_paiement: o.mode_paiement,
-        payment_order_id: o.payment_order_id,
       });
       stats[result.action]++;
     } catch {
@@ -162,18 +185,20 @@ async function syncPurchaseRequests(stats, resolveProject) {
     const montant = Number(selected?.montant_ttc) || 0;
     if (!montant) { stats.skipped++; continue; }
     try {
-      const result = await upsertProjectExpenseFromSource({
+      const result = await upsertPurchaseProjectExpense({
         project_id: r.project_id,
+        purchase_request_id: r.id,
+        purchase_acquisition_order_id: r.acquisition_order_id,
+        payment_order_id: r.payment_order_id,
         date_depense: r.date_debut || String(r.created_at || '').slice(0, 10),
         categorie: "Demande d'achat",
-        element_depense: r.titre || r.ref_demande || "Demande d'achat",
+        purchase_ref: r.ref_demande,
+        purchase_titre: r.titre,
         description: r.description,
         fournisseur: selected?.supplier_name,
         montant,
-        origine: 'achat',
-        source_type: 'purchase_request',
-        source_id: r.id,
-        statut: 'en_attente',
+        purchase_statut: r.statut,
+        mode_paiement: null,
       });
       stats[result.action]++;
     } catch {

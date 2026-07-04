@@ -13,6 +13,26 @@ export const ORIGINE_LABELS = {
   charge_manuelle: 'Charge manuelle',
 };
 
+export const STATUT_LABELS = {
+  valide: 'Validée',
+  en_attente: 'En attente',
+  annule: 'Annulée',
+  engagee: 'Engagée / Commandée',
+  payee: 'Payée',
+};
+
+export const ENGAGED_PURCHASE_STATUTS = [
+  'Devis validé',
+  "Ordre d'achat créé",
+  'Ordre de paiement créé',
+  'Commande envoyée',
+  'En attente réception',
+  'Réceptionnée',
+  'Clôturée',
+];
+
+const PAID_OP_STATUTS = ['Payé', 'Validé', 'Comptabilisé', 'Exécuté'];
+
 export const ORIGINE_OPTIONS = Object.entries(ORIGINE_LABELS).map(([value, label]) => ({ value, label }));
 
 export function normalizeProjectExpense(row) {
@@ -35,7 +55,12 @@ export function normalizeProjectExpense(row) {
     source_type: row.source_type || '',
     source_id: row.source_id ? String(row.source_id) : '',
     statut: row.statut || 'valide',
+    statut_label: STATUT_LABELS[row.statut] || row.statut,
     payment_order_id: row.payment_order_id ? String(row.payment_order_id) : '',
+    purchase_request_id: row.purchase_request_id ? String(row.purchase_request_id) : '',
+    purchase_acquisition_order_id: row.purchase_acquisition_order_id ? String(row.purchase_acquisition_order_id) : '',
+    montant_paye: row.montant_paye != null ? Number(row.montant_paye) : null,
+    date_paiement: row.date_paiement || '',
     mode_paiement: row.mode_paiement || '',
     document_path: row.document_path || '',
     attachment_url: row.attachment_url || '',
@@ -77,6 +102,10 @@ function toRow(form, userId) {
     source_id: form.source_id || null,
     statut: form.statut || 'valide',
     payment_order_id: form.payment_order_id || null,
+    purchase_request_id: form.purchase_request_id || null,
+    purchase_acquisition_order_id: form.purchase_acquisition_order_id || null,
+    montant_paye: form.montant_paye != null ? Number(form.montant_paye) : null,
+    date_paiement: form.date_paiement || null,
     mode_paiement: form.mode_paiement?.trim() || null,
     document_path: form.document_path?.trim() || null,
     attachment_url: form.attachment_url?.trim() || null,
@@ -127,8 +156,244 @@ export async function deleteProjectExpense(id) {
   if (error) throw error;
 }
 
+export async function findPurchaseLinkedExpense({
+  purchase_request_id,
+  purchase_acquisition_order_id,
+  payment_order_id,
+} = {}) {
+  const sb = getSupabase();
+  if (purchase_request_id) {
+    const { data } = await sb
+      .from(TABLE)
+      .select('id, purchase_request_id, purchase_acquisition_order_id, payment_order_id, statut, montant, montant_paye, date_paiement, origine')
+      .eq('purchase_request_id', purchase_request_id)
+      .eq('origine', 'achat')
+      .neq('statut', 'annule')
+      .maybeSingle();
+    if (data) return data;
+    const { data: anyLinked } = await sb
+      .from(TABLE)
+      .select('id, purchase_request_id, purchase_acquisition_order_id, payment_order_id, statut, montant, montant_paye, date_paiement, origine')
+      .eq('purchase_request_id', purchase_request_id)
+      .neq('statut', 'annule')
+      .maybeSingle();
+    if (anyLinked) return anyLinked;
+    const { data: bySource } = await sb
+      .from(TABLE)
+      .select('id, purchase_request_id, purchase_acquisition_order_id, payment_order_id, statut, montant, montant_paye, date_paiement')
+      .eq('source_type', 'purchase_request')
+      .eq('source_id', purchase_request_id)
+      .maybeSingle();
+    if (bySource) return bySource;
+  }
+  if (purchase_acquisition_order_id) {
+    const { data } = await sb
+      .from(TABLE)
+      .select('id, purchase_request_id, purchase_acquisition_order_id, payment_order_id, statut, montant, montant_paye, date_paiement')
+      .eq('purchase_acquisition_order_id', purchase_acquisition_order_id)
+      .neq('statut', 'annule')
+      .maybeSingle();
+    if (data) return data;
+  }
+  if (payment_order_id) {
+    const { data } = await sb
+      .from(TABLE)
+      .select('id, purchase_request_id, purchase_acquisition_order_id, payment_order_id, statut, montant, montant_paye, date_paiement')
+      .eq('payment_order_id', payment_order_id)
+      .neq('statut', 'annule')
+      .maybeSingle();
+    if (data) return data;
+  }
+  return null;
+}
+
+function buildPurchaseElementLabel(ref, titre) {
+  const parts = [ref, titre].filter(Boolean);
+  return parts.length ? `Achat — ${parts.join(' — ')}` : 'Achat';
+}
+
+function resolvePurchaseExpenseStatut({ purchaseStatut, opStatut, currentStatut }) {
+  if (opStatut && PAID_OP_STATUTS.includes(opStatut)) return 'payee';
+  if (purchaseStatut && ENGAGED_PURCHASE_STATUTS.includes(purchaseStatut)) return 'engagee';
+  if (currentStatut === 'payee') return 'payee';
+  if (currentStatut === 'engagee') return 'engagee';
+  return 'en_attente';
+}
+
+/** Une seule dépense projet par demande d'achat — origine toujours achat */
+export async function upsertPurchaseProjectExpense(payload) {
+  await getAuthUserId();
+  const purchaseRequestId = payload.purchase_request_id;
+  if (!purchaseRequestId) {
+    throw new Error('purchase_request_id requis pour une dépense achat projet.');
+  }
+
+  const existing = await findPurchaseLinkedExpense({
+    purchase_request_id: purchaseRequestId,
+    purchase_acquisition_order_id: payload.purchase_acquisition_order_id,
+    payment_order_id: payload.payment_order_id,
+  });
+
+  const statut = resolvePurchaseExpenseStatut({
+    purchaseStatut: payload.purchase_statut,
+    opStatut: payload.op_statut,
+    currentStatut: existing?.statut,
+  });
+
+  const montant = Number(payload.montant) || Number(existing?.montant) || 0;
+  const montantPaye = statut === 'payee'
+    ? Number(payload.montant_paye ?? payload.montant ?? existing?.montant_paye ?? montant) || 0
+    : (payload.montant_paye != null ? Number(payload.montant_paye) : existing?.montant_paye ?? null);
+
+  const row = {
+    project_id: payload.project_id || null,
+    project_name_raw: payload.project_name_raw || null,
+    project_match_status: payload.project_id ? 'matched' : 'needs_manual',
+    date_depense: payload.date_paiement || payload.date_depense,
+    categorie: payload.categorie || "Demande d'achat",
+    element_depense: payload.element_depense || buildPurchaseElementLabel(payload.purchase_ref, payload.purchase_titre),
+    description: payload.description || null,
+    fournisseur: payload.fournisseur || null,
+    montant,
+    observation: payload.observation || null,
+    origine: 'achat',
+    source_type: 'purchase_request',
+    source_id: purchaseRequestId,
+    statut,
+    purchase_request_id: purchaseRequestId,
+    purchase_acquisition_order_id: payload.purchase_acquisition_order_id || existing?.purchase_acquisition_order_id || null,
+    payment_order_id: payload.payment_order_id || existing?.payment_order_id || null,
+    montant_paye: montantPaye,
+    date_paiement: payload.date_paiement || existing?.date_paiement || null,
+    mode_paiement: payload.mode_paiement || null,
+    document_path: payload.document_path || null,
+  };
+
+  if (existing?.id) {
+    const { data, error } = await getSupabase()
+      .from(TABLE)
+      .update(row)
+      .eq('id', existing.id)
+      .select(SELECT)
+      .single();
+    if (error) throw error;
+    return { action: 'updated', row: normalizeProjectExpense(data) };
+  }
+
+  const { data, error } = await getSupabase().from(TABLE).insert(row).select(SELECT).single();
+  if (error) throw error;
+  return { action: 'created', row: normalizeProjectExpense(data) };
+}
+
+export async function dedupePurchaseProjectExpenses() {
+  await getAuthUserId();
+  const sb = getSupabase();
+  let deleted = 0;
+
+  const { data: opRows, error: opErr } = await sb
+    .from(TABLE)
+    .select('id, source_id, project_id, montant, fournisseur, mode_paiement')
+    .eq('origine', 'ordre_paiement')
+    .eq('source_type', 'payment_order');
+  if (opErr) throw opErr;
+
+  for (const dup of opRows || []) {
+    const { data: op } = await sb
+      .from('payment_orders')
+      .select('id, purchase_request_id, purchase_acquisition_order_id, montant, date_paiement, statut, mode_paiement')
+      .eq('id', dup.source_id)
+      .maybeSingle();
+    if (!op?.purchase_request_id) continue;
+
+    const canonical = await findPurchaseLinkedExpense({ purchase_request_id: op.purchase_request_id });
+    const paid = PAID_OP_STATUTS.includes(op.statut);
+
+    if (!canonical?.id || canonical.id === dup.id) {
+      await sb.from(TABLE).update({
+        origine: 'achat',
+        source_type: 'purchase_request',
+        source_id: op.purchase_request_id,
+        purchase_request_id: op.purchase_request_id,
+        purchase_acquisition_order_id: op.purchase_acquisition_order_id,
+        payment_order_id: op.id,
+        montant_paye: paid ? Number(op.montant) : null,
+        date_paiement: op.date_paiement,
+        statut: paid ? 'payee' : 'engagee',
+        mode_paiement: op.mode_paiement,
+      }).eq('id', dup.id);
+      continue;
+    }
+
+    await sb.from(TABLE).update({
+      payment_order_id: op.id,
+      purchase_acquisition_order_id: op.purchase_acquisition_order_id || canonical.purchase_acquisition_order_id || null,
+      montant_paye: paid ? (Number(op.montant) || canonical.montant) : canonical.montant_paye,
+      date_paiement: op.date_paiement || canonical.date_paiement,
+      statut: paid ? 'payee' : (canonical.statut === 'payee' ? 'payee' : 'engagee'),
+      mode_paiement: op.mode_paiement || canonical.mode_paiement,
+      montant: Math.max(Number(canonical.montant) || 0, Number(op.montant) || 0, Number(dup.montant) || 0),
+    }).eq('id', canonical.id);
+
+    const { error: delErr } = await sb.from(TABLE).delete().eq('id', dup.id);
+    if (!delErr) deleted++;
+  }
+
+  const { data: oaRows, error: oaErr } = await sb
+    .from(TABLE)
+    .select('id, source_id')
+    .eq('source_type', 'purchase_acquisition_order');
+  if (oaErr) throw oaErr;
+
+  for (const oaExp of oaRows || []) {
+    const { data: oa } = await sb
+      .from('purchase_acquisition_orders')
+      .select('purchase_request_id')
+      .eq('id', oaExp.source_id)
+      .maybeSingle();
+    if (!oa?.purchase_request_id) continue;
+    const canonical = await findPurchaseLinkedExpense({ purchase_request_id: oa.purchase_request_id });
+    if (!canonical?.id || canonical.id === oaExp.id) continue;
+    const { error: delErr } = await sb.from(TABLE).delete().eq('id', oaExp.id);
+    if (!delErr) deleted++;
+  }
+
+  return { deleted };
+}
+
 export async function upsertProjectExpenseFromSource(payload) {
   await getAuthUserId();
+
+  if (payload.purchase_request_id) {
+    return upsertPurchaseProjectExpense(payload);
+  }
+
+  if (payload.source_type === 'payment_order' && payload.source_id) {
+    const { data: op } = await getSupabase()
+      .from('payment_orders')
+      .select('purchase_request_id, purchase_acquisition_order_id, statut, montant, date_paiement, mode_paiement, purchase_request_ref, motif')
+      .eq('id', payload.source_id)
+      .maybeSingle();
+    if (op?.purchase_request_id && payload.project_id) {
+      return upsertPurchaseProjectExpense({
+        project_id: payload.project_id,
+        purchase_request_id: op.purchase_request_id,
+        purchase_acquisition_order_id: op.purchase_acquisition_order_id,
+        payment_order_id: payload.source_id,
+        date_depense: payload.date_depense,
+        date_paiement: op.date_paiement || payload.date_paiement,
+        categorie: payload.categorie,
+        element_depense: payload.element_depense,
+        description: payload.description,
+        fournisseur: payload.fournisseur,
+        montant: payload.montant,
+        montant_paye: PAID_OP_STATUTS.includes(op.statut) ? payload.montant : null,
+        op_statut: op.statut,
+        mode_paiement: payload.mode_paiement,
+        purchase_ref: op.purchase_request_ref,
+      });
+    }
+  }
+
   if (!payload.source_type || !payload.source_id) {
     throw new Error('source_type et source_id requis pour la synchronisation.');
   }
@@ -155,6 +420,10 @@ export async function upsertProjectExpenseFromSource(payload) {
     source_id: payload.source_id,
     statut: payload.statut || 'valide',
     payment_order_id: payload.payment_order_id || null,
+    purchase_request_id: payload.purchase_request_id || null,
+    purchase_acquisition_order_id: payload.purchase_acquisition_order_id || null,
+    montant_paye: payload.montant_paye != null ? Number(payload.montant_paye) : null,
+    date_paiement: payload.date_paiement || null,
     mode_paiement: payload.mode_paiement || null,
     document_path: payload.document_path || null,
   };

@@ -2,7 +2,7 @@
  * paymentOrderPaidSync.js — Alimentation Charges / Dépenses par projet quand un OP est payé
  */
 import { getSupabase } from '../../lib/supabase';
-import { upsertProjectExpenseFromSource } from './projectExpenses';
+import { upsertPurchaseProjectExpense, upsertProjectExpenseFromSource } from './projectExpenses';
 import { normalizePaymentOrder } from './paymentOrders';
 
 const PAID_STATUT = 'Payé';
@@ -100,6 +100,25 @@ export async function syncPaymentOrderPaidOutcome(orderInput) {
   if (!order?.id || order.statut !== PAID_STATUT) return null;
 
   if (order.project_id) {
+    if (order.purchase_request_id) {
+      return upsertPurchaseProjectExpense({
+        project_id: order.project_id,
+        purchase_request_id: order.purchase_request_id,
+        purchase_acquisition_order_id: order.purchase_acquisition_order_id,
+        payment_order_id: order.id,
+        date_depense: paymentDate(order),
+        date_paiement: paymentDate(order),
+        categorie: "Demande d'achat",
+        element_depense: order.motif,
+        purchase_ref: order.purchase_request_ref,
+        description: order.commentaire || order.observation,
+        fournisseur: order.fournisseur_lie || order.beneficiaire,
+        montant: Number(order.montant) || 0,
+        montant_paye: Number(order.montant) || 0,
+        op_statut: order.statut,
+        mode_paiement: order.mode_paiement,
+      });
+    }
     return upsertProjectExpenseFromSource({
       project_id: order.project_id,
       date_depense: paymentDate(order),
