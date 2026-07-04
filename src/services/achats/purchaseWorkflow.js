@@ -149,10 +149,13 @@ export async function updatePurchaseRequestDraft(id, form) {
   }
   const assignee = await resolveAchatsAssignee();
   const patch = {
-    ...toPurchaseRequestRow({ ...form, statut: 'Brouillon' }),
+    ...toPurchaseRequestRow({ ...form, statut: 'Brouillon', ref: existing.ref, ref_demande: existing.ref }),
     ...assignee,
     commentaires_internes: form.commentaires_internes ?? existing.commentaires_internes,
   };
+  if (!(existing.ref || '').trim()) {
+    patch.ref_demande = await generatePurchaseRequestRef();
+  }
   return patchRequest(id, patch, 'Modification', 'Demande modifiée', ctx);
 }
 
@@ -169,9 +172,13 @@ export async function submitPurchaseRequest(id) {
     err.code = 'VALIDATION';
     throw err;
   }
+  const patch = { statut: 'En étude' };
+  if (!(existing.ref || '').trim()) {
+    patch.ref_demande = await generatePurchaseRequestRef();
+  }
   const request = await patchRequest(
     id,
-    { statut: 'En étude' },
+    patch,
     'Soumission',
     `Demande soumise — ${PURCHASE_ASSIGNEE.label} (prise en charge automatique)`,
     ctx,

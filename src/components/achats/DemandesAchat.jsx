@@ -17,7 +17,7 @@ import {
   getPurchaseStatusBadge, getPurchaseStatusLabel,
 } from '../../constants/purchaseWorkflow';
 import { submitPurchaseRequest, getPurchaseRequestBundle, reconcileLegacySoumiseRequests, reconcilePurchaseRequestSentStatus } from '../../services/achats/purchaseWorkflow';
-import { projectOptionLabel, purchaseRequestProjectLabel, updatePurchaseRequestTitle } from '../../services/achats/purchaseRequests';
+import { projectOptionLabel, purchaseRequestProjectLabel, updatePurchaseRequestTitle, reconcileMissingPurchaseRequestRefs } from '../../services/achats/purchaseRequests';
 import { generatePurchaseRequestPdf } from '../../services/achats/purchaseRequestPdf';
 import { resolveCurrentPurchaseRole, purchasePermissions, canViewPurchaseRequest } from '../../services/achats/purchaseWorkflowRoles';
 import DemandeAchatDetail from './DemandeAchatDetail';
@@ -49,6 +49,7 @@ function toFormState(item) {
   const offProject = item.payload?.off_project === true;
   return {
     ...EMPTY_FORM,
+    ref: item.ref || '',
     link_type: offProject ? 'hors_projet' : 'projet',
     titre: item.titre || '',
     priorite: item.priorite || 'Normale',
@@ -383,6 +384,13 @@ export default function DemandesAchat() {
   }, []);
 
   const perms = useMemo(() => purchasePermissions(role), [role]);
+
+  useEffect(() => {
+    if (!configured) return;
+    reconcileMissingPurchaseRequestRefs()
+      .then((refs) => { if (refs > 0) reload(); })
+      .catch(() => {});
+  }, [configured, reload]);
 
   useEffect(() => {
     if (!configured || !perms.canManageQuotes) return;

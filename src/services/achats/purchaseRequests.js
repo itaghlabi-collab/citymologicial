@@ -74,8 +74,7 @@ export function toPurchaseRequestRow(form) {
     ...(form.payload || {}),
     off_project: offProject,
   };
-  return {
-    ref_demande: form.ref || form.ref_demande || null,
+  const row = {
     titre: (form.titre || '').trim(),
     priorite: form.priorite || 'Normale',
     statut: form.statut || 'Brouillon',
@@ -91,6 +90,9 @@ export function toPurchaseRequestRow(form) {
     commentaires_internes: form.commentaires_internes?.trim() || null,
     payload,
   };
+  const ref = (form.ref || form.ref_demande || '').trim();
+  if (ref) row.ref_demande = ref;
+  return row;
 }
 
 export function getPurchaseRequestLineSummary(request) {
@@ -111,13 +113,48 @@ async function requireUser() {
 export async function generatePurchaseRequestRef() {
   const year = new Date().getFullYear();
   const prefix = `DA-${year}-`;
-  const { count, error } = await getSupabase()
+  const { data, error } = await getSupabase()
     .from(TABLE)
-    .select('*', { count: 'exact', head: true })
+    .select('ref_demande')
     .like('ref_demande', `${prefix}%`);
   if (error) throw error;
-  const seq = String((count || 0) + 1).padStart(3, '0');
-  return `${prefix}${seq}`;
+  let maxSeq = 0;
+  for (const row of data || []) {
+    const match = String(row.ref_demande || '').match(/-(\d{3,})$/);
+    if (match) maxSeq = Math.max(maxSeq, parseInt(match[1], 10));
+  }
+  return `${prefix}${String(maxSeq + 1).padStart(3, '0')}`;
+}
+
+export async function assignPurchaseRequestRefIfMissing(id, existingRef = '') {
+  const current = String(existingRef || '').trim();
+  if (current) return current;
+  const newRef = await generatePurchaseRequestRef();
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .update({ ref_demande: newRef })
+    .eq('id', id)
+    .select('ref_demande')
+    .single();
+  if (error) throw error;
+  return data.ref_demande;
+}
+
+/** Attribue une référence DA aux demandes existantes sans ref_demande. */
+export async function reconcileMissingPurchaseRequestRefs() {
+  await requireUser();
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .select('id, ref_demande, created_at')
+    .or('ref_demande.is.null,ref_demande.eq.')
+    .order('created_at', { ascending: true });
+  if (error || !data?.length) return 0;
+  let fixed = 0;
+  for (const row of data) {
+    await assignPurchaseRequestRefIfMissing(row.id, row.ref_demande);
+    fixed += 1;
+  }
+  return fixed;
 }
 
 export async function listPurchaseRequests() {
