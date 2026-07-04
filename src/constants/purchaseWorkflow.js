@@ -122,6 +122,15 @@ export const OA_TO_REQUEST_STATUS = {
   Clôturé: 'Clôturée',
 };
 
+/** Libellé affiché OA (statut en base inchangé). */
+export const OA_STATUS_LABEL = {
+  'Envoyé fournisseur': 'Validé',
+};
+
+export function getAcquisitionOrderStatusLabel(statut) {
+  return OA_STATUS_LABEL[statut] || statut;
+}
+
 export const OA_STATUS_BADGE = {
   Brouillon: 'badge-grey',
   Validé: 'badge-green',

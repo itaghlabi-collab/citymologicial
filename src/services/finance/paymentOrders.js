@@ -9,6 +9,19 @@ const TABLE = 'payment_orders';
 
 export const PAYMENT_ORDER_STATUTS = ['À préparer', 'Préparé', 'Payé'];
 
+export const PAYMENT_ORDER_UI_STATUTS = [
+  { value: 'À préparer', label: 'En attente de paiement' },
+  { value: 'Payé', label: 'Payé' },
+];
+
+export function getPaymentOrderStatusLabel(statut) {
+  return normalizePaymentOrderStatut(statut) === 'Payé' ? 'Payé' : 'En attente de paiement';
+}
+
+export function getPaymentOrderStatusSelectValue(statut) {
+  return normalizePaymentOrderStatut(statut) === 'Payé' ? 'Payé' : 'À préparer';
+}
+
 export function normalizePaymentOrderStatut(statut) {
   const s = String(statut || '').trim();
   if (s === 'Payé') return 'Payé';

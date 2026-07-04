@@ -11,7 +11,7 @@ import { updateAcquisitionOrder, updateAcquisitionOrderStatus, deleteAcquisition
 import { getPurchaseRequestQuote } from '../../services/achats/purchaseRequestQuotes';
 import { generateAcquisitionOrderPdf } from '../../services/achats/purchaseAcquisitionOrderPdf';
 import { listPurchaseRequestHistory } from '../../services/achats/purchaseRequestHistory';
-import { PURCHASE_ASSIGNEE } from '../../constants/purchaseWorkflow';
+import { PURCHASE_ASSIGNEE, getAcquisitionOrderStatusLabel } from '../../constants/purchaseWorkflow';
 import {
   INPUT_STYLE, SELECT_STYLE, STATUTS_ORDRE, BADGE_ORDRE,
   KpiCard, EmptyState, SectionTitle, FField, FRow, formatMAD, Modal,
@@ -59,7 +59,7 @@ function DetailOA({ ordre, history, onBack, onStatusChange, onSave, saving }) {
           <h1 className="page-title" style={{ marginBottom: 4 }}>{ordre.ref}</h1>
           <p className="page-subtitle">{ordre.objet}</p>
         </div>
-        <span className={`badge ${BADGE_ORDRE[ordre.statut] || 'badge-grey'}`}>{ordre.statut}</span>
+        <span className={`badge ${BADGE_ORDRE[ordre.statut] || 'badge-grey'}`}>{getAcquisitionOrderStatusLabel(ordre.statut)}</span>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 16 }}>
         <div className="card">
@@ -272,7 +272,7 @@ export default function OrdresAchat() {
           </div>
           <select value={filterStatut} onChange={(e) => setFilterStatut(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 220 }}>
             <option value="">Tous statuts</option>
-            {STATUTS_ORDRE.map((s) => <option key={s} value={s}>{s}</option>)}
+            {STATUTS_ORDRE.map((s) => <option key={s} value={s}>{getAcquisitionOrderStatusLabel(s)}</option>)}
           </select>
         </div>
       </div>
@@ -299,7 +299,7 @@ export default function OrdresAchat() {
                     <td>{o.supplier_name}</td>
                     <td>{o.project_ref || '—'}</td>
                     <td>{formatMAD(o.montant_ttc)}</td>
-                    <td><span className={`badge ${BADGE_ORDRE[o.statut] || 'badge-grey'}`}>{o.statut}</span></td>
+                    <td><span className={`badge ${BADGE_ORDRE[o.statut] || 'badge-grey'}`}>{getAcquisitionOrderStatusLabel(o.statut)}</span></td>
                     <td>
                       <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
                         <button type="button" className="btn btn-secondary btn-sm" title="Voir" onClick={() => openDetail(o.id)}><Eye size={13} /></button>

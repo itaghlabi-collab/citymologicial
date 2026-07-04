@@ -4,8 +4,8 @@
 import { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   ClipboardList, Plus, Eye, Edit2, Trash2, Search, Filter,
-  Download, AlertTriangle, Clock, Loader2, RefreshCw, History, FileText,
-  BarChart2, Package, CreditCard, CheckCircle, Send, Star,
+  Download, AlertTriangle, Clock, Loader2, RefreshCw, FolderOpen, FileText,
+  BarChart2, Package, CreditCard, CheckCircle, Send,
 } from 'lucide-react';
 import { usePurchaseRequests } from '../../hooks/usePurchaseRequests';
 import { useSuppliers } from '../../hooks/useSuppliers';
@@ -603,14 +603,14 @@ export default function DemandesAchat() {
                         <button type="button" className="btn btn-ghost btn-sm" title="PDF" disabled={pdfLoadingId === x.id} onClick={() => handlePrintPdf(x)}>
                           {pdfLoadingId === x.id ? <Loader2 size={12} className="cin-spin" /> : <FileText size={13} />}
                         </button>
-                        <button type="button" className="btn btn-ghost btn-sm" title="Historique" onClick={() => setDetailId(x.id)}><History size={13} /></button>
+                        <button type="button" className="btn btn-ghost btn-sm" title="Ouvrir la demande" onClick={() => setDetailId(x.id)}><FolderOpen size={13} /></button>
                         {canSubmitPurchaseRequest(x.statut) && (
                           <button type="button" className="btn btn-primary btn-sm" title="Soumettre" disabled={submittingId === x.id} onClick={() => handleSubmit(x.id)}>
                             {submittingId === x.id ? <Loader2 size={12} className="cin-spin" /> : <Send size={12} />}
                           </button>
                         )}
                         {perms.canManageQuotes && canAddQuoteToRequest(x.statut) && (
-                          <button type="button" className="btn btn-ghost btn-sm" title="Ajouter devis" onClick={() => { setDetailAddQuote(true); setDetailId(x.id); }}><Star size={12} /></button>
+                          <button type="button" className="btn btn-ghost btn-sm" title="Ajouter devis" onClick={() => { setDetailAddQuote(true); setDetailId(x.id); }}><Plus size={12} /></button>
                         )}
                         {perms.canValidateSupplier && canValidateQuoteOnRequest(x.statut) && (
                           <button type="button" className="btn btn-primary btn-sm" title="Valider (DG)" onClick={() => setDetailId(x.id)}><CheckCircle size={12} /></button>

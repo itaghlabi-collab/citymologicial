@@ -6,7 +6,7 @@ import { useState, useCallback } from 'react';
 import { Loader2 } from 'lucide-react';
 import { usePaymentOrders } from '../../hooks/usePaymentOrders';
 import { exportPaymentOrderPdf } from '../../services/finance/paymentOrderPdf';
-import { normalizePaymentOrderStatut } from '../../services/finance/paymentOrders';
+import { normalizePaymentOrderStatut, getPaymentOrderStatusLabel, getPaymentOrderStatusSelectValue, PAYMENT_ORDER_UI_STATUTS } from '../../services/finance/paymentOrders';
 import {
   CreditCard, Plus, Eye, Edit2, Trash2, Download,
   CheckCircle, XCircle, Search, Filter, FileText,
@@ -14,7 +14,7 @@ import {
 } from 'lucide-react';
 import {
   INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE,
-  MODES_PAIEMENT, STATUTS_ORDRE, BADGE_STATUT_ORDRE, TYPES_BENEF,
+  MODES_PAIEMENT, BADGE_STATUT_ORDRE, TYPES_BENEF,
   KpiCard, EmptyState, Modal, SectionTitle, FField, FRow, UploadField,
   formatMAD, genRef, genId
 } from './shared.jsx';
@@ -98,7 +98,7 @@ function OrdreForm({ initial, categories, onSave, onCancel }) {
         </FField>
         <FField label="Statut validation">
           <select value={form.statut} onChange={e => set('statut', e.target.value)} style={SELECT_STYLE}>
-            {STATUTS_ORDRE.map(s => <option key={s} value={s}>{s}</option>)}
+            {PAYMENT_ORDER_UI_STATUTS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
           </select>
         </FField>
       </FRow>
@@ -139,7 +139,7 @@ function OrdreForm({ initial, categories, onSave, onCancel }) {
   );
 }
 
-function DetailOrdre({ ordre, onBack, onEdit, onDelete, onValider, onExecuter, onComptabiliser }) {
+function DetailOrdre({ ordre, onBack, onEdit, onDelete, onExecuter, onComptabiliser }) {
   return (
     <div className="animate-fade-in">
       <button className="btn btn-ghost btn-sm" style={{ marginBottom: 14, display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={onBack}>
@@ -155,14 +155,9 @@ function DetailOrdre({ ordre, onBack, onEdit, onDelete, onValider, onExecuter, o
           <button className="btn btn-secondary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => exportPaymentOrderPdf(ordre)}>
             <Download size={13} /> PDF
           </button>
-          {(['À préparer', 'Brouillon', 'En attente', 'Soumis'].includes(normalizePaymentOrderStatut(ordre.statut))) && (
-            <button className="btn btn-primary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => onValider(ordre)}>
-              <CheckCircle size={13} /> Préparer
-            </button>
-          )}
-          {normalizePaymentOrderStatut(ordre.statut) === 'Préparé' && (
-            <button className="btn btn-secondary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => onExecuter(ordre)}>
-              <PlayCircle size={13} /> Marquer payé
+          {normalizePaymentOrderStatut(ordre.statut) !== 'Payé' && (
+            <button className="btn btn-primary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => onExecuter(ordre)}>
+              <CheckCircle size={13} /> Marquer payé
             </button>
           )}
           {ordre.statut === 'Payé' && ordre.comptabilise === 'Non' && (
@@ -221,7 +216,7 @@ function DetailOrdre({ ordre, onBack, onEdit, onDelete, onValider, onExecuter, o
             {[
               ['Référence', ordre.ref],
               ['Montant', <span style={{ fontFamily: 'var(--font-head)', fontSize: '1.2rem', fontWeight: 800, color: 'var(--red)' }}>{formatMAD(ordre.montant)}</span>],
-              ['Statut', <span className={"badge " + (BADGE_STATUT_ORDRE[normalizePaymentOrderStatut(ordre.statut)] || 'badge-grey')}>{normalizePaymentOrderStatut(ordre.statut)}</span>],
+              ['Statut', <span className={"badge " + (BADGE_STATUT_ORDRE[normalizePaymentOrderStatut(ordre.statut)] || 'badge-grey')}>{getPaymentOrderStatusLabel(ordre.statut)}</span>],
               ['Comptabilisé', <span className={"badge " + (ordre.comptabilise === 'Oui' ? 'badge-green' : 'badge-grey')}>{ordre.comptabilise}</span>],
               ['Créé le', ordre.date_creation || '—'],
             ].map(([lbl, val]) => (
@@ -302,7 +297,7 @@ export default function OrdresPaiement({ categories = [] }) {
   const filtered = ordres.filter(o => {
     const q = search.toLowerCase();
     const matchQ = !q || o.ref?.toLowerCase().includes(q) || o.beneficiaire?.toLowerCase().includes(q) || (o.motif || '').toLowerCase().includes(q) || (o.fournisseur_lie || '').toLowerCase().includes(q) || (o.purchase_request_ref || '').toLowerCase().includes(q) || (o.purchase_oa_ref || '').toLowerCase().includes(q);
-    const matchS = !filterStatut || normalizePaymentOrderStatut(o.statut) === filterStatut;
+    const matchS = !filterStatut || getPaymentOrderStatusSelectValue(o.statut) === filterStatut;
     const matchM = !filterMode || o.mode_paiement === filterMode;
     const matchC = !filterCompta || o.comptabilise === filterCompta;
     const matchO = !filterOrigine || o.origine === filterOrigine;
@@ -384,7 +379,7 @@ export default function OrdresPaiement({ categories = [] }) {
             </div>
             <select value={filterStatut} onChange={e => setFilterStatut(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 160 }}>
               <option value="">Tous les statuts</option>
-              {STATUTS_ORDRE.map(s => <option key={s} value={s}>{s}</option>)}
+              {PAYMENT_ORDER_UI_STATUTS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
             </select>
             <select value={filterMode} onChange={e => setFilterMode(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 160 }}>
               <option value="">Tous modes</option>
@@ -469,11 +464,11 @@ export default function OrdresPaiement({ categories = [] }) {
                     <td data-label="Date prévue">{o.date_prevue || '—'}</td>
                     <td data-label="Statut">
                       <select
-                        value={normalizePaymentOrderStatut(o.statut)}
+                        value={getPaymentOrderStatusSelectValue(o.statut)}
                         onChange={(e) => handleStatusChange(o, e.target.value)}
-                        style={{ ...SELECT_STYLE, maxWidth: 140, fontSize: '0.78rem', padding: '5px 8px' }}
+                        style={{ ...SELECT_STYLE, maxWidth: 180, fontSize: '0.78rem', padding: '5px 8px' }}
                       >
-                        {STATUTS_ORDRE.map((s) => <option key={s} value={s}>{s}</option>)}
+                        {PAYMENT_ORDER_UI_STATUTS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
                       </select>
                     </td>
                     <td>
@@ -481,11 +476,8 @@ export default function OrdresPaiement({ categories = [] }) {
                         <button className="btn btn-secondary btn-sm" title="Voir" onClick={() => setDetailId(o.id)}><Eye size={13} /></button>
                         <button className="btn btn-ghost btn-sm" title="Modifier" onClick={() => { setEditOrdre(o); setShowModal(true); }}><Edit2 size={13} /></button>
                         <button className="btn btn-ghost btn-sm" title="PDF" onClick={() => exportPaymentOrderPdf(o)}><Download size={13} /></button>
-                        {normalizePaymentOrderStatut(o.statut) === 'À préparer' && (
-                          <button className="btn btn-ghost btn-sm" title="Marquer préparé" onClick={() => handleValider(o)} style={{ color: '#2E7D32' }}><CheckCircle size={13} /></button>
-                        )}
-                        {normalizePaymentOrderStatut(o.statut) === 'Préparé' && (
-                          <button className="btn btn-ghost btn-sm" title="Marquer payé" onClick={() => handleExecuter(o)} style={{ color: '#1565C0' }}><PlayCircle size={13} /></button>
+                        {normalizePaymentOrderStatut(o.statut) !== 'Payé' && (
+                          <button className="btn btn-ghost btn-sm" title="Marquer payé" onClick={() => handleExecuter(o)} style={{ color: '#2E7D32' }}><CheckCircle size={13} /></button>
                         )}
                         <button className="btn btn-ghost btn-sm" title="Supprimer" onClick={() => handleDelete(o.id)} style={{ color: 'var(--red)' }}><Trash2 size={13} /></button>
                       </div>
