@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import { usePurchaseOrders } from '../../hooks/usePurchaseOrders';
 import { computeLineTotals } from '../../services/achats/purchaseOrders';
+import { generatePurchaseOrderPdf } from '../../services/achats/purchaseOrderPdf';
 import {
   INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE,
   STATUTS_BC, BADGE_BC, DEVISES, TVA_OPTIONS,
@@ -27,7 +28,7 @@ const EMPTY_FORM = {
   date_livraison: '',
   devise: 'MAD',
   note: '',
-  lignes: [{ ...EMPTY_LIGNE, id: 1 }],
+  lignes: [],
 };
 
 function toFormState(item) {
@@ -43,7 +44,7 @@ function toFormState(item) {
     ref: item.ref || item.ref_bc || '',
     lignes: (item.lignes || item.lines || []).length
       ? (item.lignes || item.lines)
-      : [{ ...EMPTY_LIGNE, id: genId() }],
+      : [],
   };
 }
 
@@ -68,6 +69,10 @@ function BCForm({ initial, onSave, onCancel, fournisseurs, suppliersLoading, sav
     ev.preventDefault();
     if (!form.fournisseur.trim() && !form.supplier_id) {
       setErrors({ fournisseur: 'Requis' });
+      return;
+    }
+    if (!form.lignes.some((l) => l.designation?.trim())) {
+      setErrors({ lignes: 'Ajoutez au moins une ligne article.' });
       return;
     }
     setErrors({});
@@ -151,7 +156,7 @@ function BCForm({ initial, onSave, onCancel, fournisseurs, suppliersLoading, sav
   );
 }
 
-function DetailBC({ item, onBack, onEdit, onDelete, onDupliquer }) {
+function DetailBC({ item, onBack, onEdit, onDelete, onDupliquer, onPdf, pdfLoading }) {
   const lignes = item.lignes || item.lines || [];
   return (
     <div className="animate-fade-in">
@@ -164,6 +169,15 @@ function DetailBC({ item, onBack, onEdit, onDelete, onDupliquer }) {
           <p className="page-subtitle">{item.fournisseur || '—'}</p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            onClick={() => onPdf(item)}
+            disabled={pdfLoading}
+          >
+            {pdfLoading ? <Loader2 size={13} className="spin" /> : <Download size={13} />} Télécharger PDF
+          </button>
           <button className="btn btn-secondary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={onEdit}><Edit2 size={13} /> Modifier</button>
           <button className="btn btn-ghost btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => onDupliquer(item)}><Copy size={13} /> Dupliquer</button>
           <button className="btn btn-ghost btn-sm" style={{ color: 'var(--red)', display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => onDelete(item.id)}><Trash2 size={13} /></button>
@@ -236,6 +250,20 @@ export default function BonsCommande() {
   const [showModal, setShowModal] = useState(false);
   const [editBc, setEditBc] = useState(null);
   const [detailId, setDetailId] = useState(null);
+  const [pdfLoadingId, setPdfLoadingId] = useState(null);
+
+  async function handlePdf(bc) {
+    setPdfLoadingId(bc.id);
+    try {
+      const supplier = suppliers.find((s) => s.id === bc.supplier_id) || null;
+      await generatePurchaseOrderPdf(bc, supplier);
+    } catch (err) {
+      console.error(err);
+      window.alert('Impossible de générer le PDF.');
+    } finally {
+      setPdfLoadingId(null);
+    }
+  }
 
   const handleSave = useCallback(async (data) => {
     const result = await save(data, editBc?.id);
@@ -280,6 +308,8 @@ export default function BonsCommande() {
         onEdit={() => { setEditBc(item); setShowModal(true); setDetailId(null); }}
         onDelete={handleDelete}
         onDupliquer={handleDupliquer}
+        onPdf={handlePdf}
+        pdfLoading={pdfLoadingId === item.id}
       />
     );
   }
@@ -367,6 +397,15 @@ export default function BonsCommande() {
                         <td>
                           <div style={{ display: 'flex', gap: 3 }}>
                             <button className="btn btn-secondary btn-sm" title="Voir" onClick={() => setDetailId(x.id)}><Eye size={13} /></button>
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              title="PDF"
+                              onClick={() => handlePdf(x)}
+                              disabled={pdfLoadingId === x.id}
+                            >
+                              {pdfLoadingId === x.id ? <Loader2 size={13} className="spin" /> : <Download size={13} />}
+                            </button>
                             <button className="btn btn-ghost btn-sm" title="Modifier" onClick={() => { setEditBc(x); setShowModal(true); }}><Edit2 size={13} /></button>
                             <button className="btn btn-ghost btn-sm" title="Dupliquer" onClick={() => handleDupliquer(x)} disabled={saving}><Copy size={13} /></button>
                             <button className="btn btn-ghost btn-sm" title="Supprimer" onClick={() => handleDelete(x.id)} style={{ color: 'var(--red)' }}><Trash2 size={13} /></button>

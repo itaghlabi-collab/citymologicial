@@ -164,7 +164,6 @@ export default function BCLignesSection({ lignes, onChange }) {
   }
 
   function removeLigne(id) {
-    if (lignes.length <= 1) return;
     onChange(lignes.filter((l) => l.id !== id));
     if (editingId === id) resetDraft();
   }
@@ -210,7 +209,7 @@ export default function BCLignesSection({ lignes, onChange }) {
                       <button type="button" className="btn btn-ghost btn-sm" onClick={() => startEdit(l)} title="Modifier" style={{ padding: '4px 6px' }}>
                         <Pencil size={13} />
                       </button>
-                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => removeLigne(l.id)} title="Supprimer" style={{ color: 'var(--red)', padding: '4px 6px' }} disabled={lignes.length <= 1}>
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => removeLigne(l.id)} title="Supprimer" style={{ color: 'var(--red)', padding: '4px 6px' }}>
                         <Trash2 size={13} />
                       </button>
                     </td>
