@@ -24,8 +24,10 @@ import DemandeAchatDetail from './DemandeAchatDetail';
 import {
   INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE,
   STATUTS_DEMANDE, PRIORITES, BADGE_DEMANDE, BADGE_PRIORITE,
-  KpiCard, EmptyState, Modal, SectionTitle, FField, FRow, UploadField, formatMAD,
+  KpiCard, EmptyState, Modal, SectionTitle, FField, FRow, UploadField, formatMAD, genId,
 } from './shared.jsx';
+
+const EMPTY_LIGNE = { designation: '', quantite: '', unite: 'u' };
 
 const EMPTY_FORM = {
   link_type: 'projet',
@@ -37,11 +39,23 @@ const EMPTY_FORM = {
   projet_lie: '',
   fournisseur: '',
   supplier_id: '',
-  quantite: '',
-  unite: 'u',
+  lignes: [{ ...EMPTY_LIGNE, id: genId() }],
   description: '',
   commentaires_internes: '',
 };
+
+function toFormLignes(item) {
+  const raw = item?.payload?.lines || [];
+  if (raw.length) {
+    return raw.map((l, i) => ({
+      id: l.id || genId() + i,
+      designation: l.designation && l.designation !== '—' ? l.designation : '',
+      quantite: l.quantite ?? l.quantite_demandee ?? '',
+      unite: l.unite || l.unit || 'u',
+    }));
+  }
+  return [{ ...EMPTY_LIGNE, id: genId() }];
+}
 
 function toFormState(item) {
   if (!item) return EMPTY_FORM;
@@ -59,8 +73,7 @@ function toFormState(item) {
     projet_lie: item.projet_lie || item.project_name || '',
     fournisseur: item.payload?.fournisseur_souhaite || line.fournisseur || '',
     supplier_id: item.payload?.supplier_id || '',
-    quantite: line.quantite ?? line.quantite_demandee ?? '',
-    unite: line.unite || line.unit || 'u',
+    lignes: toFormLignes(item),
     description: item.description || '',
     commentaires_internes: item.commentaires_internes || '',
   };
@@ -69,6 +82,7 @@ function toFormState(item) {
 function buildFormPayload(form, existingPayload = {}, attachments = []) {
   const fournisseur = (form.fournisseur || '').trim();
   const offProject = form.link_type === 'hors_projet';
+  const lignes = (form.lignes || []).filter((l) => (l.designation || '').trim());
   return {
     ...existingPayload,
     off_project: offProject,
@@ -83,14 +97,119 @@ function buildFormPayload(form, existingPayload = {}, attachments = []) {
       added_by_name: a.added_by_name || null,
       added_by: a.added_by || null,
     })),
-    lines: [{
-      designation: form.titre?.trim() || '—',
-      quantite: form.quantite !== '' && form.quantite != null ? Number(form.quantite) : null,
-      unite: (form.unite || 'u').trim(),
+    lines: lignes.map((l) => ({
+      id: l.id,
+      designation: l.designation.trim(),
+      quantite: l.quantite !== '' && l.quantite != null ? Number(l.quantite) : null,
+      unite: (l.unite || 'u').trim(),
       fournisseur: fournisseur || null,
-      observation: form.description?.trim() || null,
-    }],
+    })),
   };
+}
+
+function DemandeLignesTable({ lignes, onChange, error }) {
+  function updateLigne(id, k, v) {
+    onChange(lignes.map((l) => (l.id === id ? { ...l, [k]: v } : l)));
+  }
+  function addLigne() {
+    onChange([...lignes, { ...EMPTY_LIGNE, id: genId() }]);
+  }
+  function removeLigne(id) {
+    if (lignes.length <= 1) return;
+    onChange(lignes.filter((l) => l.id !== id));
+  }
+
+  return (
+    <div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.84rem' }}>
+          <thead>
+            <tr style={{ background: 'var(--surface-2)', borderBottom: '1.5px solid var(--border)' }}>
+              {['N°', 'Désignation', 'Qté', 'Unité', ''].map((h) => (
+                <th
+                  key={h || 'actions'}
+                  style={{
+                    padding: '8px 10px',
+                    textAlign: 'left',
+                    fontSize: '0.72rem',
+                    fontWeight: 700,
+                    color: 'var(--text-3)',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.06em',
+                    whiteSpace: 'nowrap',
+                    width: h === 'N°' ? 36 : undefined,
+                  }}
+                >
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {lignes.map((l, idx) => (
+              <tr key={l.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                <td style={{ padding: '6px 10px', color: 'var(--text-3)', fontWeight: 700, fontSize: '0.78rem' }}>
+                  {idx + 1}
+                </td>
+                <td style={{ padding: '6px 6px' }}>
+                  <input
+                    value={l.designation}
+                    onChange={(e) => updateLigne(l.id, 'designation', e.target.value)}
+                    placeholder="Article, matériau, prestation..."
+                    style={{
+                      ...INPUT_STYLE,
+                      minWidth: 200,
+                      borderColor: error && !l.designation?.trim() ? 'var(--red)' : 'var(--border)',
+                    }}
+                  />
+                </td>
+                <td style={{ padding: '6px 6px' }}>
+                  <input
+                    type="number"
+                    min="0"
+                    step="any"
+                    value={l.quantite}
+                    onChange={(e) => updateLigne(l.id, 'quantite', e.target.value)}
+                    placeholder="0"
+                    style={{ ...INPUT_STYLE, width: 80 }}
+                  />
+                </td>
+                <td style={{ padding: '6px 6px' }}>
+                  <input
+                    value={l.unite}
+                    onChange={(e) => updateLigne(l.id, 'unite', e.target.value)}
+                    placeholder="u, m, kg..."
+                    style={{ ...INPUT_STYLE, width: 72 }}
+                  />
+                </td>
+                <td style={{ padding: '6px 6px' }}>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm"
+                    onClick={() => removeLigne(l.id)}
+                    disabled={lignes.length <= 1}
+                    style={{ color: lignes.length <= 1 ? 'var(--text-3)' : 'var(--red)', padding: '4px 6px' }}
+                    title="Supprimer la ligne"
+                  >
+                    <Trash2 size={13} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {error && <div style={{ color: 'var(--red)', fontSize: '0.72rem', marginTop: 6 }}>{error}</div>}
+      <button
+        type="button"
+        className="btn btn-secondary btn-sm"
+        onClick={addLigne}
+        style={{ marginTop: 10, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+      >
+        <Plus size={13} /> Ajouter un besoin
+      </button>
+    </div>
+  );
 }
 
 function DemandeForm({ initial, onSave, onCancel, saving, suppliers = [], projects = [] }) {
@@ -265,26 +384,19 @@ function DemandeForm({ initial, onSave, onCancel, saving, suppliers = [], projec
             style={{ ...INPUT_STYLE, marginTop: fournActifs.length ? 8 : 0 }}
           />
         </FField>
-        <FField label="Quantité">
-          <input
-            type="number"
-            min="0"
-            step="any"
-            value={form.quantite}
-            onChange={(e) => set('quantite', e.target.value)}
-            placeholder="ex. 100"
-            style={INPUT_STYLE}
-          />
-        </FField>
-        <FField label="Unité">
-          <input
-            value={form.unite}
-            onChange={(e) => set('unite', e.target.value)}
-            placeholder="u, m, kg, lot..."
-            style={INPUT_STYLE}
-          />
-        </FField>
       </FRow>
+
+      <SectionTitle icon={<Package size={12} />}>Besoins / Articles demandés</SectionTitle>
+      <p style={{ fontSize: '0.78rem', color: 'var(--text-3)', margin: '0 0 10px' }}>
+        Ajoutez une ou plusieurs lignes (désignation, quantité, unité) pour cette demande.
+      </p>
+      <div style={{ marginBottom: 20 }}>
+        <DemandeLignesTable
+          lignes={form.lignes}
+          onChange={(v) => set('lignes', v)}
+          error={errors.lignes}
+        />
+      </div>
       <SectionTitle>Description</SectionTitle>
       <FField label="Description détaillée">
         <textarea value={form.description} onChange={(e) => set('description', e.target.value)} placeholder="Détail du besoin, contexte..." style={TEXTAREA_STYLE} />
@@ -517,7 +629,7 @@ export default function DemandesAchat() {
           }}
           onRefresh={reload}
         />
-        <Modal open={showModal} onClose={() => { setShowModal(false); setEditItem(null); }} title={editItem ? 'Modifier la demande' : "Nouvelle demande d'achat"} width={680}>
+        <Modal open={showModal} onClose={() => { setShowModal(false); setEditItem(null); }} title={editItem ? 'Modifier la demande' : "Nouvelle demande d'achat"} width={780}>
           <DemandeForm
             initial={editItem}
             onSave={handleSave}
@@ -710,7 +822,7 @@ export default function DemandesAchat() {
         )}
       </div>
 
-      <Modal open={showModal} onClose={() => { setShowModal(false); setEditItem(null); }} title={editItem ? 'Modifier la demande' : "Nouvelle demande d'achat"} width={680}>
+      <Modal open={showModal} onClose={() => { setShowModal(false); setEditItem(null); }} title={editItem ? 'Modifier la demande' : "Nouvelle demande d'achat"} width={780}>
         <DemandeForm
           initial={editItem}
           onSave={handleSave}

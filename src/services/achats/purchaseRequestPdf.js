@@ -24,9 +24,12 @@ export async function generatePurchaseRequestPdf(request, { attachments = [] } =
   const projet = request.projet_lie || request.project_name || request.project_ref || '—';
   const lineSummary = getPurchaseRequestLineSummary(request);
   const fournisseur = lineSummary.fournisseur || '—';
-  const quantiteLabel = lineSummary.quantite !== '' && lineSummary.quantite != null
-    ? `${lineSummary.quantite} ${lineSummary.unite || 'u'}`
-    : '—';
+  const requestLines = normalizeRequestLines(request);
+  const quantiteLabel = requestLines.length > 1
+    ? `${requestLines.length} lignes`
+    : (lineSummary.quantite !== '' && lineSummary.quantite != null
+      ? `${lineSummary.quantite} ${lineSummary.unite || 'u'}`
+      : '—');
 
   let y = await drawAchatsHeader(doc, 'DEMANDE D\'ACHAT', [
     ['Référence', request.ref],

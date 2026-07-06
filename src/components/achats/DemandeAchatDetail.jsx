@@ -25,6 +25,7 @@ import {
 } from '../../constants/purchaseWorkflow';
 import { generatePurchaseRequestPdf } from '../../services/achats/purchaseRequestPdf';
 import { purchaseRequestProjectLabel } from '../../services/achats/purchaseRequests';
+import { normalizeRequestLines } from '../../services/achats/purchasePdfShared';
 import {
   EMPTY_QUOTE_LINE,
   computeQuoteLineTotal,
@@ -168,11 +169,21 @@ function QuoteComparisonTable({
   );
 }
 
-function QuoteForm({ suppliers, initial, onSave, onCancel, saving, requestId }) {
+function QuoteForm({ suppliers, initial, onSave, onCancel, saving, requestId, requestLines = [] }) {
   const [form, setForm] = useState(() => (initial ? { ...EMPTY_QUOTE, ...initial, ref_devis_fournisseur: initial.ref_devis || initial.ref_devis_fournisseur || '' } : EMPTY_QUOTE));
   const [lines, setLines] = useState(() => {
     const normalized = normalizeQuoteLines(initial?.lines);
-    return normalized.length ? normalized : [EMPTY_QUOTE_LINE()];
+    if (normalized.length) return normalized;
+    const fromRequest = normalizeRequestLines({ payload: { lines: requestLines } });
+    if (fromRequest.length) {
+      return fromRequest.map((l) => ({
+        ...EMPTY_QUOTE_LINE(),
+        designation: l.designation !== '—' ? l.designation : '',
+        quantite: l.quantite !== '—' ? l.quantite : '',
+        unite: l.unite !== '—' ? l.unite : 'u',
+      }));
+    }
+    return [EMPTY_QUOTE_LINE()];
   });
   const [attachment, setAttachment] = useState(() => {
     if (!initial?.attachment_url && !initial?.attachment_storage_path) return null;
@@ -506,6 +517,7 @@ export default function DemandeAchatDetail({
   }
 
   const projectDisplay = purchaseRequestProjectLabel(request);
+  const besoinsLines = normalizeRequestLines(request);
 
   const canEdit = canEditPurchaseRequest(request.statut);
   const isTerminal = ['Clôturée', 'Refusée'].includes(request.statut);
@@ -575,11 +587,7 @@ export default function DemandeAchatDetail({
                 ['Demandeur', request.requester_name || request.demandeur || '—'],
                 ['Responsable Achats', request.assigned_employee_name || PURCHASE_ASSIGNEE.label],
                 ['Fournisseur souhaité', request.payload?.fournisseur_souhaite || request.payload?.lines?.[0]?.fournisseur || '—'],
-                ['Quantité', (() => {
-                  const l = request.payload?.lines?.[0];
-                  if (!l?.quantite && l?.quantite !== 0) return '—';
-                  return `${l.quantite} ${l.unite || 'u'}`;
-                })()],
+                ['Nb. besoins', besoinsLines.length ? `${besoinsLines.length} ligne${besoinsLines.length > 1 ? 's' : ''}` : '—'],
                 ['Priorité', request.priorite],
                 ['Date souhaitée', request.date_limite || '—'],
                 ['Créée le', request.date_creation || '—'],
@@ -611,6 +619,36 @@ export default function DemandeAchatDetail({
                 } : b));
               }}
             />
+          </div>
+
+          <div className="card">
+            <SectionTitle icon={<Package size={12} />}>Besoins demandés</SectionTitle>
+            {besoinsLines.length === 0 ? (
+              <p style={{ fontSize: '0.84rem', color: 'var(--text-3)', margin: 0 }}>Aucune ligne enregistrée.</p>
+            ) : (
+              <div className="table-wrap" style={{ marginTop: 4 }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th style={{ width: 40 }}>N°</th>
+                      <th>Désignation</th>
+                      <th style={{ width: 90 }}>Qté</th>
+                      <th style={{ width: 80 }}>Unité</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {besoinsLines.map((line, idx) => (
+                      <tr key={line.id || idx}>
+                        <td style={{ color: 'var(--text-3)', fontWeight: 700 }}>{idx + 1}</td>
+                        <td style={{ fontWeight: 600 }}>{line.designation || '—'}</td>
+                        <td>{line.quantite !== '—' && line.quantite != null && line.quantite !== '' ? line.quantite : '—'}</td>
+                        <td>{line.unite || '—'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
           </div>
 
           {showQuotesSection && (
@@ -650,6 +688,7 @@ export default function DemandeAchatDetail({
                     initial={editQuote}
                     saving={saving}
                     requestId={request.id}
+                    requestLines={request.payload?.lines || []}
                     onCancel={() => { setShowQuoteForm(false); setEditQuote(null); }}
                     onSave={(form) => runAction(async () => {
                       if (editQuote?.id) {
