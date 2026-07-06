@@ -14,7 +14,7 @@ import {
   formatMad,
   moduleActionUrl,
 } from './notifications';
-import { findProfileById, findProfileByAssigneeName } from './notificationRecipients';
+import { findProfileById, findProfileByAssigneeName, personNamesMatch } from './notificationRecipients';
 import { NOTIFICATION_SUBMODULES } from './notificationTargeting';
 import { FINANCE_SOURCE_TYPES } from '../finance/financeSync';
 
@@ -73,7 +73,7 @@ export async function notifyDgTaskCreated(task) {
     title: 'Tâche DG',
     message: `La Direction vous a assigné la tâche « ${task.titre} »${task.dateLimite ? ` — échéance ${task.dateLimite}` : ''}.`,
     type: NOTIFICATION_TYPES.TASK,
-    priority: NOTIFICATION_PRIORITIES.HIGH,
+    priority: NOTIFICATION_PRIORITIES.URGENT,
     entityType: 'internal_task_dg_assign',
     entityId: task.id,
     actionUrl: moduleActionUrl('taches'),
@@ -81,27 +81,57 @@ export async function notifyDgTaskCreated(task) {
   });
 }
 
-/** Tâche créée : assigné uniquement, sinon utilisateurs module Tâches. */
+/** Tâche créée : notification personnalisée à l'assigné uniquement. */
 export async function notifyTaskCreated(task) {
   if (!task?.id) return;
   if (task.is_dg_task) {
     return notifyDgTaskCreated(task);
   }
-  const payload = {
-    title: 'Nouvelle tâche',
-    message: `Tâche « ${task.titre} » créée${task.assigne ? ` — assignée à ${task.assigne}` : ''}.`,
+  if (!task.assigne?.trim()) return null;
+
+  const assignee = await findProfileByAssigneeName(task.assigne);
+  if (!assignee?.id) {
+    console.warn('[CITYMO] notifyTaskCreated: assigné introuvable →', task.assigne);
+    return null;
+  }
+
+  const priority = task.priorite === 'urgente' || task.dg_push
+    ? NOTIFICATION_PRIORITIES.URGENT
+    : NOTIFICATION_PRIORITIES.HIGH;
+
+  return notifyUser(assignee.id, {
+    title: 'Nouvelle tâche assignée',
+    message: `La tâche « ${task.titre} » vous a été assignée${task.dateLimite ? ` — échéance ${task.dateLimite}` : ''}.`,
     type: NOTIFICATION_TYPES.TASK,
-    priority: task.dg_push ? NOTIFICATION_PRIORITIES.URGENT : NOTIFICATION_PRIORITIES.NORMAL,
+    priority,
     entityType: 'internal_task',
     entityId: task.id,
     actionUrl: moduleActionUrl('taches'),
     submoduleCode: NOTIFICATION_SUBMODULES.TACHES,
-  };
+  });
+}
+
+/** Tâche réassignée → nouveau responsable. */
+export async function notifyTaskAssigned(task, { previousAssignee } = {}) {
+  if (!task?.id || !task.assigne?.trim()) return null;
+  if (previousAssignee && personNamesMatch(previousAssignee, task.assigne)) return null;
+
   const assignee = await findProfileByAssigneeName(task.assigne);
-  if (assignee?.id) {
-    return notifyUser(assignee.id, payload);
+  if (!assignee?.id) {
+    console.warn('[CITYMO] notifyTaskAssigned: assigné introuvable →', task.assigne);
+    return null;
   }
-  return notifyTargeted({ submoduleCode: NOTIFICATION_SUBMODULES.TACHES }, payload);
+
+  return notifyUser(assignee.id, {
+    title: 'Tâche assignée',
+    message: `La tâche « ${task.titre} » vous a été assignée${task.dateLimite ? ` — échéance ${task.dateLimite}` : ''}.`,
+    type: NOTIFICATION_TYPES.TASK,
+    priority: NOTIFICATION_PRIORITIES.HIGH,
+    entityType: 'internal_task_assigned',
+    entityId: task.id,
+    actionUrl: moduleActionUrl('taches'),
+    submoduleCode: NOTIFICATION_SUBMODULES.TACHES,
+  });
 }
 
 /** Relance Directeur → notification à l'assigné uniquement. */
@@ -117,7 +147,7 @@ export async function notifyTaskDgRelance(task, customMessage) {
     title: 'Relance Directeur',
     message,
     type: NOTIFICATION_TYPES.TASK,
-    priority: NOTIFICATION_PRIORITIES.HIGH,
+    priority: NOTIFICATION_PRIORITIES.URGENT,
     entityType: 'internal_task_dg_relance',
     entityId: task.id,
     actionUrl: moduleActionUrl('taches'),
@@ -251,11 +281,11 @@ export async function notifyLeaveStatusChanged(leave, statut) {
   });
 }
 
-/** Demande de ressources chantier → RH. */
+/** Demande de ressources chantier → RH + accusé au demandeur. */
 export async function notifyResourceRequestCreated(request) {
   if (!request?.id) return;
   const projet = request.project_name || request.project_ref || 'Projet';
-  return notifyRhUsers({
+  const rhPayload = {
     title: 'Demande de ressources chantier',
     message: `${projet} — ${request.quantite} × ${request.fonction} (${request.priorite || 'Normale'}).`,
     type: NOTIFICATION_TYPES.RESOURCE_REQUEST,
@@ -266,6 +296,54 @@ export async function notifyResourceRequestCreated(request) {
     entityId: request.id,
     actionUrl: moduleActionUrl('demandes-ressources'),
     submoduleCode: NOTIFICATION_SUBMODULES.DEMANDES_RESSOURCES,
+  };
+
+  const results = await notifyRhUsers(rhPayload);
+
+  if (request.requested_by) {
+    const ack = await notifyUser(request.requested_by, {
+      title: 'Demande de ressources envoyée',
+      message: `Votre demande ${request.ref || ''} — ${request.fonction} × ${request.quantite} a été transmise au service RH.`,
+      type: NOTIFICATION_TYPES.RESOURCE_REQUEST,
+      priority: NOTIFICATION_PRIORITIES.NORMAL,
+      entityType: 'resource_request_submitted',
+      entityId: request.id,
+      actionUrl: moduleActionUrl('demandes-ressources'),
+      submoduleCode: NOTIFICATION_SUBMODULES.DEMANDES_RESSOURCES,
+    });
+    if (ack) results.push(ack);
+  }
+
+  return results;
+}
+
+/** Rendez-vous créé ou modifié → responsable concerné. */
+export async function notifyAppointmentAssigned(appt, { isUpdate = false } = {}) {
+  if (!appt?.id) return null;
+  const responsable = appt.responsable || appt.employe;
+  if (!responsable?.trim()) return null;
+
+  const assignee = await findProfileByAssigneeName(responsable);
+  if (!assignee?.id) {
+    console.warn('[CITYMO] notifyAppointmentAssigned: responsable introuvable →', responsable);
+    return null;
+  }
+
+  const dateLabel = appt.date || appt.date_rdv || '—';
+  const heure = appt.heure || appt.heure_debut || '';
+  const lieu = appt.lieu ? ` — ${appt.lieu}` : '';
+
+  return notifyUser(assignee.id, {
+    title: isUpdate ? 'Rendez-vous modifié' : 'Nouveau rendez-vous',
+    message: isUpdate
+      ? `Le RDV « ${appt.titre} » a été modifié : ${dateLabel}${heure ? ` à ${heure}` : ''}${lieu}.`
+      : `RDV « ${appt.titre} » le ${dateLabel}${heure ? ` à ${heure}` : ''}${lieu}.`,
+    type: NOTIFICATION_TYPES.APPOINTMENT,
+    priority: NOTIFICATION_PRIORITIES.HIGH,
+    entityType: isUpdate ? 'internal_appointment_updated' : 'internal_appointment',
+    entityId: appt.id,
+    actionUrl: moduleActionUrl('rendezvous'),
+    submoduleCode: NOTIFICATION_SUBMODULES.RENDEZ_VOUS,
   });
 }
 
@@ -276,7 +354,7 @@ export async function notifyResourceRequestValidated(request) {
     title: 'Ressources affectées',
     message: `Votre demande ${request.ref || ''} — ${request.fonction} a été traitée. Les ouvriers sont affectés au projet.`,
     type: NOTIFICATION_TYPES.RESOURCE_REQUEST,
-    priority: NOTIFICATION_PRIORITIES.NORMAL,
+    priority: NOTIFICATION_PRIORITIES.HIGH,
     entityType: 'resource_request_validated',
     entityId: request.id,
     actionUrl: moduleActionUrl('projets'),

@@ -3,6 +3,7 @@
  */
 import { getSupabase } from '../../lib/supabase';
 import { canManageTaskDgPush, userMatchesAssignee } from '../auth/taskDgPushAccess';
+import { personNamesMatch } from '../notifications/notificationRecipients';
 
 const TABLE = 'internal_tasks';
 const RELANCE_TABLE = 'internal_task_dg_relances';
@@ -168,6 +169,12 @@ export async function createInternalTask(form) {
 
 export async function updateInternalTask(id, form) {
   await getAuthUserId();
+  const { data: prev } = await getSupabase()
+    .from(TABLE)
+    .select('responsable')
+    .eq('id', id)
+    .maybeSingle();
+
   const row = toInternalTaskRow(form);
   const { data, error } = await getSupabase()
     .from(TABLE)
@@ -176,7 +183,17 @@ export async function updateInternalTask(id, form) {
     .select('*')
     .single();
   if (error) throw error;
-  return normalizeInternalTask(data);
+  const task = normalizeInternalTask(data);
+
+  const prevAssignee = prev?.responsable || '';
+  const newAssignee = task.assigne || '';
+  if (newAssignee && !personNamesMatch(prevAssignee, newAssignee)) {
+    import('../notifications/notificationEvents').then(({ notifyTaskAssigned }) => {
+      notifyTaskAssigned(task, { previousAssignee: prevAssignee }).catch(() => {});
+    });
+  }
+
+  return task;
 }
 
 export async function patchInternalTask(id, patch) {

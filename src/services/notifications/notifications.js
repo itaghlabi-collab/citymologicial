@@ -15,6 +15,7 @@ const TABLE = 'notifications';
 export const NOTIFICATION_TYPES = {
   PAYMENT: 'payment',
   TASK: 'task',
+  APPOINTMENT: 'appointment',
   CASH_REVIEW: 'cash_review',
   LEAVE_REQUEST: 'leave_request',
   PURCHASE_REQUEST: 'purchase_request',
@@ -23,6 +24,13 @@ export const NOTIFICATION_TYPES = {
   DOCUMENT: 'document',
   SYSTEM: 'system',
 };
+
+/** Types métier déclenchant un son à la réception. */
+export const SOUND_NOTIFICATION_TYPES = new Set([
+  NOTIFICATION_TYPES.TASK,
+  NOTIFICATION_TYPES.RESOURCE_REQUEST,
+  NOTIFICATION_TYPES.APPOINTMENT,
+]);
 
 export const NOTIFICATION_PRIORITIES = {
   LOW: 'low',

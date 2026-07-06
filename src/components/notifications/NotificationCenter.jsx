@@ -12,6 +12,7 @@ import { parseActionUrl } from '../../services/notifications/notifications';
 const TYPE_ICONS = {
   payment: Wallet,
   task: ListTodo,
+  appointment: Calendar,
   cash_review: Wallet,
   leave_request: Calendar,
   purchase_request: ShoppingCart,

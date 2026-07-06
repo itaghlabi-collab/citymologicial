@@ -8,10 +8,27 @@ import {
   countUnreadNotifications,
   markNotificationRead,
   markAllNotificationsRead,
+  SOUND_NOTIFICATION_TYPES,
 } from '../services/notifications/notifications';
 import { playNotificationSound } from '../utils/notificationSound';
 
 const POLL_MS = 30_000;
+
+function shouldPlaySoundFor(notification) {
+  if (!notification) return false;
+  if (SOUND_NOTIFICATION_TYPES.has(notification.type)) return true;
+  return notification.priority === 'high' || notification.priority === 'urgent';
+}
+
+function rowToNotification(row) {
+  if (!row) return null;
+  return {
+    id: row.id,
+    type: row.type || 'system',
+    priority: row.priority || 'normal',
+    isRead: Boolean(row.is_read),
+  };
+}
 
 export function useNotifications(user) {
   const [items, setItems] = useState([]);
@@ -21,6 +38,14 @@ export function useNotifications(user) {
   const knownIdsRef = useRef(new Set());
   const initialLoadRef = useRef(true);
   const soundEnabledRef = useRef(true);
+
+  const playForNew = useCallback((notifications) => {
+    if (!soundEnabledRef.current || !notifications?.length) return;
+    const important = notifications.filter(shouldPlaySoundFor);
+    if (important.length > 0) {
+      playNotificationSound();
+    }
+  }, []);
 
   const load = useCallback(async () => {
     if (!configured || !user?.id) {
@@ -35,13 +60,11 @@ export function useNotifications(user) {
         countUnreadNotifications(user),
       ]);
 
-      if (!initialLoadRef.current && soundEnabledRef.current) {
+      if (!initialLoadRef.current) {
         const newUnread = list.filter(
           (n) => !n.isRead && !knownIdsRef.current.has(n.id),
         );
-        if (newUnread.length > 0 && document.visibilityState === 'visible') {
-          playNotificationSound();
-        }
+        playForNew(newUnread);
       }
 
       knownIdsRef.current = new Set(list.map((n) => n.id));
@@ -53,7 +76,7 @@ export function useNotifications(user) {
     } finally {
       setLoading(false);
     }
-  }, [configured, user]);
+  }, [configured, user, playForNew]);
 
   useEffect(() => {
     initialLoadRef.current = true;
@@ -79,7 +102,13 @@ export function useNotifications(user) {
           table: 'notifications',
           filter: `recipient_user_id=eq.${user.id}`,
         },
-        () => { load(); },
+        (payload) => {
+          const incoming = rowToNotification(payload.new);
+          if (incoming && !knownIdsRef.current.has(incoming.id)) {
+            playForNew([incoming]);
+          }
+          load();
+        },
       )
       .on(
         'postgres_changes',
@@ -93,7 +122,7 @@ export function useNotifications(user) {
       )
       .subscribe();
     return () => { getSupabase().removeChannel(channel); };
-  }, [configured, user?.id, load]);
+  }, [configured, user?.id, load, playForNew]);
 
   useEffect(() => {
     if (!user?.id) return;

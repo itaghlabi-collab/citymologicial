@@ -23,7 +23,7 @@ CREATE INDEX IF NOT EXISTS notifications_submodule_idx
 ALTER TABLE public.notifications DROP CONSTRAINT IF EXISTS notifications_type_check;
 ALTER TABLE public.notifications ADD CONSTRAINT notifications_type_check CHECK (
   type IN (
-    'payment', 'task', 'cash_review', 'leave_request', 'purchase_request',
+    'payment', 'task', 'appointment', 'cash_review', 'leave_request', 'purchase_request',
     'document', 'system', 'resource_request', 'site_material_request'
   )
 );

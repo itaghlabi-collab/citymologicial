@@ -101,11 +101,21 @@ export async function createInternalAppointment(form) {
     .select('*')
     .single();
   if (error) throw error;
-  return normalizeInternalAppointment(data);
+  const appt = normalizeInternalAppointment(data);
+  import('../notifications/notificationEvents').then(({ notifyAppointmentAssigned }) => {
+    notifyAppointmentAssigned(appt, { isUpdate: false }).catch(() => {});
+  });
+  return appt;
 }
 
 export async function updateInternalAppointment(id, form) {
   await getAuthUserId();
+  const { data: prev } = await getSupabase()
+    .from(TABLE)
+    .select('responsable, date_rdv, heure_debut, titre, lieu')
+    .eq('id', id)
+    .maybeSingle();
+
   const row = toInternalAppointmentRow(form);
   const { data, error } = await getSupabase()
     .from(TABLE)
@@ -114,7 +124,23 @@ export async function updateInternalAppointment(id, form) {
     .select('*')
     .single();
   if (error) throw error;
-  return normalizeInternalAppointment(data);
+  const appt = normalizeInternalAppointment(data);
+
+  const responsableChanged = (prev?.responsable || '') !== (row.responsable || '');
+  const scheduleChanged = prev && (
+    prev.date_rdv !== row.date_rdv
+    || prev.heure_debut !== row.heure_debut
+    || prev.titre !== row.titre
+    || prev.lieu !== row.lieu
+  );
+
+  if (responsableChanged || scheduleChanged) {
+    import('../notifications/notificationEvents').then(({ notifyAppointmentAssigned }) => {
+      notifyAppointmentAssigned(appt, { isUpdate: true }).catch(() => {});
+    });
+  }
+
+  return appt;
 }
 
 export async function deleteInternalAppointment(id) {

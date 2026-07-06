@@ -22,6 +22,7 @@ export const NOTIFICATION_SUBMODULES = {
   CHARGES: 'charges',
   SAV: 'sav-projets',
   TACHES: 'taches',
+  RENDEZ_VOUS: 'rendez-vous',
   DEMANDES_RESSOURCES: 'demandes-ressources',
   DEMANDES_CHANTIER: 'demandes-chantier',
   PAIEMENT_HEBDO: 'paiement-hebdo',

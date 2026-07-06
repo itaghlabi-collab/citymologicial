@@ -49,7 +49,66 @@ function isInventaireProfile(p) {
 
 let profilesCache = null;
 let profilesCacheAt = 0;
+let employeesCache = null;
+let employeesCacheAt = 0;
 const CACHE_MS = 60_000;
+
+function normalizePersonName(name) {
+  return String(name || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function nameTokens(name) {
+  return normalizePersonName(name).split(' ').filter((t) => t.length > 1);
+}
+
+/** Correspondance souple : ordre prénom/nom, casse, accents. */
+export function personNamesMatch(a, b) {
+  const na = normalizePersonName(a);
+  const nb = normalizePersonName(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  const ta = nameTokens(a);
+  const tb = nameTokens(b);
+  if (ta.length >= 2 && tb.length >= 2) {
+    const allInB = ta.every((t) => tb.includes(t));
+    const allInA = tb.every((t) => ta.includes(t));
+    if (allInB || allInA) return true;
+  }
+  return na.includes(nb) || nb.includes(na);
+}
+
+async function fetchEmployeesForMatching() {
+  if (employeesCache && Date.now() - employeesCacheAt < CACHE_MS) return employeesCache;
+  const { data, error } = await getSupabase()
+    .from('employees')
+    .select('id, firstname, lastname, email, statut');
+  if (error) {
+    console.warn('[CITYMO] employees for notifications', error);
+    return employeesCache || [];
+  }
+  employeesCache = (data || []).filter(
+    (e) => (e.statut || 'Actif').toLowerCase() !== 'inactif',
+  );
+  employeesCacheAt = Date.now();
+  return employeesCache;
+}
+
+function employeeDisplayNames(emp) {
+  if (!emp) return [];
+  const first = (emp.firstname || '').trim();
+  const last = (emp.lastname || '').trim();
+  return [
+    [first, last].filter(Boolean).join(' '),
+    [last, first].filter(Boolean).join(' '),
+    last,
+    first,
+  ].filter(Boolean);
+}
 
 export async function fetchProfiles() {
   if (profilesCache && Date.now() - profilesCacheAt < CACHE_MS) return profilesCache;
@@ -98,25 +157,41 @@ export async function findProfileByEmail(email) {
 export function invalidateProfilesCache() {
   profilesCache = null;
   profilesCacheAt = 0;
+  employeesCache = null;
+  employeesCacheAt = 0;
 }
 
-/** Trouve un profil utilisateur par nom affiché (assigné tâche DG). */
+/** Trouve un profil utilisateur par nom affiché (tâche, RDV, assignation). */
 export async function findProfileByAssigneeName(assigneeName) {
   if (!assigneeName?.trim()) return null;
-  const q = String(assigneeName)
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/\p{M}/gu, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+
+  const q = String(assigneeName).trim();
+  if (q.includes('@')) {
+    return findProfileByEmail(q);
+  }
+
   const profiles = await fetchProfiles();
-  return profiles.find((p) => {
-    const nom = String(p.nom || '')
-      .toLowerCase()
-      .normalize('NFD')
-      .replace(/\p{M}/gu, '')
-      .replace(/\s+/g, ' ')
-      .trim();
-    return nom === q;
-  }) || null;
+
+  const byNom = profiles.find((p) => personNamesMatch(p.nom, q));
+  if (byNom) return byNom;
+
+  const employees = await fetchEmployeesForMatching();
+  const emp = employees.find((e) =>
+    employeeDisplayNames(e).some((label) => personNamesMatch(label, q)),
+  );
+
+  if (emp?.email) {
+    const byEmail = profiles.find(
+      (p) => (p.email || '').toLowerCase() === String(emp.email).toLowerCase(),
+    );
+    if (byEmail) return byEmail;
+  }
+
+  const byEmailLocal = profiles.find((p) => {
+    const local = (p.email || '').split('@')[0].replace(/[._-]/g, ' ');
+    return personNamesMatch(local, q);
+  });
+  if (byEmailLocal) return byEmailLocal;
+
+  return null;
 }
