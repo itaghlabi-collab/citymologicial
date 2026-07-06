@@ -126,21 +126,38 @@ function getBcTvaPercent(bc) {
 
 function buildPdfRows(bc) {
   const lignes = (bc.lignes || bc.lines || []).filter((l) => String(l.designation || '').trim());
-  if (!lignes.length) return [{ kind: 'empty' }];
+  const hasArticles = lignes.some((l) => (l.type || 'article') === 'article');
+  if (!hasArticles) return [{ kind: 'empty' }];
 
-  return lignes.map((l, i) => {
-    const ht = (Number(l.qte) || 0) * (Number(l.prix_ht) || 0);
-    return {
+  const rows = [];
+  let num = 0;
+
+  lignes.forEach((l) => {
+    if (l.type === 'titre') {
+      rows.push({ kind: 'titre', text: l.designation || '' });
+      return;
+    }
+    if (l.type === 'sous_titre') {
+      rows.push({ kind: 'sous_titre', text: l.designation || '' });
+      return;
+    }
+    if ((l.type || 'article') !== 'article') return;
+
+    num += 1;
+    const ht = (Number(l.qte) || 0) * (Number(l.prix_ht) || 0) * (1 - (Number(l.remise) || 0) / 100);
+    rows.push({
       kind: 'article',
-      num: i + 1,
+      num,
       designation: l.designation || '—',
       description: l.description || '',
       unite: fmtUnite(l.unite),
       quantite: l.qte,
       prix_ht: l.prix_ht,
       total_ht: ht,
-    };
+    });
   });
+
+  return rows;
 }
 
 function getDesigLines(doc, row) {
@@ -161,8 +178,50 @@ function measureArticleHeight(doc, row) {
   return Math.max(h, 9);
 }
 
+function getLabelRowLayout(doc, text, options = {}) {
+  const {
+    fontSize = 7.5,
+    uppercase = false,
+    bold = true,
+    italic = false,
+    indent = 0,
+    minH = 8,
+  } = options;
+  const displayText = uppercase ? String(text || '').toUpperCase() : String(text || '');
+  doc.setFont('helvetica', italic ? 'italic' : (bold ? 'bold' : 'normal'));
+  doc.setFontSize(fontSize);
+  const lines = doc.splitTextToSize(displayText, COL_W[1] - 4 - indent);
+  const lineH = fontSize >= 9 ? 3.8 : fontSize >= 8 ? 3.5 : italic ? 3.2 : 3.4;
+  const h = Math.max(PAD_TOP + lines.length * lineH + PAD_BOTTOM, minH);
+  return { lines, h, lineH, fontSize, bold, italic, indent };
+}
+
+function measureLabelRowHeight(doc, text, options = {}) {
+  return getLabelRowLayout(doc, text, options).h;
+}
+
+function drawTableLabelRow(doc, text, startY, options = {}) {
+  const { lines, h, lineH, fontSize, bold, italic, indent } = getLabelRowLayout(doc, text, options);
+
+  drawCellBorder(doc, M, startY, CONTENT_W, h);
+
+  doc.setFont('helvetica', italic ? 'italic' : (bold ? 'bold' : 'normal'));
+  doc.setFontSize(fontSize);
+  doc.setTextColor(...(italic ? MUTED : TEXT));
+
+  let ty = startY + PAD_TOP + 2;
+  lines.forEach((line) => {
+    doc.text(line, COL_X[1] + 2 + indent, ty);
+    ty += lineH;
+  });
+
+  return startY + h;
+}
+
 function measureRowHeight(doc, row) {
   if (row.kind === 'empty') return 12;
+  if (row.kind === 'titre') return measureLabelRowHeight(doc, row.text, { fontSize: 9, uppercase: true, minH: 8 });
+  if (row.kind === 'sous_titre') return measureLabelRowHeight(doc, row.text, { fontSize: 8, indent: 2, minH: 7 });
   return measureArticleHeight(doc, row);
 }
 
@@ -520,7 +579,11 @@ export async function generatePurchaseOrderPdf(bc, supplier = null, options = {}
       const headerH = tableHeaderOnPage ? 0 : TABLE_HDR_H;
       ensureSpace(headerH + h);
       ensureTableHeader();
-      if (row.kind === 'article') {
+      if (row.kind === 'titre') {
+        y = drawTableLabelRow(doc, row.text, y, { fontSize: 9, uppercase: true, minH: 8 });
+      } else if (row.kind === 'sous_titre') {
+        y = drawTableLabelRow(doc, row.text, y, { fontSize: 8, indent: 2, minH: 7 });
+      } else if (row.kind === 'article') {
         y = drawArticleRow(row, y);
       }
     });

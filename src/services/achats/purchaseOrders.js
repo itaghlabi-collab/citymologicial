@@ -6,9 +6,17 @@ import { getSupabase } from '../../lib/supabase';
 const TABLE = 'purchase_orders';
 
 const EMPTY_LIGNE = {
-  designation: '', description: '', categorie_id: '', article_id: '',
-  qte: 1, unite: 'unite', prix_ht: 0, tva: 20,
+  type: 'article', designation: '', description: '', categorie_id: '', article_id: '',
+  qte: 1, unite: 'unite', prix_ht: 0, remise: 0, tva: 20, ephemeral: false,
 };
+
+function lineHt(l) {
+  const t = l.type || 'article';
+  if (t === 'titre' || t === 'sous_titre') return 0;
+  const base = (parseFloat(l.qte) || 0) * (parseFloat(l.prix_ht) || 0);
+  const remise = parseFloat(l.remise) || 0;
+  return base * (1 - remise / 100);
+}
 
 function lineId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -16,14 +24,12 @@ function lineId() {
 
 export function computeLineTotals(lignes) {
   const lines = lignes || [];
-  const subtotal = lines.reduce(
-    (s, l) => s + (parseFloat(l.qte) || 0) * (parseFloat(l.prix_ht) || 0),
-    0,
-  );
-  const vat = lines.reduce(
-    (s, l) => s + (parseFloat(l.qte) || 0) * (parseFloat(l.prix_ht) || 0) * ((parseFloat(l.tva) || 0) / 100),
-    0,
-  );
+  const subtotal = lines.reduce((s, l) => s + lineHt(l), 0);
+  const vat = lines.reduce((s, l) => {
+    const t = l.type || 'article';
+    if (t === 'titre' || t === 'sous_titre') return s;
+    return s + lineHt(l) * ((parseFloat(l.tva) || 0) / 100);
+  }, 0);
   return { subtotal_ht: subtotal, total_vat: vat, total_ttc: subtotal + vat };
 }
 
@@ -32,13 +38,16 @@ function normalizeLines(raw) {
   if (!arr.length) return [{ ...EMPTY_LIGNE, id: lineId() }];
   return arr.map((l) => ({
     id: l.id || lineId(),
+    type: l.type || 'article',
+    ephemeral: l.ephemeral ?? false,
     categorie_id: l.categorie_id || '',
     article_id: l.article_id || '',
     designation: l.designation || '',
     description: l.description || '',
-    qte: l.qte ?? 1,
+    qte: l.qte ?? l.quantite ?? 1,
     unite: l.unite || 'unite',
     prix_ht: l.prix_ht ?? '',
+    remise: l.remise ?? 0,
     tva: l.tva ?? 20,
   }));
 }
@@ -91,8 +100,12 @@ export function toPurchaseOrderRow(form) {
     subtotal_ht: totals.subtotal_ht,
     total_vat: totals.total_vat,
     total_ttc: form.total_ttc != null ? Number(form.total_ttc) : totals.total_ttc,
-    lines: lignes.map(({ id, categorie_id, article_id, designation, description, qte, unite, prix_ht, tva }) => ({
+    lines: lignes.map(({
+      id, type, ephemeral, categorie_id, article_id, designation, description, qte, unite, prix_ht, remise, tva,
+    }) => ({
       id,
+      type: type || 'article',
+      ephemeral: !!ephemeral,
       categorie_id: categorie_id || null,
       article_id: article_id || null,
       designation: designation || '',
@@ -100,6 +113,7 @@ export function toPurchaseOrderRow(form) {
       qte: Number(qte) || 0,
       unite: unite || 'unite',
       prix_ht: Number(prix_ht) || 0,
+      remise: Number(remise) || 0,
       tva: Number(tva) || 0,
     })),
   };

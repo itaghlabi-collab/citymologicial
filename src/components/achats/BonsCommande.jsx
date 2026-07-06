@@ -71,7 +71,7 @@ function BCForm({ initial, onSave, onCancel, fournisseurs, suppliersLoading, sav
       setErrors({ fournisseur: 'Requis' });
       return;
     }
-    if (!form.lignes.some((l) => l.designation?.trim())) {
+    if (!form.lignes.some((l) => (l.type === 'article' || !l.type) && l.designation?.trim())) {
       setErrors({ lignes: 'Ajoutez au moins une ligne article.' });
       return;
     }
@@ -191,10 +191,33 @@ function DetailBC({ item, onBack, onEdit, onDelete, onDupliquer, onPdf, pdfLoadi
               <thead><tr><th>Désignation</th><th>Qté</th><th>Unité</th><th>Prix HT</th><th>TVA</th><th>Total HT</th></tr></thead>
               <tbody>
                 {lignes.map((l) => {
-                  const ht = (parseFloat(l.qte) || 0) * (parseFloat(l.prix_ht) || 0);
+                  const t = l.type || 'article';
+                  if (t === 'titre') {
+                    return (
+                      <tr key={l.id}>
+                        <td colSpan={6} style={{ padding: '10px 12px', background: '#F5F6F8', fontFamily: 'var(--font-head)', fontWeight: 800, color: 'var(--red)', textTransform: 'uppercase' }}>
+                          {l.designation || '—'}
+                        </td>
+                      </tr>
+                    );
+                  }
+                  if (t === 'sous_titre') {
+                    return (
+                      <tr key={l.id}>
+                        <td colSpan={6} style={{ padding: '8px 12px', background: '#FAFBFC', fontFamily: 'var(--font-head)', fontWeight: 700 }}>
+                          {l.designation || '—'}
+                        </td>
+                      </tr>
+                    );
+                  }
+                  const base = (parseFloat(l.qte) || 0) * (parseFloat(l.prix_ht) || 0);
+                  const ht = base * (1 - (parseFloat(l.remise) || 0) / 100);
                   return (
                     <tr key={l.id}>
-                      <td>{l.designation || '—'}</td>
+                      <td>
+                        <div>{l.designation || '—'}</div>
+                        {l.description && <div style={{ fontSize: '0.75rem', color: 'var(--text-3)', marginTop: 4, whiteSpace: 'pre-wrap' }}>{l.description}</div>}
+                      </td>
                       <td>{l.qte}</td>
                       <td>{l.unite}</td>
                       <td>{Number(l.prix_ht || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2 })}</td>
