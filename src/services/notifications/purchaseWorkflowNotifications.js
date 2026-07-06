@@ -1,9 +1,16 @@
 /**
- * purchaseWorkflowNotifications.js — Notifications workflow Achats
+ * purchaseWorkflowNotifications.js — Notifications workflow Achats (ciblées)
  */
-import { notifyUser } from './notifications';
-import { NOTIFICATION_TYPES, NOTIFICATION_PRIORITIES } from './notifications';
-import { listSuperAdminAndDGRecipients } from './notificationRecipients';
+import {
+  notifyUser,
+  notifySuperAdmins,
+  notifyAchatsUsers,
+  notifyFinanceUsers,
+  notifyInventaireUsers,
+  NOTIFICATION_TYPES,
+  NOTIFICATION_PRIORITIES,
+} from './notifications';
+import { NOTIFICATION_SUBMODULES } from './notificationTargeting';
 import { getSupabase } from '../../lib/supabase';
 import { PURCHASE_ASSIGNEE } from '../../constants/purchaseWorkflow';
 
@@ -40,18 +47,28 @@ async function findChargeeAchatsUserIds() {
 
 async function notifyChargeeAchats(payload) {
   const ids = await findChargeeAchatsUserIds();
-  if (!ids.length) return [];
-  return Promise.all(ids.map((userId) => notifyUser(userId, payload)));
+  if (ids.length) {
+    return Promise.all(ids.map((userId) => notifyUser(userId, {
+      ...payload,
+      submoduleCode: NOTIFICATION_SUBMODULES.DEMANDES_ACHAT,
+    })));
+  }
+  return notifyAchatsUsers(payload);
 }
 
 async function notifyDg(payload) {
-  const recipients = await listSuperAdminAndDGRecipients();
-  return Promise.all(recipients.map((p) => notifyUser(p.id, payload)));
+  return notifySuperAdmins({
+    ...payload,
+    submoduleCode: NOTIFICATION_SUBMODULES.DEMANDES_ACHAT,
+  });
 }
 
 async function notifyRequester(request, payload) {
   if (!request?.requester_user_id) return null;
-  return notifyUser(request.requester_user_id, payload);
+  return notifyUser(request.requester_user_id, {
+    ...payload,
+    submoduleCode: NOTIFICATION_SUBMODULES.DEMANDES_ACHAT,
+  });
 }
 
 export async function notifyPurchaseRequestSubmitted(request) {
@@ -129,15 +146,16 @@ export async function notifyOaCreated(request, oa) {
 }
 
 export async function notifyPaymentOrderCreated(request, oa, op) {
-  await notifyDg({
-    title: 'Ordre de paiement créé',
+  await notifyFinanceUsers({
+    title: 'Ordre de paiement à préparer',
     message: `OP ${op?.ref || ''} — OA ${oa?.ref || ''} — Demande ${request?.ref || ''}.`,
     type: NOTIFICATION_TYPES.PAYMENT,
     priority: NOTIFICATION_PRIORITIES.HIGH,
     entityType: 'purchase_payment_created',
     entityId: op?.id,
     actionUrl: 'module:ordres-paiement',
-  });
+    submoduleCode: NOTIFICATION_SUBMODULES.ORDRES_PAIEMENT,
+  }, NOTIFICATION_SUBMODULES.ORDRES_PAIEMENT);
 }
 
 export async function notifyPaymentValidated(op) {
@@ -150,6 +168,16 @@ export async function notifyPaymentValidated(op) {
     entityId: op?.id,
     actionUrl: 'module:ordres-paiement',
   });
+  await notifyFinanceUsers({
+    title: 'Paiement validé',
+    message: `L'ordre de paiement ${op?.ref || ''} a été validé.`,
+    type: NOTIFICATION_TYPES.PAYMENT,
+    priority: NOTIFICATION_PRIORITIES.NORMAL,
+    entityType: 'purchase_payment_validated_finance',
+    entityId: op?.id,
+    actionUrl: 'module:ordres-paiement',
+    submoduleCode: NOTIFICATION_SUBMODULES.ORDRES_PAIEMENT,
+  }, NOTIFICATION_SUBMODULES.ORDRES_PAIEMENT);
 }
 
 export async function notifyPurchaseReceived(request) {
@@ -163,9 +191,7 @@ export async function notifyPurchaseReceived(request) {
     entityId: request.id,
     actionUrl: moduleUrl(request.id),
   });
-  const { listInventaireRecipients } = await import('./notificationRecipients');
-  const magasiniers = await listInventaireRecipients();
-  await Promise.all(magasiniers.map((p) => notifyUser(p.id, {
+  await notifyInventaireUsers({
     title: 'Réception achat',
     message: `Commande réceptionnée — demande ${request.ref} (${request.project_name || ''}).`,
     type: NOTIFICATION_TYPES.PURCHASE_REQUEST,
@@ -173,5 +199,6 @@ export async function notifyPurchaseReceived(request) {
     entityType: 'purchase_received_magasin',
     entityId: request.id,
     actionUrl: moduleUrl(request.id),
-  })));
+    submoduleCode: NOTIFICATION_SUBMODULES.DEMANDES_CHANTIER,
+  });
 }

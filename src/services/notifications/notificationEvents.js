@@ -3,16 +3,19 @@
  */
 import {
   notifySuperAdmins,
-  notifySuperAdminsOnceDaily,
-  notifyExecutivesAndRh,
-  notifyInventaireAndAdmins,
+  notifyRhUsers,
+  notifyFinanceUsers,
+  notifyInventaireUsers,
   notifyUser,
+  notifyTargeted,
+  hasNotificationForUserToday,
   NOTIFICATION_TYPES,
   NOTIFICATION_PRIORITIES,
   formatMad,
   moduleActionUrl,
 } from './notifications';
 import { findProfileById, findProfileByAssigneeName } from './notificationRecipients';
+import { NOTIFICATION_SUBMODULES } from './notificationTargeting';
 import { FINANCE_SOURCE_TYPES } from '../finance/financeSync';
 
 const PAYMENT_HIGH_THRESHOLD = 5000;
@@ -33,7 +36,7 @@ const MODULE_BY_SOURCE = {
   [FINANCE_SOURCE_TYPES.CHARGE]: 'charges',
 };
 
-/** Cas A — Paiement réalisé (sync caisse, action created uniquement). */
+/** Paiement réalisé → Finance & Trésorerie ; montants élevés → DG en plus. */
 export async function notifyPaymentRealized({ sourceType, sourceId, entity, montant, beneficiaire }) {
   const amount = Number(montant) || 0;
   if (!amount || !sourceId) return;
@@ -42,19 +45,26 @@ export async function notifyPaymentRealized({ sourceType, sourceId, entity, mont
   const priority = amount >= PAYMENT_HIGH_THRESHOLD
     ? NOTIFICATION_PRIORITIES.HIGH
     : NOTIFICATION_PRIORITIES.NORMAL;
+  const submodule = MODULE_BY_SOURCE[sourceType] || NOTIFICATION_SUBMODULES.FEUILLE_CAISSE;
 
-  return notifySuperAdmins({
+  const payload = {
     title: 'Paiement réalisé',
     message: `Un paiement de ${formatMad(amount)} a été réalisé pour ${name} — ${label}.`,
     type: NOTIFICATION_TYPES.PAYMENT,
     priority,
     entityType: sourceType,
     entityId: sourceId,
-    actionUrl: moduleActionUrl(MODULE_BY_SOURCE[sourceType] || 'feuille-caisse'),
-  });
+    actionUrl: moduleActionUrl(submodule),
+    submoduleCode: submodule,
+  };
+
+  await notifyFinanceUsers(payload, submodule);
+  if (amount >= PAYMENT_HIGH_THRESHOLD) {
+    await notifySuperAdmins(payload);
+  }
 }
 
-/** Cas B — Tâche DG créée : notification uniquement pour l'assigné. */
+/** Tâche DG créée : notification uniquement pour l'assigné. */
 export async function notifyDgTaskCreated(task) {
   if (!task?.id || !task.is_dg_task) return;
   const assignee = await findProfileByAssigneeName(task.assigne);
@@ -67,16 +77,17 @@ export async function notifyDgTaskCreated(task) {
     entityType: 'internal_task_dg_assign',
     entityId: task.id,
     actionUrl: moduleActionUrl('taches'),
+    submoduleCode: NOTIFICATION_SUBMODULES.TACHES,
   });
 }
 
-/** Cas B — Tâche créée (tâches classiques uniquement). */
+/** Tâche créée : assigné uniquement, sinon utilisateurs module Tâches. */
 export async function notifyTaskCreated(task) {
   if (!task?.id) return;
   if (task.is_dg_task) {
     return notifyDgTaskCreated(task);
   }
-  return notifySuperAdmins({
+  const payload = {
     title: 'Nouvelle tâche',
     message: `Tâche « ${task.titre} » créée${task.assigne ? ` — assignée à ${task.assigne}` : ''}.`,
     type: NOTIFICATION_TYPES.TASK,
@@ -84,7 +95,13 @@ export async function notifyTaskCreated(task) {
     entityType: 'internal_task',
     entityId: task.id,
     actionUrl: moduleActionUrl('taches'),
-  });
+    submoduleCode: NOTIFICATION_SUBMODULES.TACHES,
+  };
+  const assignee = await findProfileByAssigneeName(task.assigne);
+  if (assignee?.id) {
+    return notifyUser(assignee.id, payload);
+  }
+  return notifyTargeted({ submoduleCode: NOTIFICATION_SUBMODULES.TACHES }, payload);
 }
 
 /** Relance Directeur → notification à l'assigné uniquement. */
@@ -104,10 +121,11 @@ export async function notifyTaskDgRelance(task, customMessage) {
     entityType: 'internal_task_dg_relance',
     entityId: task.id,
     actionUrl: moduleActionUrl('taches'),
+    submoduleCode: NOTIFICATION_SUBMODULES.TACHES,
   });
 }
 
-/** Cas B — Tâche urgente DG (Push DG). */
+/** Tâche urgente DG → Direction uniquement. */
 export async function notifyTaskDgUrgent(task) {
   if (!task?.id) return;
   return notifySuperAdmins({
@@ -118,13 +136,14 @@ export async function notifyTaskDgUrgent(task) {
     entityType: 'internal_task_dg',
     entityId: task.id,
     actionUrl: moduleActionUrl('taches'),
+    submoduleCode: NOTIFICATION_SUBMODULES.TACHES,
   });
 }
 
-/** Cas B — Tâche terminée. */
+/** Tâche terminée → créateur et assigné. */
 export async function notifyTaskCompleted(task) {
   if (!task?.id) return;
-  return notifySuperAdmins({
+  const payload = {
     title: 'Tâche terminée',
     message: `La tâche « ${task.titre} » est terminée.`,
     type: NOTIFICATION_TYPES.TASK,
@@ -132,14 +151,28 @@ export async function notifyTaskCompleted(task) {
     entityType: 'internal_task_done',
     entityId: task.id,
     actionUrl: moduleActionUrl('taches'),
-  });
+    submoduleCode: NOTIFICATION_SUBMODULES.TACHES,
+  };
+  const recipients = new Set();
+  if (task.created_by) recipients.add(task.created_by);
+  const assignee = await findProfileByAssigneeName(task.assigne);
+  if (assignee?.id) recipients.add(assignee.id);
+  if (!recipients.size) {
+    return notifyTargeted({ submoduleCode: NOTIFICATION_SUBMODULES.TACHES }, payload);
+  }
+  return Promise.all([...recipients].map((id) => notifyUser(id, payload)));
 }
 
-/** Cas C — Feuille de caisse à valider. */
+/** Feuille de caisse à valider → Finance (une fois par jour). */
 export async function notifyCashReviewPending({ reviewDate, opsCount = 0 }) {
   if (!reviewDate) return;
   const entityType = `cash_review_pending_${reviewDate}`;
-  return notifySuperAdminsOnceDaily(entityType, {
+  const { NOTIFICATION_DEPARTMENTS, NOTIFICATION_SUBMODULES, resolveNotificationRecipients } = await import('./notificationTargeting');
+  const userIds = await resolveNotificationRecipients({
+    departmentId: NOTIFICATION_DEPARTMENTS.COMPTABILITE,
+    submoduleCode: NOTIFICATION_SUBMODULES.FEUILLE_CAISSE,
+  });
+  const payload = {
     title: 'Validation caisse requise',
     message: opsCount > 0
       ? `Veuillez valider la caisse du ${reviewDate} — ${opsCount} opération(s).`
@@ -149,14 +182,23 @@ export async function notifyCashReviewPending({ reviewDate, opsCount = 0 }) {
     entityType,
     entityId: null,
     actionUrl: moduleActionUrl('feuille-caisse'),
-  });
+    submoduleCode: NOTIFICATION_SUBMODULES.FEUILLE_CAISSE,
+  };
+  const results = [];
+  for (const id of userIds) {
+    const exists = await hasNotificationForUserToday(id, payload.type, entityType);
+    if (exists) continue;
+    const n = await notifyUser(id, payload);
+    if (n) results.push(n);
+  }
+  return results;
 }
 
-/** Cas C — Feuille de caisse validée. */
+/** Feuille de caisse validée → Finance. */
 export async function notifyCashReviewCompleted({ reviewDate, entrees = 0, sorties = 0, soldeFin = 0 }) {
   if (!reviewDate) return;
   const entityType = `cash_review_done_${reviewDate}`;
-  return notifySuperAdmins({
+  return notifyFinanceUsers({
     title: 'Caisse validée',
     message: `Caisse du ${reviewDate} validée — entrées ${formatMad(entrees)}, sorties ${formatMad(sorties)}, solde fin ${formatMad(soldeFin)}.`,
     type: NOTIFICATION_TYPES.CASH_REVIEW,
@@ -164,16 +206,17 @@ export async function notifyCashReviewCompleted({ reviewDate, entrees = 0, sorti
     entityType,
     entityId: null,
     actionUrl: moduleActionUrl('feuille-caisse'),
-  });
+    submoduleCode: NOTIFICATION_SUBMODULES.FEUILLE_CAISSE,
+  }, NOTIFICATION_SUBMODULES.FEUILLE_CAISSE);
 }
 
-/** Cas D — Demande de congé créée. */
+/** Demande de congé → RH uniquement. */
 export async function notifyLeaveCreated(leave) {
   if (!leave?.id) return;
   const name = leave.employe || 'Employé';
   const debut = leave.dateDebut || leave.date_debut || '—';
   const fin = leave.dateFin || leave.date_fin || '—';
-  return notifyExecutivesAndRh({
+  return notifyRhUsers({
     title: 'Nouvelle demande de congé',
     message: `Demande de congé de ${name} du ${debut} au ${fin}.`,
     type: NOTIFICATION_TYPES.LEAVE_REQUEST,
@@ -181,10 +224,11 @@ export async function notifyLeaveCreated(leave) {
     entityType: 'leave_request',
     entityId: leave.id,
     actionUrl: moduleActionUrl('conges'),
+    submoduleCode: NOTIFICATION_SUBMODULES.CONGES,
   });
 }
 
-/** Cas D — Congé approuvé / refusé → notifier le demandeur. */
+/** Congé approuvé / refusé → demandeur uniquement. */
 export async function notifyLeaveStatusChanged(leave, statut) {
   if (!leave?.id) return;
   const requesterId = leave.created_by;
@@ -192,9 +236,6 @@ export async function notifyLeaveStatusChanged(leave, statut) {
   const approved = statut === 'Approuve' || statut === 'Approuvé';
   const refused = statut === 'Refuse' || statut === 'Refusé';
   if (!approved && !refused) return;
-
-  const profile = await findProfileById(requesterId);
-  const name = leave.employe || profile?.nom || 'Employé';
 
   return notifyUser(requesterId, {
     title: approved ? 'Congé approuvé' : 'Congé refusé',
@@ -206,14 +247,15 @@ export async function notifyLeaveStatusChanged(leave, statut) {
     entityType: 'leave_status',
     entityId: leave.id,
     actionUrl: moduleActionUrl('conges'),
+    submoduleCode: NOTIFICATION_SUBMODULES.CONGES,
   });
 }
 
-/** Demande de ressources chantier créée → RH. */
+/** Demande de ressources chantier → RH. */
 export async function notifyResourceRequestCreated(request) {
   if (!request?.id) return;
   const projet = request.project_name || request.project_ref || 'Projet';
-  return notifyExecutivesAndRh({
+  return notifyRhUsers({
     title: 'Demande de ressources chantier',
     message: `${projet} — ${request.quantite} × ${request.fonction} (${request.priorite || 'Normale'}).`,
     type: NOTIFICATION_TYPES.RESOURCE_REQUEST,
@@ -223,6 +265,7 @@ export async function notifyResourceRequestCreated(request) {
     entityType: 'resource_request',
     entityId: request.id,
     actionUrl: moduleActionUrl('demandes-ressources'),
+    submoduleCode: NOTIFICATION_SUBMODULES.DEMANDES_RESSOURCES,
   });
 }
 
@@ -237,13 +280,14 @@ export async function notifyResourceRequestValidated(request) {
     entityType: 'resource_request_validated',
     entityId: request.id,
     actionUrl: moduleActionUrl('projets'),
+    submoduleCode: NOTIFICATION_SUBMODULES.DEMANDES_RESSOURCES,
   });
 }
 
-/** Demande chantier soumise → magasinier / logistique. */
+/** Demande chantier soumise → logistique / inventaire. */
 export async function notifySiteRequestSubmitted(request) {
   if (!request?.id) return;
-  const payload = {
+  return notifyInventaireUsers({
     title: 'Nouvelle demande chantier',
     message: `${request.ref} — ${request.project_name || 'Projet'} (${request.priorite}). ${request.distinct_articles || 0} article(s) demandé(s).`,
     type: NOTIFICATION_TYPES.SITE_MATERIAL_REQUEST,
@@ -255,11 +299,11 @@ export async function notifySiteRequestSubmitted(request) {
     entityType: 'site_material_request',
     entityId: request.id,
     actionUrl: moduleActionUrl('demandes-chantier'),
-  };
-  return notifyInventaireAndAdmins(payload);
+    submoduleCode: NOTIFICATION_SUBMODULES.DEMANDES_CHANTIER,
+  });
 }
 
-/** Demande chantier — validation DG requise. */
+/** Demande chantier — validation DG. */
 export async function notifySiteRequestDgRequired(request) {
   if (!request?.id) return;
   return notifySuperAdmins({
@@ -270,6 +314,7 @@ export async function notifySiteRequestDgRequired(request) {
     entityType: 'site_material_request_dg',
     entityId: request.id,
     actionUrl: moduleActionUrl('demandes-chantier'),
+    submoduleCode: NOTIFICATION_SUBMODULES.DEMANDES_CHANTIER,
   });
 }
 
@@ -284,6 +329,7 @@ export async function notifySiteRequestReady(request) {
     entityType: 'site_material_request_ready',
     entityId: request.id,
     actionUrl: moduleActionUrl('demandes-chantier'),
+    submoduleCode: NOTIFICATION_SUBMODULES.DEMANDES_CHANTIER,
   });
 }
 
@@ -299,10 +345,11 @@ export async function notifySiteRequestDelivered(request) {
     entityType: 'site_material_request_delivered',
     entityId: request.id,
     actionUrl: moduleActionUrl('demandes-chantier'),
+    submoduleCode: NOTIFICATION_SUBMODULES.DEMANDES_CHANTIER,
   });
 }
 
-/** Accusé réception demande → demandeur. */
+/** Accusé réception → demandeur. */
 export async function notifySiteRequestReceived(request) {
   if (!request?.id || !request.requested_by) return;
   return notifyUser(request.requested_by, {
@@ -313,10 +360,11 @@ export async function notifySiteRequestReceived(request) {
     entityType: 'site_material_request_received',
     entityId: request.id,
     actionUrl: moduleActionUrl('demandes-chantier'),
+    submoduleCode: NOTIFICATION_SUBMODULES.DEMANDES_CHANTIER,
   });
 }
 
-/** Demande chantier traitée par le magasinier (préparation totale ou partielle). */
+/** Demande chantier traitée par le magasinier. */
 export async function notifySiteRequestPrepared(request, { partial = false } = {}) {
   if (!request?.id || !request.requested_by) return;
   const title = partial ? 'Demande chantier — préparation partielle' : 'Demande chantier — en préparation';
@@ -331,16 +379,16 @@ export async function notifySiteRequestPrepared(request, { partial = false } = {
     entityType: partial ? 'site_material_request_partial' : 'site_material_request_prepared',
     entityId: request.id,
     actionUrl: moduleActionUrl('demandes-chantier'),
+    submoduleCode: NOTIFICATION_SUBMODULES.DEMANDES_CHANTIER,
   });
 }
 
-/** Rupture stock → demande d'achat créée (chef de projet / demandeur). */
+/** Rupture stock → demandeur + Achats. */
 export async function notifySiteRequestPurchaseCreated(siteRequest, purchaseRequest) {
   if (!siteRequest?.id || !purchaseRequest?.id) return;
-  const recipients = new Set();
-  if (siteRequest.requested_by) recipients.add(siteRequest.requested_by);
-  const results = await Promise.all(
-    [...recipients].map((userId) => notifyUser(userId, {
+  const results = [];
+  if (siteRequest.requested_by) {
+    results.push(await notifyUser(siteRequest.requested_by, {
       title: 'Demande d\'achat générée',
       message: `Rupture de stock sur ${siteRequest.ref} — demande d'achat ${purchaseRequest.ref || ''} créée pour le projet ${siteRequest.project_name || ''}.`,
       type: NOTIFICATION_TYPES.PURCHASE_REQUEST,
@@ -348,7 +396,19 @@ export async function notifySiteRequestPurchaseCreated(siteRequest, purchaseRequ
       entityType: 'purchase_request_from_site',
       entityId: purchaseRequest.id,
       actionUrl: moduleActionUrl('demandes-achat'),
-    })),
-  );
+      submoduleCode: NOTIFICATION_SUBMODULES.DEMANDES_ACHAT,
+    }));
+  }
+  const { notifyAchatsUsers } = await import('./notifications');
+  results.push(...await notifyAchatsUsers({
+    title: 'Demande d\'achat générée (stock)',
+    message: `${purchaseRequest.ref || ''} — ${siteRequest.project_name || 'Projet'} (rupture ${siteRequest.ref}).`,
+    type: NOTIFICATION_TYPES.PURCHASE_REQUEST,
+    priority: NOTIFICATION_PRIORITIES.HIGH,
+    entityType: 'purchase_request_from_site_achats',
+    entityId: purchaseRequest.id,
+    actionUrl: moduleActionUrl('demandes-achat'),
+    submoduleCode: NOTIFICATION_SUBMODULES.DEMANDES_ACHAT,
+  }));
   return results.filter(Boolean);
 }

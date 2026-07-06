@@ -1,5 +1,5 @@
 /**
- * notifications.js — Service central notifications ERP
+ * notifications.js — Service central notifications ERP (ciblage par utilisateur)
  */
 import { getSupabase } from '../../lib/supabase';
 import {
@@ -7,6 +7,8 @@ import {
   listRhRecipients,
   listInventaireRecipients,
 } from './notificationRecipients';
+import { resolveNotificationRecipients } from './notificationTargeting';
+import { queueWhatsappNotification } from './whatsappNotifications';
 
 const TABLE = 'notifications';
 
@@ -35,6 +37,10 @@ export function normalizeNotification(row) {
     id: row.id,
     recipientUserId: row.recipient_user_id,
     recipientRole: row.recipient_role,
+    recipientRoleId: row.recipient_role_id,
+    recipientDepartmentId: row.recipient_department_id,
+    submoduleCode: row.submodule_code,
+    isGlobal: Boolean(row.is_global),
     title: row.title,
     message: row.message || '',
     type: row.type || 'system',
@@ -54,14 +60,13 @@ async function getCurrentUserId() {
   return user?.id || null;
 }
 
-/**
- * Crée une notification (anti-doublon via index unique Supabase).
- * @returns {Promise<object|null>}
- */
-export async function createNotification(payload) {
+function buildNotificationRow(payload, recipientUserId) {
   const {
-    recipientUserId = null,
     recipientRole = null,
+    roleId = null,
+    departmentId = null,
+    submoduleCode = null,
+    isGlobal = false,
     title,
     message = '',
     type = NOTIFICATION_TYPES.SYSTEM,
@@ -72,13 +77,13 @@ export async function createNotification(payload) {
     createdBy = null,
   } = payload;
 
-  if (!title?.trim()) return null;
-  if (!recipientUserId && !recipientRole) return null;
-
-  const uid = createdBy || (await getCurrentUserId());
-  const row = {
-    recipient_user_id: recipientUserId,
-    recipient_role: recipientRole,
+  return {
+    recipient_user_id: recipientUserId || null,
+    recipient_role: recipientUserId ? null : recipientRole,
+    recipient_role_id: roleId || null,
+    recipient_department_id: departmentId || null,
+    submodule_code: submoduleCode || null,
+    is_global: Boolean(isGlobal),
     title: title.trim(),
     message: message?.trim() || null,
     type,
@@ -87,8 +92,27 @@ export async function createNotification(payload) {
     entity_id: entityId || null,
     action_url: actionUrl,
     is_read: false,
-    created_by: uid,
+    created_by: createdBy,
   };
+}
+
+/**
+ * Crée une notification pour un destinataire précis (anti-doublon via index unique).
+ */
+export async function createNotification(payload) {
+  const {
+    recipientUserId = null,
+    recipientRole = null,
+    isGlobal = false,
+    title,
+    createdBy = null,
+  } = payload;
+
+  if (!title?.trim()) return null;
+  if (!isGlobal && !recipientUserId && !recipientRole) return null;
+
+  const uid = createdBy || (await getCurrentUserId());
+  const row = buildNotificationRow({ ...payload, createdBy: uid }, recipientUserId);
 
   const { data, error } = await getSupabase()
     .from(TABLE)
@@ -101,7 +125,19 @@ export async function createNotification(payload) {
     console.warn('[CITYMO] createNotification', error);
     return null;
   }
-  return normalizeNotification(data);
+
+  const normalized = normalizeNotification(data);
+
+  if (recipientUserId) {
+    queueWhatsappNotification({
+      notificationId: normalized.id,
+      userId: recipientUserId,
+      title: normalized.title,
+      message: normalized.message,
+    }).catch(() => {});
+  }
+
+  return normalized;
 }
 
 export async function notifyUser(userId, payload) {
@@ -109,12 +145,37 @@ export async function notifyUser(userId, payload) {
   return createNotification({ ...payload, recipientUserId: userId, recipientRole: null });
 }
 
+/** Notification globale explicite (tous les utilisateurs connectés). */
+export async function notifyGlobal(payload) {
+  return createNotification({ ...payload, isGlobal: true, recipientUserId: null, recipientRole: null });
+}
+
 export async function notifyRole(role, payload) {
   if (!role) return null;
   return createNotification({ ...payload, recipientUserId: null, recipientRole: role });
 }
 
-/** Notifie tous les Super Admin + DG (une ligne par utilisateur). */
+/**
+ * Cible plusieurs utilisateurs selon département, rôle, rubrique ou liste d'IDs.
+ * Une ligne par utilisateur (lecture / compteur / son individuels).
+ */
+export async function notifyTargeted(targeting, payload) {
+  const userIds = await resolveNotificationRecipients(targeting);
+  if (!userIds.length) return [];
+
+  const meta = {
+    roleId: targeting.roleId || null,
+    departmentId: targeting.departmentId || null,
+    submoduleCode: targeting.submoduleCode || payload.submoduleCode || null,
+  };
+
+  const results = await Promise.all(
+    userIds.map((id) => notifyUser(id, { ...payload, ...meta })),
+  );
+  return results.filter(Boolean);
+}
+
+/** Notifie DG / Super Admin uniquement (pas tous les utilisateurs). */
 export async function notifySuperAdmins(payload) {
   const recipients = await listSuperAdminAndDGRecipients();
   const results = await Promise.all(
@@ -123,23 +184,21 @@ export async function notifySuperAdmins(payload) {
   return results.filter(Boolean);
 }
 
-async function hasNotificationForUserToday(userId, type, entityType) {
+export async function hasNotificationForUserToday(userId, type, entityType) {
   if (!userId || !entityType) return false;
   const start = new Date();
   start.setHours(0, 0, 0, 0);
-  const { data, error } = await getSupabase()
+  const { count, error } = await getSupabase()
     .from(TABLE)
-    .select('id')
+    .select('*', { count: 'exact', head: true })
     .eq('recipient_user_id', userId)
     .eq('type', type)
     .eq('entity_type', entityType)
-    .gte('created_at', start.toISOString())
-    .limit(1);
+    .gte('created_at', start.toISOString());
   if (error) return false;
-  return (data || []).length > 0;
+  return (count || 0) > 0;
 }
 
-/** Notifie Super Admin + DG une seule fois par jour pour un entityType donné. */
 export async function notifySuperAdminsOnceDaily(entityType, payload) {
   const recipients = await listSuperAdminAndDGRecipients();
   const results = [];
@@ -152,28 +211,59 @@ export async function notifySuperAdminsOnceDaily(entityType, payload) {
   return results;
 }
 
-/** Notifie Super Admin + DG + profils RH. */
-export async function notifyExecutivesAndRh(payload) {
-  const exec = await listSuperAdminAndDGRecipients();
-  const rh = await listRhRecipients();
-  const map = new Map();
-  [...exec, ...rh].forEach((p) => map.set(p.id, p));
-  const results = await Promise.all(
-    [...map.values()].map((p) => notifyUser(p.id, payload)),
-  );
-  return results.filter(Boolean);
+/** RH uniquement (département + rubrique congés). */
+export async function notifyRhUsers(payload) {
+  const { NOTIFICATION_DEPARTMENTS, NOTIFICATION_SUBMODULES } = await import('./notificationTargeting');
+  return notifyTargeted({
+    departmentId: NOTIFICATION_DEPARTMENTS.RH,
+    submoduleCode: NOTIFICATION_SUBMODULES.CONGES,
+  }, payload);
 }
 
-/** Notifie Super Admin + DG + magasiniers / inventaire. */
+/** Finance & Trésorerie. */
+export async function notifyFinanceUsers(payload, submoduleCode) {
+  const { NOTIFICATION_DEPARTMENTS, NOTIFICATION_SUBMODULES } = await import('./notificationTargeting');
+  return notifyTargeted({
+    departmentId: NOTIFICATION_DEPARTMENTS.COMPTABILITE,
+    submoduleCode: submoduleCode || NOTIFICATION_SUBMODULES.ORDRES_PAIEMENT,
+  }, payload);
+}
+
+/** Achats uniquement. */
+export async function notifyAchatsUsers(payload) {
+  const { NOTIFICATION_DEPARTMENTS, NOTIFICATION_SUBMODULES } = await import('./notificationTargeting');
+  return notifyTargeted({
+    departmentId: NOTIFICATION_DEPARTMENTS.ACHATS,
+    submoduleCode: NOTIFICATION_SUBMODULES.DEMANDES_ACHAT,
+  }, payload);
+}
+
+/** Logistique / inventaire. */
+export async function notifyInventaireUsers(payload) {
+  const { NOTIFICATION_DEPARTMENTS, NOTIFICATION_SUBMODULES } = await import('./notificationTargeting');
+  return notifyTargeted({
+    departmentId: NOTIFICATION_DEPARTMENTS.LOGISTIQUE,
+    submoduleCode: NOTIFICATION_SUBMODULES.DEMANDES_CHANTIER,
+  }, payload);
+}
+
+/** SAV uniquement. */
+export async function notifySavUsers(payload) {
+  const { NOTIFICATION_DEPARTMENTS, NOTIFICATION_SUBMODULES } = await import('./notificationTargeting');
+  return notifyTargeted({
+    departmentId: NOTIFICATION_DEPARTMENTS.SAV,
+    submoduleCode: NOTIFICATION_SUBMODULES.SAV,
+  }, payload);
+}
+
+/** @deprecated Préférer notifyRhUsers — conservé pour compatibilité interne. */
+export async function notifyExecutivesAndRh(payload) {
+  return notifyRhUsers(payload);
+}
+
+/** @deprecated Préférer notifyInventaireUsers */
 export async function notifyInventaireAndAdmins(payload) {
-  const exec = await listSuperAdminAndDGRecipients();
-  const inv = await listInventaireRecipients();
-  const map = new Map();
-  [...exec, ...inv].forEach((p) => map.set(p.id, p));
-  const results = await Promise.all(
-    [...map.values()].map((p) => notifyUser(p.id, payload)),
-  );
-  return results.filter(Boolean);
+  return notifyInventaireUsers(payload);
 }
 
 export async function listNotificationsForUser(user, { limit = 80 } = {}) {
@@ -181,6 +271,7 @@ export async function listNotificationsForUser(user, { limit = 80 } = {}) {
   const { data, error } = await getSupabase()
     .from(TABLE)
     .select('*')
+    .or(`recipient_user_id.eq.${user.id},is_global.eq.true`)
     .order('created_at', { ascending: false })
     .limit(limit);
   if (error) {
@@ -191,8 +282,17 @@ export async function listNotificationsForUser(user, { limit = 80 } = {}) {
 }
 
 export async function countUnreadNotifications(user) {
-  const list = await listNotificationsForUser(user, { limit: 200 });
-  return list.filter((n) => !n.isRead).length;
+  if (!user?.id) return 0;
+  const { count, error } = await getSupabase()
+    .from(TABLE)
+    .select('*', { count: 'exact', head: true })
+    .or(`recipient_user_id.eq.${user.id},is_global.eq.true`)
+    .eq('is_read', false);
+  if (error) {
+    console.warn('[CITYMO] countUnreadNotifications', error);
+    return 0;
+  }
+  return count || 0;
 }
 
 export async function markNotificationRead(id) {
@@ -207,15 +307,15 @@ export async function markNotificationRead(id) {
 }
 
 export async function markAllNotificationsRead(user) {
-  const list = await listNotificationsForUser(user, { limit: 200 });
-  const unreadIds = list.filter((n) => !n.isRead).map((n) => n.id);
-  if (!unreadIds.length) return 0;
-  const { error } = await getSupabase()
+  if (!user?.id) return 0;
+  const { data, error } = await getSupabase()
     .from(TABLE)
     .update({ is_read: true, read_at: new Date().toISOString() })
-    .in('id', unreadIds);
+    .eq('recipient_user_id', user.id)
+    .eq('is_read', false)
+    .select('id');
   if (error) throw error;
-  return unreadIds.length;
+  return (data || []).length;
 }
 
 export function formatMad(amount) {
