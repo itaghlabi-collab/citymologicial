@@ -3,7 +3,6 @@
  */
 import { jsPDF } from 'jspdf';
 import { clientDisplayName } from './clients';
-import { formatCategoryDisplayName } from '../../utils/crm/categoryDisplay';
 
 const LOGO_URL = 'https://i.ibb.co/N6SbC06M/logopng.png';
 const ICON_URL = 'https://i.ibb.co/S79nbLdm/icone.png';
@@ -224,19 +223,17 @@ function fmtUnite(u) {
   return map[u] || u || 'unité';
 }
 
-function buildPdfRows(devis, catMap) {
+function buildPdfRows(devis) {
   const lignes = devis.lignes || [];
   const hasArticles = lignes.some((l) => l.type === 'article');
   if (!hasArticles) return [{ kind: 'empty' }];
 
   const rows = [];
-  let currentCat = null;
   let num = 0;
 
   lignes.forEach((l) => {
     if (l.type === 'titre') {
       rows.push({ kind: 'titre', text: l.designation || '' });
-      currentCat = null;
       return;
     }
     if (l.type === 'sous_titre') {
@@ -248,17 +245,6 @@ function buildPdfRows(devis, catMap) {
       return;
     }
     if (l.type !== 'article') return;
-
-    const catKey = l.categorie_id ? String(l.categorie_id) : '__none__';
-    if (catKey !== currentCat) {
-      currentCat = catKey;
-      if (catKey !== '__none__') {
-        rows.push({
-          kind: 'section',
-          text: formatCategoryDisplayName(catMap[catKey] || 'SANS CATÉGORIE'),
-        });
-      }
-    }
 
     num += 1;
     const ht = Number(l.quantite) * Number(l.prix_ht) * (1 - Number(l.remise || 0) / 100);
@@ -376,7 +362,7 @@ export async function generateDevisPdf(devis, catMap = {}, options = {}) {
 
   const client = devis.client || {};
   const clientNom = devis.client_nom || clientDisplayName(client) || 'CLIENT';
-  const rows = buildPdfRows(devis, catMap);
+  const rows = buildPdfRows(devis);
   const conditionsText = devis.conditions?.trim() || devis.modalites_paiement?.trim() || DEFAULT_CONDITIONS;
   const footerLayout = getFooterQrLayout(qrMeta);
 

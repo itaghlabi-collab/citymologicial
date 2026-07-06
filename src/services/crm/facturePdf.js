@@ -3,7 +3,6 @@
  */
 import { jsPDF } from 'jspdf';
 import { clientDisplayName } from './clients';
-import { formatCategoryDisplayName } from '../../utils/crm/categoryDisplay';
 
 const LOGO_URL = 'https://i.ibb.co/N6SbC06M/logopng.png';
 const ICON_URL = 'https://i.ibb.co/S79nbLdm/icone.png';
@@ -163,19 +162,17 @@ function fmtUnite(u) {
   return map[u] || u || 'unité';
 }
 
-function buildPdfRows(facture, catMap) {
+function buildPdfRows(facture) {
   const lignes = facture.lignes || [];
   const hasArticles = lignes.some((l) => l.type === 'article');
   if (!hasArticles) return [{ kind: 'empty' }];
 
   const rows = [];
-  let currentCat = null;
   let num = 0;
 
   lignes.forEach((l) => {
     if (l.type === 'titre') {
       rows.push({ kind: 'titre', text: l.designation || '' });
-      currentCat = null;
       return;
     }
     if (l.type === 'sous_titre') {
@@ -187,17 +184,6 @@ function buildPdfRows(facture, catMap) {
       return;
     }
     if (l.type !== 'article') return;
-
-    const catKey = l.categorie_id ? String(l.categorie_id) : '__none__';
-    if (catKey !== currentCat) {
-      currentCat = catKey;
-      if (catKey !== '__none__') {
-        rows.push({
-          kind: 'section',
-          text: formatCategoryDisplayName(catMap[catKey] || 'SANS CATÉGORIE'),
-        });
-      }
-    }
 
     num += 1;
     const ht = Number(l.quantite) * Number(l.prix_ht) * (1 - Number(l.remise || 0) / 100);
@@ -315,7 +301,7 @@ export async function generateFacturePdf(facture, catMap = {}, options = {}) {
   const client = facture.client || {};
   const clientNom = facture.client_nom || clientDisplayName(client) || 'CLIENT';
   const isAcompte = facture.facture_type === 'acompte';
-  const rows = buildPdfRows(facture, catMap);
+  const rows = buildPdfRows(facture);
   const conditionsText = facture.conditions?.trim() || facture.modalites_paiement?.trim() || DEFAULT_CONDITIONS;
   const footerLayout = getFooterQrLayout(qrMeta);
   const tvaPct = getFactureTvaPercent(facture);
