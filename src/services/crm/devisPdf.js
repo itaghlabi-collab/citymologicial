@@ -3,11 +3,11 @@
  */
 import { jsPDF } from 'jspdf';
 import { clientDisplayName } from './clients';
-
-const LOGO_URL = 'https://i.ibb.co/N6SbC06M/logopng.png';
-const ICON_URL = 'https://i.ibb.co/S79nbLdm/icone.png';
-const QR_URL = 'https://i.ibb.co/rRrG27n3/Capture-d-e-cran-2026-06-02-a-15-32-23.png';
-const SIGNATURE_URL = 'https://i.ibb.co/nMVcsDqS/signature.png';
+import {
+  addCrmPdfImage,
+  CRM_PDF_IMAGE_ALIAS,
+  loadCrmPdfImages,
+} from '../../utils/crm/crmPdfImageUtils';
 
 const RED = [198, 40, 40];
 const TEXT = [33, 33, 33];
@@ -74,38 +74,6 @@ const LABEL_COL_R = COL_R[4];
 const LEFT_MERGE_W = CONTENT_W - COL_W[5];
 const TOTAL_ROW_H = 7;
 
-async function loadImage(url) {
-  try {
-    const res = await fetch(url, { mode: 'cors' });
-    if (!res.ok) return null;
-    const blob = await res.blob();
-    return await new Promise((resolve) => {
-      const r = new FileReader();
-      r.onload = () => resolve(r.result);
-      r.onerror = () => resolve(null);
-      r.readAsDataURL(blob);
-    });
-  } catch {
-    return null;
-  }
-}
-
-function getImageSize(dataUrl) {
-  return new Promise((resolve) => {
-    const img = new Image();
-    img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
-    img.onerror = () => resolve({ width: 1, height: 1 });
-    img.src = dataUrl;
-  });
-}
-
-async function loadImageWithSize(url) {
-  const dataUrl = await loadImage(url);
-  if (!dataUrl) return null;
-  const size = await getImageSize(dataUrl);
-  return { dataUrl, ...size };
-}
-
 function containImage(naturalW, naturalH, maxW, maxH) {
   if (!naturalW || !naturalH) return { width: maxW, height: maxH };
   const ratio = naturalW / naturalH;
@@ -116,11 +84,6 @@ function containImage(naturalW, naturalH, maxW, maxH) {
     width = height * ratio;
   }
   return { width, height };
-}
-
-function imgFmt(dataUrl) {
-  if (!dataUrl?.includes('jpeg') && !dataUrl?.includes('jpg')) return 'PNG';
-  return 'JPEG';
 }
 
 function isDevisApproved(devis) {
@@ -353,12 +316,7 @@ function deliverPdf(doc, filename, options = {}) {
 
 export async function generateDevisPdf(devis, catMap = {}, options = {}) {
   const showSignature = isDevisApproved(devis);
-  const [logoMeta, iconMeta, qrMeta, signatureMeta] = await Promise.all([
-    loadImageWithSize(LOGO_URL),
-    loadImageWithSize(ICON_URL),
-    loadImageWithSize(QR_URL),
-    showSignature ? loadImageWithSize(SIGNATURE_URL) : Promise.resolve(null),
-  ]);
+  const { logoMeta, iconMeta, qrMeta, signatureMeta } = await loadCrmPdfImages({ withSignature: showSignature });
 
   const client = devis.client || {};
   const clientNom = devis.client_nom || clientDisplayName(client) || 'CLIENT';
@@ -366,7 +324,7 @@ export async function generateDevisPdf(devis, catMap = {}, options = {}) {
   const conditionsText = devis.conditions?.trim() || devis.modalites_paiement?.trim() || DEFAULT_CONDITIONS;
   const footerLayout = getFooterQrLayout(qrMeta);
 
-  const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
+  const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait', compress: true });
   let y = M;
 
   const drawWatermark = () => {
@@ -380,7 +338,7 @@ export async function generateDevisPdf(devis, catMap = {}, options = {}) {
       if (doc.saveGraphicsState && doc.GState) {
         doc.saveGraphicsState();
         doc.setGState(new doc.GState({ opacity: 0.07 }));
-        doc.addImage(iconMeta.dataUrl, imgFmt(iconMeta.dataUrl), ix, iy, size.width, size.height);
+        addCrmPdfImage(doc, iconMeta, ix, iy, size.width, size.height, CRM_PDF_IMAGE_ALIAS.icon);
         doc.restoreGraphicsState();
       }
     } catch { /* skip */ }
@@ -400,13 +358,14 @@ export async function generateDevisPdf(devis, catMap = {}, options = {}) {
 
     if (qrMeta?.dataUrl) {
       try {
-        doc.addImage(
-          qrMeta.dataUrl,
-          imgFmt(qrMeta.dataUrl),
+        addCrmPdfImage(
+          doc,
+          qrMeta,
           qrX,
           qrY,
           qrSize.width,
           qrSize.height,
+          CRM_PDF_IMAGE_ALIAS.qr,
         );
       } catch { /* skip */ }
     }
@@ -519,13 +478,14 @@ export async function generateDevisPdf(devis, catMap = {}, options = {}) {
         const sigX = M + (leftW - sigSize.width) / 2;
         const sigY = startY + (blockH - sigSize.height) / 2;
         try {
-          doc.addImage(
-            signatureMeta.dataUrl,
-            imgFmt(signatureMeta.dataUrl),
+          addCrmPdfImage(
+            doc,
+            signatureMeta,
             sigX,
             sigY,
             sigSize.width,
             sigSize.height,
+            CRM_PDF_IMAGE_ALIAS.signature,
           );
         } catch { /* skip */ }
       }
@@ -627,7 +587,7 @@ export async function generateDevisPdf(devis, catMap = {}, options = {}) {
   if (logoMeta?.dataUrl) {
     const logoSize = containImage(logoMeta.width, logoMeta.height, LOGO_MAX_W, LOGO_MAX_H);
     try {
-      doc.addImage(logoMeta.dataUrl, imgFmt(logoMeta.dataUrl), M, headerTop, logoSize.width, logoSize.height);
+      addCrmPdfImage(doc, logoMeta, M, headerTop, logoSize.width, logoSize.height, CRM_PDF_IMAGE_ALIAS.logo);
     } catch { /* skip */ }
   }
 
