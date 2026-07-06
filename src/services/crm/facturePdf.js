@@ -162,6 +162,12 @@ function fmtUnite(u) {
   return map[u] || u || 'unité';
 }
 
+function factureIntitule(titre) {
+  const raw = String(titre || '').trim();
+  if (!raw) return '—';
+  return raw.replace(/^facture\s*[—–-]\s*/i, '').trim() || raw;
+}
+
 function buildPdfRows(facture) {
   const lignes = facture.lignes || [];
   const hasArticles = lignes.some((l) => l.type === 'article');
@@ -444,15 +450,11 @@ export async function generateFacturePdf(facture, catMap = {}, options = {}) {
           ...(facture.devis_reste_apres != null
             ? [{ label: 'Reste a facturer sur devis :', value: facture.devis_reste_apres, bold: true, fs: 9, red: true }]
             : []),
-          { label: 'Montant paye :', value: facture.total_paye, bold: false, fs: 8, red: false },
-          { label: 'Reste a payer :', value: facture.reste_a_payer, bold: true, fs: 9, red: true },
         ]
       : [
           { label: 'Total HT :', value: facture.total_ht, bold: false, fs: 8, red: false },
           { label: `TVA (${tvaPct}%) :`, value: facture.total_tva, bold: false, fs: 8, red: false },
           { label: 'Total TTC :', value: facture.total_ttc, bold: true, fs: 9, red: true, ttc: true },
-          { label: 'Montant paye :', value: facture.total_paye, bold: false, fs: 8, red: false },
-          { label: 'Reste a payer :', value: facture.reste_a_payer, bold: true, fs: 9, red: true },
         ];
 
     const blockH = TOTAL_ROW_H * items.length;
@@ -584,7 +586,7 @@ export async function generateFacturePdf(facture, catMap = {}, options = {}) {
   const infoFields = [
     ['Date d\'émission', fmtDate(facture.date_emission)],
     ['Date d\'échéance', fmtDate(facture.date_echeance)],
-    ['Intitulé', (facture.titre || '—').toUpperCase()],
+    ['Intitulé', factureIntitule(facture.titre).toUpperCase()],
     ['Réalisé par', (facture.commercial || '—').toUpperCase()],
     ...(facture.devis_reference ? [['Devis source', facture.devis_reference]] : []),
     ...(isAcompte && facture.pourcentage_acompte != null
@@ -663,7 +665,7 @@ export async function generateFacturePdf(facture, catMap = {}, options = {}) {
     });
   }
 
-  const totalsRows = isAcompte ? (facture.devis_reste_apres != null ? 6 : 5) : 5;
+  const totalsRows = isAcompte ? (facture.devis_reste_apres != null ? 4 : 3) : 3;
   ensureSpace(TOTAL_ROW_H * totalsRows);
   y = drawTotalsBlock(y);
 
