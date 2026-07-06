@@ -7,6 +7,7 @@ import {
   CRM_PDF_IMAGE_ALIAS,
   loadCrmPdfImages,
 } from '../../utils/crm/crmPdfImageUtils';
+import { sanitizeBCLignes } from './purchaseOrders';
 
 const RED = [198, 40, 40];
 const TEXT = [33, 33, 33];
@@ -125,7 +126,7 @@ function getBcTvaPercent(bc) {
 }
 
 function buildPdfRows(bc) {
-  const lignes = (bc.lignes || bc.lines || []).filter((l) => String(l.designation || '').trim());
+  const lignes = sanitizeBCLignes(bc.lignes || bc.lines || []);
   const hasArticles = lignes.some((l) => (l.type || 'article') === 'article');
   if (!hasArticles) return [{ kind: 'empty' }];
 

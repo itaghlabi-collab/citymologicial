@@ -22,21 +22,21 @@ function lineId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 }
 
-export function computeLineTotals(lignes) {
-  const lines = lignes || [];
-  const subtotal = lines.reduce((s, l) => s + lineHt(l), 0);
-  const vat = lines.reduce((s, l) => {
-    const t = l.type || 'article';
-    if (t === 'titre' || t === 'sous_titre') return s;
-    return s + lineHt(l) * ((parseFloat(l.tva) || 0) / 100);
-  }, 0);
-  return { subtotal_ht: subtotal, total_vat: vat, total_ttc: subtotal + vat };
+/** Ligne exploitable (exclut les lignes fantômes vides). */
+export function isMeaningfulBCLigne(l) {
+  if (!l) return false;
+  const t = l.type || 'article';
+  if (t === 'titre' || t === 'sous_titre') return !!String(l.designation || '').trim();
+  return !!String(l.designation || '').trim();
+}
+
+export function sanitizeBCLignes(lignes) {
+  return (lignes || []).filter(isMeaningfulBCLigne);
 }
 
 function normalizeLines(raw) {
   const arr = Array.isArray(raw) ? raw : [];
-  if (!arr.length) return [{ ...EMPTY_LIGNE, id: lineId() }];
-  return arr.map((l) => ({
+  return sanitizeBCLignes(arr.map((l) => ({
     id: l.id || lineId(),
     type: l.type || 'article',
     ephemeral: l.ephemeral ?? false,
@@ -49,7 +49,18 @@ function normalizeLines(raw) {
     prix_ht: l.prix_ht ?? '',
     remise: l.remise ?? 0,
     tva: l.tva ?? 20,
-  }));
+  })));
+}
+
+export function computeLineTotals(lignes) {
+  const lines = lignes || [];
+  const subtotal = lines.reduce((s, l) => s + lineHt(l), 0);
+  const vat = lines.reduce((s, l) => {
+    const t = l.type || 'article';
+    if (t === 'titre' || t === 'sous_titre') return s;
+    return s + lineHt(l) * ((parseFloat(l.tva) || 0) / 100);
+  }, 0);
+  return { subtotal_ht: subtotal, total_vat: vat, total_ttc: subtotal + vat };
 }
 
 export function normalizePurchaseOrder(row) {

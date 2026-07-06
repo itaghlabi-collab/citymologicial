@@ -1,14 +1,14 @@
 /**
- * BCLignesSection — Lignes bon de commande (même composeur que devis CRM)
+ * BCLignesSection — Lignes bon de commande (composeur + affichage devis avec drag)
  */
 import { useState, useEffect } from 'react';
-import { Pencil, Trash2 } from 'lucide-react';
+import { Pencil, Trash2, GripVertical, Copy } from 'lucide-react';
 import { listArticles, getArticleById } from '../../services/crm/articles';
 import { listCategories } from '../../services/crm/categories';
 import { formatCategoryDisplayName } from '../../utils/crm/categoryDisplay';
 import ArticleDesignationSearch from '../crm/ArticleDesignationSearch';
 import {
-  INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE, TVA_OPTIONS, genId,
+  INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE, TVA_OPTIONS, genId, formatMAD,
 } from './shared.jsx';
 
 const UNITES = ['unite', 'm2', 'ml', 'm3', 'm', 'forfait', 'heure', 'jour', 'pack', 'U'];
@@ -44,6 +44,35 @@ function lineTotalHt(l) {
   const base = (parseFloat(l.qte) || 0) * (parseFloat(l.prix_ht) || 0);
   const remise = parseFloat(l.remise) || 0;
   return base * (1 - remise / 100);
+}
+
+function rowDragStyle(isDragging, isOver) {
+  if (isDragging) return { opacity: 0.45 };
+  if (isOver) return { boxShadow: 'inset 0 0 0 2px var(--red)' };
+  return {};
+}
+
+function DragHandle({ onDragStart, onDragEnd }) {
+  return (
+    <span
+      draggable
+      onDragStart={onDragStart}
+      onDragEnd={onDragEnd}
+      title="Glisser pour réorganiser"
+      style={{ cursor: 'grab', display: 'inline-flex', alignItems: 'center', touchAction: 'none' }}
+    >
+      <GripVertical size={13} style={{ color: 'var(--text-3)' }} />
+    </span>
+  );
+}
+
+function LigneDescriptionText({ description }) {
+  if (!description?.trim()) return null;
+  return (
+    <div style={{ fontSize: '0.76rem', color: 'var(--text-2)', marginTop: 6, lineHeight: 1.55, fontWeight: 400, whiteSpace: 'pre-wrap' }}>
+      {description}
+    </div>
+  );
 }
 
 function draftToLigne(draft, id, articles = []) {
@@ -102,17 +131,107 @@ function ligneToDraft(ligne, articles = []) {
   };
 }
 
-function catName(categories, id) {
-  const c = categories.find((x) => String(x.id) === String(id));
-  return c ? formatCategoryDisplayName(c.nom) : '—';
+function BCLineDisplay({ ligne, lineNum, idx, onDelete, onDuplicate, onEdit, drag }) {
+  const dragProps = {
+    style: rowDragStyle(drag.isDragging, drag.isOver),
+    onDragOver: (e) => { e.preventDefault(); drag.onDragOver(idx); },
+    onDrop: (e) => { e.preventDefault(); drag.onDrop(idx); },
+  };
+  const handleProps = {
+    onDragStart: (e) => drag.onDragStart(e, idx),
+    onDragEnd: drag.onDragEnd,
+  };
+  const actions = (
+    <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end' }}>
+      <button type="button" onClick={() => onEdit(idx)} title="Modifier" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: 4 }}>
+        <Pencil size={13} />
+      </button>
+      {lineType(ligne) === 'article' && (
+        <button type="button" onClick={() => onDuplicate(idx)} title="Dupliquer" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: 4 }}>
+          <Copy size={13} />
+        </button>
+      )}
+      <button type="button" onClick={() => onDelete(idx)} title="Supprimer" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', padding: 4 }}>
+        <Trash2 size={13} />
+      </button>
+    </div>
+  );
+
+  if (lineType(ligne) === 'titre') {
+    return (
+      <tr {...dragProps}>
+        <td colSpan={8} style={{ padding: '12px 14px', background: 'linear-gradient(90deg, #F5F5F5 0%, #FAFAFA 100%)', borderTop: '2px solid var(--red)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <DragHandle {...handleProps} />
+            <span style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '0.95rem', color: 'var(--red)', textTransform: 'uppercase', letterSpacing: '0.06em', flex: 1 }}>
+              {ligne.designation || 'Section'}
+            </span>
+            {actions}
+          </div>
+        </td>
+      </tr>
+    );
+  }
+
+  if (lineType(ligne) === 'sous_titre') {
+    return (
+      <tr {...dragProps}>
+        <td colSpan={8} style={{ padding: '8px 14px 8px 28px', background: '#FAFAFA', borderTop: '1px solid var(--border)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <DragHandle {...handleProps} />
+            <span style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.88rem', color: 'var(--text)', flex: 1 }}>
+              {ligne.designation || 'Sous-titre'}
+            </span>
+            {actions}
+          </div>
+        </td>
+      </tr>
+    );
+  }
+
+  const ht = lineTotalHt(ligne);
+
+  return (
+    <tr {...dragProps} style={{ ...dragProps.style, background: ligne.ephemeral ? '#FFFBF0' : '#fff' }}>
+      <td style={{ padding: '10px 6px', width: 28, verticalAlign: 'top' }}>
+        <DragHandle {...handleProps} />
+      </td>
+      <td style={{ padding: '10px 8px', width: 36, fontWeight: 700, color: 'var(--text-3)', fontSize: '0.82rem', verticalAlign: 'top' }}>
+        {lineNum}
+      </td>
+      <td style={{ padding: '10px 8px', minWidth: 200, verticalAlign: 'top' }}>
+        {ligne.designation?.trim() && (
+          <div style={{ fontWeight: 700, fontSize: '0.9rem', marginBottom: 4 }}>{ligne.designation}</div>
+        )}
+        {ligne.ephemeral && (
+          <span style={{ fontSize: '0.68rem', color: '#E65100', fontWeight: 600, background: '#FFF3E0', padding: '2px 6px', borderRadius: 4 }}>Hors catalogue</span>
+        )}
+        <LigneDescriptionText description={ligne.description} />
+      </td>
+      <td style={{ padding: '10px 8px', textAlign: 'center', verticalAlign: 'top', fontSize: '0.88rem' }}>{ligne.qte}</td>
+      <td style={{ padding: '10px 8px', verticalAlign: 'top', fontSize: '0.82rem', color: 'var(--text-2)' }}>{ligne.unite}</td>
+      <td style={{ padding: '10px 8px', textAlign: 'right', verticalAlign: 'top', fontSize: '0.88rem' }}>
+        {formatMAD(ligne.prix_ht)}
+        {Number(ligne.remise) > 0 && (
+          <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>-{ligne.remise}%</div>
+        )}
+      </td>
+      <td style={{ padding: '10px 8px', textAlign: 'right', verticalAlign: 'top', fontFamily: 'var(--font-head)', fontWeight: 700 }}>
+        {formatMAD(ht)}
+      </td>
+      <td style={{ padding: '10px 8px', verticalAlign: 'top' }}>{actions}</td>
+    </tr>
+  );
 }
 
 export default function BCLignesSection({ lignes, onChange }) {
   const [articles, setArticles] = useState([]);
   const [categories, setCategories] = useState([]);
   const [draft, setDraft] = useState(EMPTY_DRAFT);
-  const [editingId, setEditingId] = useState(null);
+  const [editingIdx, setEditingIdx] = useState(null);
   const [draftError, setDraftError] = useState('');
+  const [dragIdx, setDragIdx] = useState(null);
+  const [overIdx, setOverIdx] = useState(null);
 
   useEffect(() => {
     Promise.all([listArticles(), listCategories()])
@@ -133,7 +252,7 @@ export default function BCLignesSection({ lignes, onChange }) {
 
   function resetDraft() {
     setDraft(EMPTY_DRAFT());
-    setEditingId(null);
+    setEditingIdx(null);
     setDraftError('');
   }
 
@@ -198,31 +317,69 @@ export default function BCLignesSection({ lignes, onChange }) {
       setDraftError('Désignation requise.');
       return;
     }
-    const row = draftToLigne(draft, editingId, articles);
-    if (editingId) {
-      onChange(lignes.map((l) => (l.id === editingId ? row : l)));
+    const existingId = editingIdx != null ? lignes[editingIdx]?.id : null;
+    const row = draftToLigne(draft, existingId, articles);
+    if (editingIdx != null) {
+      const ls = [...lignes];
+      ls[editingIdx] = row;
+      onChange(ls);
     } else {
       onChange([...lignes, row]);
     }
     resetDraft();
   }
 
-  function startEdit(ligne) {
-    setEditingId(ligne.id);
-    setDraft(ligneToDraft(ligne, articles));
+  function startEdit(idx) {
+    setEditingIdx(idx);
+    setDraft(ligneToDraft(lignes[idx], articles));
     setDraftError('');
   }
 
-  function removeLigne(id) {
-    onChange(lignes.filter((l) => l.id !== id));
-    if (editingId === id) resetDraft();
+  function removeLigne(idx) {
+    onChange(lignes.filter((_, i) => i !== idx));
+    if (editingIdx === idx) resetDraft();
+    else if (editingIdx != null && editingIdx > idx) setEditingIdx(editingIdx - 1);
   }
+
+  function duplicateLigne(idx) {
+    const ls = [...lignes];
+    ls.splice(idx + 1, 0, { ...ls[idx], id: genId() });
+    onChange(ls);
+  }
+
+  function reorderLignes(from, to) {
+    if (from == null || to == null || from === to) return;
+    const ls = [...lignes];
+    const [item] = ls.splice(from, 1);
+    ls.splice(to, 0, item);
+    onChange(ls);
+    if (editingIdx === from) setEditingIdx(to);
+    else if (editingIdx != null && from < editingIdx && to >= editingIdx) setEditingIdx(editingIdx - 1);
+    else if (editingIdx != null && from > editingIdx && to <= editingIdx) setEditingIdx(editingIdx + 1);
+  }
+
+  const dragHandlers = {
+    onDragStart: (e, idx) => {
+      setDragIdx(idx);
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', String(idx));
+    },
+    onDragOver: (idx) => setOverIdx(idx),
+    onDrop: (idx) => {
+      if (dragIdx !== null) reorderLignes(dragIdx, idx);
+      setDragIdx(null);
+      setOverIdx(null);
+    },
+    onDragEnd: () => { setDragIdx(null); setOverIdx(null); },
+    isDragging: (idx) => dragIdx === idx,
+    isOver: (idx) => overIdx === idx && dragIdx !== idx,
+  };
 
   const isTitre = draft.mode === 'titre';
   const isSousTitre = draft.mode === 'sous_titre';
   const isHorsCatalogue = draft.mode === 'hors_catalogue';
 
-  const composerTitle = editingId
+  const composerTitle = editingIdx != null
     ? 'Modifier la ligne'
     : isTitre
       ? 'Ajouter un titre'
@@ -232,6 +389,8 @@ export default function BCLignesSection({ lignes, onChange }) {
           ? 'Ajouter un article hors catalogue'
           : 'Ajouter une ligne';
 
+  let articleLineNum = 0;
+
   return (
     <div>
       {lignes.length > 0 && (
@@ -239,96 +398,41 @@ export default function BCLignesSection({ lignes, onChange }) {
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.84rem' }}>
             <thead>
               <tr style={{ background: 'var(--surface-2)', borderBottom: '1.5px solid var(--border)' }}>
-                {['Désignation', 'Catégorie', 'Qté', 'Unité', 'Prix HT', 'Remise %', 'TVA %', 'Total HT', ''].map((h) => (
-                  <th key={h} style={{ padding: '8px 10px', textAlign: 'left', fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>{h}</th>
+                <th style={{ width: 28 }} />
+                <th style={{ width: 36, padding: '8px 6px', fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-3)' }}>#</th>
+                {['Désignation', 'Qté', 'Unité', 'Prix HT', 'Total HT', ''].map((h) => (
+                  <th key={h} style={{ padding: '8px 10px', textAlign: h === 'Prix HT' || h === 'Total HT' ? 'right' : 'left', fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>
+                    {h}
+                  </th>
                 ))}
               </tr>
             </thead>
             <tbody>
-              {lignes.map((l) => {
-                const t = lineType(l);
-                if (t === 'titre') {
-                  return (
-                    <tr key={l.id} style={{ background: '#F5F6F8', borderBottom: '1px solid var(--border)' }}>
-                      <td colSpan={9} style={{ padding: '10px 12px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                          <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, color: 'var(--red)', textTransform: 'uppercase' }}>
-                            {l.designation || '—'}
-                          </div>
-                          <div style={{ display: 'flex', gap: 4 }}>
-                            <span style={{ fontSize: '0.72rem', color: 'var(--text-3)', background: 'var(--border)', borderRadius: 4, padding: '2px 6px' }}>Titre</span>
-                            <button type="button" className="btn btn-ghost btn-sm" onClick={() => startEdit(l)} title="Modifier" style={{ padding: '4px 6px' }}>
-                              <Pencil size={13} />
-                            </button>
-                            <button type="button" className="btn btn-ghost btn-sm" onClick={() => removeLigne(l.id)} title="Supprimer" style={{ color: 'var(--red)', padding: '4px 6px' }}>
-                              <Trash2 size={13} />
-                            </button>
-                          </div>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                }
-                if (t === 'sous_titre') {
-                  return (
-                    <tr key={l.id} style={{ background: '#FAFBFC', borderBottom: '1px solid var(--border)' }}>
-                      <td colSpan={9} style={{ padding: '8px 12px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
-                          <div style={{ fontFamily: 'var(--font-head)', fontWeight: 700 }}>{l.designation || '—'}</div>
-                          <div style={{ display: 'flex', gap: 4 }}>
-                            <span style={{ fontSize: '0.72rem', color: 'var(--text-3)', background: 'var(--border)', borderRadius: 4, padding: '2px 6px' }}>Sous-titre</span>
-                            <button type="button" className="btn btn-ghost btn-sm" onClick={() => startEdit(l)} title="Modifier" style={{ padding: '4px 6px' }}>
-                              <Pencil size={13} />
-                            </button>
-                            <button type="button" className="btn btn-ghost btn-sm" onClick={() => removeLigne(l.id)} title="Supprimer" style={{ color: 'var(--red)', padding: '4px 6px' }}>
-                              <Trash2 size={13} />
-                            </button>
-                          </div>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                }
-                const totalHT = lineTotalHt(l);
+              {lignes.map((ligne, idx) => {
+                const isArticle = lineType(ligne) === 'article';
+                const lineNum = isArticle ? ++articleLineNum : null;
                 return (
-                  <tr key={l.id} style={{ borderBottom: '1px solid var(--border)', background: l.ephemeral ? '#FFFBF0' : undefined }}>
-                    <td style={{ padding: '8px 10px', minWidth: 180 }}>
-                      <div style={{ fontWeight: 700 }}>{l.designation || '—'}</div>
-                      {l.ephemeral && (
-                        <span style={{ fontSize: '0.68rem', color: '#E65100', fontWeight: 600 }}>Hors catalogue</span>
-                      )}
-                      {l.description && (
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-3)', marginTop: 4, whiteSpace: 'pre-wrap' }}>
-                          {l.description.length > 120 ? `${l.description.slice(0, 120)}…` : l.description}
-                        </div>
-                      )}
-                    </td>
-                    <td style={{ padding: '8px 10px', whiteSpace: 'nowrap' }}>
-                      {l.categorie_id ? (
-                        <span className="badge badge-blue">{catName(categories, l.categorie_id)}</span>
-                      ) : '—'}
-                    </td>
-                    <td style={{ padding: '8px 10px' }}>{l.qte}</td>
-                    <td style={{ padding: '8px 10px' }}>{l.unite}</td>
-                    <td style={{ padding: '8px 10px' }}>{Number(l.prix_ht || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2 })}</td>
-                    <td style={{ padding: '8px 10px' }}>{l.remise ? `${l.remise}%` : '—'}</td>
-                    <td style={{ padding: '8px 10px' }}>{l.tva}%</td>
-                    <td style={{ padding: '8px 10px', fontWeight: 700, fontFamily: 'var(--font-head)' }}>
-                      {totalHT.toLocaleString('fr-FR', { minimumFractionDigits: 2 })}
-                    </td>
-                    <td style={{ padding: '8px 6px', whiteSpace: 'nowrap' }}>
-                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => startEdit(l)} title="Modifier" style={{ padding: '4px 6px' }}>
-                        <Pencil size={13} />
-                      </button>
-                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => removeLigne(l.id)} title="Supprimer" style={{ color: 'var(--red)', padding: '4px 6px' }}>
-                        <Trash2 size={13} />
-                      </button>
-                    </td>
-                  </tr>
+                  <BCLineDisplay
+                    key={ligne.id || idx}
+                    ligne={ligne}
+                    lineNum={lineNum}
+                    idx={idx}
+                    onDelete={removeLigne}
+                    onDuplicate={duplicateLigne}
+                    onEdit={startEdit}
+                    drag={{
+                      ...dragHandlers,
+                      isDragging: dragHandlers.isDragging(idx),
+                      isOver: dragHandlers.isOver(idx),
+                    }}
+                  />
                 );
               })}
             </tbody>
           </table>
+          <p style={{ marginTop: 8, fontSize: '0.72rem', color: 'var(--text-3)' }}>
+            Glissez les lignes pour réorganiser titres, sous-titres et articles.
+          </p>
         </div>
       )}
 
@@ -454,15 +558,15 @@ export default function BCLignesSection({ lignes, onChange }) {
 
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
           <button type="button" className="btn btn-primary" onClick={commitDraft} style={{ minWidth: 72, fontWeight: 800 }}>
-            {editingId ? 'Mettre à jour' : 'OK'}
+            {editingIdx != null ? 'Mettre à jour' : 'OK'}
           </button>
           <button type="button" className="btn btn-ghost" onClick={resetDraft}>Effacer</button>
           {!isTitre && !isSousTitre && (
             <>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setDraft({ ...EMPTY_DRAFT(), mode: 'titre' }); setDraftError(''); }}>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setDraft({ ...EMPTY_DRAFT(), mode: 'titre' }); setDraftError(''); setEditingIdx(null); }}>
                 Ajouter Titre
               </button>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setDraft({ ...EMPTY_DRAFT(), mode: 'sous_titre' }); setDraftError(''); }}>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setDraft({ ...EMPTY_DRAFT(), mode: 'sous_titre' }); setDraftError(''); setEditingIdx(null); }}>
                 Ajouter Sous-titre
               </button>
             </>
@@ -485,7 +589,7 @@ export default function BCLignesSection({ lignes, onChange }) {
         </div>
       </div>
 
-      {!editingId && (
+      {editingIdx == null && (
         <p style={{ marginTop: 10, fontSize: '0.75rem', color: 'var(--text-3)' }}>
           Choisissez une catégorie et un article du catalogue, ou recherchez par désignation.
         </p>

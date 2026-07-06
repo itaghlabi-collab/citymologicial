@@ -1,13 +1,13 @@
 /**
  * BonsCommande.jsx — Bons de commande ERP CITYMO (Supabase purchase_orders)
  */
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import {
   ShoppingCart, Plus, Eye, Edit2, Trash2, Copy, Download, Search,
   Package, Loader2, RefreshCw, ChevronLeft,
 } from 'lucide-react';
 import { usePurchaseOrders } from '../../hooks/usePurchaseOrders';
-import { computeLineTotals } from '../../services/achats/purchaseOrders';
+import { computeLineTotals, sanitizeBCLignes } from '../../services/achats/purchaseOrders';
 import { generatePurchaseOrderPdf } from '../../services/achats/purchaseOrderPdf';
 import {
   INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE,
@@ -42,15 +42,19 @@ function toFormState(item) {
     note: item.note || '',
     statut: item.statut || item.status || 'Brouillon',
     ref: item.ref || item.ref_bc || '',
-    lignes: (item.lignes || item.lines || []).length
-      ? (item.lignes || item.lines)
-      : [],
+    lignes: sanitizeBCLignes(item.lignes || item.lines || []),
   };
 }
 
 function BCForm({ initial, onSave, onCancel, fournisseurs, suppliersLoading, saving }) {
-  const [form, setForm] = useState(toFormState(initial));
+  const [form, setForm] = useState(() => toFormState(initial));
   const [errors, setErrors] = useState({});
+
+  useEffect(() => {
+    setForm(toFormState(initial));
+    setErrors({});
+  }, [initial?.id]);
+
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
   const fournActifs = (fournisseurs || []).filter((f) => f.statut === 'Actif' || f.status === 'active');
 
@@ -157,7 +161,8 @@ function BCForm({ initial, onSave, onCancel, fournisseurs, suppliersLoading, sav
 }
 
 function DetailBC({ item, onBack, onEdit, onDelete, onDupliquer, onPdf, pdfLoading }) {
-  const lignes = item.lignes || item.lines || [];
+  const lignes = sanitizeBCLignes(item.lignes || item.lines || []);
+  let articleNum = 0;
   return (
     <div className="animate-fade-in">
       <button className="btn btn-ghost btn-sm" style={{ marginBottom: 14, display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={onBack}>
@@ -188,15 +193,15 @@ function DetailBC({ item, onBack, onEdit, onDelete, onDupliquer, onPdf, pdfLoadi
           <SectionTitle icon={<Package size={13} />}>Lignes articles</SectionTitle>
           <div className="table-wrap">
             <table>
-              <thead><tr><th>Désignation</th><th>Qté</th><th>Unité</th><th>Prix HT</th><th>TVA</th><th>Total HT</th></tr></thead>
+              <thead><tr><th>#</th><th>Désignation</th><th>Qté</th><th>Unité</th><th>Prix HT</th><th>TVA</th><th>Total HT</th></tr></thead>
               <tbody>
                 {lignes.map((l) => {
                   const t = l.type || 'article';
                   if (t === 'titre') {
                     return (
                       <tr key={l.id}>
-                        <td colSpan={6} style={{ padding: '10px 12px', background: '#F5F6F8', fontFamily: 'var(--font-head)', fontWeight: 800, color: 'var(--red)', textTransform: 'uppercase' }}>
-                          {l.designation || '—'}
+                        <td colSpan={7} style={{ padding: '10px 12px', background: '#F5F6F8', fontFamily: 'var(--font-head)', fontWeight: 800, color: 'var(--red)', textTransform: 'uppercase' }}>
+                          {l.designation}
                         </td>
                       </tr>
                     );
@@ -204,18 +209,20 @@ function DetailBC({ item, onBack, onEdit, onDelete, onDupliquer, onPdf, pdfLoadi
                   if (t === 'sous_titre') {
                     return (
                       <tr key={l.id}>
-                        <td colSpan={6} style={{ padding: '8px 12px', background: '#FAFBFC', fontFamily: 'var(--font-head)', fontWeight: 700 }}>
-                          {l.designation || '—'}
+                        <td colSpan={7} style={{ padding: '8px 12px 8px 20px', background: '#FAFBFC', fontFamily: 'var(--font-head)', fontWeight: 700 }}>
+                          {l.designation}
                         </td>
                       </tr>
                     );
                   }
+                  articleNum += 1;
                   const base = (parseFloat(l.qte) || 0) * (parseFloat(l.prix_ht) || 0);
                   const ht = base * (1 - (parseFloat(l.remise) || 0) / 100);
                   return (
                     <tr key={l.id}>
+                      <td style={{ fontWeight: 700, color: 'var(--text-3)' }}>{articleNum}</td>
                       <td>
-                        <div>{l.designation || '—'}</div>
+                        <div style={{ fontWeight: 700 }}>{l.designation}</div>
                         {l.description && <div style={{ fontSize: '0.75rem', color: 'var(--text-3)', marginTop: 4, whiteSpace: 'pre-wrap' }}>{l.description}</div>}
                       </td>
                       <td>{l.qte}</td>
@@ -457,7 +464,7 @@ export default function BonsCommande() {
         </div>
       )}
 
-      <Modal open={showModal} onClose={() => { setShowModal(false); setEditBc(null); }} title="Modifier le bon de commande" width={800}>
+      <Modal open={showModal} onClose={() => { setShowModal(false); setEditBc(null); }} title="Modifier le bon de commande" width={1100}>
         <BCForm
           initial={editBc}
           onSave={handleSave}
