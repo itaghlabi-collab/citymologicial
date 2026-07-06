@@ -477,6 +477,57 @@ export async function duplicateCrmFacture(id) {
   });
 }
 
+function addDaysIso(isoDate, days) {
+  const d = isoDate ? new Date(isoDate) : new Date();
+  d.setDate(d.getDate() + days);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Crée une facture complète à partir d'un devis (lignes, client, conditions). */
+export async function createCrmFactureFromDevis(devisId) {
+  await getAuthUserId();
+  const devis = await getCrmDevisById(devisId);
+
+  const { data: existing, error: existErr } = await getSupabase()
+    .from(TABLE)
+    .select('id, numero')
+    .eq('devis_id', devisId)
+    .eq('type', 'facture')
+    .neq('statut', 'annulee')
+    .maybeSingle();
+  if (existErr) throw existErr;
+  if (existing?.id) {
+    const err = new Error(`Une facture existe déjà pour ce devis : ${existing.numero}`);
+    err.code = 'DUPLICATE';
+    err.factureId = existing.id;
+    throw err;
+  }
+
+  const today = new Date().toISOString().slice(0, 10);
+  return createCrmFacture({
+    devis_id: devisId,
+    client_id: devis.client_id || '',
+    commercial: devis.commercial || '',
+    type_projet: devis.type_projet || '',
+    modalites_paiement: devis.modalites_paiement || '',
+    conditions: devis.conditions || '',
+    titre: devis.titre ? `Facture — ${devis.titre}` : `Facture — ${devis.reference}`,
+    statut: 'envoyee',
+    date_emission: today,
+    date_echeance: addDaysIso(devis.date_validite || today, 30),
+    lignes: (devis.lignes || []).map((l) => ({
+      ...l,
+      id: undefined,
+      _id: undefined,
+      devis_id: undefined,
+      facture_id: undefined,
+    })),
+    paiements: [],
+    acompte_montant: 0,
+    acompte_type: 'montant',
+  });
+}
+
 export function filterCrmFactures(records, filters = {}) {
   const {
     search = '', statut = '', commercial = '', client_id = '',

@@ -3,12 +3,14 @@ import {
   Plus, Search,
   FileText, Send, CheckCircle, TrendingUp, Clock,
   XCircle, AlertCircle, ChevronLeft, ChevronRight,
-  RefreshCw, ArrowUpDown, FolderKanban, Download, Eye,
+  RefreshCw, ArrowUpDown, FolderKanban, Download, Eye, Receipt,
 } from 'lucide-react';
 import { useCrmDevis } from '../../hooks/useCrmDevis';
 import { listCategories } from '../../services/crm/categories';
 import { formatCategoryDisplayName } from '../../utils/crm/categoryDisplay';
 import { generateDevisPdf } from '../../services/crm/devisPdf';
+import { generateFacturePdf } from '../../services/crm/facturePdf';
+import { createCrmFactureFromDevis, getCrmFactureById } from '../../services/crm/crmFactures';
 import { generateReceptionChecklistPdf } from '../../services/crm/receptionChecklistPdf';
 import { listArticles } from '../../services/crm/articles';
 import { enrichLignesDescriptions } from '../../utils/crm/devisLineDescription';
@@ -158,6 +160,7 @@ export default function Devis() {
   const [view, setView] = useState('list');
   const [editingDevis, setEditingDevis] = useState(null);
   const [pdfLoadingId, setPdfLoadingId] = useState(null);
+  const [factureLoadingId, setFactureLoadingId] = useState(null);
   const [checklistLoadingId, setChecklistLoadingId] = useState(null);
   const [previewDevis, setPreviewDevis] = useState(null);
   const [previewArticles, setPreviewArticles] = useState([]);
@@ -407,6 +410,27 @@ export default function Devis() {
     }
   }
 
+  async function handleConvertToFacture(d) {
+    if (!window.confirm(`Convertir le devis ${d.reference} en facture ?`)) return;
+    setFactureLoadingId(d.id);
+    try {
+      const facture = await createCrmFactureFromDevis(d.id);
+      const [full, cats] = await Promise.all([
+        getCrmFactureById(facture.id),
+        listCategories(),
+      ]);
+      const catMap = Object.fromEntries(
+        (cats || []).map((c) => [String(c.id), formatCategoryDisplayName(c.nom)]),
+      );
+      await generateFacturePdf(full, catMap);
+      showToast(`Facture creee : ${full.numero}`);
+    } catch (err) {
+      showToast(err.message || 'Erreur conversion en facture.', 'error');
+    } finally {
+      setFactureLoadingId(null);
+    }
+  }
+
   async function handleStatutChange(d, statut) {
     if (statut === d.statut) return;
     if (statut === 'valide') {
@@ -449,22 +473,36 @@ export default function Devis() {
       );
     }
     return (
-      <DevisActionsMenu
-        devis={d}
-        isConverted={isDevisConverted(d)}
-        pdfLoading={pdfLoadingId === d.id}
-        checklistLoading={checklistLoadingId === d.id}
-        onPreview={() => handlePreview(d)}
-        onPdf={() => handlePdf(d)}
-        onReceptionChecklist={() => handleReceptionChecklist(d)}
-        onConvert={() => handleConvert(d)}
-        onApprove={() => handleApprove(d)}
-        onRefuse={() => handleRefuse(d)}
-        onEdit={() => openEdit(d)}
-        onDuplicate={() => handleDuplicate(d)}
-        onDelete={() => handleDelete(d.id)}
-        onStatutChange={(statut) => handleStatutChange(d, statut)}
-      />
+      <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+        <button
+          type="button"
+          title="Convertir en facture"
+          className="btn btn-ghost btn-sm"
+          style={{ padding: '4px 7px', color: '#1565C0' }}
+          disabled={factureLoadingId === d.id}
+          onClick={() => handleConvertToFacture(d)}
+        >
+          <Receipt size={13} />
+        </button>
+        <DevisActionsMenu
+          devis={d}
+          isConverted={isDevisConverted(d)}
+          pdfLoading={pdfLoadingId === d.id}
+          checklistLoading={checklistLoadingId === d.id}
+          factureLoading={factureLoadingId === d.id}
+          onPreview={() => handlePreview(d)}
+          onPdf={() => handlePdf(d)}
+          onReceptionChecklist={() => handleReceptionChecklist(d)}
+          onConvert={() => handleConvert(d)}
+          onConvertToFacture={() => handleConvertToFacture(d)}
+          onApprove={() => handleApprove(d)}
+          onRefuse={() => handleRefuse(d)}
+          onEdit={() => openEdit(d)}
+          onDuplicate={() => handleDuplicate(d)}
+          onDelete={() => handleDelete(d.id)}
+          onStatutChange={(statut) => handleStatutChange(d, statut)}
+        />
+      </div>
     );
   }
 

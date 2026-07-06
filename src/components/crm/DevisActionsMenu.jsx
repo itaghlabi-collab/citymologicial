@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
   MoreHorizontal, Eye, Download, FolderKanban, CheckCircle, XCircle,
-  Edit2, Copy, Trash2, ChevronRight, ClipboardCheck,
+  Edit2, Copy, Trash2, ChevronRight, ClipboardCheck, Receipt,
 } from 'lucide-react';
 
 const QUICK_STATUTS = [
@@ -37,6 +37,8 @@ export default function DevisActionsMenu({
   onPdf,
   onReceptionChecklist,
   onConvert,
+  onConvertToFacture,
+  factureLoading,
   onApprove,
   onRefuse,
   onEdit,
@@ -148,6 +150,12 @@ export default function DevisActionsMenu({
         label={convertDisabled ? 'Convertir en projet (déjà converti)' : 'Convertir en projet'}
         onClick={closeAnd(onConvert)}
         disabled={convertDisabled}
+      />
+      <MenuItem
+        icon={Receipt}
+        label="Convertir en facture"
+        onClick={closeAnd(onConvertToFacture)}
+        disabled={factureLoading}
       />
 
       <div className="crm-devis-menu-divider" />

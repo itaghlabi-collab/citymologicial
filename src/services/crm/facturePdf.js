@@ -3,10 +3,12 @@
  */
 import { jsPDF } from 'jspdf';
 import { clientDisplayName } from './clients';
+import { formatCategoryDisplayName } from '../../utils/crm/categoryDisplay';
 
 const LOGO_URL = 'https://i.ibb.co/N6SbC06M/logopng.png';
 const ICON_URL = 'https://i.ibb.co/S79nbLdm/icone.png';
 const QR_URL = 'https://i.ibb.co/rRrG27n3/Capture-d-e-cran-2026-06-02-a-15-32-23.png';
+const SIGNATURE_URL = 'https://i.ibb.co/nMVcsDqS/signature.png';
 
 const RED = [198, 40, 40];
 const TEXT = [33, 33, 33];
@@ -22,6 +24,22 @@ const FOOTER_H = 26;
 const MAX_Y = PAGE_H - FOOTER_H;
 const BODY_TOP = M;
 const BODY_BOTTOM = PAGE_H - FOOTER_H;
+
+/** Footer facture — ligne rouge + QR (aligné devis) */
+const FOOTER_LINE_Y = PAGE_H - FOOTER_H + 4;
+const FOOTER_QR_MAX = 18;
+const FOOTER_QR_GAP = 6;
+
+function getFooterQrLayout(qrMeta) {
+  const qrSize = qrMeta
+    ? containImage(qrMeta.width, qrMeta.height, FOOTER_QR_MAX, FOOTER_QR_MAX)
+    : { width: 0, height: 0 };
+  const qrX = PAGE_W - M - qrSize.width;
+  const qrY = FOOTER_LINE_Y - qrSize.height;
+  const lineEndX = qrMeta?.dataUrl ? qrX - FOOTER_QR_GAP : PAGE_W - M;
+  const contentMaxY = qrMeta?.dataUrl ? qrY - 2 : MAX_Y;
+  return { qrSize, qrX, qrY, lineEndX, contentMaxY };
+}
 
 const CLIENT_W = 58;
 const LOGO_MAX_W = 42;
@@ -133,6 +151,13 @@ function textCenter(doc, text, centerX, y) {
   doc.text(String(text), centerX, y, { align: 'center' });
 }
 
+function getFactureTvaPercent(facture) {
+  const ht = Number(facture?.total_ht) || 0;
+  const tva = Number(facture?.total_tva) || 0;
+  if (ht <= 0) return 20;
+  return Math.round((tva / ht) * 100);
+}
+
 function fmtUnite(u) {
   const map = { m2: 'm²', m3: 'm³', unite: 'unité' };
   return map[u] || u || 'unité';
@@ -153,6 +178,10 @@ function buildPdfRows(facture, catMap) {
       currentCat = null;
       return;
     }
+    if (l.type === 'sous_titre') {
+      rows.push({ kind: 'sous_titre', text: l.designation || '' });
+      return;
+    }
     if (l.type === 'note') {
       rows.push({ kind: 'note', text: l.designation || '' });
       return;
@@ -162,10 +191,12 @@ function buildPdfRows(facture, catMap) {
     const catKey = l.categorie_id ? String(l.categorie_id) : '__none__';
     if (catKey !== currentCat) {
       currentCat = catKey;
-      const label = catKey === '__none__'
-        ? 'SANS CATÉGORIE'
-        : (catMap[catKey] || 'SANS CATÉGORIE').toUpperCase();
-      rows.push({ kind: 'section', text: label });
+      if (catKey !== '__none__') {
+        rows.push({
+          kind: 'section',
+          text: formatCategoryDisplayName(catMap[catKey] || 'SANS CATÉGORIE'),
+        });
+      }
     }
 
     num += 1;
@@ -203,15 +234,52 @@ function measureArticleHeight(doc, row) {
   return Math.max(h, 9);
 }
 
+function getLabelRowLayout(doc, text, options = {}) {
+  const {
+    fontSize = 7.5,
+    uppercase = false,
+    bold = true,
+    italic = false,
+    indent = 0,
+    minH = CAT_ROW_H,
+  } = options;
+  const displayText = uppercase ? String(text || '').toUpperCase() : String(text || '');
+  doc.setFont('helvetica', italic ? 'italic' : (bold ? 'bold' : 'normal'));
+  doc.setFontSize(fontSize);
+  const lines = doc.splitTextToSize(displayText, COL_W[1] - 4 - indent);
+  const lineH = fontSize >= 9 ? 3.8 : fontSize >= 8 ? 3.5 : italic ? 3.2 : 3.4;
+  const h = Math.max(PAD_TOP + lines.length * lineH + PAD_BOTTOM, minH);
+  return { lines, h, lineH, fontSize, bold, italic, indent };
+}
+
+function measureLabelRowHeight(doc, text, options = {}) {
+  return getLabelRowLayout(doc, text, options).h;
+}
+
+function drawTableLabelRow(doc, text, startY, options = {}) {
+  const { lines, h, lineH, fontSize, bold, italic, indent } = getLabelRowLayout(doc, text, options);
+
+  drawCellBorder(doc, M, startY, CONTENT_W, h);
+
+  doc.setFont('helvetica', italic ? 'italic' : (bold ? 'bold' : 'normal'));
+  doc.setFontSize(fontSize);
+  doc.setTextColor(...(italic ? MUTED : TEXT));
+
+  let ty = startY + PAD_TOP + 2;
+  lines.forEach((line) => {
+    doc.text(line, COL_X[1] + 2 + indent, ty);
+    ty += lineH;
+  });
+
+  return startY + h;
+}
+
 function measureRowHeight(doc, row) {
   if (row.kind === 'empty') return 12;
-  if (row.kind === 'section') return CAT_ROW_H;
-  if (row.kind === 'titre') return 8;
-  if (row.kind === 'note') {
-    doc.setFontSize(7);
-    const lines = doc.splitTextToSize(row.text || '', CONTENT_W - 4);
-    return Math.max(lines.length * 3.2 + 3, 8);
-  }
+  if (row.kind === 'section') return measureLabelRowHeight(doc, row.text, { uppercase: true });
+  if (row.kind === 'titre') return measureLabelRowHeight(doc, row.text, { fontSize: 9, uppercase: true, minH: 8 });
+  if (row.kind === 'sous_titre') return measureLabelRowHeight(doc, row.text, { fontSize: 8, indent: 2, minH: 7 });
+  if (row.kind === 'note') return measureLabelRowHeight(doc, row.text, { fontSize: 7, bold: false, italic: true });
   return measureArticleHeight(doc, row);
 }
 
@@ -237,10 +305,11 @@ function deliverPdf(doc, filename, options = {}) {
 }
 
 export async function generateFacturePdf(facture, catMap = {}, options = {}) {
-  const [logoMeta, iconMeta, qrMeta] = await Promise.all([
+  const [logoMeta, iconMeta, qrMeta, signatureMeta] = await Promise.all([
     loadImageWithSize(LOGO_URL),
     loadImageWithSize(ICON_URL),
     loadImageWithSize(QR_URL),
+    loadImageWithSize(SIGNATURE_URL),
   ]);
 
   const client = facture.client || {};
@@ -248,6 +317,8 @@ export async function generateFacturePdf(facture, catMap = {}, options = {}) {
   const isAcompte = facture.facture_type === 'acompte';
   const rows = buildPdfRows(facture, catMap);
   const conditionsText = facture.conditions?.trim() || facture.modalites_paiement?.trim() || DEFAULT_CONDITIONS;
+  const footerLayout = getFooterQrLayout(qrMeta);
+  const tvaPct = getFactureTvaPercent(facture);
 
   const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
   let y = M;
@@ -270,22 +341,24 @@ export async function generateFacturePdf(facture, catMap = {}, options = {}) {
   };
 
   const drawFooter = (pageNum, totalPages) => {
-    const lineY = PAGE_H - FOOTER_H + 4;
+    const { qrSize, qrX, qrY, lineEndX } = footerLayout;
+
+    if (qrMeta?.dataUrl) {
+      doc.setFillColor(...WHITE);
+      doc.rect(lineEndX, qrY - 1, PAGE_W - M - lineEndX, PAGE_H - qrY + 1, 'F');
+    }
+
     doc.setDrawColor(...RED);
     doc.setLineWidth(0.7);
-    const qrSize = qrMeta
-      ? containImage(qrMeta.width, qrMeta.height, 18, 18)
-      : { width: 0, height: 0 };
-    const lineEnd = qrMeta ? PAGE_W - M - qrSize.width - 2 : PAGE_W - M;
-    doc.line(M, lineY, lineEnd, lineY);
+    doc.line(M, FOOTER_LINE_Y, lineEndX, FOOTER_LINE_Y);
 
     if (qrMeta?.dataUrl) {
       try {
         doc.addImage(
           qrMeta.dataUrl,
           imgFmt(qrMeta.dataUrl),
-          PAGE_W - M - qrSize.width,
-          lineY - qrSize.height + 1,
+          qrX,
+          qrY,
           qrSize.width,
           qrSize.height,
         );
@@ -321,15 +394,6 @@ export async function generateFacturePdf(facture, catMap = {}, options = {}) {
     textRight(doc, 'PU HT', COL_R[4], mid);
     textRight(doc, 'TOTAL HT', COL_R[5], mid);
     return startY + TABLE_HDR_H;
-  };
-
-  const drawCategoryRow = (text, startY) => {
-    drawCellBorder(doc, M, startY, CONTENT_W, CAT_ROW_H);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7.5);
-    doc.setTextColor(...TEXT);
-    doc.text(String(text).toUpperCase(), M + 2.5, startY + CAT_ROW_H / 2 + 1);
-    return startY + CAT_ROW_H;
   };
 
   const drawEmptyRow = (startY) => {
@@ -388,51 +452,79 @@ export async function generateFacturePdf(facture, catMap = {}, options = {}) {
   const drawTotalsBlock = (startY) => {
     const items = isAcompte
       ? [
-          { label: 'Total HT', value: facture.total_ht, bold: true, red: false, fs: 8 },
-          { label: 'TVA', value: facture.total_tva, bold: false, red: false, fs: 8 },
-          { label: 'Montant acompte TTC', value: facture.total_ttc, bold: true, red: true, fs: 9 },
+          { label: 'Total HT :', value: facture.total_ht, bold: false, fs: 8, red: false },
+          { label: `TVA (${tvaPct}%) :`, value: facture.total_tva, bold: false, fs: 8, red: false },
+          { label: 'Montant acompte TTC :', value: facture.total_ttc, bold: true, fs: 9, red: true, ttc: true },
           ...(facture.devis_reste_apres != null
-            ? [{ label: 'Reste a facturer sur devis', value: facture.devis_reste_apres, bold: true, red: true, fs: 9 }]
+            ? [{ label: 'Reste a facturer sur devis :', value: facture.devis_reste_apres, bold: true, fs: 9, red: true }]
             : []),
-          { label: 'Montant paye', value: facture.total_paye, bold: false, red: false, fs: 8 },
-          { label: 'Reste a payer', value: facture.reste_a_payer, bold: true, red: true, fs: 9 },
+          { label: 'Montant paye :', value: facture.total_paye, bold: false, fs: 8, red: false },
+          { label: 'Reste a payer :', value: facture.reste_a_payer, bold: true, fs: 9, red: true },
         ]
       : [
-          { label: 'Total HT', value: facture.total_ht, bold: true, red: false, fs: 8 },
-          { label: 'TVA', value: facture.total_tva, bold: false, red: false, fs: 8 },
-          { label: 'Total TTC', value: facture.total_ttc, bold: true, red: true, fs: 9 },
-          { label: 'Montant paye', value: facture.total_paye, bold: false, red: false, fs: 8 },
-          { label: 'Reste a payer', value: facture.reste_a_payer, bold: true, red: true, fs: 9 },
+          { label: 'Total HT :', value: facture.total_ht, bold: false, fs: 8, red: false },
+          { label: `TVA (${tvaPct}%) :`, value: facture.total_tva, bold: false, fs: 8, red: false },
+          { label: 'Total TTC :', value: facture.total_ttc, bold: true, fs: 9, red: true, ttc: true },
+          { label: 'Montant paye :', value: facture.total_paye, bold: false, fs: 8, red: false },
+          { label: 'Reste a payer :', value: facture.reste_a_payer, bold: true, fs: 9, red: true },
         ];
-    let cy = startY;
-    items.forEach((item) => {
-      drawCellBorder(doc, M, cy, LEFT_MERGE_W, TOTAL_ROW_H);
-      drawCellBorder(doc, COL_X[5], cy, COL_W[5], TOTAL_ROW_H);
+
+    const blockH = TOTAL_ROW_H * items.length;
+    const splitX = M + CONTENT_W / 2;
+    const leftW = CONTENT_W / 2;
+    const rightW = CONTENT_W / 2;
+
+    doc.setDrawColor(...BORDER);
+    doc.setLineWidth(0.25);
+    doc.rect(M, startY, CONTENT_W, blockH);
+    doc.line(splitX, startY, splitX, startY + blockH);
+
+    if (signatureMeta?.dataUrl) {
+      const pad = 3;
+      const sigSize = containImage(
+        signatureMeta.width,
+        signatureMeta.height,
+        leftW - pad * 2,
+        blockH - pad * 2,
+      );
+      const sigX = M + (leftW - sigSize.width) / 2;
+      const sigY = startY + (blockH - sigSize.height) / 2;
+      try {
+        doc.addImage(
+          signatureMeta.dataUrl,
+          imgFmt(signatureMeta.dataUrl),
+          sigX,
+          sigY,
+          sigSize.width,
+          sigSize.height,
+        );
+      } catch { /* skip */ }
+    }
+
+    items.forEach((item, i) => {
+      const cy = startY + i * TOTAL_ROW_H;
+      if (item.ttc) {
+        doc.setFillColor(245, 245, 245);
+        doc.rect(splitX, cy, rightW, TOTAL_ROW_H, 'F');
+        doc.setDrawColor(...BORDER);
+        doc.line(splitX, cy, splitX + rightW, cy);
+      } else if (i > 0) {
+        doc.setDrawColor(...BORDER);
+        doc.line(splitX, cy, splitX + rightW, cy);
+      }
       const mid = cy + TOTAL_ROW_H / 2 + 1;
       doc.setFont('helvetica', item.bold ? 'bold' : 'normal');
       doc.setFontSize(item.fs);
       doc.setTextColor(...(item.red ? RED : TEXT));
-      textRight(doc, item.label, LABEL_COL_R, mid);
-      textRight(doc, `${fmtNum(item.value)} MAD`, VALUE_COL_R, mid);
-      cy += TOTAL_ROW_H;
+      doc.text(item.label, splitX + 3, mid);
+      textRight(doc, `${fmtNum(item.value)} MAD`, splitX + rightW - 3, mid);
     });
-    return cy;
-  };
 
-  const drawExtraRow = (row, startY) => {
-    if (row.kind === 'titre') {
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(9);
-      doc.setTextColor(...TEXT);
-      doc.text(row.text, M, startY + 5);
-      return startY + 8;
-    }
-    doc.setFont('helvetica', 'italic');
-    doc.setFontSize(7);
-    doc.setTextColor(...MUTED);
-    const lines = doc.splitTextToSize(row.text || '', CONTENT_W - 4);
-    lines.forEach((line, i) => doc.text(line, M, startY + 4 + i * 3.2));
-    return startY + Math.max(lines.length * 3.2 + 3, 8);
+    doc.setDrawColor(...BORDER);
+    doc.setLineWidth(0.25);
+    doc.rect(M, startY, CONTENT_W, blockH);
+
+    return startY + blockH;
   };
 
   /* ── Page 1 header (inchangé) ── */
@@ -549,7 +641,7 @@ export async function generateFacturePdf(facture, catMap = {}, options = {}) {
   };
 
   const ensureSpace = (needed) => {
-    if (y + needed > MAX_Y) newPage();
+    if (y + needed > footerLayout.contentMaxY) newPage();
   };
 
   const ensureTableHeader = () => {
@@ -566,27 +658,27 @@ export async function generateFacturePdf(facture, catMap = {}, options = {}) {
     y = drawEmptyRow(y);
   } else {
     rows.forEach((row) => {
-      if (row.kind === 'titre' || row.kind === 'note') {
-        const h = measureRowHeight(doc, row);
-        ensureSpace(h);
-        y = drawExtraRow(row, y);
-        return;
-      }
-
+      const h = measureRowHeight(doc, row);
+      const headerH = tableHeaderOnPage ? 0 : TABLE_HDR_H;
+      ensureSpace(headerH + h);
       ensureTableHeader();
 
-      const h = measureRowHeight(doc, row);
-      ensureSpace(h);
-
       if (row.kind === 'section') {
-        y = drawCategoryRow(row.text, y);
+        y = drawTableLabelRow(doc, row.text, y, { uppercase: true });
+      } else if (row.kind === 'titre') {
+        y = drawTableLabelRow(doc, row.text, y, { fontSize: 9, uppercase: true, minH: 8 });
+      } else if (row.kind === 'sous_titre') {
+        y = drawTableLabelRow(doc, row.text, y, { fontSize: 8, indent: 2, minH: 7 });
+      } else if (row.kind === 'note') {
+        y = drawTableLabelRow(doc, row.text, y, { fontSize: 7, bold: false, italic: true });
       } else if (row.kind === 'article') {
         y = drawArticleRow(row, y);
       }
     });
   }
 
-  ensureSpace(TOTAL_ROW_H * (isAcompte ? 7 : 5));
+  const totalsRows = isAcompte ? (facture.devis_reste_apres != null ? 6 : 5) : 5;
+  ensureSpace(TOTAL_ROW_H * totalsRows);
   y = drawTotalsBlock(y);
 
   const totalPages = doc.internal.getNumberOfPages();
