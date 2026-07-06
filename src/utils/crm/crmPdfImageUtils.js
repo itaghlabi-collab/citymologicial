@@ -1,5 +1,5 @@
 /**
- * Utilitaires images PDF CRM — compression JPEG + alias jsPDF (évite la duplication par page).
+ * Utilitaires images PDF CRM — compression + alias jsPDF (évite la duplication par page).
  */
 
 export const CRM_PDF_LOGO_URL = 'https://i.ibb.co/N6SbC06M/logopng.png';
@@ -30,7 +30,7 @@ async function fetchImageDataUrl(url) {
   }
 }
 
-function compressDataUrl(dataUrl, maxDimension, quality) {
+function compressDataUrl(dataUrl, maxDimension, quality, { preserveAlpha = false } = {}) {
   return new Promise((resolve) => {
     const img = new Image();
     img.onload = () => {
@@ -43,14 +43,35 @@ function compressDataUrl(dataUrl, maxDimension, quality) {
       canvas.height = h;
       const ctx = canvas.getContext('2d');
       if (!ctx) {
-        resolve({ dataUrl, width: img.naturalWidth, height: img.naturalHeight });
+        resolve({
+          dataUrl,
+          width: img.naturalWidth,
+          height: img.naturalHeight,
+          format: preserveAlpha ? 'PNG' : 'JPEG',
+        });
         return;
       }
+
+      if (preserveAlpha) {
+        ctx.clearRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve({
+          dataUrl: canvas.toDataURL('image/png'),
+          width: w,
+          height: h,
+          format: 'PNG',
+        });
+        return;
+      }
+
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, w, h);
       ctx.drawImage(img, 0, 0, w, h);
       resolve({
         dataUrl: canvas.toDataURL('image/jpeg', quality),
         width: w,
         height: h,
+        format: 'JPEG',
       });
     };
     img.onerror = () => resolve(null);
@@ -58,18 +79,20 @@ function compressDataUrl(dataUrl, maxDimension, quality) {
   });
 }
 
-export async function loadCompressedImage(url, maxDimension = 600, quality = 0.75) {
+export async function loadCompressedImage(url, maxDimension = 600, quality = 0.75, options = {}) {
   const dataUrl = await fetchImageDataUrl(url);
   if (!dataUrl) return null;
-  return compressDataUrl(dataUrl, maxDimension, quality);
+  return compressDataUrl(dataUrl, maxDimension, quality, options);
 }
 
 export async function loadCrmPdfImages({ withSignature = false } = {}) {
   const [logoMeta, iconMeta, qrMeta, signatureMeta] = await Promise.all([
     loadCompressedImage(CRM_PDF_LOGO_URL, 400, 0.82),
-    loadCompressedImage(CRM_PDF_ICON_URL, 500, 0.65),
+    loadCompressedImage(CRM_PDF_ICON_URL, 500, 0.65, { preserveAlpha: true }),
     loadCompressedImage(CRM_PDF_QR_URL, 200, 0.8),
-    withSignature ? loadCompressedImage(CRM_PDF_SIGNATURE_URL, 350, 0.82) : Promise.resolve(null),
+    withSignature
+      ? loadCompressedImage(CRM_PDF_SIGNATURE_URL, 350, 0.82, { preserveAlpha: true })
+      : Promise.resolve(null),
   ]);
   return { logoMeta, iconMeta, qrMeta, signatureMeta };
 }
@@ -77,6 +100,7 @@ export async function loadCrmPdfImages({ withSignature = false } = {}) {
 export function addCrmPdfImage(doc, meta, x, y, width, height, alias) {
   if (!meta?.dataUrl) return;
   try {
-    doc.addImage(meta.dataUrl, 'JPEG', x, y, width, height, alias, 'FAST');
+    const format = meta.format || 'JPEG';
+    doc.addImage(meta.dataUrl, format, x, y, width, height, alias, 'FAST');
   } catch { /* skip */ }
 }

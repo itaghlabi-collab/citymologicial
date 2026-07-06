@@ -135,6 +135,22 @@ export async function reorderArticles(orderedIds) {
   if (failed?.error) throw failed.error;
 }
 
+/** Réordonne un sous-ensemble (ex. une catégorie) sans déplacer les autres articles. */
+export function mergeArticleReorder(allArticles, reorderedSubsetIds) {
+  const subsetSet = new Set(reorderedSubsetIds.map(String));
+  const queue = [...reorderedSubsetIds];
+  const sorted = [...(allArticles || [])].sort((a, b) => {
+    const da = Number(a.sort_order) || 0;
+    const db = Number(b.sort_order) || 0;
+    if (da !== db) return da - db;
+    return String(a.created_at || '').localeCompare(String(b.created_at || ''));
+  });
+  return sorted.map((article) => {
+    if (subsetSet.has(String(article.id))) return queue.shift();
+    return article.id;
+  });
+}
+
 export async function listArticles() {
   await getAuthUserId();
   let { data, error } = await getSupabase()

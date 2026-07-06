@@ -4,6 +4,7 @@ import {
   ChevronUp, ChevronDown, AlertCircle, Loader, Tag, DollarSign, Layers, GripVertical,
 } from 'lucide-react';
 import { listCategories } from '../../services/crm/categories';
+import { mergeArticleReorder } from '../../services/crm/articles';
 import { useArticles } from '../../hooks/useArticles';
 import { formatCategoryDisplayName } from '../../utils/crm/categoryDisplay';
 
@@ -435,7 +436,7 @@ export default function Articles() {
   const safePagedPage = Math.min(page, totalPages);
   const paginated = filtered.slice((safePagedPage - 1) * PER_PAGE, safePagedPage * PER_PAGE);
   const hasFilters = !!(search || filterCat || filterStatut);
-  const canReorder = !hasFilters && !sortField && !loading;
+  const canReorder = !search && !filterStatut && !sortField && !loading;
 
   async function handleReorder(fromPageIdx, toPageIdx) {
     if (!canReorder || fromPageIdx == null || toPageIdx == null || fromPageIdx === toPageIdx) return;
@@ -445,7 +446,10 @@ export default function Articles() {
     const nextIds = [...ids];
     const [moved] = nextIds.splice(fromGlobal, 1);
     nextIds.splice(toGlobal, 0, moved);
-    const result = await reorder(nextIds);
+    const finalIds = filterCat
+      ? mergeArticleReorder(articles, nextIds)
+      : nextIds;
+    const result = await reorder(finalIds);
     if (result.success) showToast('Ordre des articles enregistré.');
     else showToast(result.error || 'Erreur réorganisation.', 'error');
   }
@@ -612,7 +616,9 @@ export default function Articles() {
           </span>
           {canReorder && (
             <span style={{ fontSize: '0.75rem', color: 'var(--text-3)', marginLeft: 8 }}>
-              Glissez les lignes pour réordonner le catalogue
+              {filterCat
+                ? 'Glissez les lignes pour réordonner dans cette catégorie'
+                : 'Glissez les lignes pour réordonner le catalogue'}
             </span>
           )}
         </div>
