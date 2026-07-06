@@ -14,8 +14,12 @@ import {
   KpiCard, EmptyState, Modal, SectionTitle, FField, FRow,
   formatMAD, genId,
 } from './shared.jsx';
+import BCLignesSection from './BCLignesSection';
 
-const EMPTY_LIGNE = { designation: '', qte: 1, unite: 'U', prix_ht: '', tva: 20 };
+const EMPTY_LIGNE = {
+  designation: '', description: '', categorie_id: '', article_id: '',
+  qte: 1, unite: 'unite', prix_ht: '', tva: 20,
+};
 const EMPTY_FORM = {
   supplier_id: '',
   fournisseur: '',
@@ -41,70 +45,6 @@ function toFormState(item) {
       ? (item.lignes || item.lines)
       : [{ ...EMPTY_LIGNE, id: genId() }],
   };
-}
-
-function LignesTable({ lignes, onChange }) {
-  function updateLigne(id, k, v) {
-    onChange(lignes.map((l) => (l.id === id ? { ...l, [k]: v } : l)));
-  }
-  function addLigne() {
-    onChange([...lignes, { ...EMPTY_LIGNE, id: genId() }]);
-  }
-  function removeLigne(id) {
-    if (lignes.length <= 1) return;
-    onChange(lignes.filter((l) => l.id !== id));
-  }
-
-  return (
-    <div>
-      <div style={{ overflowX: 'auto' }}>
-        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.84rem' }}>
-          <thead>
-            <tr style={{ background: 'var(--surface-2)', borderBottom: '1.5px solid var(--border)' }}>
-              {['Désignation', 'Qté', 'Unité', 'Prix HT', 'TVA %', 'Total HT', ''].map((h) => (
-                <th key={h} style={{ padding: '8px 10px', textAlign: 'left', fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.06em', whiteSpace: 'nowrap' }}>{h}</th>
-              ))}
-            </tr>
-          </thead>
-          <tbody>
-            {lignes.map((l) => {
-              const totalHT = (parseFloat(l.qte) || 0) * (parseFloat(l.prix_ht) || 0);
-              return (
-                <tr key={l.id} style={{ borderBottom: '1px solid var(--border)' }}>
-                  <td style={{ padding: '6px 6px' }}>
-                    <input value={l.designation} onChange={(e) => updateLigne(l.id, 'designation', e.target.value)} placeholder="Désignation article..." style={{ ...INPUT_STYLE, minWidth: 160 }} />
-                  </td>
-                  <td style={{ padding: '6px 6px' }}>
-                    <input type="number" min="0" value={l.qte} onChange={(e) => updateLigne(l.id, 'qte', e.target.value)} style={{ ...INPUT_STYLE, width: 70 }} />
-                  </td>
-                  <td style={{ padding: '6px 6px' }}>
-                    <input value={l.unite} onChange={(e) => updateLigne(l.id, 'unite', e.target.value)} style={{ ...INPUT_STYLE, width: 60 }} />
-                  </td>
-                  <td style={{ padding: '6px 6px' }}>
-                    <input type="number" min="0" step="0.01" value={l.prix_ht} onChange={(e) => updateLigne(l.id, 'prix_ht', e.target.value)} placeholder="0.00" style={{ ...INPUT_STYLE, width: 100 }} />
-                  </td>
-                  <td style={{ padding: '6px 6px' }}>
-                    <select value={l.tva} onChange={(e) => updateLigne(l.id, 'tva', Number(e.target.value))} style={{ ...SELECT_STYLE, width: 70 }}>
-                      {TVA_OPTIONS.map((t) => <option key={t} value={t}>{t}%</option>)}
-                    </select>
-                  </td>
-                  <td style={{ padding: '6px 10px', fontWeight: 700, fontFamily: 'var(--font-head)', whiteSpace: 'nowrap' }}>
-                    {totalHT.toLocaleString('fr-FR', { minimumFractionDigits: 2 })}
-                  </td>
-                  <td style={{ padding: '6px 6px' }}>
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => removeLigne(l.id)} style={{ color: 'var(--red)', padding: '4px 6px' }}>✕</button>
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-      <button type="button" className="btn btn-ghost btn-sm" onClick={addLigne} style={{ marginTop: 10, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-        <Plus size={13} /> Ajouter ligne
-      </button>
-    </div>
-  );
 }
 
 function BCForm({ initial, onSave, onCancel, fournisseurs, suppliersLoading, saving }) {
@@ -183,7 +123,7 @@ function BCForm({ initial, onSave, onCancel, fournisseurs, suppliersLoading, sav
 
       <SectionTitle icon={<Package size={12} />}>Lignes articles</SectionTitle>
       <div style={{ marginBottom: 20 }}>
-        <LignesTable lignes={form.lignes} onChange={(v) => set('lignes', v)} />
+        <BCLignesSection lignes={form.lignes} onChange={(v) => set('lignes', v)} />
       </div>
 
       <SectionTitle icon={<ShoppingCart size={12} />}>Totaux</SectionTitle>

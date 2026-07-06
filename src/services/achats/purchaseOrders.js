@@ -5,7 +5,10 @@ import { getSupabase } from '../../lib/supabase';
 
 const TABLE = 'purchase_orders';
 
-const EMPTY_LIGNE = { designation: '', qte: 1, unite: 'U', prix_ht: 0, tva: 20 };
+const EMPTY_LIGNE = {
+  designation: '', description: '', categorie_id: '', article_id: '',
+  qte: 1, unite: 'unite', prix_ht: 0, tva: 20,
+};
 
 function lineId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -29,9 +32,12 @@ function normalizeLines(raw) {
   if (!arr.length) return [{ ...EMPTY_LIGNE, id: lineId() }];
   return arr.map((l) => ({
     id: l.id || lineId(),
+    categorie_id: l.categorie_id || '',
+    article_id: l.article_id || '',
     designation: l.designation || '',
+    description: l.description || '',
     qte: l.qte ?? 1,
-    unite: l.unite || 'U',
+    unite: l.unite || 'unite',
     prix_ht: l.prix_ht ?? '',
     tva: l.tva ?? 20,
   }));
@@ -85,11 +91,14 @@ export function toPurchaseOrderRow(form) {
     subtotal_ht: totals.subtotal_ht,
     total_vat: totals.total_vat,
     total_ttc: form.total_ttc != null ? Number(form.total_ttc) : totals.total_ttc,
-    lines: lignes.map(({ id, designation, qte, unite, prix_ht, tva }) => ({
+    lines: lignes.map(({ id, categorie_id, article_id, designation, description, qte, unite, prix_ht, tva }) => ({
       id,
+      categorie_id: categorie_id || null,
+      article_id: article_id || null,
       designation: designation || '',
+      description: description || '',
       qte: Number(qte) || 0,
-      unite: unite || 'U',
+      unite: unite || 'unite',
       prix_ht: Number(prix_ht) || 0,
       tva: Number(tva) || 0,
     })),
