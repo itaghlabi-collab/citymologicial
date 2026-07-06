@@ -97,6 +97,39 @@ export async function updateAchatsPaymentOrder(id, form) {
   return normalizeAchatsPaymentOrder(data);
 }
 
+/** Synchronise l'OP achats après modification super admin de la demande d'achat. */
+export async function syncAchatsPaymentOrderFromRequest(paymentOrderId, { request, quote, oa }) {
+  if (!paymentOrderId || !request) return null;
+  const patch = {
+    project_id: request.project_id || null,
+    purchase_request_ref: request.ref,
+    purchase_oa_ref: oa?.ref || null,
+    motif: `Achat — ${request.ref} — ${request.titre}`,
+    commentaire: oa ? `OA ${oa.ref} — Demande ${request.ref}` : `Demande ${request.ref}`,
+  };
+  if (quote) {
+    patch.beneficiaire = quote.supplier_name;
+    patch.type_beneficiaire = 'Fournisseur';
+    patch.fournisseur_lie = quote.supplier_name;
+    patch.montant = quote.montant_ttc;
+    patch.montant_ht = quote.montant_ht;
+    patch.tva_rate = quote.tva_rate;
+    patch.supplier_id = quote.supplier_id || null;
+    patch.observation = quote.observations || null;
+  }
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .update(patch)
+    .eq('id', paymentOrderId)
+    .select()
+    .single();
+  if (error) throw error;
+  const updated = normalizeAchatsPaymentOrder(data);
+  const { syncPaymentOrderToTransaction } = await import('../finance/financeTransactions');
+  await syncPaymentOrderToTransaction(updated);
+  return updated;
+}
+
 export async function validateAchatsPaymentOrder(id, userName) {
   const op = await getAchatsPaymentOrder(id);
   const { data, error } = await getSupabase()

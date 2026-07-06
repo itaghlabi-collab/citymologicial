@@ -8,7 +8,7 @@ import {
 } from '../services/achats/purchaseRequests';
 import {
   createPurchaseRequestWorkflow,
-  updatePurchaseRequestDraft,
+  updatePurchaseRequestWorkflow,
 } from '../services/achats/purchaseWorkflow';
 
 export function usePurchaseRequests() {
@@ -63,7 +63,7 @@ export function usePurchaseRequests() {
     setSaving(true);
     setError(null);
     try {
-      if (id) await updatePurchaseRequestDraft(id, form);
+      if (id) await updatePurchaseRequestWorkflow(id, form);
       else await createPurchaseRequestWorkflow(form);
       await load();
       return { success: true };

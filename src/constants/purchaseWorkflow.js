@@ -161,8 +161,11 @@ export const OP_ACHATS_STATUS_BADGE = {
   'En attente': 'badge-orange',
 };
 
-export function canEditPurchaseRequest(statut) {
-  return normalizePurchaseStatus(statut) === 'Brouillon';
+export function canEditPurchaseRequest(statut, { isSuperAdmin = false } = {}) {
+  const s = normalizePurchaseStatus(statut);
+  if (s === 'Brouillon') return true;
+  if (isSuperAdmin && s !== 'Refusée') return true;
+  return false;
 }
 
 export function canDeletePurchaseRequest() {

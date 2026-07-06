@@ -19,6 +19,7 @@ import { submitPurchaseRequest, getPurchaseRequestBundle, reconcileLegacySoumise
 import { projectOptionLabel, purchaseRequestProjectLabel, updatePurchaseRequestTitle, reconcileMissingPurchaseRequestRefs } from '../../services/achats/purchaseRequests';
 import { generatePurchaseRequestPdf } from '../../services/achats/purchaseRequestPdf';
 import { resolveCurrentPurchaseRole, purchasePermissions, canViewPurchaseRequest } from '../../services/achats/purchaseWorkflowRoles';
+import { isSuperAdmin } from '../../services/rh/isSuperAdmin';
 import DemandeAchatDetail from './DemandeAchatDetail';
 import {
   INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE,
@@ -211,7 +212,7 @@ function DemandeLignesTable({ lignes, onChange, error }) {
   );
 }
 
-function DemandeForm({ initial, onSave, onCancel, saving, suppliers = [], projects = [], sessionUser }) {
+function DemandeForm({ initial, onSave, onCancel, saving, suppliers = [], projects = [], sessionUser, superAdminEdit = false }) {
   const [form, setForm] = useState(() => toFormState(initial));
   const [attachments, setAttachments] = useState(() => initial?.payload?.attachments || []);
   const [errors, setErrors] = useState({});
@@ -291,6 +292,11 @@ function DemandeForm({ initial, onSave, onCancel, saving, suppliers = [], projec
 
   return (
     <form onSubmit={handleSubmit}>
+      {superAdminEdit && (
+        <div style={{ marginBottom: 16, padding: '10px 14px', borderRadius: 8, background: 'rgba(198,40,40,0.08)', border: '1px solid rgba(198,40,40,0.25)', fontSize: '0.82rem', color: 'var(--text-2)' }}>
+          Modification super administrateur — les changements seront appliqués automatiquement sur l&apos;ordre d&apos;achat et l&apos;ordre de paiement liés.
+        </div>
+      )}
       <SectionTitle icon={<ClipboardList size={12} />}>Type de demande</SectionTitle>
       <div style={{ display: 'flex', gap: 20, marginBottom: 16, flexWrap: 'wrap' }}>
         <label style={{ display: 'flex', alignItems: 'center', gap: 8, cursor: 'pointer', fontSize: '0.85rem' }}>
@@ -463,6 +469,7 @@ function computeDashboardKpis(items) {
 
 export default function DemandesAchat() {
   const { user } = useAuth();
+  const superAdmin = isSuperAdmin(user);
   const { records: suppliers } = useSuppliers();
   const {
     records: items, projects, loading, saving, error, configured, reload, save, remove,
@@ -626,8 +633,8 @@ export default function DemandesAchat() {
               window.alert('Demande introuvable.');
               return;
             }
-            if (!canEditPurchaseRequest(item.statut)) {
-              window.alert('Cette demande ne peut être modifiée qu\'en statut Brouillon.');
+            if (!canEditPurchaseRequest(item.statut, { isSuperAdmin: superAdmin })) {
+              window.alert('Cette demande ne peut être modifiée qu\'en statut Brouillon (ou par le super administrateur).');
               return;
             }
             setEditItem(item);
@@ -635,7 +642,7 @@ export default function DemandesAchat() {
           }}
           onRefresh={reload}
         />
-        <Modal open={showModal} onClose={() => { setShowModal(false); setEditItem(null); }} title={editItem ? 'Modifier la demande' : "Nouvelle demande d'achat"} width={780}>
+        <Modal open={showModal} onClose={() => { setShowModal(false); setEditItem(null); }} title={editItem ? (superAdmin && editItem.statut !== 'Brouillon' ? 'Modifier la demande (super admin)' : 'Modifier la demande') : "Nouvelle demande d'achat"} width={780}>
           <DemandeForm
             initial={editItem}
             onSave={handleSave}
@@ -644,6 +651,7 @@ export default function DemandesAchat() {
             suppliers={suppliers}
             projects={projects}
             sessionUser={user}
+            superAdminEdit={superAdmin && editItem && editItem.statut !== 'Brouillon'}
           />
         </Modal>
       </>
@@ -799,8 +807,8 @@ export default function DemandesAchat() {
                     <td>
                       <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
                         <button type="button" className="btn btn-secondary btn-sm" title="Voir" onClick={() => setDetailId(x.id)}><Eye size={13} /></button>
-                        {canEditPurchaseRequest(x.statut) && (
-                          <button type="button" className="btn btn-ghost btn-sm" title="Modifier" onClick={() => { setEditItem(x); setShowModal(true); }}><Edit2 size={13} /></button>
+                        {canEditPurchaseRequest(x.statut, { isSuperAdmin: superAdmin }) && (
+                          <button type="button" className="btn btn-ghost btn-sm" title={superAdmin && x.statut !== 'Brouillon' ? 'Modifier (super admin)' : 'Modifier'} onClick={() => { setEditItem(x); setShowModal(true); }}><Edit2 size={13} /></button>
                         )}
                         <button type="button" className="btn btn-ghost btn-sm" title="PDF" disabled={pdfLoadingId === x.id} onClick={() => handlePrintPdf(x)}>
                           {pdfLoadingId === x.id ? <Loader2 size={12} className="cin-spin" /> : <FileText size={13} />}
@@ -829,7 +837,7 @@ export default function DemandesAchat() {
         )}
       </div>
 
-      <Modal open={showModal} onClose={() => { setShowModal(false); setEditItem(null); }} title={editItem ? 'Modifier la demande' : "Nouvelle demande d'achat"} width={780}>
+      <Modal open={showModal} onClose={() => { setShowModal(false); setEditItem(null); }} title={editItem ? (superAdmin && editItem.statut !== 'Brouillon' ? 'Modifier la demande (super admin)' : 'Modifier la demande') : "Nouvelle demande d'achat"} width={780}>
         <DemandeForm
           initial={editItem}
           onSave={handleSave}
@@ -838,6 +846,7 @@ export default function DemandesAchat() {
           suppliers={suppliers}
           projects={projects}
           sessionUser={user}
+          superAdminEdit={superAdmin && editItem && editItem.statut !== 'Brouillon'}
         />
       </Modal>
     </div>

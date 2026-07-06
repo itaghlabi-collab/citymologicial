@@ -24,6 +24,7 @@ import {
 } from '../../constants/purchaseWorkflow';
 import { generatePurchaseRequestPdf } from '../../services/achats/purchaseRequestPdf';
 import { purchaseRequestProjectLabel } from '../../services/achats/purchaseRequests';
+import { isSuperAdmin } from '../../services/rh/isSuperAdmin';
 import { normalizeRequestLines } from '../../services/achats/purchasePdfShared';
 import {
   EMPTY_QUOTE_LINE,
@@ -447,6 +448,7 @@ export default function DemandeAchatDetail({
   requestId, onBack, onEdit, onRefresh, suppliers = [], initialShowQuoteForm = false, refreshKey = 0,
 }) {
   const { user } = useAuth();
+  const superAdmin = isSuperAdmin(user);
   const [bundle, setBundle] = useState(null);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -518,7 +520,7 @@ export default function DemandeAchatDetail({
   const projectDisplay = purchaseRequestProjectLabel(request);
   const besoinsLines = normalizeRequestLines(request);
 
-  const canEdit = canEditPurchaseRequest(request.statut);
+  const canEdit = canEditPurchaseRequest(request.statut, { isSuperAdmin: superAdmin });
   const isTerminal = ['Clôturée', 'Refusée'].includes(request.statut);
   const canManageQuotesOnRequest = perms.canManageQuotes && canAddQuoteToRequest(request.statut);
   const showQuotesSection = request.statut !== 'Refusée';
@@ -540,7 +542,9 @@ export default function DemandeAchatDetail({
           <span className={`badge ${BADGE_PRIORITE[request.priorite] || 'badge-grey'}`}>{request.priorite}</span>
           <span className={`badge ${getPurchaseStatusBadge(request.statut)}`}>{getPurchaseStatusLabel(request.statut)}</span>
           {canEdit && (
-            <button type="button" className="btn btn-secondary btn-sm" onClick={onEdit}>Modifier</button>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={onEdit} title={superAdmin && request.statut !== 'Brouillon' ? 'Modifier (super admin — OA/OP synchronisés)' : 'Modifier'}>
+              Modifier
+            </button>
           )}
           <button
             type="button"

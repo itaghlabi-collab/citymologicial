@@ -11,12 +11,14 @@ import {
   updatePurchaseRequestQuote,
   deletePurchaseRequestQuote,
 } from './purchaseRequestQuotes';
-import { createAcquisitionOrderFromQuote, updateAcquisitionOrder } from './purchaseAcquisitionOrders';
-import { createAchatsPaymentOrderFromAcquisition } from './purchasePaymentOrdersAchats';
+import { createAcquisitionOrderFromQuote, updateAcquisitionOrder, syncAcquisitionOrderFromRequest, getAcquisitionOrder } from './purchaseAcquisitionOrders';
+import { createAchatsPaymentOrderFromAcquisition, syncAchatsPaymentOrderFromRequest } from './purchasePaymentOrdersAchats';
 import { normalizePurchaseRequest, toPurchaseRequestRow, generatePurchaseRequestRef, isOffProjectPurchaseRequest } from './purchaseRequests';
+import { getPurchaseRequestQuote } from './purchaseRequestQuotes';
 import { resolveCurrentPurchaseRole, purchasePermissions, PURCHASE_ROLES } from './purchaseWorkflowRoles';
 import { fetchProfile } from '../supabase/auth';
 import { employeeSelectLabel } from '../rh/employees';
+import { isSuperAdmin } from '../rh/isSuperAdmin';
 import {
   notifyPurchaseRequestSubmitted,
   notifyPurchaseQuoteAdded,
@@ -164,6 +166,76 @@ export async function createPurchaseRequestWorkflow(form) {
     userName: ctx.userName,
   });
   return request;
+}
+
+async function assertSuperAdmin(ctx) {
+  const { user, profile } = ctx || await getAuthContext();
+  if (!isSuperAdmin({ ...user, role: profile?.role || user?.role })) {
+    const err = new Error('Accès réservé au super administrateur.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+}
+
+async function syncLinkedOrdersFromPurchaseRequest(request) {
+  if (!request?.acquisition_order_id && !request?.payment_order_id) return;
+
+  const quote = request.selected_quote_id
+    ? await getPurchaseRequestQuote(request.selected_quote_id)
+    : null;
+
+  let oa = null;
+  if (request.acquisition_order_id) {
+    oa = await syncAcquisitionOrderFromRequest(request.acquisition_order_id, { request, quote });
+  }
+
+  if (request.payment_order_id) {
+    const oaForOp = oa || (request.acquisition_order_id
+      ? await getAcquisitionOrder(request.acquisition_order_id)
+      : null);
+    await syncAchatsPaymentOrderFromRequest(request.payment_order_id, { request, quote, oa: oaForOp });
+  }
+}
+
+export async function updatePurchaseRequestWorkflow(id, form) {
+  const ctx = await getAuthContext();
+  const existing = await fetchRequest(id);
+  if (normalizePurchaseStatus(existing.statut) === 'Brouillon') {
+    return updatePurchaseRequestDraft(id, form);
+  }
+  await assertSuperAdmin(ctx);
+  return updatePurchaseRequestSuperAdmin(id, form, existing, ctx);
+}
+
+export async function updatePurchaseRequestSuperAdmin(id, form, existing = null, ctx = null) {
+  const authCtx = ctx || await getAuthContext();
+  await assertSuperAdmin(authCtx);
+  const current = existing || await fetchRequest(id);
+  if (!isOffProjectPurchaseRequest(form) && !(form.projet_lie || form.project_name || '').trim()) {
+    const err = new Error('Le projet lié est obligatoire.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  const patch = {
+    ...toPurchaseRequestRow({
+      ...form,
+      statut: current.statut,
+      ref: current.ref,
+      ref_demande: current.ref,
+      assigned_employee_id: form.assigned_employee_id ?? current.assigned_employee_id,
+      assigned_employee_name: form.assigned_employee_name || current.assigned_employee_name || current.requester_name,
+    }),
+    commentaires_internes: form.commentaires_internes ?? current.commentaires_internes,
+  };
+  const updated = await patchRequest(
+    id,
+    patch,
+    'Modification super admin',
+    'Demande modifiée — synchronisation OA/OP',
+    authCtx,
+  );
+  await syncLinkedOrdersFromPurchaseRequest(updated);
+  return updated;
 }
 
 export async function updatePurchaseRequestDraft(id, form) {

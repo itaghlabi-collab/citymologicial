@@ -133,6 +133,32 @@ export async function updateAcquisitionOrder(id, patch) {
   return normalizeAcquisitionOrder(data);
 }
 
+/** Synchronise l'OA après modification super admin de la demande d'achat. */
+export async function syncAcquisitionOrderFromRequest(oaId, { request, quote }) {
+  if (!oaId || !request) return null;
+  const patch = {
+    project_id: request.project_id || null,
+    project_ref: request.project_ref || null,
+    project_name: request.project_name || null,
+    objet: request.titre || '',
+    lines: request.payload?.lines || [],
+    purchase_request_ref: request.ref,
+  };
+  if (quote) {
+    patch.supplier_id = quote.supplier_id || null;
+    patch.supplier_name = quote.supplier_name;
+    patch.montant_ht = quote.montant_ht;
+    patch.tva_rate = quote.tva_rate;
+    patch.montant_ttc = quote.montant_ttc;
+    patch.delai = quote.delai || null;
+    patch.conditions_paiement = quote.conditions_paiement || null;
+    patch.garantie = quote.garantie || null;
+    patch.mode_paiement = quote.conditions_paiement || null;
+    patch.attachment_url = quote.attachment_url || null;
+  }
+  return updateAcquisitionOrder(oaId, patch);
+}
+
 export async function updateAcquisitionOrderStatus(id, statut) {
   const oa = await updateAcquisitionOrder(id, { statut });
   try {
