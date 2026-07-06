@@ -10,7 +10,7 @@ export const BESOIN_TYPES = [
 
 export const BESOIN_CORPS_METIERS = [
   'Maçon', 'Coffreur', 'Ferrailleur', 'Plombier', 'Électricien', 'Carreleur',
-  'Peintre', 'Menuisier', 'Soudeur', 'Manœuvre', 'Magasinier', 'Chauffeur', 'Autre',
+  'Peintre', 'Menuisier', 'Soudeur', 'Manœuvre', 'Chef d\'équipe', 'Magasinier', 'Chauffeur', 'Autre',
 ];
 
 export const BESOIN_PRIORITES = ['Normale', 'Urgente', 'Critique'];
