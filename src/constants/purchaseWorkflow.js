@@ -168,6 +168,13 @@ export function canEditPurchaseRequest(statut, { isSuperAdmin = false } = {}) {
   return false;
 }
 
+/** Devis modifiable : actif, ou devis retenu par le super admin. */
+export function canEditSupplierQuote(quote, { isSuperAdmin = false } = {}) {
+  if (!quote) return false;
+  if (!quote.verrouille && !quote.selected) return true;
+  return isSuperAdmin && quote.selected;
+}
+
 export function canDeletePurchaseRequest() {
   return true;
 }

@@ -385,21 +385,37 @@ export async function addQuoteToRequest(id, quoteForm) {
 
 export async function updateQuoteOnRequest(requestId, quoteId, quoteForm) {
   const ctx = await getAuthContext();
+  const request = await fetchRequest(requestId);
   const quotes = await listQuotesForRequest(requestId);
   const quote = quotes.find((q) => q.id === quoteId);
-  if (!quote || quote.verrouille || quote.selected) {
+  if (!quote) {
+    const err = new Error('Devis introuvable.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  const superAdmin = isSuperAdmin({ ...ctx.user, role: ctx.profile?.role });
+  const isLocked = quote.verrouille || quote.selected;
+  if (isLocked && !(superAdmin && quote.selected)) {
     const err = new Error('Ce devis ne peut plus être modifié.');
     err.code = 'VALIDATION';
     throw err;
   }
-  const updated = await updatePurchaseRequestQuote(quoteId, { ...quoteForm, purchase_request_id: requestId });
+  const updated = await updatePurchaseRequestQuote(quoteId, {
+    ...quoteForm,
+    purchase_request_id: requestId,
+    statut: quote.statut,
+  });
   await appendPurchaseRequestHistory({
     purchaseRequestId: requestId,
-    action: 'Modification devis',
-    detail: updated.supplier_name,
+    action: isLocked ? 'Modification devis (super admin)' : 'Modification devis',
+    detail: `${updated.supplier_name}${isLocked ? ' — synchronisation OA/OP' : ''}`,
     userId: ctx.user.id,
     userName: ctx.userName,
   });
+  if (isLocked && quote.selected && (request.acquisition_order_id || request.payment_order_id)) {
+    const refreshedRequest = await fetchRequest(requestId);
+    await syncLinkedOrdersFromPurchaseRequest(refreshedRequest);
+  }
   return updated;
 }
 

@@ -55,7 +55,7 @@ const EMPTY_QUOTE = {
 };
 
 function QuoteComparisonTable({
-  quotes, onValidate, canValidate, validatingId, canManage, onEdit, onDelete, onView,
+  quotes, onValidate, canValidate, validatingId, canManage, canSuperAdminEditSelectedQuote, onEdit, onDelete, onView,
 }) {
   if (!quotes?.length) {
     return (
@@ -87,6 +87,7 @@ function QuoteComparisonTable({
         <tbody>
           {quotes.map((q) => {
             const locked = q.selected || q.verrouille;
+            const canEditQuote = (canManage && !locked) || (canSuperAdminEditSelectedQuote && q.selected);
             return (
               <tr key={q.id} style={q.selected ? { background: 'rgba(46, 125, 50, 0.08)' } : undefined}>
                 <td style={{ fontWeight: 700 }}>{q.supplier_name}</td>
@@ -122,8 +123,8 @@ function QuoteComparisonTable({
                     <button type="button" className="btn btn-ghost btn-sm" title="Voir détail" onClick={() => onView(q)}>
                       <Eye size={12} />
                     </button>
-                    {canManage && !locked && (
-                      <button type="button" className="btn btn-ghost btn-sm" title="Modifier" onClick={() => onEdit(q)}>
+                    {canEditQuote && (
+                      <button type="button" className="btn btn-ghost btn-sm" title={q.selected && canSuperAdminEditSelectedQuote ? 'Modifier (super admin)' : 'Modifier'} onClick={() => onEdit(q)}>
                         <Edit2 size={12} />
                       </button>
                     )}
@@ -169,7 +170,7 @@ function QuoteComparisonTable({
   );
 }
 
-function QuoteForm({ suppliers, initial, onSave, onCancel, saving, requestId, requestLines = [] }) {
+function QuoteForm({ suppliers, initial, onSave, onCancel, saving, requestId, requestLines = [], superAdminEdit = false }) {
   const [form, setForm] = useState(() => (initial ? { ...EMPTY_QUOTE, ...initial, ref_devis_fournisseur: initial.ref_devis || initial.ref_devis_fournisseur || '' } : EMPTY_QUOTE));
   const [lines, setLines] = useState(() => {
     const normalized = normalizeQuoteLines(initial?.lines);
@@ -327,6 +328,11 @@ function QuoteForm({ suppliers, initial, onSave, onCancel, saving, requestId, re
 
   return (
     <form onSubmit={handleSubmit}>
+      {superAdminEdit && (
+        <div style={{ marginBottom: 12, padding: '10px 14px', borderRadius: 8, background: 'rgba(198,40,40,0.08)', border: '1px solid rgba(198,40,40,0.25)', fontSize: '0.82rem', color: 'var(--text-2)' }}>
+          Modification super administrateur — les changements sur ce devis retenu seront appliqués à l&apos;ordre d&apos;achat et l&apos;ordre de paiement.
+        </div>
+      )}
       <FRow>
         <FField label="Fournisseur" required>
           {fournActifs.length > 0 && (
@@ -523,8 +529,9 @@ export default function DemandeAchatDetail({
   const canEdit = canEditPurchaseRequest(request.statut, { isSuperAdmin: superAdmin });
   const isTerminal = ['Clôturée', 'Refusée'].includes(request.statut);
   const canManageQuotesOnRequest = perms.canManageQuotes && canAddQuoteToRequest(request.statut);
+  const canSuperAdminEditSelectedQuote = superAdmin && !!request.selected_quote_id && !isTerminal;
   const showQuotesSection = request.statut !== 'Refusée';
-  const quotesReadOnly = isTerminal || !canManageQuotesOnRequest;
+  const quotesReadOnly = isTerminal || (!canManageQuotesOnRequest && !canSuperAdminEditSelectedQuote);
   const canValidateDg = perms.canValidateSupplier && canValidateQuoteOnRequest(request.statut);
 
   return (
@@ -679,9 +686,14 @@ export default function DemandeAchatDetail({
                   Les devis seront saisis par la Chargée d&apos;Achats puis validés par le DG depuis ce comparatif.
                 </div>
               )}
-              {quotesReadOnly && quotes.length > 0 && (
+              {quotesReadOnly && quotes.length > 0 && !canSuperAdminEditSelectedQuote && (
                 <div style={{ marginBottom: 12, fontSize: '0.82rem', color: 'var(--text-3)' }}>
                   Comparatif en lecture seule — validation et saisie effectuées depuis cette demande.
+                </div>
+              )}
+              {canSuperAdminEditSelectedQuote && quotes.some((q) => q.selected) && (
+                <div style={{ marginBottom: 12, padding: '10px 14px', borderRadius: 8, background: 'rgba(198,40,40,0.08)', border: '1px solid rgba(198,40,40,0.25)', fontSize: '0.82rem', color: 'var(--text-2)' }}>
+                  Super administrateur — vous pouvez modifier le devis retenu (lignes, montants, fournisseur). Les ordres d&apos;achat et de paiement seront mis à jour automatiquement.
                 </div>
               )}
               {showQuoteForm && (
@@ -692,6 +704,7 @@ export default function DemandeAchatDetail({
                     saving={saving}
                     requestId={request.id}
                     requestLines={request.payload?.lines || []}
+                    superAdminEdit={superAdmin && editQuote?.selected}
                     onCancel={() => { setShowQuoteForm(false); setEditQuote(null); }}
                     onSave={(form) => runAction(async () => {
                       if (editQuote?.id) {
@@ -709,6 +722,7 @@ export default function DemandeAchatDetail({
                 quotes={quotes}
                 canValidate={canValidateDg}
                 canManage={canManageQuotesOnRequest}
+                canSuperAdminEditSelectedQuote={canSuperAdminEditSelectedQuote}
                 validatingId={validatingId}
                 onView={setViewQuote}
                 onEdit={(q) => { setEditQuote(q); setShowQuoteForm(true); }}
