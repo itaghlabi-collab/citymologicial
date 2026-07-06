@@ -2,17 +2,8 @@ import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
   MoreHorizontal, Eye, Download, FolderKanban, CheckCircle, XCircle,
-  Edit2, Copy, Trash2, ChevronRight, ClipboardCheck, Receipt,
+  Edit2, Copy, Trash2, ClipboardCheck, Receipt,
 } from 'lucide-react';
-
-const QUICK_STATUTS = [
-  { value: 'brouillon', label: 'Brouillon' },
-  { value: 'envoye', label: 'Envoyé' },
-  { value: 'valide', label: 'Approuvé' },
-  { value: 'refuse', label: 'Refusé' },
-  { value: 'expire', label: 'Expiré' },
-  { value: 'converti', label: 'Converti en projet' },
-];
 
 function MenuItem({ icon: Icon, label, onClick, disabled, danger }) {
   return (
@@ -44,13 +35,11 @@ export default function DevisActionsMenu({
   onEdit,
   onDuplicate,
   onDelete,
-  onStatutChange,
 }) {
   const btnRef = useRef(null);
   const menuRef = useRef(null);
   const [open, setOpen] = useState(false);
   const [rect, setRect] = useState(null);
-  const [showStatuts, setShowStatuts] = useState(false);
 
   const convertDisabled = isConverted || devis.statut === 'converti';
 
@@ -102,14 +91,13 @@ export default function DevisActionsMenu({
       window.removeEventListener('scroll', onReposition, true);
       window.removeEventListener('resize', onReposition);
     };
-  }, [open, showStatuts]);
+  }, [open]);
 
   useEffect(() => {
     function onDocClick(e) {
       if (btnRef.current?.contains(e.target)) return;
       if (menuRef.current?.contains(e.target)) return;
       setOpen(false);
-      setShowStatuts(false);
     }
     document.addEventListener('mousedown', onDocClick);
     return () => document.removeEventListener('mousedown', onDocClick);
@@ -118,7 +106,6 @@ export default function DevisActionsMenu({
   function closeAnd(fn) {
     return (...args) => {
       setOpen(false);
-      setShowStatuts(false);
       fn?.(...args);
     };
   }
@@ -168,31 +155,6 @@ export default function DevisActionsMenu({
       <MenuItem icon={Edit2} label="Modifier" onClick={closeAnd(onEdit)} />
       <MenuItem icon={Copy} label="Dupliquer" onClick={closeAnd(onDuplicate)} />
       <MenuItem icon={Trash2} label="Supprimer" onClick={closeAnd(onDelete)} danger />
-
-      <div className="crm-devis-menu-divider" />
-
-      <button
-        type="button"
-        className="crm-devis-menu-item crm-devis-menu-item--statut"
-        onClick={() => setShowStatuts((v) => !v)}
-      >
-        <span>Changer le statut</span>
-        <ChevronRight size={14} style={{ transform: showStatuts ? 'rotate(90deg)' : 'none', transition: 'transform 0.15s' }} />
-      </button>
-      {showStatuts && (
-        <div className="crm-devis-menu-statuts">
-          {QUICK_STATUTS.map((s) => (
-            <button
-              key={s.value}
-              type="button"
-              className={`crm-devis-menu-statut${devis.statut === s.value ? ' crm-devis-menu-statut--active' : ''}`}
-              onClick={closeAnd(() => onStatutChange(s.value))}
-            >
-              {s.label}
-            </button>
-          ))}
-        </div>
-      )}
     </div>,
     document.body,
   );
@@ -204,7 +166,7 @@ export default function DevisActionsMenu({
         type="button"
         className="btn btn-ghost btn-sm crm-devis-menu-trigger"
         title="Actions"
-        onClick={() => { setOpen((v) => !v); setShowStatuts(false); }}
+        onClick={() => setOpen((v) => !v)}
         aria-expanded={open}
       >
         <MoreHorizontal size={16} />

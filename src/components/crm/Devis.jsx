@@ -431,27 +431,6 @@ export default function Devis() {
     }
   }
 
-  async function handleStatutChange(d, statut) {
-    if (statut === d.statut) return;
-    if (statut === 'valide') {
-      if (!window.confirm(`Approuver le devis ${d.reference} ?`)) return;
-    } else if (statut === 'refuse') {
-      if (!window.confirm(`Refuser le devis ${d.reference} ?`)) return;
-      const motif = window.prompt('Motif du refus (optionnel) :');
-      if (motif === null) return;
-      const patch = motif.trim()
-        ? { notes_internes: `${d.notes_internes ? `${d.notes_internes}\n` : ''}[Refus] ${motif.trim()}` }
-        : {};
-      const result = await updateStatut(d.id, statut, patch);
-      showToast(result.success ? 'Statut mis a jour.' : (result.error || 'Erreur.'), result.success ? 'success' : 'error');
-      return;
-    } else if (statut === 'converti') {
-      if (!window.confirm(`Marquer le devis ${d.reference} comme converti en projet ?`)) return;
-    }
-    const result = await updateStatut(d.id, statut);
-    showToast(result.success ? 'Statut mis a jour.' : (result.error || 'Erreur.'), result.success ? 'success' : 'error');
-  }
-
   function isDevisConverted(d) {
     return convertedIds.has(String(d.id)) || d.statut === 'converti';
   }
@@ -500,7 +479,6 @@ export default function Devis() {
           onEdit={() => openEdit(d)}
           onDuplicate={() => handleDuplicate(d)}
           onDelete={() => handleDelete(d.id)}
-          onStatutChange={(statut) => handleStatutChange(d, statut)}
         />
       </div>
     );
