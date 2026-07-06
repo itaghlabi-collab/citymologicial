@@ -115,7 +115,7 @@ export default function Conges() {
     permissions,
   } = useLeaves();
 
-  const { superAdmin, canApproveRefuse, canEdit, canDelete } = permissions;
+  const { canManageLeaves, canApproveRefuse, canEdit, canDelete } = permissions;
 
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -140,7 +140,7 @@ export default function Conges() {
     setEditingId(null);
     setForm({
       ...EMPTY_FORM,
-      employee_id: superAdmin ? '' : (myEmployee?.id || ''),
+      employee_id: canManageLeaves ? '' : (myEmployee?.id || ''),
     });
     setExistingFichierUrl(null);
     setErrors({});
@@ -173,15 +173,15 @@ export default function Conges() {
   }
 
   function resolveSubmitForm() {
-    if (superAdmin) return form;
+    if (canManageLeaves) return form;
     return { ...form, employee_id: myEmployee?.id || form.employee_id };
   }
 
   function validate() {
     const submitForm = resolveSubmitForm();
     const e = {};
-    if (superAdmin && !submitForm.employee_id) e.employee_id = 'Requis';
-    if (!superAdmin && !myEmployee) {
+    if (canManageLeaves && !submitForm.employee_id) e.employee_id = 'Requis';
+    if (!canManageLeaves && !myEmployee) {
       e.employee_id = 'Profil employe introuvable — contactez les RH';
     }
     if (!submitForm.dateDebut) e.dateDebut = 'Requis';
@@ -274,7 +274,7 @@ export default function Conges() {
 
   const jours = countWorkingDays(form.dateDebut, form.dateFin);
   const dateRetour = nextWorkingDay(form.dateFin);
-  const canOpenModal = configured && (superAdmin || myEmployee);
+  const canOpenModal = configured && (canManageLeaves || myEmployee);
 
   return (
     <div className="animate-fade-in">
@@ -296,7 +296,7 @@ export default function Conges() {
         </div>
       )}
 
-      {configured && !superAdmin && !myEmployee && !loading && (
+      {configured && !canManageLeaves && !myEmployee && !loading && (
         <div style={{ background: '#FFF3E0', border: '1px solid #FFB74D', borderRadius: 'var(--radius)', padding: '10px 16px', marginBottom: 16, fontSize: '0.85rem', color: '#E65100' }}>
           Aucun employe RH lie a votre email. Contactez les RH pour creer une demande.
         </div>
@@ -504,7 +504,7 @@ export default function Conges() {
               {/* Employe */}
               <div className="form-group">
                 <label>Employe</label>
-                {superAdmin ? (
+                {canManageLeaves ? (
                   <select value={form.employee_id} onChange={e => setF('employee_id', e.target.value)} style={INPUT_S(errors.employee_id)}>
                     <option value="">Selectionner un employe...</option>
                     {employees.map((emp) => (

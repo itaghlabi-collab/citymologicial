@@ -224,14 +224,14 @@ export function filterLeaves(leaves, filterKey) {
   });
 }
 
-export function canEditLeave(row, { userId, superAdmin }) {
+export function canEditLeave(row, { userId, canManageLeaves, superAdmin }) {
   if (!row || row._statut !== 'En attente') return false;
-  if (superAdmin) return true;
+  if (canManageLeaves || superAdmin) return true;
   return row.created_by === userId;
 }
 
-export function canDeleteLeave(row, { userId, superAdmin }) {
+export function canDeleteLeave(row, { userId, canManageLeaves, superAdmin }) {
   if (!row) return false;
-  if (superAdmin) return true;
+  if (canManageLeaves || superAdmin) return true;
   return row.created_by === userId && row._statut === 'En attente';
 }

@@ -7,6 +7,7 @@ import { formatSupabaseError } from '../services/supabase/formatError';
 import { useAuth } from './useAuth';
 import { listEmployees } from '../services/rh/employees';
 import { isSuperAdmin } from '../services/rh/isSuperAdmin';
+import { canManageLeaves as checkCanManageLeaves } from '../services/auth/leaveAccess';
 import {
   listLeaves,
   createLeave,
@@ -32,6 +33,16 @@ export function useLeaves() {
 
   const configured = isSupabaseConfigured();
   const superAdmin = isSuperAdmin(user);
+  const [canManageLeaves, setCanManageLeaves] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const ok = await checkCanManageLeaves(user);
+      if (!cancelled) setCanManageLeaves(ok);
+    })();
+    return () => { cancelled = true; };
+  }, [user?.id]);
 
   const myEmployee = useMemo(
     () => findEmployeeByEmail(employees, user?.email),
@@ -39,9 +50,9 @@ export function useLeaves() {
   );
 
   const visibleLeaves = useMemo(() => {
-    if (superAdmin) return leaves;
+    if (canManageLeaves) return leaves;
     return leaves.filter((l) => l.created_by === user?.id);
-  }, [leaves, superAdmin, user?.id]);
+  }, [leaves, canManageLeaves, user?.id]);
 
   const load = useCallback(async () => {
     if (!configured) {
@@ -155,8 +166,8 @@ export function useLeaves() {
   }, [load]);
 
   const approve = useCallback(async (id) => {
-    if (!superAdmin) {
-      const msg = 'Seul le Super Admin peut approuver une demande.';
+    if (!canManageLeaves) {
+      const msg = 'Seuls les responsables RH peuvent approuver une demande.';
       setError(msg);
       return { success: false, error: msg };
     }
@@ -171,11 +182,11 @@ export function useLeaves() {
       setError(msg);
       return { success: false, error: msg };
     }
-  }, [load, superAdmin]);
+  }, [load, canManageLeaves]);
 
   const refuse = useCallback(async (id) => {
-    if (!superAdmin) {
-      const msg = 'Seul le Super Admin peut refuser une demande.';
+    if (!canManageLeaves) {
+      const msg = 'Seuls les responsables RH peuvent refuser une demande.';
       setError(msg);
       return { success: false, error: msg };
     }
@@ -190,14 +201,15 @@ export function useLeaves() {
       setError(msg);
       return { success: false, error: msg };
     }
-  }, [load, superAdmin]);
+  }, [load, canManageLeaves]);
 
   const permissions = useMemo(() => ({
     superAdmin,
-    canApproveRefuse: superAdmin,
-    canEdit: (row) => canEditLeave(row, { userId: user?.id, superAdmin }),
-    canDelete: (row) => canDeleteLeave(row, { userId: user?.id, superAdmin }),
-  }), [superAdmin, user?.id]);
+    canManageLeaves,
+    canApproveRefuse: canManageLeaves,
+    canEdit: (row) => canEditLeave(row, { userId: user?.id, canManageLeaves }),
+    canDelete: (row) => canDeleteLeave(row, { userId: user?.id, canManageLeaves }),
+  }), [superAdmin, canManageLeaves, user?.id]);
 
   return {
     leaves: visibleLeaves,
