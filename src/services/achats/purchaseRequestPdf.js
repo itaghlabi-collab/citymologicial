@@ -36,7 +36,7 @@ export async function generatePurchaseRequestPdf(request, { attachments = [] } =
     ['Date', fmtDate(request.date_creation || request.created_at)],
     ['Projet lié', projet],
     ['Demandeur', request.requester_name || request.demandeur],
-    ['Resp. Achats', request.assigned_employee_name || PURCHASE_ASSIGNEE.label],
+    ['Resp. demande', request.assigned_employee_name || request.requester_name || '—'],
     ['Priorité', request.priorite],
     ['Statut', getPurchaseStatusLabel(request.statut)],
   ]);

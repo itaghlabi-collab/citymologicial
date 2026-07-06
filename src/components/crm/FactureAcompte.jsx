@@ -253,7 +253,7 @@ export default function FactureAcompte({ onBack, onCreated, createAcompte, fetch
             onClick={handleSubmit}
             style={{ minWidth: 180, opacity: (!isValid || isSaving || !configured) ? 0.55 : 1 }}
           >
-            {isSaving ? <Spinner /> : <><FileText size={14} /> Creer facture acompte</>}
+            {isSaving ? <Spinner /> : <><FileText size={14} /> Créer facture acompte</>}
           </button>
         </div>
       </div>
@@ -541,7 +541,7 @@ export default function FactureAcompte({ onBack, onCreated, createAcompte, fetch
                 style={{ width: '100%', justifyContent: 'center', opacity: (!isValid || isSaving || !configured) ? 0.55 : 1 }}
                 onClick={handleSubmit}
               >
-                {isSaving ? <Spinner /> : <><FileText size={14} /> Creer facture acompte</>}
+                {isSaving ? <Spinner /> : <><FileText size={14} /> Créer facture acompte</>}
               </button>
               {!isValid && !isSaving && (
                 <p style={{ fontSize: '0.72rem', color: 'var(--text-3)', textAlign: 'center', marginTop: 8, lineHeight: 1.5 }}>

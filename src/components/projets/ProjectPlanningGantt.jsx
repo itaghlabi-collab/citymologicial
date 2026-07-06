@@ -27,7 +27,6 @@ import {
 } from '../../services/projects/projectPlanningTasks';
 import { generateProjectPlanningPdfSynthesis, generateProjectPlanningPdfDetailed } from '../../services/projects/projectPlanningPdf';
 import {
-  PLANNING_LOTS,
   PLANNING_STATUTS,
   mergePlanningLots,
   planningStatutMeta,
@@ -174,6 +173,7 @@ function TaskModal({ open, task, tasks, employees, saving, importingTemplate, on
   if (!open) return null;
 
   const parentOptions = filterPlanningParentTasks(tasks, form.lot, task?.id);
+  const lotOptions = mergePlanningLots(tasks);
   const showWbsTemplate = !task && hasPlanningWbsTemplate(form.lot);
 
   function setField(key, val) {
@@ -266,7 +266,7 @@ function TaskModal({ open, task, tasks, employees, saving, importingTemplate, on
           <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase' }}>Lot / catégorie</span>
             <select value={form.lot} onChange={(e) => setField('lot', e.target.value)} style={{ ...IS, cursor: 'pointer' }}>
-              {PLANNING_LOTS.map((l) => <option key={l} value={l}>{l}</option>)}
+              {lotOptions.map((l) => <option key={l} value={l}>{l}</option>)}
             </select>
           </label>
           {showWbsTemplate && (

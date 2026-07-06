@@ -11,6 +11,8 @@ import {
   deleteArticle,
   duplicateArticle,
   backfillMissingArticleReferences,
+  reconcileArticleSortOrders,
+  reorderArticles,
   filterArticles,
   computeArticlesStats,
 } from '../services/crm/articles';
@@ -33,6 +35,7 @@ export function useArticles() {
     setError(null);
     try {
       await backfillMissingArticleReferences().catch(() => {});
+      await reconcileArticleSortOrders().catch(() => 0);
       const rows = await listArticles();
       setRecords(rows);
     } catch (err) {
@@ -115,6 +118,31 @@ export function useArticles() {
     }
   }, [load]);
 
+  const reorder = useCallback(async (orderedIds) => {
+    setSaving(true);
+    setError(null);
+    try {
+      const byId = new Map(records.map((r) => [String(r.id), r]));
+      const optimistic = orderedIds
+        .map((id, index) => {
+          const row = byId.get(String(id));
+          return row ? { ...row, sort_order: (index + 1) * 10 } : null;
+        })
+        .filter(Boolean);
+      if (optimistic.length) setRecords(optimistic);
+      await reorderArticles(orderedIds);
+      await load();
+      return { success: true };
+    } catch (err) {
+      await load();
+      const msg = formatSupabaseError(err, 'Erreur réorganisation des articles.');
+      setError(msg);
+      return { success: false, error: msg };
+    } finally {
+      setSaving(false);
+    }
+  }, [load, records]);
+
   return {
     records,
     loading,
@@ -126,6 +154,7 @@ export function useArticles() {
     update,
     remove,
     duplicate,
+    reorder,
     filterArticles,
     computeArticlesStats,
   };

@@ -32,6 +32,10 @@ function fmtDate(d) {
   try { return new Date(d).toLocaleDateString('fr-MA', { day: '2-digit', month: '2-digit', year: 'numeric' }); }
   catch { return d; }
 }
+function fmtCommercial(v) {
+  if (!v?.trim()) return '—';
+  return String(v).trim().toUpperCase();
+}
 
 function pdfOpenButtonStyle(disabled, extra = {}) {
   return {
@@ -61,13 +65,13 @@ function isDueSoon(dateStr, statut) {
 /* ── Statut config ── */
 const STATUT_CFG = {
   brouillon:           { label: 'Brouillon',       cls: 'badge-grey',   icon: FileText },
-  envoyee:             { label: 'Envoyee',          cls: 'badge-blue',   icon: Send },
-  payee:               { label: 'Payee',            cls: 'badge-green',  icon: CheckCircle },
-  partiellement_payee: { label: 'Part. payee',      cls: 'badge-orange', icon: DollarSign },
-  impayee:             { label: 'Impayee',          cls: 'badge-red',    icon: XCircle },
+  envoyee:             { label: 'Envoyée',          cls: 'badge-blue',   icon: Send },
+  payee:               { label: 'Payée',            cls: 'badge-green',  icon: CheckCircle },
+  partiellement_payee: { label: 'Part. payée',      cls: 'badge-orange', icon: DollarSign },
+  impayee:             { label: 'Impayée',          cls: 'badge-red',    icon: XCircle },
   en_retard:           { label: 'En retard',        cls: 'badge-red',    icon: AlertCircle },
-  annulee:             { label: 'Annulee',          cls: 'badge-grey',   icon: Ban },
-  archive_importee:    { label: 'Archive importee', cls: 'badge-orange', icon: FileText },
+  annulee:             { label: 'Annulée',          cls: 'badge-grey',   icon: Ban },
+  archive_importee:    { label: 'Archive importée', cls: 'badge-orange', icon: FileText },
 };
 function StatutBadge({ statut }) {
   const cfg = STATUT_CFG[statut] || { label: statut, cls: 'badge-grey' };
@@ -478,7 +482,7 @@ export default function Factures() {
                     { label: 'Total HT',        field: 'total_ht',        align: 'right' },
                     { label: 'TVA',             field: 'total_tva',       align: 'right' },
                     { label: 'Total TTC',       field: 'total_ttc',       align: 'right' },
-                    { label: 'Paye',            field: 'total_paye',      align: 'right' },
+                    { label: 'Payé',            field: 'total_paye',      align: 'right' },
                     { label: 'Reste',           field: 'reste_a_payer',   align: 'right' },
                     { label: 'Emission',        field: 'date_emission' },
                     { label: 'Echeance',        field: 'date_echeance' },
@@ -549,7 +553,7 @@ export default function Factures() {
 
                       {/* Commercial */}
                       <td data-label="Commercial" style={{ padding: '10px 12px', whiteSpace: 'nowrap', color: 'var(--text-2)' }}>
-                        {f.commercial || '—'}
+                        {fmtCommercial(f.commercial)}
                       </td>
 
                       {/* Total HT */}
@@ -569,8 +573,8 @@ export default function Factures() {
                         </span>
                       </td>
 
-                      {/* Paye */}
-                      <td data-label="Paye" style={{ padding: '10px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      {/* Payé */}
+                      <td data-label="Payé" style={{ padding: '10px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
                         <span style={{ fontWeight: 600, color: '#388E3C' }}>
                           {fmtMAD(f.total_paye || 0)}
                         </span>
@@ -685,7 +689,7 @@ export default function Factures() {
                   </button>
                   <div className="crm-doc-meta">
                     <span>{clientNom}</span>
-                    {f.commercial && <span>· {f.commercial}</span>}
+                    {f.commercial && <span>· {fmtCommercial(f.commercial)}</span>}
                     <span>· {fmtDate(f.date_emission)}</span>
                     {overdue && <span style={{ color: 'var(--red)', fontWeight: 700 }}>· En retard</span>}
                     {dueSoon && <span style={{ color: '#E65100', fontWeight: 700 }}>· Echeance proche</span>}

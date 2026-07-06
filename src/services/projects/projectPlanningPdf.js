@@ -1,5 +1,5 @@
 /**
- * projectPlanningPdf.js — Export PDF planning Gantt (1 page, timeline condensée)
+ * projectPlanningPdf.js — Export PDF planning Gantt (pagination automatique, lisibilité fixe)
  */
 import { jsPDF } from 'jspdf';
 import { hexToRgb, darkenRgb, lightenRgb, planningGanttBarColor, planningTaskBarColor } from '../../constants/projectPlanning';
@@ -359,24 +359,49 @@ function rowBarColor(row) {
   return row._barColor || planningGanttBarColor(row);
 }
 
-function pickPageLayout(rowCount, rows = []) {
+function pickPageLayout() {
   const fmt = FORMATS.a3;
-  const summaryExtra = (rows || []).filter((r) => r.type === 'summary').length * 0.12;
-  const effectiveRows = Math.max(1, rowCount + summaryExtra);
-  const bodyH = fmt.h - HEADER_BLOCK_H - CAL_H - FOOTER_H - M;
-  const totalGap = ROW_GAP * Math.max(0, rowCount - 1);
-  const rawRowH = (bodyH - totalGap) / effectiveRows;
-  const rowH = Math.min(MAX_ROW_H, Math.max(MIN_ROW_H, rawRowH));
   return {
     format: fmt.name,
     pageW: fmt.w,
     pageH: fmt.h,
-    rowH,
+    rowH: MAX_ROW_H,
     rowGap: ROW_GAP,
     ganttX: M + LEFT_W,
     ganttW: fmt.w - M * 2 - LEFT_W,
     bodyBottom: fmt.h - FOOTER_H - 2,
   };
+}
+
+function rowAreaStartY() {
+  return M + HEADER_BLOCK_H + CAL_H + 1;
+}
+
+/** Découpe les lignes en pages selon la hauteur disponible (sans compression). */
+function paginateRows(rows, rowHeights, layout) {
+  const available = layout.bodyBottom - rowAreaStartY();
+  const pages = [];
+  let pageRows = [];
+  let pageHeights = [];
+  let used = 0;
+
+  rows.forEach((row, i) => {
+    const rh = rowHeights[i];
+    const gap = pageRows.length > 0 ? layout.rowGap : 0;
+    if (pageRows.length > 0 && used + gap + rh > available) {
+      pages.push({ rows: pageRows, heights: pageHeights });
+      pageRows = [row];
+      pageHeights = [rh];
+      used = rh;
+      return;
+    }
+    pageRows.push(row);
+    pageHeights.push(rh);
+    used += gap + rh;
+  });
+
+  if (pageRows.length) pages.push({ rows: pageRows, heights: pageHeights });
+  return pages.length ? pages : [{ rows: [], heights: [] }];
 }
 
 function fileSlug(projet, mode) {
@@ -399,7 +424,7 @@ function drawHeaderCell(doc, x, labelY, valueY, label, value, maxW) {
   return lines.length;
 }
 
-function drawHeader(doc, layout, { logo, projet, minDate, maxDate, projectDates }) {
+function drawHeader(doc, layout, { logo, projet, minDate, maxDate, projectDates, pageNum = 1, totalPages = 1 }) {
   const { pageW } = layout;
   const y0 = M;
   const contentW = pageW - M * 2;
@@ -422,7 +447,6 @@ function drawHeader(doc, layout, { logo, projet, minDate, maxDate, projectDates 
   const editionDate = new Date().toLocaleDateString('fr-FR', {
     day: '2-digit', month: '2-digit', year: 'numeric',
   });
-  const totalPages = doc.internal.getNumberOfPages();
 
   /* Colonne gauche — logo */
   const logoH = logo?.h || 14;
@@ -476,7 +500,7 @@ function drawHeader(doc, layout, { logo, projet, minDate, maxDate, projectDates 
 
   [
     ['Date d\'édition', editionDate],
-    ['Page', `1 / ${totalPages}`],
+    ['Page', `${pageNum} / ${totalPages}`],
     ['Avancement global', `${avancement} %`],
   ].forEach(([label, value]) => {
     doc.setFont('helvetica', 'normal');
@@ -761,33 +785,31 @@ function computeRowHeight(doc, row, baseRowH) {
   return Math.max(MIN_ROW_H, minH, textH);
 }
 
-function computeRowHeights(doc, rows, baseRowH, bodyAvailable) {
-  const heights = rows.map((row) => computeRowHeight(doc, row, baseRowH));
-  let total = heights.reduce((s, h) => s + h, 0) + ROW_GAP * Math.max(0, rows.length - 1);
-  if (total <= bodyAvailable || !rows.length) return heights;
+function computeRowHeights(doc, rows, baseRowH) {
+  return rows.map((row) => computeRowHeight(doc, row, baseRowH));
+}
 
-  let gap = ROW_GAP;
-  while (total > bodyAvailable && gap > 0.15) {
-    gap -= 0.1;
-    total = heights.reduce((s, h) => s + h, 0) + gap * Math.max(0, rows.length - 1);
-  }
-  if (total <= bodyAvailable) return heights;
+function drawPageBody(doc, layout, {
+  scale, minDate, maxDate, pageRows, pageHeights, mode,
+}) {
+  const rowStartY = drawColumnHeaders(doc, layout, scale, minDate, maxDate);
+  drawWeekendBands(doc, layout, scale, minDate, maxDate, rowStartY);
+  drawGanttGrid(doc, layout, scale, minDate, maxDate, rowStartY);
+  drawTodayLine(doc, layout, minDate, maxDate, rowStartY);
 
-  const singleLineIdx = rows
-    .map((row, i) => ({ i, lines: splitNomLines(doc, row).length }))
-    .filter(({ lines }) => lines <= 1)
-    .map(({ i }) => i);
-  let shrink = 0.2;
-  while (total > bodyAvailable && shrink < baseRowH - MIN_ROW_H && singleLineIdx.length) {
-    singleLineIdx.forEach((i) => {
-      if (rows[i].type !== 'summary') {
-        heights[i] = Math.max(MIN_ROW_H, baseRowH - shrink);
-      }
-    });
-    total = heights.reduce((s, h) => s + h, 0) + gap * Math.max(0, rows.length - 1);
-    shrink += 0.2;
+  const rowMetrics = [];
+  let y = rowStartY;
+  pageRows.forEach((row, i) => {
+    const rh = pageHeights[i];
+    const metric = drawRow(doc, layout, row, y, minDate, maxDate, rh);
+    rowMetrics.push({ row, ...metric });
+    y += rh + layout.rowGap;
+  });
+
+  if (mode === 'detailed') {
+    drawDependencies(doc, rowMetrics);
   }
-  return heights;
+  return rowMetrics;
 }
 
 function drawRow(doc, layout, row, y, minDate, maxDate, rowH) {
@@ -914,13 +936,16 @@ function drawLegend(doc, layout) {
   doc.text('Aujourd\'hui', M + 70, y);
 }
 
-function drawFooter(doc, layout) {
+function drawFooter(doc, layout, pageNum, totalPages) {
   const { pageW, pageH } = layout;
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(7);
   doc.setTextColor(...MUTED);
-  doc.text('CITYMO — Planning chantier (vue condensée 1 page)', M, pageH - FOOTER_H);
-  doc.text('Échelle adaptée à la durée du projet', pageW - M, pageH - FOOTER_H, { align: 'right' });
+  doc.text('CITYMO — Planning chantier', M, pageH - FOOTER_H);
+  const right = totalPages > 1
+    ? `Page ${pageNum} / ${totalPages} — Échelle adaptée à la durée du projet`
+    : 'Échelle adaptée à la durée du projet';
+  doc.text(right, pageW - M, pageH - FOOTER_H, { align: 'right' });
 }
 
 /**
@@ -940,7 +965,7 @@ export async function generateProjectPlanningPdf(projet, tasks = [], options = {
 
   projet = { ...projet, _tasksForPdf: tasks };
   const rows = buildPdfRows(tasks, mode, milestones);
-  const layout = pickPageLayout(Math.max(1, rows.length), rows);
+  const layout = pickPageLayout();
   const projectDates = projectSpan(tasks, projet);
 
   const doc = new jsPDF({ unit: 'mm', format: layout.format, orientation: 'landscape' });
@@ -951,12 +976,14 @@ export async function generateProjectPlanningPdf(projet, tasks = [], options = {
       minDate: projet.date_debut || '',
       maxDate: projet.date_fin_prevue || '',
       projectDates,
+      pageNum: 1,
+      totalPages: 1,
     });
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(10);
     doc.setTextColor(...MUTED);
     doc.text('Aucune tâche planning enregistrée.', M, HEADER_BLOCK_H + 20);
-    drawFooter(doc, layout);
+    drawFooter(doc, layout, 1, 1);
     doc.save(`${fileSlug(projet, mode)}.pdf`);
     return;
   }
@@ -965,39 +992,40 @@ export async function generateProjectPlanningPdf(projet, tasks = [], options = {
   const { minDate, maxDate } = computePdfTimelineBounds(tasks, milestoneRows);
   const scale = buildPdfGanttScale(minDate, maxDate, layout.ganttW);
 
-  drawHeader(doc, layout, { logo, projet, minDate, maxDate, projectDates });
-  const rowStartY = drawColumnHeaders(doc, layout, scale, minDate, maxDate);
-  drawWeekendBands(doc, layout, scale, minDate, maxDate, rowStartY);
-  drawGanttGrid(doc, layout, scale, minDate, maxDate, rowStartY);
-  drawTodayLine(doc, layout, minDate, maxDate, rowStartY);
+  const rowHeights = computeRowHeights(doc, rows, layout.rowH);
+  const pages = paginateRows(rows, rowHeights, layout);
+  const totalPages = pages.length;
 
-  const bodyAvailable = layout.bodyBottom - rowStartY;
-  const rowHeights = computeRowHeights(doc, rows, layout.rowH, bodyAvailable);
+  pages.forEach((page, pageIndex) => {
+    if (pageIndex > 0) doc.addPage(layout.format, 'landscape');
 
-  const rowMetrics = [];
-  let y = rowStartY;
-  rows.forEach((row, i) => {
-    const rh = rowHeights[i];
-    const metric = drawRow(doc, layout, row, y, minDate, maxDate, rh);
-    rowMetrics.push({ row, ...metric });
-    y += rh + layout.rowGap;
+    drawHeader(doc, layout, {
+      logo, projet, minDate, maxDate, projectDates,
+      pageNum: pageIndex + 1,
+      totalPages,
+    });
+    drawPageBody(doc, layout, {
+      scale, minDate, maxDate,
+      pageRows: page.rows,
+      pageHeights: page.heights,
+      mode,
+    });
+
+    if (pageIndex === totalPages - 1) {
+      drawLegend(doc, layout);
+    }
+    drawFooter(doc, layout, pageIndex + 1, totalPages);
   });
 
-  if (mode === 'detailed') {
-    drawDependencies(doc, rowMetrics);
-  }
-
-  drawLegend(doc, layout);
-  drawFooter(doc, layout);
   doc.save(`${fileSlug(projet, mode)}.pdf`);
 }
 
-/** PDF synthèse : lots uniquement, 1 page. */
+/** PDF synthèse : lots uniquement, paginé si nécessaire. */
 export async function generateProjectPlanningPdfSynthesis(projet, tasks = [], options = {}) {
   return generateProjectPlanningPdf(projet, tasks, { mode: 'synthesis', ...options });
 }
 
-/** PDF détaillé : WBS complet, 1 page condensée. */
+/** PDF détaillé : WBS complet, paginé si nécessaire. */
 export async function generateProjectPlanningPdfDetailed(projet, tasks = [], options = {}) {
   return generateProjectPlanningPdf(projet, tasks, { mode: 'detailed', ...options });
 }

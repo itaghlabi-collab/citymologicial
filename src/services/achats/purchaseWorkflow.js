@@ -15,6 +15,8 @@ import { createAcquisitionOrderFromQuote, updateAcquisitionOrder } from './purch
 import { createAchatsPaymentOrderFromAcquisition } from './purchasePaymentOrdersAchats';
 import { normalizePurchaseRequest, toPurchaseRequestRow, generatePurchaseRequestRef, isOffProjectPurchaseRequest } from './purchaseRequests';
 import { resolveCurrentPurchaseRole, purchasePermissions, PURCHASE_ROLES } from './purchaseWorkflowRoles';
+import { fetchProfile } from '../supabase/auth';
+import { employeeSelectLabel } from '../rh/employees';
 import {
   notifyPurchaseRequestSubmitted,
   notifyPurchaseQuoteAdded,
@@ -29,8 +31,36 @@ const TABLE = 'purchase_requests';
 async function getAuthContext() {
   const { data: { user }, error } = await getSupabase().auth.getUser();
   if (error || !user) throw new Error('Session requise.');
-  const name = user.user_metadata?.full_name || user.email?.split('@')[0] || 'Utilisateur';
-  return { user, userName: name };
+  const profile = await fetchProfile(user.id);
+  const name = profile?.nom
+    || user.user_metadata?.full_name
+    || user.user_metadata?.nom
+    || user.email?.split('@')[0]
+    || 'Utilisateur';
+  return { user, userName: name, profile };
+}
+
+/** Responsable = utilisateur de la session qui crée / édite la demande. */
+export async function resolveCreatorAssignee(ctx) {
+  const { user, userName } = ctx || await getAuthContext();
+  const email = (user?.email || '').trim().toLowerCase();
+  if (email) {
+    const { data } = await getSupabase()
+      .from('employees')
+      .select('id, firstname, lastname, poste, department_id, department')
+      .ilike('email', email)
+      .maybeSingle();
+    if (data?.id) {
+      return {
+        assigned_employee_id: data.id,
+        assigned_employee_name: employeeSelectLabel(data) || userName,
+      };
+    }
+  }
+  return {
+    assigned_employee_id: null,
+    assigned_employee_name: userName,
+  };
 }
 
 async function fetchRequest(id) {
@@ -92,12 +122,14 @@ export async function resolveAchatsAssignee() {
 
 export async function createPurchaseRequestWorkflow(form) {
   const ctx = await getAuthContext();
-  const assignee = await resolveAchatsAssignee();
+  const assignee = await resolveCreatorAssignee(ctx);
   const row = {
     ...toPurchaseRequestRow({
       ...form,
       statut: 'Brouillon',
       department: 'ACHATS',
+      assigned_employee_id: form.assigned_employee_id ?? assignee.assigned_employee_id,
+      assigned_employee_name: form.assigned_employee_name || assignee.assigned_employee_name,
     }),
     requester_user_id: ctx.user.id,
     requester_name: ctx.userName,
@@ -147,10 +179,15 @@ export async function updatePurchaseRequestDraft(id, form) {
     err.code = 'VALIDATION';
     throw err;
   }
-  const assignee = await resolveAchatsAssignee();
   const patch = {
-    ...toPurchaseRequestRow({ ...form, statut: 'Brouillon', ref: existing.ref, ref_demande: existing.ref }),
-    ...assignee,
+    ...toPurchaseRequestRow({
+      ...form,
+      statut: 'Brouillon',
+      ref: existing.ref,
+      ref_demande: existing.ref,
+      assigned_employee_id: form.assigned_employee_id ?? existing.assigned_employee_id,
+      assigned_employee_name: form.assigned_employee_name || existing.assigned_employee_name || existing.requester_name,
+    }),
     commentaires_internes: form.commentaires_internes ?? existing.commentaires_internes,
   };
   if (!(existing.ref || '').trim()) {

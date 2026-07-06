@@ -39,6 +39,10 @@ function fmtDate(d) {
     return new Date(d).toLocaleDateString('fr-MA', { day: '2-digit', month: '2-digit', year: 'numeric' });
   } catch { return d; }
 }
+function fmtCommercial(v) {
+  if (!v?.trim()) return '—';
+  return String(v).trim().toUpperCase();
+}
 
 function pdfOpenButtonStyle(disabled, extra = {}) {
   return {
@@ -669,7 +673,7 @@ export default function Devis() {
 
                       {/* Commercial */}
                       <td data-label="Commercial" style={{ padding: '10px 12px', whiteSpace: 'nowrap', color: 'var(--text-2)' }}>
-                        {d.commercial || '—'}
+                        {fmtCommercial(d.commercial)}
                       </td>
 
                       {/* Total HT */}
@@ -750,7 +754,7 @@ export default function Devis() {
                   </button>
                   <div className="crm-doc-meta">
                     <span>{clientNom}</span>
-                    {d.commercial && <span>· {d.commercial}</span>}
+                    {d.commercial && <span>· {fmtCommercial(d.commercial)}</span>}
                     <span>· {fmtDate(d.date_creation)}</span>
                     {expSoon && <span style={{ color: '#E65100', fontWeight: 700 }}>· Expire bientot</span>}
                   </div>

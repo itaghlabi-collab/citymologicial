@@ -10,7 +10,6 @@ import {
 import { usePurchaseRequests } from '../../hooks/usePurchaseRequests';
 import { useSuppliers } from '../../hooks/useSuppliers';
 import { useAuth } from '../../hooks/useAuth';
-import { PURCHASE_ASSIGNEE } from '../../constants/purchaseWorkflow';
 import {
   canEditPurchaseRequest, canDeletePurchaseRequest, normalizePurchaseStatus,
   canSubmitPurchaseRequest, canAddQuoteToRequest, canValidateQuoteOnRequest,
@@ -212,12 +211,18 @@ function DemandeLignesTable({ lignes, onChange, error }) {
   );
 }
 
-function DemandeForm({ initial, onSave, onCancel, saving, suppliers = [], projects = [] }) {
+function DemandeForm({ initial, onSave, onCancel, saving, suppliers = [], projects = [], sessionUser }) {
   const [form, setForm] = useState(() => toFormState(initial));
   const [attachments, setAttachments] = useState(() => initial?.payload?.attachments || []);
   const [errors, setErrors] = useState({});
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
   const isHorsProjet = form.link_type === 'hors_projet';
+
+  const responsableLabel = initial?.assigned_employee_name
+    || initial?.requester_name
+    || sessionUser?.nom
+    || sessionUser?.email?.split('@')[0]
+    || '—';
 
   const fournActifs = suppliers.filter((f) => f.statut === 'Actif' || f.status === 'active');
 
@@ -279,6 +284,7 @@ function DemandeForm({ initial, onSave, onCancel, saving, suppliers = [], projec
     setErrors({});
     onSave({
       ...form,
+      assigned_employee_name: responsableLabel,
       payload: buildFormPayload(form, initial?.payload, attachments),
     });
   }
@@ -351,15 +357,15 @@ function DemandeForm({ initial, onSave, onCancel, saving, suppliers = [], projec
             )}
             {errors.projet_lie && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.projet_lie}</div>}
           </FField>
-          <FField label="Responsable Achats">
-            <input value={PURCHASE_ASSIGNEE.label} readOnly style={{ ...INPUT_STYLE, background: 'var(--surface-2)', cursor: 'not-allowed' }} />
+          <FField label="Responsable">
+            <input value={responsableLabel} readOnly style={{ ...INPUT_STYLE, background: 'var(--surface-2)', cursor: 'not-allowed' }} />
           </FField>
         </FRow>
       )}
       {isHorsProjet && (
         <FRow>
-          <FField label="Responsable Achats">
-            <input value={PURCHASE_ASSIGNEE.label} readOnly style={{ ...INPUT_STYLE, background: 'var(--surface-2)', cursor: 'not-allowed' }} />
+          <FField label="Responsable">
+            <input value={responsableLabel} readOnly style={{ ...INPUT_STYLE, background: 'var(--surface-2)', cursor: 'not-allowed' }} />
           </FField>
         </FRow>
       )}
@@ -637,6 +643,7 @@ export default function DemandesAchat() {
             saving={saving}
             suppliers={suppliers}
             projects={projects}
+            sessionUser={user}
           />
         </Modal>
       </>
@@ -830,6 +837,7 @@ export default function DemandesAchat() {
           saving={saving}
           suppliers={suppliers}
           projects={projects}
+          sessionUser={user}
         />
       </Modal>
     </div>

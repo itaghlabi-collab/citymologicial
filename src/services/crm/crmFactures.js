@@ -321,17 +321,20 @@ export async function createCrmFactureAcompte(form) {
 
 export async function generateCrmFactureNumero() {
   await getAuthUserId();
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = String(now.getMonth() + 1).padStart(2, '0');
-  const prefix = `FA-${y}-${m}-`;
-  const { count, error } = await getSupabase()
+  const year = new Date().getFullYear();
+  const prefix = `FAC-${year}-`;
+  const { data, error } = await getSupabase()
     .from(TABLE)
-    .select('*', { count: 'exact', head: true })
-    .like('numero', `${prefix}%`);
+    .select('numero')
+    .ilike('numero', `${prefix}%`);
   if (error) throw error;
-  const seq = String((count || 0) + 1).padStart(4, '0');
-  return `${prefix}${seq}`;
+  let maxSeq = 0;
+  const re = new RegExp(`^FAC-${year}-(\\d+)$`, 'i');
+  for (const row of data || []) {
+    const match = String(row.numero || '').match(re);
+    if (match) maxSeq = Math.max(maxSeq, parseInt(match[1], 10));
+  }
+  return `${prefix}${String(maxSeq + 1).padStart(3, '0')}`;
 }
 
 async function fetchLignes(factureId) {

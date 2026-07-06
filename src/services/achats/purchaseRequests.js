@@ -49,8 +49,8 @@ export function normalizePurchaseRequest(row) {
     project_name: row.project_name || '',
     projet_lie: projectLabel,
     assigned_employee_id: row.assigned_employee_id || null,
-    assigned_employee_name: row.assigned_employee_name || PURCHASE_ASSIGNEE.label,
-    assignes: row.assigned_employee_name || PURCHASE_ASSIGNEE.label,
+    assigned_employee_name: row.assigned_employee_name || row.requester_name || PURCHASE_ASSIGNEE.label,
+    assignes: row.assigned_employee_name || row.requester_name || PURCHASE_ASSIGNEE.label,
     requester_user_id: row.requester_user_id || row.created_by || null,
     requester_name: row.requester_name || '',
     demandeur: row.requester_name || '',
@@ -86,7 +86,7 @@ export function toPurchaseRequestRow(form) {
     project_ref: offProject ? null : (form.project_ref || null),
     project_name: offProject ? null : (projetLie || null),
     assigned_employee_id: form.assigned_employee_id || null,
-    assigned_employee_name: form.assigned_employee_name || PURCHASE_ASSIGNEE.label,
+    assigned_employee_name: form.assigned_employee_name || form.requester_name || PURCHASE_ASSIGNEE.label,
     commentaires_internes: form.commentaires_internes?.trim() || null,
     payload,
   };
@@ -171,7 +171,8 @@ export async function createPurchaseRequest(form) {
   const { data: { user }, error: authErr } = await getSupabase().auth.getUser();
   if (authErr || !user) throw new Error('Session requise.');
   const uid = user.id;
-  const assignee = await import('./purchaseWorkflow').then((m) => m.resolveAchatsAssignee());
+  const { resolveCreatorAssignee } = await import('./purchaseWorkflow');
+  const assignee = await resolveCreatorAssignee();
   const row = {
     ...toPurchaseRequestRow(form),
     ...assignee,

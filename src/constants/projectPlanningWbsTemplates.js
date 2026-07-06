@@ -46,6 +46,13 @@ export const PLANNING_WBS_TEMPLATES = {
     { nom: 'Maçonnerie', wbs_code: '3', duree_jours: 10 },
     { nom: 'Enduits', wbs_code: '4', duree_jours: 8 },
   ],
+  'Charpente métallique': [
+    { nom: 'Étude et détail d\'exécution', wbs_code: '1', duree_jours: 7 },
+    { nom: 'Fabrication', wbs_code: '2', duree_jours: 14 },
+    { nom: 'Transport et levage', wbs_code: '3', duree_jours: 5 },
+    { nom: 'Montage charpente', wbs_code: '4', duree_jours: 10 },
+    { nom: 'Boulonnage et réglages', wbs_code: '5', duree_jours: 5 },
+  ],
   'Second œuvre': [
     { nom: 'Cloisons', wbs_code: '1', duree_jours: 7 },
     { nom: 'Doublages', wbs_code: '2', duree_jours: 5 },

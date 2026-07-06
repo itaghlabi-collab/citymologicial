@@ -28,6 +28,7 @@ export function normalizeArticle(row) {
     categorie_id: row.categorie_id ? String(row.categorie_id) : '',
     description: row.description || '',
     reference: row.reference || '',
+    sort_order: Number(row.sort_order ?? 0),
     tva: 20,
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -86,12 +87,68 @@ export async function generateArticleReference(categorieId, existingRefs = null)
   return nextReferenceForPrefix(prefix, refs);
 }
 
-export async function listArticles() {
+async function nextArticleSortOrder() {
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .select('sort_order')
+    .order('sort_order', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throw error;
+  return (Number(data?.sort_order) || 0) + 10;
+}
+
+/** Attribue sort_order aux articles existants sans ordre. */
+export async function reconcileArticleSortOrders() {
   await getAuthUserId();
   const { data, error } = await getSupabase()
     .from(TABLE)
+    .select('id, sort_order, created_at')
+    .order('created_at', { ascending: true });
+  if (error) {
+    if (String(error.message || '').includes('sort_order')) return 0;
+    throw error;
+  }
+  const rows = data || [];
+  if (!rows.length || !rows.every((r) => !r.sort_order)) return 0;
+  let fixed = 0;
+  for (let i = 0; i < rows.length; i++) {
+    const { error: upErr } = await getSupabase()
+      .from(TABLE)
+      .update({ sort_order: (i + 1) * 10 })
+      .eq('id', rows[i].id);
+    if (!upErr) fixed += 1;
+  }
+  return fixed;
+}
+
+export async function reorderArticles(orderedIds) {
+  await getAuthUserId();
+  if (!orderedIds?.length) return;
+  const results = await Promise.all(
+    orderedIds.map((id, index) => getSupabase()
+      .from(TABLE)
+      .update({ sort_order: (index + 1) * 10 })
+      .eq('id', id)),
+  );
+  const failed = results.find((r) => r.error);
+  if (failed?.error) throw failed.error;
+}
+
+export async function listArticles() {
+  await getAuthUserId();
+  let { data, error } = await getSupabase()
+    .from(TABLE)
     .select('*')
-    .order('nom', { ascending: true });
+    .order('sort_order', { ascending: true })
+    .order('created_at', { ascending: true });
+
+  if (error && String(error.message || '').includes('sort_order')) {
+    ({ data, error } = await getSupabase()
+      .from(TABLE)
+      .select('*')
+      .order('nom', { ascending: true }));
+  }
 
   if (error) {
     console.error('[CITYMO] articles list', error);
@@ -156,6 +213,7 @@ export async function createArticle(form) {
   if (!row.reference) {
     row.reference = await generateArticleReference(form.categorie_id);
   }
+  row.sort_order = await nextArticleSortOrder();
 
   const { data, error } = await getSupabase()
     .from(TABLE)
@@ -225,6 +283,7 @@ export async function duplicateArticle(id) {
     categorie_id: row.categorie_id,
     reference,
     description: row.description || null,
+    sort_order: await nextArticleSortOrder(),
   };
 
   const { data, error } = await getSupabase()

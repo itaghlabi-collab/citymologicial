@@ -24,6 +24,22 @@ const MAX_Y = PAGE_H - FOOTER_H;
 const BODY_TOP = M;
 const BODY_BOTTOM = PAGE_H - FOOTER_H;
 
+/** Footer — même gabarit que devisPdf.js */
+const FOOTER_LINE_Y = PAGE_H - FOOTER_H + 4;
+const FOOTER_QR_MAX = 18;
+const FOOTER_QR_GAP = 6;
+
+function getFooterQrLayout(qrMeta) {
+  const qrSize = qrMeta
+    ? containImage(qrMeta.width, qrMeta.height, FOOTER_QR_MAX, FOOTER_QR_MAX)
+    : { width: 0, height: 0 };
+  const qrX = PAGE_W - M - qrSize.width;
+  const qrY = FOOTER_LINE_Y - qrSize.height;
+  const lineEndX = qrMeta?.dataUrl ? qrX - FOOTER_QR_GAP : PAGE_W - M;
+  const contentMaxY = qrMeta?.dataUrl ? qrY - 2 : MAX_Y;
+  return { qrSize, qrX, qrY, lineEndX, contentMaxY };
+}
+
 const CLIENT_W = 58;
 const LOGO_MAX_W = 42;
 const LOGO_MAX_H = 20;
@@ -262,6 +278,7 @@ export async function generateReceptionChecklistPdf(devis, catMap = {}) {
   const clientNom = devis.client_nom || clientDisplayName(client) || 'CLIENT';
   const rows = buildChecklistRows(devis, catMap);
   const conditionsText = devis.conditions?.trim() || devis.modalites_paiement?.trim() || DEFAULT_CONDITIONS;
+  const footerLayout = getFooterQrLayout(qrMeta);
 
   const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
   let y = M;
@@ -284,22 +301,24 @@ export async function generateReceptionChecklistPdf(devis, catMap = {}) {
   };
 
   const drawFooter = (pageNum, totalPages) => {
-    const lineY = PAGE_H - FOOTER_H + 4;
+    const { qrSize, qrX, qrY, lineEndX } = footerLayout;
+
+    if (qrMeta?.dataUrl) {
+      doc.setFillColor(...WHITE);
+      doc.rect(lineEndX, qrY - 1, PAGE_W - M - lineEndX, PAGE_H - qrY + 1, 'F');
+    }
+
     doc.setDrawColor(...RED);
     doc.setLineWidth(0.7);
-    const qrSize = qrMeta
-      ? containImage(qrMeta.width, qrMeta.height, 18, 18)
-      : { width: 0, height: 0 };
-    const lineEnd = qrMeta ? PAGE_W - M - qrSize.width - 2 : PAGE_W - M;
-    doc.line(M, lineY, lineEnd, lineY);
+    doc.line(M, FOOTER_LINE_Y, lineEndX, FOOTER_LINE_Y);
 
     if (qrMeta?.dataUrl) {
       try {
         doc.addImage(
           qrMeta.dataUrl,
           imgFmt(qrMeta.dataUrl),
-          PAGE_W - M - qrSize.width,
-          lineY - qrSize.height + 1,
+          qrX,
+          qrY,
           qrSize.width,
           qrSize.height,
         );
@@ -531,7 +550,7 @@ export async function generateReceptionChecklistPdf(devis, catMap = {}) {
   };
 
   const ensureSpace = (needed) => {
-    if (y + needed > MAX_Y) newPage();
+    if (y + needed > footerLayout.contentMaxY) newPage();
   };
 
   const ensureTableHeader = () => {

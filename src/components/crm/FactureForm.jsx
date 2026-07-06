@@ -43,10 +43,6 @@ function SectionTitle({ children }) {
 }
 function today() { return new Date().toISOString().slice(0, 10); }
 function addDays(n) { const d = new Date(); d.setDate(d.getDate() + n); return d.toISOString().slice(0, 10); }
-function genNumFact() {
-  const d = new Date();
-  return 'FA-' + d.getFullYear() + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(Math.floor(Math.random() * 9000) + 1000);
-}
 
 /* ── Constants ── */
 const UNITES    = ['unite', 'm2', 'ml', 'm3', 'm', 'forfait', 'heure', 'jour', 'pack'];
@@ -54,12 +50,12 @@ const TVA_TAUX  = [0, 7, 10, 14, 20];
 const STATUTS   = ['brouillon', 'envoyee', 'payee', 'partiellement_payee', 'impayee', 'en_retard', 'annulee'];
 const STATUT_LABEL = {
   brouillon:            'Brouillon',
-  envoyee:              'Envoyee',
-  payee:                'Payee',
-  partiellement_payee:  'Part. payee',
-  impayee:              'Impayee',
+  envoyee:              'Envoyée',
+  payee:                'Payée',
+  partiellement_payee:  'Part. payée',
+  impayee:              'Impayée',
   en_retard:            'En retard',
-  annulee:              'Annulee',
+  annulee:              'Annulée',
 };
 const MODALITES    = ['30 jours net', '60 jours net', 'Comptant', 'A la commande', '50% avance / 50% livraison', 'Sur devis'];
 const MODES_PAIEMENT = ['virement', 'cheque', 'especes', 'carte', 'autre'];
@@ -220,7 +216,7 @@ export default function FactureForm({ facture, onBack, onSaved, saving = false }
     ...EMPTY_FACTURE, ...facture,
     lignes: facture.lignes?.length ? facture.lignes.map(l => ({ ...EMPTY_LIGNE(), ...l, _id: l._id || Date.now() + Math.random() })) : [EMPTY_LIGNE()],
     paiements: facture.paiements || [],
-  } : { ...EMPTY_FACTURE, numero: genNumFact() });
+  } : { ...EMPTY_FACTURE, numero: '' });
 
   const [clients, setClients]       = useState([]);
   const [articles, setArticles]     = useState([]);
@@ -414,7 +410,7 @@ export default function FactureForm({ facture, onBack, onSaved, saving = false }
           <div style={{ display: 'flex', gap: 8 }}>
             <button type="button" className="btn btn-ghost" onClick={onBack}>Annuler</button>
             <button type="submit" className="btn btn-primary" disabled={isSaving} style={{ minWidth: 130 }}>
-              {isSaving ? <Spinner /> : <><FileText size={14} /> {isEdit ? 'Enregistrer' : 'Creer facture'}</>}
+              {isSaving ? <Spinner /> : <><FileText size={14} /> {isEdit ? 'Enregistrer' : 'Créer facture'}</>}
             </button>
           </div>
         </div>
@@ -473,7 +469,7 @@ export default function FactureForm({ facture, onBack, onSaved, saving = false }
                 </div>
 
                 <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-                  <Label>Creer depuis un devis</Label>
+                  <Label>Créer depuis un devis</Label>
                   <select value={form.devis_id} onChange={e => loadFromDevis(e.target.value)} style={IS(false)}>
                     <option value="">Aucun devis lie...</option>
                     {devisList.map(d => <option key={d.id} value={d.id}>{d.reference} — {d.titre}</option>)}
@@ -723,7 +719,7 @@ export default function FactureForm({ facture, onBack, onSaved, saving = false }
               <SectionTitle>Actions</SectionTitle>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 <button type="submit" className="btn btn-primary" disabled={isSaving} style={{ justifyContent: 'center' }}>
-                  {isSaving ? <Spinner /> : <><FileText size={14} /> {isEdit ? 'Enregistrer' : 'Creer la facture'}</>}
+                  {isSaving ? <Spinner /> : <><FileText size={14} /> {isEdit ? 'Enregistrer' : 'Créer la facture'}</>}
                 </button>
                 {isEdit && (
                   <button type="button" className="btn btn-ghost" onClick={handlePdf} style={{ justifyContent: 'center', display: 'flex', alignItems: 'center', gap: 6 }}>

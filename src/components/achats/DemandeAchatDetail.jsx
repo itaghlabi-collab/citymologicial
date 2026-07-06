@@ -17,7 +17,6 @@ import {
   validateSupplierQuote,
 } from '../../services/achats/purchaseWorkflow';
 import { resolveCurrentPurchaseRole, purchasePermissions } from '../../services/achats/purchaseWorkflowRoles';
-import { PURCHASE_ASSIGNEE } from '../../constants/purchaseWorkflow';
 import {
   canEditPurchaseRequest, canAddQuoteToRequest, canValidateQuoteOnRequest,
   getPurchaseStatusBadge, getPurchaseStatusLabel,
@@ -585,7 +584,7 @@ export default function DemandeAchatDetail({
               {[
                 ['Projet', projectDisplay],
                 ['Demandeur', request.requester_name || request.demandeur || '—'],
-                ['Responsable Achats', request.assigned_employee_name || PURCHASE_ASSIGNEE.label],
+                ['Responsable', request.assigned_employee_name || request.requester_name || '—'],
                 ['Fournisseur souhaité', request.payload?.fournisseur_souhaite || request.payload?.lines?.[0]?.fournisseur || '—'],
                 ['Nb. besoins', besoinsLines.length ? `${besoinsLines.length} ligne${besoinsLines.length > 1 ? 's' : ''}` : '—'],
                 ['Priorité', request.priorite],

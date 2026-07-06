@@ -338,7 +338,7 @@ GRANT ALL ON public.worker_project_assignments TO authenticated, service_role;
 CREATE TABLE IF NOT EXISTS public.purchase_requests (
   id                      UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   ref_demande             TEXT,
-  titre                   TEXT NOT NULL DEFAULT 'Demande d''achat',
+  titre                   TEXT NOT NULL DEFAULT 'Demande achat',
   priorite                TEXT NOT NULL DEFAULT 'Normale',
   statut                  TEXT NOT NULL DEFAULT 'Brouillon',
   date_debut              DATE,

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   Package, Plus, Edit2, Trash2, Eye, Copy, Search, X,
-  ChevronUp, ChevronDown, AlertCircle, Loader, Tag, DollarSign, Layers
+  ChevronUp, ChevronDown, AlertCircle, Loader, Tag, DollarSign, Layers, GripVertical,
 } from 'lucide-react';
 import { listCategories } from '../../services/crm/categories';
 import { useArticles } from '../../hooks/useArticles';
@@ -71,7 +71,7 @@ function Toast({ msg, type, onClose }) {
 function EmptyState({ filtered, onAdd }) {
   return (
     <tr>
-      <td colSpan={9} style={{ textAlign: 'center', padding: '48px 0' }}>
+      <td colSpan={10} style={{ textAlign: 'center', padding: '48px 0' }}>
         <Package size={36} style={{ color: 'var(--border)', marginBottom: 12, display: 'block', margin: '0 auto 12px' }} />
         <div style={{ fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-2)', marginBottom: 6 }}>
           {filtered ? 'Aucun article ne correspond aux filtres.' : 'Aucun article enregistre.'}
@@ -359,6 +359,7 @@ export default function Articles() {
     update,
     remove,
     duplicate,
+    reorder,
     filterArticles,
     computeArticlesStats,
   } = useArticles();
@@ -375,6 +376,8 @@ export default function Articles() {
   const [sortField, setSortField] = useState('');
   const [sortDir, setSortDir] = useState('asc');
   const [page, setPage] = useState(1);
+  const [dragIdx, setDragIdx] = useState(null);
+  const [overIdx, setOverIdx] = useState(null);
 
   const [toast, setToast] = useState({ msg: '', type: 'success' });
 
@@ -432,6 +435,43 @@ export default function Articles() {
   const safePagedPage = Math.min(page, totalPages);
   const paginated = filtered.slice((safePagedPage - 1) * PER_PAGE, safePagedPage * PER_PAGE);
   const hasFilters = !!(search || filterCat || filterStatut);
+  const canReorder = !hasFilters && !sortField && !loading;
+
+  async function handleReorder(fromPageIdx, toPageIdx) {
+    if (!canReorder || fromPageIdx == null || toPageIdx == null || fromPageIdx === toPageIdx) return;
+    const fromGlobal = (safePagedPage - 1) * PER_PAGE + fromPageIdx;
+    const toGlobal = (safePagedPage - 1) * PER_PAGE + toPageIdx;
+    const ids = filtered.map((a) => a.id);
+    const nextIds = [...ids];
+    const [moved] = nextIds.splice(fromGlobal, 1);
+    nextIds.splice(toGlobal, 0, moved);
+    const result = await reorder(nextIds);
+    if (result.success) showToast('Ordre des articles enregistré.');
+    else showToast(result.error || 'Erreur réorganisation.', 'error');
+  }
+
+  const dragHandlers = {
+    onDragStart: (e, pageIdx) => {
+      if (!canReorder) return;
+      setDragIdx(pageIdx);
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', String(pageIdx));
+    },
+    onDragOver: (e, pageIdx) => {
+      if (!canReorder) return;
+      e.preventDefault();
+      setOverIdx(pageIdx);
+    },
+    onDrop: (pageIdx) => {
+      if (!canReorder) return;
+      if (dragIdx !== null) handleReorder(dragIdx, pageIdx);
+      setDragIdx(null);
+      setOverIdx(null);
+    },
+    onDragEnd: () => { setDragIdx(null); setOverIdx(null); },
+    isDragging: (pageIdx) => dragIdx === pageIdx,
+    isOver: (pageIdx) => overIdx === pageIdx && dragIdx !== pageIdx,
+  };
 
   /* ── KPI ── */
   const stats = useMemo(() => computeArticlesStats(articles), [articles, computeArticlesStats]);
@@ -570,6 +610,11 @@ export default function Articles() {
           <span className="crm-filter-count">
             {loading ? '...' : `${filtered.length} article${filtered.length !== 1 ? 's' : ''}`}
           </span>
+          {canReorder && (
+            <span style={{ fontSize: '0.75rem', color: 'var(--text-3)', marginLeft: 8 }}>
+              Glissez les lignes pour réordonner le catalogue
+            </span>
+          )}
         </div>
       </div>
 
@@ -584,6 +629,7 @@ export default function Articles() {
               <table>
                 <thead>
                   <tr>
+                    <th style={{ width: 34 }} title={canReorder ? 'Glisser pour réordonner' : ''} />
                     <th>Reference</th>
                     <th>Nom article</th>
                     <th>Categorie</th>
@@ -602,8 +648,26 @@ export default function Articles() {
                 <tbody>
                   {paginated.length === 0
                     ? <EmptyState filtered={hasFilters} onAdd={openAdd} />
-                    : paginated.map(a => (
-                      <tr key={a.id}>
+                    : paginated.map((a, pageIdx) => (
+                      <tr
+                        key={a.id}
+                        draggable={canReorder}
+                        onDragStart={(e) => dragHandlers.onDragStart(e, pageIdx)}
+                        onDragOver={(e) => dragHandlers.onDragOver(e, pageIdx)}
+                        onDrop={() => dragHandlers.onDrop(pageIdx)}
+                        onDragEnd={dragHandlers.onDragEnd}
+                        style={{
+                          ...(dragHandlers.isDragging(pageIdx) ? { opacity: 0.45 } : {}),
+                          ...(dragHandlers.isOver(pageIdx) ? { boxShadow: 'inset 0 0 0 2px var(--red)' } : {}),
+                        }}
+                      >
+                        <td style={{ width: 34, padding: '4px 6px', verticalAlign: 'middle' }}>
+                          {canReorder ? (
+                            <span title="Glisser pour déplacer" style={{ display: 'inline-flex', cursor: 'grab', color: 'var(--text-3)' }}>
+                              <GripVertical size={15} />
+                            </span>
+                          ) : null}
+                        </td>
                         <td style={{ fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--red)', fontSize: '0.82rem', whiteSpace: 'nowrap' }}>
                           {a.reference || '—'}
                         </td>
