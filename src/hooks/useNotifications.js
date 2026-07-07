@@ -12,7 +12,7 @@ import {
 import { playNotificationSound } from '../utils/notificationSound';
 import { logNotificationDebug } from '../services/notifications/notificationDebug';
 
-const POLL_MS = 10_000;
+const POLL_MS = 5_000;
 
 function rowToNotification(row) {
   if (!row) return null;
@@ -37,7 +37,7 @@ export function useNotifications(user) {
     if (!soundEnabledRef.current || !notifications?.length) return;
     const freshUnread = notifications.filter((n) => n && !n.isRead);
     if (freshUnread.length > 0) {
-      playNotificationSound();
+      playNotificationSound().catch(() => {});
       logNotificationDebug('sound.play', { count: freshUnread.length });
     }
   }, []);
@@ -101,6 +101,7 @@ export function useNotifications(user) {
         (payload) => {
           const incoming = rowToNotification(payload.new);
           if (incoming && !incoming.isRead && !knownIdsRef.current.has(incoming.id)) {
+            knownIdsRef.current.add(incoming.id);
             playForNew([incoming]);
           }
           load();

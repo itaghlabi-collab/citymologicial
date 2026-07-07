@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from './hooks/useAuth';
-import { initNotificationSoundUnlock } from './utils/notificationSound';
+import { initNotificationSoundUnlock, unlockNotificationSound } from './utils/notificationSound';
 import './App.css';
 import NotificationCenter from './components/notifications/NotificationCenter';
 import UserProfileMenu from './components/dashboard/UserProfileMenu';
@@ -350,6 +350,7 @@ function LoginPage() {
 
   async function handleSubmit(e) {
     e.preventDefault();
+    unlockNotificationSound();
     setError('');
     if (!email || !password) {
       setError('Veuillez remplir tous les champs.');
