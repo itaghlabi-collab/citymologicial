@@ -2,8 +2,7 @@
  * purchaseOrders.js — Bons de commande (Supabase purchase_orders)
  */
 import { getSupabase } from '../../lib/supabase';
-import Big from 'big.js';
-import { moneyLineHt, moneyVatFromHt, moneyToNumber2, moneyRound2 } from '../../utils/decimalMoney';
+import { moneyLineHt, moneyComputeDocumentTotals, moneyToNumber2 } from '../../utils/decimalMoney';
 
 const TABLE = 'purchase_orders';
 
@@ -57,22 +56,16 @@ function normalizeLines(raw) {
 }
 
 export function computeLineTotals(lignes) {
-  const lines = lignes || [];
-  const subtotal = lines.reduce((s, l) => new Big(s).plus(lineHt(l)), new Big(0));
-  const vat = lines.reduce((s, l) => {
+  return moneyComputeDocumentTotals(lignes, (l) => {
     const t = l.type || 'article';
-    if (t === 'titre' || t === 'sous_titre') return s;
-    const ht = moneyLineHt({ qty: l.qte, unitPriceHt: l.prix_ht, remisePct: l.remise });
-    return s.plus(moneyVatFromHt(ht, l.tva));
-  }, new Big(0));
-
-  const subtotal2 = moneyRound2(subtotal);
-  const vat2 = moneyRound2(vat);
-  return {
-    subtotal_ht: Number(subtotal2.toString()),
-    total_vat: Number(vat2.toString()),
-    total_ttc: Number(subtotal2.plus(vat2).toString()),
-  };
+    if (t === 'titre' || t === 'sous_titre') return null;
+    return {
+      qty: l.qte,
+      unitPriceHt: l.prix_ht,
+      tvaPct: l.tva,
+      remisePct: l.remise,
+    };
+  });
 }
 
 export function normalizePurchaseOrder(row) {

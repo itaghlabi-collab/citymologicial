@@ -5,8 +5,7 @@ import { getSupabase } from '../../lib/supabase';
 import { clientDisplayName } from './clients';
 import { getCrmDevisById } from './crmDevis';
 import { syncFacturePaymentsToCash } from '../finance/financeSync';
-import Big from 'big.js';
-import { moneyLineHt, moneyVatFromHt, moneyRound2 } from '../../utils/decimalMoney';
+import { moneyLineHt, moneyLineTtc, moneyComputeDocumentTotals, moneyToNumber2 } from '../../utils/decimalMoney';
 
 const TABLE = 'crm_factures';
 const LIGNES = 'crm_facture_lignes';
@@ -25,33 +24,23 @@ const FACTURE_SELECT = `
 
 function ligneTotalHt(l) {
   if (l.type !== 'article') return 0;
-  return Number(moneyRound2(moneyLineHt({
+  return moneyToNumber2(moneyLineHt({
     qty: l.quantite,
     unitPriceHt: l.prix_ht,
     remisePct: l.remise,
-  })).toString());
+  }));
 }
 
 function computeTotals(lignes = []) {
-  const articles = (lignes || []).filter((l) => l.type === 'article');
-  const ht = articles.reduce(
-    (s, l) => s.plus(moneyLineHt({ qty: l.quantite, unitPriceHt: l.prix_ht, remisePct: l.remise })),
-    new Big(0),
-  );
-  const tva = articles.reduce(
-    (s, l) => {
-      const lineHt = moneyLineHt({ qty: l.quantite, unitPriceHt: l.prix_ht, remisePct: l.remise });
-      return s.plus(moneyVatFromHt(lineHt, l.tva || 0));
-    },
-    new Big(0),
-  );
-  const ht2 = moneyRound2(ht);
-  const tva2 = moneyRound2(tva);
-  return {
-    total_ht: Number(ht2.toString()),
-    total_tva: Number(tva2.toString()),
-    total_ttc: Number(ht2.plus(tva2).toString()),
-  };
+  return moneyComputeDocumentTotals(lignes, (l) => {
+    if (l.type !== 'article') return null;
+    return {
+      qty: l.quantite,
+      unitPriceHt: l.prix_ht,
+      tvaPct: l.tva,
+      remisePct: l.remise,
+    };
+  });
 }
 
 function computeAcompte(form, total_ttc) {

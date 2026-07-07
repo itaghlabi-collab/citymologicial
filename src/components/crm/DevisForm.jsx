@@ -16,7 +16,7 @@ import ArticleDesignationSearch from './ArticleDesignationSearch';
 import { TYPE_PROJET_VALUES, TYPE_PROJET_LABEL } from '../../constants/commercial';
 import { useAuth } from '../../hooks/useAuth';
 import Big from 'big.js';
-import { moneyLineHt, moneyVatFromHt, moneyRound2 } from '../../utils/decimalMoney';
+import { moneyLineHt, moneyLineTtc, moneyComputeDocumentTotals, moneyToNumber2, moneyRound2 } from '../../utils/decimalMoney';
 
 const CITYMO_LOGO = 'https://i.ibb.co/N6SbC06M/logopng.png';
 const CITYMO_COMPANY = {
@@ -73,11 +73,11 @@ function Label({ children, required }) {
 
 function ligneSousTotalHt(l) {
   if (l.type !== 'article') return 0;
-  return Number(moneyRound2(moneyLineHt({
+  return moneyToNumber2(moneyLineHt({
     qty: l.quantite,
     unitPriceHt: l.prix_ht,
     remisePct: l.remise,
-  })).toString());
+  }));
 }
 
 function genRef() {
@@ -1014,18 +1014,18 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
   };
 
   const articleLignes = form.lignes.filter((l) => l.type === 'article');
-  const totalHT = Number(moneyRound2(articleLignes.reduce(
-    (s, l) => s.plus(moneyLineHt({ qty: l.quantite, unitPriceHt: l.prix_ht, remisePct: l.remise })),
-    new Big(0),
-  )).toString());
-  const totalTVA = Number(moneyRound2(articleLignes.reduce(
-    (s, l) => {
-      const ht = moneyLineHt({ qty: l.quantite, unitPriceHt: l.prix_ht, remisePct: l.remise });
-      return s.plus(moneyVatFromHt(ht, l.tva));
+  const { subtotal_ht: totalHT, total_vat: totalTVA, total_ttc: totalTTC } = moneyComputeDocumentTotals(
+    form.lignes,
+    (l) => {
+      if (l.type !== 'article') return null;
+      return {
+        qty: l.quantite,
+        unitPriceHt: l.prix_ht,
+        tvaPct: l.tva,
+        remisePct: l.remise,
+      };
     },
-    new Big(0),
-  )).toString());
-  const totalTTC = Number(moneyRound2(new Big(totalHT).plus(new Big(totalTVA))).toString());
+  );
   const totalRemise = Number(moneyRound2(articleLignes.reduce(
     (s, l) => {
       const brut = moneyLineHt({ qty: l.quantite, unitPriceHt: l.prix_ht, remisePct: 0 });

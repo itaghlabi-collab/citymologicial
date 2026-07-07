@@ -11,7 +11,7 @@ import { listCrmDevis, getCrmDevisById } from '../../services/crm/crmDevis';
 import { generateCrmFactureNumero } from '../../services/crm/crmFactures';
 import { generateFacturePdf } from '../../services/crm/facturePdf';
 import Big from 'big.js';
-import { moneyLineHt, moneyVatFromHt, moneyRound2 } from '../../utils/decimalMoney';
+import { moneyLineHt, moneyLineTtc, moneyComputeDocumentTotals, moneyToNumber2, moneyRound2 } from '../../utils/decimalMoney';
 
 /* ── Helpers ── */
 function fmtMAD(v) {
@@ -98,8 +98,8 @@ function Spinner() {
 function LigneRow({ ligne, categories, articles, onChange, onDelete, onDuplicate }) {
   const [showDesc, setShowDesc] = useState(false);
   const catArticles = articles.filter(a => !ligne.categorie_id || String(a.categorie_id) === String(ligne.categorie_id));
-  const stHT = Number(moneyRound2(moneyLineHt({ qty: ligne.quantite, unitPriceHt: ligne.prix_ht, remisePct: ligne.remise })).toString());
-  const stTTC = Number(moneyRound2(new Big(stHT).plus(moneyVatFromHt(new Big(stHT), ligne.tva))).toString());
+  const stHT = moneyToNumber2(moneyLineHt({ qty: ligne.quantite, unitPriceHt: ligne.prix_ht, remisePct: ligne.remise }));
+  const stTTC = moneyToNumber2(moneyLineTtc({ qty: ligne.quantite, unitPriceHt: ligne.prix_ht, tvaPct: ligne.tva, remisePct: ligne.remise }));
 
   function set(k, v) { onChange({ ...ligne, [k]: v }); }
 
@@ -316,18 +316,18 @@ export default function FactureForm({ facture, onBack, onSaved, saving = false }
 
   /* Totals */
   const artLignes   = form.lignes.filter(l => l.type === 'article');
-  const totalHT = Number(moneyRound2(artLignes.reduce(
-    (s, l) => s.plus(moneyLineHt({ qty: l.quantite, unitPriceHt: l.prix_ht, remisePct: l.remise })),
-    new Big(0),
-  )).toString());
-  const totalTVA = Number(moneyRound2(artLignes.reduce(
-    (s, l) => {
-      const ht = moneyLineHt({ qty: l.quantite, unitPriceHt: l.prix_ht, remisePct: l.remise });
-      return s.plus(moneyVatFromHt(ht, l.tva));
+  const { subtotal_ht: totalHT, total_vat: totalTVA, total_ttc: totalTTC } = moneyComputeDocumentTotals(
+    form.lignes,
+    (l) => {
+      if (l.type !== 'article') return null;
+      return {
+        qty: l.quantite,
+        unitPriceHt: l.prix_ht,
+        tvaPct: l.tva,
+        remisePct: l.remise,
+      };
     },
-    new Big(0),
-  )).toString());
-  const totalTTC = Number(moneyRound2(new Big(totalHT).plus(new Big(totalTVA))).toString());
+  );
   const totalRemise = Number(moneyRound2(artLignes.reduce(
     (s, l) => {
       const brut = moneyLineHt({ qty: l.quantite, unitPriceHt: l.prix_ht, remisePct: 0 });
