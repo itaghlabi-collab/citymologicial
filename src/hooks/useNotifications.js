@@ -14,7 +14,7 @@ import { playNotificationSound } from '../utils/notificationSound';
 import { logNotificationDebug } from '../services/notifications/notificationDebug';
 
 const POLL_FAST_MS = 2_500;
-const POLL_SLOW_MS = 8_000;
+const POLL_BACKUP_MS = 5_000;
 const POLL_HIDDEN_MS = 15_000;
 
 function rowToNotification(row) {
@@ -27,68 +27,91 @@ function isDocumentVisible() {
 }
 
 export function useNotifications(user) {
+  const userId = user?.id;
   const [items, setItems] = useState([]);
   const [unreadCount, setUnreadCount] = useState(0);
   const [loading, setLoading] = useState(true);
   const configured = isSupabaseConfigured();
   const knownIdsRef = useRef(new Set());
+  const announcedIdsRef = useRef(new Set());
   const initialLoadRef = useRef(true);
   const soundEnabledRef = useRef(true);
   const realtimeOkRef = useRef(false);
   const loadRef = useRef(null);
+  const syncTimerRef = useRef(null);
 
   const playForNew = useCallback((notifications) => {
     if (!soundEnabledRef.current || !notifications?.length) return;
     const freshUnread = notifications.filter((n) => n && !n.isRead);
     if (freshUnread.length > 0) {
       playNotificationSound().catch(() => {});
-      logNotificationDebug('sound.play', { count: freshUnread.length });
+      logNotificationDebug('sound.play', { count: freshUnread.length, ids: freshUnread.map((n) => n.id) });
     }
   }, []);
 
-  const applyIncoming = useCallback((incoming, { playSound = true } = {}) => {
+  const announceUnread = useCallback((notifications) => {
+    const fresh = (notifications || []).filter(
+      (n) => n?.id && !n.isRead && !announcedIdsRef.current.has(n.id),
+    );
+    if (!fresh.length) return;
+    fresh.forEach((n) => announcedIdsRef.current.add(n.id));
+    playForNew(fresh);
+  }, [playForNew]);
+
+  const scheduleSync = useCallback(() => {
+    if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
+    syncTimerRef.current = setTimeout(() => {
+      syncTimerRef.current = null;
+      loadRef.current?.();
+    }, 400);
+  }, []);
+
+  const applyIncoming = useCallback((incoming) => {
     if (!incoming?.id || incoming.isRead) return;
     const isNew = !knownIdsRef.current.has(incoming.id);
-    if (!isNew) return;
-
     knownIdsRef.current.add(incoming.id);
-    setItems((prev) => {
-      if (prev.some((n) => n.id === incoming.id)) return prev;
-      return [incoming, ...prev].sort(
-        (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0),
-      );
-    });
-    setUnreadCount((c) => c + 1);
-    if (playSound) playForNew([incoming]);
-    logNotificationDebug('realtime.incoming', {
-      id: incoming.id,
-      title: incoming.title,
-      userId: user?.id,
-    });
-  }, [playForNew, user?.id]);
+
+    if (isNew) {
+      setItems((prev) => {
+        if (prev.some((n) => n.id === incoming.id)) return prev;
+        return [incoming, ...prev].sort(
+          (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0),
+        );
+      });
+      setUnreadCount((c) => c + 1);
+      logNotificationDebug('realtime.incoming', {
+        id: incoming.id,
+        title: incoming.title,
+        userId,
+      });
+    }
+
+    announceUnread([incoming]);
+  }, [announceUnread, userId]);
 
   const load = useCallback(async () => {
-    if (!configured || !user?.id) {
+    if (!configured || !userId) {
       setItems([]);
       setUnreadCount(0);
       setLoading(false);
       return;
     }
-    logNotificationDebug('session', { currentUserId: user.id, email: user.email });
+    logNotificationDebug('session', { currentUserId: userId, email: user.email });
     try {
       const [list, unread] = await Promise.all([
         listNotificationsForUser(user),
         countUnreadNotifications(user),
       ]);
 
-      if (!initialLoadRef.current) {
-        const newUnread = list.filter(
-          (n) => !n.isRead && !knownIdsRef.current.has(n.id),
-        );
-        playForNew(newUnread);
+      if (initialLoadRef.current) {
+        list.filter((n) => !n.isRead).forEach((n) => {
+          announcedIdsRef.current.add(n.id);
+        });
+      } else {
+        announceUnread(list);
       }
 
-      knownIdsRef.current = new Set(list.map((n) => n.id));
+      list.forEach((n) => knownIdsRef.current.add(n.id));
       initialLoadRef.current = false;
       setItems(list);
       setUnreadCount(unread);
@@ -97,19 +120,23 @@ export function useNotifications(user) {
     } finally {
       setLoading(false);
     }
-  }, [configured, user, playForNew]);
+  }, [configured, userId, user, announceUnread]);
 
   loadRef.current = load;
 
   useEffect(() => {
     initialLoadRef.current = true;
     knownIdsRef.current = new Set();
+    announcedIdsRef.current = new Set();
     realtimeOkRef.current = false;
+  }, [userId, configured]);
+
+  useEffect(() => {
     load();
   }, [load]);
 
   useEffect(() => {
-    if (!configured || !user?.id) return undefined;
+    if (!configured || !userId) return undefined;
 
     const tick = () => {
       if (!isDocumentVisible()) return;
@@ -118,7 +145,7 @@ export function useNotifications(user) {
 
     const schedule = () => {
       if (!isDocumentVisible()) return POLL_HIDDEN_MS;
-      return realtimeOkRef.current ? POLL_SLOW_MS : POLL_FAST_MS;
+      return realtimeOkRef.current ? POLL_BACKUP_MS : POLL_FAST_MS;
     };
 
     let timer = null;
@@ -140,15 +167,16 @@ export function useNotifications(user) {
 
     return () => {
       if (timer) clearTimeout(timer);
+      if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
       document.removeEventListener('visibilitychange', onVisible);
       window.removeEventListener('focus', onFocus);
     };
-  }, [configured, user?.id]);
+  }, [configured, userId]);
 
   useEffect(() => {
-    if (!configured || !user?.id) return undefined;
+    if (!configured || !userId) return undefined;
 
-    const channelName = `notifications-${user.id}`;
+    const channelName = `notifications-${userId}`;
     const sb = getSupabase();
     const channel = sb
       .channel(channelName)
@@ -158,12 +186,11 @@ export function useNotifications(user) {
           event: 'INSERT',
           schema: 'public',
           table: 'notifications',
-          filter: `recipient_user_id=eq.${user.id}`,
+          filter: `recipient_user_id=eq.${userId}`,
         },
         (payload) => {
-          const incoming = rowToNotification(payload.new);
-          applyIncoming(incoming);
-          loadRef.current?.();
+          applyIncoming(rowToNotification(payload.new));
+          scheduleSync();
         },
       )
       .on(
@@ -172,41 +199,40 @@ export function useNotifications(user) {
           event: 'UPDATE',
           schema: 'public',
           table: 'notifications',
-          filter: `recipient_user_id=eq.${user.id}`,
+          filter: `recipient_user_id=eq.${userId}`,
         },
         (payload) => {
           const incoming = rowToNotification(payload.new);
-          const wasRead = Boolean(payload.old?.is_read);
-          if (incoming && !incoming.isRead && wasRead) {
+          if (incoming && !incoming.isRead) {
             applyIncoming(incoming);
           }
-          loadRef.current?.();
+          scheduleSync();
         },
       )
       .subscribe((status) => {
         const ok = status === 'SUBSCRIBED';
         realtimeOkRef.current = ok;
-        logNotificationDebug('realtime.status', { status, userId: user.id, ok });
+        logNotificationDebug('realtime.status', { status, userId, ok });
         if (!ok && status !== 'SUBSCRIBED') {
           loadRef.current?.();
         }
       });
 
     return () => { sb.removeChannel(channel); };
-  }, [configured, user?.id, applyIncoming]);
+  }, [configured, userId, applyIncoming, scheduleSync]);
 
   useEffect(() => {
-    if (!user?.id) return;
+    if (!userId) return;
     getSupabase()
       .from('profiles')
       .select('notification_sound_enabled')
-      .eq('id', user.id)
+      .eq('id', userId)
       .maybeSingle()
       .then(({ data }) => {
         soundEnabledRef.current = data?.notification_sound_enabled !== false;
       })
       .catch(() => {});
-  }, [user?.id]);
+  }, [userId]);
 
   const markRead = useCallback(async (id) => {
     await markNotificationRead(id);
