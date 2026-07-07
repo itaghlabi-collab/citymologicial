@@ -32,7 +32,7 @@ function ligneTotalHt(l) {
 }
 
 function computeTotals(lignes = []) {
-  return moneyComputeDocumentTotals(lignes, (l) => {
+  const result = moneyComputeDocumentTotals(lignes, (l) => {
     if (l.type !== 'article') return null;
     return {
       qty: l.quantite,
@@ -41,6 +41,10 @@ function computeTotals(lignes = []) {
       remisePct: l.remise,
     };
   });
+  return {
+    ...result,
+    total_tva: result.total_vat,
+  };
 }
 
 function computeAcompte(form, total_ttc) {
@@ -159,9 +163,9 @@ function toFactureRow(form, totals, payeInfo) {
     pourcentage_acompte: form.pourcentage_acompte != null ? Number(form.pourcentage_acompte) : null,
     devise: form.devise || 'MAD',
     devis_reste_apres: form.devis_reste_apres != null ? Number(form.devis_reste_apres) : null,
-    total_ht: totals.total_ht,
-    total_tva: totals.total_tva,
-    total_ttc: totals.total_ttc,
+    total_ht: totals.total_ht ?? 0,
+    total_tva: totals.total_tva ?? totals.total_vat ?? 0,
+    total_ttc: totals.total_ttc ?? 0,
     total_paye: payeInfo.total_paye,
     reste_a_payer: payeInfo.reste_a_payer,
   };
@@ -420,7 +424,12 @@ async function upsertPaiements(factureId, paiements) {
 
 export async function createCrmFacture(form) {
   await getAuthUserId();
-  const totals = computeTotals(form.lignes);
+  const computed = computeTotals(form.lignes);
+  const totals = {
+    total_ht: computed.total_ht || Number(form.total_ht) || 0,
+    total_tva: computed.total_tva || Number(form.total_tva) || 0,
+    total_ttc: computed.total_ttc || Number(form.total_ttc) || 0,
+  };
   const payeInfo = computePaiements(form, totals.total_ttc);
   const numero = form.numero?.trim() || await generateCrmFactureNumero();
   const row = { ...toFactureRow({ ...form, numero, facture_type: 'facture' }, totals, payeInfo), numero };
@@ -443,7 +452,12 @@ export async function createCrmFacture(form) {
 
 export async function updateCrmFacture(id, form) {
   await getAuthUserId();
-  const totals = computeTotals(form.lignes);
+  const computed = computeTotals(form.lignes);
+  const totals = {
+    total_ht: computed.total_ht || Number(form.total_ht) || 0,
+    total_tva: computed.total_tva || Number(form.total_tva) || 0,
+    total_ttc: computed.total_ttc || Number(form.total_ttc) || 0,
+  };
   const payeInfo = computePaiements(form, totals.total_ttc);
   const row = toFactureRow(form, totals, payeInfo);
 
@@ -524,6 +538,9 @@ export async function createCrmFactureFromDevis(devisId) {
     statut: 'envoyee',
     date_emission: today,
     date_echeance: addDaysIso(devis.date_validite || today, 30),
+    total_ht: devis.total_ht,
+    total_tva: devis.total_tva,
+    total_ttc: devis.total_ttc,
     lignes: (devis.lignes || []).map((l) => ({
       ...l,
       id: undefined,

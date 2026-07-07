@@ -25,7 +25,7 @@ function ligneTotalHt(l) {
 }
 
 function computeTotals(lignes = []) {
-  return moneyComputeDocumentTotals(lignes, (l) => {
+  const result = moneyComputeDocumentTotals(lignes, (l) => {
     if (l.type !== 'article') return null;
     return {
       qty: l.quantite,
@@ -34,6 +34,10 @@ function computeTotals(lignes = []) {
       remisePct: l.remise,
     };
   });
+  return {
+    ...result,
+    total_tva: result.total_vat,
+  };
 }
 
 export function normalizeLigne(row) {
@@ -126,9 +130,9 @@ function toDevisRow(form, totals) {
     modalites_paiement: form.modalites_paiement || null,
     conditions: form.conditions?.trim() || null,
     notes_internes: form.notes_internes?.trim() || null,
-    total_ht: totals.total_ht,
-    total_tva: totals.total_tva,
-    total_ttc: totals.total_ttc,
+    total_ht: totals.total_ht ?? 0,
+    total_tva: totals.total_tva ?? totals.total_vat ?? 0,
+    total_ttc: totals.total_ttc ?? 0,
   };
 }
 
