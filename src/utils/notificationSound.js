@@ -15,22 +15,38 @@ function getAudioContext() {
   return audioCtx;
 }
 
-/** Génère un WAV double-bip en mémoire (pas de fichier externe). */
+/** Triple bip alarme urgent (WAV en mémoire). */
 function buildNotificationWavUrl() {
   if (wavUrl) return wavUrl;
   const sampleRate = 22050;
-  const durationSec = 0.45;
+  const durationSec = 0.72;
   const numSamples = Math.floor(sampleRate * durationSec);
   const pcm = new Int16Array(numSamples);
+
+  const beeps = [
+    { start: 0.0, dur: 0.14, freq: 1180 },
+    { start: 0.2, dur: 0.14, freq: 1180 },
+    { start: 0.4, dur: 0.22, freq: 1580 },
+  ];
+
+  const alarmSample = (freq, t, localT) => {
+    const attack = Math.min(1, localT / 0.008);
+    const decay = Math.exp(-localT * 3.2);
+    const env = attack * decay;
+    const s = Math.sin(2 * Math.PI * freq * t);
+    const harsh = Math.sign(s) * 0.42;
+    return (s * 0.58 + harsh) * env * 0.98;
+  };
 
   for (let i = 0; i < numSamples; i += 1) {
     const t = i / sampleRate;
     let sample = 0;
-    if (t < 0.11) {
-      sample = Math.sin(2 * Math.PI * 880 * t) * 0.55 * Math.exp(-t * 7);
-    } else if (t >= 0.13 && t < 0.34) {
-      sample = Math.sin(2 * Math.PI * 1318 * t) * 0.45 * Math.exp(-(t - 0.13) * 5);
-    }
+    beeps.forEach(({ start, dur, freq }) => {
+      const localT = t - start;
+      if (localT >= 0 && localT < dur) {
+        sample += alarmSample(freq, t, localT);
+      }
+    });
     pcm[i] = Math.max(-1, Math.min(1, sample)) * 32767;
   }
 
@@ -75,7 +91,7 @@ function getAudioElement() {
     buildNotificationWavUrl();
     audioEl = new Audio(wavUrl);
     audioEl.preload = 'auto';
-    audioEl.volume = 0.85;
+    audioEl.volume = 1;
   }
   return audioEl;
 }
@@ -86,21 +102,22 @@ function playWebAudioChime() {
   try {
     if (ctx.state === 'suspended') ctx.resume().catch(() => {});
     const t = ctx.currentTime;
-    const playTone = (freq, start, dur, vol) => {
+    const playAlarmBeep = (freq, start, dur, vol) => {
       const osc = ctx.createOscillator();
       const gain = ctx.createGain();
-      osc.type = 'sine';
+      osc.type = 'square';
       osc.frequency.setValueAtTime(freq, start);
       gain.gain.setValueAtTime(0.0001, start);
-      gain.gain.exponentialRampToValueAtTime(vol, start + 0.012);
+      gain.gain.exponentialRampToValueAtTime(vol, start + 0.006);
       gain.gain.exponentialRampToValueAtTime(0.0001, start + dur);
       osc.connect(gain);
       gain.connect(ctx.destination);
       osc.start(start);
       osc.stop(start + dur + 0.02);
     };
-    playTone(880, t, 0.1, 0.15);
-    playTone(1318, t + 0.13, 0.14, 0.12);
+    playAlarmBeep(1180, t, 0.14, 0.28);
+    playAlarmBeep(1180, t + 0.2, 0.14, 0.28);
+    playAlarmBeep(1580, t + 0.4, 0.22, 0.32);
     return true;
   } catch {
     return false;
