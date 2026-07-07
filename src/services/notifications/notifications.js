@@ -127,6 +127,44 @@ export async function createNotification(payload) {
   const uid = createdBy || (await getCurrentUserId());
   const row = buildNotificationRow({ ...payload, createdBy: uid }, recipientUserId);
 
+  if (recipientUserId) {
+    const { entityType, entityId, type } = payload;
+    const rpcArgs = {
+      p_recipient_user_id: recipientUserId,
+      p_title: row.title,
+      p_message: row.message,
+      p_type: type || NOTIFICATION_TYPES.SYSTEM,
+      p_priority: row.priority,
+      p_entity_type: entityType || null,
+      p_entity_id: entityId || null,
+      p_action_url: row.action_url,
+      p_created_by: uid,
+      p_submodule_code: row.submodule_code,
+    };
+
+    if (entityType && entityId) {
+      const { data: upserted, error: rpcErr } = await getSupabase().rpc('upsert_user_notification', rpcArgs);
+      if (!rpcErr && upserted) {
+        const normalized = normalizeNotification(upserted);
+        logNotificationDebug('create.rpc.upsert', { id: normalized.id, recipientUserId, title: normalized.title });
+        return normalized;
+      }
+      if (rpcErr?.code !== 'PGRST202') {
+        console.warn('[CITYMO] upsert_user_notification', rpcErr);
+      }
+    } else {
+      const { data: inserted, error: rpcErr } = await getSupabase().rpc('insert_user_notification', rpcArgs);
+      if (!rpcErr && inserted) {
+        const normalized = normalizeNotification(inserted);
+        logNotificationDebug('create.rpc.insert', { id: normalized.id, recipientUserId, title: normalized.title });
+        return normalized;
+      }
+      if (rpcErr?.code !== 'PGRST202') {
+        console.warn('[CITYMO] insert_user_notification', rpcErr);
+      }
+    }
+  }
+
   const { data, error } = await getSupabase()
     .from(TABLE)
     .insert([row])
@@ -135,29 +173,6 @@ export async function createNotification(payload) {
 
   if (error) {
     if (error.code === '23505' && recipientUserId) {
-      const { entityType, entityId, type } = payload;
-      if (entityType && entityId) {
-        const { data: upserted, error: rpcErr } = await getSupabase().rpc('upsert_user_notification', {
-          p_recipient_user_id: recipientUserId,
-          p_title: row.title,
-          p_message: row.message,
-          p_type: type,
-          p_priority: row.priority,
-          p_entity_type: entityType,
-          p_entity_id: entityId,
-          p_action_url: row.action_url,
-          p_created_by: uid,
-          p_submodule_code: row.submodule_code,
-        });
-        if (!rpcErr && upserted) {
-          const normalized = normalizeNotification(upserted);
-          logNotificationDebug('create.refresh', { id: normalized.id, recipientUserId, title: normalized.title });
-          return normalized;
-        }
-        if (rpcErr && rpcErr.code !== 'PGRST202') {
-          console.warn('[CITYMO] upsert_user_notification', rpcErr);
-        }
-      }
       logNotificationDebug('create.duplicate', { recipientUserId, title, type: payload.type });
       return null;
     }

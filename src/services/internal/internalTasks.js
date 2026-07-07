@@ -164,7 +164,9 @@ export async function createInternalTask(form) {
   if (error) throw error;
   const task = normalizeInternalTask(data);
   import('../notifications/notificationEvents').then(({ notifyTaskCreated }) => {
-    notifyTaskCreated(task).catch(() => {});
+    notifyTaskCreated(task).catch((err) => {
+      console.warn('[CITYMO] notifyTaskCreated', err, task?.id, task?.assigne);
+    });
   });
   return task;
 }
@@ -191,7 +193,9 @@ export async function updateInternalTask(id, form) {
   const newAssignee = task.assigne || '';
   if (newAssignee && !personNamesMatch(prevAssignee, newAssignee)) {
     import('../notifications/notificationEvents').then(({ notifyTaskAssigned }) => {
-      notifyTaskAssigned(task, { previousAssignee: prevAssignee }).catch(() => {});
+      notifyTaskAssigned(task, { previousAssignee: prevAssignee }).catch((err) => {
+        console.warn('[CITYMO] notifyTaskAssigned', err, task?.id);
+      });
     });
   }
 
