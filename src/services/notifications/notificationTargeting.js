@@ -57,7 +57,9 @@ export async function fetchProfilesForTargeting() {
     console.warn('[CITYMO] profiles targeting', error);
     return [];
   }
-  return (data || []).filter((p) => (p.statut || 'actif') !== 'inactif');
+  return (data || []).filter(
+    (p) => (p.statut || 'actif').toLowerCase() !== 'inactif',
+  );
 }
 
 async function listUserIdsBySubmodule(submoduleCode) {

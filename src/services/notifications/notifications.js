@@ -65,19 +65,7 @@ export function normalizeNotification(row) {
 }
 
 async function buildNotificationListFilter(user) {
-  const parts = [`recipient_user_id.eq.${user.id}`, 'is_global.eq.true'];
-
-  const { data: profile } = await getSupabase()
-    .from('profiles')
-    .select('role_id, department_id, role')
-    .eq('id', user.id)
-    .maybeSingle();
-
-  if (profile?.role_id) parts.push(`recipient_role_id.eq.${profile.role_id}`);
-  if (profile?.department_id) parts.push(`recipient_department_id.eq.${profile.department_id}`);
-  if (profile?.role) parts.push(`recipient_role.eq.${profile.role}`);
-
-  return parts.join(',');
+  return `recipient_user_id.eq.${user.id},is_global.eq.true`;
 }
 
 async function getCurrentUserId() {
@@ -105,8 +93,8 @@ function buildNotificationRow(payload, recipientUserId) {
   return {
     recipient_user_id: recipientUserId || null,
     recipient_role: recipientUserId ? null : recipientRole,
-    recipient_role_id: roleId || null,
-    recipient_department_id: departmentId || null,
+    recipient_role_id: recipientUserId ? null : (roleId || null),
+    recipient_department_id: recipientUserId ? null : (departmentId || null),
     submodule_code: submoduleCode || null,
     is_global: Boolean(isGlobal),
     title: title.trim(),
@@ -146,7 +134,30 @@ export async function createNotification(payload) {
     .single();
 
   if (error) {
-    if (error.code === '23505') {
+    if (error.code === '23505' && recipientUserId) {
+      const { entityType, entityId, type } = payload;
+      if (entityType && entityId) {
+        const { data: upserted, error: rpcErr } = await getSupabase().rpc('upsert_user_notification', {
+          p_recipient_user_id: recipientUserId,
+          p_title: row.title,
+          p_message: row.message,
+          p_type: type,
+          p_priority: row.priority,
+          p_entity_type: entityType,
+          p_entity_id: entityId,
+          p_action_url: row.action_url,
+          p_created_by: uid,
+          p_submodule_code: row.submodule_code,
+        });
+        if (!rpcErr && upserted) {
+          const normalized = normalizeNotification(upserted);
+          logNotificationDebug('create.refresh', { id: normalized.id, recipientUserId, title: normalized.title });
+          return normalized;
+        }
+        if (rpcErr && rpcErr.code !== 'PGRST202') {
+          console.warn('[CITYMO] upsert_user_notification', rpcErr);
+        }
+      }
       logNotificationDebug('create.duplicate', { recipientUserId, title, type: payload.type });
       return null;
     }
@@ -307,7 +318,7 @@ export async function notifyInventaireAndAdmins(payload) {
   return notifyInventaireUsers(payload);
 }
 
-export async function listNotificationsForUser(user, { limit = 80 } = {}) {
+export async function listNotificationsForUser(user, { limit = 120 } = {}) {
   if (!user?.id) return [];
   const filter = await buildNotificationListFilter(user);
   const { data, error } = await getSupabase()
@@ -363,10 +374,11 @@ export async function markNotificationRead(id) {
 
 export async function markAllNotificationsRead(user) {
   if (!user?.id) return 0;
+  const filter = await buildNotificationListFilter(user);
   const { data, error } = await getSupabase()
     .from(TABLE)
     .update({ is_read: true, read_at: new Date().toISOString() })
-    .eq('recipient_user_id', user.id)
+    .or(filter)
     .eq('is_read', false)
     .select('id');
   if (error) throw error;

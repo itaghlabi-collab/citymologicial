@@ -126,6 +126,17 @@ export async function fetchProfiles() {
 }
 
 export async function listSuperAdminAndDGRecipients() {
+  try {
+    const { data, error } = await getSupabase().rpc('list_super_admin_dg_user_ids');
+    if (!error && Array.isArray(data) && data.length) {
+      return data.map((id) => ({ id }));
+    }
+    if (error && error.code !== 'PGRST202') {
+      console.warn('[CITYMO] list_super_admin_dg_user_ids RPC', error);
+    }
+  } catch (err) {
+    console.warn('[CITYMO] list_super_admin_dg_user_ids', err);
+  }
   const profiles = await fetchProfiles();
   const map = new Map();
   profiles.forEach((p) => {
@@ -146,8 +157,21 @@ export async function listInventaireRecipients() {
 
 export async function findProfileById(userId) {
   if (!userId) return null;
+  try {
+    const { data, error } = await getSupabase().rpc('resolve_notification_recipient', {
+      p_user_id: userId,
+      p_employee_id: null,
+      p_email: null,
+      p_assignee_name: null,
+    });
+    if (!error && data === userId) {
+      return { id: userId };
+    }
+  } catch {
+    /* fallback */
+  }
   const profiles = await fetchProfiles();
-  return profiles.find((p) => p.id === userId) || null;
+  return profiles.find((p) => p.id === userId) || { id: userId };
 }
 
 export async function findProfileByEmail(email) {
