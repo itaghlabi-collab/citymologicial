@@ -8,9 +8,9 @@ import { listCategories } from '../../services/crm/categories';
 import { formatCategoryDisplayName } from '../../utils/crm/categoryDisplay';
 import ArticleDesignationSearch from '../crm/ArticleDesignationSearch';
 import {
-  INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE, TVA_OPTIONS, genId, formatMAD,
+  INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE, TVA_OPTIONS, genId,
 } from './shared.jsx';
-import { moneyLineHt, moneyToNumber2 } from '../../utils/decimalMoney';
+import { moneyLineHt, moneyFormatMAD } from '../../utils/decimalMoney';
 
 const UNITES = ['unite', 'm2', 'ml', 'm3', 'm', 'forfait', 'heure', 'jour', 'pack', 'U'];
 
@@ -41,12 +41,12 @@ function lineType(l) {
 
 function lineTotalHt(l) {
   const t = lineType(l);
-  if (t === 'titre' || t === 'sous_titre') return 0;
-  return moneyToNumber2(moneyLineHt({
+  if (t === 'titre' || t === 'sous_titre') return null;
+  return moneyLineHt({
     qty: l.qte,
     unitPriceHt: l.prix_ht,
     remisePct: l.remise,
-  }));
+  });
 }
 
 function rowDragStyle(isDragging, isOver) {
@@ -224,7 +224,7 @@ function BCLineDisplay({ ligne, lineNum, idx, onDelete, onDuplicate, onEdit, dra
         )}
       </td>
       <td style={{ padding: '10px 8px', textAlign: 'right', verticalAlign: 'top', fontFamily: 'var(--font-head)', fontWeight: 700 }}>
-        {formatMAD(ht)}
+        {moneyFormatMAD(ht)}
       </td>
       <td style={{ padding: '10px 8px', verticalAlign: 'top' }}>{actions}</td>
     </tr>

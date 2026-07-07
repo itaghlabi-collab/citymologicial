@@ -4,7 +4,7 @@
 import { getSupabase } from '../../lib/supabase';
 import { QUOTE_STATUSES } from '../../constants/purchaseWorkflow';
 import Big from 'big.js';
-import { moneyLineHt, moneyLineTtc, moneyRound2, moneyToNumber2 } from '../../utils/decimalMoney';
+import { moneyLineHt, moneyLineTtc, moneyToNumber } from '../../utils/decimalMoney';
 
 const TABLE = 'purchase_request_quotes';
 
@@ -24,7 +24,7 @@ export const EMPTY_QUOTE_LINE = () => ({
 });
 
 export function computeQuoteLineTotal(line) {
-  return moneyToNumber2(moneyLineHt({
+  return moneyToNumber(moneyLineHt({
     qty: line?.quantite,
     unitPriceHt: line?.prix_unitaire_ht,
     remisePct: line?.remise_pct,
@@ -41,7 +41,7 @@ export function sumQuoteLinesTtc(lines, tvaRate = 20) {
     })),
     new Big(0),
   );
-  return moneyToNumber2(sum);
+  return moneyToNumber(sum);
 }
 
 export function normalizeQuoteLines(raw) {
@@ -67,7 +67,7 @@ export function normalizeQuoteLines(raw) {
 export function sumQuoteLinesHt(lines) {
   const normalized = normalizeQuoteLines(lines);
   const sum = normalized.reduce((s, l) => s.plus(new Big(l.montant_ht || 0)), new Big(0));
-  return Number(moneyRound2(sum).toString());
+  return moneyToNumber(sum);
 }
 
 export function formatQuoteReferencesSummary(lines) {
@@ -122,7 +122,7 @@ export function toQuoteRow(form, purchaseRequestId) {
   const ttcFromLines = lines.length ? sumQuoteLinesTtc(lines, tva) : 0;
   const ttc = form.montant_ttc != null && form.montant_ttc !== ''
     ? Number(form.montant_ttc)
-    : (ttcFromLines > 0 ? ttcFromLines : Number(moneyRound2(new Big(ht).times(new Big(1).plus(new Big(tva).div(100))))));
+    : (ttcFromLines > 0 ? ttcFromLines : moneyToNumber(new Big(ht).times(new Big(1).plus(new Big(tva).div(100)))));
   return {
     purchase_request_id: purchaseRequestId,
     supplier_id: form.supplier_id || null,

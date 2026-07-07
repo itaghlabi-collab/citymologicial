@@ -9,7 +9,7 @@ import {
 import { usePurchaseOrders } from '../../hooks/usePurchaseOrders';
 import { computeLineTotals, sanitizeBCLignes } from '../../services/achats/purchaseOrders';
 import { generatePurchaseOrderPdf } from '../../services/achats/purchaseOrderPdf';
-import { moneyLineHt, moneyToNumber2 } from '../../utils/decimalMoney';
+import { moneyLineHt, moneyFormatMAD } from '../../utils/decimalMoney';
 import {
   INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE,
   STATUTS_BC, BADGE_BC, DEVISES, TVA_OPTIONS,
@@ -142,7 +142,7 @@ function BCForm({ initial, onSave, onCancel, fournisseurs, suppliersLoading, sav
           <div key={l} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: i < 2 ? '1px solid var(--border)' : 'none' }}>
             <span style={{ fontSize: '0.85rem', fontWeight: i === 2 ? 700 : 500, color: i === 2 ? 'var(--text)' : 'var(--text-2)' }}>{l}</span>
             <span style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: i === 2 ? '1.05rem' : '0.9rem', color: i === 2 ? 'var(--red)' : 'var(--text)' }}>
-              {v.toLocaleString('fr-FR', { minimumFractionDigits: 2 })} {form.devise}
+              {moneyFormatMAD(v).replace(' MAD', '')} {form.devise}
             </span>
           </div>
         ))}
@@ -217,7 +217,7 @@ function DetailBC({ item, onBack, onEdit, onDelete, onDupliquer, onPdf, pdfLoadi
                     );
                   }
                   articleNum += 1;
-                  const ht = moneyToNumber2(moneyLineHt({ qty: l.qte, unitPriceHt: l.prix_ht, remisePct: l.remise }));
+                  const ht = moneyLineHt({ qty: l.qte, unitPriceHt: l.prix_ht, remisePct: l.remise });
                   return (
                     <tr key={l.id}>
                       <td style={{ fontWeight: 700, color: 'var(--text-3)' }}>{articleNum}</td>
@@ -229,7 +229,7 @@ function DetailBC({ item, onBack, onEdit, onDelete, onDupliquer, onPdf, pdfLoadi
                       <td>{l.unite}</td>
                       <td>{String(l.prix_ht ?? '').trim() !== '' ? String(l.prix_ht).replace('.', ',') : '—'}</td>
                       <td>{l.tva}%</td>
-                      <td style={{ fontWeight: 700 }}>{ht.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+                      <td style={{ fontWeight: 700 }}>{moneyFormatMAD(ht).replace(' MAD', '')}</td>
                     </tr>
                   );
                 })}

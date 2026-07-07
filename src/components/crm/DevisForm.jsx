@@ -16,7 +16,7 @@ import ArticleDesignationSearch from './ArticleDesignationSearch';
 import { TYPE_PROJET_VALUES, TYPE_PROJET_LABEL } from '../../constants/commercial';
 import { useAuth } from '../../hooks/useAuth';
 import Big from 'big.js';
-import { moneyLineHt, moneyLineTtc, moneyComputeDocumentTotals, moneyToNumber2, moneyRound2 } from '../../utils/decimalMoney';
+import { moneyLineHt, moneyLineTtc, moneyComputeDocumentTotals, moneyToNumber, moneyFormatMAD } from '../../utils/decimalMoney';
 
 const CITYMO_LOGO = 'https://i.ibb.co/N6SbC06M/logopng.png';
 const CITYMO_COMPANY = {
@@ -36,9 +36,7 @@ const STATUT_LABEL = {
 const MODALITES = ['30 jours net', '60 jours net', 'Comptant', 'A la commande', '50% avance / 50% livraison', 'Sur devis'];
 
 function fmtMAD(v) {
-  const n = Number(v);
-  if (Number.isNaN(n)) return '0,00 MAD';
-  return n.toLocaleString('fr-MA', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' MAD';
+  return moneyFormatMAD(v);
 }
 
 function fmtDateFr(iso) {
@@ -72,12 +70,12 @@ function Label({ children, required }) {
 }
 
 function ligneSousTotalHt(l) {
-  if (l.type !== 'article') return 0;
-  return moneyToNumber2(moneyLineHt({
+  if (l.type !== 'article') return null;
+  return moneyLineHt({
     qty: l.quantite,
     unitPriceHt: l.prix_ht,
     remisePct: l.remise,
-  }));
+  });
 }
 
 function genRef() {
@@ -558,7 +556,11 @@ function DevisLineDisplay({ ligne, lineNum, idx, articles, onDelete, onDuplicate
       </td>
       <td style={{ padding: '10px 8px', textAlign: 'center', verticalAlign: 'top', fontSize: '0.88rem' }}>{ligne.quantite}</td>
       <td style={{ padding: '10px 8px', verticalAlign: 'top', fontSize: '0.82rem', color: 'var(--text-2)' }}>{ligne.unite}</td>
-      <td style={{ padding: '10px 8px', textAlign: 'right', verticalAlign: 'top', fontSize: '0.88rem' }}>{fmtMAD(ligne.prix_ht)}</td>
+      <td style={{ padding: '10px 8px', textAlign: 'right', verticalAlign: 'top', fontSize: '0.88rem' }}>
+        {String(ligne.prix_ht ?? '').trim() !== ''
+          ? `${String(ligne.prix_ht).replace('.', ',')} MAD`
+          : '—'}
+      </td>
       <td style={{ padding: '10px 8px', textAlign: 'right', verticalAlign: 'top', fontFamily: 'var(--font-head)', fontWeight: 700 }}>{fmtMAD(ht)}</td>
       <td style={{ padding: '10px 8px', verticalAlign: 'top' }}>{actions}</td>
     </tr>
@@ -603,7 +605,7 @@ function DevisLineCard({ ligne, lineNum, idx, articles, onDelete, onDuplicate, o
       <LigneDescriptionText description={description} />
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 6, fontSize: '0.82rem', marginBottom: 10 }}>
         <div><span style={{ color: 'var(--text-3)' }}>Qté </span><strong>{ligne.quantite} {ligne.unite}</strong></div>
-        <div><span style={{ color: 'var(--text-3)' }}>PU </span><strong>{fmtMAD(ligne.prix_ht)}</strong></div>
+        <div><span style={{ color: 'var(--text-3)' }}>PU </span><strong>{String(ligne.prix_ht ?? '').trim() !== '' ? `${String(ligne.prix_ht).replace('.', ',')} MAD` : '—'}</strong></div>
       </div>
       <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, color: 'var(--red)', marginBottom: 10 }}>{fmtMAD(ht)}</div>
       <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
@@ -1026,18 +1028,18 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
       };
     },
   );
-  const totalRemise = Number(moneyRound2(articleLignes.reduce(
+  const totalRemise = moneyToNumber(articleLignes.reduce(
     (s, l) => {
       const brut = moneyLineHt({ qty: l.quantite, unitPriceHt: l.prix_ht, remisePct: 0 });
       const remisePct = new Big(l.remise || 0).div(100);
       return s.plus(brut.times(remisePct));
     },
     new Big(0),
-  )).toString());
-  const totalBrut = Number(moneyRound2(articleLignes.reduce(
+  ));
+  const totalBrut = moneyToNumber(articleLignes.reduce(
     (s, l) => s.plus(moneyLineHt({ qty: l.quantite, unitPriceHt: l.prix_ht, remisePct: 0 })),
     new Big(0),
-  )).toString());
+  ));
 
   let articleLineNum = 0;
 

@@ -5,7 +5,7 @@ import { getSupabase } from '../../lib/supabase';
 import { clientDisplayName } from './clients';
 import { getCrmDevisById } from './crmDevis';
 import { syncFacturePaymentsToCash } from '../finance/financeSync';
-import { moneyLineHt, moneyLineTtc, moneyComputeDocumentTotals, moneyToNumber2 } from '../../utils/decimalMoney';
+import { moneyLineHt, moneyLineTtc, moneyComputeDocumentTotals, moneyToNumber } from '../../utils/decimalMoney';
 
 const TABLE = 'crm_factures';
 const LIGNES = 'crm_facture_lignes';
@@ -24,7 +24,7 @@ const FACTURE_SELECT = `
 
 function ligneTotalHt(l) {
   if (l.type !== 'article') return 0;
-  return moneyToNumber2(moneyLineHt({
+  return moneyToNumber(moneyLineHt({
     qty: l.quantite,
     unitPriceHt: l.prix_ht,
     remisePct: l.remise,

@@ -2,7 +2,7 @@
  * purchaseOrders.js — Bons de commande (Supabase purchase_orders)
  */
 import { getSupabase } from '../../lib/supabase';
-import { moneyLineHt, moneyComputeDocumentTotals, moneyToNumber2 } from '../../utils/decimalMoney';
+import { moneyLineHt, moneyComputeDocumentTotals, moneyToNumber } from '../../utils/decimalMoney';
 
 const TABLE = 'purchase_orders';
 
@@ -14,7 +14,7 @@ const EMPTY_LIGNE = {
 function lineHt(l) {
   const t = l.type || 'article';
   if (t === 'titre' || t === 'sous_titre') return 0;
-  return moneyToNumber2(moneyLineHt({
+  return moneyToNumber(moneyLineHt({
     qty: l.qte,
     unitPriceHt: l.prix_ht,
     remisePct: l.remise,

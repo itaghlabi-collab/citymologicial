@@ -3,7 +3,7 @@
  */
 import { getSupabase } from '../../lib/supabase';
 import { clientDisplayName } from './clients';
-import { moneyLineHt, moneyComputeDocumentTotals, moneyToNumber2 } from '../../utils/decimalMoney';
+import { moneyLineHt, moneyComputeDocumentTotals, moneyToNumber } from '../../utils/decimalMoney';
 
 const TABLE = 'crm_devis';
 const LIGNES = 'crm_devis_lignes';
@@ -17,7 +17,7 @@ const DEVIS_SELECT = `
 
 function ligneTotalHt(l) {
   if (l.type !== 'article') return 0;
-  return moneyToNumber2(moneyLineHt({
+  return moneyToNumber(moneyLineHt({
     qty: l.quantite,
     unitPriceHt: l.prix_ht,
     remisePct: l.remise,

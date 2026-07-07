@@ -11,13 +11,11 @@ import { listCrmDevis, getCrmDevisById } from '../../services/crm/crmDevis';
 import { generateCrmFactureNumero } from '../../services/crm/crmFactures';
 import { generateFacturePdf } from '../../services/crm/facturePdf';
 import Big from 'big.js';
-import { moneyLineHt, moneyLineTtc, moneyComputeDocumentTotals, moneyToNumber2, moneyRound2 } from '../../utils/decimalMoney';
+import { moneyLineHt, moneyLineTtc, moneyComputeDocumentTotals, moneyToNumber, moneyFormatMAD } from '../../utils/decimalMoney';
 
 /* ── Helpers ── */
 function fmtMAD(v) {
-  const n = Number(v);
-  if (isNaN(n)) return '0 MAD';
-  return n.toLocaleString('fr-MA') + ' MAD';
+  return moneyFormatMAD(v);
 }
 function IS(err, extra = {}) {
   return {
@@ -98,8 +96,8 @@ function Spinner() {
 function LigneRow({ ligne, categories, articles, onChange, onDelete, onDuplicate }) {
   const [showDesc, setShowDesc] = useState(false);
   const catArticles = articles.filter(a => !ligne.categorie_id || String(a.categorie_id) === String(ligne.categorie_id));
-  const stHT = moneyToNumber2(moneyLineHt({ qty: ligne.quantite, unitPriceHt: ligne.prix_ht, remisePct: ligne.remise }));
-  const stTTC = moneyToNumber2(moneyLineTtc({ qty: ligne.quantite, unitPriceHt: ligne.prix_ht, tvaPct: ligne.tva, remisePct: ligne.remise }));
+  const stHT = moneyLineHt({ qty: ligne.quantite, unitPriceHt: ligne.prix_ht, remisePct: ligne.remise });
+  const stTTC = moneyLineTtc({ qty: ligne.quantite, unitPriceHt: ligne.prix_ht, tvaPct: ligne.tva, remisePct: ligne.remise });
 
   function set(k, v) { onChange({ ...ligne, [k]: v }); }
 
@@ -181,8 +179,8 @@ function LigneRow({ ligne, categories, articles, onChange, onDelete, onDuplicate
         </select>
       </td>
       <td style={{ padding: '6px 8px', width: 110, textAlign: 'right' }}>
-        <div style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.88rem' }}>{fmtMAD(stHT.toFixed(2))}</div>
-        <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>TTC: {fmtMAD(stTTC.toFixed(2))}</div>
+        <div style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.88rem' }}>{fmtMAD(stHT)}</div>
+        <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>TTC: {fmtMAD(stTTC)}</div>
       </td>
       <td style={{ padding: '6px 5px', width: 52 }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
@@ -328,13 +326,17 @@ export default function FactureForm({ facture, onBack, onSaved, saving = false }
       };
     },
   );
-  const totalRemise = Number(moneyRound2(artLignes.reduce(
+  const totalRemise = moneyToNumber(artLignes.reduce(
     (s, l) => {
       const brut = moneyLineHt({ qty: l.quantite, unitPriceHt: l.prix_ht, remisePct: 0 });
       return s.plus(brut.times(new Big(l.remise || 0).div(100)));
     },
     new Big(0),
-  )).toString());
+  ));
+  const totalBrut = moneyToNumber(artLignes.reduce(
+    (s, l) => s.plus(moneyLineHt({ qty: l.quantite, unitPriceHt: l.prix_ht, remisePct: 0 })),
+    new Big(0),
+  ));
   const acompteMontant = form.acompte_type === 'pct'
     ? totalTTC * (Number(form.acompte_montant) / 100)
     : Number(form.acompte_montant) || 0;
@@ -592,7 +594,7 @@ export default function FactureForm({ facture, onBack, onSaved, saving = false }
                 </div>
                 {acompteMontant > 0 && (
                   <div style={{ gridColumn: '1 / -1', background: '#F3E5F5', borderRadius: 6, padding: '8px 12px', fontSize: '0.82rem', color: '#6A1B9A' }}>
-                    Acompte calcule : <strong>{fmtMAD(acompteMontant.toFixed(2))}</strong>
+                    Acompte calcule : <strong>{fmtMAD(acompteMontant)}</strong>
                     {form.acompte_type === 'pct' && <span style={{ color: 'var(--text-3)', marginLeft: 6 }}>({form.acompte_montant}% du TTC)</span>}
                   </div>
                 )}
@@ -673,10 +675,10 @@ export default function FactureForm({ facture, onBack, onSaved, saving = false }
               <SectionTitle>Recapitulatif</SectionTitle>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {[
-                  ['Total HT brut', fmtMAD(artLignes.reduce((s, l) => s + Number(l.quantite) * Number(l.prix_ht), 0).toFixed(2))],
-                  ['Remises', '- ' + fmtMAD(totalRemise.toFixed(2))],
-                  ['Total HT net', fmtMAD(totalHT.toFixed(2))],
-                  ['TVA', fmtMAD(totalTVA.toFixed(2))],
+                  ['Total HT brut', fmtMAD(totalBrut)],
+                  ['Remises', '- ' + fmtMAD(totalRemise)],
+                  ['Total HT net', fmtMAD(totalHT)],
+                  ['TVA', fmtMAD(totalTVA)],
                 ].map(([label, val], i) => (
                   <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', padding: '5px 0', borderBottom: '1px solid var(--border)' }}>
                     <span style={{ color: 'var(--text-2)' }}>{label}</span>
@@ -685,24 +687,24 @@ export default function FactureForm({ facture, onBack, onSaved, saving = false }
                 ))}
                 <div style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
                   <span style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '0.95rem', textTransform: 'uppercase' }}>Total TTC</span>
-                  <span style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1rem', color: 'var(--red)' }}>{fmtMAD(totalTTC.toFixed(2))}</span>
+                  <span style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1rem', color: 'var(--red)' }}>{fmtMAD(totalTTC)}</span>
                 </div>
                 {acompteMontant > 0 && (
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', padding: '4px 0', color: '#7B1FA2' }}>
                     <span>Acompte</span>
-                    <span style={{ fontWeight: 700 }}>- {fmtMAD(acompteMontant.toFixed(2))}</span>
+                    <span style={{ fontWeight: 700 }}>- {fmtMAD(acompteMontant)}</span>
                   </div>
                 )}
                 {totalPaye > 0 && (
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.82rem', padding: '4px 0', color: '#388E3C' }}>
                     <span>Deja paye</span>
-                    <span style={{ fontWeight: 700 }}>- {fmtMAD(totalPaye.toFixed(2))}</span>
+                    <span style={{ fontWeight: 700 }}>- {fmtMAD(totalPaye)}</span>
                   </div>
                 )}
                 <div style={{ display: 'flex', justifyContent: 'space-between', padding: '10px 0 0', marginTop: 4 }}>
                   <span style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1rem', textTransform: 'uppercase' }}>Reste a payer</span>
                   <span style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.15rem', color: resteAPayer <= 0 ? '#388E3C' : 'var(--red)' }}>
-                    {resteAPayer <= 0 ? 'Solde' : fmtMAD(resteAPayer.toFixed(2))}
+                    {resteAPayer <= 0 ? 'Solde' : fmtMAD(resteAPayer)}
                   </span>
                 </div>
               </div>
