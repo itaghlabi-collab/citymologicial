@@ -3,6 +3,8 @@
  */
 import { getSupabase } from '../../lib/supabase';
 import { clientDisplayName } from './clients';
+import Big from 'big.js';
+import { moneyLineHt, moneyVatFromHt, moneyRound2 } from '../../utils/decimalMoney';
 
 const TABLE = 'crm_devis';
 const LIGNES = 'crm_devis_lignes';
@@ -16,17 +18,32 @@ const DEVIS_SELECT = `
 
 function ligneTotalHt(l) {
   if (l.type !== 'article') return 0;
-  return Number(l.quantite || 0) * Number(l.prix_ht || 0) * (1 - Number(l.remise || 0) / 100);
+  return Number(moneyRound2(moneyLineHt({
+    qty: l.quantite,
+    unitPriceHt: l.prix_ht,
+    remisePct: l.remise,
+  })).toString());
 }
 
 function computeTotals(lignes = []) {
   const articles = (lignes || []).filter((l) => l.type === 'article');
-  const total_ht = articles.reduce((s, l) => s + ligneTotalHt(l), 0);
-  const total_tva = articles.reduce((s, l) => s + ligneTotalHt(l) * (Number(l.tva || 0) / 100), 0);
+  const ht = articles.reduce(
+    (s, l) => s.plus(moneyLineHt({ qty: l.quantite, unitPriceHt: l.prix_ht, remisePct: l.remise })),
+    new Big(0),
+  );
+  const tva = articles.reduce(
+    (s, l) => {
+      const lineHt = moneyLineHt({ qty: l.quantite, unitPriceHt: l.prix_ht, remisePct: l.remise });
+      return s.plus(moneyVatFromHt(lineHt, l.tva || 0));
+    },
+    new Big(0),
+  );
+  const ht2 = moneyRound2(ht);
+  const tva2 = moneyRound2(tva);
   return {
-    total_ht: Math.round(total_ht * 100) / 100,
-    total_tva: Math.round(total_tva * 100) / 100,
-    total_ttc: Math.round((total_ht + total_tva) * 100) / 100,
+    total_ht: Number(ht2.toString()),
+    total_tva: Number(tva2.toString()),
+    total_ttc: Number(ht2.plus(tva2).toString()),
   };
 }
 

@@ -9,6 +9,7 @@ import {
 import { usePurchaseOrders } from '../../hooks/usePurchaseOrders';
 import { computeLineTotals, sanitizeBCLignes } from '../../services/achats/purchaseOrders';
 import { generatePurchaseOrderPdf } from '../../services/achats/purchaseOrderPdf';
+import { moneyLineHt, moneyToNumber2 } from '../../utils/decimalMoney';
 import {
   INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE,
   STATUTS_BC, BADGE_BC, DEVISES, TVA_OPTIONS,
@@ -216,8 +217,7 @@ function DetailBC({ item, onBack, onEdit, onDelete, onDupliquer, onPdf, pdfLoadi
                     );
                   }
                   articleNum += 1;
-                  const base = (parseFloat(l.qte) || 0) * (parseFloat(l.prix_ht) || 0);
-                  const ht = base * (1 - (parseFloat(l.remise) || 0) / 100);
+                  const ht = moneyToNumber2(moneyLineHt({ qty: l.qte, unitPriceHt: l.prix_ht, remisePct: l.remise }));
                   return (
                     <tr key={l.id}>
                       <td style={{ fontWeight: 700, color: 'var(--text-3)' }}>{articleNum}</td>
@@ -229,7 +229,7 @@ function DetailBC({ item, onBack, onEdit, onDelete, onDupliquer, onPdf, pdfLoadi
                       <td>{l.unite}</td>
                       <td>{Number(l.prix_ht || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2 })}</td>
                       <td>{l.tva}%</td>
-                      <td style={{ fontWeight: 700 }}>{ht.toLocaleString('fr-FR', { minimumFractionDigits: 2 })}</td>
+                      <td style={{ fontWeight: 700 }}>{ht.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                     </tr>
                   );
                 })}

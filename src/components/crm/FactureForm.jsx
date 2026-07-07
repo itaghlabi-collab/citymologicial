@@ -10,6 +10,8 @@ import { listCategories } from '../../services/crm/categories';
 import { listCrmDevis, getCrmDevisById } from '../../services/crm/crmDevis';
 import { generateCrmFactureNumero } from '../../services/crm/crmFactures';
 import { generateFacturePdf } from '../../services/crm/facturePdf';
+import Big from 'big.js';
+import { moneyLineHt, moneyVatFromHt, moneyRound2 } from '../../utils/decimalMoney';
 
 /* ── Helpers ── */
 function fmtMAD(v) {
@@ -96,8 +98,8 @@ function Spinner() {
 function LigneRow({ ligne, categories, articles, onChange, onDelete, onDuplicate }) {
   const [showDesc, setShowDesc] = useState(false);
   const catArticles = articles.filter(a => !ligne.categorie_id || String(a.categorie_id) === String(ligne.categorie_id));
-  const stHT  = Number(ligne.quantite) * Number(ligne.prix_ht) * (1 - Number(ligne.remise) / 100);
-  const stTTC = stHT * (1 + Number(ligne.tva) / 100);
+  const stHT = Number(moneyRound2(moneyLineHt({ qty: ligne.quantite, unitPriceHt: ligne.prix_ht, remisePct: ligne.remise })).toString());
+  const stTTC = Number(moneyRound2(new Big(stHT).plus(moneyVatFromHt(new Big(stHT), ligne.tva))).toString());
 
   function set(k, v) { onChange({ ...ligne, [k]: v }); }
 
@@ -314,13 +316,25 @@ export default function FactureForm({ facture, onBack, onSaved, saving = false }
 
   /* Totals */
   const artLignes   = form.lignes.filter(l => l.type === 'article');
-  const totalHT     = artLignes.reduce((s, l) => s + Number(l.quantite) * Number(l.prix_ht) * (1 - Number(l.remise) / 100), 0);
-  const totalTVA    = artLignes.reduce((s, l) => {
-    const ht = Number(l.quantite) * Number(l.prix_ht) * (1 - Number(l.remise) / 100);
-    return s + ht * Number(l.tva) / 100;
-  }, 0);
-  const totalTTC    = totalHT + totalTVA;
-  const totalRemise = artLignes.reduce((s, l) => s + Number(l.quantite) * Number(l.prix_ht) * (Number(l.remise) / 100), 0);
+  const totalHT = Number(moneyRound2(artLignes.reduce(
+    (s, l) => s.plus(moneyLineHt({ qty: l.quantite, unitPriceHt: l.prix_ht, remisePct: l.remise })),
+    new Big(0),
+  )).toString());
+  const totalTVA = Number(moneyRound2(artLignes.reduce(
+    (s, l) => {
+      const ht = moneyLineHt({ qty: l.quantite, unitPriceHt: l.prix_ht, remisePct: l.remise });
+      return s.plus(moneyVatFromHt(ht, l.tva));
+    },
+    new Big(0),
+  )).toString());
+  const totalTTC = Number(moneyRound2(new Big(totalHT).plus(new Big(totalTVA))).toString());
+  const totalRemise = Number(moneyRound2(artLignes.reduce(
+    (s, l) => {
+      const brut = moneyLineHt({ qty: l.quantite, unitPriceHt: l.prix_ht, remisePct: 0 });
+      return s.plus(brut.times(new Big(l.remise || 0).div(100)));
+    },
+    new Big(0),
+  )).toString());
   const acompteMontant = form.acompte_type === 'pct'
     ? totalTTC * (Number(form.acompte_montant) / 100)
     : Number(form.acompte_montant) || 0;

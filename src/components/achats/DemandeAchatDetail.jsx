@@ -7,6 +7,7 @@ import {
   Plus, Loader2, Star, Lock, Package, CreditCard, Eye, Edit2, Trash2, Download,
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
+import Big from 'big.js';
 import { getPurchaseRequestBundle } from '../../services/achats/purchaseWorkflow';
 import {
   submitPurchaseRequest,
@@ -201,31 +202,32 @@ function QuoteForm({ suppliers, initial, onSave, onCancel, saving, requestId, re
   const fournActifs = suppliers.filter((f) => f.statut === 'Actif' || f.status === 'active');
 
   function applyTtcToLines(nextLines, targetTtc, tvaRate) {
-    const factor = 1 + (parseFloat(tvaRate) || 0) / 100;
-    if (!factor || !targetTtc) return nextLines;
-    const targetHt = targetTtc / factor;
+    const factor = new Big(1).plus(new Big(tvaRate || 0).div(100));
+    if (factor.lte(0) || !targetTtc) return nextLines;
+    const targetHt = new Big(targetTtc || 0).div(factor);
     const normalized = normalizeQuoteLines(nextLines);
     const currentHt = sumQuoteLinesHt(normalized);
     if (!normalized.length) return nextLines;
 
     if (normalized.length === 1 || currentHt <= 0) {
       const line = normalized[0];
-      const qty = Number(line.quantite) || 1;
-      const remise = Number(line.remise_pct) || 0;
-      const divisor = qty * (1 - remise / 100) || 1;
-      const pu = targetHt / divisor;
+      const qty = new Big(Number(line.quantite) || 1);
+      const remise = new Big(Number(line.remise_pct) || 0);
+      const divisor = qty.times(new Big(1).minus(remise.div(100)));
+      const safeDiv = divisor.eq(0) ? new Big(1) : divisor;
+      const pu = targetHt.div(safeDiv);
       return normalized.map((l, i) => {
         if (i !== 0) return l;
-        const updated = { ...l, prix_unitaire_ht: pu > 0 ? String(Number(pu.toFixed(4))) : '' };
+        const updated = { ...l, prix_unitaire_ht: pu.gt(0) ? String(pu.round(4, Big.roundHalfUp)) : '' };
         updated.montant_ht = computeQuoteLineTotal(updated);
         return updated;
       });
     }
 
-    const ratio = targetHt / currentHt;
+    const ratio = targetHt.div(new Big(currentHt || 1));
     return normalized.map((l) => {
-      const pu = (Number(l.prix_unitaire_ht) || 0) * ratio;
-      const updated = { ...l, prix_unitaire_ht: pu > 0 ? String(Number(pu.toFixed(4))) : '' };
+      const pu = new Big(Number(l.prix_unitaire_ht) || 0).times(ratio);
+      const updated = { ...l, prix_unitaire_ht: pu.gt(0) ? String(pu.round(4, Big.roundHalfUp)) : '' };
       updated.montant_ht = computeQuoteLineTotal(updated);
       return updated;
     });
@@ -234,12 +236,13 @@ function QuoteForm({ suppliers, initial, onSave, onCancel, saving, requestId, re
   function syncTotalsFromLines(nextLines, tvaRate = form.tva_rate) {
     const normalized = normalizeQuoteLines(nextLines);
     const ht = sumQuoteLinesHt(normalized);
-    const tva = parseFloat(tvaRate) || 0;
+    const tva = new Big(tvaRate || 0);
+    const ttc = ht > 0 ? new Big(ht).times(new Big(1).plus(tva.div(100))) : new Big(0);
     setTotalEditSource('ht');
     setForm((p) => ({
       ...p,
       montant_ht: ht > 0 ? ht.toFixed(2) : '',
-      montant_ttc: ht > 0 ? (ht * (1 + tva / 100)).toFixed(2) : '',
+      montant_ttc: ht > 0 ? String(ttc.round(2, Big.roundHalfUp)) : '',
     }));
   }
 
@@ -294,8 +297,8 @@ function QuoteForm({ suppliers, initial, onSave, onCancel, saving, requestId, re
 
   function handleTtcChange(val) {
     setTotalEditSource('ttc');
-    const tva = parseFloat(form.tva_rate) || 0;
-    const ttc = parseFloat(val);
+    const tva = Number(form.tva_rate) || 0;
+    const ttc = Number(String(val).replace(',', '.'));
     if (val === '' || Number.isNaN(ttc) || ttc < 0) {
       setForm((p) => ({ ...p, montant_ttc: val }));
       return;

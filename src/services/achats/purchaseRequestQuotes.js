@@ -3,6 +3,8 @@
  */
 import { getSupabase } from '../../lib/supabase';
 import { QUOTE_STATUSES } from '../../constants/purchaseWorkflow';
+import Big from 'big.js';
+import { moneyLineHt, moneyRound2, moneyVatFromHt } from '../../utils/decimalMoney';
 
 const TABLE = 'purchase_request_quotes';
 
@@ -22,12 +24,12 @@ export const EMPTY_QUOTE_LINE = () => ({
 });
 
 export function computeQuoteLineTotal(line) {
-  const qty = Number(line?.quantite) || 0;
-  const pu = Number(line?.prix_unitaire_ht) || 0;
-  const remise = Number(line?.remise_pct) || 0;
-  if (!qty || !pu) return 0;
-  const brut = qty * pu;
-  return Math.round(brut * (1 - remise / 100) * 100) / 100;
+  const ht = moneyLineHt({
+    qty: line?.quantite,
+    unitPriceHt: line?.prix_unitaire_ht,
+    remisePct: line?.remise_pct,
+  });
+  return Number(moneyRound2(ht).toString());
 }
 
 export function normalizeQuoteLines(raw) {
@@ -51,7 +53,9 @@ export function normalizeQuoteLines(raw) {
 }
 
 export function sumQuoteLinesHt(lines) {
-  return normalizeQuoteLines(lines).reduce((s, l) => s + (Number(l.montant_ht) || 0), 0);
+  const normalized = normalizeQuoteLines(lines);
+  const sum = normalized.reduce((s, l) => s.plus(new Big(l.montant_ht || 0)), new Big(0));
+  return Number(moneyRound2(sum).toString());
 }
 
 export function formatQuoteReferencesSummary(lines) {
@@ -70,7 +74,7 @@ export function normalizeQuote(row) {
   const htFromLines = lines.length ? sumQuoteLinesHt(lines) : 0;
   const ht = htFromLines > 0 ? htFromLines : (Number(row.montant_ht) || 0);
   const tva = Number(row.tva_rate) ?? 20;
-  const ttc = Number(row.montant_ttc) || ht * (1 + tva / 100);
+  const ttc = Number(row.montant_ttc) || Number(moneyRound2(new Big(ht).plus(moneyVatFromHt(new Big(ht), tva))).toString());
   return {
     id: row.id,
     purchase_request_id: row.purchase_request_id,
@@ -104,7 +108,7 @@ export function toQuoteRow(form, purchaseRequestId) {
   const tva = Number(form.tva_rate ?? form.tva) || 0;
   const ttc = form.montant_ttc != null && form.montant_ttc !== ''
     ? Number(form.montant_ttc)
-    : ht * (1 + tva / 100);
+    : Number(moneyRound2(new Big(ht).plus(moneyVatFromHt(new Big(ht), tva))).toString());
   return {
     purchase_request_id: purchaseRequestId,
     supplier_id: form.supplier_id || null,

@@ -10,6 +10,7 @@ import ArticleDesignationSearch from '../crm/ArticleDesignationSearch';
 import {
   INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE, TVA_OPTIONS, genId, formatMAD,
 } from './shared.jsx';
+import { moneyLineHt, moneyToNumber2 } from '../../utils/decimalMoney';
 
 const UNITES = ['unite', 'm2', 'ml', 'm3', 'm', 'forfait', 'heure', 'jour', 'pack', 'U'];
 
@@ -41,9 +42,11 @@ function lineType(l) {
 function lineTotalHt(l) {
   const t = lineType(l);
   if (t === 'titre' || t === 'sous_titre') return 0;
-  const base = (parseFloat(l.qte) || 0) * (parseFloat(l.prix_ht) || 0);
-  const remise = parseFloat(l.remise) || 0;
-  return base * (1 - remise / 100);
+  return moneyToNumber2(moneyLineHt({
+    qty: l.qte,
+    unitPriceHt: l.prix_ht,
+    remisePct: l.remise,
+  }));
 }
 
 function rowDragStyle(isDragging, isOver) {
