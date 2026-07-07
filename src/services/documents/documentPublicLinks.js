@@ -2,6 +2,7 @@
  * documentPublicLinks.js — Liens publics documents (document_public_links)
  */
 import { getSupabase } from '../../lib/supabase';
+import { resolveAppOrigin } from '../../config/env';
 import { normalizeDocumentDepartment } from '../../constants/documentDepartments';
 
 const TABLE = 'document_public_links';
@@ -40,10 +41,7 @@ function normalizeLink(row) {
 }
 
 export function buildPublicLinkUrl(token) {
-  if (typeof window !== 'undefined' && window.location?.origin) {
-    return `${window.location.origin}/share/${token}`;
-  }
-  return `https://citymologicial.vercel.app/share/${token}`;
+  return `${resolveAppOrigin()}/share/${token}`;
 }
 
 async function requireUser() {

@@ -31,6 +31,19 @@ export const IS_PROD = ENV.MODE === 'production';
 export const HAS_BACKEND = ENV.API_URL !== 'http://localhost:3000/api' || IS_PROD;
 export const HAS_SUPABASE = Boolean(ENV.SUPABASE_URL && ENV.SUPABASE_ANON_KEY);
 
+/** Domaine production (Vercel custom domain). */
+export const PRODUCTION_APP_ORIGIN = 'https://www.citymoapp.com';
+
+/** Origine publique de l'app (liens partagés, redirects). */
+export function resolveAppOrigin() {
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    return window.location.origin;
+  }
+  const configured = trimEnv(import.meta.env.VITE_APP_URL);
+  if (configured) return configured.replace(/\/+$/, '');
+  return PRODUCTION_APP_ORIGIN;
+}
+
 /** URL API joignable depuis mobile (proxy Vite /api en dev) et Vercel (same-origin /api). */
 export function resolveApiBaseUrl() {
   const configured = trimEnv(import.meta.env.VITE_API_URL);
