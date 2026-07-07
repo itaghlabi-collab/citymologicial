@@ -1,5 +1,5 @@
 /**
- * useNotifications.js — Hook centre de notifications (poll 30s + realtime ciblé)
+ * useNotifications.js — Hook centre de notifications (poll 10s + realtime ciblé)
  */
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { getSupabase, isSupabaseConfigured } from '../lib/supabase';
@@ -11,8 +11,9 @@ import {
   SOUND_NOTIFICATION_TYPES,
 } from '../services/notifications/notifications';
 import { playNotificationSound } from '../utils/notificationSound';
+import { logNotificationDebug } from '../services/notifications/notificationDebug';
 
-const POLL_MS = 30_000;
+const POLL_MS = 10_000;
 
 function shouldPlaySoundFor(notification) {
   if (!notification) return false;
@@ -54,6 +55,7 @@ export function useNotifications(user) {
       setLoading(false);
       return;
     }
+    logNotificationDebug('session', { currentUserId: user.id, email: user.email });
     try {
       const [list, unread] = await Promise.all([
         listNotificationsForUser(user),

@@ -2,6 +2,7 @@
  * notificationRecipients.js — Résolution destinataires DG / Super Admin / RH
  */
 import { getSupabase } from '../../lib/supabase';
+import { logNotificationDebug } from './notificationDebug';
 import { DG_EMAIL } from '../auth/executiveCalendarAccess';
 import { SUPER_ADMIN_EMAIL } from '../rh/isSuperAdmin';
 
@@ -112,7 +113,9 @@ function employeeDisplayNames(emp) {
 
 export async function fetchProfiles() {
   if (profilesCache && Date.now() - profilesCacheAt < CACHE_MS) return profilesCache;
-  const { data, error } = await getSupabase().from('profiles').select('id, email, role, nom');
+  const { data, error } = await getSupabase()
+    .from('profiles')
+    .select('id, email, role, nom, employee_id, role_id, department_id, statut');
   if (error) {
     console.warn('[CITYMO] profiles for notifications', error);
     return profilesCache || [];
@@ -161,37 +164,111 @@ export function invalidateProfilesCache() {
   employeesCacheAt = 0;
 }
 
-/** Trouve un profil utilisateur par nom affiché (tâche, RDV, assignation). */
-export async function findProfileByAssigneeName(assigneeName) {
-  if (!assigneeName?.trim()) return null;
+async function resolveAssigneeProfileLocal(hints = {}) {
+  const {
+    userId,
+    employeeId,
+    email,
+    assigneeName,
+  } = hints;
 
-  const q = String(assigneeName).trim();
-  if (q.includes('@')) {
-    return findProfileByEmail(q);
+  if (userId) {
+    const byId = await findProfileById(userId);
+    if (byId) return { profile: byId, matchMethod: 'user_id' };
   }
 
   const profiles = await fetchProfiles();
 
-  const byNom = profiles.find((p) => personNamesMatch(p.nom, q));
-  if (byNom) return byNom;
+  if (employeeId) {
+    const byEmpLink = profiles.find((p) => p.employee_id === employeeId);
+    if (byEmpLink) return { profile: byEmpLink, matchMethod: 'employee_id' };
+  }
+
+  if (email) {
+    const byEmail = profiles.find(
+      (p) => (p.email || '').toLowerCase() === String(email).toLowerCase(),
+    );
+    if (byEmail) return { profile: byEmail, matchMethod: 'email' };
+  }
+
+  if (!assigneeName?.trim()) return { profile: null, matchMethod: null };
+
+  const q = String(assigneeName).trim();
+  if (q.includes('@')) {
+    const byMail = profiles.find((p) => (p.email || '').toLowerCase() === q.toLowerCase());
+    if (byMail) return { profile: byMail, matchMethod: 'assignee_email' };
+  }
 
   const employees = await fetchEmployeesForMatching();
   const emp = employees.find((e) =>
     employeeDisplayNames(e).some((label) => personNamesMatch(label, q)),
   );
 
-  if (emp?.email) {
-    const byEmail = profiles.find(
-      (p) => (p.email || '').toLowerCase() === String(emp.email).toLowerCase(),
-    );
-    if (byEmail) return byEmail;
+  if (emp) {
+    const byEmpLink = profiles.find((p) => p.employee_id === emp.id);
+    if (byEmpLink) return { profile: byEmpLink, matchMethod: 'employee_name_employee_id' };
+
+    if (emp.email) {
+      const byEmpEmail = profiles.find(
+        (p) => (p.email || '').toLowerCase() === String(emp.email).toLowerCase(),
+      );
+      if (byEmpEmail) return { profile: byEmpEmail, matchMethod: 'employee_name_email' };
+    }
   }
 
-  const byEmailLocal = profiles.find((p) => {
-    const local = (p.email || '').split('@')[0].replace(/[._-]/g, ' ');
-    return personNamesMatch(local, q);
-  });
-  if (byEmailLocal) return byEmailLocal;
+  const byNom = profiles.find((p) => personNamesMatch(p.nom, q));
+  if (byNom) return { profile: byNom, matchMethod: 'profile_nom' };
 
-  return null;
+  return { profile: null, matchMethod: null };
+}
+
+/**
+ * Résout un assigné → profil utilisateur.
+ * Priorité : user_id → employee_id → email → employé RH (nom) → nom profil.
+ * Utilise RPC SECURITY DEFINER (contourne RLS profiles).
+ */
+export async function resolveAssigneeProfile(hints = {}) {
+  const assigneeName = hints.assigneeName || hints.assignee || null;
+
+  try {
+    const { data: userId, error } = await getSupabase().rpc('resolve_notification_recipient', {
+      p_user_id: hints.userId || null,
+      p_employee_id: hints.employeeId || null,
+      p_email: hints.email || null,
+      p_assignee_name: assigneeName,
+    });
+
+    if (!error && userId) {
+      const profile = await findProfileById(userId) || { id: userId };
+      logNotificationDebug('resolveAssignee.rpc', {
+        hints,
+        recipient_user_id: userId,
+        matchMethod: 'rpc',
+      });
+      return { profile, matchMethod: 'rpc' };
+    }
+
+    if (error && error.code !== 'PGRST202') {
+      console.warn('[CITYMO] resolve_notification_recipient RPC', error);
+    }
+  } catch (err) {
+    console.warn('[CITYMO] resolve_notification_recipient', err);
+  }
+
+  const local = await resolveAssigneeProfileLocal({ ...hints, assigneeName });
+  logNotificationDebug('resolveAssignee.local', {
+    hints,
+    recipient_user_id: local.profile?.id || null,
+    matchMethod: local.matchMethod,
+  });
+  return local;
+}
+
+/** Trouve un profil utilisateur par nom affiché (tâche, RDV, assignation). */
+export async function findProfileByAssigneeName(assigneeName, extraHints = {}) {
+  const { profile } = await resolveAssigneeProfile({
+    assigneeName,
+    ...extraHints,
+  });
+  return profile;
 }

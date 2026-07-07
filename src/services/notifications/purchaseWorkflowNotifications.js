@@ -13,6 +13,8 @@ import {
 import { NOTIFICATION_SUBMODULES } from './notificationTargeting';
 import { getSupabase } from '../../lib/supabase';
 import { PURCHASE_ASSIGNEE } from '../../constants/purchaseWorkflow';
+import { resolveAssigneeProfile } from './notificationRecipients';
+import { logNotificationDebug } from './notificationDebug';
 
 function purchaseRequestDetailUrl(requestId) {
   return `/?module=achats&tab=demandes-achat&requestId=${requestId}`;
@@ -23,30 +25,42 @@ function moduleUrl(requestId) {
   return '/?module=achats&tab=demandes-achat';
 }
 
-async function findChargeeAchatsUserIds() {
+async function findChargeeAchatsUserIds(request) {
+  if (request?.assigned_employee_id) {
+    const { profile } = await resolveAssigneeProfile({ employeeId: request.assigned_employee_id });
+    if (profile?.id) {
+      logNotificationDebug('purchase.assignee', {
+        employee_id: request.assigned_employee_id,
+        recipient_user_id: profile.id,
+      });
+      return [profile.id];
+    }
+  }
+
   const { data: employees } = await getSupabase()
     .from('employees')
     .select('id, firstname, lastname, email')
     .or('lastname.ilike.%WOTFI%,firstname.ilike.%LAILA%');
-  const emails = (employees || [])
-    .filter((e) => {
-      const n = `${e.firstname || ''} ${e.lastname || ''}`.toUpperCase();
-      return n.includes('LAILA') && n.includes('WOTFI');
-    })
-    .map((e) => (e.email || '').toLowerCase())
-    .filter(Boolean);
 
-  if (!emails.length) return [];
+  const matches = (employees || []).filter((e) => {
+    const n = `${e.firstname || ''} ${e.lastname || ''}`.toUpperCase();
+    return n.includes('LAILA') && n.includes('WOTFI');
+  });
 
-  const { data: profiles } = await getSupabase()
-    .from('profiles')
-    .select('id, email')
-    .in('email', emails);
-  return (profiles || []).map((p) => p.id);
+  const ids = [];
+  for (const emp of matches) {
+    const { profile } = await resolveAssigneeProfile({
+      employeeId: emp.id,
+      email: emp.email,
+      assigneeName: `${emp.firstname || ''} ${emp.lastname || ''}`.trim(),
+    });
+    if (profile?.id) ids.push(profile.id);
+  }
+  return [...new Set(ids)];
 }
 
-async function notifyChargeeAchats(payload) {
-  const ids = await findChargeeAchatsUserIds();
+async function notifyChargeeAchats(payload, request = null) {
+  const ids = await findChargeeAchatsUserIds(request);
   if (ids.length) {
     return Promise.all(ids.map((userId) => notifyUser(userId, {
       ...payload,
@@ -81,7 +95,7 @@ export async function notifyPurchaseRequestSubmitted(request) {
     entityType: 'purchase_request_submitted',
     entityId: request.id,
     actionUrl: moduleUrl(request.id),
-  });
+  }, request);
 }
 
 export async function notifyPurchaseQuoteAdded(request) {

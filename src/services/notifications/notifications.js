@@ -9,6 +9,7 @@ import {
 } from './notificationRecipients';
 import { resolveNotificationRecipients } from './notificationTargeting';
 import { queueWhatsappNotification } from './whatsappNotifications';
+import { logNotificationDebug } from './notificationDebug';
 
 const TABLE = 'notifications';
 
@@ -61,6 +62,22 @@ export function normalizeNotification(row) {
     createdBy: row.created_by,
     createdAt: row.created_at,
   };
+}
+
+async function buildNotificationListFilter(user) {
+  const parts = [`recipient_user_id.eq.${user.id}`, 'is_global.eq.true'];
+
+  const { data: profile } = await getSupabase()
+    .from('profiles')
+    .select('role_id, department_id, role')
+    .eq('id', user.id)
+    .maybeSingle();
+
+  if (profile?.role_id) parts.push(`recipient_role_id.eq.${profile.role_id}`);
+  if (profile?.department_id) parts.push(`recipient_department_id.eq.${profile.department_id}`);
+  if (profile?.role) parts.push(`recipient_role.eq.${profile.role}`);
+
+  return parts.join(',');
 }
 
 async function getCurrentUserId() {
@@ -129,12 +146,24 @@ export async function createNotification(payload) {
     .single();
 
   if (error) {
-    if (error.code === '23505') return null;
-    console.warn('[CITYMO] createNotification', error);
+    if (error.code === '23505') {
+      logNotificationDebug('create.duplicate', { recipientUserId, title, type: payload.type });
+      return null;
+    }
+    console.warn('[CITYMO] createNotification', error, { recipientUserId, title });
+    logNotificationDebug('create.error', { error, recipientUserId, title });
     return null;
   }
 
   const normalized = normalizeNotification(data);
+  logNotificationDebug('create.ok', {
+    id: normalized.id,
+    recipient_user_id: normalized.recipientUserId,
+    title: normalized.title,
+    type: normalized.type,
+    entity_id: normalized.entityId,
+    is_read: normalized.isRead,
+  });
 
   if (recipientUserId) {
     queueWhatsappNotification({
@@ -169,7 +198,11 @@ export async function notifyRole(role, payload) {
  */
 export async function notifyTargeted(targeting, payload) {
   const userIds = await resolveNotificationRecipients(targeting);
-  if (!userIds.length) return [];
+  logNotificationDebug('notifyTargeted', { targeting, resolvedUserIds: userIds, title: payload.title });
+  if (!userIds.length) {
+    console.warn('[CITYMO] notifyTargeted: aucun destinataire', targeting, payload.title);
+    return [];
+  }
 
   const meta = {
     roleId: targeting.roleId || null,
@@ -276,25 +309,39 @@ export async function notifyInventaireAndAdmins(payload) {
 
 export async function listNotificationsForUser(user, { limit = 80 } = {}) {
   if (!user?.id) return [];
+  const filter = await buildNotificationListFilter(user);
   const { data, error } = await getSupabase()
     .from(TABLE)
     .select('*')
-    .or(`recipient_user_id.eq.${user.id},is_global.eq.true`)
+    .or(filter)
     .order('created_at', { ascending: false })
     .limit(limit);
   if (error) {
     console.warn('[CITYMO] listNotifications', error);
     return [];
   }
-  return (data || []).map(normalizeNotification);
+  const list = (data || []).map(normalizeNotification);
+  logNotificationDebug('listForUser', {
+    currentUserId: user.id,
+    count: list.length,
+    unread: list.filter((n) => !n.isRead).length,
+    sample: list.slice(0, 3).map((n) => ({
+      id: n.id,
+      recipient_user_id: n.recipientUserId,
+      title: n.title,
+      is_read: n.isRead,
+    })),
+  });
+  return list;
 }
 
 export async function countUnreadNotifications(user) {
   if (!user?.id) return 0;
+  const filter = await buildNotificationListFilter(user);
   const { count, error } = await getSupabase()
     .from(TABLE)
     .select('*', { count: 'exact', head: true })
-    .or(`recipient_user_id.eq.${user.id},is_global.eq.true`)
+    .or(filter)
     .eq('is_read', false);
   if (error) {
     console.warn('[CITYMO] countUnreadNotifications', error);

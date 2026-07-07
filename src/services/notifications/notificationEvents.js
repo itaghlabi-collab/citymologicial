@@ -14,9 +14,29 @@ import {
   formatMad,
   moduleActionUrl,
 } from './notifications';
-import { findProfileById, findProfileByAssigneeName, personNamesMatch } from './notificationRecipients';
+import { resolveAssigneeProfile, findProfileById, personNamesMatch } from './notificationRecipients';
 import { NOTIFICATION_SUBMODULES } from './notificationTargeting';
 import { FINANCE_SOURCE_TYPES } from '../finance/financeSync';
+import { logNotificationDebug } from './notificationDebug';
+
+async function notifyAssignee(assigneeName, payload, extraHints = {}) {
+  const { profile, matchMethod } = await resolveAssigneeProfile({
+    assigneeName,
+    ...extraHints,
+  });
+  if (!profile?.id) {
+    console.warn('[CITYMO] notifyAssignee: destinataire introuvable →', assigneeName, extraHints);
+    logNotificationDebug('notifyAssignee.miss', { assigneeName, extraHints, payload: payload.title });
+    return null;
+  }
+  logNotificationDebug('notifyAssignee.hit', {
+    assigneeName,
+    recipient_user_id: profile.id,
+    matchMethod,
+    title: payload.title,
+  });
+  return notifyUser(profile.id, payload);
+}
 
 const PAYMENT_HIGH_THRESHOLD = 5000;
 
@@ -67,9 +87,7 @@ export async function notifyPaymentRealized({ sourceType, sourceId, entity, mont
 /** Tâche DG créée : notification uniquement pour l'assigné. */
 export async function notifyDgTaskCreated(task) {
   if (!task?.id || !task.is_dg_task) return;
-  const assignee = await findProfileByAssigneeName(task.assigne);
-  if (!assignee?.id) return;
-  return notifyUser(assignee.id, {
+  return notifyAssignee(task.assigne, {
     title: 'Tâche DG',
     message: `La Direction vous a assigné la tâche « ${task.titre} »${task.dateLimite ? ` — échéance ${task.dateLimite}` : ''}.`,
     type: NOTIFICATION_TYPES.TASK,
@@ -89,17 +107,11 @@ export async function notifyTaskCreated(task) {
   }
   if (!task.assigne?.trim()) return null;
 
-  const assignee = await findProfileByAssigneeName(task.assigne);
-  if (!assignee?.id) {
-    console.warn('[CITYMO] notifyTaskCreated: assigné introuvable →', task.assigne);
-    return null;
-  }
-
   const priority = task.priorite === 'urgente' || task.dg_push
     ? NOTIFICATION_PRIORITIES.URGENT
     : NOTIFICATION_PRIORITIES.HIGH;
 
-  return notifyUser(assignee.id, {
+  return notifyAssignee(task.assigne, {
     title: 'Nouvelle tâche assignée',
     message: `La tâche « ${task.titre} » vous a été assignée${task.dateLimite ? ` — échéance ${task.dateLimite}` : ''}.`,
     type: NOTIFICATION_TYPES.TASK,
@@ -116,13 +128,7 @@ export async function notifyTaskAssigned(task, { previousAssignee } = {}) {
   if (!task?.id || !task.assigne?.trim()) return null;
   if (previousAssignee && personNamesMatch(previousAssignee, task.assigne)) return null;
 
-  const assignee = await findProfileByAssigneeName(task.assigne);
-  if (!assignee?.id) {
-    console.warn('[CITYMO] notifyTaskAssigned: assigné introuvable →', task.assigne);
-    return null;
-  }
-
-  return notifyUser(assignee.id, {
+  return notifyAssignee(task.assigne, {
     title: 'Tâche assignée',
     message: `La tâche « ${task.titre} » vous a été assignée${task.dateLimite ? ` — échéance ${task.dateLimite}` : ''}.`,
     type: NOTIFICATION_TYPES.TASK,
@@ -137,13 +143,11 @@ export async function notifyTaskAssigned(task, { previousAssignee } = {}) {
 /** Relance Directeur → notification à l'assigné uniquement. */
 export async function notifyTaskDgRelance(task, customMessage) {
   if (!task?.id) return;
-  const assignee = await findProfileByAssigneeName(task.assigne);
-  if (!assignee?.id) return;
   let message = `Le Directeur vous demande une mise à jour concernant la tâche :\n${task.titre}`;
   if (customMessage?.trim()) {
     message += `\n\n${customMessage.trim()}`;
   }
-  return notifyUser(assignee.id, {
+  return notifyAssignee(task.assigne, {
     title: 'Relance Directeur',
     message,
     type: NOTIFICATION_TYPES.TASK,
@@ -185,7 +189,7 @@ export async function notifyTaskCompleted(task) {
   };
   const recipients = new Set();
   if (task.created_by) recipients.add(task.created_by);
-  const assignee = await findProfileByAssigneeName(task.assigne);
+  const { profile: assignee } = await resolveAssigneeProfile({ assigneeName: task.assigne });
   if (assignee?.id) recipients.add(assignee.id);
   if (!recipients.size) {
     return notifyTargeted({ submoduleCode: NOTIFICATION_SUBMODULES.TACHES }, payload);
@@ -323,17 +327,11 @@ export async function notifyAppointmentAssigned(appt, { isUpdate = false } = {})
   const responsable = appt.responsable || appt.employe;
   if (!responsable?.trim()) return null;
 
-  const assignee = await findProfileByAssigneeName(responsable);
-  if (!assignee?.id) {
-    console.warn('[CITYMO] notifyAppointmentAssigned: responsable introuvable →', responsable);
-    return null;
-  }
-
   const dateLabel = appt.date || appt.date_rdv || '—';
   const heure = appt.heure || appt.heure_debut || '';
   const lieu = appt.lieu ? ` — ${appt.lieu}` : '';
 
-  return notifyUser(assignee.id, {
+  return notifyAssignee(responsable, {
     title: isUpdate ? 'Rendez-vous modifié' : 'Nouveau rendez-vous',
     message: isUpdate
       ? `Le RDV « ${appt.titre} » a été modifié : ${dateLabel}${heure ? ` à ${heure}` : ''}${lieu}.`

@@ -3,6 +3,7 @@
  */
 import { getSupabase } from '../../lib/supabase';
 import { invalidateProfilesCache } from './notificationRecipients';
+import { logNotificationDebug } from './notificationDebug';
 
 export const NOTIFICATION_DEPARTMENTS = {
   ACHATS: 3,
@@ -144,6 +145,34 @@ export async function resolveNotificationRecipients(targeting = {}) {
   } = targeting;
 
   const exclude = new Set(excludeUserIds.filter(Boolean));
+
+  try {
+    let resolvedRoleId = roleId;
+    if (!resolvedRoleId && roleCode) {
+      const roleMap = await fetchRoleDepartmentMap();
+      resolvedRoleId = [...roleMap.entries()].find(([, r]) => r.code === roleCode)?.[0] || null;
+    }
+
+    const { data, error } = await getSupabase().rpc('list_notification_target_user_ids', {
+      p_department_id: departmentId || null,
+      p_submodule_code: submoduleCode || null,
+      p_role_id: resolvedRoleId || null,
+      p_user_ids: userIds.length ? userIds : null,
+    });
+
+    if (!error && Array.isArray(data)) {
+      const ids = data.filter((id) => id && !exclude.has(id));
+      logNotificationDebug('resolveRecipients.rpc', { targeting, userIds: ids });
+      return ids;
+    }
+
+    if (error && error.code !== 'PGRST202') {
+      console.warn('[CITYMO] list_notification_target_user_ids RPC', error);
+    }
+  } catch (err) {
+    console.warn('[CITYMO] list_notification_target_user_ids', err);
+  }
+
   const resolved = new Set(userIds.filter(Boolean));
 
   const batches = await Promise.all([
@@ -157,7 +186,9 @@ export async function resolveNotificationRecipients(targeting = {}) {
     batches.forEach((batch) => batch.forEach((id) => resolved.add(id)));
   }
 
-  return [...resolved].filter((id) => !exclude.has(id));
+  const ids = [...resolved].filter((id) => !exclude.has(id));
+  logNotificationDebug('resolveRecipients.local', { targeting, userIds: ids });
+  return ids;
 }
 
 export function invalidateTargetingCache() {
