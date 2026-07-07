@@ -100,7 +100,9 @@ function draftToLigne(draft, id, articles = []) {
     description,
     qte: Number(draft.qte) || 0,
     unite: draft.unite || 'unite',
-    prix_ht: draft.prix_ht === '' ? '' : Number(draft.prix_ht),
+    // IMPORTANT: garder la valeur saisie (ex: "7,33333") pour affichage exact.
+    // Les calculs utilisent decimalMoney (accepte virgule).
+    prix_ht: draft.prix_ht === '' ? '' : String(draft.prix_ht),
     remise: Number(draft.remise) || 0,
     tva: Number(draft.tva) ?? 20,
   };
@@ -214,7 +216,9 @@ function BCLineDisplay({ ligne, lineNum, idx, onDelete, onDuplicate, onEdit, dra
       <td style={{ padding: '10px 8px', textAlign: 'center', verticalAlign: 'top', fontSize: '0.88rem' }}>{ligne.qte}</td>
       <td style={{ padding: '10px 8px', verticalAlign: 'top', fontSize: '0.82rem', color: 'var(--text-2)' }}>{ligne.unite}</td>
       <td style={{ padding: '10px 8px', textAlign: 'right', verticalAlign: 'top', fontSize: '0.88rem' }}>
-        {formatMAD(ligne.prix_ht)}
+        {String(ligne.prix_ht ?? '').trim() !== ''
+          ? `${String(ligne.prix_ht).replace('.', ',')} MAD`
+          : '—'}
         {Number(ligne.remise) > 0 && (
           <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>-{ligne.remise}%</div>
         )}
@@ -543,7 +547,14 @@ export default function BCLignesSection({ lignes, onChange }) {
               </div>
               <div>
                 <FieldLabel><span style={{ whiteSpace: 'nowrap', letterSpacing: '0.04em' }}>PRIX.U.HT.</span></FieldLabel>
-                <input type="number" min="0" step="0.01" value={draft.prix_ht} onChange={(e) => setF('prix_ht', e.target.value)} style={INPUT_STYLE} />
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={draft.prix_ht}
+                  onChange={(e) => setF('prix_ht', e.target.value)}
+                  placeholder="Ex: 7,33333"
+                  style={INPUT_STYLE}
+                />
               </div>
               <div>
                 <FieldLabel>Remise %</FieldLabel>

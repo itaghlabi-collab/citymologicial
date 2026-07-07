@@ -135,7 +135,8 @@ export function toPurchaseOrderRow(form) {
       description: description || '',
       qte: Number(qte) || 0,
       unite: unite || 'unite',
-      prix_ht: Number(prix_ht) || 0,
+      // garder la saisie (string possible avec virgule) : les calculs savent parser
+      prix_ht: prix_ht === '' || prix_ht == null ? '' : String(prix_ht),
       remise: Number(remise) || 0,
       tva: Number(tva) || 0,
     })),

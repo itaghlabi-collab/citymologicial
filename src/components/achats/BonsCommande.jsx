@@ -227,7 +227,7 @@ function DetailBC({ item, onBack, onEdit, onDelete, onDupliquer, onPdf, pdfLoadi
                       </td>
                       <td>{l.qte}</td>
                       <td>{l.unite}</td>
-                      <td>{Number(l.prix_ht || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2 })}</td>
+                      <td>{String(l.prix_ht ?? '').trim() !== '' ? String(l.prix_ht).replace('.', ',') : '—'}</td>
                       <td>{l.tva}%</td>
                       <td style={{ fontWeight: 700 }}>{ht.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
                     </tr>
