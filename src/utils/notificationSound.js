@@ -1,9 +1,11 @@
 /**
- * notificationSound.js — Son notification ERP (HTML5 Audio + Web Audio, multi-navigateurs)
+ * notificationSound.js — Alarme 3 bips (fichier statique + secours Web Audio)
  */
+const ALARM_SOUND_URL = '/sounds/notification-alarm-v3.wav';
+const SOUND_REVISION = 'alarm-v3';
+
 let audioCtx = null;
 let audioEl = null;
-let wavUrl = null;
 let unlocked = false;
 let unlockListenersAttached = false;
 
@@ -15,81 +17,32 @@ function getAudioContext() {
   return audioCtx;
 }
 
-/** Triple bip alarme urgent (WAV en mémoire). */
-function buildNotificationWavUrl() {
-  if (wavUrl) return wavUrl;
-  const sampleRate = 22050;
-  const durationSec = 0.72;
-  const numSamples = Math.floor(sampleRate * durationSec);
-  const pcm = new Int16Array(numSamples);
-
-  const beeps = [
-    { start: 0.0, dur: 0.14, freq: 1180 },
-    { start: 0.2, dur: 0.14, freq: 1180 },
-    { start: 0.4, dur: 0.22, freq: 1580 },
-  ];
-
-  const alarmSample = (freq, t, localT) => {
-    const attack = Math.min(1, localT / 0.008);
-    const decay = Math.exp(-localT * 3.2);
-    const env = attack * decay;
-    const s = Math.sin(2 * Math.PI * freq * t);
-    const harsh = Math.sign(s) * 0.42;
-    return (s * 0.58 + harsh) * env * 0.98;
-  };
-
-  for (let i = 0; i < numSamples; i += 1) {
-    const t = i / sampleRate;
-    let sample = 0;
-    beeps.forEach(({ start, dur, freq }) => {
-      const localT = t - start;
-      if (localT >= 0 && localT < dur) {
-        sample += alarmSample(freq, t, localT);
-      }
-    });
-    pcm[i] = Math.max(-1, Math.min(1, sample)) * 32767;
+function resetAudioElement() {
+  if (audioEl) {
+    audioEl.pause();
+    audioEl.src = '';
+    audioEl = null;
   }
+}
 
-  const byteRate = sampleRate * 2;
-  const blockAlign = 2;
-  const dataSize = pcm.length * 2;
-  const buffer = new ArrayBuffer(44 + dataSize);
-  const view = new DataView(buffer);
-
-  const writeStr = (offset, str) => {
-    for (let i = 0; i < str.length; i += 1) view.setUint8(offset + i, str.charCodeAt(i));
-  };
-
-  writeStr(0, 'RIFF');
-  view.setUint32(4, 36 + dataSize, true);
-  writeStr(8, 'WAVE');
-  writeStr(12, 'fmt ');
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, 1, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, byteRate, true);
-  view.setUint16(32, blockAlign, true);
-  view.setUint16(34, 16, true);
-  writeStr(36, 'data');
-  view.setUint32(40, dataSize, true);
-
-  let offset = 44;
-  for (let i = 0; i < pcm.length; i += 1) {
-    view.setInt16(offset, pcm[i], true);
-    offset += 2;
+function ensureSoundRevision() {
+  if (typeof window === 'undefined') return;
+  try {
+    const key = 'citymo_notif_sound_rev';
+    if (localStorage.getItem(key) !== SOUND_REVISION) {
+      localStorage.setItem(key, SOUND_REVISION);
+      resetAudioElement();
+    }
+  } catch {
+    /* ignore */
   }
-
-  const blob = new Blob([buffer], { type: 'audio/wav' });
-  wavUrl = URL.createObjectURL(blob);
-  return wavUrl;
 }
 
 function getAudioElement() {
   if (typeof window === 'undefined') return null;
+  ensureSoundRevision();
   if (!audioEl) {
-    buildNotificationWavUrl();
-    audioEl = new Audio(wavUrl);
+    audioEl = new Audio(ALARM_SOUND_URL);
     audioEl.preload = 'auto';
     audioEl.volume = 1;
   }
@@ -132,11 +85,19 @@ async function playHtmlAudio() {
     await el.play();
     return true;
   } catch {
-    return false;
+    resetAudioElement();
+    try {
+      const retry = getAudioElement();
+      if (!retry) return false;
+      retry.currentTime = 0;
+      await retry.play();
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
-/** Débloque l'audio (à appeler sur interaction utilisateur). */
 export function unlockNotificationSound() {
   if (typeof window === 'undefined') return;
   getAudioElement();
@@ -168,9 +129,9 @@ export function unlockNotificationSound() {
   }
 }
 
-/** Joue le son — HTML5 Audio en priorité, Web Audio en secours. */
 export async function playNotificationSound() {
   if (typeof window === 'undefined') return;
+  ensureSoundRevision();
   unlockNotificationSound();
 
   const htmlOk = await playHtmlAudio();
@@ -192,7 +153,6 @@ function detachUnlockListeners(listeners) {
   });
 }
 
-/** Réessaie le déblocage à chaque interaction jusqu'à succès. */
 export function initNotificationSoundUnlock() {
   if (typeof window === 'undefined' || unlockListenersAttached) return () => {};
   unlockListenersAttached = true;

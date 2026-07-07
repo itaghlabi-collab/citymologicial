@@ -6,8 +6,19 @@ import { AuthProvider } from './context/AuthContext';
 import { ToastProvider } from './utils/toast';
 import './index.css';
 
-if (import.meta.env.PROD && import.meta.env.VITE_BUILD_ID) {
-  console.info(`[CITYMO] build ${import.meta.env.VITE_BUILD_ID}`);
+const BUILD_ID = import.meta.env.VITE_BUILD_ID || 'dev';
+const BUILD_STORAGE_KEY = 'citymo_build_id';
+
+if (import.meta.env.PROD) {
+  const previousBuild = localStorage.getItem(BUILD_STORAGE_KEY);
+  if (previousBuild && previousBuild !== BUILD_ID) {
+    localStorage.setItem(BUILD_STORAGE_KEY, BUILD_ID);
+    localStorage.removeItem('citymo_notif_sound_rev');
+    window.location.reload();
+  } else if (!previousBuild) {
+    localStorage.setItem(BUILD_STORAGE_KEY, BUILD_ID);
+  }
+  console.info(`[CITYMO] build ${BUILD_ID}`);
 }
 
 const root = document.getElementById('root');
