@@ -83,33 +83,45 @@ export async function getAcquisitionOrder(id) {
   return normalizeAcquisitionOrder(data);
 }
 
-export async function createAcquisitionOrderFromQuote({ request, quote, userId }) {
+export async function createAcquisitionOrderFromQuote({
+  request, quote, userId, projectOverride, linesSubset, amountOverride,
+}) {
   const ref = await generateAcquisitionOrderRef();
+  const project = projectOverride || {
+    project_id: request.project_id || null,
+    project_ref: request.project_ref || null,
+    project_name: request.project_name || null,
+  };
+  const objetSuffix = project.projet_lie || project.project_name || '';
+  const objet = objetSuffix && projectOverride
+    ? `${request.titre || ''} — ${objetSuffix}`.trim()
+    : (request.titre || '');
   const row = {
     ref_oa: ref,
     purchase_request_id: request.id,
     quote_id: quote.id,
     supplier_id: quote.supplier_id || null,
     supplier_name: quote.supplier_name,
-    project_id: request.project_id || null,
-    project_ref: request.project_ref || null,
-    project_name: request.project_name || null,
-    objet: request.titre || '',
-    montant_ht: quote.montant_ht,
+    project_id: project.project_id || null,
+    project_ref: project.project_ref || null,
+    project_name: project.project_name || null,
+    objet,
+    montant_ht: amountOverride?.montant_ht ?? quote.montant_ht,
     tva_rate: quote.tva_rate,
-    montant_ttc: quote.montant_ttc,
+    montant_ttc: amountOverride?.montant_ttc ?? quote.montant_ttc,
     delai: quote.delai || null,
     conditions_paiement: quote.conditions_paiement || null,
     garantie: quote.garantie || null,
     mode_paiement: quote.conditions_paiement || null,
     statut: 'Brouillon',
-    lines: request.payload?.lines || [],
+    lines: linesSubset || request.payload?.lines || [],
     purchase_request_ref: request.ref,
     responsable_achats: PURCHASE_ASSIGNEE.label,
     attachment_url: quote.attachment_url || null,
     payload: {
       purchase_request_ref: request.ref,
       quote_id: quote.id,
+      is_grouped_child: !!projectOverride,
     },
     created_by: userId,
   };

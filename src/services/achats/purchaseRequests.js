@@ -5,6 +5,7 @@ import { getSupabase } from '../../lib/supabase';
 import { employeeFullName } from '../rh/employees';
 import { PURCHASE_ASSIGNEE, normalizePurchaseStatus } from '../../constants/purchaseWorkflow';
 import { listProjects } from '../projects/projects';
+import { isGroupedPurchaseRequest, groupedProjectLabel } from './purchaseGrouped';
 
 const TABLE = 'purchase_requests';
 const ACHATS_DEPARTMENT_ID = 3;
@@ -15,14 +16,18 @@ export function projectOptionLabel(p) {
   return [p.ref, p.nom, client].filter(Boolean).join(' — ');
 }
 
+export { isGroupedPurchaseRequest } from './purchaseGrouped';
+
 export function isOffProjectPurchaseRequest(formOrRequest) {
   if (!formOrRequest) return false;
+  if (isGroupedPurchaseRequest(formOrRequest)) return false;
   return formOrRequest.link_type === 'hors_projet'
     || formOrRequest.payload?.off_project === true;
 }
 
 export function purchaseRequestProjectLabel(request) {
   if (!request) return '—';
+  if (isGroupedPurchaseRequest(request)) return groupedProjectLabel(request);
   if (isOffProjectPurchaseRequest(request)) return 'Hors projet';
   return request.projet_lie || request.project_name || request.project_ref || '—';
 }
@@ -64,15 +69,18 @@ export function normalizePurchaseRequest(row) {
     updated_at: row.updated_at,
     payload: row.payload || {},
     off_project: row.payload?.off_project === true,
+    is_grouped: row.payload?.is_grouped === true,
   };
 }
 
 export function toPurchaseRequestRow(form) {
-  const offProject = isOffProjectPurchaseRequest(form);
-  const projetLie = offProject ? '' : (form.projet_lie || form.project_name || '').trim();
+  const grouped = isGroupedPurchaseRequest(form);
+  const offProject = !grouped && isOffProjectPurchaseRequest(form);
+  const projetLie = grouped ? '' : (offProject ? '' : (form.projet_lie || form.project_name || '').trim());
   const payload = {
     ...(form.payload || {}),
-    off_project: offProject,
+    off_project: grouped ? false : offProject,
+    is_grouped: grouped ? true : (form.payload?.is_grouped || false),
   };
   const row = {
     titre: (form.titre || '').trim(),
@@ -82,9 +90,9 @@ export function toPurchaseRequestRow(form) {
     date_limite: form.date_limite || null,
     description: form.description?.trim() || null,
     department: 'ACHATS',
-    project_id: offProject ? null : (form.project_id || null),
-    project_ref: offProject ? null : (form.project_ref || null),
-    project_name: offProject ? null : (projetLie || null),
+    project_id: grouped || offProject ? null : (form.project_id || null),
+    project_ref: grouped || offProject ? null : (form.project_ref || null),
+    project_name: grouped || offProject ? null : (projetLie || null),
     assigned_employee_id: form.assigned_employee_id || null,
     assigned_employee_name: form.assigned_employee_name || form.requester_name || PURCHASE_ASSIGNEE.label,
     commentaires_internes: form.commentaires_internes?.trim() || null,

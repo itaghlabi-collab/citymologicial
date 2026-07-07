@@ -46,22 +46,31 @@ export async function getAchatsPaymentOrder(id) {
   return normalizeAchatsPaymentOrder(data);
 }
 
-export async function createAchatsPaymentOrderFromAcquisition({ request, oa, quote, userId }) {
+export async function createAchatsPaymentOrderFromAcquisition({
+  request, oa, quote, userId, projectOverride, amountOverride,
+}) {
+  const projectId = projectOverride?.project_id ?? request.project_id;
+  const montantTtc = amountOverride?.montant_ttc ?? quote.montant_ttc;
+  const montantHt = amountOverride?.montant_ht ?? quote.montant_ht;
+  const projectLabel = projectOverride?.projet_lie || projectOverride?.project_name || '';
+  const motif = projectLabel
+    ? `Achat groupé — ${request.ref} — ${projectLabel}`
+    : `Achat — ${request.ref} — ${request.titre}`;
   const row = {
     beneficiaire: quote.supplier_name,
     type_benef: 'Fournisseur',
     fournisseur_lie: quote.supplier_name,
-    montant: quote.montant_ttc,
-    montant_ht: quote.montant_ht,
+    montant: montantTtc,
+    montant_ht: montantHt,
     tva_rate: quote.tva_rate,
     date: new Date().toISOString().slice(0, 10),
     date_prevue: new Date().toISOString().slice(0, 10),
     statut: 'À préparer',
     mode_paiement: 'Virement',
-    motif: `Achat — ${request.ref} — ${request.titre}`,
+    motif,
     commentaire: `OA ${oa.ref} — Demande ${request.ref}`,
     observation: quote.observations || '',
-    project_id: request.project_id,
+    project_id: projectId,
     supplier_id: quote.supplier_id,
     purchase_request_id: request.id,
     purchase_acquisition_order_id: oa.id,

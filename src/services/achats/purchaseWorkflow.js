@@ -13,7 +13,9 @@ import {
 } from './purchaseRequestQuotes';
 import { createAcquisitionOrderFromQuote, updateAcquisitionOrder, syncAcquisitionOrderFromRequest, getAcquisitionOrder } from './purchaseAcquisitionOrders';
 import { createAchatsPaymentOrderFromAcquisition, syncAchatsPaymentOrderFromRequest } from './purchasePaymentOrdersAchats';
-import { normalizePurchaseRequest, toPurchaseRequestRow, generatePurchaseRequestRef, isOffProjectPurchaseRequest } from './purchaseRequests';
+import { normalizePurchaseRequest, toPurchaseRequestRow, generatePurchaseRequestRef, isOffProjectPurchaseRequest, isGroupedPurchaseRequest } from './purchaseRequests';
+import { buildProjectSplitsFromQuote, validateGroupedRequestLines } from './purchaseGrouped';
+import { upsertPurchaseProjectExpense } from '../finance/projectExpenses';
 import { getPurchaseRequestQuote } from './purchaseRequestQuotes';
 import { resolveCurrentPurchaseRole, purchasePermissions, PURCHASE_ROLES } from './purchaseWorkflowRoles';
 import { fetchProfile } from '../supabase/auth';
@@ -143,10 +145,13 @@ export async function createPurchaseRequestWorkflow(form) {
     err.code = 'VALIDATION';
     throw err;
   }
-  if (!isOffProjectPurchaseRequest(form) && !row.project_name?.trim()) {
+  if (!isOffProjectPurchaseRequest(form) && !isGroupedPurchaseRequest(form) && !row.project_name?.trim()) {
     const err = new Error('Le projet lié est obligatoire.');
     err.code = 'VALIDATION';
     throw err;
+  }
+  if (isGroupedPurchaseRequest(form)) {
+    validateGroupedRequestLines(form.payload?.lines || form.lignes);
   }
   if (!row.ref_demande) row.ref_demande = await generatePurchaseRequestRef();
 
@@ -211,10 +216,13 @@ export async function updatePurchaseRequestSuperAdmin(id, form, existing = null,
   const authCtx = ctx || await getAuthContext();
   await assertSuperAdmin(authCtx);
   const current = existing || await fetchRequest(id);
-  if (!isOffProjectPurchaseRequest(form) && !(form.projet_lie || form.project_name || '').trim()) {
+  if (!isOffProjectPurchaseRequest(form) && !isGroupedPurchaseRequest(form) && !(form.projet_lie || form.project_name || '').trim()) {
     const err = new Error('Le projet lié est obligatoire.');
     err.code = 'VALIDATION';
     throw err;
+  }
+  if (isGroupedPurchaseRequest(form)) {
+    validateGroupedRequestLines(form.payload?.lines || form.lignes);
   }
   const patch = {
     ...toPurchaseRequestRow({
@@ -246,10 +254,13 @@ export async function updatePurchaseRequestDraft(id, form) {
     err.code = 'VALIDATION';
     throw err;
   }
-  if (!isOffProjectPurchaseRequest(form) && !(form.projet_lie || form.project_name || '').trim()) {
+  if (!isOffProjectPurchaseRequest(form) && !isGroupedPurchaseRequest(form) && !(form.projet_lie || form.project_name || '').trim()) {
     const err = new Error('Le projet lié est obligatoire.');
     err.code = 'VALIDATION';
     throw err;
+  }
+  if (isGroupedPurchaseRequest(form)) {
+    validateGroupedRequestLines(form.payload?.lines || form.lignes);
   }
   const patch = {
     ...toPurchaseRequestRow({
@@ -276,10 +287,14 @@ export async function submitPurchaseRequest(id) {
     err.code = 'VALIDATION';
     throw err;
   }
-  if (!isOffProjectPurchaseRequest(existing) && !(existing.project_name || existing.projet_lie || '').trim()) {
+  if (!isOffProjectPurchaseRequest(existing) && !isGroupedPurchaseRequest(existing)
+    && !(existing.project_name || existing.projet_lie || '').trim()) {
     const err = new Error('Renseignez le projet lié avant de soumettre la demande.');
     err.code = 'VALIDATION';
     throw err;
+  }
+  if (isGroupedPurchaseRequest(existing)) {
+    validateGroupedRequestLines(existing.payload?.lines);
   }
   const patch = { statut: 'En étude' };
   if (!(existing.ref || '').trim()) {
@@ -462,6 +477,109 @@ export async function sendRequestToDgValidation(id) {
   return request;
 }
 
+async function validateGroupedSupplierQuote(request, quote, ctx) {
+  const projectGroups = buildProjectSplitsFromQuote(request, quote);
+  const created = [];
+
+  for (const group of projectGroups) {
+    const oa = await createAcquisitionOrderFromQuote({
+      request,
+      quote,
+      userId: ctx.user.id,
+      projectOverride: group,
+      linesSubset: group.lines,
+      amountOverride: { montant_ht: group.montant_ht, montant_ttc: group.montant_ttc },
+    });
+    const op = await createAchatsPaymentOrderFromAcquisition({
+      request,
+      oa,
+      quote,
+      userId: ctx.user.id,
+      projectOverride: group,
+      amountOverride: { montant_ht: group.montant_ht, montant_ttc: group.montant_ttc },
+    });
+    await updateAcquisitionOrder(oa.id, { payment_order_id: op.id });
+    try {
+      await upsertPurchaseProjectExpense({
+        purchase_request_id: request.id,
+        purchase_acquisition_order_id: oa.id,
+        payment_order_id: op.id,
+        project_id: group.project_id,
+        project_name_raw: group.projet_lie || group.project_name,
+        montant: group.montant_ttc,
+        purchase_ref: request.ref,
+        purchase_titre: request.titre,
+        fournisseur: quote.supplier_name,
+        purchase_statut: 'Ordre de paiement créé',
+        op_statut: op.statut,
+        date_depense: new Date().toISOString().slice(0, 10),
+        description: `Achat groupé — ${group.projet_lie || group.project_name}`,
+      });
+    } catch (err) {
+      console.warn('[CITYMO] upsertPurchaseProjectExpense grouped', err);
+    }
+    created.push({ oa, op, group });
+  }
+
+  const first = created[0];
+  const groupOrders = created.map(({ oa, op, group }) => ({
+    project_id: group.project_id,
+    project_ref: group.project_ref,
+    project_name: group.project_name,
+    projet_lie: group.projet_lie,
+    acquisition_order_id: oa.id,
+    payment_order_id: op.id,
+    oa_ref: oa.ref,
+    op_ref: op.ref,
+    montant_ht: group.montant_ht,
+    montant_ttc: group.montant_ttc,
+  }));
+
+  const refsSummary = groupOrders.map((g) => `${g.oa_ref}/${g.op_ref}`).join(', ');
+
+  let updated = await patchRequest(
+    request.id,
+    {
+      statut: 'Devis validé',
+      selected_quote_id: quote.id,
+      payload: { ...request.payload, group_orders: groupOrders },
+    },
+    'Validation devis (groupé)',
+    `Fournisseur retenu : ${quote.supplier_name} — ${projectGroups.length} projet(s)`,
+    ctx,
+    refsSummary,
+  );
+
+  updated = await patchRequest(
+    request.id,
+    {
+      statut: 'Ordre d\'achat créé',
+      acquisition_order_id: first.oa.id,
+    },
+    'Création ordres d\'achat',
+    `${projectGroups.length} OA : ${groupOrders.map((g) => g.oa_ref).join(', ')}`,
+    ctx,
+  );
+
+  updated = await patchRequest(
+    request.id,
+    {
+      statut: 'Ordre de paiement créé',
+      payment_order_id: first.op.id,
+    },
+    'Ordres de paiement créés',
+    `${projectGroups.length} OP : ${groupOrders.map((g) => g.op_ref).join(', ')}`,
+    ctx,
+  );
+
+  await notifyPurchaseSupplierValidated(updated, { quote, oa: first.oa, op: first.op });
+  for (const { oa } of created) {
+    await notifyOaCreated(updated, oa);
+  }
+
+  return { request: updated, quote, oa: first.oa, op: first.op, groupOrders, acquisitionOrders: created.map((c) => c.oa), paymentOrders: created.map((c) => c.op) };
+}
+
 export async function validateSupplierQuote(requestId, quoteId) {
   const ctx = await getAuthContext();
   await assertDgRole(ctx);
@@ -483,6 +601,10 @@ export async function validateSupplierQuote(requestId, quoteId) {
   }
 
   await lockOtherQuotes(requestId, quoteId);
+
+  if (isGroupedPurchaseRequest(request)) {
+    return validateGroupedSupplierQuote(request, quote, ctx);
+  }
 
   const oa = await createAcquisitionOrderFromQuote({ request, quote, userId: ctx.user.id });
   const op = await createAchatsPaymentOrderFromAcquisition({
@@ -604,22 +726,44 @@ export async function getPurchaseRequestBundle(id) {
   ]);
   let acquisitionOrder = null;
   let paymentOrder = null;
-  if (request.acquisition_order_id) {
+  let acquisitionOrders = [];
+  let paymentOrders = [];
+  const grouped = isGroupedPurchaseRequest(request);
+  const groupMeta = request.payload?.group_orders || [];
+
+  if (grouped && groupMeta.length) {
     const { getAcquisitionOrder } = await import('./purchaseAcquisitionOrders');
-    acquisitionOrder = await getAcquisitionOrder(request.acquisition_order_id);
-  }
-  if (request.payment_order_id) {
-    const { data } = await getSupabase()
-      .from('payment_orders')
-      .select('*')
-      .eq('id', request.payment_order_id)
-      .maybeSingle();
-    if (data) {
-      const { normalizePaymentOrder } = await import('../finance/paymentOrders');
-      paymentOrder = normalizePaymentOrder(data);
+    const { normalizePaymentOrder } = await import('../finance/paymentOrders');
+    acquisitionOrders = (await Promise.all(
+      groupMeta.map((g) => (g.acquisition_order_id ? getAcquisitionOrder(g.acquisition_order_id) : null)),
+    )).filter(Boolean);
+    const opIds = groupMeta.map((g) => g.payment_order_id).filter(Boolean);
+    if (opIds.length) {
+      const { data: opRows } = await getSupabase().from('payment_orders').select('*').in('id', opIds);
+      paymentOrders = (opRows || []).map(normalizePaymentOrder);
+    }
+    acquisitionOrder = acquisitionOrders[0] || null;
+    paymentOrder = paymentOrders[0] || null;
+  } else {
+    if (request.acquisition_order_id) {
+      const { getAcquisitionOrder } = await import('./purchaseAcquisitionOrders');
+      acquisitionOrder = await getAcquisitionOrder(request.acquisition_order_id);
+    }
+    if (request.payment_order_id) {
+      const { data } = await getSupabase()
+        .from('payment_orders')
+        .select('*')
+        .eq('id', request.payment_order_id)
+        .maybeSingle();
+      if (data) {
+        const { normalizePaymentOrder } = await import('../finance/paymentOrders');
+        paymentOrder = normalizePaymentOrder(data);
+      }
     }
   }
-  return { request, quotes, history, acquisitionOrder, paymentOrder };
+  return {
+    request, quotes, history, acquisitionOrder, paymentOrder, acquisitionOrders, paymentOrders, isGrouped: grouped,
+  };
 }
 
 export { listQuotesForRequest };

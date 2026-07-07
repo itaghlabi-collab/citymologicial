@@ -5,7 +5,7 @@ import { useState, useCallback, useMemo, useEffect } from 'react';
 import {
   ClipboardList, Plus, Eye, Edit2, Trash2, Search, Filter,
   Download, AlertTriangle, Clock, Loader2, RefreshCw, FileText,
-  BarChart2, Package, CreditCard, CheckCircle, Send,
+  BarChart2, Package, CreditCard, CheckCircle, Send, Layers,
 } from 'lucide-react';
 import { usePurchaseRequests } from '../../hooks/usePurchaseRequests';
 import { useSuppliers } from '../../hooks/useSuppliers';
@@ -16,7 +16,8 @@ import {
   getPurchaseStatusBadge, getPurchaseStatusLabel,
 } from '../../constants/purchaseWorkflow';
 import { submitPurchaseRequest, getPurchaseRequestBundle, reconcileLegacySoumiseRequests, reconcilePurchaseRequestSentStatus } from '../../services/achats/purchaseWorkflow';
-import { projectOptionLabel, purchaseRequestProjectLabel, updatePurchaseRequestTitle, reconcileMissingPurchaseRequestRefs } from '../../services/achats/purchaseRequests';
+import { projectOptionLabel, purchaseRequestProjectLabel, updatePurchaseRequestTitle, reconcileMissingPurchaseRequestRefs, isGroupedPurchaseRequest } from '../../services/achats/purchaseRequests';
+import { buildGroupedFormPayload } from '../../services/achats/purchaseGrouped';
 import { generatePurchaseRequestPdf } from '../../services/achats/purchaseRequestPdf';
 import { resolveCurrentPurchaseRole, purchasePermissions, canViewPurchaseRequest } from '../../services/achats/purchaseWorkflowRoles';
 import { isSuperAdmin } from '../../services/rh/isSuperAdmin';
@@ -28,6 +29,20 @@ import {
 } from './shared.jsx';
 
 const EMPTY_LIGNE = { designation: '', quantite: '', unite: 'u' };
+
+const EMPTY_GROUPED_LIGNE = {
+  designation: '', quantite: '', unite: 'u', project_id: '', project_ref: '', projet_lie: '', fournisseur: '', supplier_id: '', commentaire: '',
+};
+
+const EMPTY_GROUPED_FORM = {
+  is_grouped: true,
+  titre: '',
+  priorite: 'Normale',
+  date_limite: '',
+  lignes: [{ ...EMPTY_GROUPED_LIGNE, id: genId() }],
+  description: '',
+  commentaires_internes: '',
+};
 
 const EMPTY_FORM = {
   link_type: 'projet',
@@ -55,6 +70,40 @@ function toFormLignes(item) {
     }));
   }
   return [{ ...EMPTY_LIGNE, id: genId() }];
+}
+
+function toGroupedFormLignes(item) {
+  const raw = item?.payload?.lines || [];
+  if (raw.length) {
+    return raw.map((l, i) => ({
+      id: l.id || genId() + i,
+      designation: l.designation && l.designation !== '—' ? l.designation : '',
+      quantite: l.quantite ?? l.quantite_demandee ?? '',
+      unite: l.unite || l.unit || 'u',
+      project_id: l.project_id || '',
+      project_ref: l.project_ref || '',
+      projet_lie: l.projet_lie || l.project_name || '',
+      project_name: l.project_name || '',
+      fournisseur: l.fournisseur || '',
+      supplier_id: l.supplier_id || '',
+      commentaire: l.commentaire || '',
+    }));
+  }
+  return [{ ...EMPTY_GROUPED_LIGNE, id: genId() }];
+}
+
+function toGroupedFormState(item) {
+  if (!item) return EMPTY_GROUPED_FORM;
+  return {
+    ...EMPTY_GROUPED_FORM,
+    ref: item.ref || '',
+    titre: item.titre || '',
+    priorite: item.priorite || 'Normale',
+    date_limite: item.date_limite || '',
+    lignes: toGroupedFormLignes(item),
+    description: item.description || '',
+    commentaires_internes: item.commentaires_internes || '',
+  };
 }
 
 function toFormState(item) {
@@ -209,6 +258,193 @@ function DemandeLignesTable({ lignes, onChange, error }) {
         <Plus size={13} /> Ajouter un besoin
       </button>
     </div>
+  );
+}
+
+function GroupedDemandeLignesTable({ lignes, onChange, projects, suppliers, lineError }) {
+  const fournActifs = suppliers.filter((f) => f.statut === 'Actif' || f.status === 'active');
+
+  function updateLigne(id, k, v) {
+    onChange(lignes.map((l) => (l.id === id ? { ...l, [k]: v } : l)));
+  }
+
+  function handleProjectChange(id, projectId) {
+    const p = projects.find((x) => String(x.id) === String(projectId));
+    onChange(lignes.map((l) => (l.id === id ? {
+      ...l,
+      project_id: projectId || '',
+      project_ref: p?.ref || '',
+      project_name: p?.nom || '',
+      projet_lie: p ? projectOptionLabel(p) : '',
+    } : l)));
+  }
+
+  function addLigne() {
+    onChange([...lignes, { ...EMPTY_GROUPED_LIGNE, id: genId() }]);
+  }
+
+  function removeLigne(id) {
+    if (lignes.length <= 1) return;
+    onChange(lignes.filter((l) => l.id !== id));
+  }
+
+  return (
+    <div>
+      <div style={{ overflowX: 'auto' }}>
+        <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.82rem', minWidth: 900 }}>
+          <thead>
+            <tr style={{ background: 'var(--surface-2)', borderBottom: '1.5px solid var(--border)' }}>
+              {['N°', 'Désignation', 'Qté', 'Unité', 'Projet lié', 'Fournisseur', 'Commentaire', ''].map((h) => (
+                <th key={h || 'actions'} style={{ padding: '8px 8px', textAlign: 'left', fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {lignes.map((l, idx) => (
+              <tr key={l.id} style={{ borderBottom: '1px solid var(--border)' }}>
+                <td style={{ padding: '6px 8px', color: 'var(--text-3)', fontWeight: 700 }}>{idx + 1}</td>
+                <td style={{ padding: '6px 4px', minWidth: 140 }}>
+                  <input value={l.designation} onChange={(e) => updateLigne(l.id, 'designation', e.target.value)} placeholder="Article..." style={{ ...INPUT_STYLE, minWidth: 130, borderColor: lineError && !l.designation?.trim() ? 'var(--red)' : 'var(--border)' }} />
+                </td>
+                <td style={{ padding: '6px 4px' }}>
+                  <input type="number" min="0" step="any" value={l.quantite} onChange={(e) => updateLigne(l.id, 'quantite', e.target.value)} style={{ ...INPUT_STYLE, width: 70 }} />
+                </td>
+                <td style={{ padding: '6px 4px' }}>
+                  <input value={l.unite} onChange={(e) => updateLigne(l.id, 'unite', e.target.value)} style={{ ...INPUT_STYLE, width: 56 }} />
+                </td>
+                <td style={{ padding: '6px 4px', minWidth: 160 }}>
+                  <select value={l.project_id || ''} onChange={(e) => handleProjectChange(l.id, e.target.value)} style={{ ...SELECT_STYLE, borderColor: lineError && !l.project_id ? 'var(--red)' : 'var(--border)', fontSize: '0.78rem' }}>
+                    <option value="">— Projet —</option>
+                    {projects.map((p) => <option key={p.id} value={p.id}>{projectOptionLabel(p)}</option>)}
+                  </select>
+                </td>
+                <td style={{ padding: '6px 4px', minWidth: 120 }}>
+                  <input value={l.fournisseur} onChange={(e) => updateLigne(l.id, 'fournisseur', e.target.value)} placeholder="Optionnel" style={{ ...INPUT_STYLE, minWidth: 110, fontSize: '0.78rem' }} list={`fourn-${l.id}`} />
+                  <datalist id={`fourn-${l.id}`}>
+                    {fournActifs.map((s) => <option key={s.id} value={s.company_name || s.raison_sociale || s.nom} />)}
+                  </datalist>
+                </td>
+                <td style={{ padding: '6px 4px', minWidth: 100 }}>
+                  <input value={l.commentaire} onChange={(e) => updateLigne(l.id, 'commentaire', e.target.value)} placeholder="Optionnel" style={{ ...INPUT_STYLE, minWidth: 90, fontSize: '0.78rem' }} />
+                </td>
+                <td style={{ padding: '6px 4px' }}>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => removeLigne(l.id)} disabled={lignes.length <= 1} style={{ color: lignes.length <= 1 ? 'var(--text-3)' : 'var(--red)', padding: '4px 6px' }}>
+                    <Trash2 size={13} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {lineError && <div style={{ color: 'var(--red)', fontSize: '0.72rem', marginTop: 6 }}>{lineError}</div>}
+      <button type="button" className="btn btn-secondary btn-sm" onClick={addLigne} style={{ marginTop: 10, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+        <Plus size={13} /> Ajouter une ligne
+      </button>
+    </div>
+  );
+}
+
+function GroupedDemandeForm({ initial, onSave, onCancel, saving, suppliers = [], projects = [], sessionUser }) {
+  const [form, setForm] = useState(() => toGroupedFormState(initial));
+  const [attachments, setAttachments] = useState(() => initial?.payload?.attachments || []);
+  const [errors, setErrors] = useState({});
+  const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
+
+  const responsableLabel = initial?.assigned_employee_name
+    || initial?.requester_name
+    || sessionUser?.nom
+    || sessionUser?.email?.split('@')[0]
+    || '—';
+
+  useEffect(() => {
+    setForm(toGroupedFormState(initial));
+    setErrors({});
+    let cancelled = false;
+    (async () => {
+      const raw = initial?.payload?.attachments || [];
+      if (!raw.length) { if (!cancelled) setAttachments([]); return; }
+      const { resolvePurchaseAttachments } = await import('../../services/achats/purchaseStorage');
+      const resolved = await resolvePurchaseAttachments(raw);
+      if (!cancelled) setAttachments(resolved);
+    })();
+    return () => { cancelled = true; };
+  }, [initial]);
+
+  function handleSubmit(ev) {
+    ev.preventDefault();
+    const e = {};
+    if (!form.titre.trim()) e.titre = 'Requis';
+    const lignes = (form.lignes || []).filter((l) => (l.designation || '').trim());
+    if (!lignes.length) e.lignes = 'Ajoutez au moins une ligne';
+    else if (lignes.some((l) => !l.project_id)) e.lignes = 'Chaque ligne doit avoir un projet';
+    if (Object.keys(e).length) { setErrors(e); return; }
+    setErrors({});
+    onSave({
+      ...form,
+      is_grouped: true,
+      assigned_employee_name: responsableLabel,
+      payload: buildGroupedFormPayload(form, initial?.payload, attachments, projects),
+    });
+  }
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <div style={{ marginBottom: 16, padding: '10px 14px', borderRadius: 8, background: '#E3F2FD', border: '1px solid #90CAF9', fontSize: '0.82rem', color: 'var(--text-2)' }}>
+        <strong>Achats groupés</strong> — une seule demande, plusieurs projets. Chaque ligne est imputée à son projet après validation.
+      </div>
+      <SectionTitle icon={<Layers size={12} />}>Informations générales</SectionTitle>
+      <FRow>
+        <FField label="Titre de la demande groupée" required>
+          <input value={form.titre} onChange={(e) => set('titre', e.target.value)} placeholder="ex. Achats multi-chantiers juin 2026" style={{ ...INPUT_STYLE, borderColor: errors.titre ? 'var(--red)' : 'var(--border)' }} />
+          {errors.titre && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.titre}</div>}
+        </FField>
+        <FField label="Priorité">
+          <select value={form.priorite} onChange={(e) => set('priorite', e.target.value)} style={SELECT_STYLE}>
+            {PRIORITES.map((p) => <option key={p} value={p}>{p}</option>)}
+          </select>
+        </FField>
+        <FField label="Date souhaitée">
+          <input type="date" value={form.date_limite} onChange={(e) => set('date_limite', e.target.value)} style={INPUT_STYLE} />
+        </FField>
+      </FRow>
+      <FRow>
+        <FField label="Responsable">
+          <input value={responsableLabel} readOnly style={{ ...INPUT_STYLE, background: 'var(--surface-2)', cursor: 'not-allowed' }} />
+        </FField>
+      </FRow>
+
+      <SectionTitle icon={<Package size={12} />}>Besoins / Articles demandés</SectionTitle>
+      <GroupedDemandeLignesTable
+        lignes={form.lignes}
+        onChange={(v) => set('lignes', v)}
+        projects={projects}
+        suppliers={suppliers}
+        lineError={errors.lignes}
+      />
+
+      <div style={{ marginTop: 20 }}>
+        <FField label="Description / contexte">
+          <textarea value={form.description} onChange={(e) => set('description', e.target.value)} rows={3} style={TEXTAREA_STYLE} placeholder="Contexte global de la demande groupée..." />
+        </FField>
+      </div>
+      <div style={{ marginTop: 12 }}>
+        <FField label="Commentaires internes">
+          <textarea value={form.commentaires_internes} onChange={(e) => set('commentaires_internes', e.target.value)} rows={2} style={TEXTAREA_STYLE} />
+        </FField>
+      </div>
+      <div style={{ marginTop: 16 }}>
+        <UploadField scope="requests" requestId={initial?.id} attachments={attachments} onChange={setAttachments} disabled={!!initial?.id && initial?.statut !== 'Brouillon'} />
+      </div>
+
+      <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 24, flexWrap: 'wrap' }}>
+        <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={saving}>Annuler</button>
+        <button type="submit" className="btn btn-primary" disabled={saving}>
+          {saving ? <Loader2 size={14} className="spin" /> : <Layers size={14} />}
+          {initial?.id ? 'Enregistrer' : 'Créer la demande groupée'}
+        </button>
+      </div>
+    </form>
   );
 }
 
@@ -480,7 +716,7 @@ export default function DemandesAchat() {
   const [filterPrio, setFilterPrio] = useState('');
   const [filterProjet, setFilterProjet] = useState('');
   const [showFilters, setShowFilters] = useState(false);
-  const [showModal, setShowModal] = useState(false);
+  const [modalMode, setModalMode] = useState(null);
   const [editItem, setEditItem] = useState(null);
   const [detailId, setDetailId] = useState(null);
   const [detailAddQuote, setDetailAddQuote] = useState(false);
@@ -535,11 +771,26 @@ export default function DemandesAchat() {
   const handleSave = useCallback(async (data) => {
     const result = await save(data, editItem?.id);
     if (result.success) {
-      setShowModal(false);
+      setModalMode(null);
       setEditItem(null);
       if (detailId) setDetailRefreshKey((k) => k + 1);
     }
   }, [editItem, save, detailId]);
+
+  function openCreateModal(mode) {
+    setEditItem(null);
+    setModalMode(mode);
+  }
+
+  function openEditModal(item) {
+    setEditItem(item);
+    setModalMode(isGroupedPurchaseRequest(item) ? 'grouped' : 'simple');
+  }
+
+  function closeModal() {
+    setModalMode(null);
+    setEditItem(null);
+  }
 
   async function handleDelete(id) {
     const item = items.find((x) => x.id === id);
@@ -637,22 +888,37 @@ export default function DemandesAchat() {
               window.alert('Cette demande ne peut être modifiée qu\'en statut Brouillon (ou par le super administrateur).');
               return;
             }
-            setEditItem(item);
-            setShowModal(true);
+            openEditModal(item);
           }}
           onRefresh={reload}
         />
-        <Modal open={showModal} onClose={() => { setShowModal(false); setEditItem(null); }} title={editItem ? (superAdmin && editItem.statut !== 'Brouillon' ? 'Modifier la demande (super admin)' : 'Modifier la demande') : "Nouvelle demande d'achat"} width={780}>
-          <DemandeForm
-            initial={editItem}
-            onSave={handleSave}
-            onCancel={() => { setShowModal(false); setEditItem(null); }}
-            saving={saving}
-            suppliers={suppliers}
-            projects={projects}
-            sessionUser={user}
-            superAdminEdit={superAdmin && editItem && editItem.statut !== 'Brouillon'}
-          />
+        <Modal open={modalMode !== null} onClose={closeModal} title={
+          editItem
+            ? (isGroupedPurchaseRequest(editItem) ? 'Modifier achats groupés' : (superAdmin && editItem.statut !== 'Brouillon' ? 'Modifier la demande (super admin)' : 'Modifier la demande'))
+            : (modalMode === 'grouped' ? 'Achats groupés' : "Nouvelle demande d'achat")
+        } width={modalMode === 'grouped' ? 960 : 780}>
+          {modalMode === 'grouped' ? (
+            <GroupedDemandeForm
+              initial={editItem}
+              onSave={handleSave}
+              onCancel={closeModal}
+              saving={saving}
+              suppliers={suppliers}
+              projects={projects}
+              sessionUser={user}
+            />
+          ) : (
+            <DemandeForm
+              initial={editItem}
+              onSave={handleSave}
+              onCancel={closeModal}
+              saving={saving}
+              suppliers={suppliers}
+              projects={projects}
+              sessionUser={user}
+              superAdminEdit={superAdmin && editItem && editItem.statut !== 'Brouillon'}
+            />
+          )}
         </Modal>
       </>
     );
@@ -676,9 +942,14 @@ export default function DemandesAchat() {
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowFilters((f) => !f)}><Filter size={14} /> Filtres</button>
           <button type="button" className="btn btn-ghost btn-sm" onClick={reload} disabled={loading}><RefreshCw size={14} /> Actualiser</button>
           {perms.canCreateRequest && (
-            <button type="button" className="btn btn-primary" onClick={() => { setEditItem(null); setShowModal(true); }}>
-              <Plus size={15} /> Nouvelle demande
-            </button>
+            <>
+              <button type="button" className="btn btn-secondary" onClick={() => openCreateModal('grouped')}>
+                <Layers size={15} /> Achats groupés
+              </button>
+              <button type="button" className="btn btn-primary" onClick={() => openCreateModal('simple')}>
+                <Plus size={15} /> Nouvelle demande
+              </button>
+            </>
           )}
         </div>
       </div>
@@ -733,7 +1004,7 @@ export default function DemandesAchat() {
         {loading ? (
           <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-3)' }}><Loader2 size={20} className="cin-spin" /> Chargement...</div>
         ) : filtered.length === 0 ? (
-          <EmptyState icon={<ClipboardList size={24} />} title="Aucune demande" sub="Créez votre première demande d'achat" action={perms.canCreateRequest ? 'Nouvelle demande' : undefined} onAction={() => { setEditItem(null); setShowModal(true); }} />
+          <EmptyState icon={<ClipboardList size={24} />} title="Aucune demande" sub="Créez votre première demande d'achat" action={perms.canCreateRequest ? 'Nouvelle demande' : undefined} onAction={() => openCreateModal('simple')} />
         ) : (
           <div className="table-wrap">
             <table>
@@ -808,7 +1079,7 @@ export default function DemandesAchat() {
                       <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
                         <button type="button" className="btn btn-secondary btn-sm" title="Voir" onClick={() => setDetailId(x.id)}><Eye size={13} /></button>
                         {canEditPurchaseRequest(x.statut, { isSuperAdmin: superAdmin }) && (
-                          <button type="button" className="btn btn-ghost btn-sm" title={superAdmin && x.statut !== 'Brouillon' ? 'Modifier (super admin)' : 'Modifier'} onClick={() => { setEditItem(x); setShowModal(true); }}><Edit2 size={13} /></button>
+                          <button type="button" className="btn btn-ghost btn-sm" title={superAdmin && x.statut !== 'Brouillon' ? 'Modifier (super admin)' : 'Modifier'} onClick={() => openEditModal(x)}><Edit2 size={13} /></button>
                         )}
                         <button type="button" className="btn btn-ghost btn-sm" title="PDF" disabled={pdfLoadingId === x.id} onClick={() => handlePrintPdf(x)}>
                           {pdfLoadingId === x.id ? <Loader2 size={12} className="cin-spin" /> : <FileText size={13} />}
@@ -837,17 +1108,33 @@ export default function DemandesAchat() {
         )}
       </div>
 
-      <Modal open={showModal} onClose={() => { setShowModal(false); setEditItem(null); }} title={editItem ? (superAdmin && editItem.statut !== 'Brouillon' ? 'Modifier la demande (super admin)' : 'Modifier la demande') : "Nouvelle demande d'achat"} width={780}>
-        <DemandeForm
-          initial={editItem}
-          onSave={handleSave}
-          onCancel={() => { setShowModal(false); setEditItem(null); }}
-          saving={saving}
-          suppliers={suppliers}
-          projects={projects}
-          sessionUser={user}
-          superAdminEdit={superAdmin && editItem && editItem.statut !== 'Brouillon'}
-        />
+      <Modal open={modalMode !== null} onClose={closeModal} title={
+        editItem
+          ? (isGroupedPurchaseRequest(editItem) ? 'Modifier achats groupés' : (superAdmin && editItem.statut !== 'Brouillon' ? 'Modifier la demande (super admin)' : 'Modifier la demande'))
+          : (modalMode === 'grouped' ? 'Achats groupés' : "Nouvelle demande d'achat")
+      } width={modalMode === 'grouped' ? 960 : 780}>
+        {modalMode === 'grouped' ? (
+          <GroupedDemandeForm
+            initial={editItem}
+            onSave={handleSave}
+            onCancel={closeModal}
+            saving={saving}
+            suppliers={suppliers}
+            projects={projects}
+            sessionUser={user}
+          />
+        ) : (
+          <DemandeForm
+            initial={editItem}
+            onSave={handleSave}
+            onCancel={closeModal}
+            saving={saving}
+            suppliers={suppliers}
+            projects={projects}
+            sessionUser={user}
+            superAdminEdit={superAdmin && editItem && editItem.statut !== 'Brouillon'}
+          />
+        )}
       </Modal>
     </div>
   );

@@ -162,12 +162,30 @@ export async function findPurchaseLinkedExpense({
   payment_order_id,
 } = {}) {
   const sb = getSupabase();
+  if (purchase_acquisition_order_id) {
+    const { data } = await sb
+      .from(TABLE)
+      .select('id, purchase_request_id, purchase_acquisition_order_id, payment_order_id, statut, montant, montant_paye, date_paiement, origine')
+      .eq('purchase_acquisition_order_id', purchase_acquisition_order_id)
+      .neq('statut', 'annule')
+      .maybeSingle();
+    if (data) return data;
+  }
+  if (payment_order_id) {
+    const { data } = await sb
+      .from(TABLE)
+      .select('id, purchase_request_id, purchase_acquisition_order_id, payment_order_id, statut, montant, montant_paye, date_paiement')
+      .eq('payment_order_id', payment_order_id)
+      .neq('statut', 'annule')
+      .maybeSingle();
+    if (data) return data;
+  }
   if (purchase_request_id) {
     const { data } = await sb
       .from(TABLE)
       .select('id, purchase_request_id, purchase_acquisition_order_id, payment_order_id, statut, montant, montant_paye, date_paiement, origine')
       .eq('purchase_request_id', purchase_request_id)
-      .eq('origine', 'achat')
+      .is('purchase_acquisition_order_id', null)
       .neq('statut', 'annule')
       .maybeSingle();
     if (data) return data;
@@ -185,24 +203,6 @@ export async function findPurchaseLinkedExpense({
       .eq('source_id', purchase_request_id)
       .maybeSingle();
     if (bySource) return bySource;
-  }
-  if (purchase_acquisition_order_id) {
-    const { data } = await sb
-      .from(TABLE)
-      .select('id, purchase_request_id, purchase_acquisition_order_id, payment_order_id, statut, montant, montant_paye, date_paiement')
-      .eq('purchase_acquisition_order_id', purchase_acquisition_order_id)
-      .neq('statut', 'annule')
-      .maybeSingle();
-    if (data) return data;
-  }
-  if (payment_order_id) {
-    const { data } = await sb
-      .from(TABLE)
-      .select('id, purchase_request_id, purchase_acquisition_order_id, payment_order_id, statut, montant, montant_paye, date_paiement')
-      .eq('payment_order_id', payment_order_id)
-      .neq('statut', 'annule')
-      .maybeSingle();
-    if (data) return data;
   }
   return null;
 }

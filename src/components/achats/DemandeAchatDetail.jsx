@@ -24,7 +24,7 @@ import {
   QUOTE_STATUS_BADGE,
 } from '../../constants/purchaseWorkflow';
 import { generatePurchaseRequestPdf } from '../../services/achats/purchaseRequestPdf';
-import { purchaseRequestProjectLabel } from '../../services/achats/purchaseRequests';
+import { purchaseRequestProjectLabel, isGroupedPurchaseRequest } from '../../services/achats/purchaseRequests';
 import { isSuperAdmin } from '../../services/rh/isSuperAdmin';
 import { normalizeRequestLines } from '../../services/achats/purchasePdfShared';
 import {
@@ -176,13 +176,14 @@ function QuoteForm({ suppliers, initial, onSave, onCancel, saving, requestId, re
   const [lines, setLines] = useState(() => {
     const normalized = normalizeQuoteLines(initial?.lines);
     if (normalized.length) return normalized;
-    const fromRequest = normalizeRequestLines({ payload: { lines: requestLines } });
+    const fromRequest = requestLines || [];
     if (fromRequest.length) {
       return fromRequest.map((l) => ({
         ...EMPTY_QUOTE_LINE(),
-        designation: l.designation !== '—' ? l.designation : '',
-        quantite: l.quantite !== '—' ? l.quantite : '',
-        unite: l.unite !== '—' ? l.unite : 'u',
+        request_line_id: l.id || null,
+        designation: l.designation && l.designation !== '—' ? l.designation : (l.designation || ''),
+        quantite: l.quantite != null && l.quantite !== '—' ? l.quantite : '',
+        unite: l.unite && l.unite !== '—' ? l.unite : 'u',
       }));
     }
     return [EMPTY_QUOTE_LINE()];
@@ -527,7 +528,10 @@ export default function DemandeAchatDetail({
   }
 
   const projectDisplay = purchaseRequestProjectLabel(request);
-  const besoinsLines = normalizeRequestLines(request);
+  const isGrouped = isGroupedPurchaseRequest(request);
+  const besoinsLines = isGrouped
+    ? (request.payload?.lines || [])
+    : normalizeRequestLines(request);
 
   const canEdit = canEditPurchaseRequest(request.statut, { isSuperAdmin: superAdmin });
   const isTerminal = ['Clôturée', 'Refusée'].includes(request.statut);
@@ -546,7 +550,7 @@ export default function DemandeAchatDetail({
       <div className="flex-between" style={{ marginBottom: 20, flexWrap: 'wrap', gap: 12 }}>
         <div>
           <h1 className="page-title" style={{ marginBottom: 4 }}>{request.ref}</h1>
-          <p className="page-subtitle">{request.titre}</p>
+          <p className="page-subtitle">{request.titre}{isGrouped && <span className="badge badge-blue" style={{ marginLeft: 8, fontSize: '0.72rem' }}>Achats groupés</span>}</p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <span className={`badge ${BADGE_PRIORITE[request.priorite] || 'badge-grey'}`}>{request.priorite}</span>
@@ -647,6 +651,9 @@ export default function DemandeAchatDetail({
                       <th>Désignation</th>
                       <th style={{ width: 90 }}>Qté</th>
                       <th style={{ width: 80 }}>Unité</th>
+                      {isGrouped && <th>Projet</th>}
+                      {isGrouped && <th>Fournisseur</th>}
+                      {isGrouped && <th>Commentaire</th>}
                     </tr>
                   </thead>
                   <tbody>
@@ -656,6 +663,9 @@ export default function DemandeAchatDetail({
                         <td style={{ fontWeight: 600 }}>{line.designation || '—'}</td>
                         <td>{line.quantite !== '—' && line.quantite != null && line.quantite !== '' ? line.quantite : '—'}</td>
                         <td>{line.unite || '—'}</td>
+                        {isGrouped && <td style={{ fontSize: '0.78rem' }}>{line.projet_lie || line.project_name || '—'}</td>}
+                        {isGrouped && <td style={{ fontSize: '0.78rem' }}>{line.fournisseur || '—'}</td>}
+                        {isGrouped && <td style={{ fontSize: '0.78rem', color: 'var(--text-2)' }}>{line.commentaire || '—'}</td>}
                       </tr>
                     ))}
                   </tbody>
@@ -779,24 +789,27 @@ export default function DemandeAchatDetail({
           <div className="card">
             <SectionTitle>Workflow</SectionTitle>
             <div style={{ fontSize: '0.82rem', display: 'flex', flexDirection: 'column', gap: 8 }}>
-              {bundle?.acquisitionOrder && (
-                <div style={{ padding: 10, background: 'var(--surface-2)', borderRadius: 8 }}>
+              {(bundle?.acquisitionOrders?.length ? bundle.acquisitionOrders : (bundle?.acquisitionOrder ? [bundle.acquisitionOrder] : [])).map((oa) => (
+                <div key={oa.id} style={{ padding: 10, background: 'var(--surface-2)', borderRadius: 8 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, marginBottom: 4 }}>
                     <Package size={14} /> Ordre d&apos;achat
+                    {oa.projet_lie || oa.project_name ? (
+                      <span style={{ fontSize: '0.72rem', fontWeight: 500, color: 'var(--text-3)' }}>— {oa.projet_lie || oa.project_name}</span>
+                    ) : null}
                   </div>
-                  <div>{bundle.acquisitionOrder.ref} — {bundle.acquisitionOrder.supplier_name}</div>
-                  <div style={{ color: 'var(--text-3)' }}>{formatMAD(bundle.acquisitionOrder.montant_ttc)} — {bundle.acquisitionOrder.statut}</div>
+                  <div>{oa.ref} — {oa.supplier_name}</div>
+                  <div style={{ color: 'var(--text-3)' }}>{formatMAD(oa.montant_ttc)} — {oa.statut}</div>
                 </div>
-              )}
-              {bundle?.paymentOrder && (
-                <div style={{ padding: 10, background: 'var(--surface-2)', borderRadius: 8 }}>
+              ))}
+              {(bundle?.paymentOrders?.length ? bundle.paymentOrders : (bundle?.paymentOrder ? [bundle.paymentOrder] : [])).map((op) => (
+                <div key={op.id} style={{ padding: 10, background: 'var(--surface-2)', borderRadius: 8 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700, marginBottom: 4 }}>
                     <CreditCard size={14} /> Ordre de paiement
                   </div>
-                  <div>{bundle.paymentOrder.ref} — {formatMAD(bundle.paymentOrder.montant)}</div>
-                  <div style={{ color: 'var(--text-3)' }}>{bundle.paymentOrder.statut}</div>
+                  <div>{op.ref} — {formatMAD(op.montant)}</div>
+                  <div style={{ color: 'var(--text-3)' }}>{op.statut}</div>
                 </div>
-              )}
+              ))}
               {['Ordre d\'achat créé', 'Ordre de paiement créé', 'Commande envoyée', 'En attente réception', 'Réceptionnée'].includes(request.statut) && (
                 <p style={{ fontSize: '0.78rem', color: 'var(--text-3)', margin: 0 }}>
                   Les statuts commande et réception sont mis à jour automatiquement depuis l&apos;ordre d&apos;achat.
