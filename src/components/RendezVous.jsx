@@ -28,7 +28,10 @@ const TYPE_COLORS = {
 
 const STATUT_LABELS = RDV_STATUT_LABELS;
 
-const EMPTY_FORM = { titre: '', date: '', heure: '09:00', heure_fin: '', employe: '', client_prospect: '', lieu: '', description: '', type: 'reunion_interne', statut: 'planifie' };
+const EMPTY_FORM = {
+  titre: '', date: '', heure: '09:00', heure_fin: '', employe: '', employe_employee_id: '',
+  client_prospect: '', lieu: '', description: '', type: 'reunion_interne', statut: 'planifie',
+};
 const INPUT_S = (err) => ({ padding: '9px 12px', width: '100%', outline: 'none', fontFamily: 'var(--font-body)', fontSize: '0.9rem', border: '1.5px solid ' + (err ? 'var(--red)' : 'var(--border)'), borderRadius: 'var(--radius)', background: '#fff' });
 const FILTER_S = { padding: '7px 10px', border: '1.5px solid var(--border)', borderRadius: 'var(--radius)', fontSize: '0.82rem', background: '#fff', fontFamily: 'var(--font-body)' };
 
@@ -108,6 +111,7 @@ export default function RendezVous() {
       heure: a.heure || '09:00',
       heure_fin: a.heure_fin || '',
       employe: a.employe || '',
+      employe_employee_id: a.responsableEmployeeId || '',
       client_prospect: a.client_prospect || '',
       lieu: a.lieu || '',
       description: a.description || '',
@@ -169,13 +173,18 @@ export default function RendezVous() {
     }).sort((a, b) => a.date.localeCompare(b.date) || a.heure.localeCompare(b.heure));
   }, [view, appointments, selectedStr, filter, dateFilter, statutFilter, typeFilter, responsableFilter, filterInternalAppointments]);
 
-  const employeeNames = useMemo(() => {
-    const fromRh = employees
+  const employeeOptions = useMemo(() => {
+    return employees
       .filter((e) => e.statut !== 'Inactif')
-      .map(employeeFullName)
-      .filter(Boolean);
+      .map((e) => ({ id: e.id, name: employeeFullName(e) }))
+      .filter((o) => o.name)
+      .sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+  }, [employees]);
+
+  const employeeNames = useMemo(() => {
+    const fromRh = employeeOptions.map((o) => o.name);
     return [...new Set([...fromRh, ...responsables])].sort((a, b) => a.localeCompare(b, 'fr'));
-  }, [employees, responsables]);
+  }, [employeeOptions, responsables]);
 
   function typeColor(type) {
     return TYPE_COLORS[type] || TYPE_COLORS.autre;
@@ -403,9 +412,21 @@ export default function RendezVous() {
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div className="form-group">
                   <label>Employe</label>
-                  <select value={form.employe} onChange={e => setF('employe', e.target.value)} style={INPUT_S(false)}>
+                  <select
+                    value={form.employe}
+                    onChange={(e) => {
+                      const name = e.target.value;
+                      const opt = employeeOptions.find((o) => o.name === name);
+                      setForm((p) => ({
+                        ...p,
+                        employe: name,
+                        employe_employee_id: opt?.id || '',
+                      }));
+                    }}
+                    style={INPUT_S(false)}
+                  >
                     <option value="">Liste des employes</option>
-                    {employeeNames.map(name => <option key={name} value={name}>{name}</option>)}
+                    {employeeNames.map((name) => <option key={name} value={name}>{name}</option>)}
                   </select>
                 </div>
                 <div className="form-group">

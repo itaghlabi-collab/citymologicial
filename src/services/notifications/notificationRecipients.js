@@ -253,11 +253,20 @@ async function resolveAssigneeProfileLocal(hints = {}) {
  */
 export async function resolveAssigneeProfile(hints = {}) {
   const assigneeName = hints.assigneeName || hints.assignee || null;
+  let employeeId = hints.employeeId || null;
+
+  if (!employeeId && assigneeName?.trim()) {
+    const employees = await fetchEmployeesForMatching();
+    const emp = employees.find((e) =>
+      employeeDisplayNames(e).some((label) => personNamesMatch(label, assigneeName)),
+    );
+    if (emp?.id) employeeId = emp.id;
+  }
 
   try {
     const { data: userId, error } = await getSupabase().rpc('resolve_notification_recipient', {
       p_user_id: hints.userId || null,
-      p_employee_id: hints.employeeId || null,
+      p_employee_id: employeeId,
       p_email: hints.email || null,
       p_assignee_name: assigneeName,
     });

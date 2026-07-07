@@ -31,7 +31,7 @@ function Toast({ toast }) {
 const PRIORITY_BADGES = { urgente: 'badge-red', haute: 'badge-red', normale: 'badge-blue', basse: 'badge-grey' };
 
 const EMPTY_FORM = {
-  titre: '', description: '', assigne: '', departement_id: '', dateLimite: '',
+  titre: '', description: '', assigne: '', assigne_employee_id: '', departement_id: '', dateLimite: '',
   statut: 'a_faire', priorite: 'normale', module_lie: '', commentaire: '', is_dg_task: false,
 };
 
@@ -293,6 +293,7 @@ export default function Taches() {
       titre: t.titre,
       description: t.description || '',
       assigne: t.assigne || '',
+      assigne_employee_id: t.responsableEmployeeId || '',
       departement_id: deptCodeFromTask(t),
       dateLimite: t.dateLimite || '',
       statut: t.statut,
@@ -309,7 +310,7 @@ export default function Taches() {
   function setF(k, v) { setForm((p) => ({ ...p, [k]: v })); }
 
   function handleDepartmentChange(deptId) {
-    setForm((p) => ({ ...p, departement_id: deptId, assigne: '' }));
+    setForm((p) => ({ ...p, departement_id: deptId, assigne: '', assigne_employee_id: '' }));
   }
 
   function payloadFromForm(f) {
@@ -422,6 +423,7 @@ export default function Taches() {
       : active;
 
     const options = filtered.map((e) => ({
+      id: e.id,
       name: employeeFullName(e),
       deptCode: employeeDepartmentCode(e),
     })).filter((o) => o.name);
@@ -429,6 +431,7 @@ export default function Taches() {
     if (form.assigne && !options.some((o) => o.name === form.assigne)) {
       const match = active.find((e) => employeeFullName(e) === form.assigne);
       options.push({
+        id: match?.id || form.assigne_employee_id || '',
         name: form.assigne,
         deptCode: match ? employeeDepartmentCode(match) : '—',
       });
@@ -648,7 +651,19 @@ export default function Taches() {
               </div>
               <div className="form-group">
                 <label>Assigné à{form.is_dg_task ? ' *' : ''}</label>
-                <select value={form.assigne} onChange={(e) => setF('assigne', e.target.value)} style={INPUT_S(errors.assigne)}>
+                <select
+                  value={form.assigne}
+                  onChange={(e) => {
+                    const name = e.target.value;
+                    const opt = assignableEmployees.find((o) => o.name === name);
+                    setForm((p) => ({
+                      ...p,
+                      assigne: name,
+                      assigne_employee_id: opt?.id || '',
+                    }));
+                  }}
+                  style={INPUT_S(errors.assigne)}
+                >
                   <option value="">
                     {form.departement_id ? 'Choisir un employé du département…' : 'Liste des employés'}
                   </option>

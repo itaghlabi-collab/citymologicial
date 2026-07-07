@@ -96,7 +96,7 @@ export async function notifyDgTaskCreated(task) {
     entityId: task.id,
     actionUrl: moduleActionUrl('taches'),
     submoduleCode: NOTIFICATION_SUBMODULES.TACHES,
-  });
+  }, { employeeId: task.responsableEmployeeId });
 }
 
 /** Tâche créée : notification personnalisée à l'assigné uniquement. */
@@ -120,7 +120,7 @@ export async function notifyTaskCreated(task) {
     entityId: task.id,
     actionUrl: moduleActionUrl('taches'),
     submoduleCode: NOTIFICATION_SUBMODULES.TACHES,
-  });
+  }, { employeeId: task.responsableEmployeeId });
 }
 
 /** Tâche réassignée → nouveau responsable. */
@@ -137,7 +137,7 @@ export async function notifyTaskAssigned(task, { previousAssignee } = {}) {
     entityId: task.id,
     actionUrl: moduleActionUrl('taches'),
     submoduleCode: NOTIFICATION_SUBMODULES.TACHES,
-  });
+  }, { employeeId: task.responsableEmployeeId });
 }
 
 /** Relance Directeur → notification à l'assigné uniquement. */
@@ -156,7 +156,7 @@ export async function notifyTaskDgRelance(task, customMessage) {
     entityId: task.id,
     actionUrl: moduleActionUrl('taches'),
     submoduleCode: NOTIFICATION_SUBMODULES.TACHES,
-  });
+  }, { employeeId: task.responsableEmployeeId });
 }
 
 /** Tâche urgente DG → Direction uniquement. */
@@ -189,7 +189,10 @@ export async function notifyTaskCompleted(task) {
   };
   const recipients = new Set();
   if (task.created_by) recipients.add(task.created_by);
-  const { profile: assignee } = await resolveAssigneeProfile({ assigneeName: task.assigne });
+  const { profile: assignee } = await resolveAssigneeProfile({
+    assigneeName: task.assigne,
+    employeeId: task.responsableEmployeeId,
+  });
   if (assignee?.id) recipients.add(assignee.id);
   if (!recipients.size) {
     return notifyTargeted({ submoduleCode: NOTIFICATION_SUBMODULES.TACHES }, payload);
@@ -342,7 +345,7 @@ export async function notifyAppointmentAssigned(appt, { isUpdate = false } = {})
     entityId: appt.id,
     actionUrl: moduleActionUrl('rendezvous'),
     submoduleCode: NOTIFICATION_SUBMODULES.RENDEZ_VOUS,
-  });
+  }, { employeeId: appt.responsableEmployeeId });
 }
 
 /** Demande de ressources validée → demandeur. */
