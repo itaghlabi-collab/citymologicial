@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from './hooks/useAuth';
+import { initNotificationSoundUnlock } from './utils/notificationSound';
 import './App.css';
 import NotificationCenter from './components/notifications/NotificationCenter';
 import UserProfileMenu from './components/dashboard/UserProfileMenu';
@@ -559,6 +560,8 @@ export default function App() {
     window.addEventListener('popstate', onPopState);
     return () => window.removeEventListener('popstate', onPopState);
   }, []);
+
+  useEffect(() => initNotificationSoundUnlock(), []);
 
   // While restoring session — même fond login Codia (spinner visible)
   if (loading) {

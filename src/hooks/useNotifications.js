@@ -8,18 +8,11 @@ import {
   countUnreadNotifications,
   markNotificationRead,
   markAllNotificationsRead,
-  SOUND_NOTIFICATION_TYPES,
 } from '../services/notifications/notifications';
 import { playNotificationSound } from '../utils/notificationSound';
 import { logNotificationDebug } from '../services/notifications/notificationDebug';
 
 const POLL_MS = 10_000;
-
-function shouldPlaySoundFor(notification) {
-  if (!notification) return false;
-  if (SOUND_NOTIFICATION_TYPES.has(notification.type)) return true;
-  return notification.priority === 'high' || notification.priority === 'urgent';
-}
 
 function rowToNotification(row) {
   if (!row) return null;
@@ -42,9 +35,10 @@ export function useNotifications(user) {
 
   const playForNew = useCallback((notifications) => {
     if (!soundEnabledRef.current || !notifications?.length) return;
-    const important = notifications.filter(shouldPlaySoundFor);
-    if (important.length > 0) {
+    const freshUnread = notifications.filter((n) => n && !n.isRead);
+    if (freshUnread.length > 0) {
       playNotificationSound();
+      logNotificationDebug('sound.play', { count: freshUnread.length });
     }
   }, []);
 
@@ -106,7 +100,7 @@ export function useNotifications(user) {
         },
         (payload) => {
           const incoming = rowToNotification(payload.new);
-          if (incoming && !knownIdsRef.current.has(incoming.id)) {
+          if (incoming && !incoming.isRead && !knownIdsRef.current.has(incoming.id)) {
             playForNew([incoming]);
           }
           load();
@@ -120,7 +114,14 @@ export function useNotifications(user) {
           table: 'notifications',
           filter: `recipient_user_id=eq.${user.id}`,
         },
-        () => { load(); },
+        (payload) => {
+          const incoming = rowToNotification(payload.new);
+          const wasRead = Boolean(payload.old?.is_read);
+          if (incoming && !incoming.isRead && wasRead) {
+            playForNew([incoming]);
+          }
+          load();
+        },
       )
       .subscribe();
     return () => { getSupabase().removeChannel(channel); };

@@ -26,12 +26,8 @@ export const NOTIFICATION_TYPES = {
   SYSTEM: 'system',
 };
 
-/** Types métier déclenchant un son à la réception. */
-export const SOUND_NOTIFICATION_TYPES = new Set([
-  NOTIFICATION_TYPES.TASK,
-  NOTIFICATION_TYPES.RESOURCE_REQUEST,
-  NOTIFICATION_TYPES.APPOINTMENT,
-]);
+/** Types métier (son joué pour toute nouvelle notification non lue). */
+export const SOUND_NOTIFICATION_TYPES = new Set(Object.values(NOTIFICATION_TYPES));
 
 export const NOTIFICATION_PRIORITIES = {
   LOW: 'low',

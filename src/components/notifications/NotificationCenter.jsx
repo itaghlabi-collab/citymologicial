@@ -7,6 +7,7 @@ import {
   ShoppingCart, AlertTriangle, Info, ExternalLink, Users,
 } from 'lucide-react';
 import { useNotifications } from '../../hooks/useNotifications';
+import { unlockNotificationSound } from '../../utils/notificationSound';
 import { parseActionUrl } from '../../services/notifications/notifications';
 
 const TYPE_ICONS = {
@@ -94,7 +95,10 @@ export default function NotificationCenter({ user, onNavigate }) {
         className="icon-btn notif-bell-btn"
         aria-label="Notifications"
         aria-expanded={open}
-        onClick={() => setOpen((o) => !o)}
+        onClick={() => {
+          unlockNotificationSound();
+          setOpen((o) => !o);
+        }}
       >
         <Bell size={18} />
         {unreadCount > 0 && (
