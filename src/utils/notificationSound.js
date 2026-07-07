@@ -1,5 +1,5 @@
 /**
- * notificationSound.js — Alarme 3 bips (fichier statique + secours Web Audio)
+ * notificationSound.js — Alarme 3 bips (Web Audio instant + WAV en renfort)
  */
 const ALARM_SOUND_URL = '/sounds/notification-alarm-v3.wav';
 const SOUND_REVISION = 'alarm-v3';
@@ -8,6 +8,7 @@ let audioCtx = null;
 let audioEl = null;
 let unlocked = false;
 let unlockListenersAttached = false;
+let preloadStarted = false;
 
 function getAudioContext() {
   if (typeof window === 'undefined') return null;
@@ -35,6 +36,15 @@ function ensureSoundRevision() {
     }
   } catch {
     /* ignore */
+  }
+}
+
+function preloadAlarmFile() {
+  if (preloadStarted || typeof window === 'undefined') return;
+  preloadStarted = true;
+  const el = getAudioElement();
+  if (el) {
+    el.load();
   }
 }
 
@@ -100,7 +110,7 @@ async function playHtmlAudio() {
 
 export function unlockNotificationSound() {
   if (typeof window === 'undefined') return;
-  getAudioElement();
+  preloadAlarmFile();
   const ctx = getAudioContext();
   try {
     if (ctx?.state === 'suspended') {
@@ -129,22 +139,22 @@ export function unlockNotificationSound() {
   }
 }
 
-export async function playNotificationSound() {
+/** Bip immédiat (Web Audio) puis WAV en arrière-plan si disponible. */
+export function playNotificationSound() {
   if (typeof window === 'undefined') return;
   ensureSoundRevision();
   unlockNotificationSound();
 
-  const htmlOk = await playHtmlAudio();
-  if (htmlOk) return;
-
   const ctx = getAudioContext();
   if (ctx?.state === 'suspended') {
-    await ctx.resume().catch(() => {});
+    void ctx.resume();
   }
-  if (!playWebAudioChime()) {
-    await new Promise((r) => setTimeout(r, 80));
-    await playHtmlAudio();
-  }
+
+  playWebAudioChime();
+
+  void playHtmlAudio().catch(() => {
+    playWebAudioChime();
+  });
 }
 
 function detachUnlockListeners(listeners) {
@@ -156,6 +166,7 @@ function detachUnlockListeners(listeners) {
 export function initNotificationSoundUnlock() {
   if (typeof window === 'undefined' || unlockListenersAttached) return () => {};
   unlockListenersAttached = true;
+  preloadAlarmFile();
 
   const events = ['pointerdown', 'touchstart', 'keydown', 'click'];
   const listeners = [];

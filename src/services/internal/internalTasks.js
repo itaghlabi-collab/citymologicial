@@ -4,6 +4,13 @@
 import { getSupabase } from '../../lib/supabase';
 import { canManageTaskDgPush, userMatchesAssignee } from '../auth/taskDgPushAccess';
 import { personNamesMatch } from '../notifications/notificationRecipients';
+import {
+  notifyTaskCreated,
+  notifyTaskAssigned,
+  notifyTaskCompleted,
+  notifyTaskDgRelance,
+  notifyTaskDgUrgent,
+} from '../notifications/notificationEvents';
 
 const TABLE = 'internal_tasks';
 const RELANCE_TABLE = 'internal_task_dg_relances';
@@ -163,10 +170,8 @@ export async function createInternalTask(form) {
     .single();
   if (error) throw error;
   const task = normalizeInternalTask(data);
-  import('../notifications/notificationEvents').then(({ notifyTaskCreated }) => {
-    notifyTaskCreated(task).catch((err) => {
-      console.warn('[CITYMO] notifyTaskCreated', err, task?.id, task?.assigne);
-    });
+  notifyTaskCreated(task).catch((err) => {
+    console.warn('[CITYMO] notifyTaskCreated', err, task?.id, task?.assigne);
   });
   return task;
 }
@@ -192,10 +197,8 @@ export async function updateInternalTask(id, form) {
   const prevAssignee = prev?.responsable || '';
   const newAssignee = task.assigne || '';
   if (newAssignee && !personNamesMatch(prevAssignee, newAssignee)) {
-    import('../notifications/notificationEvents').then(({ notifyTaskAssigned }) => {
-      notifyTaskAssigned(task, { previousAssignee: prevAssignee }).catch((err) => {
-        console.warn('[CITYMO] notifyTaskAssigned', err, task?.id);
-      });
+    notifyTaskAssigned(task, { previousAssignee: prevAssignee }).catch((err) => {
+      console.warn('[CITYMO] notifyTaskAssigned', err, task?.id);
     });
   }
 
@@ -222,9 +225,7 @@ export async function setInternalTaskStatut(id, statut) {
   }
   const task = await patchInternalTask(id, { statut });
   if (statut === 'terminee') {
-    import('../notifications/notificationEvents').then(({ notifyTaskCompleted }) => {
-      notifyTaskCompleted(task).catch(() => {});
-    });
+    notifyTaskCompleted(task).catch(() => {});
   }
   return task;
 }
@@ -240,7 +241,6 @@ export async function sendInternalTaskDgRelance(task, message) {
   };
   const { error } = await getSupabase().from(RELANCE_TABLE).insert([payload]);
   if (error) throw error;
-  const { notifyTaskDgRelance } = await import('../notifications/notificationEvents');
   await notifyTaskDgRelance(task, message);
   return {
     ...task,
@@ -263,9 +263,7 @@ export async function setInternalTaskDgPush(id, enabled, userId, dgNote) {
   }
   const task = await patchInternalTask(id, patch);
   if (enabled) {
-    import('../notifications/notificationEvents').then(({ notifyTaskDgUrgent }) => {
-      notifyTaskDgUrgent(task).catch(() => {});
-    });
+    notifyTaskDgUrgent(task).catch(() => {});
   }
   return task;
 }

@@ -13,8 +13,7 @@ import {
 import { playNotificationSound } from '../utils/notificationSound';
 import { logNotificationDebug } from '../services/notifications/notificationDebug';
 
-const POLL_FAST_MS = 2_500;
-const POLL_BACKUP_MS = 5_000;
+const POLL_MS = 1_500;
 const POLL_HIDDEN_MS = 15_000;
 
 function rowToNotification(row) {
@@ -44,7 +43,7 @@ export function useNotifications(user) {
     if (!soundEnabledRef.current || !notifications?.length) return;
     const freshUnread = notifications.filter((n) => n && !n.isRead);
     if (freshUnread.length > 0) {
-      playNotificationSound().catch(() => {});
+      playNotificationSound();
       logNotificationDebug('sound.play', { count: freshUnread.length, ids: freshUnread.map((n) => n.id) });
     }
   }, []);
@@ -71,6 +70,8 @@ export function useNotifications(user) {
     const isNew = !knownIdsRef.current.has(incoming.id);
     knownIdsRef.current.add(incoming.id);
 
+    announceUnread([incoming]);
+
     if (isNew) {
       setItems((prev) => {
         if (prev.some((n) => n.id === incoming.id)) return prev;
@@ -85,8 +86,6 @@ export function useNotifications(user) {
         userId,
       });
     }
-
-    announceUnread([incoming]);
   }, [announceUnread, userId]);
 
   const load = useCallback(async () => {
@@ -143,10 +142,7 @@ export function useNotifications(user) {
       loadRef.current?.();
     };
 
-    const schedule = () => {
-      if (!isDocumentVisible()) return POLL_HIDDEN_MS;
-      return realtimeOkRef.current ? POLL_BACKUP_MS : POLL_FAST_MS;
-    };
+    const schedule = () => (isDocumentVisible() ? POLL_MS : POLL_HIDDEN_MS);
 
     let timer = null;
     const loop = () => {
