@@ -246,6 +246,8 @@ BEGIN
   )
   ON CONFLICT (recipient_user_id, entity_type, entity_id, type)
   WHERE recipient_user_id IS NOT NULL
+    AND entity_type IS NOT NULL
+    AND entity_id IS NOT NULL
   DO UPDATE SET
     title = EXCLUDED.title,
     message = EXCLUDED.message,
