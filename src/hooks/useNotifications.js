@@ -1,5 +1,5 @@
 /**
- * useNotifications.js — Hook centre de notifications (poll 10s + realtime ciblé)
+ * useNotifications.js — Hook centre de notifications (realtime + poll adaptatif)
  */
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { getSupabase, isSupabaseConfigured } from '../lib/supabase';
@@ -8,20 +8,22 @@ import {
   countUnreadNotifications,
   markNotificationRead,
   markAllNotificationsRead,
+  normalizeNotification,
 } from '../services/notifications/notifications';
 import { playNotificationSound } from '../utils/notificationSound';
 import { logNotificationDebug } from '../services/notifications/notificationDebug';
 
-const POLL_MS = 5_000;
+const POLL_FAST_MS = 2_500;
+const POLL_SLOW_MS = 8_000;
+const POLL_HIDDEN_MS = 15_000;
 
 function rowToNotification(row) {
-  if (!row) return null;
-  return {
-    id: row.id,
-    type: row.type || 'system',
-    priority: row.priority || 'normal',
-    isRead: Boolean(row.is_read),
-  };
+  return normalizeNotification(row);
+}
+
+function isDocumentVisible() {
+  if (typeof document === 'undefined') return true;
+  return document.visibilityState === 'visible';
 }
 
 export function useNotifications(user) {
@@ -32,6 +34,8 @@ export function useNotifications(user) {
   const knownIdsRef = useRef(new Set());
   const initialLoadRef = useRef(true);
   const soundEnabledRef = useRef(true);
+  const realtimeOkRef = useRef(false);
+  const loadRef = useRef(null);
 
   const playForNew = useCallback((notifications) => {
     if (!soundEnabledRef.current || !notifications?.length) return;
@@ -41,6 +45,27 @@ export function useNotifications(user) {
       logNotificationDebug('sound.play', { count: freshUnread.length });
     }
   }, []);
+
+  const applyIncoming = useCallback((incoming, { playSound = true } = {}) => {
+    if (!incoming?.id || incoming.isRead) return;
+    const isNew = !knownIdsRef.current.has(incoming.id);
+    if (!isNew) return;
+
+    knownIdsRef.current.add(incoming.id);
+    setItems((prev) => {
+      if (prev.some((n) => n.id === incoming.id)) return prev;
+      return [incoming, ...prev].sort(
+        (a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0),
+      );
+    });
+    setUnreadCount((c) => c + 1);
+    if (playSound) playForNew([incoming]);
+    logNotificationDebug('realtime.incoming', {
+      id: incoming.id,
+      title: incoming.title,
+      userId: user?.id,
+    });
+  }, [playForNew, user?.id]);
 
   const load = useCallback(async () => {
     if (!configured || !user?.id) {
@@ -74,22 +99,59 @@ export function useNotifications(user) {
     }
   }, [configured, user, playForNew]);
 
+  loadRef.current = load;
+
   useEffect(() => {
     initialLoadRef.current = true;
     knownIdsRef.current = new Set();
+    realtimeOkRef.current = false;
     load();
   }, [load]);
 
   useEffect(() => {
     if (!configured || !user?.id) return undefined;
-    const timer = setInterval(load, POLL_MS);
-    return () => clearInterval(timer);
-  }, [configured, user?.id, load]);
+
+    const tick = () => {
+      if (!isDocumentVisible()) return;
+      loadRef.current?.();
+    };
+
+    const schedule = () => {
+      if (!isDocumentVisible()) return POLL_HIDDEN_MS;
+      return realtimeOkRef.current ? POLL_SLOW_MS : POLL_FAST_MS;
+    };
+
+    let timer = null;
+    const loop = () => {
+      tick();
+      timer = setTimeout(loop, schedule());
+    };
+    timer = setTimeout(loop, schedule());
+
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') {
+        loadRef.current?.();
+      }
+    };
+    const onFocus = () => { loadRef.current?.(); };
+
+    document.addEventListener('visibilitychange', onVisible);
+    window.addEventListener('focus', onFocus);
+
+    return () => {
+      if (timer) clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [configured, user?.id]);
 
   useEffect(() => {
     if (!configured || !user?.id) return undefined;
-    const channel = getSupabase()
-      .channel(`notifications-${user.id}`)
+
+    const channelName = `notifications-${user.id}`;
+    const sb = getSupabase();
+    const channel = sb
+      .channel(channelName)
       .on(
         'postgres_changes',
         {
@@ -100,11 +162,8 @@ export function useNotifications(user) {
         },
         (payload) => {
           const incoming = rowToNotification(payload.new);
-          if (incoming && !incoming.isRead && !knownIdsRef.current.has(incoming.id)) {
-            knownIdsRef.current.add(incoming.id);
-            playForNew([incoming]);
-          }
-          load();
+          applyIncoming(incoming);
+          loadRef.current?.();
         },
       )
       .on(
@@ -119,14 +178,22 @@ export function useNotifications(user) {
           const incoming = rowToNotification(payload.new);
           const wasRead = Boolean(payload.old?.is_read);
           if (incoming && !incoming.isRead && wasRead) {
-            playForNew([incoming]);
+            applyIncoming(incoming);
           }
-          load();
+          loadRef.current?.();
         },
       )
-      .subscribe();
-    return () => { getSupabase().removeChannel(channel); };
-  }, [configured, user?.id, load, playForNew]);
+      .subscribe((status) => {
+        const ok = status === 'SUBSCRIBED';
+        realtimeOkRef.current = ok;
+        logNotificationDebug('realtime.status', { status, userId: user.id, ok });
+        if (!ok && status !== 'SUBSCRIBED') {
+          loadRef.current?.();
+        }
+      });
+
+    return () => { sb.removeChannel(channel); };
+  }, [configured, user?.id, applyIncoming]);
 
   useEffect(() => {
     if (!user?.id) return;
