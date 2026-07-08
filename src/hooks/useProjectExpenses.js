@@ -1,7 +1,7 @@
 /**
  * useProjectExpenses.js — Hook module Dépenses par projet
  */
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import { listProjects } from '../services/projects/projects';
 import {
   listProjectExpenses,
@@ -18,6 +18,18 @@ import {
 } from '../services/finance/projectExpenseData';
 import { isSupabaseConfigured } from '../lib/supabase';
 
+const SYNC_COOLDOWN_MS = 5 * 60 * 1000; // sync auto max 1× / 5 min
+let lastAutoSyncAt = 0;
+
+function enrichExpensesWithProjects(expenses, projects) {
+  const byId = Object.fromEntries((projects || []).map((p) => [p.id, p]));
+  return (expenses || []).map((e) => {
+    const p = e.project_id ? byId[e.project_id] : null;
+    if (!p) return e;
+    return { ...e, project_nom: p.nom || e.project_nom || e.project_name_raw || '' };
+  });
+}
+
 export function useProjectExpenses() {
   const [projects, setProjects] = useState([]);
   const [expenses, setExpenses] = useState([]);
@@ -27,7 +39,8 @@ export function useProjectExpenses() {
   const [error, setError] = useState(null);
   const configured = isSupabaseConfigured();
 
-  const reload = useCallback(async (withSync = true) => {
+  const reload = useCallback(async (opts = {}) => {
+    const withSync = opts.withSync === true;
     if (!configured) {
       setLoading(false);
       return;
@@ -35,45 +48,72 @@ export function useProjectExpenses() {
     setLoading(true);
     setError(null);
     try {
-      if (withSync) {
-        setSyncing(true);
-        await syncProjectExpensesFromErp().catch(() => {});
-        setSyncing(false);
-      }
-      await purgeImportedTotalSummaryRows().catch(() => {});
       const [projs, exps, ctx] = await Promise.all([
-        listProjects(),
+        listProjects({ light: true }),
         listProjectExpenses(),
         fetchErpContextForProjects(),
       ]);
       setProjects(projs);
-      setExpenses(exps);
+      setExpenses(enrichExpensesWithProjects(exps, projs));
       setErpContext(ctx);
     } catch (err) {
       setError(err.message || 'Erreur chargement');
     } finally {
       setLoading(false);
+    }
+
+    // Sync ERP uniquement sur demande explicite (bouton), ou 1× toutes les 5 min max
+    const now = Date.now();
+    const canAuto = withSync && now - lastAutoSyncAt > SYNC_COOLDOWN_MS;
+    if (!canAuto && !opts.forceSync) return;
+
+    setSyncing(true);
+    try {
+      lastAutoSyncAt = Date.now();
+      await syncProjectExpensesFromErp().catch(() => {});
+      await purgeImportedTotalSummaryRows().catch(() => {});
+      const [projs2, exps2, ctx2] = await Promise.all([
+        listProjects({ light: true }),
+        listProjectExpenses(),
+        fetchErpContextForProjects(),
+      ]);
+      setProjects(projs2);
+      setExpenses(enrichExpensesWithProjects(exps2, projs2));
+      setErpContext(ctx2);
+    } finally {
       setSyncing(false);
     }
   }, [configured]);
 
-  useEffect(() => { reload(); }, [reload]);
+  useEffect(() => {
+    // Premier affichage : lecture seule (rapide) — pas de sync ERP
+    reload({ withSync: false });
+  }, [reload]);
 
-  const dashboard = buildProjectExpenseDashboard(
-    expenses,
-    projects,
-    erpContext.orders,
-    erpContext.acquisitionOrders,
+  const dashboard = useMemo(
+    () => buildProjectExpenseDashboard(
+      expenses,
+      projects,
+      erpContext.orders,
+      erpContext.acquisitionOrders,
+    ),
+    [expenses, projects, erpContext.orders, erpContext.acquisitionOrders],
   );
 
-  const summaries = buildProjectSummaries(
-    projects,
-    expenses,
-    erpContext.orders,
-    erpContext.acquisitionOrders,
+  const summaries = useMemo(
+    () => buildProjectSummaries(
+      projects,
+      expenses,
+      erpContext.orders,
+      erpContext.acquisitionOrders,
+    ),
+    [projects, expenses, erpContext.orders, erpContext.acquisitionOrders],
   );
 
-  const unmatched = expenses.filter((e) => e.project_match_status === 'needs_manual');
+  const unmatched = useMemo(
+    () => expenses.filter((e) => e.project_match_status === 'needs_manual'),
+    [expenses],
+  );
 
   return {
     configured,
@@ -86,15 +126,20 @@ export function useProjectExpenses() {
     dashboard,
     summaries,
     unmatched,
-    reload,
+    reload: () => reload({ withSync: false }),
     create: createProjectExpense,
     update: updateProjectExpense,
     remove: deleteProjectExpense,
     syncNow: async () => {
       setSyncing(true);
-      await syncProjectExpensesFromErp();
-      await reload(false);
-      setSyncing(false);
+      try {
+        lastAutoSyncAt = Date.now();
+        await syncProjectExpensesFromErp();
+        await purgeImportedTotalSummaryRows().catch(() => {});
+        await reload({ withSync: false });
+      } finally {
+        setSyncing(false);
+      }
     },
   };
 }

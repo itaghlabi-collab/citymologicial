@@ -1,34 +1,137 @@
 -- =============================================================================
--- CITYMO ERP — Sécurité RLS complète (migration unique)
--- Supabase → SQL Editor → Run (ré-exécutable)
+-- CITYMO ERP — Sécurité RLS (version SAFE — ne pas exécuter sans validation)
+-- Fichier : supabase/RUN_RLS_SECURITY_COMPLET_SAFE.sql
+-- Version : 2026-07-08
+-- Référence audit : supabase/RLS_SECURITY_AUDIT.md
 --
--- VERSION : 2026-07-08 — autonome (copier/coller ce fichier entier dans SQL Editor)
--- DOCUMENTATION : supabase/RLS_SECURITY_AUDIT.md
+-- ⚠️  PRODUCTION — lire entièrement avant exécution
+-- ⚠️  Ce script NE modifie PAS les données métier par défaut
+-- ⚠️  Les sections SEED et HARDENING sont désactivées (commentées)
 --
--- Ce script :
---   1. Crée les helpers RBAC (erp_can, erp_auth_ok, erp_legacy_access)
---   2. Complète les permissions rôles (DG, chef_projet, chef_chantier)
---   3. Révoque les grants anon sur tables métier
---   4. Active RLS partout
---   5. Applique policies par module (sans USING(true) sur métier)
---   6. Policies CUSTOM (profiles, leaves, notifications, tâches DG, agenda)
---   7. Durcit SECURITY DEFINER
+-- Convention fonctions statut profil :
+--   profile_is_active(text)  → vérifie la colonne statut ('actif' / autre)
+--   is_profile_active(uuid)  → vérifie un utilisateur par id
+--   is_profile_active(text)  → alias rétrocompat (délègue à profile_is_active)
 -- =============================================================================
 
+
 -- ═══════════════════════════════════════════════════════════════════════════
--- PARTIE 0 — FONCTIONS PRÉREQUIS (autonome, ré-exécutable)
+-- PARTIE 0 — PRECHECK (lecture + garde-fou — arrêt si prérequis critiques absents)
 -- ═══════════════════════════════════════════════════════════════════════════
 
--- Statut profil : texte (NE PAS confondre avec is_profile_active(uuid))
+-- 0.1 Tables critiques
+SELECT 'TABLE' AS check_type, t AS object_name,
+  CASE WHEN to_regclass('public.' || t) IS NOT NULL THEN 'OK' ELSE 'MANQUANT' END AS status
+FROM unnest(ARRAY[
+  'profiles', 'erp_roles', 'role_permissions', 'user_permission_exceptions',
+  'notifications', 'leaves', 'internal_tasks'
+]) AS t
+ORDER BY 1, 2;
+
+-- 0.2 Colonnes profiles utilisées par les helpers
+SELECT 'COLUMN' AS check_type, c.col AS object_name,
+  CASE WHEN EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'profiles' AND column_name = c.col
+  ) THEN 'OK' ELSE 'MANQUANT' END AS status
+FROM unnest(ARRAY['id', 'statut', 'role_id', 'role', 'email', 'employee_id', 'nom']) AS c(col)
+ORDER BY 2;
+
+-- 0.3 Colonnes notifications (si table présente)
+SELECT 'COLUMN' AS check_type, c.col AS object_name,
+  CASE WHEN to_regclass('public.notifications') IS NULL THEN 'SKIP (pas de table)'
+       WHEN EXISTS (
+         SELECT 1 FROM information_schema.columns
+         WHERE table_schema = 'public' AND table_name = 'notifications' AND column_name = c.col
+       ) THEN 'OK' ELSE 'MANQUANT' END AS status
+FROM unnest(ARRAY[
+  'recipient_user_id', 'is_global', 'title', 'entity_type', 'entity_id', 'type'
+]) AS c(col)
+ORDER BY 2;
+
+-- 0.4 Fonctions RPC notifications (informatif — seront créées si absentes en PARTIE 1)
+SELECT 'FUNCTION' AS check_type, f.sig AS object_name,
+  CASE WHEN to_regprocedure(f.sig) IS NOT NULL THEN 'OK' ELSE 'SERA_CRÉÉE' END AS status
+FROM (VALUES
+  ('public.insert_user_notification(uuid,text,text,text,text,text,uuid,text,uuid,text)'),
+  ('public.upsert_user_notification(uuid,text,text,text,text,text,uuid,text,uuid,text)'),
+  ('public.resolve_notification_recipient(uuid,uuid,text,text)'),
+  ('public.profile_is_active(text)'),
+  ('public.is_profile_active(uuid)')
+) AS f(sig)
+ORDER BY 2;
+
+-- 0.5 Profils sans role_id (risque erp_legacy_access — informatif uniquement)
+SELECT 'DATA' AS check_type, 'profiles_sans_role_id' AS object_name,
+  count(*)::text AS status
+FROM public.profiles
+WHERE role_id IS NULL;
+
+-- 0.6 GARDE-FOU : arrêt si prérequis critiques manquants
+DO $precheck$
+DECLARE
+  v_missing_tables text[];
+  v_missing_cols text[];
+BEGIN
+  SELECT array_agg(t ORDER BY t) INTO v_missing_tables
+  FROM unnest(ARRAY['profiles', 'erp_roles', 'role_permissions']) AS t
+  WHERE to_regclass('public.' || t) IS NULL;
+
+  IF v_missing_tables IS NOT NULL THEN
+    RAISE EXCEPTION
+      'PRECHECK ECHEC — tables critiques manquantes : %. Migration RLS annulée.',
+      array_to_string(v_missing_tables, ', ');
+  END IF;
+
+  SELECT array_agg(c ORDER BY c) INTO v_missing_cols
+  FROM unnest(ARRAY['id', 'statut', 'role_id']) AS c
+  WHERE NOT EXISTS (
+    SELECT 1 FROM information_schema.columns
+    WHERE table_schema = 'public' AND table_name = 'profiles' AND column_name = c
+  );
+
+  IF v_missing_cols IS NOT NULL THEN
+    RAISE EXCEPTION
+      'PRECHECK ECHEC — colonnes profiles manquantes : %. Migration RLS annulée.',
+      array_to_string(v_missing_cols, ', ');
+  END IF;
+
+  RAISE NOTICE 'PRECHECK OK — poursuite de la migration SAFE';
+END
+$precheck$;
+
+
+-- ═══════════════════════════════════════════════════════════════════════════
+-- PARTIE 1 — FONCTIONS FONDATION (ordre strict : aucun appel avant définition)
+-- ═══════════════════════════════════════════════════════════════════════════
+
+-- 1.1 Statut texte (fonction canonique)
 CREATE OR REPLACE FUNCTION public.profile_is_active(p_statut text)
 RETURNS boolean
 LANGUAGE sql
 IMMUTABLE
+PARALLEL SAFE
 AS $$
   SELECT lower(coalesce(trim(p_statut), 'actif')) = 'actif';
 $$;
 
--- Statut profil : par user_id
+COMMENT ON FUNCTION public.profile_is_active(text) IS
+  'Vérifie qu''un statut profil est actif (insensible à la casse).';
+
+-- 1.2 Alias rétrocompatibilité : corrige les appels erronés is_profile_active(p.statut)
+CREATE OR REPLACE FUNCTION public.is_profile_active(p_statut text)
+RETURNS boolean
+LANGUAGE sql
+IMMUTABLE
+PARALLEL SAFE
+AS $$
+  SELECT public.profile_is_active(p_statut);
+$$;
+
+COMMENT ON FUNCTION public.is_profile_active(text) IS
+  'Alias rétrocompat — préférer profile_is_active(text) dans le nouveau code.';
+
+-- 1.3 Statut par user_id (surcharge uuid — distincte de la version text)
 CREATE OR REPLACE FUNCTION public.is_profile_active(p_user_id uuid)
 RETURNS boolean
 LANGUAGE sql
@@ -37,17 +140,19 @@ SECURITY DEFINER
 SET search_path = public
 AS $$
   SELECT COALESCE(
-    (SELECT lower(coalesce(trim(statut), 'actif')) = 'actif' FROM public.profiles WHERE id = p_user_id),
+    (SELECT public.profile_is_active(statut) FROM public.profiles WHERE id = p_user_id),
     true
   );
 $$;
 
 GRANT EXECUTE ON FUNCTION public.is_profile_active(uuid) TO authenticated;
+GRANT EXECUTE ON FUNCTION public.is_profile_active(text) TO authenticated;
 
 CREATE OR REPLACE FUNCTION public.normalize_person_name(p_name text)
 RETURNS text
 LANGUAGE sql
 IMMUTABLE
+PARALLEL SAFE
 AS $$
   SELECT lower(trim(regexp_replace(
     translate(coalesce(p_name, ''), 'àâäéèêëïîôùûüç', 'aaaeeeeiioouuuc'),
@@ -149,6 +254,7 @@ CREATE OR REPLACE FUNCTION public.normalize_profile_role(p_role text)
 RETURNS text
 LANGUAGE sql
 IMMUTABLE
+PARALLEL SAFE
 AS $$
   SELECT lower(trim(regexp_replace(
     translate(coalesce(p_role, ''), 'éèêëàâäùûüôöîïç', 'eeeeaaauuuooiic'),
@@ -285,8 +391,159 @@ $$;
 
 GRANT EXECUTE ON FUNCTION public.resolve_notification_recipient(uuid, uuid, text, text) TO authenticated;
 
+-- RPC notifications (uniquement si table notifications présente)
+DO $notif_rpc$
+BEGIN
+  IF to_regclass('public.notifications') IS NULL THEN
+    RAISE NOTICE 'Skip RPC notifications — table notifications absente';
+    RETURN;
+  END IF;
+
+  EXECUTE $fn$
+    CREATE OR REPLACE FUNCTION public.insert_user_notification(
+      p_recipient_user_id uuid,
+      p_title text,
+      p_message text DEFAULT NULL,
+      p_type text DEFAULT 'system',
+      p_priority text DEFAULT 'normal',
+      p_entity_type text DEFAULT NULL,
+      p_entity_id uuid DEFAULT NULL,
+      p_action_url text DEFAULT NULL,
+      p_created_by uuid DEFAULT NULL,
+      p_submodule_code text DEFAULT NULL
+    )
+    RETURNS jsonb
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    SET search_path = public
+    AS $body$
+    DECLARE
+      v_row public.notifications;
+    BEGIN
+      IF p_recipient_user_id IS NULL OR trim(coalesce(p_title, '')) = '' THEN
+        RETURN NULL;
+      END IF;
+
+      INSERT INTO public.notifications (
+        recipient_user_id, title, message, type, priority,
+        entity_type, entity_id, action_url, created_by, submodule_code,
+        is_read, read_at
+      ) VALUES (
+        p_recipient_user_id,
+        trim(p_title),
+        NULLIF(trim(coalesce(p_message, '')), ''),
+        coalesce(p_type, 'system'),
+        coalesce(p_priority, 'normal'),
+        p_entity_type,
+        p_entity_id,
+        p_action_url,
+        p_created_by,
+        p_submodule_code,
+        false,
+        NULL
+      )
+      RETURNING * INTO v_row;
+
+      RETURN to_jsonb(v_row);
+    END;
+    $body$;
+  $fn$;
+
+  EXECUTE $fn$
+    CREATE OR REPLACE FUNCTION public.upsert_user_notification(
+      p_recipient_user_id uuid,
+      p_title text,
+      p_message text DEFAULT NULL,
+      p_type text DEFAULT 'system',
+      p_priority text DEFAULT 'normal',
+      p_entity_type text DEFAULT NULL,
+      p_entity_id uuid DEFAULT NULL,
+      p_action_url text DEFAULT NULL,
+      p_created_by uuid DEFAULT NULL,
+      p_submodule_code text DEFAULT NULL
+    )
+    RETURNS jsonb
+    LANGUAGE plpgsql
+    SECURITY DEFINER
+    SET search_path = public
+    AS $body$
+    DECLARE
+      v_row public.notifications;
+      v_type text := coalesce(p_type, 'system');
+    BEGIN
+      IF p_recipient_user_id IS NULL OR trim(coalesce(p_title, '')) = '' THEN
+        RETURN NULL;
+      END IF;
+
+      IF p_entity_type IS NULL OR p_entity_id IS NULL THEN
+        RETURN public.insert_user_notification(
+          p_recipient_user_id, p_title, p_message, v_type, p_priority,
+          p_entity_type, p_entity_id, p_action_url, p_created_by, p_submodule_code
+        );
+      END IF;
+
+      BEGIN
+        INSERT INTO public.notifications (
+          recipient_user_id, title, message, type, priority,
+          entity_type, entity_id, action_url, created_by, submodule_code,
+          is_read, read_at
+        ) VALUES (
+          p_recipient_user_id,
+          trim(p_title),
+          NULLIF(trim(coalesce(p_message, '')), ''),
+          v_type,
+          coalesce(p_priority, 'normal'),
+          p_entity_type,
+          p_entity_id,
+          p_action_url,
+          p_created_by,
+          p_submodule_code,
+          false,
+          NULL
+        )
+        RETURNING * INTO v_row;
+      EXCEPTION WHEN unique_violation THEN
+        UPDATE public.notifications
+        SET
+          title = trim(p_title),
+          message = NULLIF(trim(coalesce(p_message, '')), ''),
+          priority = coalesce(p_priority, 'normal'),
+          action_url = p_action_url,
+          submodule_code = p_submodule_code,
+          is_read = false,
+          read_at = NULL,
+          created_at = now()
+        WHERE recipient_user_id = p_recipient_user_id
+          AND entity_type = p_entity_type
+          AND entity_id = p_entity_id
+          AND type = v_type
+        RETURNING * INTO v_row;
+      END;
+
+      RETURN CASE WHEN v_row IS NULL THEN NULL ELSE to_jsonb(v_row) END;
+    END;
+    $body$;
+  $fn$;
+
+  CREATE UNIQUE INDEX IF NOT EXISTS notifications_dedup_user_idx
+    ON public.notifications (recipient_user_id, entity_type, entity_id, type)
+    WHERE recipient_user_id IS NOT NULL
+      AND entity_type IS NOT NULL
+      AND entity_id IS NOT NULL;
+
+  GRANT EXECUTE ON FUNCTION public.insert_user_notification(
+    uuid, text, text, text, text, text, uuid, text, uuid, text
+  ) TO authenticated;
+
+  GRANT EXECUTE ON FUNCTION public.upsert_user_notification(
+    uuid, text, text, text, text, text, uuid, text, uuid, text
+  ) TO authenticated;
+END
+$notif_rpc$;
+
+
 -- ═══════════════════════════════════════════════════════════════════════════
--- PARTIE 1 — HELPERS RBAC
+-- PARTIE 2 — HELPERS RBAC (après fondation)
 -- ═══════════════════════════════════════════════════════════════════════════
 
 CREATE OR REPLACE FUNCTION public.erp_auth_ok()
@@ -316,7 +573,7 @@ AS $$
     SELECT 1 FROM public.profiles p
     WHERE p.id = auth.uid()
       AND p.role_id IS NULL
-      AND lower(coalesce(trim(p.statut), 'actif')) = 'actif'
+      AND public.profile_is_active(p.statut)
   );
 $$;
 
@@ -343,10 +600,6 @@ $$;
 
 GRANT EXECUTE ON FUNCTION public.erp_can(text, text) TO authenticated;
 
-COMMENT ON FUNCTION public.erp_can(text, text) IS
-  'Vérifie permission ERP : action (voir/creer/modifier/supprimer/valider/exporter) sur sous-rubrique.';
-
--- Helper : utilisateur assigné à une tâche/RDV (nom ou employee_id)
 CREATE OR REPLACE FUNCTION public.erp_is_task_assignee(
   p_responsable text,
   p_employee_id uuid
@@ -364,10 +617,13 @@ $$;
 
 GRANT EXECUTE ON FUNCTION public.erp_is_task_assignee(text, uuid) TO authenticated;
 
+
 -- ═══════════════════════════════════════════════════════════════════════════
--- PARTIE 2 — SEED PERMISSIONS RÔLES MANQUANTS (DG, chef_projet, chef_chantier)
+-- PARTIE 3 — SEED PERMISSIONS (DÉSACTIVÉ — ne modifie pas les données)
+-- Décommenter uniquement après validation explicite en staging
 -- ═══════════════════════════════════════════════════════════════════════════
 
+/*
 -- DG : lecture globale + valider/exporter
 INSERT INTO public.role_permissions (role_id, module_code, submodule_code, action_code, granted)
 SELECT r.id, x.module_code, x.submodule_code, a.action_code,
@@ -407,54 +663,12 @@ ON CONFLICT (role_id, submodule_code, action_code) DO UPDATE SET
   module_code = EXCLUDED.module_code,
   granted = EXCLUDED.granted;
 
--- Chef de projet
-INSERT INTO public.role_permissions (role_id, module_code, submodule_code, action_code, granted)
-SELECT r.id, x.module_code, x.submodule_code, a.action_code,
-  CASE
-    WHEN a.action_code IN ('voir', 'creer', 'modifier', 'exporter') THEN true
-    WHEN a.action_code = 'valider' AND x.submodule_code IN ('projets', 'demandes-chantier') THEN true
-    ELSE false
-  END
-FROM public.erp_roles r
-CROSS JOIN (VALUES
-  ('organisation_interne', 'dashboard'), ('organisation_interne', 'taches'), ('organisation_interne', 'rendezvous'),
-  ('projets', 'projets'), ('projets', 'sav-projets'),
-  ('inventaire_depot', 'demandes-chantier'),
-  ('ressources_humaines', 'conges'),
-  ('documents', 'mes-documents'),
-  ('crm', 'devis'), ('crm', 'clients')
-) AS x(module_code, submodule_code)
-CROSS JOIN (VALUES ('voir'), ('creer'), ('modifier'), ('supprimer'), ('valider'), ('exporter')) AS a(action_code)
-WHERE r.code = 'chef_projet'
-ON CONFLICT (role_id, submodule_code, action_code) DO UPDATE SET
-  module_code = EXCLUDED.module_code,
-  granted = EXCLUDED.granted;
+-- Chef de projet + chef de chantier : voir RUN_RLS_SECURITY_COMPLET.sql PARTIE 2
+*/
 
--- Chef de chantier
-INSERT INTO public.role_permissions (role_id, module_code, submodule_code, action_code, granted)
-SELECT r.id, x.module_code, x.submodule_code, a.action_code,
-  CASE
-    WHEN a.action_code IN ('voir', 'creer', 'modifier') THEN true
-    WHEN a.action_code = 'exporter' AND x.submodule_code IN ('presence', 'demandes-chantier') THEN true
-    ELSE false
-  END
-FROM public.erp_roles r
-CROSS JOIN (VALUES
-  ('organisation_interne', 'dashboard'), ('organisation_interne', 'taches'),
-  ('projets', 'projets'),
-  ('employes_externes', 'presence'),
-  ('inventaire_depot', 'demandes-chantier'),
-  ('ressources_humaines', 'conges'),
-  ('documents', 'mes-documents')
-) AS x(module_code, submodule_code)
-CROSS JOIN (VALUES ('voir'), ('creer'), ('modifier'), ('supprimer'), ('valider'), ('exporter')) AS a(action_code)
-WHERE r.code = 'chef_chantier'
-ON CONFLICT (role_id, submodule_code, action_code) DO UPDATE SET
-  module_code = EXCLUDED.module_code,
-  granted = EXCLUDED.granted;
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- PARTIE 3 — RÉVOQUER ANON SUR TABLES MÉTIER
+-- PARTIE 4 — GRANTS (révoque anon sur tables métier)
 -- ═══════════════════════════════════════════════════════════════════════════
 
 DO $revoke_anon$
@@ -475,8 +689,9 @@ GRANT USAGE ON SCHEMA public TO authenticated, service_role;
 REVOKE ALL ON SCHEMA public FROM anon;
 GRANT USAGE ON SCHEMA public TO anon;
 
+
 -- ═══════════════════════════════════════════════════════════════════════════
--- PARTIE 4 — HELPER : supprimer toutes les policies d'une table
+-- PARTIE 5 — HELPERS RLS (drop policies + apply atomique)
 -- ═══════════════════════════════════════════════════════════════════════════
 
 CREATE OR REPLACE FUNCTION public._citymo_drop_policies(p_table text)
@@ -487,6 +702,9 @@ SET search_path = public
 AS $$
 DECLARE r record;
 BEGIN
+  IF to_regclass('public.' || p_table) IS NULL THEN
+    RETURN;
+  END IF;
   FOR r IN
     SELECT policyname FROM pg_policies
     WHERE schemaname = 'public' AND tablename = p_table
@@ -496,10 +714,6 @@ BEGIN
 END;
 $$;
 
--- ═══════════════════════════════════════════════════════════════════════════
--- PARTIE 5 — HELPER : policies standard module (SELECT/INSERT/UPDATE/DELETE)
--- ═══════════════════════════════════════════════════════════════════════════
-
 CREATE OR REPLACE FUNCTION public._citymo_apply_module_rls(p_table text, p_submodule text)
 RETURNS void
 LANGUAGE plpgsql
@@ -507,8 +721,12 @@ SECURITY INVOKER
 SET search_path = public
 AS $$
 BEGIN
+  IF to_regclass('public.' || p_table) IS NULL THEN
+    RAISE NOTICE 'Skip RLS — table absente : %', p_table;
+    RETURN;
+  END IF;
+
   PERFORM public._citymo_drop_policies(p_table);
-  EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', p_table);
 
   EXECUTE format(
     'CREATE POLICY %I ON public.%I FOR SELECT TO authenticated USING (public.erp_can(''voir'', %L))',
@@ -526,11 +744,14 @@ BEGIN
     'CREATE POLICY %I ON public.%I FOR DELETE TO authenticated USING (public.erp_can(''supprimer'', %L))',
     p_table || '_delete', p_table, p_submodule
   );
+
+  EXECUTE format('ALTER TABLE public.%I ENABLE ROW LEVEL SECURITY', p_table);
 END;
 $$;
 
+
 -- ═══════════════════════════════════════════════════════════════════════════
--- PARTIE 6 — APPLIQUER RLS MODULE SUR TOUTES LES TABLES MÉTIER
+-- PARTIE 6 — RLS MODULE (tables existantes uniquement)
 -- ═══════════════════════════════════════════════════════════════════════════
 
 DO $apply_module$
@@ -539,7 +760,6 @@ DECLARE
 BEGIN
   FOR rec IN
     SELECT * FROM (VALUES
-      -- CRM / Commercial
       ('clients', 'clients'),
       ('prospects', 'prospects'),
       ('actions_marketing', 'actions-marketing'),
@@ -558,7 +778,6 @@ BEGIN
       ('delivery_notes', 'bon-livraison'),
       ('delivery_note_items', 'bon-livraison'),
       ('devis', 'devis'),
-      -- RH
       ('departments', 'departements'),
       ('employees', 'employes'),
       ('employee_documents', 'employes'),
@@ -568,7 +787,6 @@ BEGIN
       ('resource_requests', 'demandes-ressources'),
       ('resource_request_history', 'demandes-ressources'),
       ('resource_request_workers', 'demandes-ressources'),
-      -- Ouvriers / ST
       ('workers', 'ouvriers'),
       ('worker_documents', 'ouvriers'),
       ('worker_project_assignments', 'ouvriers'),
@@ -578,7 +796,6 @@ BEGIN
       ('subcontractor_services', 'sous-traitants'),
       ('subcontractor_payments', 'sous-traitants'),
       ('subcontractor_project_adjustments', 'sous-traitants'),
-      -- Projets
       ('projects', 'projets'),
       ('project_documents', 'projets'),
       ('project_expenses', 'depenses-par-projet'),
@@ -594,7 +811,6 @@ BEGIN
       ('project_planning_resources', 'projets'),
       ('sav_requests', 'sav-projets'),
       ('sav_reports', 'cr-sav'),
-      -- Finance
       ('finance_transactions', 'feuille-caisse'),
       ('cash_monthly_balances', 'feuille-caisse'),
       ('cash_daily_validations', 'feuille-caisse'),
@@ -602,7 +818,6 @@ BEGIN
       ('finance_charges', 'charges'),
       ('finance_categories', 'categories-charge'),
       ('payment_orders', 'ordres-paiement'),
-      -- Achats
       ('purchase_suppliers', 'fournisseurs'),
       ('purchase_requests', 'demandes-achat'),
       ('purchase_orders', 'bons-commande'),
@@ -614,7 +829,6 @@ BEGIN
       ('achat_purchase_requests', 'demandes-achat'),
       ('achat_purchase_orders', 'bons-commande'),
       ('charge_categories', 'categories-charge'),
-      -- Inventaire
       ('stock_categories', 'categories-stock'),
       ('stock_articles', 'articles-stock'),
       ('stock_warehouses', 'depots'),
@@ -623,13 +837,11 @@ BEGIN
       ('site_material_requests', 'demandes-chantier'),
       ('site_material_request_lines', 'demandes-chantier'),
       ('site_material_request_history', 'demandes-chantier'),
-      -- Logistique
       ('vehicles', 'vehicules'),
       ('vehicle_intervention_requests', 'interventions'),
       ('vehicle_intervention_history', 'historique-interv'),
       ('vehicle_daily_reports', 'vehicules'),
       ('vehicle_daily_trips', 'vehicules'),
-      -- Documents
       ('document_folders', 'mes-documents'),
       ('documents', 'mes-documents'),
       ('document_shares', 'docs-partages'),
@@ -638,7 +850,6 @@ BEGIN
       ('ged_documents', 'mes-documents'),
       ('ged_shares', 'docs-partages'),
       ('ged_public_links', 'liens-publics'),
-      -- Organisation (sauf internal_tasks = custom)
       ('internal_appointments', 'rendezvous'),
       ('internal_task_dg_relances', 'taches')
     ) AS m(tbl, submodule)
@@ -650,251 +861,247 @@ BEGIN
 END
 $apply_module$;
 
+
 -- ═══════════════════════════════════════════════════════════════════════════
--- PARTIE 7 — POLICIES CUSTOM
+-- PARTIE 7 — POLICIES CUSTOM (table par table, policies AVANT ENABLE RLS)
 -- ═══════════════════════════════════════════════════════════════════════════
 
--- ─── profiles ───────────────────────────────────────────────────────────────
-SELECT public._citymo_drop_policies('profiles');
-ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+DO $profiles_rls$
+BEGIN
+  IF to_regclass('public.profiles') IS NULL THEN
+    RAISE NOTICE 'Skip profiles RLS — table absente';
+    RETURN;
+  END IF;
 
-CREATE POLICY profiles_select_own ON public.profiles
-  FOR SELECT TO authenticated USING (auth.uid() = id);
+  PERFORM public._citymo_drop_policies('profiles');
 
-CREATE POLICY profiles_update_own ON public.profiles
-  FOR UPDATE TO authenticated
-  USING (auth.uid() = id) WITH CHECK (auth.uid() = id);
+  CREATE POLICY profiles_select_own ON public.profiles
+    FOR SELECT TO authenticated USING (auth.uid() = id);
+  CREATE POLICY profiles_update_own ON public.profiles
+    FOR UPDATE TO authenticated
+    USING (auth.uid() = id) WITH CHECK (auth.uid() = id);
+  CREATE POLICY profiles_insert_own ON public.profiles
+    FOR INSERT TO authenticated WITH CHECK (auth.uid() = id);
+  CREATE POLICY profiles_select_admin ON public.profiles
+    FOR SELECT TO authenticated USING (public.is_erp_admin());
+  CREATE POLICY profiles_update_admin ON public.profiles
+    FOR UPDATE TO authenticated
+    USING (public.is_erp_admin()) WITH CHECK (public.is_erp_admin());
+  CREATE POLICY profiles_insert_admin ON public.profiles
+    FOR INSERT TO authenticated WITH CHECK (public.is_erp_admin() OR auth.uid() = id);
 
-CREATE POLICY profiles_insert_own ON public.profiles
-  FOR INSERT TO authenticated WITH CHECK (auth.uid() = id);
+  ALTER TABLE public.profiles ENABLE ROW LEVEL SECURITY;
+END
+$profiles_rls$;
 
-CREATE POLICY profiles_select_admin ON public.profiles
-  FOR SELECT TO authenticated USING (public.is_erp_admin());
+DO $erp_roles_rls$
+BEGIN
+  IF to_regclass('public.erp_roles') IS NULL THEN RETURN; END IF;
+  PERFORM public._citymo_drop_policies('erp_roles');
+  CREATE POLICY erp_roles_select ON public.erp_roles
+    FOR SELECT TO authenticated USING (public.erp_auth_ok());
+  CREATE POLICY erp_roles_write_admin ON public.erp_roles
+    FOR ALL TO authenticated
+    USING (public.is_erp_admin()) WITH CHECK (public.is_erp_admin());
+  ALTER TABLE public.erp_roles ENABLE ROW LEVEL SECURITY;
+END
+$erp_roles_rls$;
 
-CREATE POLICY profiles_update_admin ON public.profiles
-  FOR UPDATE TO authenticated
-  USING (public.is_erp_admin()) WITH CHECK (public.is_erp_admin());
+DO $role_perms_rls$
+BEGIN
+  IF to_regclass('public.role_permissions') IS NULL THEN RETURN; END IF;
+  PERFORM public._citymo_drop_policies('role_permissions');
+  CREATE POLICY role_permissions_select ON public.role_permissions
+    FOR SELECT TO authenticated USING (public.erp_auth_ok());
+  CREATE POLICY role_permissions_write_admin ON public.role_permissions
+    FOR ALL TO authenticated
+    USING (public.is_erp_admin()) WITH CHECK (public.is_erp_admin());
+  ALTER TABLE public.role_permissions ENABLE ROW LEVEL SECURITY;
+END
+$role_perms_rls$;
 
-CREATE POLICY profiles_insert_admin ON public.profiles
-  FOR INSERT TO authenticated WITH CHECK (public.is_erp_admin() OR auth.uid() = id);
+DO $user_perm_exc_rls$
+BEGIN
+  IF to_regclass('public.user_permission_exceptions') IS NULL THEN RETURN; END IF;
+  PERFORM public._citymo_drop_policies('user_permission_exceptions');
+  CREATE POLICY user_perm_exc_select ON public.user_permission_exceptions
+    FOR SELECT TO authenticated
+    USING (user_id = auth.uid() OR public.is_erp_admin());
+  CREATE POLICY user_perm_exc_write_admin ON public.user_permission_exceptions
+    FOR ALL TO authenticated
+    USING (public.is_erp_admin()) WITH CHECK (public.is_erp_admin());
+  ALTER TABLE public.user_permission_exceptions ENABLE ROW LEVEL SECURITY;
+END
+$user_perm_exc_rls$;
 
--- ─── erp_roles / role_permissions (lecture RBAC, écriture admin) ─────────────
-SELECT public._citymo_drop_policies('erp_roles');
-ALTER TABLE public.erp_roles ENABLE ROW LEVEL SECURITY;
+DO $leaves_rls$
+BEGIN
+  IF to_regclass('public.leaves') IS NULL THEN RETURN; END IF;
+  PERFORM public._citymo_drop_policies('leaves');
+  CREATE POLICY leaves_select_own ON public.leaves
+    FOR SELECT TO authenticated USING (created_by = auth.uid());
+  CREATE POLICY leaves_select_rh ON public.leaves
+    FOR SELECT TO authenticated USING (public.is_leave_rh_manager());
+  CREATE POLICY leaves_insert_own ON public.leaves
+    FOR INSERT TO authenticated
+    WITH CHECK (created_by = auth.uid() AND statut = 'En attente');
+  CREATE POLICY leaves_update_own ON public.leaves
+    FOR UPDATE TO authenticated
+    USING (created_by = auth.uid() AND statut = 'En attente')
+    WITH CHECK (created_by = auth.uid() AND statut = 'En attente');
+  CREATE POLICY leaves_update_rh ON public.leaves
+    FOR UPDATE TO authenticated
+    USING (public.is_leave_rh_manager()) WITH CHECK (public.is_leave_rh_manager());
+  CREATE POLICY leaves_delete_own ON public.leaves
+    FOR DELETE TO authenticated
+    USING (created_by = auth.uid() AND statut = 'En attente');
+  CREATE POLICY leaves_delete_rh ON public.leaves
+    FOR DELETE TO authenticated USING (public.is_leave_rh_manager());
+  ALTER TABLE public.leaves ENABLE ROW LEVEL SECURITY;
+END
+$leaves_rls$;
 
-CREATE POLICY erp_roles_select ON public.erp_roles
-  FOR SELECT TO authenticated USING (public.erp_auth_ok());
-
-CREATE POLICY erp_roles_write_admin ON public.erp_roles
-  FOR ALL TO authenticated
-  USING (public.is_erp_admin()) WITH CHECK (public.is_erp_admin());
-
-SELECT public._citymo_drop_policies('role_permissions');
-ALTER TABLE public.role_permissions ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY role_permissions_select ON public.role_permissions
-  FOR SELECT TO authenticated USING (public.erp_auth_ok());
-
-CREATE POLICY role_permissions_write_admin ON public.role_permissions
-  FOR ALL TO authenticated
-  USING (public.is_erp_admin()) WITH CHECK (public.is_erp_admin());
-
--- user_permission_exceptions : déjà OK, on réapplique proprement
-SELECT public._citymo_drop_policies('user_permission_exceptions');
-ALTER TABLE public.user_permission_exceptions ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY user_perm_exc_select ON public.user_permission_exceptions
-  FOR SELECT TO authenticated
-  USING (user_id = auth.uid() OR public.is_erp_admin());
-
-CREATE POLICY user_perm_exc_write_admin ON public.user_permission_exceptions
-  FOR ALL TO authenticated
-  USING (public.is_erp_admin()) WITH CHECK (public.is_erp_admin());
-
--- ─── leaves (conserver logique RH existante) ────────────────────────────────
-SELECT public._citymo_drop_policies('leaves');
-ALTER TABLE public.leaves ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY leaves_select_own ON public.leaves
-  FOR SELECT TO authenticated USING (created_by = auth.uid());
-
-CREATE POLICY leaves_select_rh ON public.leaves
-  FOR SELECT TO authenticated USING (public.is_leave_rh_manager());
-
-CREATE POLICY leaves_insert_own ON public.leaves
-  FOR INSERT TO authenticated
-  WITH CHECK (created_by = auth.uid() AND statut = 'En attente');
-
-CREATE POLICY leaves_update_own ON public.leaves
-  FOR UPDATE TO authenticated
-  USING (created_by = auth.uid() AND statut = 'En attente')
-  WITH CHECK (created_by = auth.uid() AND statut = 'En attente');
-
-CREATE POLICY leaves_update_rh ON public.leaves
-  FOR UPDATE TO authenticated
-  USING (public.is_leave_rh_manager()) WITH CHECK (public.is_leave_rh_manager());
-
-CREATE POLICY leaves_delete_own ON public.leaves
-  FOR DELETE TO authenticated
-  USING (created_by = auth.uid() AND statut = 'En attente');
-
-CREATE POLICY leaves_delete_rh ON public.leaves
-  FOR DELETE TO authenticated USING (public.is_leave_rh_manager());
-
--- ─── internal_tasks (tâches DG restreintes) ─────────────────────────────────
-SELECT public._citymo_drop_policies('internal_tasks');
-ALTER TABLE public.internal_tasks ENABLE ROW LEVEL SECURITY;
-
-CREATE POLICY internal_tasks_select ON public.internal_tasks
-  FOR SELECT TO authenticated
-  USING (
-    public.erp_can('voir', 'taches')
-    AND (
-      NOT coalesce(is_dg_task, false)
-      OR created_by = auth.uid()
-      OR public.erp_is_task_assignee(responsable, responsable_employee_id)
-      OR public.is_super_admin()
+DO $internal_tasks_rls$
+BEGIN
+  IF to_regclass('public.internal_tasks') IS NULL THEN RETURN; END IF;
+  PERFORM public._citymo_drop_policies('internal_tasks');
+  CREATE POLICY internal_tasks_select ON public.internal_tasks
+    FOR SELECT TO authenticated
+    USING (
+      public.erp_can('voir', 'taches')
+      AND (
+        NOT coalesce(is_dg_task, false)
+        OR created_by = auth.uid()
+        OR public.erp_is_task_assignee(responsable, responsable_employee_id)
+        OR public.is_super_admin()
+      )
+    );
+  CREATE POLICY internal_tasks_insert ON public.internal_tasks
+    FOR INSERT TO authenticated WITH CHECK (public.erp_can('creer', 'taches'));
+  CREATE POLICY internal_tasks_update ON public.internal_tasks
+    FOR UPDATE TO authenticated
+    USING (
+      public.erp_can('modifier', 'taches')
+      AND (
+        NOT coalesce(is_dg_task, false)
+        OR created_by = auth.uid()
+        OR public.erp_is_task_assignee(responsable, responsable_employee_id)
+        OR public.is_super_admin()
+      )
     )
-  );
+    WITH CHECK (public.erp_can('modifier', 'taches'));
+  CREATE POLICY internal_tasks_delete ON public.internal_tasks
+    FOR DELETE TO authenticated
+    USING (public.erp_can('supprimer', 'taches') AND public.is_erp_admin());
+  ALTER TABLE public.internal_tasks ENABLE ROW LEVEL SECURITY;
+END
+$internal_tasks_rls$;
 
-CREATE POLICY internal_tasks_insert ON public.internal_tasks
-  FOR INSERT TO authenticated
-  WITH CHECK (public.erp_can('creer', 'taches'));
-
-CREATE POLICY internal_tasks_update ON public.internal_tasks
-  FOR UPDATE TO authenticated
-  USING (
-    public.erp_can('modifier', 'taches')
-    AND (
-      NOT coalesce(is_dg_task, false)
-      OR created_by = auth.uid()
-      OR public.erp_is_task_assignee(responsable, responsable_employee_id)
-      OR public.is_super_admin()
-    )
-  )
-  WITH CHECK (public.erp_can('modifier', 'taches'));
-
-CREATE POLICY internal_tasks_delete ON public.internal_tasks
-  FOR DELETE TO authenticated
-  USING (public.erp_can('supprimer', 'taches') AND public.is_erp_admin());
-
--- ─── executive_calendar (conserver restrictions direction) ──────────────────
 DO $exec_cal$
 BEGIN
   IF to_regclass('public.executive_calendar') IS NOT NULL THEN
     PERFORM public._citymo_drop_policies('executive_calendar');
+    CREATE POLICY executive_calendar_select ON public.executive_calendar
+      FOR SELECT TO authenticated USING (public.can_read_executive_calendar());
+    CREATE POLICY executive_calendar_insert ON public.executive_calendar
+      FOR INSERT TO authenticated WITH CHECK (public.can_write_executive_calendar());
+    CREATE POLICY executive_calendar_update ON public.executive_calendar
+      FOR UPDATE TO authenticated
+      USING (public.can_write_executive_calendar())
+      WITH CHECK (public.can_write_executive_calendar());
+    CREATE POLICY executive_calendar_delete ON public.executive_calendar
+      FOR DELETE TO authenticated USING (public.can_write_executive_calendar());
     ALTER TABLE public.executive_calendar ENABLE ROW LEVEL SECURITY;
-
-    EXECUTE $p$
-      CREATE POLICY executive_calendar_select ON public.executive_calendar
-        FOR SELECT TO authenticated USING (public.can_read_executive_calendar())
-    $p$;
-    EXECUTE $p$
-      CREATE POLICY executive_calendar_insert ON public.executive_calendar
-        FOR INSERT TO authenticated WITH CHECK (public.can_write_executive_calendar())
-    $p$;
-    EXECUTE $p$
-      CREATE POLICY executive_calendar_update ON public.executive_calendar
-        FOR UPDATE TO authenticated
-        USING (public.can_write_executive_calendar())
-        WITH CHECK (public.can_write_executive_calendar())
-    $p$;
-    EXECUTE $p$
-      CREATE POLICY executive_calendar_delete ON public.executive_calendar
-        FOR DELETE TO authenticated USING (public.can_write_executive_calendar())
-    $p$;
   END IF;
 
   IF to_regclass('public.executive_calendar_notifications') IS NOT NULL THEN
     PERFORM public._citymo_drop_policies('executive_calendar_notifications');
+    CREATE POLICY exec_cal_notif_select ON public.executive_calendar_notifications
+      FOR SELECT TO authenticated
+      USING (user_id = auth.uid() AND public.can_read_executive_calendar());
+    CREATE POLICY exec_cal_notif_insert ON public.executive_calendar_notifications
+      FOR INSERT TO authenticated
+      WITH CHECK (user_id = auth.uid() AND public.can_write_executive_calendar());
+    CREATE POLICY exec_cal_notif_update ON public.executive_calendar_notifications
+      FOR UPDATE TO authenticated
+      USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid());
     ALTER TABLE public.executive_calendar_notifications ENABLE ROW LEVEL SECURITY;
-
-    EXECUTE $p$
-      CREATE POLICY exec_cal_notif_select ON public.executive_calendar_notifications
-        FOR SELECT TO authenticated
-        USING (user_id = auth.uid() AND public.can_read_executive_calendar())
-    $p$;
-    EXECUTE $p$
-      CREATE POLICY exec_cal_notif_insert ON public.executive_calendar_notifications
-        FOR INSERT TO authenticated
-        WITH CHECK (user_id = auth.uid() AND public.can_write_executive_calendar())
-    $p$;
-    EXECUTE $p$
-      CREATE POLICY exec_cal_notif_update ON public.executive_calendar_notifications
-        FOR UPDATE TO authenticated
-        USING (user_id = auth.uid()) WITH CHECK (user_id = auth.uid())
-    $p$;
   END IF;
 END
 $exec_cal$;
 
--- ─── notifications (lecture ciblée, écriture via RPC uniquement) ───────────
-SELECT public._citymo_drop_policies('notifications');
-ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
+DO $notifications_rls$
+BEGIN
+  IF to_regclass('public.notifications') IS NULL THEN RETURN; END IF;
 
-CREATE POLICY notifications_select ON public.notifications
-  FOR SELECT TO authenticated
-  USING (recipient_user_id = auth.uid() OR is_global = true);
+  IF to_regprocedure('public.insert_user_notification(uuid,text,text,text,text,text,uuid,text,uuid,text)') IS NULL THEN
+    RAISE EXCEPTION
+      'notifications RLS annulée — insert_user_notification absente. Exécuter PARTIE 1 d''abord.';
+  END IF;
 
-CREATE POLICY notifications_update ON public.notifications
-  FOR UPDATE TO authenticated
-  USING (recipient_user_id = auth.uid() OR is_global = true)
-  WITH CHECK (recipient_user_id = auth.uid() OR is_global = true);
+  PERFORM public._citymo_drop_policies('notifications');
+  CREATE POLICY notifications_select ON public.notifications
+    FOR SELECT TO authenticated
+    USING (recipient_user_id = auth.uid() OR is_global = true);
+  CREATE POLICY notifications_update ON public.notifications
+    FOR UPDATE TO authenticated
+    USING (recipient_user_id = auth.uid() OR is_global = true)
+    WITH CHECK (recipient_user_id = auth.uid() OR is_global = true);
+  CREATE POLICY notifications_insert_block ON public.notifications
+    FOR INSERT TO authenticated WITH CHECK (false);
+  CREATE POLICY notifications_delete_admin ON public.notifications
+    FOR DELETE TO authenticated USING (public.is_erp_admin());
+  ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
+END
+$notifications_rls$;
 
--- Pas d'INSERT direct client : insert_user_notification / upsert_user_notification (SECURITY DEFINER)
-CREATE POLICY notifications_insert_block ON public.notifications
-  FOR INSERT TO authenticated WITH CHECK (false);
-
-CREATE POLICY notifications_delete_admin ON public.notifications
-  FOR DELETE TO authenticated USING (public.is_erp_admin());
-
--- ─── whatsapp_notification_log ──────────────────────────────────────────────
 DO $wa$
 BEGIN
   IF to_regclass('public.whatsapp_notification_log') IS NOT NULL THEN
     PERFORM public._citymo_drop_policies('whatsapp_notification_log');
+    CREATE POLICY whatsapp_log_select_own ON public.whatsapp_notification_log
+      FOR SELECT TO authenticated USING (user_id = auth.uid());
+    CREATE POLICY whatsapp_log_insert_service ON public.whatsapp_notification_log
+      FOR INSERT TO authenticated WITH CHECK (public.is_erp_admin() OR user_id = auth.uid());
     ALTER TABLE public.whatsapp_notification_log ENABLE ROW LEVEL SECURITY;
-
-    EXECUTE $p$
-      CREATE POLICY whatsapp_log_select_own ON public.whatsapp_notification_log
-        FOR SELECT TO authenticated USING (user_id = auth.uid())
-    $p$;
-    EXECUTE $p$
-      CREATE POLICY whatsapp_log_insert_service ON public.whatsapp_notification_log
-        FOR INSERT TO authenticated WITH CHECK (public.is_erp_admin() OR user_id = auth.uid())
-    $p$;
   END IF;
 END
 $wa$;
 
--- ─── erp_backups (Super Admin) ────────────────────────────────────────────────
 DO $backups$
 BEGIN
   IF to_regclass('public.erp_backups') IS NOT NULL THEN
     PERFORM public._citymo_drop_policies('erp_backups');
+    CREATE POLICY erp_backups_super ON public.erp_backups
+      FOR ALL TO authenticated
+      USING (public.is_super_admin()) WITH CHECK (public.is_super_admin());
     ALTER TABLE public.erp_backups ENABLE ROW LEVEL SECURITY;
-    EXECUTE $p$ CREATE POLICY erp_backups_super ON public.erp_backups FOR ALL TO authenticated USING (public.is_super_admin()) WITH CHECK (public.is_super_admin()) $p$;
   END IF;
   IF to_regclass('public.erp_backup_audit_log') IS NOT NULL THEN
     PERFORM public._citymo_drop_policies('erp_backup_audit_log');
+    CREATE POLICY erp_backup_audit_super ON public.erp_backup_audit_log
+      FOR ALL TO authenticated
+      USING (public.is_super_admin()) WITH CHECK (public.is_super_admin());
     ALTER TABLE public.erp_backup_audit_log ENABLE ROW LEVEL SECURITY;
-    EXECUTE $p$ CREATE POLICY erp_backup_audit_super ON public.erp_backup_audit_log FOR ALL TO authenticated USING (public.is_super_admin()) WITH CHECK (public.is_super_admin()) $p$;
   END IF;
   IF to_regclass('public.erp_backup_schedules') IS NOT NULL THEN
     PERFORM public._citymo_drop_policies('erp_backup_schedules');
+    CREATE POLICY erp_backup_schedules_super ON public.erp_backup_schedules
+      FOR ALL TO authenticated
+      USING (public.is_super_admin()) WITH CHECK (public.is_super_admin());
     ALTER TABLE public.erp_backup_schedules ENABLE ROW LEVEL SECURITY;
-    EXECUTE $p$ CREATE POLICY erp_backup_schedules_super ON public.erp_backup_schedules FOR ALL TO authenticated USING (public.is_super_admin()) WITH CHECK (public.is_super_admin()) $p$;
   END IF;
 END
 $backups$;
 
+
 -- ═══════════════════════════════════════════════════════════════════════════
--- PARTIE 8 — DURCIR SECURITY DEFINER (search_path)
+-- PARTIE 8 — HARDENING (DÉSACTIVÉ par défaut — décommenter après tests staging)
 -- ═══════════════════════════════════════════════════════════════════════════
 
+/*
 DO $harden$
-DECLARE
-  fn record;
+DECLARE fn record;
 BEGIN
   FOR fn IN
     SELECT p.oid, p.proname, pg_get_function_identity_arguments(p.oid) AS args
@@ -910,10 +1117,8 @@ BEGIN
 END
 $harden$;
 
--- Révoquer EXECUTE anon sur fonctions sensibles (sauf liens publics documents)
 DO $revoke_fn$
-DECLARE
-  fn record;
+DECLARE fn record;
 BEGIN
   FOR fn IN
     SELECT p.oid::regprocedure AS sig
@@ -927,32 +1132,30 @@ BEGIN
   END LOOP;
 END
 $revoke_fn$;
+*/
+
 
 -- ═══════════════════════════════════════════════════════════════════════════
--- PARTIE 9 — VÉRIFICATIONS (Security Advisor manuel)
+-- PARTIE 9 — POST-CHECK (lecture seule)
 -- ═══════════════════════════════════════════════════════════════════════════
 
--- Tables sans RLS
 SELECT c.relname AS table_sans_rls
 FROM pg_class c
 JOIN pg_namespace n ON n.oid = c.relnamespace
 WHERE n.nspname = 'public' AND c.relkind = 'r' AND c.relrowsecurity = false
 ORDER BY 1;
 
--- Policies permissives USING(true) restantes
 SELECT tablename, policyname, cmd, qual
 FROM pg_policies
 WHERE schemaname = 'public'
   AND (qual = 'true' OR with_check = 'true')
 ORDER BY tablename, policyname;
 
--- Grants anon restants sur tables
 SELECT table_name, privilege_type
 FROM information_schema.role_table_grants
 WHERE table_schema = 'public' AND grantee = 'anon'
 ORDER BY 1, 2;
 
--- Résumé policies par table
 SELECT tablename, count(*) AS nb_policies
 FROM pg_policies
 WHERE schemaname = 'public'
@@ -961,4 +1164,4 @@ ORDER BY tablename;
 
 NOTIFY pgrst, 'reload schema';
 
-SELECT 'RUN_RLS_SECURITY_COMPLET terminé — voir RLS_SECURITY_AUDIT.md' AS status;
+SELECT 'RUN_RLS_SECURITY_COMPLET_SAFE terminé — valider avec checklist §RLS_SECURITY_AUDIT.md' AS status;

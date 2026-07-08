@@ -131,7 +131,6 @@ async function requireUser() {
 }
 
 export async function listPaymentOrders() {
-  await requireUser();
   const { data, error } = await getSupabase()
     .from(TABLE)
     .select('*')

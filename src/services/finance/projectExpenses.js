@@ -70,6 +70,15 @@ export function normalizeProjectExpense(row) {
   };
 }
 
+/** Select léger pour listes (pas de join projects — déjà chargé à part). */
+const LIST_SELECT = `
+  id, project_id, project_name_raw, project_match_status, date_depense,
+  categorie, element_depense, description, fournisseur, montant, observation,
+  origine, source_type, source_id, statut, payment_order_id, purchase_request_id,
+  purchase_acquisition_order_id, montant_paye, date_paiement, mode_paiement,
+  document_path, attachment_url, created_by, created_at, updated_at
+`;
+
 const SELECT = `
   *,
   projects ( id, nom, ref, responsable, budget_estime, statut )
@@ -114,8 +123,10 @@ function toRow(form, userId) {
 }
 
 export async function listProjectExpenses(filters = {}) {
-  await getAuthUserId();
-  let q = getSupabase().from(TABLE).select(SELECT).order('date_depense', { ascending: false });
+  let q = getSupabase()
+    .from(TABLE)
+    .select(filters.withProjectJoin ? SELECT : LIST_SELECT)
+    .order('date_depense', { ascending: false });
   if (filters.project_id) q = q.eq('project_id', filters.project_id);
   if (filters.origine) q = q.eq('origine', filters.origine);
   if (filters.statut) q = q.eq('statut', filters.statut);

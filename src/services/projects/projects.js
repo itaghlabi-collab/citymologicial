@@ -108,11 +108,13 @@ export async function generateProjectRef() {
   return `${prefix}${seq}`;
 }
 
-export async function listProjects() {
-  await getAuthUserId();
+export async function listProjects(options = {}) {
+  const columns = options.light
+    ? 'id, nom, ref, responsable, budget_estime, statut, created_at'
+    : SELECT;
   const { data, error } = await getSupabase()
     .from(TABLE)
-    .select(SELECT)
+    .select(columns)
     .order('created_at', { ascending: false });
   if (error) {
     console.error('[CITYMO] projects list', error);

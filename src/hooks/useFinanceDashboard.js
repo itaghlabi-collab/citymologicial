@@ -4,13 +4,10 @@ import { formatSupabaseError } from '../services/supabase/formatError';
 import { listFinanceCharges } from '../services/finance/charges';
 import { listPaymentOrders } from '../services/finance/paymentOrders';
 import {
-  listFinanceTransactions,
   listFinanceTransactionsForYear,
   computeCashTotals,
-  runRhPaymentsCashBackfill,
 } from '../services/finance/financeTransactions';
 import {
-  getCashMonthlyBalance,
   listCashMonthlyBalancesForYear,
 } from '../services/finance/cashMonthlyBalances';
 import { listProjects } from '../services/projects/projects';
@@ -33,6 +30,10 @@ import {
 const PENDING_CHARGE_STATUTS = ['Brouillon', 'En attente validation'];
 const PENDING_ORDER_STATUTS = ['Brouillon', 'Soumis', 'En attente'];
 
+function filterTxsByMonth(txs, y, m) {
+  return (txs || []).filter((t) => inMonth(t.date, y, m));
+}
+
 export function useFinanceDashboard() {
   const now = new Date();
   const year = now.getFullYear();
@@ -53,33 +54,33 @@ export function useFinanceDashboard() {
     setLoading(true);
     setError(null);
     try {
-      await runRhPaymentsCashBackfill().catch((err) => {
-        console.warn('[CITYMO] dashboard backfill RH', err);
-        if (err?.code === 'SCHEMA') throw err;
-      });
+      // Peu de requêtes parallèles — pas de backfill RH ni reconcile au load
       const [
         charges,
         orders,
         yearTxs,
-        monthTxs,
-        prevTxs,
         balances,
-        balance,
-        prevBalance,
         projects,
         categories,
       ] = await Promise.all([
         listFinanceCharges(),
         listPaymentOrders(),
         listFinanceTransactionsForYear(year),
-        listFinanceTransactions({ year, month }),
-        listFinanceTransactions({ year: prevYear, month: prevMonthNum }),
         listCashMonthlyBalancesForYear(year),
-        getCashMonthlyBalance(year, month),
-        getCashMonthlyBalance(prevYear, prevMonthNum),
-        listProjects().catch(() => []),
+        listProjects({ light: true }).catch(() => []),
         listChargeCategories().catch(() => []),
       ]);
+
+      const monthTxs = filterTxsByMonth(yearTxs, year, month);
+      // Mois précédent dans la même année (en janvier, on saute l’évolution fine)
+      const prevTxs = prevYear === year
+        ? filterTxsByMonth(yearTxs, prevYear, prevMonthNum)
+        : [];
+
+      const balance = (balances || []).find((b) => b.mois === month) || null;
+      const prevBalance = prevYear === year
+        ? (balances || []).find((b) => b.mois === prevMonthNum) || null
+        : null;
 
       const totals = computeCashTotals(monthTxs, balance);
       const prevTotals = computeCashTotals(prevTxs, prevBalance);

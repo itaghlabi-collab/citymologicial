@@ -118,9 +118,11 @@ export function chargeDisplayRef(charge) {
   return String(charge?.ref || charge?.ref_charge || '').trim();
 }
 
-export async function listFinanceCharges() {
-  await requireUser();
-  await reconcileMissingChargeRefs();
+export async function listFinanceCharges({ reconcileRefs = false } = {}) {
+  // reconcileRefs est volontairement off par défaut : trop lent au chargement page
+  if (reconcileRefs) {
+    await reconcileMissingChargeRefs().catch(() => 0);
+  }
   const { data, error } = await getSupabase()
     .from(TABLE)
     .select('*')
