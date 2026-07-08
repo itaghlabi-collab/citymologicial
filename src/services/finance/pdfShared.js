@@ -2,6 +2,7 @@
  * pdfShared.js — Utilitaires PDF Finance CITYMO
  */
 import { jsPDF } from 'jspdf';
+import { moneyToNumber } from '../../utils/decimalMoney';
 
 const LOGO_URL = 'https://i.ibb.co/N6SbC06M/logopng.png';
 const RED = [198, 40, 40];
@@ -82,15 +83,46 @@ export function addFinanceFooter(doc, pageNum) {
 /** Séparateur milliers insécable — évite les retours ligne jsPDF (ex. « 35 /000,00 »). */
 const PDF_THOUSANDS_SEP = '\u00A0';
 
-/** Format monétaire MAD — virgule décimale, compatible jsPDF (pas de toLocaleString). */
-export function formatPdfMAD(n) {
-  const num = Number(n) || 0;
-  const sign = num < 0 ? '- ' : '';
+function formatPdfNumberParts(value, { decimals }) {
+  const num = moneyToNumber(value);
+  if (!Number.isFinite(num)) {
+    return decimals === 0 ? '0' : `0${PDF_THOUSANDS_SEP},${'0'.repeat(decimals)}`;
+  }
+  const sign = num < 0 ? '-' : '';
   const abs = Math.abs(num);
-  const fixed = abs.toFixed(2);
+  if (decimals === 0) {
+    const intVal = Math.round(abs);
+    const grouped = String(intVal).replace(/\B(?=(\d{3})+(?!\d))/g, PDF_THOUSANDS_SEP);
+    return `${sign}${grouped}`;
+  }
+  const fixed = abs.toFixed(decimals);
   const [intPart, decPart] = fixed.split('.');
   const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, PDF_THOUSANDS_SEP);
-  return `${sign}${grouped},${decPart} MAD`;
+  return `${sign}${grouped},${decPart}`;
+}
+
+/** Quantité PDF : entier sans virgule (4, pas 4,00). Fraction rare → décimales minimales. */
+export function formatPdfQty(value) {
+  const num = moneyToNumber(value);
+  if (!Number.isFinite(num)) return '0';
+  const rounded = Math.round(num);
+  if (Math.abs(num - rounded) < 1e-6) {
+    return formatPdfNumberParts(rounded, { decimals: 0 });
+  }
+  const raw = String(num).replace('.', ',');
+  const [intPart, decPart] = raw.split(',');
+  const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, PDF_THOUSANDS_SEP);
+  return decPart ? `${grouped},${decPart}` : grouped;
+}
+
+/** Montant PDF (HT, PU, TTC) : toujours 2 décimales (750,00). */
+export function formatPdfAmount(value) {
+  return formatPdfNumberParts(value, { decimals: 2 });
+}
+
+/** Format monétaire MAD — virgule décimale, compatible jsPDF (pas de toLocaleString). */
+export function formatPdfMAD(n) {
+  return `${formatPdfAmount(n)} MAD`;
 }
 
 export { TEXT, MUTED, RED, BORDER };

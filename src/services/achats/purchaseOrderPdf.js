@@ -9,6 +9,7 @@ import {
 } from '../../utils/crm/crmPdfImageUtils';
 import { sanitizeBCLignes } from './purchaseOrders';
 import { moneyLineHt, moneyToNumber } from '../../utils/decimalMoney';
+import { formatPdfAmount, formatPdfQty } from '../finance/pdfShared';
 
 const RED = [198, 40, 40];
 const TEXT = [33, 33, 33];
@@ -87,34 +88,7 @@ function fmtDate(d) {
 }
 
 function fmtNum(n) {
-  const v = Number(n);
-  if (isNaN(v)) return '0,00';
-  const fixed = Math.abs(v).toFixed(2);
-  const [intPart, decPart] = fixed.split('.');
-  const sign = v < 0 ? '-' : '';
-  const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
-  return `${sign}${grouped},${decPart}`;
-}
-
-/** Quantité : entier sans virgule ni décimales (4, pas 4,00). */
-function fmtQty(n) {
-  if (n == null || n === '') return '0';
-  const v = moneyToNumber(n);
-  if (!Number.isFinite(v)) return '0';
-  const rounded = Math.round(v);
-  if (Math.abs(v - rounded) < 1e-6) {
-    const sign = rounded < 0 ? '-' : '';
-    return `${sign}${String(Math.abs(rounded)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}`;
-  }
-  const raw = String(v).replace('.', ',');
-  const [intPart, decPart] = raw.split(',');
-  const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
-  return decPart ? `${grouped},${decPart}` : grouped;
-}
-
-/** PU HT : toujours 2 décimales (750,00). */
-function fmtUnitPrice(n) {
-  return fmtNum(moneyToNumber(n));
+  return formatPdfAmount(n);
 }
 
 function textRight(doc, text, rightX, y) {
@@ -174,8 +148,8 @@ function buildPdfRows(bc) {
       designation: l.designation || '—',
       description: l.description || '',
       unite: fmtUnite(l.unite),
-      quantite: fmtQty(l.qte),
-      prix_ht: fmtUnitPrice(l.prix_ht),
+      quantite: formatPdfQty(l.qte),
+      prix_ht: formatPdfAmount(l.prix_ht),
       total_ht: moneyToNumber(lineHt),
     });
   });
