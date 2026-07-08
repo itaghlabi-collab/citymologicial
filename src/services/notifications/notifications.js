@@ -143,60 +143,44 @@ export async function createNotification(payload) {
       if (!rpcErr && upserted) {
         const normalized = normalizeNotification(upserted);
         logNotificationDebug('create.rpc.upsert', { id: normalized.id, recipientUserId, title: normalized.title });
+        queueWhatsappNotification({
+          notificationId: normalized.id,
+          userId: recipientUserId,
+          title: normalized.title,
+          message: normalized.message,
+        }).catch(() => {});
         return normalized;
       }
       if (rpcErr?.code !== 'PGRST202') {
         console.warn('[CITYMO] upsert_user_notification', rpcErr);
       }
-    } else {
-      const { data: inserted, error: rpcErr } = await getSupabase().rpc('insert_user_notification', rpcArgs);
-      if (!rpcErr && inserted) {
-        const normalized = normalizeNotification(inserted);
-        logNotificationDebug('create.rpc.insert', { id: normalized.id, recipientUserId, title: normalized.title });
-        return normalized;
-      }
-      if (rpcErr?.code !== 'PGRST202') {
-        console.warn('[CITYMO] insert_user_notification', rpcErr);
-      }
     }
-  }
 
-  const { data, error } = await getSupabase()
-    .from(TABLE)
-    .insert([row])
-    .select()
-    .single();
-
-  if (error) {
-    if (error.code === '23505' && recipientUserId) {
-      logNotificationDebug('create.duplicate', { recipientUserId, title, type: payload.type });
-      return null;
+    const { data: inserted, error: rpcErr } = await getSupabase().rpc('insert_user_notification', rpcArgs);
+    if (!rpcErr && inserted) {
+      const normalized = normalizeNotification(inserted);
+      logNotificationDebug('create.rpc.insert', { id: normalized.id, recipientUserId, title: normalized.title });
+      queueWhatsappNotification({
+        notificationId: normalized.id,
+        userId: recipientUserId,
+        title: normalized.title,
+        message: normalized.message,
+      }).catch(() => {});
+      return normalized;
     }
-    console.warn('[CITYMO] createNotification', error, { recipientUserId, title });
-    logNotificationDebug('create.error', { error, recipientUserId, title });
+    if (rpcErr?.code !== 'PGRST202') {
+      console.warn('[CITYMO] insert_user_notification', rpcErr);
+    }
     return null;
   }
 
-  const normalized = normalizeNotification(data);
-  logNotificationDebug('create.ok', {
-    id: normalized.id,
-    recipient_user_id: normalized.recipientUserId,
-    title: normalized.title,
-    type: normalized.type,
-    entity_id: normalized.entityId,
-    is_read: normalized.isRead,
-  });
-
-  if (recipientUserId) {
-    queueWhatsappNotification({
-      notificationId: normalized.id,
-      userId: recipientUserId,
-      title: normalized.title,
-      message: normalized.message,
-    }).catch(() => {});
+  // Notifications globales / par rôle : réservées aux flux admin (pas d'insert direct)
+  if (isGlobal || recipientRole) {
+    console.warn('[CITYMO] createNotification: global/role notifications require targeted RPC');
+    return null;
   }
 
-  return normalized;
+  return null;
 }
 
 export async function notifyUser(userId, payload) {
