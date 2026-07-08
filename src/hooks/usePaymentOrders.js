@@ -24,7 +24,7 @@ export function usePaymentOrders() {
     setLoading(true);
     setError(null);
     try {
-      setRecords(await listPaymentOrders());
+      setRecords(await listPaymentOrders({ reconcileRefs: true }));
     } catch (err) {
       console.error('[CITYMO] usePaymentOrders', err);
       setError(formatSupabaseError(err, 'Erreur chargement ordres de paiement.'));

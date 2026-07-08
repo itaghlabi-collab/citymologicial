@@ -437,7 +437,9 @@ export default function OrdresPaiement({ categories = [] }) {
                 {filtered.map(o => (
                   <tr key={o.id}>
                     <td data-label="Référence">
-                      <span style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.82rem', color: 'var(--red)' }}>{o.ref}</span>
+                      <span style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.82rem', color: 'var(--red)' }}>
+                        {o.ref || o.purchase_request_ref || '—'}
+                      </span>
                     </td>
                     <td data-label="Origine">
                       <span style={{ fontSize: '0.8rem', color: 'var(--text-2)' }}>{o.origine || '—'}</span>

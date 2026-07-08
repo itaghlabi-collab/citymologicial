@@ -130,7 +130,58 @@ async function requireUser() {
   return user.id;
 }
 
-export async function listPaymentOrders() {
+export async function generatePaymentOrderRef() {
+  const year = new Date().getFullYear();
+  const prefix = `OP-${year}-`;
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .select('ref_ordre')
+    .like('ref_ordre', `${prefix}%`);
+  if (error) throw error;
+  let maxSeq = 0;
+  for (const row of data || []) {
+    const match = String(row.ref_ordre || '').match(/-(\d{3,})$/);
+    if (match) maxSeq = Math.max(maxSeq, parseInt(match[1], 10));
+  }
+  return `${prefix}${String(maxSeq + 1).padStart(3, '0')}`;
+}
+
+export async function assignPaymentOrderRefIfMissing(id, existingRef = '') {
+  const current = String(existingRef || '').trim();
+  if (current) return current;
+  const newRef = await generatePaymentOrderRef();
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .update({ ref_ordre: newRef })
+    .eq('id', id)
+    .select('ref_ordre')
+    .single();
+  if (error) throw error;
+  return data.ref_ordre;
+}
+
+/** Attribue OP-AAAA-NNN aux ordres existants sans ref_ordre. */
+export async function reconcileMissingPaymentOrderRefs() {
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .select('id, ref_ordre, created_at')
+    .or('ref_ordre.is.null,ref_ordre.eq.')
+    .order('created_at', { ascending: true });
+  if (error || !data?.length) return 0;
+  let fixed = 0;
+  for (const row of data) {
+    await assignPaymentOrderRefIfMissing(row.id, row.ref_ordre);
+    fixed += 1;
+  }
+  return fixed;
+}
+
+export async function listPaymentOrders({ reconcileRefs = false } = {}) {
+  if (reconcileRefs) {
+    await reconcileMissingPaymentOrderRefs().catch((err) => {
+      console.warn('[CITYMO] reconcile payment order refs', err);
+    });
+  }
   const { data, error } = await getSupabase()
     .from(TABLE)
     .select('*')
@@ -141,9 +192,13 @@ export async function listPaymentOrders() {
 
 export async function createPaymentOrder(form) {
   const uid = await requireUser();
+  const row = { ...toPaymentOrderRow(form), created_by: uid };
+  if (!String(row.ref_ordre || '').trim()) {
+    row.ref_ordre = await generatePaymentOrderRef();
+  }
   const { data, error } = await getSupabase()
     .from(TABLE)
-    .insert([{ ...toPaymentOrderRow(form), created_by: uid }])
+    .insert([row])
     .select()
     .single();
   if (error) throw error;

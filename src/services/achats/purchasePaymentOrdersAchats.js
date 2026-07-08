@@ -2,7 +2,7 @@
  * purchasePaymentOrdersAchats.js — Ordres de paiement liés aux achats
  */
 import { getSupabase } from '../../lib/supabase';
-import { normalizePaymentOrder, toPaymentOrderRow } from '../finance/paymentOrders';
+import { normalizePaymentOrder, toPaymentOrderRow, generatePaymentOrderRef } from '../finance/paymentOrders';
 import { syncPaymentOrderPaidOutcome } from '../finance/paymentOrderPaidSync';
 import { appendPurchaseRequestHistory } from './purchaseRequestHistory';
 import { PURCHASE_ASSIGNEE } from '../../constants/purchaseWorkflow';
@@ -77,9 +77,13 @@ export async function createAchatsPaymentOrderFromAcquisition({
     purchase_request_ref: request.ref,
     purchase_oa_ref: oa.ref,
   };
+  const insertRow = { ...toPaymentOrderRow(row), created_by: userId };
+  if (!String(insertRow.ref_ordre || '').trim()) {
+    insertRow.ref_ordre = await generatePaymentOrderRef();
+  }
   const { data, error } = await getSupabase()
     .from(TABLE)
-    .insert([{ ...toPaymentOrderRow(row), created_by: userId }])
+    .insert([insertRow])
     .select()
     .single();
   if (error) throw error;
