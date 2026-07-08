@@ -96,19 +96,20 @@ function fmtNum(n) {
   return `${sign}${grouped},${decPart}`;
 }
 
-/** Quantité : entier sans décimales (4, pas 4,00) ; fraction si besoin (ex. 2,5). */
+/** Quantité : entier sans virgule ni décimales (4, pas 4,00). */
 function fmtQty(n) {
+  if (n == null || n === '') return '0';
   const v = moneyToNumber(n);
   if (!Number.isFinite(v)) return '0';
   const rounded = Math.round(v);
-  if (Math.abs(v - rounded) < 1e-9) {
+  if (Math.abs(v - rounded) < 1e-6) {
     const sign = rounded < 0 ? '-' : '';
-    const grouped = String(Math.abs(rounded)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
-    return `${sign}${grouped}`;
+    return `${sign}${String(Math.abs(rounded)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ')}`;
   }
-  const [intPart, decPart] = String(v).split('.');
+  const raw = String(v).replace('.', ',');
+  const [intPart, decPart] = raw.split(',');
   const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
-  return `${grouped},${decPart}`;
+  return decPart ? `${grouped},${decPart}` : grouped;
 }
 
 /** PU HT : toujours 2 décimales (750,00). */
@@ -173,8 +174,8 @@ function buildPdfRows(bc) {
       designation: l.designation || '—',
       description: l.description || '',
       unite: fmtUnite(l.unite),
-      quantite: l.qte,
-      prix_ht: l.prix_ht,
+      quantite: fmtQty(l.qte),
+      prix_ht: fmtUnitPrice(l.prix_ht),
       total_ht: moneyToNumber(lineHt),
     });
   });
@@ -392,8 +393,8 @@ export async function generatePurchaseOrderPdf(bc, supplier = null, options = {}
     doc.setFontSize(7.5);
     doc.setTextColor(...TEXT);
     textCenter(doc, row.unite, COL_X[2] + COL_W[2] / 2, midY);
-    textRight(doc, fmtQty(row.quantite), COL_R[3], midY);
-    textRight(doc, fmtUnitPrice(row.prix_ht), COL_R[4], midY);
+    textRight(doc, row.quantite, COL_R[3], midY);
+    textRight(doc, row.prix_ht, COL_R[4], midY);
     doc.setFont('helvetica', 'bold');
     textRight(doc, `${fmtNum(row.total_ht)} ${devise}`, COL_R[5], midY);
 
