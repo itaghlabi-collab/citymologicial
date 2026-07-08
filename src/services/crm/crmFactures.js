@@ -550,7 +550,7 @@ export async function createCrmFactureFromDevis(devisId) {
     })),
     paiements: [],
     acompte_montant: 0,
-    acompte_type: 'montant',
+    acompte_type: 'fixe', // contrainte DB : 'fixe' | 'pct' uniquement
   });
 }
 
