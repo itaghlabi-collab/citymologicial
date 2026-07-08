@@ -123,12 +123,18 @@ export function buildProjectSummaries(projects, expenses, orders = [], acquisiti
 
 export async function fetchErpContextForProjects() {
   const sb = getSupabase();
+  // payment_orders : colonne = montant (pas montant_ttc) — select invalide → 400 PostgREST
   const [ordersRes, oaRes] = await Promise.all([
-    sb.from('payment_orders').select('id, project_id, montant, montant_ttc, statut').not('project_id', 'is', null),
+    sb.from('payment_orders').select('id, project_id, montant, statut').not('project_id', 'is', null),
     sb.from('purchase_acquisition_orders').select('id, project_id, montant_ttc, statut').not('project_id', 'is', null),
   ]);
+  if (ordersRes.error) console.warn('[CITYMO] fetchErpContext payment_orders', ordersRes.error);
+  if (oaRes.error) console.warn('[CITYMO] fetchErpContext purchase_acquisition_orders', oaRes.error);
   return {
-    orders: ordersRes.data || [],
+    orders: (ordersRes.data || []).map((o) => ({
+      ...o,
+      montant_ttc: o.montant_ttc ?? o.montant,
+    })),
     acquisitionOrders: oaRes.data || [],
   };
 }
