@@ -364,7 +364,7 @@ export default function Dashboard({ onNavigate }) {
         <div>
           <h1 className="page-title" style={{ marginBottom: 4 }}>Tableau de Bord</h1>
           <p className="page-subtitle">
-            Centre de pilotage CITYMO — données en temps réel
+            Centre de pilotage CITYMO — mise à jour automatique
             {useInternal && internal.kpis ? (
               <span style={{ marginLeft: 8, color: 'var(--text-3)' }}>
                 · {internal.kpis.pendingTasks} tâches · {internal.kpis.todayMeetings} RDV aujourd&apos;hui

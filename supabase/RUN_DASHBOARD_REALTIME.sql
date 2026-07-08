@@ -15,6 +15,8 @@ DECLARE
     'finance_charges',
     'payment_orders',
     'crm_factures',
+    'crm_devis',
+    'clients',
     'payroll',
     'subcontractor_payments',
     'projects',
@@ -26,7 +28,8 @@ DECLARE
     'notifications',
     'attendance',
     'purchase_orders',
-    'daily_cash_reviews'
+    'daily_cash_reviews',
+    'prospects'
   ];
 BEGIN
   IF NOT EXISTS (SELECT 1 FROM pg_publication WHERE pubname = 'supabase_realtime') THEN

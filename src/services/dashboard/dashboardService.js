@@ -1,13 +1,14 @@
 /**
  * dashboardService.js — Service central tableau de bord ERP CITYMO
- * Chargement agrégé, alertes prioritaires, realtime + fallback polling.
+ * Chargement agrégé, alertes prioritaires, realtime + polling permanent.
  */
 import { getSupabase, isSupabaseConfigured } from '../../lib/supabase';
 import { loadMainDashboardData } from './dashboardData';
 import { formatDate, roundMoney } from '../../utils/formatters';
 import { ROUTES } from '../../config/routes';
 
-export const DASHBOARD_POLL_MS = 30_000;
+/** Polling permanent — garde le dashboard à jour même si le realtime lâche. */
+export const DASHBOARD_POLL_MS = 15_000;
 
 /** Tables Supabase écoutées pour rafraîchissement automatique */
 export const DASHBOARD_REALTIME_TABLES = [
@@ -16,6 +17,8 @@ export const DASHBOARD_REALTIME_TABLES = [
   'finance_charges',
   'payment_orders',
   'crm_factures',
+  'crm_devis',
+  'clients',
   'payroll',
   'subcontractor_payments',
   'projects',
@@ -28,6 +31,7 @@ export const DASHBOARD_REALTIME_TABLES = [
   'attendance',
   'purchase_orders',
   'daily_cash_reviews',
+  'prospects',
 ];
 
 /** @deprecated alias — préférer loadDashboardData */
@@ -72,7 +76,6 @@ export function buildDashboardAlerts(data, { dateFrom, dateTo } = {}) {
 
   const internal = data.internal;
 
-  // Tâches urgentes / en retard
   (internal?.tasks || []).forEach((t) => {
     if (t.priority === 'haute' || t.priority === 'urgente') {
       push({
@@ -91,7 +94,6 @@ export function buildDashboardAlerts(data, { dateFrom, dateTo } = {}) {
     push({ ...a, module: a.module || module });
   });
 
-  // Congés en attente (période)
   (data.leaves || [])
     .filter((l) => l.status === 'pending' && overlapsRange(l.dateDebut, l.dateFin, from, to))
     .slice(0, 5)
@@ -103,7 +105,6 @@ export function buildDashboardAlerts(data, { dateFrom, dateTo } = {}) {
       });
     });
 
-  // Caisse J-1 non validée
   if (data.cashValidation?.needsValidation) {
     push({
       type: 'warning',
@@ -112,7 +113,6 @@ export function buildDashboardAlerts(data, { dateFrom, dateTo } = {}) {
     });
   }
 
-  // Factures impayées / en retard
   (data.legacyInvoices || [])
     .filter((i) => (i.status === 'overdue' || i.status === 'unpaid') && overlapsRange(i.date, i.date, from, to))
     .slice(0, 5)
@@ -124,7 +124,6 @@ export function buildDashboardAlerts(data, { dateFrom, dateTo } = {}) {
       });
     });
 
-  // Projets en retard
   (data.projects || []).filter((p) => p.delayed).slice(0, 5).forEach((p) => {
     push({
       type: 'warning',
@@ -133,7 +132,6 @@ export function buildDashboardAlerts(data, { dateFrom, dateTo } = {}) {
     });
   });
 
-  // Stock critique
   (data.products || []).slice(0, 5).forEach((p) => {
     push({
       type: 'error',
@@ -142,7 +140,6 @@ export function buildDashboardAlerts(data, { dateFrom, dateTo } = {}) {
     });
   });
 
-  // Paiements ouvriers importants (période, payés)
   (data.workerPayments || [])
     .filter((p) => p.statut === 'Payé' && overlapsRange(p.paymentDate || p.semaineDebut, p.paymentDate || p.semaineFin, from, to))
     .filter((p) => roundMoney(p.total) >= 5000)
@@ -155,7 +152,6 @@ export function buildDashboardAlerts(data, { dateFrom, dateTo } = {}) {
       });
     });
 
-  // Bons de commande en attente
   (data.purchaseAlerts || []).forEach((a) => {
     push({ ...a, module: ROUTES.BONS_COMMANDE });
   });
@@ -167,58 +163,47 @@ export function buildDashboardAlerts(data, { dateFrom, dateTo } = {}) {
 }
 
 /**
- * Abonnement realtime Supabase + fallback polling 30s si indisponible.
+ * Abonnement realtime Supabase + polling permanent (15s).
  * @param {() => void} onChange
  * @returns {() => void} cleanup
  */
 export function subscribeDashboardRealtime(onChange) {
+  if (typeof onChange !== 'function') return () => {};
+
+  let debounceTimer = null;
+  const notify = () => {
+    clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(() => {
+      onChange();
+    }, 350);
+  };
+
+  // Polling toujours actif (filet de sécurité + cas realtime coupé)
+  const pollTimer = setInterval(notify, DASHBOARD_POLL_MS);
+
   if (!isSupabaseConfigured()) {
-    const timer = setInterval(onChange, DASHBOARD_POLL_MS);
-    return () => clearInterval(timer);
+    return () => {
+      clearTimeout(debounceTimer);
+      clearInterval(pollTimer);
+    };
   }
 
   const sb = getSupabase();
-  let channel = sb.channel('citymo-dashboard-realtime');
-  let realtimeOk = false;
-  let pollTimer = null;
-
-  function startPolling() {
-    if (pollTimer) return;
-    pollTimer = setInterval(onChange, DASHBOARD_POLL_MS);
-  }
-
-  function stopPolling() {
-    if (pollTimer) {
-      clearInterval(pollTimer);
-      pollTimer = null;
-    }
-  }
+  let channel = sb.channel(`citymo-dashboard-realtime-${Date.now()}`);
 
   DASHBOARD_REALTIME_TABLES.forEach((table) => {
     channel = channel.on(
       'postgres_changes',
       { event: '*', schema: 'public', table },
-      () => onChange(),
+      () => notify(),
     );
   });
 
-  channel.subscribe((status) => {
-    if (status === 'SUBSCRIBED') {
-      realtimeOk = true;
-      stopPolling();
-    } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
-      realtimeOk = false;
-      startPolling();
-    }
-  });
-
-  const fallbackTimer = setTimeout(() => {
-    if (!realtimeOk) startPolling();
-  }, 5000);
+  channel.subscribe();
 
   return () => {
-    clearTimeout(fallbackTimer);
-    stopPolling();
+    clearTimeout(debounceTimer);
+    clearInterval(pollTimer);
     sb.removeChannel(channel);
   };
 }

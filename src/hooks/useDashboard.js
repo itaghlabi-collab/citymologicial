@@ -1,5 +1,5 @@
 /**
- * useDashboard.js — Hook tableau de bord (chargement + realtime + dernière MAJ)
+ * useDashboard.js — Hook tableau de bord (chargement auto permanent + realtime)
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { loadDashboardData, subscribeDashboardRealtime } from '../services/dashboard/dashboardService';
@@ -13,29 +13,9 @@ export function useDashboard({ dateFrom, dateTo }) {
   const [justUpdated, setJustUpdated] = useState(false);
   const mountedRef = useRef(true);
   const flashTimerRef = useRef(null);
-
-  const load = useCallback(async ({ silent = false } = {}) => {
-    if (!silent) setLoading(true);
-    else setRefreshing(true);
-    setError(null);
-    try {
-      const payload = await loadDashboardData({ dateFrom, dateTo });
-      if (!mountedRef.current) return;
-      setData(payload);
-      setLastUpdated(new Date());
-    } catch (err) {
-      if (!mountedRef.current) return;
-      setError(err?.message || 'Impossible de charger le tableau de bord.');
-      if (!silent) setData(null);
-    } finally {
-      if (mountedRef.current) {
-        setLoading(false);
-        setRefreshing(false);
-      }
-    }
-  }, [dateFrom, dateTo]);
-
-  const reload = useCallback(() => load({ silent: Boolean(data) }), [load, data]);
+  const loadInFlightRef = useRef(false);
+  const dataRef = useRef(null);
+  const loadRef = useRef(null);
 
   const flashUpdated = useCallback(() => {
     setJustUpdated(true);
@@ -45,21 +25,70 @@ export function useDashboard({ dateFrom, dateTo }) {
     }, 2500);
   }, []);
 
+  const load = useCallback(async ({ silent = false, flash = false } = {}) => {
+    if (loadInFlightRef.current) return;
+    loadInFlightRef.current = true;
+
+    if (!silent) setLoading(true);
+    else setRefreshing(true);
+    setError(null);
+    try {
+      const payload = await loadDashboardData({ dateFrom, dateTo });
+      if (!mountedRef.current) return;
+      setData(payload);
+      dataRef.current = payload;
+      setLastUpdated(new Date());
+      if (flash) flashUpdated();
+    } catch (err) {
+      if (!mountedRef.current) return;
+      setError(err?.message || 'Impossible de charger le tableau de bord.');
+      if (!silent) setData(null);
+    } finally {
+      loadInFlightRef.current = false;
+      if (mountedRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    }
+  }, [dateFrom, dateTo, flashUpdated]);
+
+  loadRef.current = load;
+
+  const reload = useCallback(() => {
+    load({ silent: Boolean(dataRef.current) });
+  }, [load]);
+
   useEffect(() => {
     mountedRef.current = true;
-    load();
+    load({ silent: false });
     return () => {
       mountedRef.current = false;
       clearTimeout(flashTimerRef.current);
     };
   }, [load]);
 
+  // Realtime + polling permanent
   useEffect(() => {
     const unsub = subscribeDashboardRealtime(() => {
-      load({ silent: true }).then(() => flashUpdated());
+      loadRef.current?.({ silent: true, flash: true });
     });
     return unsub;
-  }, [load, flashUpdated]);
+  }, [dateFrom, dateTo]);
+
+  // Rafraîchir dès le retour sur l'onglet / la fenêtre
+  useEffect(() => {
+    const refreshNow = () => {
+      if (document.visibilityState === 'visible') {
+        loadRef.current?.({ silent: true, flash: true });
+      }
+    };
+    document.addEventListener('visibilitychange', refreshNow);
+    window.addEventListener('focus', refreshNow);
+    return () => {
+      document.removeEventListener('visibilitychange', refreshNow);
+      window.removeEventListener('focus', refreshNow);
+    };
+  }, []);
 
   return {
     data,
