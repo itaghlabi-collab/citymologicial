@@ -1,12 +1,19 @@
 /**
  * decimalMoney.js — Calculs monétaires en décimal (évite les erreurs float JS)
  *
- * Règle CITYMO : conserver la précision saisie, sans arrondi intermédiaire.
- * - PU HT net = PU HT × (1 - remise%)
- * - Total ligne HT  = Qté × PU HT net
- * - PU TTC          = PU HT net × (1 + TVA%)
- * - Total ligne TTC = Qté × PU TTC
- * - TVA document    = Σ TTC - Σ HT
+ * Règle CITYMO / MAD (centimes) :
+ * 1. Total ligne HT = arrondi_2(Qté × PU HT net)
+ * 2. Sous-total HT  = somme des totaux lignes HT
+ * 3. Par taux TVA   : Total TTC = arrondi_2(HT × (1 + taux%))
+ *                     TVA       = TTC − HT
+ * 4. Totaux doc     = sommes des HT / TVA / TTC
+ *
+ * Exemple BC TTC 5 600 :
+ *   4 × 750    → 3 000,00
+ *   8 × 208,33 → 1 666,64
+ *   HT         = 4 666,64
+ *   TTC 20 %   = arrondi(4 666,64 × 1,2) = 5 600,00
+ *   TVA        = 5 600,00 − 4 666,64 = 933,36
  */
 import Big from 'big.js';
 
@@ -22,23 +29,33 @@ function toBig(v) {
   }
 }
 
-/** Arrondi à 2 déc. — uniquement si besoin explicite (ex. paiements arrondis) */
+/** Arrondi monétaire MAD (2 décimales, half-up) */
 export function moneyRound2(big) {
   return toBig(big).round(2, Big.roundHalfUp);
 }
 
-/** Convertit Big → Number en conservant la précision décimale (via chaîne) */
+/** Convertit Big → Number via string (pas de float drift) */
 export function moneyToNumber(big) {
   return Number(toBig(big).toString());
 }
 
-/** @deprecated — préférer moneyToNumber pour conserver la précision */
+/** @deprecated */
 export function moneyToNumber2(big) {
-  return moneyToNumber(big);
+  return Number(moneyRound2(big).toString());
 }
 
-/** Affiche un montant MAD en conservant les décimales exactes (ex: 8,88888 MAD) */
+/** Affiche un montant MAD arrondi à 2 décimales */
 export function moneyFormatMAD(value) {
+  const str = moneyRound2(value).toFixed(2);
+  const neg = str.startsWith('-');
+  const abs = neg ? str.slice(1) : str;
+  const [intPart, decPart] = abs.split('.');
+  const intFmt = Number(intPart || 0).toLocaleString('fr-FR');
+  return `${neg ? '-' : ''}${intFmt},${decPart} MAD`;
+}
+
+/** Affiche un PU en conservant la précision saisie */
+export function moneyFormatUnitPrice(value) {
   const str = toBig(value).toString();
   const neg = str.startsWith('-');
   const abs = neg ? str.slice(1) : str;
@@ -48,55 +65,73 @@ export function moneyFormatMAD(value) {
   return `${neg ? '-' : ''}${body} MAD`;
 }
 
-/** PU HT après remise */
+/** PU HT après remise (précision exacte) */
 export function moneyUnitHtNet(unitPriceHt, remisePct = 0) {
   const pu = toBig(unitPriceHt);
   const remise = toBig(remisePct);
   return pu.times(new Big(1).minus(remise.div(100)));
 }
 
-/** PU TTC (sans arrondi) */
+/** PU TTC (précision exacte) */
 export function moneyUnitTtc(unitPriceHt, tvaPct, remisePct = 0) {
   const unitHtNet = moneyUnitHtNet(unitPriceHt, remisePct);
   const tva = toBig(tvaPct);
   return unitHtNet.times(new Big(1).plus(tva.div(100)));
 }
 
-/** Total ligne HT = Qté × PU HT net */
+/** Total ligne HT = arrondi_2(Qté × PU HT net) */
 export function moneyLineHt({ qty, unitPriceHt, remisePct }) {
   const q = toBig(qty);
   const unitHtNet = moneyUnitHtNet(unitPriceHt, remisePct);
-  return q.times(unitHtNet);
+  return moneyRound2(q.times(unitHtNet));
 }
 
-/** Total ligne TTC = Qté × PU TTC */
+/** Total ligne TTC = arrondi_2(HT ligne × (1 + TVA%)) */
 export function moneyLineTtc({ qty, unitPriceHt, tvaPct, remisePct }) {
-  const q = toBig(qty);
-  const unitTtc = moneyUnitTtc(unitPriceHt, tvaPct, remisePct);
-  return q.times(unitTtc);
+  const ht = moneyLineHt({ qty, unitPriceHt, remisePct });
+  return moneyRound2(ht.times(new Big(1).plus(toBig(tvaPct).div(100))));
 }
 
 /** @deprecated */
 export function moneyVatFromHt(ht, tvaPct) {
-  return toBig(ht).times(toBig(tvaPct).div(100));
+  const h = moneyRound2(ht);
+  const ttc = moneyRound2(h.times(new Big(1).plus(toBig(tvaPct).div(100))));
+  return moneyRound2(ttc.minus(h));
 }
 
-/** Totaux document : HT, TVA, TTC (précision exacte) */
+/**
+ * Totaux document MAD :
+ * HT par ligne → TTC = arrondi_2(HT × (1+taux)) par taux → TVA = TTC − HT
+ */
 export function moneyComputeDocumentTotals(lines, mapLine) {
-  let sumHt = new Big(0);
-  let sumTtc = new Big(0);
+  const htByRate = new Map();
 
   for (const line of lines || []) {
     const p = mapLine(line);
     if (!p) continue;
     const { qty, unitPriceHt, tvaPct, remisePct } = p;
-    sumHt = sumHt.plus(moneyLineHt({ qty, unitPriceHt, remisePct }));
-    sumTtc = sumTtc.plus(moneyLineTtc({ qty, unitPriceHt, tvaPct, remisePct }));
+    const ht = moneyLineHt({ qty, unitPriceHt, remisePct });
+    const rateKey = toBig(tvaPct).toString();
+    const prev = htByRate.get(rateKey) || new Big(0);
+    htByRate.set(rateKey, prev.plus(ht));
   }
 
-  const subtotal_ht = moneyToNumber(sumHt);
-  const total_ttc = moneyToNumber(sumTtc);
-  const total_vat = moneyToNumber(sumTtc.minus(sumHt));
+  let sumHt = new Big(0);
+  let sumVat = new Big(0);
+  let sumTtc = new Big(0);
+
+  for (const [rateKey, htRaw] of htByRate.entries()) {
+    const ht = moneyRound2(htRaw);
+    const ttc = moneyRound2(ht.times(new Big(1).plus(toBig(rateKey).div(100))));
+    const vat = moneyRound2(ttc.minus(ht));
+    sumHt = sumHt.plus(ht);
+    sumVat = sumVat.plus(vat);
+    sumTtc = sumTtc.plus(ttc);
+  }
+
+  const subtotal_ht = moneyToNumber(moneyRound2(sumHt));
+  const total_vat = moneyToNumber(moneyRound2(sumVat));
+  const total_ttc = moneyToNumber(moneyRound2(sumTtc));
 
   return { subtotal_ht, total_ht: subtotal_ht, total_vat, total_ttc };
 }

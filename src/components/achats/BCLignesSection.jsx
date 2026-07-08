@@ -10,7 +10,8 @@ import ArticleDesignationSearch from '../crm/ArticleDesignationSearch';
 import {
   INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE, TVA_OPTIONS, genId,
 } from './shared.jsx';
-import { moneyLineHt, moneyFormatMAD } from '../../utils/decimalMoney';
+import { moneyLineHt, moneyFormatMAD, moneyRound2 } from '../../utils/decimalMoney';
+import Big from 'big.js';
 
 const UNITES = ['unite', 'm2', 'ml', 'm3', 'm', 'forfait', 'heure', 'jour', 'pack', 'U'];
 
@@ -23,9 +24,73 @@ const EMPTY_DRAFT = () => ({
   qte: 1,
   unite: 'unite',
   prix_ht: '',
+  total_ht: '',
+  total_ttc: '',
   remise: 0,
   tva: 20,
 });
+
+function toDraftBig(v) {
+  if (v === null || v === undefined || v === '') return new Big(0);
+  try {
+    return new Big(String(v).trim().replace(',', '.'));
+  } catch {
+    return new Big(0);
+  }
+}
+
+/** Déduit le P.U. HT depuis un total ligne HT (précision jusqu’à 6 déc.) */
+function derivePuFromTotalHt(totalHt, qty, remisePct = 0) {
+  const ht = toDraftBig(totalHt);
+  const q = toDraftBig(qty);
+  if (ht.lte(0) || q.lte(0)) return '';
+  const remise = toDraftBig(remisePct);
+  const divisor = q.times(new Big(1).minus(remise.div(100)));
+  if (divisor.lte(0)) return '';
+  return ht.div(divisor).round(6, Big.roundHalfUp).toString();
+}
+
+/** Déduit le P.U. HT depuis un total ligne TTC */
+function derivePuFromTotalTtc(totalTtc, qty, tvaPct = 20, remisePct = 0) {
+  const ttc = toDraftBig(totalTtc);
+  const factor = new Big(1).plus(toDraftBig(tvaPct).div(100));
+  if (ttc.lte(0) || factor.lte(0)) return '';
+  const ht = ttc.div(factor);
+  return derivePuFromTotalHt(ht, qty, remisePct);
+}
+
+function syncDraftMoney(draft, source) {
+  const qte = draft.qte;
+  const remise = draft.remise;
+  const tva = draft.tva;
+  let prix_ht = draft.prix_ht;
+  let total_ht = draft.total_ht;
+  let total_ttc = draft.total_ttc;
+
+  if (source === 'total_ttc') {
+    prix_ht = derivePuFromTotalTtc(total_ttc, qte, tva, remise);
+    const ht = moneyLineHt({ qty: qte, unitPriceHt: prix_ht, remisePct: remise });
+    total_ht = prix_ht ? moneyRound2(ht).toFixed(2) : '';
+  } else if (source === 'total_ht') {
+    prix_ht = derivePuFromTotalHt(total_ht, qte, remise);
+    const ht = moneyLineHt({ qty: qte, unitPriceHt: prix_ht, remisePct: remise });
+    const ttc = moneyRound2(ht.times(new Big(1).plus(toDraftBig(tva).div(100))));
+    total_ttc = prix_ht ? ttc.toFixed(2) : '';
+    total_ht = prix_ht ? moneyRound2(ht).toFixed(2) : total_ht;
+  } else {
+    // prix_ht / qte / remise / tva
+    const ht = moneyLineHt({ qty: qte, unitPriceHt: prix_ht, remisePct: remise });
+    if (String(prix_ht ?? '').trim() === '') {
+      total_ht = '';
+      total_ttc = '';
+    } else {
+      total_ht = moneyRound2(ht).toFixed(2);
+      total_ttc = moneyRound2(ht.times(new Big(1).plus(toDraftBig(tva).div(100)))).toFixed(2);
+    }
+  }
+
+  return { ...draft, prix_ht, total_ht, total_ttc };
+}
 
 function FieldLabel({ children, required }) {
   return (
@@ -121,7 +186,7 @@ function ligneToDraft(ligne, articles = []) {
     const art = articles.find((a) => String(a.id) === String(ligne.article_id));
     description = art?.description?.trim() || '';
   }
-  return {
+  return syncDraftMoney({
     ...EMPTY_DRAFT(),
     mode: ligne.ephemeral ? 'hors_catalogue' : 'article',
     categorie_id: ligne.categorie_id ? String(ligne.categorie_id) : '',
@@ -133,7 +198,7 @@ function ligneToDraft(ligne, articles = []) {
     prix_ht: ligne.prix_ht ?? '',
     remise: ligne.remise ?? 0,
     tva: ligne.tva ?? 20,
-  };
+  }, 'prix_ht');
 }
 
 function BCLineDisplay({ ligne, lineNum, idx, onDelete, onDuplicate, onEdit, drag }) {
@@ -254,7 +319,13 @@ export default function BCLignesSection({ lignes, onChange }) {
     : [];
 
   function setF(k, v) {
-    setDraft((p) => ({ ...p, [k]: v }));
+    setDraft((p) => {
+      const next = { ...p, [k]: v };
+      if (['prix_ht', 'qte', 'remise', 'tva', 'total_ht', 'total_ttc'].includes(k)) {
+        return syncDraftMoney(next, k);
+      }
+      return next;
+    });
   }
 
   function resetDraft() {
@@ -274,7 +345,7 @@ export default function BCLignesSection({ lignes, onChange }) {
     }
     const art = articles.find((a) => String(a.id) === String(articleId));
     if (art) {
-      setDraft((p) => ({
+      setDraft((p) => syncDraftMoney({
         ...p,
         article_id: articleId,
         categorie_id: art.categorie_id ? String(art.categorie_id) : p.categorie_id,
@@ -284,7 +355,7 @@ export default function BCLignesSection({ lignes, onChange }) {
         prix_ht: art.prix_ht ?? art.prix ?? '',
         remise: art.remise ?? 0,
         tva: art.tva ?? 20,
-      }));
+      }, 'prix_ht'));
     } else {
       setDraft((p) => ({ ...p, article_id: articleId }));
     }
@@ -300,7 +371,7 @@ export default function BCLignesSection({ lignes, onChange }) {
         }
         return [...prev, fresh];
       });
-      setDraft((p) => ({
+      setDraft((p) => syncDraftMoney({
         ...p,
         article_id: articleId,
         categorie_id: fresh.categorie_id ? String(fresh.categorie_id) : p.categorie_id,
@@ -310,7 +381,7 @@ export default function BCLignesSection({ lignes, onChange }) {
         prix_ht: fresh.prix_ht ?? fresh.prix ?? p.prix_ht,
         remise: fresh.remise ?? p.remise,
         tva: fresh.tva ?? p.tva,
-      }));
+      }, 'prix_ht'));
     } catch { /* keep local */ }
   }
 
@@ -534,7 +605,7 @@ export default function BCLignesSection({ lignes, onChange }) {
               />
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 10, marginBottom: 12, alignItems: 'end' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 10, marginBottom: 12, alignItems: 'end' }}>
               <div>
                 <FieldLabel>Quantité</FieldLabel>
                 <input type="number" min="0" step="0.01" value={draft.qte} onChange={(e) => setF('qte', e.target.value)} style={INPUT_STYLE} />
@@ -552,8 +623,33 @@ export default function BCLignesSection({ lignes, onChange }) {
                   inputMode="decimal"
                   value={draft.prix_ht}
                   onChange={(e) => setF('prix_ht', e.target.value)}
-                  placeholder="Ex: 7,33333"
+                  placeholder="Ex: 208,333333"
                   style={INPUT_STYLE}
+                  title="Saisie précise acceptée (jusqu’à 6 décimales)"
+                />
+              </div>
+              <div>
+                <FieldLabel>Total HT</FieldLabel>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={draft.total_ht}
+                  onChange={(e) => setF('total_ht', e.target.value)}
+                  placeholder="Ex: 1666,67"
+                  style={INPUT_STYLE}
+                  title="Saisir le total HT ligne → calcule le P.U. HT"
+                />
+              </div>
+              <div>
+                <FieldLabel>Total TTC</FieldLabel>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  value={draft.total_ttc}
+                  onChange={(e) => setF('total_ttc', e.target.value)}
+                  placeholder="Ex: 2000"
+                  style={INPUT_STYLE}
+                  title="Saisir le total TTC ligne → calcule le P.U. HT"
                 />
               </div>
               <div>
@@ -567,6 +663,9 @@ export default function BCLignesSection({ lignes, onChange }) {
                 </select>
               </div>
             </div>
+            <p style={{ margin: '0 0 12px', fontSize: '0.72rem', color: 'var(--text-3)', lineHeight: 1.4 }}>
+              Astuce TTC exact : saisissez le <strong>Total HT</strong> (ex. 1 666,67) ou le <strong>Total TTC</strong> de la ligne — le P.U. HT se calcule avec la précision nécessaire (ex. 208,333333).
+            </p>
           </>
         )}
 
