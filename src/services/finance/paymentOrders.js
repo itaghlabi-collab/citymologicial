@@ -162,14 +162,20 @@ export async function assignPaymentOrderRefIfMissing(id, existingRef = '') {
 
 /** Attribue OP-AAAA-NNN aux ordres existants sans ref_ordre. */
 export async function reconcileMissingPaymentOrderRefs() {
+  // Uniquement .is(null) — un .eq. vide provoque une erreur 400 PostgREST
   const { data, error } = await getSupabase()
     .from(TABLE)
     .select('id, ref_ordre, created_at')
-    .or('ref_ordre.is.null,ref_ordre.eq.')
+    .is('ref_ordre', null)
     .order('created_at', { ascending: true });
-  if (error || !data?.length) return 0;
+  if (error) {
+    console.warn('[CITYMO] reconcile payment order refs query', error);
+    return 0;
+  }
+  const missing = (data || []).filter((row) => !String(row.ref_ordre || '').trim());
+  if (!missing.length) return 0;
   let fixed = 0;
-  for (const row of data) {
+  for (const row of missing) {
     await assignPaymentOrderRefIfMissing(row.id, row.ref_ordre);
     fixed += 1;
   }

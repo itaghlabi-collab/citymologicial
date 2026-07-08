@@ -482,7 +482,8 @@ async function maybeNotifyPaymentCreated(sourceType, sourceId, entity, built, re
  * - autre statut → supprimer la transaction finance liée (pas le paiement RH)
  */
 export async function syncFinanceTransaction(sourceType, sourceId, options = {}) {
-  console.log('[FINANCE SYNC START]', sourceType, sourceId);
+  // log debug uniquement (évite le bruit console en prod)
+  if (import.meta.env?.DEV) console.log('[FINANCE SYNC START]', sourceType, sourceId);
   if (!sourceType || !sourceId) {
     console.error('[FINANCE SYNC ERROR] sourceType ou sourceId manquant', { sourceType, sourceId });
     return { action: 'error', reason: 'missing_source', id: null };
