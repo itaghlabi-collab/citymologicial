@@ -8,7 +8,7 @@ import {
   loadCrmPdfImages,
 } from '../../utils/crm/crmPdfImageUtils';
 import { sanitizeBCLignes } from './purchaseOrders';
-import { moneyLineHt, moneyToNumber, moneyFormatUnitPrice } from '../../utils/decimalMoney';
+import { moneyLineHt, moneyToNumber } from '../../utils/decimalMoney';
 
 const RED = [198, 40, 40];
 const TEXT = [33, 33, 33];
@@ -94,6 +94,26 @@ function fmtNum(n) {
   const sign = v < 0 ? '-' : '';
   const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
   return `${sign}${grouped},${decPart}`;
+}
+
+/** Quantité : entier sans décimales (4, pas 4,00) ; fraction si besoin (ex. 2,5). */
+function fmtQty(n) {
+  const v = moneyToNumber(n);
+  if (!Number.isFinite(v)) return '0';
+  const rounded = Math.round(v);
+  if (Math.abs(v - rounded) < 1e-9) {
+    const sign = rounded < 0 ? '-' : '';
+    const grouped = String(Math.abs(rounded)).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+    return `${sign}${grouped}`;
+  }
+  const [intPart, decPart] = String(v).split('.');
+  const grouped = intPart.replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+  return `${grouped},${decPart}`;
+}
+
+/** PU HT : toujours 2 décimales (750,00). */
+function fmtUnitPrice(n) {
+  return fmtNum(moneyToNumber(n));
 }
 
 function textRight(doc, text, rightX, y) {
@@ -372,8 +392,8 @@ export async function generatePurchaseOrderPdf(bc, supplier = null, options = {}
     doc.setFontSize(7.5);
     doc.setTextColor(...TEXT);
     textCenter(doc, row.unite, COL_X[2] + COL_W[2] / 2, midY);
-    textRight(doc, fmtNum(row.quantite), COL_R[3], midY);
-    textRight(doc, moneyFormatUnitPrice(row.prix_ht).replace(' MAD', ''), COL_R[4], midY);
+    textRight(doc, fmtQty(row.quantite), COL_R[3], midY);
+    textRight(doc, fmtUnitPrice(row.prix_ht), COL_R[4], midY);
     doc.setFont('helvetica', 'bold');
     textRight(doc, `${fmtNum(row.total_ht)} ${devise}`, COL_R[5], midY);
 
