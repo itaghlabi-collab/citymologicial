@@ -11,6 +11,7 @@ import {
   updateCrmFacture,
   deleteCrmFacture,
   duplicateCrmFacture,
+  markCrmFacturePaid,
   createCrmFactureAcompte,
   getDevisAcompteSummary,
   filterCrmFactures,
@@ -114,6 +115,22 @@ export function useCrmFactures() {
     }
   }, [load]);
 
+  const markPaid = useCallback(async (id) => {
+    setSaving(true);
+    setError(null);
+    try {
+      const data = await markCrmFacturePaid(id);
+      await load();
+      return { success: true, data };
+    } catch (err) {
+      const msg = formatSupabaseError(err, 'Erreur marquage paiement.');
+      setError(msg);
+      return { success: false, error: msg };
+    } finally {
+      setSaving(false);
+    }
+  }, [load]);
+
   const fetchOne = useCallback(async (id) => {
     try {
       return await getCrmFactureById(id);
@@ -158,6 +175,7 @@ export function useCrmFactures() {
     update,
     remove,
     duplicate,
+    markPaid,
     fetchOne,
     fetchDevisAcompteSummary,
     filterCrmFactures,

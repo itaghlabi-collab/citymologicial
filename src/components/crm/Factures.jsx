@@ -150,6 +150,7 @@ export default function Factures() {
     update,
     remove,
     duplicate,
+    markPaid,
     fetchOne,
     fetchDevisAcompteSummary,
     filterCrmFactures,
@@ -292,6 +293,19 @@ export default function Factures() {
   async function handleDuplicate(f) {
     const result = await duplicate(f.id);
     showToast(result.success ? 'Facture dupliquee avec succes.' : (result.error || 'Erreur duplication.'), result.success ? 'success' : 'error');
+  }
+
+  async function handleMarkPaid(f) {
+    if (f.statut === 'payee') {
+      showToast('Cette facture est déjà payée.');
+      return;
+    }
+    if (!window.confirm(`Marquer la facture ${f.numero} comme payée ?\nUn règlement du reste à payer sera enregistré.`)) return;
+    const result = await markPaid(f.id);
+    showToast(
+      result.success ? `Facture ${f.numero} marquée payée.` : (result.error || 'Erreur marquage paiement.'),
+      result.success ? 'success' : 'error',
+    );
   }
 
   async function handleDelete(id) {
@@ -634,6 +648,17 @@ export default function Factures() {
                             className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }}>
                             <Download size={13} />
                           </button>
+                          {f.statut !== 'payee' && f.statut !== 'annulee' && (
+                            <button
+                              title="Marquer payée"
+                              onClick={() => handleMarkPaid(f)}
+                              disabled={saving}
+                              className="btn btn-ghost btn-sm"
+                              style={{ padding: '4px 7px', color: '#2E7D32' }}
+                            >
+                              <CheckCircle size={13} />
+                            </button>
+                          )}
                           <button title="Modifier" onClick={() => openEdit(f)}
                             className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }}>
                             <Edit2 size={13} />
@@ -713,6 +738,12 @@ export default function Factures() {
                         <>
                       <button type="button" title="PDF" onClick={() => handlePdf(f)} disabled={pdfLoadingId === f.id}
                         className="btn btn-ghost btn-sm crm-icon-btn"><Download size={14} /></button>
+                      {f.statut !== 'payee' && f.statut !== 'annulee' && (
+                        <button type="button" title="Marquer payée" onClick={() => handleMarkPaid(f)} disabled={saving}
+                          className="btn btn-ghost btn-sm crm-icon-btn" style={{ color: '#2E7D32' }}>
+                          <CheckCircle size={14} />
+                        </button>
+                      )}
                       <button type="button" title="Modifier" onClick={() => openEdit(f)}
                         className="btn btn-ghost btn-sm crm-icon-btn"><Edit2 size={14} /></button>
                       <button type="button" title="Dupliquer" onClick={() => handleDuplicate(f)}

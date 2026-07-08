@@ -343,13 +343,39 @@ export default function FactureForm({ facture, onBack, onSaved, saving = false }
   const totalPaye   = form.paiements.reduce((s, p) => s + Number(p.montant), 0);
   const resteAPayer = Math.max(0, totalTTC - totalPaye - acompteMontant);
 
-  /* Auto statut */
+  /* Auto statut selon règlements (sauf annulation / brouillon forcé) */
   function computeStatut() {
     if (form.statut === 'annulee' || form.statut === 'brouillon') return form.statut;
     if (resteAPayer <= 0) return 'payee';
     if (totalPaye > 0) return 'partiellement_payee';
     if (form.date_echeance && new Date(form.date_echeance) < new Date()) return 'en_retard';
     return form.statut;
+  }
+
+  /** Si l’utilisateur choisit « Payée », compléter le règlement du reste automatiquement. */
+  function ensurePaidPaiements(payload) {
+    if (payload.statut !== 'payee') return payload;
+    const ttc = Number(payload.total_ttc) || 0;
+    const paye = (payload.paiements || []).reduce((s, p) => s + Number(p.montant || 0), 0)
+      + (Number(payload.acompte_montant) || 0);
+    const reste = Math.max(0, Math.round((ttc - paye) * 100) / 100);
+    if (reste <= 0) {
+      return { ...payload, total_paye: ttc, reste_a_payer: 0 };
+    }
+    return {
+      ...payload,
+      paiements: [
+        ...(payload.paiements || []),
+        {
+          montant: reste,
+          date: today(),
+          mode: 'virement',
+          reference: 'Règlement complet',
+        },
+      ],
+      total_paye: ttc,
+      reste_a_payer: 0,
+    };
   }
 
   function validate() {
@@ -367,9 +393,9 @@ export default function FactureForm({ facture, onBack, onSaved, saving = false }
     setSavingLocal(true);
     try {
       const autoStatut = computeStatut();
-      const payload = {
+      let payload = {
         ...form,
-        statut: autoStatut,
+        statut: form.statut === 'payee' ? 'payee' : autoStatut,
         total_ht: totalHT,
         total_tva: totalTVA,
         total_ttc: totalTTC,
@@ -378,6 +404,7 @@ export default function FactureForm({ facture, onBack, onSaved, saving = false }
         lignes: form.lignes,
         paiements: form.paiements,
       };
+      payload = ensurePaidPaiements(payload);
       const result = await onSaved(payload, isEdit);
       if (result && result.success === false) {
         setApiError(result.error || "Erreur lors de l'enregistrement.");
@@ -462,6 +489,9 @@ export default function FactureForm({ facture, onBack, onSaved, saving = false }
                   <select value={form.statut} onChange={e => setField('statut', e.target.value)} style={IS(false)}>
                     {STATUTS.map(s => <option key={s} value={s}>{STATUT_LABEL[s]}</option>)}
                   </select>
+                  <p style={{ margin: '6px 0 0', fontSize: '0.72rem', color: 'var(--text-3)', lineHeight: 1.35 }}>
+                    « Envoyée » = facture émise. « Payée » = règlement reçu (ou ajoutez un règlement ci-dessous : le statut se met à jour tout seul).
+                  </p>
                 </div>
 
                 <div className="form-group">

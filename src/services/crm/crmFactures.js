@@ -476,6 +476,53 @@ export async function updateCrmFacture(id, form) {
   return facture;
 }
 
+/**
+ * Marque une facture comme payée :
+ * - ajoute un règlement du reste à payer (si besoin)
+ * - statut → payee, reste_a_payer → 0
+ */
+export async function markCrmFacturePaid(id, options = {}) {
+  await getAuthUserId();
+  const facture = await getCrmFactureById(id);
+  if (!facture) {
+    const err = new Error('Facture introuvable.');
+    err.code = 'NOT_FOUND';
+    throw err;
+  }
+  if (facture.statut === 'annulee') {
+    const err = new Error('Impossible de marquer une facture annulée comme payée.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  if (facture.statut === 'payee' && Number(facture.reste_a_payer) <= 0) {
+    return facture;
+  }
+
+  const totalTtc = Number(facture.total_ttc) || 0;
+  const dejaPaye = (facture.paiements || []).reduce((s, p) => s + (Number(p.montant) || 0), 0)
+    + (Number(facture.acompte_montant) || 0);
+  const reste = Math.max(0, Math.round((totalTtc - dejaPaye) * 100) / 100);
+  const today = new Date().toISOString().slice(0, 10);
+
+  const paiements = [...(facture.paiements || [])];
+  if (reste > 0) {
+    paiements.push({
+      montant: reste,
+      date: options.date || today,
+      mode: options.mode || 'virement',
+      reference: options.reference || 'Règlement complet',
+    });
+  }
+
+  return updateCrmFacture(id, {
+    ...facture,
+    statut: 'payee',
+    paiements,
+    total_paye: totalTtc,
+    reste_a_payer: 0,
+  });
+}
+
 export async function deleteCrmFacture(id) {
   await getAuthUserId();
   const { error } = await getSupabase().from(TABLE).delete().eq('id', id);
