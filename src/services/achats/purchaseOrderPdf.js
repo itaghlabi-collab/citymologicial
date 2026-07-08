@@ -8,6 +8,7 @@ import {
   loadCrmPdfImages,
 } from '../../utils/crm/crmPdfImageUtils';
 import { sanitizeBCLignes } from './purchaseOrders';
+import { moneyLineHt, moneyToNumber, moneyFormatUnitPrice } from '../../utils/decimalMoney';
 
 const RED = [198, 40, 40];
 const TEXT = [33, 33, 33];
@@ -145,7 +146,7 @@ function buildPdfRows(bc) {
     if ((l.type || 'article') !== 'article') return;
 
     num += 1;
-    const ht = (Number(l.qte) || 0) * (Number(l.prix_ht) || 0) * (1 - (Number(l.remise) || 0) / 100);
+    const lineHt = moneyLineHt({ qty: l.qte, unitPriceHt: l.prix_ht, remisePct: l.remise });
     rows.push({
       kind: 'article',
       num,
@@ -154,7 +155,7 @@ function buildPdfRows(bc) {
       unite: fmtUnite(l.unite),
       quantite: l.qte,
       prix_ht: l.prix_ht,
-      total_ht: ht,
+      total_ht: moneyToNumber(lineHt),
     });
   });
 
@@ -372,7 +373,7 @@ export async function generatePurchaseOrderPdf(bc, supplier = null, options = {}
     doc.setTextColor(...TEXT);
     textCenter(doc, row.unite, COL_X[2] + COL_W[2] / 2, midY);
     textRight(doc, fmtNum(row.quantite), COL_R[3], midY);
-    textRight(doc, fmtNum(row.prix_ht), COL_R[4], midY);
+    textRight(doc, moneyFormatUnitPrice(row.prix_ht).replace(' MAD', ''), COL_R[4], midY);
     doc.setFont('helvetica', 'bold');
     textRight(doc, `${fmtNum(row.total_ht)} ${devise}`, COL_R[5], midY);
 
