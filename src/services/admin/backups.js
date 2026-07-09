@@ -212,6 +212,14 @@ export async function runBackup({ type, planification, description }) {
     };
   }
 
+  if (result.async) {
+    return {
+      async: true,
+      message: result.message,
+      ...mapBackup(result.backup),
+    };
+  }
+
   return mapBackup(result.backup);
 }
 

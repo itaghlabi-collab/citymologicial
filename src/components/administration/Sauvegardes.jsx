@@ -155,6 +155,9 @@ export default function Sauvegardes({ backups = [], setBackups, reload, canManag
       const result = await runBackup(data);
       if (result.scheduled) {
         alert(result.message);
+      } else if (result.async) {
+        setBackups((prev) => [result, ...prev]);
+        alert(result.message || 'Sauvegarde lancée en arrière-plan. Le statut passera à « Succès » une fois terminée.');
       } else {
         setBackups((prev) => [result, ...prev]);
       }

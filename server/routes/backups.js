@@ -4,7 +4,7 @@
 const express = require('express');
 const { requireSupabaseSuperAdmin } = require('../middleware/supabaseAuth');
 const {
-  runBackup,
+  startBackupAsync,
   registerSchedule,
   getDownloadUrl,
   deleteBackup,
@@ -87,14 +87,19 @@ router.post('/', async (req, res, next) => {
       });
     }
 
-    const backup = await runBackup({
+    const backup = await startBackupAsync({
       type,
       planification: 'manuelle',
       description: description || notes,
       actor: req.user,
     });
 
-    res.status(201).json({ scheduled: false, backup });
+    return res.status(202).json({
+      scheduled: false,
+      async: true,
+      backup,
+      message: 'Sauvegarde lancée en arrière-plan. Actualisez la liste pour suivre le statut.',
+    });
   } catch (err) {
     next(err);
   }

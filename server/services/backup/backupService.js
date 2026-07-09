@@ -93,9 +93,7 @@ async function compressJson(payload) {
   return gzip(Buffer.from(json, 'utf8'));
 }
 
-async function runBackup({ type, planification, description, actor }) {
-  const typeKey = 'complete';
-  const row = await createBackupRow({ type: typeKey, planification, description, actor });
+async function executeBackupJob(row, { typeKey, planification, description, actor }) {
   const storage = getBackupStorageProvider();
   const backupPrefix = row.ref;
 
@@ -223,6 +221,27 @@ async function runBackup({ type, planification, description, actor }) {
   }
 }
 
+/** Lance la sauvegarde en arrière-plan (réponse HTTP immédiate — évite timeout Vercel/Railway proxy). */
+async function startBackupAsync({ type, planification, description, actor }) {
+  const typeKey = 'complete';
+  const row = await createBackupRow({ type: typeKey, planification, description, actor });
+  const jobParams = { typeKey, planification, description, actor };
+
+  setImmediate(() => {
+    executeBackupJob(row, jobParams).catch((err) => {
+      console.error('[backup:async] échec', { ref: row.ref, message: err.message });
+    });
+  });
+
+  return row;
+}
+
+async function runBackup({ type, planification, description, actor }) {
+  const typeKey = 'complete';
+  const row = await createBackupRow({ type: typeKey, planification, description, actor });
+  return executeBackupJob(row, { typeKey, planification, description, actor });
+}
+
 async function registerSchedule({ type, planification, notes, actor }) {
   const sb = getSupabaseAdmin();
   const typeKey = 'complete';
@@ -347,6 +366,7 @@ async function deleteBackup(backupId, actor) {
 
 module.exports = {
   runBackup,
+  startBackupAsync,
   registerSchedule,
   getDownloadUrl,
   deleteBackup,
