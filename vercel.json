@@ -6,8 +6,8 @@
   "rewrites": [
     { "source": "/api/admin/users/:id/password", "destination": "/api/admin-user-password?id=:id" },
     { "source": "/api/admin/users/:id/email", "destination": "/api/admin-user-email?id=:id" },
-    { "source": "/api/backups", "destination": "/api/backups.js" },
-    { "source": "/api/backups/:path*", "destination": "/api/backups.js?path=:path*" },
+    { "source": "/api/backups", "destination": "/api/backup-railway-proxy" },
+    { "source": "/api/backups/:path*", "destination": "/api/backup-railway-proxy?path=:path*" },
     { "source": "/((?!api/|assets/|sounds/).*)", "destination": "/index.html" }
   ],
   "headers": [
@@ -40,7 +40,7 @@
       "maxDuration": 60,
       "memory": 1024
     },
-    "api/backups.js": {
+    "api/backup-railway-proxy.js": {
       "maxDuration": 300,
       "memory": 1024
     },

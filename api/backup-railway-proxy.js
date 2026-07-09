@@ -1,6 +1,6 @@
 /**
  * Vercel — proxy /api/backups et /api/backups/* → Railway
- * Handler unique : les catch-all [[...path]] ne sont pas supportés hors Next.js sur /api.
+ * Fichier dédié (hors /api/backups) : évite conflit de routage Vercel sur ce chemin.
  */
 import { proxyToRailway } from '../lib/railwayProxy.mjs';
 
