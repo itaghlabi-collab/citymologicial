@@ -39,7 +39,7 @@ export default async function handler(req, res) {
     init.body = typeof req.body === 'object' ? JSON.stringify(req.body) : String(req.body);
   }
 
-  const upstream = await globalThis.fetch(`${base}/api/${path}`, init);
+  const upstream = await fetch(`${base}/api/${path}`, init);
   const contentType = upstream.headers.get('content-type') || 'application/json';
   const text = await upstream.text();
   res.status(upstream.status);
