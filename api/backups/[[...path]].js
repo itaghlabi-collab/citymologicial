@@ -8,11 +8,14 @@ export const config = { maxDuration: 300 };
 
 function backupApiPath(segments) {
   if (segments == null || segments === '') return 'backups';
-  const parts = Array.isArray(segments) ? segments : [segments];
+  const parts = Array.isArray(segments)
+    ? segments
+    : String(segments).split('/').filter((s) => s.length > 0);
   const suffix = parts.filter((s) => s != null && String(s).length > 0).join('/');
   return suffix ? `backups/${suffix}` : 'backups';
 }
 
 export default async function handler(req, res) {
-  return proxyToRailway(req, res, backupApiPath(req.query.path));
+  const segments = req.query.path ?? req.query['...path'];
+  return proxyToRailway(req, res, backupApiPath(segments));
 }

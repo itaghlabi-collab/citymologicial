@@ -6,6 +6,8 @@
   "rewrites": [
     { "source": "/api/admin/users/:id/password", "destination": "/api/admin-user-password?id=:id" },
     { "source": "/api/admin/users/:id/email", "destination": "/api/admin-user-email?id=:id" },
+    { "source": "/api/backups", "destination": "/api/backups/[[...path]]" },
+    { "source": "/api/backups/:path*", "destination": "/api/backups/[[...path]]?path=:path*" },
     { "source": "/((?!api/|assets/|sounds/).*)", "destination": "/index.html" }
   ],
   "headers": [
