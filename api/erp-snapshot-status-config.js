@@ -1,7 +1,5 @@
-import { proxyToRailway } from '../lib/railwayProxy.mjs';
-
 export const config = { maxDuration: 60 };
 
 export default async function handler(req, res) {
-  return proxyToRailway(req, res, 'backups/status/config');
+  return res.status(200).json({ route: 'erp-snapshot-status-config', method: req.method });
 }
