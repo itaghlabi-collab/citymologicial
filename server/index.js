@@ -49,19 +49,42 @@ const app  = express();
 const PORT = process.env.PORT || 3000;
 
 // ── CORS ─────────────────────────────────────────────────────────────────────
-const ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || 'http://localhost:5173,http://localhost:5174')
+const DEFAULT_ALLOWED_ORIGINS = [
+  'http://localhost:5173',
+  'http://localhost:5174',
+  'https://www.citymoapp.com',
+  'https://citymoapp.com',
+  'https://citymologicial.vercel.app',
+];
+
+const EXTRA_ALLOWED_ORIGINS = (process.env.ALLOWED_ORIGINS || '')
   .split(',')
-  .map(o => o.trim());
+  .map((o) => o.trim())
+  .filter(Boolean);
+
+const ALLOWED_ORIGINS = [...new Set([...DEFAULT_ALLOWED_ORIGINS, ...EXTRA_ALLOWED_ORIGINS])];
+
+/** Previews Vercel du projet (ex. citymologicial-git-main-xxx.vercel.app) */
+const VERCEL_PREVIEW_ORIGIN = /^https:\/\/citymologicial[a-z0-9-]*\.vercel\.app$/i;
+
+function isAllowedOrigin(origin) {
+  if (!origin) return true;
+  if (ALLOWED_ORIGINS.includes(origin)) return true;
+  if (VERCEL_PREVIEW_ORIGIN.test(origin)) return true;
+  return false;
+}
 
 app.use(cors({
-  origin: (origin, cb) => {
-    // Allow requests with no origin (mobile apps, curl, Postman)
-    if (!origin || ALLOWED_ORIGINS.includes(origin)) return cb(null, true);
+  origin(origin, cb) {
+    if (isAllowedOrigin(origin)) {
+      return cb(null, origin || true);
+    }
     cb(new Error(`CORS bloqué pour l'origine: ${origin}`));
   },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-client-info', 'apikey'],
   credentials: true,
+  optionsSuccessStatus: 204,
 }));
 
 // ── Body parsers ──────────────────────────────────────────────────────────────
