@@ -1,6 +1,7 @@
 /**
- * Proxy Vercel → Railway pour les handlers erp-snapshot (dans api/ pour le bundling Vercel).
+ * Vercel — proxy unique /api/backups* → Railway (sans import externe).
  */
+export const config = { maxDuration: 300 };
 
 function resolveRailwayBase() {
   const raw = process.env.RAILWAY_API_URL
@@ -24,7 +25,17 @@ async function readBody(req) {
   });
 }
 
-export async function proxyToRailway(req, res, apiPath) {
+function resolveBackupPath(req) {
+  const route = req.query.route;
+  if (route != null && String(route).length > 0) {
+    return `backups/${String(route).replace(/^\/+/, '')}`;
+  }
+  const { id, action } = req.query;
+  if (id) return action ? `backups/${id}/${action}` : `backups/${id}`;
+  return 'backups';
+}
+
+export default async function handler(req, res) {
   const base = resolveRailwayBase();
   if (!base) {
     return res.status(503).json({
@@ -32,9 +43,8 @@ export async function proxyToRailway(req, res, apiPath) {
     });
   }
 
-  const path = String(apiPath || '').replace(/^\/+/, '');
-  const query = req.url?.includes('?') ? req.url.slice(req.url.indexOf('?')) : '';
-  const targetUrl = `${base}/api/${path}${query}`;
+  const path = resolveBackupPath(req).replace(/^\/+/, '');
+  const targetUrl = `${base}/api/${path}`;
 
   const headers = {};
   if (req.headers.authorization) headers.Authorization = req.headers.authorization;
@@ -66,7 +76,7 @@ export async function proxyToRailway(req, res, apiPath) {
     }
     return res.end();
   } catch (err) {
-    console.error('[erp-snapshot-proxy]', path, err.message);
+    console.error('[erp-snapshot-router]', path, err.message);
     return res.status(502).json({ error: `Proxy Railway : ${err.message}` });
   }
 }

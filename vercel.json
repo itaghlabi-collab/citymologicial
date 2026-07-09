@@ -6,13 +6,13 @@
   "rewrites": [
     { "source": "/api/admin/users/:id/password", "destination": "/api/admin-user-password?id=:id" },
     { "source": "/api/admin/users/:id/email", "destination": "/api/admin-user-email?id=:id" },
-    { "source": "/api/backups/status/config", "destination": "/api/erp-snapshot-status-config" },
-    { "source": "/api/backups/status/drive", "destination": "/api/erp-snapshot-status-drive" },
-    { "source": "/api/backups/:id/download", "destination": "/api/erp-snapshot-by-id?id=:id&action=download" },
-    { "source": "/api/backups/:id/drive", "destination": "/api/erp-snapshot-by-id?id=:id&action=drive" },
-    { "source": "/api/backups/:id/restore", "destination": "/api/erp-snapshot-by-id?id=:id&action=restore" },
-    { "source": "/api/backups/:id", "destination": "/api/erp-snapshot-by-id?id=:id" },
-    { "source": "/api/backups", "destination": "/api/erp-snapshot-root" },
+    { "source": "/api/backups/status/config", "destination": "/api/erp-snapshot-router?route=status/config" },
+    { "source": "/api/backups/status/drive", "destination": "/api/erp-snapshot-router?route=status/drive" },
+    { "source": "/api/backups/:id/download", "destination": "/api/erp-snapshot-router?id=:id&action=download" },
+    { "source": "/api/backups/:id/drive", "destination": "/api/erp-snapshot-router?id=:id&action=drive" },
+    { "source": "/api/backups/:id/restore", "destination": "/api/erp-snapshot-router?id=:id&action=restore" },
+    { "source": "/api/backups/:id", "destination": "/api/erp-snapshot-router?id=:id" },
+    { "source": "/api/backups", "destination": "/api/erp-snapshot-router" },
     { "source": "/((?!api/|assets/|sounds/).*)", "destination": "/index.html" }
   ],
   "headers": [
@@ -45,19 +45,7 @@
       "maxDuration": 60,
       "memory": 1024
     },
-    "api/erp-snapshot-root.js": {
-      "maxDuration": 300,
-      "memory": 1024
-    },
-    "api/erp-snapshot-status-config.js": {
-      "maxDuration": 60,
-      "memory": 512
-    },
-    "api/erp-snapshot-status-drive.js": {
-      "maxDuration": 60,
-      "memory": 512
-    },
-    "api/erp-snapshot-by-id.js": {
+    "api/erp-snapshot-router.js": {
       "maxDuration": 300,
       "memory": 1024
     },
