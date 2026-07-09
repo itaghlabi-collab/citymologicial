@@ -32,33 +32,6 @@ function readBody(req) {
   });
 }
 
-function requestRailway(https, URL, targetUrl, init) {
-  return new Promise((resolve, reject) => {
-    const parsed = new URL(targetUrl);
-    const request = https.request({
-      protocol: parsed.protocol,
-      hostname: parsed.hostname,
-      port: parsed.port || 443,
-      path: `${parsed.pathname}${parsed.search}`,
-      method: init.method || 'GET',
-      headers: init.headers || {},
-    }, (upstream) => {
-      const chunks = [];
-      upstream.on('data', (chunk) => chunks.push(chunk));
-      upstream.on('end', () => {
-        resolve({
-          status: upstream.statusCode || 502,
-          contentType: upstream.headers['content-type'] || 'application/json',
-          body: Buffer.concat(chunks).toString('utf8'),
-        });
-      });
-    });
-    request.on('error', reject);
-    if (init.body) request.write(init.body);
-    request.end();
-  });
-}
-
 export default async function handler(req, res) {
   try {
     const base = resolveRailwayBase();
@@ -68,10 +41,10 @@ export default async function handler(req, res) {
       });
     }
 
-    const [{ default: https }, { URL }] = await Promise.all([
-      import('node:https'),
-      import('node:url'),
-    ]);
+    const { createRequire } = await import('node:module');
+    const require = createRequire(import.meta.url);
+    const https = require('node:https');
+    const { URL } = require('node:url');
 
     const path = resolveBackupPath(req).replace(/^\/+/, '');
     const headers = {};
@@ -79,13 +52,33 @@ export default async function handler(req, res) {
     if (req.headers['content-type']) headers['Content-Type'] = req.headers['content-type'];
 
     const method = req.method || 'GET';
-    const init = { method, headers };
+    const body = !['GET', 'HEAD', 'OPTIONS'].includes(method) ? await readBody(req) : '';
 
-    if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
-      init.body = await readBody(req);
-    }
+    const upstream = await new Promise((resolve, reject) => {
+      const parsed = new URL(`${base}/api/${path}`);
+      const request = https.request({
+        protocol: parsed.protocol,
+        hostname: parsed.hostname,
+        port: parsed.port || 443,
+        path: `${parsed.pathname}${parsed.search}`,
+        method,
+        headers,
+      }, (response) => {
+        const chunks = [];
+        response.on('data', (chunk) => chunks.push(chunk));
+        response.on('end', () => {
+          resolve({
+            status: response.statusCode || 502,
+            contentType: response.headers['content-type'] || 'application/json',
+            body: Buffer.concat(chunks).toString('utf8'),
+          });
+        });
+      });
+      request.on('error', reject);
+      if (body) request.write(body);
+      request.end();
+    });
 
-    const upstream = await requestRailway(https, URL, `${base}/api/${path}`, init);
     res.status(upstream.status);
     res.setHeader('Content-Type', upstream.contentType);
     if (!upstream.body) return res.end();
