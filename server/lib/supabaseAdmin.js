@@ -2,6 +2,7 @@
  * Client Supabase admin (service_role) — jamais exposé au frontend.
  */
 const { createClient } = require('@supabase/supabase-js');
+const ws = require('ws');
 const { CITYMO_SUPABASE_URL } = require('../config/supabaseProject');
 
 let adminClient = null;
@@ -27,6 +28,7 @@ function getSupabaseAdmin() {
 
   adminClient = createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
+    realtime: { transport: ws },
   });
   return adminClient;
 }
@@ -42,6 +44,7 @@ function getSupabaseAnon() {
   }
   return createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
+    realtime: { transport: ws },
   });
 }
 

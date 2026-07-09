@@ -21,7 +21,8 @@
     "googleapis": "^144.0.0",
     "jsonwebtoken": "^9.0.2",
     "multer": "^1.4.5-lts.1",
-    "node-cron": "^3.0.3"
+    "node-cron": "^3.0.3",
+    "ws": "^8.21.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.2"
