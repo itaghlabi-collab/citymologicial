@@ -4,24 +4,50 @@
  */
 const { Readable } = require('stream');
 const { google } = require('googleapis');
+const { JWT } = require('google-auth-library');
 const {
   getServiceAccountCredentials,
   getDriveRootFolderId,
+  getServiceAccountEmail,
   isGoogleDriveEnabled,
 } = require('./googleDriveConfig');
 
 let driveClient = null;
+let rootFolderVerified = false;
 const folderCache = new Map();
 
 function getDrive() {
   if (driveClient) return driveClient;
+
   const credentials = getServiceAccountCredentials();
-  const auth = new google.auth.GoogleAuth({
-    credentials,
+  const auth = new JWT({
+    email: credentials.client_email,
+    key: credentials.private_key,
     scopes: ['https://www.googleapis.com/auth/drive.file'],
   });
+
   driveClient = google.drive({ version: 'v3', auth });
   return driveClient;
+}
+
+async function assertRootFolderAccessible() {
+  if (rootFolderVerified) return;
+
+  const drive = getDrive();
+  const rootId = getDriveRootFolderId();
+  const serviceEmail = getServiceAccountEmail();
+
+  try {
+    await drive.files.get({ fileId: rootId, fields: 'id, name' });
+    rootFolderVerified = true;
+  } catch (err) {
+    const hint = serviceEmail
+      ? ` Partagez le dossier Drive avec ${serviceEmail} (rôle Éditeur).`
+      : '';
+    throw new Error(
+      `Dossier Drive inaccessible (ID ${rootId}).${hint} Détail Google : ${err.message}`,
+    );
+  }
 }
 
 function escapeDriveQuery(value) {
@@ -96,6 +122,8 @@ async function upload(filePath, buffer, contentType = 'application/gzip') {
     throw new Error('Google Drive non configuré.');
   }
 
+  await assertRootFolderAccessible();
+
   const drive = getDrive();
   const { parentId, fileName } = await resolvePathFolderIds(filePath);
   const existingId = await findFileInFolder(parentId, fileName);
@@ -157,6 +185,9 @@ async function getSignedUrl(filePath) {
 }
 
 async function getBackupFolderLink(backupRef) {
+  await assertRootFolderAccessible();
+
+  const drive = getDrive();
   const rootId = getDriveRootFolderId();
   let folderId = await findChildFolder(rootId, backupRef);
   if (!folderId) folderId = await getOrCreateFolder(rootId, backupRef);
@@ -218,4 +249,5 @@ module.exports = {
   list,
   getBackupFolderLink,
   removeBackupFolder,
+  assertRootFolderAccessible,
 };

@@ -80,7 +80,21 @@ function logBackupEnvironmentOnStartup() {
     logger.envWarn('BACKUP_GOOGLE_DRIVE_ENABLED=true mais config incomplète (JSON ou FOLDER_ID)');
   }
   if (status.google_drive.json_configured && !status.google_drive.json_valid) {
-    logger.envWarn('GOOGLE_SERVICE_ACCOUNT_JSON invalide — vérifiez le JSON (accolade fermante, pas de point en trop)');
+    logger.envWarn('GOOGLE_SERVICE_ACCOUNT_JSON invalide — vérifiez le JSON (accolade fermante, private_key avec \\n)');
+  }
+  if (status.google_drive.active) {
+    const { assertRootFolderAccessible } = require('./googleDriveStorageProvider');
+    const { getServiceAccountEmail, getDriveRootFolderId } = require('./googleDriveConfig');
+    assertRootFolderAccessible()
+      .then(() => {
+        logger.envOk('Google Drive dossier racine accessible', {
+          folder_id: getDriveRootFolderId(),
+          service_account: getServiceAccountEmail(),
+        });
+      })
+      .catch((err) => {
+        logger.envWarn(`Google Drive inaccessible : ${err.message}`);
+      });
   }
 }
 
