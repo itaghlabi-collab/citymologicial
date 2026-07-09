@@ -1,4 +1,4 @@
-export const config = { maxDuration: 60 };
+export const config = { runtime: 'edge' };
 
 function resolveRailwayBase() {
   const raw = process.env.RAILWAY_API_URL
@@ -10,20 +10,46 @@ function resolveRailwayBase() {
   return trimmed.replace(/\/api$/, '');
 }
 
-function resolveBackupPath(req) {
-  const route = req.query.route;
-  if (route != null && String(route).length > 0) {
-    return `backups/${String(route).replace(/^\/+/, '')}`;
-  }
-  const { id, action } = req.query;
+function resolveBackupPath(url) {
+  const route = url.searchParams.get('route');
+  if (route) return `backups/${route.replace(/^\/+/, '')}`;
+  const id = url.searchParams.get('id');
+  const action = url.searchParams.get('action');
   if (id) return action ? `backups/${id}/${action}` : `backups/${id}`;
   return 'backups';
 }
 
-export default async function handler(req, res) {
-  return res.status(200).json({
-    path: resolveBackupPath(req),
-    method: req.method,
-    base: resolveRailwayBase() ? 'configured' : 'missing',
+export default async function handler(request) {
+  const base = resolveRailwayBase();
+  if (!base) {
+    return Response.json(
+      { error: 'API Railway non configurée. Définissez RAILWAY_API_URL sur Vercel.' },
+      { status: 503 },
+    );
+  }
+
+  const incoming = new URL(request.url);
+  const path = resolveBackupPath(incoming);
+  const target = `${base}/api/${path}`;
+
+  const headers = new Headers();
+  const authorization = request.headers.get('authorization');
+  const contentType = request.headers.get('content-type');
+  if (authorization) headers.set('authorization', authorization);
+  if (contentType) headers.set('content-type', contentType);
+
+  const init = { method: request.method, headers };
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(request.method)) {
+    init.body = await request.text();
+  }
+
+  const upstream = await fetch(target, init);
+  const responseHeaders = new Headers();
+  const upstreamType = upstream.headers.get('content-type');
+  if (upstreamType) responseHeaders.set('content-type', upstreamType);
+
+  return new Response(await upstream.text(), {
+    status: upstream.status,
+    headers: responseHeaders,
   });
 }
