@@ -19,25 +19,6 @@ function resolveBackupPath(req) {
   return 'backups';
 }
 
-async function readJsonBody(req) {
-  if (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) {
-    return req.body;
-  }
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    req.on('data', (c) => chunks.push(c));
-    req.on('end', () => {
-      try {
-        const raw = Buffer.concat(chunks).toString('utf8');
-        resolve(raw ? JSON.parse(raw) : {});
-      } catch (e) {
-        reject(e);
-      }
-    });
-    req.on('error', reject);
-  });
-}
-
 export default async function handler(req, res) {
   const base = resolveRailwayBase();
   if (!base) {
@@ -49,25 +30,19 @@ export default async function handler(req, res) {
   const path = resolveBackupPath(req).replace(/^\/+/, '');
   const headers = {};
   if (req.headers.authorization) headers.Authorization = req.headers.authorization;
-  if (req.headers['content-type']) headers['Content-Type'] = req.headers['content-type'];
 
-  const method = req.method || 'GET';
-  const init = { method, headers };
+  const upstream = await fetch(`${base}/api/${path}`, {
+    method: req.method || 'GET',
+    headers,
+    body: ['GET', 'HEAD', 'OPTIONS'].includes(req.method || 'GET')
+      ? undefined
+      : typeof req.body === 'object' ? JSON.stringify(req.body) : req.body,
+  });
 
-  if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
-    const body = await readJsonBody(req);
-    init.body = JSON.stringify(body);
-  }
-
-  try {
-    const upstream = await fetch(`${base}/api/${path}`, init);
-    const contentType = upstream.headers.get('content-type') || 'application/json';
-    const text = await upstream.text();
-    res.status(upstream.status);
-    res.setHeader('Content-Type', contentType);
-    if (!text) return res.end();
-    return res.send(text);
-  } catch (err) {
-    return res.status(502).json({ error: `Proxy Railway : ${err.message}` });
-  }
+  const contentType = upstream.headers.get('content-type') || 'application/json';
+  const text = await upstream.text();
+  res.status(upstream.status);
+  res.setHeader('Content-Type', contentType);
+  if (!text) return res.end();
+  return res.send(text);
 }
