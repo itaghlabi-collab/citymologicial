@@ -23,15 +23,16 @@ function resolveBackupPath(req) {
   return 'backups';
 }
 
-async function readBody(req) {
-  if (req.body != null && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) {
-    return JSON.stringify(req.body);
+function readBody(req) {
+  if (req.body != null && typeof req.body === 'object') {
+    return Promise.resolve(JSON.stringify(req.body));
   }
-  const chunks = [];
-  for await (const chunk of req) {
-    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
-  }
-  return Buffer.concat(chunks).toString('utf8');
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on('data', (chunk) => chunks.push(chunk));
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8') || ''));
+    req.on('error', reject);
+  });
 }
 
 export default async function handler(req, res) {
@@ -56,25 +57,12 @@ export default async function handler(req, res) {
     init.body = await readBody(req);
   }
 
-  try {
-    const upstream = await fetch(targetUrl, init);
-    const contentType = upstream.headers.get('content-type') || 'application/json';
-    res.status(upstream.status);
-    res.setHeader('Content-Type', contentType);
+  const upstream = await fetch(targetUrl, init);
+  const contentType = upstream.headers.get('content-type') || 'application/json';
+  const text = await upstream.text();
 
-    const text = await upstream.text();
-    if (!text) return res.end();
-
-    if (contentType.includes('application/json')) {
-      try {
-        return res.json(JSON.parse(text));
-      } catch {
-        /* fall through */
-      }
-    }
-    return res.send(text);
-  } catch (err) {
-    console.error('[erp-snapshot-router]', path, err.message);
-    return res.status(502).json({ error: `Proxy Railway : ${err.message}` });
-  }
+  res.status(upstream.status);
+  res.setHeader('Content-Type', contentType);
+  if (!text) return res.end();
+  return res.send(text);
 }
