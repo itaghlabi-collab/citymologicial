@@ -6,9 +6,13 @@
   "rewrites": [
     { "source": "/api/admin/users/:id/password", "destination": "/api/admin-user-password?id=:id" },
     { "source": "/api/admin/users/:id/email", "destination": "/api/admin-user-email?id=:id" },
-    { "source": "/api/backups", "destination": "/api/backups/index" },
-    { "source": "/api/backups/status/config", "destination": "/api/backups/status/config" },
-    { "source": "/api/backups/status/drive", "destination": "/api/backups/status/drive" },
+    { "source": "/api/backups/status/config", "destination": "/api/backups-status-config" },
+    { "source": "/api/backups/status/drive", "destination": "/api/backups-status-drive" },
+    { "source": "/api/backups/:id/download", "destination": "/api/backups-by-id?id=:id&action=download" },
+    { "source": "/api/backups/:id/drive", "destination": "/api/backups-by-id?id=:id&action=drive" },
+    { "source": "/api/backups/:id/restore", "destination": "/api/backups-by-id?id=:id&action=restore" },
+    { "source": "/api/backups/:id", "destination": "/api/backups-by-id?id=:id" },
+    { "source": "/api/backups", "destination": "/api/backups-root" },
     { "source": "/((?!api/|assets/|sounds/).*)", "destination": "/index.html" }
   ],
   "headers": [
@@ -41,31 +45,19 @@
       "maxDuration": 60,
       "memory": 1024
     },
-    "api/backups/index.js": {
+    "api/backups-root.js": {
       "maxDuration": 300,
       "memory": 1024
     },
-    "api/backups/status/config.js": {
+    "api/backups-status-config.js": {
       "maxDuration": 60,
       "memory": 512
     },
-    "api/backups/status/drive.js": {
+    "api/backups-status-drive.js": {
       "maxDuration": 60,
       "memory": 512
     },
-    "api/backups/[id].js": {
-      "maxDuration": 60,
-      "memory": 512
-    },
-    "api/backups/[id]/download.js": {
-      "maxDuration": 60,
-      "memory": 512
-    },
-    "api/backups/[id]/drive.js": {
-      "maxDuration": 60,
-      "memory": 512
-    },
-    "api/backups/[id]/restore.js": {
+    "api/backups-by-id.js": {
       "maxDuration": 300,
       "memory": 1024
     },
