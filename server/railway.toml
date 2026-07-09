@@ -1,0 +1,17 @@
+# CITYMO ERP — API Express (déployée sur Railway)
+# Frontend Vite → Vercel uniquement.
+#
+# Railway service settings :
+#   Source → Root Directory : server
+#   Config-as-code file    : /server/railway.toml
+
+[build]
+builder = "NIXPACKS"
+buildCommand = "npm install --omit=dev"
+watchPatterns = ["**"]
+
+[deploy]
+startCommand = "npm start"
+healthcheckPath = "/health"
+healthcheckTimeout = 120
+restartPolicyType = "ON_FAILURE"

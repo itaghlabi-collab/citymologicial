@@ -1,0 +1,14 @@
+# Nixpacks — backend Express uniquement (pas de build Vite)
+# https://nixpacks.com/docs/configuration/file
+
+[phases.setup]
+nixPkgs = ["nodejs_20", "npm-9_x", "python3", "gcc"]
+
+[phases.install]
+cmds = ["npm install --omit=dev"]
+
+[phases.build]
+cmds = []
+
+[start]
+cmd = "node index.js"

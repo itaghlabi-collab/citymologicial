@@ -1,0 +1,16 @@
+# CITYMO ERP — force Railway à lancer l'API Express (server/), pas le frontend Vite.
+# Le frontend est hébergé sur Vercel.
+#
+# Si le service Railway a Root Directory = server, préférer /server/railway.toml
+# (Settings → Source → Config-as-code file path).
+
+[build]
+builder = "NIXPACKS"
+buildCommand = "cd server && npm install --omit=dev"
+watchPatterns = ["server/**"]
+
+[deploy]
+startCommand = "cd server && npm start"
+healthcheckPath = "/health"
+healthcheckTimeout = 120
+restartPolicyType = "ON_FAILURE"
