@@ -13,6 +13,29 @@ function resolveSupabaseUrl() {
     || CITYMO_SUPABASE_URL;
 }
 
+/** Diagnostic démarrage — projet Supabase attendu vs variables Railway. */
+function logSupabaseProjectConfigOnStartup() {
+  const url = resolveSupabaseUrl();
+  let host = '(manquante)';
+  try {
+    host = new URL(url).host;
+  } catch {
+    host = '(url invalide)';
+  }
+  const expectedHost = new URL(CITYMO_SUPABASE_URL).host;
+  console.info('[supabaseAuth:debug] config Railway', {
+    backendUrlHost: host,
+    expectedCitymoHost: expectedHost,
+    urlMatchesCitymo: host === expectedHost,
+    hasSupabaseUrl: Boolean(process.env.SUPABASE_URL),
+    hasViteSupabaseUrl: Boolean(process.env.VITE_SUPABASE_URL),
+    hasSupabaseAnonKey: Boolean(process.env.SUPABASE_ANON_KEY),
+    hasViteSupabaseAnonKey: Boolean(process.env.VITE_SUPABASE_ANON_KEY),
+    hasServiceRoleKey: Boolean(process.env.SUPABASE_SERVICE_ROLE_KEY),
+    frontendExpected: 'VITE_SUPABASE_URL + VITE_SUPABASE_ANON_KEY (Vercel)',
+  });
+}
+
 function getSupabaseAdmin() {
   if (adminClient) return adminClient;
 
@@ -48,4 +71,9 @@ function getSupabaseAnon() {
   });
 }
 
-module.exports = { getSupabaseAdmin, getSupabaseAnon, resolveSupabaseUrl };
+module.exports = {
+  getSupabaseAdmin,
+  getSupabaseAnon,
+  resolveSupabaseUrl,
+  logSupabaseProjectConfigOnStartup,
+};

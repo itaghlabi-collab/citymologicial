@@ -26,9 +26,26 @@ function extractBearerToken(req) {
   return typeof alt === 'string' ? alt.trim() : '';
 }
 
+function authHeaderDebug(req) {
+  const auth = req.headers.authorization || req.headers.Authorization || '';
+  const alt = req.headers['x-supabase-token'];
+  return {
+    authorizationReceived: Boolean(auth),
+    authorizationBearer: auth.startsWith('Bearer '),
+    xSupabaseTokenReceived: Boolean(alt),
+    authorizationLength: auth.length,
+    xSupabaseTokenLength: typeof alt === 'string' ? alt.length : 0,
+  };
+}
+
 async function requireSupabaseSuperAdmin(req, res, next) {
+  const headerDebug = authHeaderDebug(req);
   const token = extractBearerToken(req);
+
+  console.info('[supabaseAuth:debug] headers', headerDebug);
+
   if (!token) {
+    console.error('[supabaseAuth:debug] rejet — aucun token (Authorization Bearer ou X-Supabase-Token)');
     return res.status(401).json({ error: 'Authentification Supabase requise.' });
   }
 
@@ -46,13 +63,14 @@ async function requireSupabaseSuperAdmin(req, res, next) {
   try {
     let user;
     try {
-      user = await verifySupabaseAccessToken(token);
+      user = await verifySupabaseAccessToken(token, headerDebug);
     } catch (authErr) {
-      console.error('[supabaseAuth] token:', authErr.message);
+      console.error('[supabaseAuth:debug] rejet final JWT:', authErr.message);
       return res.status(401).json({ error: 'Session Supabase invalide ou expirée.' });
     }
 
     if (!user?.id) {
+      console.error('[supabaseAuth:debug] rejet — auth/v1/user sans id utilisateur');
       return res.status(401).json({ error: 'Session Supabase invalide ou expirée.' });
     }
 

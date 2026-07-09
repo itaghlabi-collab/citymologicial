@@ -42,6 +42,7 @@ const { requireAuth }     = require('./middleware/auth');
 // ── CRON jobs ─────────────────────────────────────────────────────────────────
 const { startCronJobs } = require('./jobs/cronJobs');
 const { logBackupEnvironmentOnStartup } = require('./services/backup/backupEnvCheck');
+const { logSupabaseProjectConfigOnStartup } = require('./lib/supabaseAdmin');
 
 // ─────────────────────────────────────────────────────────────────────────────
 
