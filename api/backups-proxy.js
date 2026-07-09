@@ -45,6 +45,11 @@ export default async function handler(req, res) {
   const rel = resolveBackupPath(req);
   const url = `${base}/api/${rel}`;
   const sig = proxySignature(verified.user.id);
+  if (!sig) {
+    return res.status(503).json({
+      error: 'Proxy sauvegarde non configuré. SUPABASE_SERVICE_ROLE_KEY requis sur Vercel.',
+    });
+  }
 
   const headers = {
     'X-Citymo-Verified-User-Id': verified.user.id,
