@@ -1,6 +1,3 @@
-import https from 'node:https';
-import { URL } from 'node:url';
-
 export const config = { maxDuration: 60 };
 
 function resolveRailwayBase() {
@@ -35,7 +32,7 @@ function readBody(req) {
   });
 }
 
-function requestRailway(targetUrl, init) {
+function requestRailway(https, URL, targetUrl, init) {
   return new Promise((resolve, reject) => {
     const parsed = new URL(targetUrl);
     const request = https.request({
@@ -71,6 +68,11 @@ export default async function handler(req, res) {
       });
     }
 
+    const [{ default: https }, { URL }] = await Promise.all([
+      import('node:https'),
+      import('node:url'),
+    ]);
+
     const path = resolveBackupPath(req).replace(/^\/+/, '');
     const headers = {};
     if (req.headers.authorization) headers.Authorization = req.headers.authorization;
@@ -83,7 +85,7 @@ export default async function handler(req, res) {
       init.body = await readBody(req);
     }
 
-    const upstream = await requestRailway(`${base}/api/${path}`, init);
+    const upstream = await requestRailway(https, URL, `${base}/api/${path}`, init);
     res.status(upstream.status);
     res.setHeader('Content-Type', upstream.contentType);
     if (!upstream.body) return res.end();
