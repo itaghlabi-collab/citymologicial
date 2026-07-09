@@ -1,6 +1,3 @@
-/**
- * Vercel — proxy unique /api/backups* → Railway
- */
 export const config = { maxDuration: 60 };
 
 function resolveRailwayBase() {
@@ -23,18 +20,6 @@ function resolveBackupPath(req) {
   return 'backups';
 }
 
-function readBody(req) {
-  if (req.body != null && typeof req.body === 'object') {
-    return Promise.resolve(JSON.stringify(req.body));
-  }
-  return new Promise((resolve, reject) => {
-    const chunks = [];
-    req.on('data', (chunk) => chunks.push(chunk));
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8') || ''));
-    req.on('error', reject);
-  });
-}
-
 export default async function handler(req, res) {
   const base = resolveRailwayBase();
   if (!base) {
@@ -44,25 +29,17 @@ export default async function handler(req, res) {
   }
 
   const path = resolveBackupPath(req).replace(/^\/+/, '');
-  const targetUrl = `${base}/api/${path}`;
-
   const headers = {};
   if (req.headers.authorization) headers.Authorization = req.headers.authorization;
-  if (req.headers['content-type']) headers['Content-Type'] = req.headers['content-type'];
 
-  const method = req.method || 'GET';
-  const init = { method, headers };
+  const upstream = await fetch(`${base}/api/${path}`, {
+    method: req.method || 'GET',
+    headers,
+    body: ['GET', 'HEAD', 'OPTIONS'].includes(req.method || 'GET') ? undefined : req,
+  });
 
-  if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
-    init.body = await readBody(req);
-  }
-
-  const upstream = await fetch(targetUrl, init);
-  const contentType = upstream.headers.get('content-type') || 'application/json';
   const text = await upstream.text();
-
   res.status(upstream.status);
-  res.setHeader('Content-Type', contentType);
-  if (!text) return res.end();
-  return res.send(text);
+  res.setHeader('Content-Type', upstream.headers.get('content-type') || 'application/json');
+  return text ? res.send(text) : res.end();
 }
