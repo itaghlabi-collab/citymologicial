@@ -1,12 +1,22 @@
 /**
  * Authentification Supabase JWT + vérification Super Admin.
  */
-const { getSupabaseAnon, getSupabaseAdmin } = require('../lib/supabaseAdmin');
+const { getSupabaseAdmin } = require('../lib/supabaseAdmin');
 
 const SUPER_ADMIN_EMAILS = [
   'selim.moumni@citymo.ma',
   'selim.moumni@gmail.com',
 ];
+
+function isSuperAdminUser(user, profile) {
+  const email = (user.email || profile?.email || '').toLowerCase();
+  const role = (profile?.role || '').toLowerCase().replace(/\s+/g, '_');
+  const roleCode = (profile?.erp_roles?.code || '').toLowerCase();
+  return SUPER_ADMIN_EMAILS.includes(email)
+    || role === 'super_admin'
+    || roleCode === 'super_admin'
+    || profile?.erp_roles?.est_admin === true;
+}
 
 async function requireSupabaseSuperAdmin(req, res, next) {
   const header = req.headers.authorization || '';
@@ -15,25 +25,36 @@ async function requireSupabaseSuperAdmin(req, res, next) {
   }
 
   const token = header.slice(7);
+
+  let admin;
   try {
-    const anon = getSupabaseAnon();
-    const { data: { user }, error } = await anon.auth.getUser(token);
+    admin = getSupabaseAdmin();
+  } catch (configErr) {
+    console.error('[supabaseAuth] config:', configErr.message);
+    return res.status(503).json({
+      error: 'API sauvegardes non configurée sur Railway.',
+      detail: configErr.message,
+    });
+  }
+
+  try {
+    const { data: { user }, error } = await admin.auth.getUser(token);
     if (error || !user) {
       return res.status(401).json({ error: 'Session Supabase invalide ou expirée.' });
     }
 
-    const admin = getSupabaseAdmin();
-    const { data: profile } = await admin
+    const { data: profile, error: profileError } = await admin
       .from('profiles')
-      .select('id, email, role, statut')
+      .select('id, email, role, statut, erp_roles ( code, est_admin )')
       .eq('id', user.id)
       .maybeSingle();
 
-    const email = (user.email || profile?.email || '').toLowerCase();
-    const role = (profile?.role || '').toLowerCase().replace(/\s+/g, '_');
-    const isSuper = SUPER_ADMIN_EMAILS.includes(email) || role === 'super_admin';
+    if (profileError) {
+      console.error('[supabaseAuth] profile:', profileError.message);
+      return res.status(500).json({ error: 'Erreur lecture profil utilisateur.' });
+    }
 
-    if (!isSuper) {
+    if (!isSuperAdminUser(user, profile)) {
       return res.status(403).json({ error: 'Accès réservé aux Super Admin.' });
     }
 
@@ -43,9 +64,9 @@ async function requireSupabaseSuperAdmin(req, res, next) {
 
     req.user = {
       id: user.id,
-      email,
-      role: profile?.role || 'super_admin',
-      nom: profile?.nom || email,
+      email: (user.email || profile?.email || '').toLowerCase(),
+      role: profile?.role || profile?.erp_roles?.code || 'super_admin',
+      nom: profile?.nom || user.email || '',
     };
     next();
   } catch (err) {
