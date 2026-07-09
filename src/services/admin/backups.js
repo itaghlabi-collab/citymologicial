@@ -2,7 +2,6 @@
  * backups.js — Sauvegardes ERP CITYMO (Supabase + API Railway sécurisée).
  */
 import { getSupabase } from '../../lib/supabase';
-import { getAuthToken } from '../auth';
 import { resolveApiBaseUrl } from '../../config/env';
 import { moduleLabel } from './constants';
 
@@ -72,9 +71,20 @@ function capitalizePlan(p) {
   return p.charAt(0).toUpperCase() + p.slice(1);
 }
 
-async function backupApiFetch(path, options = {}) {
-  const token = await getAuthToken();
+async function resolveBackupAuthToken() {
+  const sb = getSupabase();
+  const { data: { user }, error } = await sb.auth.getUser();
+  if (error || !user) {
+    throw new Error('Session expirée. Reconnectez-vous.');
+  }
+  const { data: { session } } = await sb.auth.getSession();
+  const token = session?.access_token?.trim();
   if (!token) throw new Error('Session expirée. Reconnectez-vous.');
+  return token;
+}
+
+async function backupApiFetch(path, options = {}) {
+  const token = await resolveBackupAuthToken();
 
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), BACKUP_TIMEOUT_MS);
@@ -86,6 +96,7 @@ async function backupApiFetch(path, options = {}) {
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
+        'X-Supabase-Token': token,
         ...(options.headers || {}),
       },
     });

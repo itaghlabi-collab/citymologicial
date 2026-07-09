@@ -2,6 +2,7 @@
  * Authentification Supabase JWT + vérification Super Admin.
  */
 const { getSupabaseAdmin } = require('../lib/supabaseAdmin');
+const { verifySupabaseAccessToken } = require('../lib/verifySupabaseToken');
 
 const SUPER_ADMIN_EMAILS = [
   'selim.moumni@citymo.ma',
@@ -18,13 +19,18 @@ function isSuperAdminUser(user, profile) {
     || profile?.erp_roles?.est_admin === true;
 }
 
+function extractBearerToken(req) {
+  const header = req.headers.authorization || req.headers.Authorization || '';
+  if (header.startsWith('Bearer ')) return header.slice(7).trim();
+  const alt = req.headers['x-supabase-token'];
+  return typeof alt === 'string' ? alt.trim() : '';
+}
+
 async function requireSupabaseSuperAdmin(req, res, next) {
-  const header = req.headers.authorization || '';
-  if (!header.startsWith('Bearer ')) {
+  const token = extractBearerToken(req);
+  if (!token) {
     return res.status(401).json({ error: 'Authentification Supabase requise.' });
   }
-
-  const token = header.slice(7);
 
   let admin;
   try {
@@ -38,14 +44,21 @@ async function requireSupabaseSuperAdmin(req, res, next) {
   }
 
   try {
-    const { data: { user }, error } = await admin.auth.getUser(token);
-    if (error || !user) {
+    let user;
+    try {
+      user = await verifySupabaseAccessToken(token);
+    } catch (authErr) {
+      console.error('[supabaseAuth] token:', authErr.message);
+      return res.status(401).json({ error: 'Session Supabase invalide ou expirée.' });
+    }
+
+    if (!user?.id) {
       return res.status(401).json({ error: 'Session Supabase invalide ou expirée.' });
     }
 
     const { data: profile, error: profileError } = await admin
       .from('profiles')
-      .select('id, email, role, statut, erp_roles ( code, est_admin )')
+      .select('id, email, role, statut, nom, erp_roles ( code, est_admin )')
       .eq('id', user.id)
       .maybeSingle();
 

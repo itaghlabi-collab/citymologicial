@@ -82,7 +82,7 @@ app.use(cors({
     cb(new Error(`CORS bloqué pour l'origine: ${origin}`));
   },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-client-info', 'apikey'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-client-info', 'apikey', 'x-supabase-token'],
   credentials: true,
   optionsSuccessStatus: 204,
 }));
