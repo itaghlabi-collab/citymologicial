@@ -71,6 +71,22 @@ export default async function handler(req, res) {
   const upstream = await fetch(url, init);
   const contentType = upstream.headers.get('content-type') || 'application/json';
   const text = await upstream.text();
+
+  if (!upstream.ok) {
+    console.error('[backup:auth:vercel] railway upstream', {
+      status: upstream.status,
+      url,
+      userId: verified.user.id,
+      bodyPreview: text.slice(0, 400),
+    });
+  } else {
+    console.info('[backup:auth:vercel] railway upstream OK', {
+      status: upstream.status,
+      userId: verified.user.id,
+      path: rel,
+    });
+  }
+
   res.status(upstream.status);
   res.setHeader('Content-Type', contentType);
   if (!text) return res.end();

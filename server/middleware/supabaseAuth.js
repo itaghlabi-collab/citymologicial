@@ -48,38 +48,44 @@ function verifyVercelProxyUserId(req) {
   if (!userId || !sig || !key) return null;
   const expected = crypto.createHmac('sha256', key).update(String(userId)).digest('hex');
   if (sig !== expected) {
-    console.error('[supabaseAuth] proxy sig mismatch pour user', userId);
+    console.error('[backup:auth:railway] proxy sig mismatch', { userId });
     return null;
   }
   return String(userId);
 }
 
-async function loadVerifiedUser(admin, user) {
+async function fetchProfile(admin, userId) {
   const { data: profile, error: profileError } = await admin
     .from('profiles')
     .select('id, email, role, statut, nom, erp_roles ( code, est_admin )')
-    .eq('id', user.id)
+    .eq('id', userId)
     .maybeSingle();
 
   if (profileError) {
-    console.error('[supabaseAuth] profile:', profileError.message);
+    console.error('[backup:auth:railway] profile:', profileError.message);
     throw Object.assign(new Error('Erreur lecture profil utilisateur.'), { status: 500 });
   }
+  return profile;
+}
 
+function buildVerifiedUser(user, profile) {
   if (!isSuperAdminUser(user, profile)) {
     throw Object.assign(new Error('Accès réservé aux Super Admin.'), { status: 403 });
   }
-
   if (profile?.statut && profile.statut !== 'actif') {
     throw Object.assign(new Error('Compte désactivé.'), { status: 403 });
   }
-
   return {
     id: user.id,
     email: (user.email || profile?.email || '').toLowerCase(),
     role: profile?.role || profile?.erp_roles?.code || 'super_admin',
     nom: profile?.nom || user.email || '',
   };
+}
+
+async function loadVerifiedUser(admin, user) {
+  const profile = await fetchProfile(admin, user.id);
+  return buildVerifiedUser(user, profile);
 }
 
 async function requireSupabaseSuperAdmin(req, res, next) {
@@ -107,13 +113,10 @@ async function requireSupabaseSuperAdmin(req, res, next) {
 
   try {
     if (proxyUserId) {
-      console.info('[supabaseAuth:debug] auth via proxy Vercel', { userId: proxyUserId });
-      const { data: { user }, error } = await admin.auth.admin.getUserById(proxyUserId);
-      if (error || !user) {
-        console.error('[supabaseAuth] proxy getUserById:', error?.message);
-        return res.status(401).json({ error: 'Session Supabase invalide ou expirée.' });
-      }
-      req.user = await loadVerifiedUser(admin, user);
+      console.info('[backup:auth:railway] proxy Vercel signé — confiance directe', { userId: proxyUserId });
+      const profile = await fetchProfile(admin, proxyUserId);
+      const user = { id: proxyUserId, email: profile?.email || '' };
+      req.user = buildVerifiedUser(user, profile);
       return next();
     }
 
