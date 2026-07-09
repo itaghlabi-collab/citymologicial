@@ -1,5 +1,3 @@
-import { proxyToRailway } from '../lib/railwayProxy.mjs';
-
 export const config = { maxDuration: 60 };
 
 function resolveBackupPath(req) {
@@ -13,5 +11,12 @@ function resolveBackupPath(req) {
 }
 
 export default async function handler(req, res) {
-  return proxyToRailway(req, res, resolveBackupPath(req));
+  const path = resolveBackupPath(req);
+  try {
+    const { proxyToRailway } = await import('../lib/railwayProxy.mjs');
+    return proxyToRailway(req, res, path);
+  } catch (err) {
+    console.error('[erp-snapshot-router]', err);
+    return res.status(500).json({ error: err.message || 'Proxy Railway échoué' });
+  }
 }
