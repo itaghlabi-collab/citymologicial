@@ -46,7 +46,8 @@
       "memory": 1024
     },
     "api/erp-snapshot-router.js": {
-      "maxDuration": 60
+      "maxDuration": 60,
+      "memory": 512
     },
     "api/admin/users/[...path].js": {
       "maxDuration": 60,
