@@ -1,3 +1,5 @@
+import { proxyToRailway } from '../lib/railwayProxy.mjs';
+
 export const config = { maxDuration: 60 };
 
 function resolveBackupPath(req) {
@@ -11,8 +13,5 @@ function resolveBackupPath(req) {
 }
 
 export default async function handler(req, res) {
-  return res.status(200).json({
-    path: resolveBackupPath(req),
-    method: req.method,
-  });
+  return proxyToRailway(req, res, resolveBackupPath(req));
 }
