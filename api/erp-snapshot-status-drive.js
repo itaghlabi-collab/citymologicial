@@ -1,4 +1,4 @@
-import { proxyToRailway } from '../lib/railwayProxy.mjs';
+import { proxyToRailway } from './erp-snapshot-proxy.mjs';
 
 export const config = { maxDuration: 60 };
 
