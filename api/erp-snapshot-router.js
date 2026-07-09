@@ -20,26 +20,49 @@ function resolveBackupPath(req) {
   return 'backups';
 }
 
-export default async function handler(req, res) {
-  const base = resolveRailwayBase();
-  if (!base) {
-    return res.status(503).json({
-      error: 'API Railway non configurée. Définissez RAILWAY_API_URL sur Vercel.',
-    });
+function readBody(req) {
+  if (req.body != null && typeof req.body === 'object') {
+    return Promise.resolve(JSON.stringify(req.body));
   }
-
-  const path = resolveBackupPath(req).replace(/^\/+/, '');
-  const headers = {};
-  if (req.headers.authorization) headers.Authorization = req.headers.authorization;
-
-  const upstream = await fetch(`${base}/api/${path}`, {
-    method: req.method || 'GET',
-    headers,
-    body: ['GET', 'HEAD', 'OPTIONS'].includes(req.method || 'GET') ? undefined : req,
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on('data', (chunk) => chunks.push(chunk));
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8') || ''));
+    req.on('error', reject);
   });
+}
 
-  const text = await upstream.text();
-  res.status(upstream.status);
-  res.setHeader('Content-Type', upstream.headers.get('content-type') || 'application/json');
-  return text ? res.send(text) : res.end();
+export default async function handler(req, res) {
+  try {
+    const base = resolveRailwayBase();
+    if (!base) {
+      return res.status(503).json({
+        error: 'API Railway non configurée. Définissez RAILWAY_API_URL sur Vercel.',
+      });
+    }
+
+    const path = resolveBackupPath(req).replace(/^\/+/, '');
+    const headers = {};
+    if (req.headers.authorization) headers.Authorization = req.headers.authorization;
+    if (req.headers['content-type']) headers['Content-Type'] = req.headers['content-type'];
+
+    const method = req.method || 'GET';
+    const init = { method, headers };
+
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+      init.body = await readBody(req);
+    }
+
+    const upstream = await fetch(`${base}/api/${path}`, init);
+    const contentType = upstream.headers.get('content-type') || 'application/json';
+    const text = await upstream.text();
+
+    res.status(upstream.status);
+    res.setHeader('Content-Type', contentType);
+    if (!text) return res.end();
+    return res.send(text);
+  } catch (err) {
+    console.error('[erp-snapshot-router]', err);
+    return res.status(500).json({ error: err.message || 'Proxy Railway échoué' });
+  }
 }
