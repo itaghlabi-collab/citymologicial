@@ -6,13 +6,13 @@
   "rewrites": [
     { "source": "/api/admin/users/:id/password", "destination": "/api/admin-user-password?id=:id" },
     { "source": "/api/admin/users/:id/email", "destination": "/api/admin-user-email?id=:id" },
-    { "source": "/api/backups/status/config", "destination": "/api/backups-status-config" },
-    { "source": "/api/backups/status/drive", "destination": "/api/backups-status-drive" },
-    { "source": "/api/backups/:id/download", "destination": "/api/backups-by-id?id=:id&action=download" },
-    { "source": "/api/backups/:id/drive", "destination": "/api/backups-by-id?id=:id&action=drive" },
-    { "source": "/api/backups/:id/restore", "destination": "/api/backups-by-id?id=:id&action=restore" },
-    { "source": "/api/backups/:id", "destination": "/api/backups-by-id?id=:id" },
-    { "source": "/api/backups", "destination": "/api/backups-root" },
+    { "source": "/api/backups/status/config", "destination": "/api/erp-snapshot-status-config" },
+    { "source": "/api/backups/status/drive", "destination": "/api/erp-snapshot-status-drive" },
+    { "source": "/api/backups/:id/download", "destination": "/api/erp-snapshot-by-id?id=:id&action=download" },
+    { "source": "/api/backups/:id/drive", "destination": "/api/erp-snapshot-by-id?id=:id&action=drive" },
+    { "source": "/api/backups/:id/restore", "destination": "/api/erp-snapshot-by-id?id=:id&action=restore" },
+    { "source": "/api/backups/:id", "destination": "/api/erp-snapshot-by-id?id=:id" },
+    { "source": "/api/backups", "destination": "/api/erp-snapshot-root" },
     { "source": "/((?!api/|assets/|sounds/).*)", "destination": "/index.html" }
   ],
   "headers": [
@@ -45,19 +45,19 @@
       "maxDuration": 60,
       "memory": 1024
     },
-    "api/backups-root.js": {
+    "api/erp-snapshot-root.js": {
       "maxDuration": 300,
       "memory": 1024
     },
-    "api/backups-status-config.js": {
+    "api/erp-snapshot-status-config.js": {
       "maxDuration": 60,
       "memory": 512
     },
-    "api/backups-status-drive.js": {
+    "api/erp-snapshot-status-drive.js": {
       "maxDuration": 60,
       "memory": 512
     },
-    "api/backups-by-id.js": {
+    "api/erp-snapshot-by-id.js": {
       "maxDuration": 300,
       "memory": 1024
     },
