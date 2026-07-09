@@ -4,6 +4,7 @@
 const crypto = require('crypto');
 const { getSupabaseAdmin } = require('../lib/supabaseAdmin');
 const { verifySupabaseAccessToken } = require('../lib/verifySupabaseToken');
+const { resolveSupabaseServiceRoleKey } = require('../lib/supabaseEnv');
 
 const SUPER_ADMIN_EMAILS = [
   'selim.moumni@citymo.ma',
@@ -43,7 +44,7 @@ function authHeaderDebug(req) {
 function verifyVercelProxyUserId(req) {
   const userId = req.headers['x-citymo-verified-user-id'];
   const sig = req.headers['x-citymo-proxy-sig'];
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  const key = resolveSupabaseServiceRoleKey();
   if (!userId || !sig || !key) return null;
   const expected = crypto.createHmac('sha256', key).update(String(userId)).digest('hex');
   if (sig !== expected) {

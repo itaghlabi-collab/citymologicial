@@ -4,6 +4,7 @@
  */
 import crypto from 'crypto';
 import { requireSupabaseSuperAdmin } from '../lib/supabaseAdminVercel.mjs';
+import { resolveSupabaseServiceRoleKey } from '../lib/supabaseEnv.mjs';
 
 export const config = { maxDuration: 300 };
 
@@ -22,7 +23,7 @@ function resolveBackupPath(req) {
 }
 
 function proxySignature(userId) {
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  const key = resolveSupabaseServiceRoleKey();
   if (!key || !userId) return null;
   return crypto.createHmac('sha256', key).update(String(userId)).digest('hex');
 }
@@ -47,7 +48,7 @@ export default async function handler(req, res) {
   const sig = proxySignature(verified.user.id);
   if (!sig) {
     return res.status(503).json({
-      error: 'Proxy sauvegarde non configuré. SUPABASE_SERVICE_ROLE_KEY requis sur Vercel.',
+      error: 'Proxy sauvegarde non configuré. SUPABASE_SERVICE_ROLE_KEY ou SUPABASE_SECRET_KEY requis sur Vercel.',
     });
   }
 

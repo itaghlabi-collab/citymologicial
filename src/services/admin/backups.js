@@ -132,12 +132,17 @@ async function backupApiFetch(path, options = {}) {
   };
 
   if (import.meta.env.DEV) {
+    let supabaseHost = null;
+    try {
+      supabaseHost = ENV.SUPABASE_URL ? new URL(ENV.SUPABASE_URL).host : null;
+    } catch { /* ignore */ }
     console.info('[backup:auth] headers envoyés', {
       hasAuthorization: Boolean(headers.Authorization),
       bearerPrefixOk: headers.Authorization?.startsWith('Bearer '),
       accessTokenLength: token.length,
       hasApikey: Boolean(headers.apikey),
       apikeyLength: headers.apikey?.length || 0,
+      supabaseUrlHost: supabaseHost,
       contentType: headers['Content-Type'],
       path,
       method: options.method || 'GET',
