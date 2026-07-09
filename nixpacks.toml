@@ -1,0 +1,14 @@
+# Nixpacks racine — backend Express dans server/ (pas de build Vite)
+# Le frontend est déployé sur Vercel.
+
+[phases.setup]
+nixPkgs = ["nodejs_20", "npm-9_x", "python3", "gcc"]
+
+[phases.install]
+cmds = ["cd server && npm install --omit=dev"]
+
+[phases.build]
+cmds = []
+
+[start]
+cmd = "cd server && node index.js"
