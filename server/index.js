@@ -83,7 +83,7 @@ app.use(cors({
     cb(new Error(`CORS bloqué pour l'origine: ${origin}`));
   },
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'x-client-info', 'apikey', 'x-supabase-token'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-client-info', 'apikey', 'x-supabase-token', 'x-citymo-verified-user-id', 'x-citymo-proxy-sig'],
   credentials: true,
   optionsSuccessStatus: 204,
 }));
@@ -141,6 +141,7 @@ app.listen(PORT, () => {
   // Start background jobs after server is up
   startCronJobs();
   logBackupEnvironmentOnStartup();
+  logSupabaseProjectConfigOnStartup();
 });
 
 module.exports = app;

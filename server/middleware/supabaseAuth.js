@@ -1,6 +1,7 @@
 /**
  * Authentification Supabase JWT + vérification Super Admin.
  */
+const crypto = require('crypto');
 const { getSupabaseAdmin } = require('../lib/supabaseAdmin');
 const { verifySupabaseAccessToken } = require('../lib/verifySupabaseToken');
 
@@ -33,21 +34,56 @@ function authHeaderDebug(req) {
     authorizationReceived: Boolean(auth),
     authorizationBearer: auth.startsWith('Bearer '),
     xSupabaseTokenReceived: Boolean(alt),
+    vercelProxyUserId: req.headers['x-citymo-verified-user-id'] || null,
     authorizationLength: auth.length,
     xSupabaseTokenLength: typeof alt === 'string' ? alt.length : 0,
   };
 }
 
+function verifyVercelProxyUserId(req) {
+  const userId = req.headers['x-citymo-verified-user-id'];
+  const sig = req.headers['x-citymo-proxy-sig'];
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  if (!userId || !sig || !key) return null;
+  const expected = crypto.createHmac('sha256', key).update(String(userId)).digest('hex');
+  if (sig !== expected) {
+    console.error('[supabaseAuth] proxy sig mismatch pour user', userId);
+    return null;
+  }
+  return String(userId);
+}
+
+async function loadVerifiedUser(admin, user) {
+  const { data: profile, error: profileError } = await admin
+    .from('profiles')
+    .select('id, email, role, statut, nom, erp_roles ( code, est_admin )')
+    .eq('id', user.id)
+    .maybeSingle();
+
+  if (profileError) {
+    console.error('[supabaseAuth] profile:', profileError.message);
+    throw Object.assign(new Error('Erreur lecture profil utilisateur.'), { status: 500 });
+  }
+
+  if (!isSuperAdminUser(user, profile)) {
+    throw Object.assign(new Error('Accès réservé aux Super Admin.'), { status: 403 });
+  }
+
+  if (profile?.statut && profile.statut !== 'actif') {
+    throw Object.assign(new Error('Compte désactivé.'), { status: 403 });
+  }
+
+  return {
+    id: user.id,
+    email: (user.email || profile?.email || '').toLowerCase(),
+    role: profile?.role || profile?.erp_roles?.code || 'super_admin',
+    nom: profile?.nom || user.email || '',
+  };
+}
+
 async function requireSupabaseSuperAdmin(req, res, next) {
   const headerDebug = authHeaderDebug(req);
-  const token = extractBearerToken(req);
-
   console.info('[supabaseAuth:debug] headers', headerDebug);
-
-  if (!token) {
-    console.error('[supabaseAuth:debug] rejet — aucun token (Authorization Bearer ou X-Supabase-Token)');
-    return res.status(401).json({ error: 'Authentification Supabase requise.' });
-  }
 
   let admin;
   try {
@@ -61,6 +97,24 @@ async function requireSupabaseSuperAdmin(req, res, next) {
   }
 
   try {
+    const proxyUserId = verifyVercelProxyUserId(req);
+    if (proxyUserId) {
+      console.info('[supabaseAuth:debug] auth via proxy Vercel', { userId: proxyUserId });
+      const { data: { user }, error } = await admin.auth.admin.getUserById(proxyUserId);
+      if (error || !user) {
+        console.error('[supabaseAuth] proxy getUserById:', error?.message);
+        return res.status(401).json({ error: 'Session Supabase invalide ou expirée.' });
+      }
+      req.user = await loadVerifiedUser(admin, user);
+      return next();
+    }
+
+    const token = extractBearerToken(req);
+    if (!token) {
+      console.error('[supabaseAuth:debug] rejet — aucun token');
+      return res.status(401).json({ error: 'Authentification Supabase requise.' });
+    }
+
     let user;
     try {
       user = await verifySupabaseAccessToken(token, headerDebug);
@@ -70,37 +124,15 @@ async function requireSupabaseSuperAdmin(req, res, next) {
     }
 
     if (!user?.id) {
-      console.error('[supabaseAuth:debug] rejet — auth/v1/user sans id utilisateur');
       return res.status(401).json({ error: 'Session Supabase invalide ou expirée.' });
     }
 
-    const { data: profile, error: profileError } = await admin
-      .from('profiles')
-      .select('id, email, role, statut, nom, erp_roles ( code, est_admin )')
-      .eq('id', user.id)
-      .maybeSingle();
-
-    if (profileError) {
-      console.error('[supabaseAuth] profile:', profileError.message);
-      return res.status(500).json({ error: 'Erreur lecture profil utilisateur.' });
-    }
-
-    if (!isSuperAdminUser(user, profile)) {
-      return res.status(403).json({ error: 'Accès réservé aux Super Admin.' });
-    }
-
-    if (profile?.statut && profile.statut !== 'actif') {
-      return res.status(403).json({ error: 'Compte désactivé.' });
-    }
-
-    req.user = {
-      id: user.id,
-      email: (user.email || profile?.email || '').toLowerCase(),
-      role: profile?.role || profile?.erp_roles?.code || 'super_admin',
-      nom: profile?.nom || user.email || '',
-    };
+    req.user = await loadVerifiedUser(admin, user);
     next();
   } catch (err) {
+    if (err.status) {
+      return res.status(err.status).json({ error: err.message });
+    }
     console.error('[supabaseAuth]', err.message);
     return res.status(500).json({ error: 'Erreur vérification authentification.' });
   }
