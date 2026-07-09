@@ -57,6 +57,7 @@ export default async function handler(req, res) {
   };
   if (req.headers.authorization) headers.Authorization = req.headers.authorization;
   if (req.headers['x-supabase-token']) headers['X-Supabase-Token'] = req.headers['x-supabase-token'];
+  if (req.headers.apikey) headers.apikey = req.headers.apikey;
   if (req.headers['content-type']) headers['Content-Type'] = req.headers['content-type'];
 
   const method = req.method || 'GET';

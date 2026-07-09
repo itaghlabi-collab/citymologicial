@@ -2,7 +2,7 @@
  * backups.js — Sauvegardes ERP CITYMO (Supabase + API Railway sécurisée).
  */
 import { getSupabase } from '../../lib/supabase';
-import { resolveApiBaseUrl } from '../../config/env';
+import { ENV, resolveApiBaseUrl } from '../../config/env';
 import { moduleLabel } from './constants';
 
 const TABLE = 'erp_backups';
@@ -73,18 +73,39 @@ function capitalizePlan(p) {
 
 async function resolveBackupAuthToken() {
   const sb = getSupabase();
-  const { data: { user }, error } = await sb.auth.getUser();
-  if (error || !user) {
+  const { data: { session: current }, error: sessionError } = await sb.auth.getSession();
+
+  if (sessionError || !current?.access_token) {
     throw new Error('Session expirée. Reconnectez-vous.');
   }
-  const { data: { session } } = await sb.auth.getSession();
-  const token = session?.access_token?.trim();
-  if (!token) throw new Error('Session expirée. Reconnectez-vous.');
+
+  let session = current;
+  const expiresAtMs = current.expires_at ? current.expires_at * 1000 : 0;
+  const shouldRefresh = !expiresAtMs || expiresAtMs < Date.now() + 120_000;
+
+  if (shouldRefresh && current.refresh_token) {
+    const { data: refreshed, error: refreshError } = await sb.auth.refreshSession();
+    if (!refreshError && refreshed?.session?.access_token) {
+      session = refreshed.session;
+    }
+  }
+
+  const token = session.access_token?.trim();
+  if (!token) {
+    throw new Error('Session expirée. Reconnectez-vous.');
+  }
+
+  const { data: { user }, error: userError } = await sb.auth.getUser(token);
+  if (userError || !user) {
+    throw new Error('Session expirée. Reconnectez-vous.');
+  }
+
   return token;
 }
 
 async function backupApiFetch(path, options = {}) {
   const token = await resolveBackupAuthToken();
+  const anonKey = ENV.SUPABASE_ANON_KEY?.trim();
 
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), BACKUP_TIMEOUT_MS);
@@ -93,10 +114,12 @@ async function backupApiFetch(path, options = {}) {
     const res = await fetch(`${resolveApiBaseUrl()}${path}`, {
       ...options,
       signal: ctrl.signal,
+      credentials: 'same-origin',
       headers: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${token}`,
         'X-Supabase-Token': token,
+        ...(anonKey ? { apikey: anonKey } : {}),
         ...(options.headers || {}),
       },
     });

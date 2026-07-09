@@ -85,6 +85,14 @@ async function requireSupabaseSuperAdmin(req, res, next) {
   const headerDebug = authHeaderDebug(req);
   console.info('[supabaseAuth:debug] headers', headerDebug);
 
+  const proxyUserId = verifyVercelProxyUserId(req);
+  if (req.headers['x-citymo-verified-user-id'] && req.headers['x-citymo-proxy-sig'] && !proxyUserId) {
+    console.error('[supabaseAuth:debug] signature proxy Vercel invalide');
+    return res.status(503).json({
+      error: 'Signature proxy invalide. SUPABASE_SERVICE_ROLE_KEY doit être identique sur Vercel et Railway.',
+    });
+  }
+
   let admin;
   try {
     admin = getSupabaseAdmin();
@@ -97,7 +105,6 @@ async function requireSupabaseSuperAdmin(req, res, next) {
   }
 
   try {
-    const proxyUserId = verifyVercelProxyUserId(req);
     if (proxyUserId) {
       console.info('[supabaseAuth:debug] auth via proxy Vercel', { userId: proxyUserId });
       const { data: { user }, error } = await admin.auth.admin.getUserById(proxyUserId);
@@ -110,6 +117,7 @@ async function requireSupabaseSuperAdmin(req, res, next) {
     }
 
     const token = extractBearerToken(req);
+    const clientApiKey = req.headers.apikey || req.headers.Apikey || '';
     if (!token) {
       console.error('[supabaseAuth:debug] rejet — aucun token');
       return res.status(401).json({ error: 'Authentification Supabase requise.' });
@@ -117,7 +125,7 @@ async function requireSupabaseSuperAdmin(req, res, next) {
 
     let user;
     try {
-      user = await verifySupabaseAccessToken(token, headerDebug);
+      user = await verifySupabaseAccessToken(token, { ...headerDebug, clientApiKey });
     } catch (authErr) {
       console.error('[supabaseAuth:debug] rejet final JWT:', authErr.message);
       return res.status(401).json({ error: 'Session Supabase invalide ou expirée.' });

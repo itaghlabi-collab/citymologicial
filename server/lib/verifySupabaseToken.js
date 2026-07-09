@@ -95,24 +95,25 @@ async function callAuthUser(baseUrl, token, apikey, keyLabel) {
 
 async function verifySupabaseAccessToken(token, reqMeta = {}) {
   const baseUrl = String(resolveSupabaseUrl() || '').replace(/\/+$/, '');
-  const anonKeys = [...new Set(
-    ['SUPABASE_ANON_KEY', 'VITE_SUPABASE_ANON_KEY']
-      .map((k) => process.env[k]?.trim())
-      .filter(Boolean),
-  )];
-  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim();
+  const seen = new Set();
+  const attempts = [];
 
+  const pushKey = (label, key) => {
+    const trimmed = String(key || '').trim();
+    if (!trimmed || seen.has(trimmed)) return;
+    seen.add(trimmed);
+    attempts.push([label, trimmed]);
+  };
+
+  pushKey('client_apikey', reqMeta.clientApiKey);
+  pushKey('SUPABASE_ANON_KEY', process.env.SUPABASE_ANON_KEY);
+  pushKey('VITE_SUPABASE_ANON_KEY', process.env.VITE_SUPABASE_ANON_KEY);
+  pushKey('service_role', process.env.SUPABASE_SERVICE_ROLE_KEY);
   const diag = logJwtDiagnostics(token, reqMeta);
 
   if (!baseUrl) {
     throw new Error('SUPABASE_URL manquant sur Railway.');
   }
-
-  const attempts = [];
-  anonKeys.forEach((key, i) => attempts.push([`anon_${i + 1}`, key]));
-  if (serviceKey) attempts.push(['service_role', serviceKey]);
-
-  if (!attempts.length) {
     throw new Error('SUPABASE_ANON_KEY ou SUPABASE_SERVICE_ROLE_KEY requis sur Railway.');
   }
 
