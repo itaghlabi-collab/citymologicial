@@ -71,32 +71,49 @@ function capitalizePlan(p) {
   return p.charAt(0).toUpperCase() + p.slice(1);
 }
 
+function isSessionTokenStale(session) {
+  if (!session?.access_token) return true;
+  if (!session.expires_at) return false;
+  return session.expires_at * 1000 < Date.now() + 60_000;
+}
+
+function logBackupAuthDebug(label, session, extra = {}) {
+  if (!import.meta.env.DEV) return;
+  const token = session?.access_token || '';
+  console.info(`[backup:auth] ${label}`, {
+    sessionExists: Boolean(session),
+    accessTokenPresent: Boolean(token),
+    accessTokenLength: token.length,
+    userId: session?.user?.id || null,
+    expiresAt: session?.expires_at
+      ? new Date(session.expires_at * 1000).toISOString()
+      : null,
+    tokenStale: session ? isSessionTokenStale(session) : null,
+    ...extra,
+  });
+}
+
+/**
+ * Récupère un access_token Supabase frais pour les appels /api/backups*.
+ * Aligné sur getAuthToken() (admin/users.js) + refresh si session/token absent ou expiré.
+ */
 async function resolveBackupAuthToken() {
-  const sb = getSupabase();
-  const { data: { session: current }, error: sessionError } = await sb.auth.getSession();
+  const supabase = getSupabase();
 
-  if (sessionError || !current?.access_token) {
-    throw new Error('Session expirée. Reconnectez-vous.');
+  let { data: { session }, error: sessionError } = await supabase.auth.getSession();
+  logBackupAuthDebug('getSession', session, { sessionError: sessionError?.message || null });
+
+  if (!session || isSessionTokenStale(session)) {
+    const { error: refreshError } = await supabase.auth.refreshSession();
+    ({ data: { session }, error: sessionError } = await supabase.auth.getSession());
+    logBackupAuthDebug('après refreshSession + getSession', session, {
+      refreshError: refreshError?.message || null,
+      sessionError: sessionError?.message || null,
+    });
   }
 
-  let session = current;
-  const expiresAtMs = current.expires_at ? current.expires_at * 1000 : 0;
-  const shouldRefresh = !expiresAtMs || expiresAtMs < Date.now() + 120_000;
-
-  if (shouldRefresh && current.refresh_token) {
-    const { data: refreshed, error: refreshError } = await sb.auth.refreshSession();
-    if (!refreshError && refreshed?.session?.access_token) {
-      session = refreshed.session;
-    }
-  }
-
-  const token = session.access_token?.trim();
+  const token = session?.access_token?.trim();
   if (!token) {
-    throw new Error('Session expirée. Reconnectez-vous.');
-  }
-
-  const { data: { user }, error: userError } = await sb.auth.getUser(token);
-  if (userError || !user) {
     throw new Error('Session expirée. Reconnectez-vous.');
   }
 
@@ -107,6 +124,26 @@ async function backupApiFetch(path, options = {}) {
   const token = await resolveBackupAuthToken();
   const anonKey = ENV.SUPABASE_ANON_KEY?.trim();
 
+  const headers = {
+    'Content-Type': 'application/json',
+    Authorization: `Bearer ${token}`,
+    ...(anonKey ? { apikey: anonKey } : {}),
+    ...(options.headers || {}),
+  };
+
+  if (import.meta.env.DEV) {
+    console.info('[backup:auth] headers envoyés', {
+      hasAuthorization: Boolean(headers.Authorization),
+      bearerPrefixOk: headers.Authorization?.startsWith('Bearer '),
+      accessTokenLength: token.length,
+      hasApikey: Boolean(headers.apikey),
+      apikeyLength: headers.apikey?.length || 0,
+      contentType: headers['Content-Type'],
+      path,
+      method: options.method || 'GET',
+    });
+  }
+
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), BACKUP_TIMEOUT_MS);
 
@@ -114,14 +151,7 @@ async function backupApiFetch(path, options = {}) {
     const res = await fetch(`${resolveApiBaseUrl()}${path}`, {
       ...options,
       signal: ctrl.signal,
-      credentials: 'same-origin',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${token}`,
-        'X-Supabase-Token': token,
-        ...(anonKey ? { apikey: anonKey } : {}),
-        ...(options.headers || {}),
-      },
+      headers,
     });
 
     if (!res.ok) {
