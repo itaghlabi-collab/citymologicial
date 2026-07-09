@@ -30,15 +30,16 @@ export default async function handler(req, res) {
   const path = resolveBackupPath(req).replace(/^\/+/, '');
   const headers = {};
   if (req.headers.authorization) headers.Authorization = req.headers.authorization;
+  if (req.headers['content-type']) headers['Content-Type'] = req.headers['content-type'];
 
-  const upstream = await fetch(`${base}/api/${path}`, {
-    method: req.method || 'GET',
-    headers,
-    body: ['GET', 'HEAD', 'OPTIONS'].includes(req.method || 'GET')
-      ? undefined
-      : typeof req.body === 'object' ? JSON.stringify(req.body) : req.body,
-  });
+  const method = req.method || 'GET';
+  const init = { method, headers };
 
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && req.body != null) {
+    init.body = typeof req.body === 'object' ? JSON.stringify(req.body) : String(req.body);
+  }
+
+  const upstream = await globalThis.fetch(`${base}/api/${path}`, init);
   const contentType = upstream.headers.get('content-type') || 'application/json';
   const text = await upstream.text();
   res.status(upstream.status);
