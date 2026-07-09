@@ -1,6 +1,14 @@
-import { proxyToRailway } from '../lib/railwayProxy.mjs';
-
 export const config = { maxDuration: 60 };
+
+function resolveRailwayBase() {
+  const raw = process.env.RAILWAY_API_URL
+    || process.env.CITYMO_API_URL
+    || process.env.VITE_API_URL
+    || '';
+  const trimmed = String(raw).trim().replace(/\/+$/, '');
+  if (!trimmed) return null;
+  return trimmed.replace(/\/api$/, '');
+}
 
 function resolveBackupPath(req) {
   const route = req.query.route;
@@ -12,6 +20,49 @@ function resolveBackupPath(req) {
   return 'backups';
 }
 
+function readBody(req) {
+  if (req.body != null && typeof req.body === 'object') {
+    return Promise.resolve(JSON.stringify(req.body));
+  }
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on('data', (chunk) => chunks.push(chunk));
+    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8') || ''));
+    req.on('error', reject);
+  });
+}
+
 export default async function handler(req, res) {
-  return proxyToRailway(req, res, resolveBackupPath(req));
+  try {
+    const base = resolveRailwayBase();
+    if (!base) {
+      return res.status(503).json({
+        error: 'API Railway non configurée. Définissez RAILWAY_API_URL sur Vercel.',
+      });
+    }
+
+    const path = resolveBackupPath(req).replace(/^\/+/, '');
+    const headers = {};
+    if (req.headers.authorization) headers.Authorization = req.headers.authorization;
+    if (req.headers['content-type']) headers['Content-Type'] = req.headers['content-type'];
+
+    const method = req.method || 'GET';
+    const init = { method, headers };
+
+    if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+      init.body = await readBody(req);
+    }
+
+    const upstream = await fetch(`${base}/api/${path}`, init);
+    const contentType = upstream.headers.get('content-type') || 'application/json';
+    const text = await upstream.text();
+
+    res.status(upstream.status);
+    res.setHeader('Content-Type', contentType);
+    if (!text) return res.end();
+    return res.send(text);
+  } catch (err) {
+    console.error('[erp-snapshot-router]', err);
+    return res.status(500).json({ error: err.message || 'Proxy Railway échoué' });
+  }
 }
