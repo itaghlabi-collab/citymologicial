@@ -326,6 +326,11 @@ export default function Sauvegardes({ backups = [], setBackups, reload, canManag
                         {x.statut === 'Erreur' && <AlertTriangle size={10} />}
                         {x.statut}
                       </span>
+                      {x.statut === 'En cours' && x.description && (
+                        <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 4, maxWidth: 240, lineHeight: 1.35 }}>
+                          {x.description}
+                        </div>
+                      )}
                     </td>
                     <td data-label="Drive" style={{ fontSize: '0.78rem' }}>
                       {x.drive_synced ? (

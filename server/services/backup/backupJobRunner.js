@@ -4,8 +4,8 @@
 const { getSupabaseAdmin } = require('../../lib/supabaseAdmin');
 const logger = require('./backupLogger');
 
-/** Sauvegarde considérée bloquée après ce délai (ms). */
-const STUCK_BACKUP_MS = Number(process.env.BACKUP_STUCK_AFTER_MS) || 2 * 60 * 60 * 1000;
+/** Sauvegarde considérée bloquée après ce délai (ms) — défaut 45 min. */
+const STUCK_BACKUP_MS = Number(process.env.BACKUP_STUCK_AFTER_MS) || 45 * 60 * 1000;
 
 /** Durée max d'un job complet (ms). */
 const JOB_TIMEOUT_MS = Number(process.env.BACKUP_JOB_TIMEOUT_MS) || 90 * 60 * 1000;

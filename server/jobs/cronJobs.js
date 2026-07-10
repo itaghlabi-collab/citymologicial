@@ -175,7 +175,18 @@ function startCronJobs() {
     timezone: 'Africa/Algiers',
   });
 
-  console.log('[CRON] Jobs planifiés: devis_stagnant + rdv_rappel + backups ERP');
+  // Débloquer les sauvegardes « en cours » fantômes (redéploiement Railway, crash)
+  const { reconcileStuckBackups } = require('../services/backup/backupJobRunner');
+  cron.schedule('*/5 * * * *', () => {
+    reconcileStuckBackups().catch((err) => {
+      console.error('[CRON backups reconcile]', err.message);
+    });
+  }, {
+    scheduled: true,
+    timezone: 'Africa/Algiers',
+  });
+
+  console.log('[CRON] Jobs planifiés: devis_stagnant + rdv_rappel + backups ERP + reconcile backups');
 
   // Run devis check immediately on startup to catch any backlog
   checkStaleDevis();

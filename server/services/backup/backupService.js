@@ -143,7 +143,16 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
     }
 
     if (typeKey === 'documents' || typeKey === 'complete') {
-      const manifest = await exportFiles(backupPrefix, storage);
+      let filesDone = 0;
+      const manifest = await exportFiles(backupPrefix, storage, (progress) => {
+        filesDone += 1;
+        if (filesDone === 1 || filesDone % 25 === 0) {
+          const label = progress?.path
+            ? `Fichiers… ${filesDone} copiés (${progress.bucket}/${progress.path})`
+            : `Fichiers… ${filesDone} copiés`;
+          updateBackupProgress(row.id, label).catch(() => {});
+        }
+      });
       logger.storageExportOk({
         files: manifest.total_files || 0,
         bytes: manifest.total_size || 0,
