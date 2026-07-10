@@ -4,7 +4,7 @@
 import { getSupabase } from '../../lib/supabase';
 import { employeeFullName } from '../rh/employees';
 import { PURCHASE_ASSIGNEE, normalizePurchaseStatus } from '../../constants/purchaseWorkflow';
-import { listProjects } from '../projects/projects';
+import { listProjectsForSelect } from '../projects/projects';
 import { isGroupedPurchaseRequest, groupedProjectLabel } from './purchaseGrouped';
 
 const TABLE = 'purchase_requests';
@@ -363,7 +363,7 @@ export function employeeOptionLabel(emp) {
 
 export async function loadPurchaseRequestFormOptions() {
   const [projects, employees] = await Promise.all([
-    listProjects().catch(() => []),
+    listProjectsForSelect().catch(() => []),
     listAchatsEmployees().catch(() => []),
   ]);
   return { projects, employees };

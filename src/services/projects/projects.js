@@ -108,10 +108,19 @@ export async function generateProjectRef() {
   return `${prefix}${seq}`;
 }
 
+const SELECT_FOR_LINK = 'id, nom, ref, client_nom, statut, created_at';
+
+/** Liste légère pour listes déroulantes (Achats, Finance) — sans jointure clients. */
+export async function listProjectsForSelect() {
+  return listProjects({ forSelect: true });
+}
+
 export async function listProjects(options = {}) {
-  const columns = options.light
-    ? 'id, nom, ref, responsable, budget_estime, statut, created_at'
-    : SELECT;
+  const columns = options.forSelect
+    ? SELECT_FOR_LINK
+    : options.light
+      ? 'id, nom, ref, responsable, budget_estime, statut, created_at'
+      : SELECT;
   const { data, error } = await getSupabase()
     .from(TABLE)
     .select(columns)
