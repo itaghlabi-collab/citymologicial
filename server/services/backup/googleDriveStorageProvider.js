@@ -2,7 +2,6 @@
  * Stockage Google Drive — 2e copie de sécurité (compte de service).
  * Projet GCP : citymo-erp-sauvegardes
  */
-const { Readable } = require('stream');
 const { google } = require('googleapis');
 const { JWT } = require('google-auth-library');
 const {
@@ -138,42 +137,55 @@ async function upload(filePath, buffer, contentType = 'application/gzip') {
     throw new Error('Google Drive non configuré.');
   }
 
+  if (!buffer?.length) {
+    throw new Error(`Buffer vide pour ${filePath}`);
+  }
+
   await assertRootFolderAccessible();
 
   const drive = getDrive();
   const { parentId, fileName } = await resolvePathFolderIds(filePath);
   const existingId = await findFileInFolder(parentId, fileName);
 
-  const media = {
-    mimeType: contentType,
-    body: Readable.from(buffer),
-  };
+  const mimeType = contentType || 'application/octet-stream';
+  const media = { mimeType, body: buffer };
 
-  if (existingId) {
-    await drive.files.update({
-      fileId: existingId,
+  try {
+    if (existingId) {
+      await drive.files.update({
+        fileId: existingId,
+        media,
+        supportsAllDrives: true,
+      });
+      return { path: filePath, fileId: existingId, bucket: 'google_drive' };
+    }
+
+    const created = await drive.files.create({
+      requestBody: {
+        name: fileName,
+        parents: [parentId],
+      },
       media,
+      fields: 'id, webViewLink, webContentLink, size',
       supportsAllDrives: true,
     });
-    return { path: filePath, fileId: existingId, bucket: 'google_drive' };
+
+    return {
+      path: filePath,
+      fileId: created.data.id,
+      webViewLink: created.data.webViewLink,
+      bucket: 'google_drive',
+      bytes: Number(created.data.size) || buffer.length,
+    };
+  } catch (err) {
+    const msg = String(err.message || err);
+    if (/storage quota|quota exceeded|insufficient/i.test(msg)) {
+      throw new Error(
+        `${msg} — Espace Google Drive presque plein : libérez de l'espace sur le compte propriétaire du dossier.`,
+      );
+    }
+    throw err;
   }
-
-  const created = await drive.files.create({
-    requestBody: {
-      name: fileName,
-      parents: [parentId],
-    },
-    media,
-    fields: 'id, webViewLink, webContentLink',
-    supportsAllDrives: true,
-  });
-
-  return {
-    path: filePath,
-    fileId: created.data.id,
-    webViewLink: created.data.webViewLink,
-    bucket: 'google_drive',
-  };
 }
 
 async function download(filePath) {
@@ -248,6 +260,35 @@ async function removeBackupFolder(backupRef) {
   folderCache.delete(`${rootId}/${backupRef}`);
 }
 
+async function listBackupFiles(backupRef) {
+  await assertRootFolderAccessible();
+  const rootId = getDriveRootFolderId();
+  const folderId = await findChildFolder(rootId, backupRef);
+  if (!folderId) return [];
+
+  const drive = getDrive();
+  const res = await drive.files.list({
+    q: `'${folderId}' in parents and trashed=false and mimeType!='application/vnd.google-apps.folder'`,
+    fields: 'files(id, name, size)',
+    pageSize: 100,
+    ...DRIVE_LIST_OPTS,
+  });
+  return res.data.files || [];
+}
+
+async function verifyDriveBackupFiles(backupRef, expectedPaths) {
+  const expectedNames = expectedPaths.map((p) => p.split('/').pop());
+  const files = await listBackupFiles(backupRef);
+  const found = new Set(files.map((f) => f.name));
+  const missing = expectedNames.filter((name) => !found.has(name));
+  if (missing.length) {
+    throw new Error(
+      `Fichiers manquants sur Drive (${missing.join(', ')}) — ${files.length}/${expectedNames.length} présents.`,
+    );
+  }
+  return { count: files.length, names: [...found] };
+}
+
 async function list(prefix) {
   const drive = getDrive();
   const rootId = getDriveRootFolderId();
@@ -269,6 +310,8 @@ module.exports = {
   getSignedUrl,
   remove,
   list,
+  listBackupFiles,
+  verifyDriveBackupFiles,
   getBackupFolderLink,
   removeBackupFolder,
   assertRootFolderAccessible,

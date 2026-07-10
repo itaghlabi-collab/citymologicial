@@ -336,7 +336,12 @@ export default function Sauvegardes({ backups = [], setBackups, reload, canManag
                       {x.drive_synced ? (
                         <span className="badge badge-green" style={{ fontSize: '0.68rem' }}>Sync OK</span>
                       ) : x.drive_sync_error ? (
-                        <span className="badge badge-orange" style={{ fontSize: '0.68rem' }} title={x.drive_sync_error}>Drive ⚠</span>
+                        <div>
+                          <span className="badge badge-orange" style={{ fontSize: '0.68rem' }} title={x.drive_sync_error}>Drive ⚠</span>
+                          <div style={{ fontSize: '0.68rem', color: 'var(--text-3)', marginTop: 4, maxWidth: 200, lineHeight: 1.3 }} title={x.drive_sync_error}>
+                            {x.drive_sync_error.length > 80 ? `${x.drive_sync_error.slice(0, 80)}…` : x.drive_sync_error}
+                          </div>
+                        </div>
                       ) : (
                         <span style={{ color: 'var(--text-3)' }}>—</span>
                       )}

@@ -133,6 +133,7 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
     let totalSize = 0;
     let mainFilePath = null;
     const driveErrors = [];
+    const driveUploadedPaths = [];
 
     if (typeKey === 'base_donnees' || typeKey === 'complete') {
       const dbPayload = await pipeline.run(
@@ -161,6 +162,7 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
       mainFilePath = `${backupPrefix}/database.json.gz`;
       const up = await timedUpload(mainFilePath, compressed);
       if (up.driveError) driveErrors.push(up.driveError);
+      else if (driveUploadAllowed) driveUploadedPaths.push(mainFilePath);
       await verifyBackupArtifact(mainFilePath, pipeline);
       totalSize += compressed.length;
       await pipeline.run('updateBackupProgress:db-done', async () => {
@@ -205,6 +207,7 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
       const manifestPath = `${backupPrefix}/files-manifest.json.gz`;
       const up = await timedUpload(manifestPath, manifestBuf);
       if (up.driveError) driveErrors.push(up.driveError);
+      else if (driveUploadAllowed) driveUploadedPaths.push(manifestPath);
       await verifyBackupArtifact(manifestPath, pipeline);
       totalSize += manifestBuf.length;
       if (typeKey === 'documents') mainFilePath = manifestPath;
@@ -231,8 +234,22 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
       mainFilePath = `${backupPrefix}/complete-index.json.gz`;
       const up = await timedUpload(mainFilePath, indexBuf);
       if (up.driveError) driveErrors.push(up.driveError);
+      else if (driveUploadAllowed) driveUploadedPaths.push(mainFilePath);
       await verifyBackupArtifact(mainFilePath, pipeline);
       totalSize += indexBuf.length;
+    }
+
+    if (driveUploadAllowed && storage.driveEnabled && driveUploadedPaths.length && !driveErrors.length) {
+      const { verifyDriveBackupFiles } = require('./googleDriveStorageProvider');
+      try {
+        await pipeline.run(
+          'verifyDriveBackupFiles',
+          () => verifyDriveBackupFiles(backupPrefix, driveUploadedPaths),
+          { timeoutMs: 60_000 },
+        );
+      } catch (err) {
+        driveErrors.push(`[Google Drive] ${err.message}`);
+      }
     }
 
     let driveFolderId = null;
@@ -242,6 +259,7 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
         const link = await pipeline.run(
           'getDriveFolderLink',
           () => storage.getDriveFolderLink(backupPrefix),
+          { timeoutMs: 60_000 },
         );
         driveFolderId = link?.folderId || null;
         driveFolderUrl = link?.url || null;
