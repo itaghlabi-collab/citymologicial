@@ -2,6 +2,7 @@
  * charges.js — Charges / dépenses (Supabase)
  */
 import { getSupabase } from '../../lib/supabase';
+import { normalizeProject } from '../projects/projects';
 import { syncChargeToTransaction } from './financeTransactions';
 import { syncFinanceTransaction, FINANCE_SOURCE_TYPES } from './financeSync';
 
@@ -116,6 +117,29 @@ export async function reconcileMissingChargeRefs() {
 
 export function chargeDisplayRef(charge) {
   return String(charge?.ref || charge?.ref_charge || '').trim();
+}
+
+const CHARGES_PROJECT_COLUMNS = 'id, ref, nom, client_nom, statut, created_at';
+
+/** Projets pour le select « Projet lié » — module Dépenses générales uniquement. */
+export async function listProjectsForCharges() {
+  const sb = getSupabase();
+  const { data, error } = await sb.rpc('list_projects_for_charges_select');
+  if (!error && Array.isArray(data)) {
+    return data.map(normalizeProject);
+  }
+  if (error) {
+    console.warn('[CITYMO] list_projects_for_charges_select', error);
+  }
+  const { data: rows, error: qErr } = await sb
+    .from('projects')
+    .select(CHARGES_PROJECT_COLUMNS)
+    .order('created_at', { ascending: false });
+  if (qErr) {
+    console.error('[CITYMO] charges project options fallback', qErr);
+    return [];
+  }
+  return (rows || []).map(normalizeProject);
 }
 
 export async function listFinanceCharges({ reconcileRefs = false } = {}) {

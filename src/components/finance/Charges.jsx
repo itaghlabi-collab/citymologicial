@@ -5,8 +5,7 @@
 import { useState, useCallback, useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useFinanceCharges } from '../../hooks/useFinanceCharges';
-import { listProjectsForSelect } from '../../services/projects/projects';
-import { chargeDisplayRef } from '../../services/finance/charges';
+import { chargeDisplayRef, listProjectsForCharges } from '../../services/finance/charges';
 import { projectOptionLabel } from '../../services/achats/purchaseRequests';
 import {
   TrendingDown, Plus, Eye, Edit2, Trash2, Archive, Download,
@@ -248,16 +247,6 @@ function DetailCharge({ charge, onBack, onEdit, onDelete, onValider, onComptabil
 
 export default function Charges({ categories }) {
   const { records: charges, loading, error, save, remove } = useFinanceCharges();
-  const [projects, setProjects] = useState([]);
-
-  useEffect(() => {
-    listProjectsForSelect()
-      .then(setProjects)
-      .catch((err) => {
-        console.error('[CITYMO] Charges projects', err);
-        setProjects([]);
-      });
-  }, []);
   const [search, setSearch] = useState('');
   const [filterStatut, setFilterStatut] = useState('');
   const [filterCat, setFilterCat] = useState('');
@@ -266,6 +255,22 @@ export default function Charges({ categories }) {
   const [showModal, setShowModal] = useState(false);
   const [editCharge, setEditCharge] = useState(null);
   const [detailId, setDetailId] = useState(null);
+  const [projects, setProjects] = useState([]);
+
+  const loadProjects = useCallback(() => (
+    listProjectsForCharges()
+      .then(setProjects)
+      .catch((err) => {
+        console.error('[CITYMO] Charges projects', err);
+        setProjects([]);
+      })
+  ), []);
+
+  useEffect(() => { loadProjects(); }, [loadProjects]);
+
+  useEffect(() => {
+    if (showModal) loadProjects();
+  }, [showModal, loadProjects]);
 
   const cats = categories || [];
   const today = new Date().toISOString().slice(0, 10);
