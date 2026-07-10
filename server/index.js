@@ -43,6 +43,7 @@ const { requireAuth }     = require('./middleware/auth');
 const { startCronJobs } = require('./jobs/cronJobs');
 const { logBackupEnvironmentOnStartup } = require('./services/backup/backupEnvCheck');
 const { logSupabaseProjectConfigOnStartup } = require('./lib/supabaseAdmin');
+const { reconcileStuckBackups } = require('./services/backup/backupService');
 
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -142,6 +143,9 @@ app.listen(PORT, () => {
   startCronJobs();
   logBackupEnvironmentOnStartup();
   logSupabaseProjectConfigOnStartup();
+  reconcileStuckBackups().catch((err) => {
+    console.error('[backup:reconcile] au démarrage', err.message);
+  });
 });
 
 module.exports = app;

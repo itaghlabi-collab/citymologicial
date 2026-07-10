@@ -1,7 +1,9 @@
 /**
  * Export fichiers Supabase Storage (documents, PDF, scans RH, etc.)
+ * Les copies binaires vont uniquement dans Supabase Storage (pas miroir Drive fichier par fichier).
  */
 const { getSupabaseAdmin } = require('../../lib/supabaseAdmin');
+const supabaseStorageProvider = require('./supabaseStorageProvider');
 
 const SOURCE_BUCKETS_FALLBACK = [
   'citymo-workers',
@@ -48,18 +50,18 @@ async function listBucketFiles(bucket, prefix = '', acc = []) {
   return { bucket, files: acc };
 }
 
-async function copyFileToBackup(bucket, filePath, backupPrefix, storageProvider) {
+async function copyFileToBackup(bucket, filePath, backupPrefix) {
   const sb = getSupabaseAdmin();
   const { data, error } = await sb.storage.from(bucket).download(filePath);
   if (error) throw new Error(`Lecture ${bucket}/${filePath} : ${error.message}`);
 
   const buffer = Buffer.from(await data.arrayBuffer());
   const destPath = `${backupPrefix}/files/${bucket}/${filePath}`;
-  await storageProvider.upload(destPath, buffer, data.type || 'application/octet-stream');
+  await supabaseStorageProvider.upload(destPath, buffer, data.type || 'application/octet-stream');
   return { source: `${bucket}/${filePath}`, dest: destPath, size: buffer.length };
 }
 
-async function exportFiles(backupPrefix, storageProvider, onProgress) {
+async function exportFiles(backupPrefix, _storageProvider, onProgress) {
   const buckets = await listSourceBuckets();
   const manifest = {
     format: 'citymo-files-v2',
@@ -75,7 +77,7 @@ async function exportFiles(backupPrefix, storageProvider, onProgress) {
 
     for (const file of files) {
       try {
-        const copied = await copyFileToBackup(bucket, file.path, backupPrefix, storageProvider);
+        const copied = await copyFileToBackup(bucket, file.path, backupPrefix);
         manifest.files.push(copied);
         onProgress?.({ bucket, path: file.path, size: copied.size });
       } catch (err) {

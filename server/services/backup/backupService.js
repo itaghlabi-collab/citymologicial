@@ -10,6 +10,15 @@ const { exportFiles } = require('./filesExporter');
 const { logBackupAction } = require('./auditLog');
 const logger = require('./backupLogger');
 const { testSupabaseConnection } = require('./backupEnvCheck');
+const {
+  withTimeout,
+  JOB_TIMEOUT_MS,
+  assertNoConcurrentBackup,
+  markJobStarted,
+  markJobFinished,
+  updateBackupProgress,
+  reconcileStuckBackups,
+} = require('./backupJobRunner');
 
 const gzip = promisify(zlib.gzip);
 
@@ -108,6 +117,7 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
 
   try {
     await testSupabaseConnection();
+    await updateBackupProgress(row.id, 'Export base de données…');
 
     let totalSize = 0;
     let mainFilePath = null;
@@ -129,6 +139,7 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
       const up = await storage.upload(mainFilePath, compressed);
       if (up.driveError) driveErrors.push(up.driveError);
       totalSize += compressed.length;
+      await updateBackupProgress(row.id, 'Base de données exportée — export fichiers…');
     }
 
     if (typeKey === 'documents' || typeKey === 'complete') {
@@ -223,14 +234,39 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
 
 /** Lance la sauvegarde en arrière-plan (réponse HTTP immédiate — évite timeout Vercel/Railway proxy). */
 async function startBackupAsync({ type, planification, description, actor }) {
+  await assertNoConcurrentBackup();
+
   const typeKey = 'complete';
   const row = await createBackupRow({ type: typeKey, planification, description, actor });
   const jobParams = { typeKey, planification, description, actor };
 
+  markJobStarted(row.ref);
   setImmediate(() => {
-    executeBackupJob(row, jobParams).catch((err) => {
-      console.error('[backup:async] échec', { ref: row.ref, message: err.message });
-    });
+    withTimeout(
+      executeBackupJob(row, jobParams),
+      JOB_TIMEOUT_MS,
+      `sauvegarde ${row.ref}`,
+    )
+      .catch(async (err) => {
+        console.error('[backup:async] échec', { ref: row.ref, message: err.message });
+        try {
+          const sb = getSupabaseAdmin();
+          const { data } = await sb.from('erp_backups').select('statut').eq('id', row.id).maybeSingle();
+          if (data?.statut === 'en_cours') {
+            await finalizeBackupRow(row.id, {
+              statut: 'erreur',
+              error_message: err.message,
+              drive_synced: false,
+              drive_sync_error: err.message,
+            });
+          }
+        } catch (finalizeErr) {
+          console.error('[backup:async] finalize après échec', finalizeErr.message);
+        }
+      })
+      .finally(() => {
+        markJobFinished(row.ref);
+      });
   });
 
   return row;
@@ -374,4 +410,5 @@ module.exports = {
   createBackupRow,
   computeNextRun,
   genBackupRef,
+  reconcileStuckBackups,
 };

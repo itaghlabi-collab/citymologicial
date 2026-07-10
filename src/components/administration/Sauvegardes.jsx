@@ -1,7 +1,7 @@
 /**
  * Sauvegardes.jsx — Sauvegardes ERP CITYMO opérationnelles (Supabase + Railway).
  */
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { HardDrive, Plus, Trash2, Download, RefreshCw, Search, Filter, CheckCircle, AlertTriangle, Server, Loader2, Cloud } from 'lucide-react';
 import {
   INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE,
@@ -147,6 +147,14 @@ export default function Sauvegardes({ backups = [], setBackups, reload, canManag
   const [restoreTarget, setRestoreTarget] = useState(null);
   const [restoring, setRestoring] = useState(false);
   const [downloadingId, setDownloadingId] = useState(null);
+
+  const hasInProgress = backups.some((b) => b.statut === 'En cours');
+
+  useEffect(() => {
+    if (!hasInProgress || !reload) return undefined;
+    const timer = setInterval(() => reload(), 15000);
+    return () => clearInterval(timer);
+  }, [hasInProgress, reload]);
 
   const handleSave = useCallback(async (data) => {
     if (!canManage) return;

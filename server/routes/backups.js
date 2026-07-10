@@ -101,6 +101,9 @@ router.post('/', async (req, res, next) => {
       message: 'Sauvegarde lancée en arrière-plan. Actualisez la liste pour suivre le statut.',
     });
   } catch (err) {
+    if (err.status) {
+      return res.status(err.status).json({ error: err.message });
+    }
     next(err);
   }
 });
