@@ -2,7 +2,9 @@
  * Pipeline sauvegarde — étapes numérotées, timeouts 30s, progression max 60s.
  */
 const OP_TIMEOUT_MS = Number(process.env.BACKUP_OP_TIMEOUT_MS) || 30_000;
-const PROGRESS_STALE_MS = Number(process.env.BACKUP_PROGRESS_STALE_MS) || 60_000;
+/** Délai sans heartbeat UI/DB avant échec du job (ms). */
+const PROGRESS_STALE_MS = Number(process.env.BACKUP_PROGRESS_STALE_MS) || 120_000;
+const COMPRESS_TIMEOUT_MS = Number(process.env.BACKUP_COMPRESS_TIMEOUT_MS) || 5 * 60_000;
 const WATCHDOG_POLL_MS = 5_000;
 
 class TimeoutError extends Error {
@@ -129,6 +131,7 @@ module.exports = {
   TimeoutError,
   OP_TIMEOUT_MS,
   PROGRESS_STALE_MS,
+  COMPRESS_TIMEOUT_MS,
   runTimed,
   createPipeline,
   formatFailMessage,

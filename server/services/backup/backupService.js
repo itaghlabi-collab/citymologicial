@@ -8,7 +8,7 @@ const { getBackupStorageProvider, isGoogleDriveEnabled } = require('./backupStor
 const { exportDatabase, exportErpConfig } = require('./databaseExporter');
 const { exportFiles, resolveFilesMode } = require('./filesExporter');
 const { verifyBackupArtifact } = require('./backupArtifacts');
-const { createPipeline, formatFailMessage, PROGRESS_STALE_MS } = require('./backupPipeline');
+const { createPipeline, formatFailMessage, COMPRESS_TIMEOUT_MS } = require('./backupPipeline');
 const { wrapStorageUpload } = require('./timedBackupStorage');
 const { logBackupAction } = require('./auditLog');
 const logger = require('./backupLogger');
@@ -134,9 +134,17 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
     const driveErrors = [];
 
     if (typeKey === 'base_donnees' || typeKey === 'complete') {
-      const dbPayload = await pipeline.run('exportDatabase', () => exportDatabase());
+      const dbPayload = await pipeline.run(
+        'exportDatabase',
+        () => exportDatabase(pipeline),
+        { timeoutMs: 30 * 60_000, progressMsg: 'Export base de données…' },
+      );
       if (typeKey === 'complete') {
-        dbPayload.erp_config = await pipeline.run('exportErpConfig', () => exportErpConfig());
+        dbPayload.erp_config = await pipeline.run(
+          'exportErpConfig',
+          () => exportErpConfig(pipeline),
+          { timeoutMs: 2 * 60_000 },
+        );
       }
       logger.supabaseExportOk({
         tables: dbPayload.meta?.tables?.length || 0,
@@ -144,7 +152,11 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
         skipped: dbPayload.meta?.skipped?.length || 0,
       });
 
-      const compressed = await pipeline.run('compressJson:database', () => compressJson(dbPayload));
+      const compressed = await pipeline.run(
+        'compressJson:database',
+        () => compressJson(dbPayload),
+        { timeoutMs: COMPRESS_TIMEOUT_MS, progressMsg: 'Compression base de données…' },
+      );
       mainFilePath = `${backupPrefix}/database.json.gz`;
       const up = await timedUpload(mainFilePath, compressed);
       if (up.driveError) driveErrors.push(up.driveError);
@@ -184,7 +196,11 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
         errors: manifest.errors?.length || 0,
       });
 
-      const manifestBuf = await pipeline.run('compressJson:manifest', () => compressJson(manifest));
+      const manifestBuf = await pipeline.run(
+        'compressJson:manifest',
+        () => compressJson(manifest),
+        { timeoutMs: COMPRESS_TIMEOUT_MS, progressMsg: 'Compression manifeste fichiers…' },
+      );
       const manifestPath = `${backupPrefix}/files-manifest.json.gz`;
       const up = await timedUpload(manifestPath, manifestBuf);
       if (up.driveError) driveErrors.push(up.driveError);
@@ -206,7 +222,11 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
         storage_provider: storage.name,
         drive_enabled: Boolean(storage.driveEnabled),
       };
-      const indexBuf = await pipeline.run('compressJson:index', () => compressJson(index));
+      const indexBuf = await pipeline.run(
+        'compressJson:index',
+        () => compressJson(index),
+        { timeoutMs: COMPRESS_TIMEOUT_MS },
+      );
       mainFilePath = `${backupPrefix}/complete-index.json.gz`;
       const up = await timedUpload(mainFilePath, indexBuf);
       if (up.driveError) driveErrors.push(up.driveError);

@@ -6,16 +6,21 @@ const logger = require('./backupLogger');
 
 const { PROGRESS_STALE_MS, OP_TIMEOUT_MS } = require('./backupPipeline');
 
-/** Sauvegarde sans activité depuis ce délai → considérée bloquée (ms). */
-const STUCK_BACKUP_MS = Number(process.env.BACKUP_STUCK_AFTER_MS) || 5 * 60 * 1000;
+/** Job en cours en mémoire — ne pas réconcilier. */
+let inMemoryJobRef = null;
 
-/** Sans heartbeat récent, job considéré mort (ms) — aligné pipeline. */
-const HEARTBEAT_STALE_MS = Number(process.env.BACKUP_HEARTBEAT_STALE_MS) || PROGRESS_STALE_MS;
+function isJobActiveInMemory(ref) {
+  return Boolean(ref && inMemoryJobRef === ref);
+}
+
+/** Sauvegarde éligible à réconciliation (ms depuis création). */
+const STUCK_BACKUP_MS = Number(process.env.BACKUP_STUCK_AFTER_MS) || 10 * 60 * 1000;
+
+/** Sans heartbeat DB depuis ce délai → réconciliation (ms). */
+const HEARTBEAT_STALE_MS = Number(process.env.BACKUP_HEARTBEAT_STALE_MS) || 3 * 60 * 1000;
 
 /** Durée max absolue d'un job (ms). */
 const JOB_TIMEOUT_MS = Number(process.env.BACKUP_JOB_TIMEOUT_MS) || 90 * 60 * 1000;
-
-let inMemoryJobRef = null;
 
 function withTimeout(promise, ms, label) {
   return new Promise((resolve, reject) => {
@@ -38,8 +43,7 @@ async function reconcileStuckBackups() {
   const { data: candidates, error } = await sb
     .from('erp_backups')
     .select('id, ref, created_at, progress_at')
-    .eq('statut', 'en_cours')
-    .lt('created_at', ageCutoff);
+    .eq('statut', 'en_cours');
 
   if (error) {
     console.error('[backup:reconcile] lecture échouée', error.message);
@@ -47,14 +51,16 @@ async function reconcileStuckBackups() {
   }
 
   const stuck = (candidates || []).filter((row) => {
+    if (isJobActiveInMemory(row.ref)) return false;
     if (row.created_at < absoluteCutoff) return true;
-    if (!row.progress_at) return row.created_at < ageCutoff;
+    if (row.created_at > ageCutoff) return false;
+    if (!row.progress_at) return true;
     return row.progress_at < heartbeatCutoff;
   });
 
   const reconciled = [];
   for (const row of stuck) {
-    const msg = `Job interrompu — aucune progression depuis ${Math.round(HEARTBEAT_STALE_MS / 1000)}s. Relancez une sauvegarde.`;
+    const msg = `Job interrompu — aucune progression DB depuis ${Math.round(HEARTBEAT_STALE_MS / 1000)}s (dernière activité enregistrée). Relancez une sauvegarde.`;
     const { error: updErr } = await sb
       .from('erp_backups')
       .update({
@@ -149,5 +155,6 @@ module.exports = {
   assertNoConcurrentBackup,
   markJobStarted,
   markJobFinished,
+  isJobActiveInMemory,
   updateBackupProgress,
 };
