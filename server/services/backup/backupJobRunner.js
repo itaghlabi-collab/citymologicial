@@ -4,10 +4,13 @@
 const { getSupabaseAdmin } = require('../../lib/supabaseAdmin');
 const logger = require('./backupLogger');
 
-/** Sauvegarde considérée bloquée après ce délai (ms) — défaut 45 min. */
+/** Sauvegarde sans activité depuis ce délai → considérée bloquée (ms). */
 const STUCK_BACKUP_MS = Number(process.env.BACKUP_STUCK_AFTER_MS) || 45 * 60 * 1000;
 
-/** Durée max d'un job complet (ms). */
+/** Sans heartbeat récent, job considéré mort (ms). */
+const HEARTBEAT_STALE_MS = Number(process.env.BACKUP_HEARTBEAT_STALE_MS) || 20 * 60 * 1000;
+
+/** Durée max absolue d'un job (ms). */
 const JOB_TIMEOUT_MS = Number(process.env.BACKUP_JOB_TIMEOUT_MS) || 90 * 60 * 1000;
 
 let inMemoryJobRef = null;
@@ -25,21 +28,30 @@ function withTimeout(promise, ms, label) {
 
 async function reconcileStuckBackups() {
   const sb = getSupabaseAdmin();
-  const cutoff = new Date(Date.now() - STUCK_BACKUP_MS).toISOString();
+  const now = Date.now();
+  const ageCutoff = new Date(now - STUCK_BACKUP_MS).toISOString();
+  const heartbeatCutoff = new Date(now - HEARTBEAT_STALE_MS).toISOString();
+  const absoluteCutoff = new Date(now - JOB_TIMEOUT_MS).toISOString();
 
-  const { data: stuck, error } = await sb
+  const { data: candidates, error } = await sb
     .from('erp_backups')
-    .select('id, ref, created_at')
+    .select('id, ref, created_at, progress_at')
     .eq('statut', 'en_cours')
-    .lt('created_at', cutoff);
+    .lt('created_at', ageCutoff);
 
   if (error) {
     console.error('[backup:reconcile] lecture échouée', error.message);
     return [];
   }
 
+  const stuck = (candidates || []).filter((row) => {
+    if (row.created_at < absoluteCutoff) return true;
+    if (!row.progress_at) return true;
+    return row.progress_at < heartbeatCutoff;
+  });
+
   const reconciled = [];
-  for (const row of stuck || []) {
+  for (const row of stuck) {
     const msg = 'Job interrompu (redéploiement Railway ou délai dépassé). Relancez une sauvegarde.';
     const { error: updErr } = await sb
       .from('erp_backups')
@@ -109,15 +121,25 @@ function markJobFinished(ref) {
 
 async function updateBackupProgress(backupId, message) {
   const sb = getSupabaseAdmin();
-  await sb
+  const now = new Date().toISOString();
+  const payload = { description: message, progress_at: now };
+  const { error } = await sb
     .from('erp_backups')
-    .update({ description: message })
+    .update(payload)
     .eq('id', backupId)
     .eq('statut', 'en_cours');
+  if (error && error.message?.includes('progress_at')) {
+    await sb
+      .from('erp_backups')
+      .update({ description: message })
+      .eq('id', backupId)
+      .eq('statut', 'en_cours');
+  }
 }
 
 module.exports = {
   STUCK_BACKUP_MS,
+  HEARTBEAT_STALE_MS,
   JOB_TIMEOUT_MS,
   withTimeout,
   reconcileStuckBackups,

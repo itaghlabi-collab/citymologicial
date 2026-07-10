@@ -58,6 +58,7 @@ async function createBackupRow({ type, planification, description, actor, schedu
       schedule_type: scheduleType || null,
       statut: 'en_cours',
       description: description?.trim() || null,
+      progress_at: new Date().toISOString(),
       storage_provider: isGoogleDriveEnabled()
         ? 'supabase_storage+google_drive'
         : (process.env.BACKUP_STORAGE_PROVIDER || 'supabase_storage'),
