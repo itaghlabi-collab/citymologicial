@@ -219,7 +219,12 @@ function QuoteForm({ suppliers, initial, onSave, onCancel, saving, requestId, re
       const pu = targetHt.div(safeDiv);
       return normalized.map((l, i) => {
         if (i !== 0) return l;
-        const updated = { ...l, prix_unitaire_ht: pu.gt(0) ? String(pu.round(4, Big.roundHalfUp)) : '' };
+        const qtyVal = l.quantite === '' || l.quantite == null ? '1' : l.quantite;
+        const updated = {
+          ...l,
+          quantite: qtyVal,
+          prix_unitaire_ht: pu.gt(0) ? String(pu.round(6, Big.roundHalfUp)) : '',
+        };
         updated.montant_ht = computeQuoteLineTotal(updated);
         return updated;
       });
@@ -228,7 +233,7 @@ function QuoteForm({ suppliers, initial, onSave, onCancel, saving, requestId, re
     const ratio = targetHt.div(new Big(currentHt || 1));
     return normalized.map((l) => {
       const pu = new Big(Number(l.prix_unitaire_ht) || 0).times(ratio);
-      const updated = { ...l, prix_unitaire_ht: pu.gt(0) ? String(pu.round(4, Big.roundHalfUp)) : '' };
+      const updated = { ...l, prix_unitaire_ht: pu.gt(0) ? String(pu.round(6, Big.roundHalfUp)) : '' };
       updated.montant_ht = computeQuoteLineTotal(updated);
       return updated;
     });
@@ -247,6 +252,14 @@ function QuoteForm({ suppliers, initial, onSave, onCancel, saving, requestId, re
     }));
   }
 
+  function syncHtOnlyFromLines(nextLines) {
+    const ht = sumQuoteLinesHt(normalizeQuoteLines(nextLines));
+    setForm((p) => ({
+      ...p,
+      montant_ht: ht > 0 ? ht.toFixed(2) : '',
+    }));
+  }
+
   function updateLine(idx, key, value) {
     setLines((prev) => {
       const next = prev.map((l, i) => {
@@ -255,7 +268,11 @@ function QuoteForm({ suppliers, initial, onSave, onCancel, saving, requestId, re
         updated.montant_ht = computeQuoteLineTotal(updated);
         return updated;
       });
-      syncTotalsFromLines(next);
+      if (totalEditSource === 'ttc') {
+        syncHtOnlyFromLines(next);
+      } else {
+        syncTotalsFromLines(next);
+      }
       return next;
     });
   }
@@ -267,7 +284,8 @@ function QuoteForm({ suppliers, initial, onSave, onCancel, saving, requestId, re
   function removeLine(idx) {
     setLines((prev) => {
       const next = prev.length > 1 ? prev.filter((_, i) => i !== idx) : [EMPTY_QUOTE_LINE()];
-      syncTotalsFromLines(next);
+      if (totalEditSource === 'ttc') syncHtOnlyFromLines(next);
+      else syncTotalsFromLines(next);
       return next;
     });
   }
@@ -331,7 +349,7 @@ function QuoteForm({ suppliers, initial, onSave, onCancel, saving, requestId, re
   }
 
   return (
-    <form onSubmit={handleSubmit}>
+    <form onSubmit={handleSubmit} noValidate>
       {superAdminEdit && (
         <div style={{ marginBottom: 12, padding: '10px 14px', borderRadius: 8, background: 'rgba(198,40,40,0.08)', border: '1px solid rgba(198,40,40,0.25)', fontSize: '0.82rem', color: 'var(--text-2)' }}>
           Modification super administrateur — les changements sur ce devis retenu seront appliqués à l&apos;ordre d&apos;achat et l&apos;ordre de paiement.
@@ -397,8 +415,18 @@ function QuoteForm({ suppliers, initial, onSave, onCancel, saving, requestId, re
                   <td><input value={line.designation} onChange={(e) => updateLine(idx, 'designation', e.target.value)} style={{ ...INPUT_STYLE, minWidth: 120 }} placeholder="Désignation" /></td>
                   <td><input type="number" min="0" step="any" value={line.quantite} onChange={(e) => updateLine(idx, 'quantite', e.target.value)} style={{ ...INPUT_STYLE, width: 70 }} /></td>
                   <td><input value={line.unite} onChange={(e) => updateLine(idx, 'unite', e.target.value)} style={{ ...INPUT_STYLE, width: 56 }} /></td>
-                  <td><input type="number" min="0" step="0.01" value={line.prix_unitaire_ht} onChange={(e) => updateLine(idx, 'prix_unitaire_ht', e.target.value)} style={{ ...INPUT_STYLE, width: 90 }} /></td>
-                  <td><input type="number" min="0" max="100" step="0.01" value={line.remise_pct} onChange={(e) => updateLine(idx, 'remise_pct', e.target.value)} style={{ ...INPUT_STYLE, width: 70 }} /></td>
+                  <td>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={line.prix_unitaire_ht}
+                      onChange={(e) => updateLine(idx, 'prix_unitaire_ht', e.target.value)}
+                      style={{ ...INPUT_STYLE, width: 100 }}
+                      placeholder="P.U. HT"
+                      title="Valeur libre (ex. 91,666667) — le TTC saisi n'est pas modifié"
+                    />
+                  </td>
+                  <td><input type="number" min="0" max="100" step="any" value={line.remise_pct} onChange={(e) => updateLine(idx, 'remise_pct', e.target.value)} style={{ ...INPUT_STYLE, width: 70 }} /></td>
                   <td style={{ fontWeight: 700, whiteSpace: 'nowrap' }}>{formatMAD(line.montant_ht || computeQuoteLineTotal(line))}</td>
                   <td>
                     <button type="button" className="btn btn-ghost btn-sm" title="Supprimer la ligne" onClick={() => removeLine(idx)} style={{ color: 'var(--red)' }}>
@@ -422,7 +450,15 @@ function QuoteForm({ suppliers, initial, onSave, onCancel, saving, requestId, re
           </select>
         </FField>
         <FField label="Total TTC">
-          <input type="number" step="0.01" min="0" value={form.montant_ttc} onChange={(e) => handleTtcChange(e.target.value)} style={INPUT_STYLE} placeholder="TTC fournisseur → calcule P.U. HT" />
+          <input
+            type="text"
+            inputMode="decimal"
+            value={form.montant_ttc}
+            onChange={(e) => handleTtcChange(e.target.value)}
+            style={INPUT_STYLE}
+            placeholder="TTC fournisseur → calcule le P.U. HT"
+            title="Saisissez le TTC exact du devis — il reste fixe si vous ajustez le P.U. HT"
+          />
         </FField>
       </FRow>
       <FRow>
