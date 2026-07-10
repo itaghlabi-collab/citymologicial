@@ -60,7 +60,7 @@ function BackupForm({ onSave, onCancel, saving }) {
         <div style={{ fontWeight: 700, marginBottom: 4 }}>Sauvegarde sécurisée</div>
         <div>
           {form.planification === 'Manuelle'
-            ? 'Export complet : toutes les tables Supabase, tous les buckets Storage (hors sauvegardes), configuration ERP et copie Google Drive si activée.'
+            ? 'Export : base Supabase + inventaire Storage (manifeste rapide) + archive gzip sur Supabase Storage et Google Drive. Durée typique : 5 à 15 min.'
             : `Planification ${form.planification.toLowerCase()} — chaque exécution sera une sauvegarde complète.`}
         </div>
       </div>

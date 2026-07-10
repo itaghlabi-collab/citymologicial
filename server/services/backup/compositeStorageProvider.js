@@ -6,6 +6,19 @@ const googleDriveStorageProvider = require('./googleDriveStorageProvider');
 const { isGoogleDriveEnabled } = require('./googleDriveConfig');
 const logger = require('./backupLogger');
 
+const DRIVE_UPLOAD_TIMEOUT_MS = Number(process.env.BACKUP_DRIVE_UPLOAD_TIMEOUT_MS) || 300_000;
+
+function withTimeout(promise, ms, label) {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`Délai dépassé (${Math.round(ms / 1000)}s) — ${label}`));
+    }, ms);
+    promise
+      .then((v) => { clearTimeout(timer); resolve(v); })
+      .catch((e) => { clearTimeout(timer); reject(e); });
+  });
+}
+
 function createCompositeStorageProvider() {
   const primary = supabaseStorageProvider;
   const driveEnabled = isGoogleDriveEnabled();
@@ -23,7 +36,11 @@ function createCompositeStorageProvider() {
 
       if (driveEnabled) {
         try {
-          driveResult = await googleDriveStorageProvider.upload(path, buffer, contentType);
+          driveResult = await withTimeout(
+            googleDriveStorageProvider.upload(path, buffer, contentType),
+            DRIVE_UPLOAD_TIMEOUT_MS,
+            `Drive ${path}`,
+          );
           logger.googleDriveUploadOk(path);
         } catch (err) {
           driveError = err.message;

@@ -50,12 +50,29 @@ async function restoreDatabaseFromPayload(payload) {
 }
 
 async function restoreFilesFromManifest(manifest) {
+  const isManifestOnly = manifest.mode === 'manifest'
+    || manifest.format === 'citymo-files-v3-manifest';
+
+  if (isManifestOnly) {
+    const count = (manifest.files || []).length;
+    return {
+      restored: 0,
+      skipped_manifest: count,
+      message: 'Inventaire manifeste — fichiers conservés dans les buckets Supabase source.',
+      errors: [],
+    };
+  }
+
   const sb = getSupabaseAdmin();
   const storage = getBackupStorageProvider();
   const restored = [];
   const errors = [];
 
   for (const file of manifest.files || []) {
+    if (!file.dest) {
+      errors.push({ file: file.source || file.path, error: 'Entrée sans copie binaire (manifeste)' });
+      continue;
+    }
     try {
       const buf = await storage.download(file.dest);
       const parts = (file.source || '').split('/');
@@ -114,6 +131,9 @@ async function restoreBackup(backupId, actor, confirmation) {
 
     if (typeKey === 'complete') {
       index = await decompressJson(await storage.download(backup.file_path));
+      if (index.format === 'citymo-complete-v1') {
+        index.files_mode = index.files_mode || 'full';
+      }
     }
 
     if (typeKey === 'base_donnees' || typeKey === 'complete') {

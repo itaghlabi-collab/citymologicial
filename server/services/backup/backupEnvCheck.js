@@ -4,6 +4,7 @@
  */
 const { getSupabaseAdmin } = require('../../lib/supabaseAdmin');
 const { isGoogleDriveEnabled, getServiceAccountCredentials, getDriveRootFolderId } = require('./googleDriveConfig');
+const { resolveFilesMode } = require('./filesExporter');
 const logger = require('./backupLogger');
 
 function maskHost(url) {
@@ -42,6 +43,8 @@ function getBackupEnvironmentStatus() {
     storage: {
       provider: process.env.BACKUP_STORAGE_PROVIDER || 'supabase_storage',
       bucket: 'citymo-backups',
+      files_mode: resolveFilesMode(),
+      file_copy_concurrency: Number(process.env.BACKUP_FILE_COPY_CONCURRENCY) || 4,
     },
     google_drive: {
       enabled_flag: process.env.BACKUP_GOOGLE_DRIVE_ENABLED === 'true',

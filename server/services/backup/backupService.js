@@ -6,7 +6,8 @@ const { promisify } = require('util');
 const { getSupabaseAdmin } = require('../../lib/supabaseAdmin');
 const { getBackupStorageProvider, isGoogleDriveEnabled } = require('./backupStorageProvider');
 const { exportDatabase, exportErpConfig } = require('./databaseExporter');
-const { exportFiles } = require('./filesExporter');
+const { exportFiles, resolveFilesMode } = require('./filesExporter');
+const { verifyBackupArtifact } = require('./backupArtifacts');
 const { logBackupAction } = require('./auditLog');
 const logger = require('./backupLogger');
 const { testSupabaseConnection } = require('./backupEnvCheck');
@@ -139,20 +140,28 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
       mainFilePath = `${backupPrefix}/database.json.gz`;
       const up = await storage.upload(mainFilePath, compressed);
       if (up.driveError) driveErrors.push(up.driveError);
+      await verifyBackupArtifact(mainFilePath);
       totalSize += compressed.length;
-      await updateBackupProgress(row.id, 'Base de données exportée — export fichiers…');
+      await updateBackupProgress(row.id, 'Base de données exportée — inventaire fichiers…');
     }
 
     if (typeKey === 'documents' || typeKey === 'complete') {
-      let filesDone = 0;
-      const manifest = await exportFiles(backupPrefix, storage, (progress) => {
-        filesDone += 1;
-        if (filesDone === 1 || filesDone % 25 === 0) {
-          const label = progress?.path
-            ? `Fichiers… ${filesDone} copiés (${progress.bucket}/${progress.path})`
-            : `Fichiers… ${filesDone} copiés`;
-          updateBackupProgress(row.id, label).catch(() => {});
-        }
+      const filesMode = resolveFilesMode();
+      const manifest = await exportFiles(backupPrefix, {
+        mode: filesMode,
+        onProgress: (p) => {
+          let label = null;
+          if (p.phase === 'bucket_start') {
+            label = `Inventaire bucket « ${p.bucket} »…`;
+          } else if (p.phase === 'listing') {
+            label = `Inventaire ${p.bucket} — ${p.listed} objets`;
+          } else if (p.phase === 'bucket_listed') {
+            label = `${p.bucket} : ${p.count} fichier(s) — total inventorié ${p.totalListed || p.count}`;
+          } else if (p.phase === 'copied') {
+            label = `Copie fichiers ${p.copied}/${p.total}`;
+          }
+          if (label) updateBackupProgress(row.id, label).catch(() => {});
+        },
       });
       logger.storageExportOk({
         files: manifest.total_files || 0,
@@ -164,15 +173,17 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
       const manifestPath = `${backupPrefix}/files-manifest.json.gz`;
       const up = await storage.upload(manifestPath, manifestBuf);
       if (up.driveError) driveErrors.push(up.driveError);
+      await verifyBackupArtifact(manifestPath);
       totalSize += manifestBuf.length;
       if (typeKey === 'documents') mainFilePath = manifestPath;
     }
 
     if (typeKey === 'complete') {
       const index = {
-        format: 'citymo-complete-v1',
+        format: 'citymo-complete-v2',
         ref: row.ref,
         exported_at: new Date().toISOString(),
+        files_mode: manifest.mode || resolveFilesMode(),
         parts: {
           database: `${backupPrefix}/database.json.gz`,
           files_manifest: `${backupPrefix}/files-manifest.json.gz`,
@@ -184,6 +195,7 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
       mainFilePath = `${backupPrefix}/complete-index.json.gz`;
       const up = await storage.upload(mainFilePath, indexBuf);
       if (up.driveError) driveErrors.push(up.driveError);
+      await verifyBackupArtifact(mainFilePath);
       totalSize += indexBuf.length;
     }
 
