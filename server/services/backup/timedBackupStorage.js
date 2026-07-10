@@ -5,7 +5,9 @@ const supabaseStorageProvider = require('./supabaseStorageProvider');
 const googleDriveStorageProvider = require('./googleDriveStorageProvider');
 const { isGoogleDriveEnabled } = require('./googleDriveConfig');
 
-function wrapStorageUpload(storage, pipeline, label) {
+function wrapStorageUpload(storage, pipeline, label, options = {}) {
+  const { driveUploadAllowed = false } = options;
+
   return async (path, buffer, contentType) => {
     const primary = await pipeline.run(
       `${label}.supabase.upload(${path})`,
@@ -13,7 +15,11 @@ function wrapStorageUpload(storage, pipeline, label) {
     );
 
     let driveError = null;
-    if (storage.driveEnabled && isGoogleDriveEnabled()) {
+    const driveRequested = storage.driveEnabled && isGoogleDriveEnabled();
+
+    if (driveRequested && !driveUploadAllowed) {
+      driveError = 'Upload Google Drive ignoré — dossier non validé avant upload.';
+    } else if (driveRequested && driveUploadAllowed) {
       try {
         await pipeline.run(
           `${label}.googleDrive.upload(${path})`,

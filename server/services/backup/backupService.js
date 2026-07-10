@@ -8,8 +8,11 @@ const { getBackupStorageProvider, isGoogleDriveEnabled } = require('./backupStor
 const { exportDatabase, exportErpConfig } = require('./databaseExporter');
 const { exportFiles, resolveFilesMode } = require('./filesExporter');
 const { verifyBackupArtifact } = require('./backupArtifacts');
-const { createPipeline, formatFailMessage, COMPRESS_TIMEOUT_MS } = require('./backupPipeline');
+const { createPipeline, COMPRESS_TIMEOUT_MS } = require('./backupPipeline');
 const { wrapStorageUpload } = require('./timedBackupStorage');
+const { formatFailMessage, DOMAINS } = require('./backupErrors');
+const { updateErpBackupRow, buildInsertPayload } = require('./erpBackupSchema');
+const { validateGoogleDriveForBackup } = require('./googleDriveAccess');
 const { logBackupAction } = require('./auditLog');
 const logger = require('./backupLogger');
 const { testSupabaseConnection } = require('./backupEnvCheck');
@@ -51,23 +54,24 @@ async function createBackupRow({ type, planification, description, actor, schedu
   const ext = typeKey === 'documents' ? 'files.json.gz' : 'json.gz';
   const nom = `backup_citymo_${timestamp()}_${typeKey}.${ext}`;
 
+  const insertPayload = await buildInsertPayload({
+    ref,
+    nom,
+    type: typeKey,
+    planification: (planification || 'manuelle').toLowerCase(),
+    schedule_type: scheduleType || null,
+    statut: 'en_cours',
+    description: description?.trim() || null,
+    storage_provider: isGoogleDriveEnabled()
+      ? 'supabase_storage+google_drive'
+      : (process.env.BACKUP_STORAGE_PROVIDER || 'supabase_storage'),
+    cree_par: actor?.id || null,
+    cree_par_nom: actor?.nom || actor?.email || 'Super Admin',
+  });
+
   const { data, error } = await sb
     .from('erp_backups')
-    .insert({
-      ref,
-      nom,
-      type: typeKey,
-      planification: (planification || 'manuelle').toLowerCase(),
-      schedule_type: scheduleType || null,
-      statut: 'en_cours',
-      description: description?.trim() || null,
-      progress_at: new Date().toISOString(),
-      storage_provider: isGoogleDriveEnabled()
-        ? 'supabase_storage+google_drive'
-        : (process.env.BACKUP_STORAGE_PROVIDER || 'supabase_storage'),
-      cree_par: actor?.id || null,
-      cree_par_nom: actor?.nom || actor?.email || 'Super Admin',
-    })
+    .insert(insertPayload)
     .select('*')
     .single();
 
@@ -75,30 +79,18 @@ async function createBackupRow({ type, planification, description, actor, schedu
   return data;
 }
 
-async function finalizeBackupRow(id, {
-  statut, file_path, taille_bytes, error_message,
-  drive_synced, drive_folder_id, drive_sync_error,
-}) {
-  const sb = getSupabaseAdmin();
-  const payload = {
-    statut,
-    file_path: file_path || null,
-    taille_bytes: taille_bytes || null,
-    error_message: error_message || null,
-  };
-  if (drive_synced !== undefined) payload.drive_synced = drive_synced;
-  if (drive_folder_id !== undefined) payload.drive_folder_id = drive_folder_id;
-  if (drive_sync_error !== undefined) payload.drive_sync_error = drive_sync_error;
+async function finalizeBackupRow(id, fields) {
+  return updateErpBackupRow(id, fields);
+}
 
-  const { data, error } = await sb
-    .from('erp_backups')
-    .update(payload)
-    .eq('id', id)
-    .select('*')
-    .single();
-
-  if (error) throw new Error(`Mise à jour sauvegarde : ${error.message}`);
-  return data;
+async function safeFinalizeBackupRow(id, fields, originalError) {
+  try {
+    return await finalizeBackupRow(id, fields);
+  } catch (finalizeErr) {
+    console.error('[backup] finalize SQL échoué — erreur job conservée:', originalError);
+    console.error('[backup] finalize SQL détail:', finalizeErr.message);
+    return null;
+  }
 }
 
 async function compressJson(payload) {
@@ -110,7 +102,7 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
   const storage = getBackupStorageProvider();
   const backupPrefix = row.ref;
   const pipeline = createPipeline(row.ref, (msg) => updateBackupProgress(row.id, msg));
-  const timedUpload = wrapStorageUpload(storage, pipeline, 'backup');
+  let driveUploadAllowed = false;
 
   logger.backupStart(backupPrefix, typeKey, actor);
 
@@ -125,6 +117,15 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
 
   try {
     await pipeline.run('testSupabaseConnection', () => testSupabaseConnection());
+
+    const driveCheck = await pipeline.run(
+      'googleDrive.validate',
+      () => validateGoogleDriveForBackup(),
+    );
+    driveUploadAllowed = Boolean(driveCheck.uploadAllowed);
+
+    const timedUpload = wrapStorageUpload(storage, pipeline, 'backup', { driveUploadAllowed });
+
     await pipeline.run('updateBackupProgress:init', async () => {
       await updateBackupProgress(row.id, 'Export base de données…');
     });
@@ -236,7 +237,7 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
 
     let driveFolderId = null;
     let driveFolderUrl = null;
-    if (storage.driveEnabled && storage.getDriveFolderLink) {
+    if (driveUploadAllowed && storage.driveEnabled && storage.getDriveFolderLink) {
       try {
         const link = await pipeline.run(
           'getDriveFolderLink',
@@ -250,7 +251,7 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
       }
     }
 
-    const driveSynced = storage.driveEnabled && driveErrors.length === 0;
+    const driveSynced = driveUploadAllowed && storage.driveEnabled && driveErrors.length === 0;
 
     const updated = await pipeline.run('finalizeBackupRow:succes', () => finalizeBackupRow(row.id, {
       statut: 'succes',
@@ -278,12 +279,15 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
   } catch (err) {
     const failMsg = formatFailMessage(err, pipeline.lastLocation);
     logger.backupError(backupPrefix, err);
-    await finalizeBackupRow(row.id, {
+    const driveOnlyMsg = err?.domain === DOMAINS.DRIVE
+      ? err.message.replace(`[${DOMAINS.DRIVE}] `, '')
+      : null;
+    await safeFinalizeBackupRow(row.id, {
       statut: 'erreur',
       error_message: failMsg,
       drive_synced: false,
-      drive_sync_error: failMsg,
-    }).catch(() => {});
+      drive_sync_error: driveOnlyMsg || (err?.domain === DOMAINS.DRIVE ? failMsg : null),
+    }, failMsg);
     await logBackupAction({
       backupId: row.id,
       action: 'error',
@@ -317,12 +321,11 @@ async function startBackupAsync({ type, planification, description, actor }) {
           const sb = getSupabaseAdmin();
           const { data } = await sb.from('erp_backups').select('statut').eq('id', row.id).maybeSingle();
           if (data?.statut === 'en_cours') {
-            await finalizeBackupRow(row.id, {
+            await safeFinalizeBackupRow(row.id, {
               statut: 'erreur',
-              error_message: err.message,
+              error_message: formatFailMessage(err, 'async'),
               drive_synced: false,
-              drive_sync_error: err.message,
-            });
+            }, err.message);
           }
         } catch (finalizeErr) {
           console.error('[backup:async] finalize après échec', finalizeErr.message);

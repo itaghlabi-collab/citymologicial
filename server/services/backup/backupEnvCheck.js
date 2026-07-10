@@ -69,6 +69,10 @@ async function testSupabaseConnection() {
 
 function logBackupEnvironmentOnStartup() {
   const status = getBackupEnvironmentStatus();
+  const { loadErpBackupSchema } = require('./erpBackupSchema');
+  loadErpBackupSchema().catch((err) => {
+    logger.envWarn(`Schéma erp_backups non détecté : ${err.message}`);
+  });
   logger.envOk('Configuration sauvegardes', {
     supabase_host: status.supabase.url_host,
     service_role: status.supabase.service_role_configured,
@@ -88,12 +92,12 @@ function logBackupEnvironmentOnStartup() {
     logger.envWarn('GOOGLE_SERVICE_ACCOUNT_JSON invalide — vérifiez le JSON (accolade fermante, private_key avec \\n)');
   }
   if (status.google_drive.active) {
-    const { assertRootFolderAccessible } = require('./googleDriveStorageProvider');
+    const { validateGoogleDriveForBackup } = require('./googleDriveAccess');
     const { getServiceAccountEmail, getDriveRootFolderId } = require('./googleDriveConfig');
-    assertRootFolderAccessible()
-      .then(() => {
+    validateGoogleDriveForBackup()
+      .then((check) => {
         logger.envOk('Google Drive dossier racine accessible', {
-          folder_id: getDriveRootFolderId(),
+          folder_id: check.folderId || getDriveRootFolderId(),
           service_account: getServiceAccountEmail(),
         });
       })

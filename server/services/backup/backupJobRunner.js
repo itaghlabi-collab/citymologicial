@@ -3,6 +3,7 @@
  */
 const { getSupabaseAdmin } = require('../../lib/supabaseAdmin');
 const logger = require('./backupLogger');
+const { loadErpBackupSchema } = require('./erpBackupSchema');
 
 const { PROGRESS_STALE_MS, OP_TIMEOUT_MS } = require('./backupPipeline');
 
@@ -35,14 +36,19 @@ function withTimeout(promise, ms, label) {
 
 async function reconcileStuckBackups() {
   const sb = getSupabaseAdmin();
+  const schema = await loadErpBackupSchema();
   const now = Date.now();
   const ageCutoff = new Date(now - STUCK_BACKUP_MS).toISOString();
   const heartbeatCutoff = new Date(now - HEARTBEAT_STALE_MS).toISOString();
   const absoluteCutoff = new Date(now - JOB_TIMEOUT_MS).toISOString();
 
+  const selectCols = schema.progress_at
+    ? 'id, ref, created_at, progress_at'
+    : 'id, ref, created_at';
+
   const { data: candidates, error } = await sb
     .from('erp_backups')
-    .select('id, ref, created_at, progress_at')
+    .select(selectCols)
     .eq('statut', 'en_cours');
 
   if (error) {
@@ -54,6 +60,7 @@ async function reconcileStuckBackups() {
     if (isJobActiveInMemory(row.ref)) return false;
     if (row.created_at < absoluteCutoff) return true;
     if (row.created_at > ageCutoff) return false;
+    if (!schema.progress_at) return true;
     if (!row.progress_at) return true;
     return row.progress_at < heartbeatCutoff;
   });
@@ -129,19 +136,18 @@ function markJobFinished(ref) {
 
 async function updateBackupProgress(backupId, message) {
   const sb = getSupabaseAdmin();
+  const schema = await loadErpBackupSchema();
   const now = new Date().toISOString();
-  const payload = { description: message, progress_at: now };
+  const payload = schema.progress_at
+    ? { description: message, progress_at: now }
+    : { description: message };
   const { error } = await sb
     .from('erp_backups')
     .update(payload)
     .eq('id', backupId)
     .eq('statut', 'en_cours');
-  if (error && error.message?.includes('progress_at')) {
-    await sb
-      .from('erp_backups')
-      .update({ description: message })
-      .eq('id', backupId)
-      .eq('statut', 'en_cours');
+  if (error) {
+    console.warn('[backup:progress] mise à jour échouée', error.message);
   }
 }
 
