@@ -12,6 +12,11 @@ const {
   isGoogleDriveEnabled,
 } = require('./googleDriveConfig');
 
+/** Scope complet requis pour accéder à un dossier partagé avec le compte de service. */
+const DRIVE_SCOPES = ['https://www.googleapis.com/auth/drive'];
+
+const DRIVE_LIST_OPTS = { supportsAllDrives: true, includeItemsFromAllDrives: true };
+
 let driveClient = null;
 let rootFolderVerified = false;
 const folderCache = new Map();
@@ -23,11 +28,17 @@ function getDrive() {
   const auth = new JWT({
     email: credentials.client_email,
     key: credentials.private_key,
-    scopes: ['https://www.googleapis.com/auth/drive.file'],
+    scopes: DRIVE_SCOPES,
   });
 
   driveClient = google.drive({ version: 'v3', auth });
   return driveClient;
+}
+
+function resetDriveClient() {
+  driveClient = null;
+  rootFolderVerified = false;
+  folderCache.clear();
 }
 
 async function assertRootFolderAccessible() {
@@ -38,11 +49,15 @@ async function assertRootFolderAccessible() {
   const serviceEmail = getServiceAccountEmail();
 
   try {
-    await drive.files.get({ fileId: rootId, fields: 'id, name' });
+    await drive.files.get({
+      fileId: rootId,
+      fields: 'id, name, capabilities',
+      supportsAllDrives: true,
+    });
     rootFolderVerified = true;
   } catch (err) {
     const hint = serviceEmail
-      ? ` Partagez le dossier Drive avec ${serviceEmail} (rôle Éditeur).`
+      ? ` Ouvrez https://drive.google.com/drive/folders/${rootId} → Partager → ajoutez ${serviceEmail} en Éditeur.`
       : '';
     throw new Error(
       `Dossier Drive inaccessible (ID ${rootId}).${hint} Détail Google : ${err.message}`,
@@ -63,7 +78,7 @@ async function findChildFolder(parentId, name) {
     'trashed=false',
   ].join(' and ');
 
-  const res = await drive.files.list({ q, fields: 'files(id)', pageSize: 1 });
+  const res = await drive.files.list({ q, fields: 'files(id)', pageSize: 1, ...DRIVE_LIST_OPTS });
   return res.data.files?.[0]?.id || null;
 }
 
@@ -75,7 +90,7 @@ async function findFileInFolder(parentId, name) {
     'trashed=false',
   ].join(' and ');
 
-  const res = await drive.files.list({ q, fields: 'files(id)', pageSize: 1 });
+  const res = await drive.files.list({ q, fields: 'files(id)', pageSize: 1, ...DRIVE_LIST_OPTS });
   return res.data.files?.[0]?.id || null;
 }
 
@@ -97,6 +112,7 @@ async function getOrCreateFolder(parentId, name) {
       parents: [parentId],
     },
     fields: 'id',
+    supportsAllDrives: true,
   });
 
   folderCache.set(cacheKey, created.data.id);
@@ -137,6 +153,7 @@ async function upload(filePath, buffer, contentType = 'application/gzip') {
     await drive.files.update({
       fileId: existingId,
       media,
+      supportsAllDrives: true,
     });
     return { path: filePath, fileId: existingId, bucket: 'google_drive' };
   }
@@ -148,6 +165,7 @@ async function upload(filePath, buffer, contentType = 'application/gzip') {
     },
     media,
     fields: 'id, webViewLink, webContentLink',
+    supportsAllDrives: true,
   });
 
   return {
@@ -165,7 +183,7 @@ async function download(filePath) {
   if (!fileId) throw new Error(`Fichier Drive introuvable : ${filePath}`);
 
   const res = await drive.files.get(
-    { fileId, alt: 'media' },
+    { fileId, alt: 'media', supportsAllDrives: true },
     { responseType: 'arraybuffer' },
   );
   return Buffer.from(res.data);
@@ -180,6 +198,7 @@ async function getSignedUrl(filePath) {
   const meta = await drive.files.get({
     fileId,
     fields: 'webViewLink, webContentLink',
+    supportsAllDrives: true,
   });
   return meta.data.webContentLink || meta.data.webViewLink;
 }
@@ -195,6 +214,7 @@ async function getBackupFolderLink(backupRef) {
   const meta = await drive.files.get({
     fileId: folderId,
     fields: 'webViewLink',
+    supportsAllDrives: true,
   });
   return { folderId, url: meta.data.webViewLink };
 }
@@ -218,6 +238,7 @@ async function removeBackupFolder(backupRef) {
     q: `'${folderId}' in parents and trashed=false`,
     fields: 'files(id)',
     pageSize: 1000,
+    ...DRIVE_LIST_OPTS,
   });
 
   for (const child of children.data.files || []) {
@@ -236,6 +257,7 @@ async function list(prefix) {
     q: `'${folderId}' in parents and trashed=false`,
     fields: 'files(id, name, size)',
     pageSize: 1000,
+    ...DRIVE_LIST_OPTS,
   });
 
   return (res.data.files || []).map((f) => ({ name: f.name, id: f.id, size: f.size }));
@@ -250,4 +272,5 @@ module.exports = {
   getBackupFolderLink,
   removeBackupFolder,
   assertRootFolderAccessible,
+  resetDriveClient,
 };
