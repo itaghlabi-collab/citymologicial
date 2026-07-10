@@ -4,11 +4,13 @@
 const { getSupabaseAdmin } = require('../../lib/supabaseAdmin');
 const logger = require('./backupLogger');
 
-/** Sauvegarde sans activité depuis ce délai → considérée bloquée (ms). */
-const STUCK_BACKUP_MS = Number(process.env.BACKUP_STUCK_AFTER_MS) || 45 * 60 * 1000;
+const { PROGRESS_STALE_MS, OP_TIMEOUT_MS } = require('./backupPipeline');
 
-/** Sans heartbeat récent, job considéré mort (ms). */
-const HEARTBEAT_STALE_MS = Number(process.env.BACKUP_HEARTBEAT_STALE_MS) || 20 * 60 * 1000;
+/** Sauvegarde sans activité depuis ce délai → considérée bloquée (ms). */
+const STUCK_BACKUP_MS = Number(process.env.BACKUP_STUCK_AFTER_MS) || 5 * 60 * 1000;
+
+/** Sans heartbeat récent, job considéré mort (ms) — aligné pipeline. */
+const HEARTBEAT_STALE_MS = Number(process.env.BACKUP_HEARTBEAT_STALE_MS) || PROGRESS_STALE_MS;
 
 /** Durée max absolue d'un job (ms). */
 const JOB_TIMEOUT_MS = Number(process.env.BACKUP_JOB_TIMEOUT_MS) || 90 * 60 * 1000;
@@ -46,13 +48,13 @@ async function reconcileStuckBackups() {
 
   const stuck = (candidates || []).filter((row) => {
     if (row.created_at < absoluteCutoff) return true;
-    if (!row.progress_at) return true;
+    if (!row.progress_at) return row.created_at < ageCutoff;
     return row.progress_at < heartbeatCutoff;
   });
 
   const reconciled = [];
   for (const row of stuck) {
-    const msg = 'Job interrompu (redéploiement Railway ou délai dépassé). Relancez une sauvegarde.';
+    const msg = `Job interrompu — aucune progression depuis ${Math.round(HEARTBEAT_STALE_MS / 1000)}s. Relancez une sauvegarde.`;
     const { error: updErr } = await sb
       .from('erp_backups')
       .update({

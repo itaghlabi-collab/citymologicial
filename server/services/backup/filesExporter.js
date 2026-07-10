@@ -1,12 +1,9 @@
 /**
- * Export fichiers Supabase Storage pour sauvegardes ERP.
- *
- * BACKUP_FILES_MODE :
- *   manifest (défaut) — inventaire rapide (métadonnées), sans copie binaire → fiable sur Railway
- *   full            — copie chaque fichier vers citymo-backups (lent, optionnel)
+ * Export fichiers Supabase Storage — pipeline déterministe (timeouts 30s / watchdog 60s).
  */
 const { getSupabaseAdmin } = require('../../lib/supabaseAdmin');
 const supabaseStorageProvider = require('./supabaseStorageProvider');
+const { OP_TIMEOUT_MS } = require('./backupPipeline');
 
 const SOURCE_BUCKETS_FALLBACK = [
   'citymo-workers',
@@ -18,8 +15,9 @@ const SOURCE_BUCKETS_FALLBACK = [
 const EXCLUDE_BUCKETS = new Set(['citymo-backups']);
 
 const LIST_PAGE_SIZE = 1000;
+const MAX_FOLDER_DEPTH = Number(process.env.BACKUP_MAX_FOLDER_DEPTH) || 24;
+const MAX_LIST_PAGES_PER_PREFIX = Number(process.env.BACKUP_MAX_LIST_PAGES) || 200;
 const COPY_CONCURRENCY = Number(process.env.BACKUP_FILE_COPY_CONCURRENCY) || 4;
-const FILE_COPY_TIMEOUT_MS = Number(process.env.BACKUP_FILE_COPY_TIMEOUT_MS) || 120_000;
 const MAX_FILE_BYTES = Number(process.env.BACKUP_MAX_FILE_BYTES) || 100 * 1024 * 1024;
 
 function resolveFilesMode(mode) {
@@ -27,41 +25,55 @@ function resolveFilesMode(mode) {
   return m === 'full' ? 'full' : 'manifest';
 }
 
-function withTimeout(promise, ms, label) {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      reject(new Error(`Délai dépassé (${Math.round(ms / 1000)}s) — ${label}`));
-    }, ms);
-    promise
-      .then((v) => { clearTimeout(timer); resolve(v); })
-      .catch((e) => { clearTimeout(timer); reject(e); });
-  });
-}
-
-async function listSourceBuckets() {
-  const sb = getSupabaseAdmin();
-  const { data, error } = await sb.storage.listBuckets();
-  if (error || !data?.length) return SOURCE_BUCKETS_FALLBACK;
-  return data
-    .map((b) => b.name || b.id)
-    .filter((name) => name && !EXCLUDE_BUCKETS.has(name));
+async function listSourceBuckets(pipeline) {
+  return pipeline.run(
+    'filesExporter.listSourceBuckets',
+    async () => {
+      const sb = getSupabaseAdmin();
+      const { data, error } = await sb.storage.listBuckets();
+      if (error) throw new Error(error.message);
+      if (!data?.length) return SOURCE_BUCKETS_FALLBACK;
+      return data
+        .map((b) => b.name || b.id)
+        .filter((name) => name && !EXCLUDE_BUCKETS.has(name));
+    },
+    { progressMsg: 'Inventaire : liste des buckets…' },
+  );
 }
 
 /**
- * Liste récursive paginée d'un bucket (heartbeat possible via onProgress).
+ * Liste récursive paginée — chaque appel storage.list() a un timeout 30s.
  */
-async function listBucketFiles(bucket, onProgress) {
+async function listBucketFiles(bucket, pipeline, onProgress) {
   const files = [];
   const sb = getSupabaseAdmin();
 
-  async function walk(prefix) {
+  async function walk(prefix, depth) {
+    pipeline.assertAlive();
+    if (depth > MAX_FOLDER_DEPTH) {
+      throw new Error(`Profondeur max ${MAX_FOLDER_DEPTH} dépassée : ${bucket}/${prefix}`);
+    }
+
     let offset = 0;
+    let page = 0;
+
     while (true) {
-      const { data, error } = await sb.storage.from(bucket).list(prefix, {
-        limit: LIST_PAGE_SIZE,
-        offset,
-        sortBy: { column: 'name', order: 'asc' },
-      });
+      pipeline.assertAlive();
+      page += 1;
+      if (page > MAX_LIST_PAGES_PER_PREFIX) {
+        throw new Error(`Pagination max ${MAX_LIST_PAGES_PER_PREFIX} pages : ${bucket}/${prefix || '/'}`);
+      }
+
+      const listPath = prefix || '(racine)';
+      const location = `storage.list(${bucket}, ${listPath}, offset=${offset}, page=${page})`;
+
+      const { data, error } = await pipeline.run(location, async () => (
+        sb.storage.from(bucket).list(prefix, {
+          limit: LIST_PAGE_SIZE,
+          offset,
+          sortBy: { column: 'name', order: 'asc' },
+        })
+      ));
 
       if (error) {
         throw new Error(`Liste ${bucket}/${prefix || ''} : ${error.message}`);
@@ -70,18 +82,18 @@ async function listBucketFiles(bucket, onProgress) {
       if (!data?.length) break;
 
       for (const item of data) {
+        pipeline.assertAlive();
         const itemPath = prefix ? `${prefix}/${item.name}` : item.name;
         if (item.id === null) {
-          await walk(itemPath);
+          await walk(itemPath, depth + 1);
         } else {
-          const entry = {
+          files.push({
             bucket,
             path: itemPath,
             size: Number(item.metadata?.size || item.metadata?.contentLength || 0),
             mimetype: item.metadata?.mimetype || null,
             updated_at: item.updated_at || item.created_at || null,
-          };
-          files.push(entry);
+          });
           onProgress?.({ phase: 'listed', bucket, path: itemPath, listed: files.length });
         }
       }
@@ -91,74 +103,91 @@ async function listBucketFiles(bucket, onProgress) {
     }
   }
 
-  await walk('');
+  await pipeline.run(
+    `listBucketFiles.walk(${bucket})`,
+    () => walk('', 0),
+    { progressMsg: `Inventaire bucket « ${bucket} »…` },
+  );
+
   return files;
 }
 
-async function copyFileToBackup(bucket, filePath, backupPrefix) {
-  const sb = getSupabaseAdmin();
+async function copyFileToBackup(bucket, filePath, backupPrefix, pipeline) {
   const label = `${bucket}/${filePath}`;
+  const sb = getSupabaseAdmin();
 
-  const { data, error } = await withTimeout(
-    sb.storage.from(bucket).download(filePath),
-    FILE_COPY_TIMEOUT_MS,
-    `lecture ${label}`,
+  const { data, error } = await pipeline.run(
+    `storage.download(${label})`,
+    () => sb.storage.from(bucket).download(filePath),
   );
   if (error) throw new Error(`Lecture ${label} : ${error.message}`);
 
-  const buffer = Buffer.from(await data.arrayBuffer());
-  if (buffer.length > MAX_FILE_BYTES) {
-    throw new Error(`Fichier trop volumineux (${buffer.length} o, max ${MAX_FILE_BYTES})`);
+  const buffer = await pipeline.run(
+    `arrayBuffer(${label})`,
+    () => data.arrayBuffer(),
+  );
+  const buf = Buffer.from(buffer);
+  if (buf.length > MAX_FILE_BYTES) {
+    throw new Error(`Fichier trop volumineux (${buf.length} o, max ${MAX_FILE_BYTES})`);
   }
 
   const destPath = `${backupPrefix}/files/${bucket}/${filePath}`;
-  await withTimeout(
-    supabaseStorageProvider.upload(destPath, buffer, data.type || 'application/octet-stream'),
-    FILE_COPY_TIMEOUT_MS,
-    `écriture ${destPath}`,
+  await pipeline.run(
+    `supabaseStorage.upload(${destPath})`,
+    () => supabaseStorageProvider.upload(destPath, buf, data.type || 'application/octet-stream'),
   );
 
-  return { source: label, dest: destPath, size: buffer.length };
+  return { source: label, dest: destPath, size: buf.length };
 }
 
-async function copyFilesParallel(files, backupPrefix, onProgress) {
+async function copyFilesParallel(files, backupPrefix, pipeline, onProgress) {
   const manifestEntries = [];
   const errors = [];
   let done = 0;
   let index = 0;
 
-  async function worker() {
-    while (index < files.length) {
+  async function worker(workerId) {
+    while (true) {
+      pipeline.assertAlive();
+      if (index >= files.length) return;
       const i = index;
       index += 1;
       const file = files[i];
       try {
-        const copied = await copyFileToBackup(file.bucket, file.path, backupPrefix);
+        const copied = await copyFileToBackup(file.bucket, file.path, backupPrefix, pipeline);
         manifestEntries.push(copied);
         done += 1;
         onProgress?.({ phase: 'copied', bucket: file.bucket, path: file.path, copied: done, total: files.length });
+        pipeline.touchProgress(`Copie ${done}/${files.length} — ${file.bucket}/${file.path}`);
       } catch (err) {
         errors.push({ bucket: file.bucket, path: file.path, error: err.message });
         done += 1;
         onProgress?.({ phase: 'copy_error', bucket: file.bucket, path: file.path, error: err.message, copied: done, total: files.length });
+        pipeline.touchProgress(`Erreur copie ${file.bucket}/${file.path}: ${err.message}`);
       }
     }
   }
 
-  const workers = Array.from({ length: Math.min(COPY_CONCURRENCY, files.length || 1) }, () => worker());
-  await Promise.all(workers);
+  const workerCount = Math.min(COPY_CONCURRENCY, files.length || 1);
+  await pipeline.run(
+    `copyFilesParallel.workers(${workerCount}, ${files.length} fichiers)`,
+    () => Promise.all(Array.from({ length: workerCount }, (_, w) => worker(w + 1))),
+    { timeoutMs: Math.max(OP_TIMEOUT_MS, files.length * OP_TIMEOUT_MS), progressMsg: `Copie parallèle ${files.length} fichier(s)…` },
+  );
 
   return { manifestEntries, errors };
 }
 
 /**
  * @param {string} backupPrefix
- * @param {{ mode?: string, onProgress?: Function }} options
+ * @param {{ mode?: string, pipeline: object, onProgress?: Function }} options
  */
 async function exportFiles(backupPrefix, options = {}) {
+  const { pipeline, onProgress } = options;
+  if (!pipeline) throw new Error('exportFiles requiert pipeline (backupPipeline.createPipeline).');
+
   const mode = resolveFilesMode(options.mode);
-  const onProgress = options.onProgress;
-  const buckets = await listSourceBuckets();
+  const buckets = await listSourceBuckets(pipeline);
 
   const manifest = {
     format: mode === 'full' ? 'citymo-files-v2' : 'citymo-files-v3-manifest',
@@ -169,46 +198,68 @@ async function exportFiles(backupPrefix, options = {}) {
     errors: [],
   };
 
-    let totalListed = 0;
+  let totalListed = 0;
+  let bucketIndex = 0;
 
   for (const bucket of buckets) {
-    onProgress?.({ phase: 'bucket_start', bucket, mode });
+    pipeline.assertAlive();
+    bucketIndex += 1;
+    onProgress?.({ phase: 'bucket_start', bucket, mode, bucketIndex, bucketTotal: buckets.length });
 
     let bucketFiles;
     try {
-      bucketFiles = await listBucketFiles(bucket, (p) => {
-        totalListed = p.listed;
-        if (p.listed === 1 || p.listed % 100 === 0) {
-          onProgress?.({ phase: 'listing', bucket, listed: p.listed, path: p.path });
-        }
-      });
+      bucketFiles = await pipeline.run(
+        `exportFiles.bucket[${bucketIndex}/${buckets.length}]=${bucket}`,
+        () => listBucketFiles(bucket, pipeline, (p) => {
+          if (p.listed === 1 || p.listed % 50 === 0) {
+            onProgress?.({ phase: 'listing', bucket, listed: p.listed, path: p.path });
+            pipeline.touchProgress(`Inventaire ${bucket} — ${p.listed} objets`);
+          }
+        }),
+        { progressMsg: `Bucket ${bucketIndex}/${buckets.length} : ${bucket}…` },
+      );
     } catch (err) {
       manifest.errors.push({ bucket, path: '', error: err.message });
+      pipeline.touchProgress(`Bucket ${bucket} en erreur : ${err.message}`);
       continue;
     }
 
+    totalListed += bucketFiles.length;
     onProgress?.({
       phase: 'bucket_listed',
       bucket,
       count: bucketFiles.length,
-      totalListed: totalListed + bucketFiles.length,
+      totalListed,
+      bucketIndex,
+      bucketTotal: buckets.length,
     });
-    totalListed += bucketFiles.length;
+    pipeline.touchProgress(`${bucket} : ${bucketFiles.length} fichier(s) — total inventorié ${totalListed}`);
 
     if (mode === 'manifest') {
-      for (const f of bucketFiles) {
-        manifest.files.push({
-          bucket: f.bucket,
-          path: f.path,
-          size: f.size,
-          mimetype: f.mimetype,
-          updated_at: f.updated_at,
-        });
-      }
+      await pipeline.run(
+        `exportFiles.manifestMerge(${bucket}, ${bucketFiles.length} entrées)`,
+        async () => {
+          for (const f of bucketFiles) {
+            manifest.files.push({
+              bucket: f.bucket,
+              path: f.path,
+              size: f.size,
+              mimetype: f.mimetype,
+              updated_at: f.updated_at,
+            });
+          }
+        },
+        { progressMsg: `Manifeste ${bucket} (${bucketFiles.length})…` },
+      );
       continue;
     }
 
-    const { manifestEntries, errors } = await copyFilesParallel(bucketFiles, backupPrefix, onProgress);
+    const { manifestEntries, errors } = await copyFilesParallel(
+      bucketFiles,
+      backupPrefix,
+      pipeline,
+      onProgress,
+    );
     manifest.files.push(...manifestEntries);
     manifest.errors.push(...errors);
   }

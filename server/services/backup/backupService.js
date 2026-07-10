@@ -8,6 +8,8 @@ const { getBackupStorageProvider, isGoogleDriveEnabled } = require('./backupStor
 const { exportDatabase, exportErpConfig } = require('./databaseExporter');
 const { exportFiles, resolveFilesMode } = require('./filesExporter');
 const { verifyBackupArtifact } = require('./backupArtifacts');
+const { createPipeline, formatFailMessage, PROGRESS_STALE_MS } = require('./backupPipeline');
+const { wrapStorageUpload } = require('./timedBackupStorage');
 const { logBackupAction } = require('./auditLog');
 const logger = require('./backupLogger');
 const { testSupabaseConnection } = require('./backupEnvCheck');
@@ -107,6 +109,8 @@ async function compressJson(payload) {
 async function executeBackupJob(row, { typeKey, planification, description, actor }) {
   const storage = getBackupStorageProvider();
   const backupPrefix = row.ref;
+  const pipeline = createPipeline(row.ref, (msg) => updateBackupProgress(row.id, msg));
+  const timedUpload = wrapStorageUpload(storage, pipeline, 'backup');
 
   logger.backupStart(backupPrefix, typeKey, actor);
 
@@ -117,18 +121,22 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
     details: { type: typeKey, planification, ref: row.ref },
   });
 
+  let manifest = null;
+
   try {
-    await testSupabaseConnection();
-    await updateBackupProgress(row.id, 'Export base de données…');
+    await pipeline.run('testSupabaseConnection', () => testSupabaseConnection());
+    await pipeline.run('updateBackupProgress:init', async () => {
+      await updateBackupProgress(row.id, 'Export base de données…');
+    });
 
     let totalSize = 0;
     let mainFilePath = null;
     const driveErrors = [];
 
     if (typeKey === 'base_donnees' || typeKey === 'complete') {
-      const dbPayload = await exportDatabase();
+      const dbPayload = await pipeline.run('exportDatabase', () => exportDatabase());
       if (typeKey === 'complete') {
-        dbPayload.erp_config = await exportErpConfig();
+        dbPayload.erp_config = await pipeline.run('exportErpConfig', () => exportErpConfig());
       }
       logger.supabaseExportOk({
         tables: dbPayload.meta?.tables?.length || 0,
@@ -136,44 +144,51 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
         skipped: dbPayload.meta?.skipped?.length || 0,
       });
 
-      const compressed = await compressJson(dbPayload);
+      const compressed = await pipeline.run('compressJson:database', () => compressJson(dbPayload));
       mainFilePath = `${backupPrefix}/database.json.gz`;
-      const up = await storage.upload(mainFilePath, compressed);
+      const up = await timedUpload(mainFilePath, compressed);
       if (up.driveError) driveErrors.push(up.driveError);
-      await verifyBackupArtifact(mainFilePath);
+      await verifyBackupArtifact(mainFilePath, pipeline);
       totalSize += compressed.length;
-      await updateBackupProgress(row.id, 'Base de données exportée — inventaire fichiers…');
+      await pipeline.run('updateBackupProgress:db-done', async () => {
+        await updateBackupProgress(row.id, 'Base de données exportée — inventaire fichiers…');
+      });
     }
 
     if (typeKey === 'documents' || typeKey === 'complete') {
       const filesMode = resolveFilesMode();
-      const manifest = await exportFiles(backupPrefix, {
-        mode: filesMode,
-        onProgress: (p) => {
-          let label = null;
-          if (p.phase === 'bucket_start') {
-            label = `Inventaire bucket « ${p.bucket} »…`;
-          } else if (p.phase === 'listing') {
-            label = `Inventaire ${p.bucket} — ${p.listed} objets`;
-          } else if (p.phase === 'bucket_listed') {
-            label = `${p.bucket} : ${p.count} fichier(s) — total inventorié ${p.totalListed || p.count}`;
-          } else if (p.phase === 'copied') {
-            label = `Copie fichiers ${p.copied}/${p.total}`;
-          }
-          if (label) updateBackupProgress(row.id, label).catch(() => {});
-        },
-      });
+      manifest = await pipeline.run(
+        'exportFiles',
+        () => exportFiles(backupPrefix, {
+          mode: filesMode,
+          pipeline,
+          onProgress: (p) => {
+            let label = null;
+            if (p.phase === 'bucket_start') {
+              label = `Inventaire bucket ${p.bucketIndex}/${p.bucketTotal} « ${p.bucket} »…`;
+            } else if (p.phase === 'listing') {
+              label = `Inventaire ${p.bucket} — ${p.listed} objets`;
+            } else if (p.phase === 'bucket_listed') {
+              label = `${p.bucket} : ${p.count} fichier(s) — total inventorié ${p.totalListed}`;
+            } else if (p.phase === 'copied') {
+              label = `Copie fichiers ${p.copied}/${p.total}`;
+            }
+            if (label) pipeline.touchProgress(label);
+          },
+        }),
+        { timeoutMs: Math.max(30_000, 30 * 60_000), progressMsg: 'Inventaire Storage…' },
+      );
       logger.storageExportOk({
         files: manifest.total_files || 0,
         bytes: manifest.total_size || 0,
         errors: manifest.errors?.length || 0,
       });
 
-      const manifestBuf = await compressJson(manifest);
+      const manifestBuf = await pipeline.run('compressJson:manifest', () => compressJson(manifest));
       const manifestPath = `${backupPrefix}/files-manifest.json.gz`;
-      const up = await storage.upload(manifestPath, manifestBuf);
+      const up = await timedUpload(manifestPath, manifestBuf);
       if (up.driveError) driveErrors.push(up.driveError);
-      await verifyBackupArtifact(manifestPath);
+      await verifyBackupArtifact(manifestPath, pipeline);
       totalSize += manifestBuf.length;
       if (typeKey === 'documents') mainFilePath = manifestPath;
     }
@@ -183,7 +198,7 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
         format: 'citymo-complete-v2',
         ref: row.ref,
         exported_at: new Date().toISOString(),
-        files_mode: manifest.mode || resolveFilesMode(),
+        files_mode: manifest?.mode || resolveFilesMode(),
         parts: {
           database: `${backupPrefix}/database.json.gz`,
           files_manifest: `${backupPrefix}/files-manifest.json.gz`,
@@ -191,11 +206,11 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
         storage_provider: storage.name,
         drive_enabled: Boolean(storage.driveEnabled),
       };
-      const indexBuf = await compressJson(index);
+      const indexBuf = await pipeline.run('compressJson:index', () => compressJson(index));
       mainFilePath = `${backupPrefix}/complete-index.json.gz`;
-      const up = await storage.upload(mainFilePath, indexBuf);
+      const up = await timedUpload(mainFilePath, indexBuf);
       if (up.driveError) driveErrors.push(up.driveError);
-      await verifyBackupArtifact(mainFilePath);
+      await verifyBackupArtifact(mainFilePath, pipeline);
       totalSize += indexBuf.length;
     }
 
@@ -203,7 +218,10 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
     let driveFolderUrl = null;
     if (storage.driveEnabled && storage.getDriveFolderLink) {
       try {
-        const link = await storage.getDriveFolderLink(backupPrefix);
+        const link = await pipeline.run(
+          'getDriveFolderLink',
+          () => storage.getDriveFolderLink(backupPrefix),
+        );
         driveFolderId = link?.folderId || null;
         driveFolderUrl = link?.url || null;
       } catch (err) {
@@ -214,14 +232,14 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
 
     const driveSynced = storage.driveEnabled && driveErrors.length === 0;
 
-    const updated = await finalizeBackupRow(row.id, {
+    const updated = await pipeline.run('finalizeBackupRow:succes', () => finalizeBackupRow(row.id, {
       statut: 'succes',
       file_path: mainFilePath,
       taille_bytes: totalSize,
       drive_synced: driveSynced,
       drive_folder_id: driveFolderId,
       drive_sync_error: driveErrors.length ? driveErrors.join(' | ') : null,
-    });
+    }));
 
     if (driveFolderUrl) {
       updated.drive_folder_url = driveFolderUrl;
@@ -233,24 +251,28 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
       drive_synced: driveSynced,
       drive_errors: driveErrors.length,
       file_path: mainFilePath,
+      steps: pipeline.lastStep,
     });
 
     return updated;
   } catch (err) {
+    const failMsg = formatFailMessage(err, pipeline.lastLocation);
     logger.backupError(backupPrefix, err);
     await finalizeBackupRow(row.id, {
       statut: 'erreur',
-      error_message: err.message,
+      error_message: failMsg,
       drive_synced: false,
-      drive_sync_error: err.message,
+      drive_sync_error: failMsg,
     }).catch(() => {});
     await logBackupAction({
       backupId: row.id,
       action: 'error',
       actor,
-      details: { message: err.message },
+      details: { message: failMsg, step: pipeline.lastStep, location: pipeline.lastLocation },
     });
     throw err;
+  } finally {
+    pipeline.dispose();
   }
 }
 
