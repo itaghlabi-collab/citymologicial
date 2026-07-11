@@ -84,14 +84,14 @@ export default async function handler(req, res) {
     if (expErr) return res.status(500).json({ error: expErr.message });
 
     const indexes = buildProjectIndexes(projects || []);
-    const existingKeys = new Set(
-      (existingExpenses || []).map((e) => sourceKey(e.source_type, e.source_id)),
+    const existingByKey = new Map(
+      (existingExpenses || []).map((e) => [sourceKey(e.source_type, e.source_id), e]),
     );
 
     const report = {
       since,
       dryRun,
-      analyzed: { charges: 0, orders: 0, alreadyLinked: 0 },
+      analyzed: { charges: 0, orders: 0, alreadyLinked: 0, upgraded: 0 },
       missing: { charges: [], orders: [] },
       unresolved: [],
       stats: { created: 0, updated: 0, skipped: 0, errors: 0 },
@@ -110,10 +110,8 @@ export default async function handler(req, res) {
 
       report.analyzed.charges++;
       const key = sourceKey('finance_charge', charge.id);
-      if (existingKeys.has(key)) {
-        report.analyzed.alreadyLinked++;
-        continue;
-      }
+      const hadExisting = existingByKey.has(key);
+      if (hadExisting) report.analyzed.alreadyLinked++;
 
       const project = resolveChargeProject(charge, indexes);
       if (!project?.id) {
@@ -128,15 +126,17 @@ export default async function handler(req, res) {
         continue;
       }
 
-      report.missing.charges.push({
-        id: charge.id,
-        ref: charge.ref_charge,
-        libelle: charge.libelle,
-        montant: charge.montant,
-        statut: charge.statut,
-        project_id: project.id,
-        project_ref: projects.find((p) => String(p.id) === String(project.id))?.ref || null,
-      });
+      if (!hadExisting) {
+        report.missing.charges.push({
+          id: charge.id,
+          ref: charge.ref_charge,
+          libelle: charge.libelle,
+          montant: charge.montant,
+          statut: charge.statut,
+          project_id: project.id,
+          project_ref: projects.find((p) => String(p.id) === String(project.id))?.ref || null,
+        });
+      }
 
       if (dryRun) continue;
 
@@ -144,10 +144,11 @@ export default async function handler(req, res) {
       const result = await upsertProjectExpenseRow(admin, row);
       if (result.action === 'created') {
         report.stats.created++;
-        existingKeys.add(key);
+        existingByKey.set(key, { source_type: 'finance_charge', source_id: charge.id });
       } else if (result.action === 'updated') {
         report.stats.updated++;
-        existingKeys.add(key);
+        if (hadExisting) report.analyzed.upgraded++;
+        existingByKey.set(key, { source_type: 'finance_charge', source_id: charge.id });
       } else {
         report.stats.errors++;
       }
@@ -166,11 +167,10 @@ export default async function handler(req, res) {
         hasPurchase ? 'purchase_request' : 'payment_order',
         hasPurchase ? order.purchase_request_id : order.id,
       );
-      if (existingKeys.has(key)) {
-        report.analyzed.alreadyLinked++;
-        continue;
-      }
+      const hadExisting = existingByKey.has(key);
+      if (hadExisting) report.analyzed.alreadyLinked++;
 
+      if (!hadExisting) {
       report.missing.orders.push({
         id: order.id,
         ref: order.ref_ordre,
@@ -178,6 +178,7 @@ export default async function handler(req, res) {
         montant: order.montant_ttc ?? order.montant,
         project_id: order.project_id,
       });
+      }
 
       if (dryRun) continue;
 
@@ -185,10 +186,11 @@ export default async function handler(req, res) {
       const result = await upsertProjectExpenseRow(admin, row);
       if (result.action === 'created') {
         report.stats.created++;
-        existingKeys.add(key);
+        existingByKey.set(key, { source_type: row.source_type, source_id: row.source_id });
       } else if (result.action === 'updated') {
         report.stats.updated++;
-        existingKeys.add(key);
+        if (hadExisting) report.analyzed.upgraded++;
+        existingByKey.set(key, { source_type: row.source_type, source_id: row.source_id });
       } else {
         report.stats.errors++;
       }

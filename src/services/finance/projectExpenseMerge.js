@@ -34,14 +34,15 @@ export function buildProjectIndexes(projects) {
 
 export function resolveChargeProject(charge, indexes) {
   const { projectById, projectByName, projectByRef } = indexes;
+  const label = String(charge.projet_lie || charge.project_name || '').trim();
+  const refPart = label.split(' — ')[0]?.trim();
+  // Référence explicite (ex. PRJ-202607-0001) prioritaire — évite les doublons de nom.
+  if (refPart && projectByRef[refPart]) return projectByRef[refPart];
   if (charge.project_id) {
     const id = String(charge.project_id);
     return projectById[id] || { id };
   }
-  const label = String(charge.projet_lie || charge.project_name || '').trim();
   if (!label) return null;
-  const refPart = label.split(' — ')[0]?.trim();
-  if (refPart && projectByRef[refPart]) return projectByRef[refPart];
   const nomPart = label.split(' — ')[1]?.trim() || label;
   return projectByName[normalizeName(nomPart)] || projectByName[normalizeName(label)] || null;
 }
@@ -111,26 +112,34 @@ export function chargeToProjectExpenseRow(charge, projectId, projects) {
   };
 }
 
-/** Ajoute les dépenses générales payées non encore présentes dans project_expenses. */
+/** Ajoute les dépenses générales payées non encore comptabilisées dans project_expenses. */
 export function mergeChargesIntoProjectExpenses(expenses, charges, projects) {
   const indexes = buildProjectIndexes(projects);
-  const syncedChargeIds = new Set(
-    (expenses || [])
+
+  // Ne bloque pas la fusion si une ligne DB existe en en_attente (ancienne sync « Validé »).
+  const merged = (expenses || []).filter((e) => {
+    if (e.source_type === 'finance_charge' && e.source_id) {
+      return isCountedProjectExpense(e);
+    }
+    return isCountedProjectExpense(e);
+  });
+
+  const countedChargeIds = new Set(
+    merged
       .filter((e) => e.source_type === 'finance_charge' && e.source_id)
       .map((e) => String(e.source_id)),
   );
 
-  const merged = (expenses || []).filter(isCountedProjectExpense);
   for (const charge of charges || []) {
     if (!isChargePaidForProject(charge) && !isChargeEligibleForBackfill(charge)) continue;
     if (SKIP_CHARGE_STATUTS.includes(charge.statut)) continue;
-    if (syncedChargeIds.has(String(charge.id))) continue;
+    if (countedChargeIds.has(String(charge.id))) continue;
 
     const project = resolveChargeProject(charge, indexes);
     if (!project?.id) continue;
 
     merged.push(chargeToProjectExpenseRow(charge, project.id, projects));
-    syncedChargeIds.add(String(charge.id));
+    countedChargeIds.add(String(charge.id));
   }
 
   return merged.sort((a, b) => String(b.date_depense).localeCompare(String(a.date_depense)));

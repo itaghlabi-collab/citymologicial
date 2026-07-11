@@ -101,7 +101,9 @@ export async function syncChargeToProjectExpense(charge) {
   if (!project?.id) return null;
 
   try {
-    return await upsertProjectExpenseFromSource(chargeProjectExpensePayload(charge, project.id));
+    const result = await upsertProjectExpenseFromSource(chargeProjectExpensePayload(charge, project.id));
+    await syncChargesToProjectsViaApi();
+    return result;
   } catch (err) {
     console.warn('[CITYMO] sync charge → project_expense direct', err);
     await syncChargesToProjectsViaApi();

@@ -3,47 +3,14 @@
  */
 import { verifySupabaseAccessTokenVercel } from '../../lib/verifySupabaseTokenVercel.mjs';
 import { getSupabaseAdmin } from '../../lib/supabaseAdminVercel.mjs';
+import {
+  buildProjectIndexes,
+  resolveChargeProject,
+} from '../../lib/financeProjectExpenseSync.mjs';
 
 export const config = { maxDuration: 60 };
 
-const SKIP_STATUTS = ['Annulé', 'Refusé', 'Refusée', 'Brouillon'];
 const CHARGE_SYNC_STATUT = 'Payé';
-const OP_SYNC_STATUT = 'Payé';
-
-function normalizeName(s) {
-  return String(s || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function buildProjectIndexes(projects) {
-  const projectById = Object.fromEntries((projects || []).map((p) => [String(p.id), p]));
-  const projectByName = {};
-  const projectByRef = {};
-  (projects || []).forEach((p) => {
-    projectByName[normalizeName(p.nom)] = p;
-    if (p.ref) projectByRef[p.ref] = p;
-  });
-  return { projectById, projectByName, projectByRef };
-}
-
-function resolveChargeProject(charge, indexes) {
-  const { projectById, projectByName, projectByRef } = indexes;
-  if (charge.project_id) {
-    const id = String(charge.project_id);
-    return projectById[id] || { id };
-  }
-  const label = String(charge.projet_lie || '').trim();
-  if (!label) return null;
-  const refPart = label.split(' — ')[0]?.trim();
-  if (refPart && projectByRef[refPart]) return projectByRef[refPart];
-  const nomPart = label.split(' — ')[1]?.trim() || label;
-  return projectByName[normalizeName(nomPart)] || projectByName[normalizeName(label)] || null;
-}
 
 function chargeRow(charge, projectId) {
   return {
