@@ -11,8 +11,12 @@ const {
   getOrCreateFolder,
   findFileInFolder,
   getDrive,
-  DRIVE_LIST_OPTS,
 } = require('./googleDriveStorageProvider');
+const {
+  loadDriveContext,
+  getDriveListOpts,
+  formatDriveApiError,
+} = require('./googleDriveContext');
 
 /** backupRef → folderId Google Drive (conservé pour tout le job). */
 const backupFolderCache = new Map();
@@ -108,27 +112,32 @@ async function uploadBufferToBackup(backupRef, relativePath, buffer, contentType
   let fileId;
   let size;
 
-  if (existingId) {
-    const res = await drive.files.update({
-      fileId: existingId,
-      media,
-      supportsAllDrives: true,
-      fields: 'id, size',
-    });
-    fileId = res.data.id;
-    size = Number(res.data.size) || buffer.length;
-  } else {
-    const res = await drive.files.create({
-      requestBody: {
-        name: fileName,
-        parents: [parentId],
-      },
-      media,
-      supportsAllDrives: true,
-      fields: 'id, size',
-    });
-    fileId = res.data.id;
-    size = Number(res.data.size) || buffer.length;
+  try {
+    if (existingId) {
+      const res = await drive.files.update({
+        fileId: existingId,
+        media,
+        supportsAllDrives: true,
+        fields: 'id, size',
+      });
+      fileId = res.data.id;
+      size = Number(res.data.size) || buffer.length;
+    } else {
+      const res = await drive.files.create({
+        requestBody: {
+          name: fileName,
+          parents: [parentId],
+        },
+        media,
+        supportsAllDrives: true,
+        fields: 'id, size',
+      });
+      fileId = res.data.id;
+      size = Number(res.data.size) || buffer.length;
+    }
+  } catch (err) {
+    const ctx = await loadDriveContext().catch(() => ({}));
+    throw new Error(formatDriveApiError(err, ctx));
   }
 
   if (!fileId || size <= 0) {
@@ -162,13 +171,14 @@ async function uploadFromSupabasePath(storagePath, contentType) {
 async function listBackupFolderFiles(backupRef) {
   const folderId = await ensureBackupFolder(backupRef);
   const drive = getDrive();
+  const listOpts = await getDriveListOpts();
   const q = `'${folderId}' in parents and trashed=false`;
 
   const res = await drive.files.list({
     q,
     fields: 'files(id, name, size, mimeType)',
     pageSize: 1000,
-    ...DRIVE_LIST_OPTS,
+    ...listOpts,
   });
 
   const items = (res.data.files || []).filter(

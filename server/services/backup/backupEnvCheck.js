@@ -93,11 +93,29 @@ function logBackupEnvironmentOnStartup() {
   }
   if (status.google_drive.active) {
     const { validateGoogleDriveForBackup } = require('./googleDriveAccess');
-    const { getServiceAccountEmail, getDriveRootFolderId } = require('./googleDriveConfig');
+    const { loadDriveContext } = require('./googleDriveContext');
+    const { getServiceAccountEmail } = require('./googleDriveConfig');
+    loadDriveContext()
+      .then((ctx) => {
+        logger.envOk('Google Drive contexte', {
+          folder: ctx.rootFolderName,
+          folder_id: ctx.rootFolderId,
+          shared_drive: ctx.isSharedDrive ? ctx.sharedDriveId : 'NON — Mon Drive personnel (incompatible)',
+        });
+        if (ctx.isPersonalDrive) {
+          logger.envWarn(
+            'GOOGLE_DRIVE_FOLDER_ID pointe vers Mon Drive personnel — les comptes de service ne peuvent pas uploader. Utilisez un Drive partagé.',
+          );
+        }
+      })
+      .catch((err) => {
+        logger.envWarn(`Google Drive contexte : ${err.message}`);
+      });
     validateGoogleDriveForBackup()
       .then((check) => {
-        logger.envOk('Google Drive dossier racine accessible', {
-          folder_id: check.folderId || getDriveRootFolderId(),
+        logger.envOk('Google Drive probe upload OK', {
+          folder_id: check.folderId,
+          shared_drive_id: check.sharedDriveId,
           service_account: getServiceAccountEmail(),
         });
       })

@@ -3,6 +3,7 @@
  */
 const { isGoogleDriveEnabled, getDriveRootFolderId } = require('./googleDriveConfig');
 const { assertRootFolderAccessible } = require('./googleDriveStorageProvider');
+const { assertSharedDriveRequired, probeDriveWriteAccess, formatDriveApiError } = require('./googleDriveContext');
 const { backupDriveError } = require('./backupErrors');
 
 async function validateGoogleDriveForBackup() {
@@ -21,11 +22,17 @@ async function validateGoogleDriveForBackup() {
 
   try {
     await assertRootFolderAccessible();
+    await assertSharedDriveRequired();
+    const probe = await probeDriveWriteAccess();
+    return {
+      enabled: true,
+      uploadAllowed: true,
+      folderId: probe.folderId || folderId,
+      sharedDriveId: probe.sharedDriveId,
+    };
   } catch (err) {
-    throw backupDriveError(err.message);
+    throw backupDriveError(formatDriveApiError(err, { rootFolderId: folderId }));
   }
-
-  return { enabled: true, uploadAllowed: true, folderId };
 }
 
 module.exports = { validateGoogleDriveForBackup };

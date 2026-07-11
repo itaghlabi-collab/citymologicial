@@ -10,8 +10,14 @@ const {
   getServiceAccountEmail,
   isGoogleDriveEnabled,
 } = require('./googleDriveConfig');
+const {
+  loadDriveContext,
+  getDriveListOpts,
+  formatDriveApiError,
+  resetDriveContext,
+} = require('./googleDriveContext');
 
-/** Scope complet requis pour accéder à un dossier partagé avec le compte de service. */
+/** Scope complet — Drive partagé (Shared Drive) obligatoire pour compte de service. */
 const DRIVE_SCOPES = ['https://www.googleapis.com/auth/drive'];
 
 const DRIVE_LIST_OPTS = { supportsAllDrives: true, includeItemsFromAllDrives: true };
@@ -38,29 +44,18 @@ function resetDriveClient() {
   driveClient = null;
   rootFolderVerified = false;
   folderCache.clear();
+  resetDriveContext();
 }
 
 async function assertRootFolderAccessible() {
   if (rootFolderVerified) return;
 
-  const drive = getDrive();
-  const rootId = getDriveRootFolderId();
-  const serviceEmail = getServiceAccountEmail();
-
   try {
-    await drive.files.get({
-      fileId: rootId,
-      fields: 'id, name, capabilities',
-      supportsAllDrives: true,
-    });
+    await loadDriveContext();
     rootFolderVerified = true;
   } catch (err) {
-    const hint = serviceEmail
-      ? ` Ouvrez https://drive.google.com/drive/folders/${rootId} → Partager → ajoutez ${serviceEmail} en Éditeur.`
-      : '';
-    throw new Error(
-      `Dossier Drive inaccessible (ID ${rootId}).${hint} Détail Google : ${err.message}`,
-    );
+    const rootId = getDriveRootFolderId();
+    throw new Error(formatDriveApiError(err, { rootFolderId: rootId }));
   }
 }
 
@@ -70,6 +65,7 @@ function escapeDriveQuery(value) {
 
 async function findChildFolder(parentId, name) {
   const drive = getDrive();
+  const listOpts = await getDriveListOpts();
   const q = [
     `name='${escapeDriveQuery(name)}'`,
     `'${parentId}' in parents`,
@@ -77,19 +73,20 @@ async function findChildFolder(parentId, name) {
     'trashed=false',
   ].join(' and ');
 
-  const res = await drive.files.list({ q, fields: 'files(id)', pageSize: 1, ...DRIVE_LIST_OPTS });
+  const res = await drive.files.list({ q, fields: 'files(id)', pageSize: 1, ...listOpts });
   return res.data.files?.[0]?.id || null;
 }
 
 async function findFileInFolder(parentId, name) {
   const drive = getDrive();
+  const listOpts = await getDriveListOpts();
   const q = [
     `name='${escapeDriveQuery(name)}'`,
     `'${parentId}' in parents`,
     'trashed=false',
   ].join(' and ');
 
-  const res = await drive.files.list({ q, fields: 'files(id)', pageSize: 1, ...DRIVE_LIST_OPTS });
+  const res = await drive.files.list({ q, fields: 'files(id)', pageSize: 1, ...listOpts });
   return res.data.files?.[0]?.id || null;
 }
 
@@ -178,13 +175,8 @@ async function upload(filePath, buffer, contentType = 'application/gzip') {
       bytes: Number(created.data.size) || buffer.length,
     };
   } catch (err) {
-    const msg = String(err.message || err);
-    if (/storage quota|quota exceeded|insufficient/i.test(msg)) {
-      throw new Error(
-        `${msg} — Espace Google Drive presque plein : libérez de l'espace sur le compte propriétaire du dossier.`,
-      );
-    }
-    throw err;
+    const ctx = await loadDriveContext().catch(() => ({}));
+    throw new Error(formatDriveApiError(err, ctx));
   }
 }
 
