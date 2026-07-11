@@ -6,9 +6,17 @@
  */
 export const CHARGE_SYNC_STATUT = 'Payé';
 export const OP_SYNC_STATUT = 'Payé';
+export const CHARGE_BACKFILL_STATUTS = ['Payé', 'Validé', 'Validée', 'Comptabilisée', 'Comptabilisé'];
 
 export function isChargePaidForProject(charge) {
   return String(charge?.statut || '').trim() === CHARGE_SYNC_STATUT;
+}
+
+export function isChargeEligibleForBackfill(charge) {
+  if (!charge) return false;
+  const statut = String(charge.statut || '').trim();
+  if (['Annulé', 'Refusé', 'Refusée', 'Brouillon'].includes(statut)) return false;
+  return CHARGE_BACKFILL_STATUTS.includes(statut);
 }
 
 export function isOpPaidForProject(order) {

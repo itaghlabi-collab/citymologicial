@@ -67,6 +67,10 @@
     "api/finance/sync-charges-to-projects.js": {
       "maxDuration": 60,
       "memory": 512
+    },
+    "api/finance/backfill-project-expenses.js": {
+      "maxDuration": 120,
+      "memory": 512
     }
   }
 }

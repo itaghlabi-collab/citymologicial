@@ -18,6 +18,7 @@ import {
   fetchLinkedChargesForProjects,
   mergeChargesIntoProjectExpenses,
 } from '../services/finance/projectExpenseMerge';
+import { backfillProjectExpensesViaApi } from '../services/finance/projectExpenseBackfill';
 import { isSupabaseConfigured } from '../lib/supabase';
 
 function enrichExpensesWithProjects(expenses, projects) {
@@ -56,6 +57,7 @@ export function useProjectExpenses() {
     setLoading(true);
     setError(null);
     try {
+      await backfillProjectExpensesViaApi();
       const { projs, expenses: merged, ctx } = await loadExpenseBundle();
       setProjects(projs);
       setExpenses(merged);

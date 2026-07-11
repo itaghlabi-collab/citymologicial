@@ -4,7 +4,7 @@
 import { getSupabase } from '../../lib/supabase';
 import { ORIGINE_LABELS } from './projectExpenses';
 import {
-  CHARGE_SYNC_STATUT,
+  isChargeEligibleForBackfill,
   isChargePaidForProject,
   isCountedProjectExpense,
 } from './projectExpenseRules';
@@ -78,7 +78,10 @@ export function chargeMatchesProject(charge, project) {
 
 function chargeExpenseStatut(statut) {
   if (SKIP_CHARGE_STATUTS.includes(statut)) return 'annule';
-  return statut === CHARGE_SYNC_STATUT ? 'payee' : 'en_attente';
+  if (isChargePaidForProject({ statut }) || isChargeEligibleForBackfill({ statut })) {
+    return 'payee';
+  }
+  return 'en_attente';
 }
 
 export function chargeToProjectExpenseRow(charge, projectId, projects) {
@@ -119,7 +122,7 @@ export function mergeChargesIntoProjectExpenses(expenses, charges, projects) {
 
   const merged = (expenses || []).filter(isCountedProjectExpense);
   for (const charge of charges || []) {
-    if (!isChargePaidForProject(charge)) continue;
+    if (!isChargePaidForProject(charge) && !isChargeEligibleForBackfill(charge)) continue;
     if (SKIP_CHARGE_STATUTS.includes(charge.statut)) continue;
     if (syncedChargeIds.has(String(charge.id))) continue;
 
@@ -159,12 +162,14 @@ export async function fetchLinkedChargesForProjects() {
   const { data, error } = await getSupabase()
     .from('finance_charges')
     .select('id, project_id, projet_lie, date_charge, libelle, categorie, fournisseur, montant, mode_paiement, statut, ref_charge, commentaire')
-    .eq('statut', CHARGE_SYNC_STATUT)
     .or('project_id.not.is.null,projet_lie.not.is.null')
     .order('date_charge', { ascending: false });
 
   if (!error && Array.isArray(data) && data.length) {
-    return data.filter((c) => c.project_id || String(c.projet_lie || '').trim());
+    return data.filter(
+      (c) => (c.project_id || String(c.projet_lie || '').trim())
+        && (isChargePaidForProject(c) || isChargeEligibleForBackfill(c)),
+    );
   }
 
   const viaApi = await fetchLinkedChargesViaApi();
