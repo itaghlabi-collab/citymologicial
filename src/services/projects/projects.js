@@ -110,6 +110,35 @@ export async function generateProjectRef() {
 
 const SELECT_FOR_LINK = 'id, nom, ref, client_nom, statut, created_at';
 
+async function fetchProjectsViaSelectApi() {
+  try {
+    const { resolveApiBaseUrl, ENV } = await import('../../config/env');
+    const sb = getSupabase();
+    const { data: { session } } = await sb.auth.getSession();
+    if (!session?.access_token) return [];
+
+    const res = await fetch(`${resolveApiBaseUrl()}/projects/for-select`, {
+      method: 'GET',
+      headers: {
+        Authorization: `Bearer ${session.access_token}`,
+        apikey: ENV.SUPABASE_ANON_KEY,
+      },
+    });
+
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      console.warn('[CITYMO] API projects/for-select', res.status, err.error || '');
+      return [];
+    }
+
+    const json = await res.json();
+    return (json.projects || []).map(normalizeProject);
+  } catch (err) {
+    console.warn('[CITYMO] fetchProjectsViaSelectApi', err);
+    return [];
+  }
+}
+
 /** Liste légère pour listes déroulantes (Achats, Finance) — sans jointure clients. */
 export async function listProjectsForSelect() {
   const sb = getSupabase();
@@ -117,6 +146,16 @@ export async function listProjectsForSelect() {
   const { data: rpcData, error: rpcError } = await sb.rpc('list_projects_for_purchase_select');
   if (!rpcError && rpcData?.length) {
     return rpcData.map(normalizeProject);
+  }
+
+  const viaApi = await fetchProjectsViaSelectApi();
+  if (viaApi.length) return viaApi;
+
+  try {
+    const rows = await listProjects({ forSelect: true });
+    if (rows.length) return rows;
+  } catch (directErr) {
+    console.warn('[CITYMO] projects list direct', directErr);
   }
 
   if (rpcError) {
@@ -127,19 +166,6 @@ export async function listProjectsForSelect() {
     if (!rpcMissing) {
       console.warn('[CITYMO] list_projects_for_purchase_select', rpcError.message);
     }
-  } else if (Array.isArray(rpcData) && rpcData.length === 0) {
-    console.warn('[CITYMO] list_projects_for_purchase_select : liste vide — repli requête directe');
-  }
-
-  try {
-    const rows = await listProjects({ forSelect: true });
-    if (rows.length) return rows;
-  } catch (directErr) {
-    console.warn('[CITYMO] projects list direct', directErr);
-  }
-
-  if (!rpcError && rpcData?.length) {
-    return rpcData.map(normalizeProject);
   }
 
   return [];

@@ -69,5 +69,14 @@ GRANT EXECUTE ON FUNCTION public.list_projects_for_charges_select() TO authentic
 
 NOTIFY pgrst, 'reload schema';
 
+-- Permission lecture projets pour le rôle Achats (liste déroulante « Projet lié »)
+INSERT INTO public.role_permissions (role_id, module_code, submodule_code, action_code, granted)
+SELECT r.id, 'projets', 'projets', 'voir', true
+FROM public.erp_roles r
+WHERE r.code = 'achats'
+ON CONFLICT (role_id, submodule_code, action_code) DO UPDATE SET
+  module_code = EXCLUDED.module_code,
+  granted = EXCLUDED.granted;
+
 -- Contrôle (en tant qu'utilisateur connecté via SQL editor = service role voit tout)
 SELECT COUNT(*)::int AS projets_en_base FROM public.projects;

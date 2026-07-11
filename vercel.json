@@ -55,6 +55,10 @@
     "api/admin-user-email.js": {
       "maxDuration": 60,
       "memory": 512
+    },
+    "api/projects/for-select.js": {
+      "maxDuration": 30,
+      "memory": 512
     }
   }
 }
