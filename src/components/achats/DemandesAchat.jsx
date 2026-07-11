@@ -708,7 +708,7 @@ export default function DemandesAchat() {
   const superAdmin = isSuperAdmin(user);
   const { records: suppliers } = useSuppliers();
   const {
-    records: items, projects, loading, saving, error, configured, reload, save, remove,
+    records: items, projects, loading, saving, error, configured, reload, reloadOptions, save, remove,
   } = usePurchaseRequests();
 
   const [search, setSearch] = useState('');
@@ -780,11 +780,13 @@ export default function DemandesAchat() {
   function openCreateModal(mode) {
     setEditItem(null);
     setModalMode(mode);
+    reloadOptions();
   }
 
   function openEditModal(item) {
     setEditItem(item);
     setModalMode(isGroupedPurchaseRequest(item) ? 'grouped' : 'simple');
+    reloadOptions();
   }
 
   function closeModal() {

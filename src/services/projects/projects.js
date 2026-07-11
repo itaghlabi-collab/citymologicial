@@ -113,10 +113,22 @@ const SELECT_FOR_LINK = 'id, nom, ref, client_nom, statut, created_at';
 /** Liste légère pour listes déroulantes (Achats, Finance) — sans jointure clients. */
 export async function listProjectsForSelect() {
   const sb = getSupabase();
-  const { data, error } = await sb.rpc('list_projects_for_purchase_select');
 
-  if (!error && Array.isArray(data)) {
-    return data.map(normalizeProject);
+  const { data: rpcData, error: rpcError } = await sb.rpc('list_projects_for_purchase_select');
+  if (!rpcError && rpcData?.length) {
+    return rpcData.map(normalizeProject);
+  }
+
+  if (rpcError) {
+    const msg = String(rpcError.message || '').toLowerCase();
+    const rpcMissing = rpcError.code === 'PGRST202'
+      || rpcError.code === '42883'
+      || msg.includes('list_projects_for_purchase_select');
+    if (!rpcMissing) {
+      console.warn('[CITYMO] list_projects_for_purchase_select', rpcError.message);
+    }
+  } else if (Array.isArray(rpcData) && rpcData.length === 0) {
+    console.warn('[CITYMO] list_projects_for_purchase_select : liste vide — repli requête directe');
   }
 
   try {
@@ -126,12 +138,8 @@ export async function listProjectsForSelect() {
     console.warn('[CITYMO] projects list direct', directErr);
   }
 
-  if (error) {
-    const msg = String(error.message || '').toLowerCase();
-    const rpcMissing = error.code === 'PGRST202'
-      || error.code === '42883'
-      || msg.includes('list_projects_for_purchase_select');
-    if (!rpcMissing) console.warn('[CITYMO] list_projects_for_purchase_select', error);
+  if (!rpcError && rpcData?.length) {
+    return rpcData.map(normalizeProject);
   }
 
   return [];

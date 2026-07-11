@@ -1,7 +1,5 @@
--- =============================================================================
--- FIX — Liste « Projet lié » vide pour Laila WOTFI (Responsable Achats)
--- Exécuter dans Supabase SQL Editor (obligatoire si le dropdown reste vide).
--- =============================================================================
+-- Fix définitif : liste projets pour Achats (Laila WOTFI et tous utilisateurs connectés)
+-- La RPC ne doit pas dépendre de erp_can (souvent false pour le rôle Achats).
 
 CREATE OR REPLACE FUNCTION public.erp_can_read_projects_for_link()
 RETURNS boolean
@@ -15,6 +13,9 @@ AS $$
 $$;
 
 GRANT EXECUTE ON FUNCTION public.erp_can_read_projects_for_link() TO authenticated;
+
+COMMENT ON FUNCTION public.erp_can_read_projects_for_link() IS
+  'Tout utilisateur ERP actif peut lire la liste projets pour les selects Achats/Finance.';
 
 DROP POLICY IF EXISTS projects_select_linked ON public.projects;
 CREATE POLICY projects_select_linked ON public.projects
@@ -68,6 +69,3 @@ $$;
 GRANT EXECUTE ON FUNCTION public.list_projects_for_charges_select() TO authenticated;
 
 NOTIFY pgrst, 'reload schema';
-
--- Contrôle (en tant qu'utilisateur connecté via SQL editor = service role voit tout)
-SELECT COUNT(*)::int AS projets_en_base FROM public.projects;
