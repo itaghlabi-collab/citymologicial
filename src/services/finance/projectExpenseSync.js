@@ -14,13 +14,7 @@ import {
   resolveChargeProject,
   syncChargesToProjectsViaApi,
 } from './projectExpenseMerge';
-
-import {
-  buildProjectIndexes,
-  resolveChargeProject,
-  syncChargesToProjectsViaApi,
-} from './projectExpenseMerge';
-import { CHARGE_SYNC_STATUT, isChargePaidForProject } from './projectExpenseRules';
+import { isChargePaidForProject } from './projectExpenseRules';
 
 const SKIP_STATUTS = ['Annulé', 'Refusé', 'Refusée', 'Brouillon'];
 const OP_PAID_STATUTS = ['Payé'];
