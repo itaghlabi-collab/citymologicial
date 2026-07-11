@@ -31,6 +31,7 @@ WHERE (c.project_id IS NOT NULL OR NULLIF(TRIM(c.projet_lie), '') IS NOT NULL)
   AND c.statut IN ('Payé', 'Validé', 'Validée', 'Comptabilisée', 'Comptabilisé')
   AND c.statut NOT IN ('Annulé', 'Refusé', 'Refusée', 'Brouillon')
   AND (c.date_charge >= '2026-07-01' OR c.created_at::date >= '2026-07-01')
+  AND COALESCE(c.project_id, p.id) IS NOT NULL
   AND NOT EXISTS (
     SELECT 1 FROM public.project_expenses pe
     WHERE pe.source_type = 'finance_charge' AND pe.source_id = c.id
