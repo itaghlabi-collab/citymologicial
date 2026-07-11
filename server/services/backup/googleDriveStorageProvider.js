@@ -260,6 +260,47 @@ async function removeBackupFolder(backupRef) {
   folderCache.delete(`${rootId}/${backupRef}`);
 }
 
+async function listBackupTree(backupRef) {
+  await assertRootFolderAccessible();
+  const rootId = getDriveRootFolderId();
+  const folderId = await findChildFolder(rootId, backupRef);
+  if (!folderId) return [];
+
+  const drive = getDrive();
+  const files = [];
+
+  async function walk(parentId, relPrefix) {
+    let pageToken = null;
+    do {
+      const res = await drive.files.list({
+        q: `'${parentId}' in parents and trashed=false`,
+        fields: 'nextPageToken, files(id, name, mimeType, size)',
+        pageSize: 1000,
+        pageToken: pageToken || undefined,
+        ...DRIVE_LIST_OPTS,
+      });
+
+      for (const f of res.data.files || []) {
+        const relPath = relPrefix ? `${relPrefix}/${f.name}` : f.name;
+        if (f.mimeType === 'application/vnd.google-apps.folder') {
+          await walk(f.id, relPath);
+        } else {
+          files.push({
+            id: f.id,
+            name: f.name,
+            relPath,
+            size: Number(f.size) || 0,
+          });
+        }
+      }
+      pageToken = res.data.nextPageToken;
+    } while (pageToken);
+  }
+
+  await walk(folderId, '');
+  return files;
+}
+
 async function listBackupFiles(backupRef) {
   await assertRootFolderAccessible();
   const rootId = getDriveRootFolderId();
@@ -311,6 +352,7 @@ module.exports = {
   remove,
   list,
   listBackupFiles,
+  listBackupTree,
   verifyDriveBackupFiles,
   getBackupFolderLink,
   removeBackupFolder,

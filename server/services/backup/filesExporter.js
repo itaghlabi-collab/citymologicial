@@ -112,7 +112,7 @@ async function listBucketFiles(bucket, pipeline, onProgress) {
   return files;
 }
 
-async function copyFileToBackup(bucket, filePath, backupPrefix, pipeline) {
+async function copyFileToBackup(bucket, filePath, backupPrefix, pipeline, { mirrorDrive } = {}) {
   const label = `${bucket}/${filePath}`;
   const sb = getSupabaseAdmin();
 
@@ -137,10 +137,18 @@ async function copyFileToBackup(bucket, filePath, backupPrefix, pipeline) {
     () => supabaseStorageProvider.upload(destPath, buf, data.type || 'application/octet-stream'),
   );
 
+  if (mirrorDrive) {
+    await pipeline.run(
+      `googleDrive.mirror(${destPath})`,
+      () => mirrorDrive(destPath, buf, data.type || 'application/octet-stream'),
+      { timeoutMs: Number(process.env.BACKUP_DRIVE_UPLOAD_TIMEOUT_MS) || 300_000 },
+    );
+  }
+
   return { source: label, dest: destPath, size: buf.length };
 }
 
-async function copyFilesParallel(files, backupPrefix, pipeline, onProgress) {
+async function copyFilesParallel(files, backupPrefix, pipeline, onProgress, { mirrorDrive } = {}) {
   const manifestEntries = [];
   const errors = [];
   let done = 0;
@@ -154,7 +162,7 @@ async function copyFilesParallel(files, backupPrefix, pipeline, onProgress) {
       index += 1;
       const file = files[i];
       try {
-        const copied = await copyFileToBackup(file.bucket, file.path, backupPrefix, pipeline);
+        const copied = await copyFileToBackup(file.bucket, file.path, backupPrefix, pipeline, { mirrorDrive });
         manifestEntries.push(copied);
         done += 1;
         onProgress?.({ phase: 'copied', bucket: file.bucket, path: file.path, copied: done, total: files.length });
@@ -183,7 +191,7 @@ async function copyFilesParallel(files, backupPrefix, pipeline, onProgress) {
  * @param {{ mode?: string, pipeline: object, onProgress?: Function }} options
  */
 async function exportFiles(backupPrefix, options = {}) {
-  const { pipeline, onProgress } = options;
+  const { pipeline, onProgress, mirrorDrive } = options;
   if (!pipeline) throw new Error('exportFiles requiert pipeline (backupPipeline.createPipeline).');
 
   const mode = resolveFilesMode(options.mode);
@@ -196,9 +204,18 @@ async function exportFiles(backupPrefix, options = {}) {
     buckets,
     files: [],
     errors: [],
+    copied_files: 0,
+    drive_copied_files: 0,
   };
 
   let totalListed = 0;
+  let driveCopiedCount = 0;
+  const mirrorWithCount = mirrorDrive
+    ? async (destPath, buf, contentType) => {
+      await mirrorDrive(destPath, buf, contentType);
+      driveCopiedCount += 1;
+    }
+    : null;
   let bucketIndex = 0;
 
   for (const bucket of buckets) {
@@ -259,6 +276,7 @@ async function exportFiles(backupPrefix, options = {}) {
       backupPrefix,
       pipeline,
       onProgress,
+      { mirrorDrive: mirrorWithCount },
     );
     manifest.files.push(...manifestEntries);
     manifest.errors.push(...errors);
@@ -267,6 +285,8 @@ async function exportFiles(backupPrefix, options = {}) {
   manifest.total_files = manifest.files.length;
   manifest.total_size = manifest.files.reduce((s, f) => s + (f.size || 0), 0);
   manifest.listed_objects = totalListed;
+  manifest.copied_files = mode === 'full' ? manifest.files.length : 0;
+  manifest.drive_copied_files = mode === 'full' ? driveCopiedCount : 0;
   return manifest;
 }
 
