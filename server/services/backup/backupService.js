@@ -9,12 +9,17 @@ const { exportDatabase, exportErpConfig } = require('./databaseExporter');
 const { exportFiles, resolveFilesMode } = require('./filesExporter');
 const { verifyBackupArtifact, countStorageFilesUnder } = require('./backupArtifacts');
 const { assertBackupIntegrity } = require('./backupIntegrity');
-const googleDriveStorageProvider = require('./googleDriveStorageProvider');
 const { createPipeline, COMPRESS_TIMEOUT_MS, runTimed } = require('./backupPipeline');
-const { wrapStorageUpload, DRIVE_UPLOAD_TIMEOUT_MS } = require('./timedBackupStorage');
+const { wrapStorageUpload, createDriveMirror, DRIVE_UPLOAD_TIMEOUT_MS } = require('./timedBackupStorage');
 const { formatFailMessage, DOMAINS } = require('./backupErrors');
 const { updateErpBackupRow, buildInsertPayload } = require('./erpBackupSchema');
 const { validateGoogleDriveForBackup } = require('./googleDriveAccess');
+const {
+  ensureBackupFolder,
+  getCachedBackupFolderId,
+  verifyBackupArchivesOnDrive,
+} = require('./googleDriveBackupUploader');
+const { isDriveRequired } = require('./googleDriveConfig');
 const { logBackupAction } = require('./auditLog');
 const logger = require('./backupLogger');
 const { testSupabaseConnection } = require('./backupEnvCheck');
@@ -117,6 +122,8 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
 
   let manifest = null;
   let dbPayload = null;
+  let totalSize = 0;
+  let mainFilePath = null;
 
   try {
     await pipeline.run('testSupabaseConnection', () => testSupabaseConnection());
@@ -127,14 +134,19 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
     );
     driveUploadAllowed = Boolean(driveCheck.uploadAllowed);
 
-    const timedUpload = wrapStorageUpload(storage, pipeline, 'backup', { driveUploadAllowed });
+    if (driveUploadAllowed) {
+      await pipeline.run('ensureBackupFolder', () => ensureBackupFolder(backupPrefix));
+    }
+
+    const timedUpload = wrapStorageUpload(storage, pipeline, 'backup', {
+      driveUploadAllowed,
+      backupRef: backupPrefix,
+    });
 
     await pipeline.run('updateBackupProgress:init', async () => {
       await updateBackupProgress(row.id, 'Export base de données…');
     });
 
-    let totalSize = 0;
-    let mainFilePath = null;
     const driveErrors = [];
     const driveUploadedPaths = [];
 
@@ -176,12 +188,13 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
     if (typeKey === 'documents' || typeKey === 'complete') {
       const filesMode = typeKey === 'complete' ? 'full' : resolveFilesMode();
 
-      const mirrorDrive = driveUploadAllowed
+      const baseMirror = driveUploadAllowed ? createDriveMirror(backupPrefix) : null;
+      const mirrorDrive = baseMirror
         ? async (destPath, buf, contentType) => {
           await runTimed(
             'drive-mirror',
             destPath,
-            () => googleDriveStorageProvider.upload(destPath, buf, contentType),
+            () => baseMirror(destPath, buf, contentType),
             DRIVE_UPLOAD_TIMEOUT_MS,
           );
           driveUploadedPaths.push(destPath);
@@ -293,40 +306,48 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
       { timeoutMs: 30 * 60_000, progressMsg: 'Contrôle intégrité final…' },
     );
 
-    let driveFolderId = null;
-    let driveFolderUrl = null;
-    if (driveUploadAllowed && storage.driveEnabled && storage.getDriveFolderLink) {
+    let driveFolderId = getCachedBackupFolderId(backupPrefix);
+    let driveSynced = false;
+    let driveSyncError = null;
+
+    if (driveUploadAllowed && driveEnabled) {
       try {
-        const link = await pipeline.run(
-          'getDriveFolderLink',
-          () => storage.getDriveFolderLink(backupPrefix),
-          { timeoutMs: 60_000 },
+        const driveVerify = await pipeline.run(
+          'verifyBackupArchivesOnDrive',
+          () => verifyBackupArchivesOnDrive(backupPrefix),
+          { timeoutMs: 120_000 },
         );
-        driveFolderId = link?.folderId || null;
-        driveFolderUrl = link?.url || null;
+        driveFolderId = driveVerify.folderId;
+        driveSynced = true;
       } catch (err) {
-        throw new Error(`[Google Drive] Lien dossier inaccessible — ${err.message}`);
+        driveSyncError = err.message;
+        if (isDriveRequired()) {
+          throw new Error(`[Google Drive] ${err.message}`);
+        }
       }
+    }
+
+    if (isDriveRequired() && driveEnabled && !driveSynced) {
+      throw new Error(`[Google Drive] ${driveSyncError || 'Dossier Drive vide — archives absentes'}`);
     }
 
     const updated = await pipeline.run('finalizeBackupRow:succes', () => finalizeBackupRow(row.id, {
       statut: 'succes',
       file_path: mainFilePath,
       taille_bytes: totalSize,
-      drive_synced: Boolean(integrityReport.drive_verified),
+      drive_synced: driveSynced,
       drive_folder_id: driveFolderId,
-      drive_sync_error: null,
-      description: `Intégrité OK — ${integrityReport.tables_exported} tables, ${integrityReport.files_copied} fichiers copiés, ${Math.round(integrityReport.total_size_bytes / 1024)} Ko`,
+      drive_sync_error: driveSyncError,
+      description: driveSynced
+        ? `Intégrité OK — ${integrityReport.tables_exported} tables, ${integrityReport.files_copied} fichiers copiés, Drive sync OK`
+        : `Intégrité OK — Supabase OK, Drive ⚠ ${driveSyncError || 'non synchronisé'}`,
     }));
-
-    if (driveFolderUrl) {
-      updated.drive_folder_url = driveFolderUrl;
-    }
 
     logger.backupDone(backupPrefix, {
       type: typeKey,
       bytes: totalSize,
-      drive_synced: integrityReport.drive_verified,
+      drive_synced: driveSynced,
+      drive_folder_id: driveFolderId,
       integrity: integrityReport,
       file_path: mainFilePath,
       steps: pipeline.lastStep,
@@ -338,6 +359,24 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
       ? err.message
       : formatFailMessage(err, pipeline.lastLocation);
     logger.backupError(backupPrefix, err);
+
+    const driveOnlyFailure = !isDriveRequired()
+      && (failMsg.includes('[Google Drive]') || failMsg.includes('DRIVE]'));
+
+    if (driveOnlyFailure) {
+      await safeFinalizeBackupRow(row.id, {
+        statut: 'succes',
+        file_path: mainFilePath || null,
+        taille_bytes: totalSize || null,
+        error_message: null,
+        drive_synced: false,
+        drive_sync_error: failMsg.replace(/^\[Google Drive\]\s*/, ''),
+        drive_folder_id: getCachedBackupFolderId(backupPrefix),
+        description: `Succès partiel — Supabase OK, Drive en échec`,
+      }, failMsg);
+      return null;
+    }
+
     const driveOnlyMsg = err?.domain === DOMAINS.DRIVE
       ? err.message.replace(`[${DOMAINS.DRIVE}] `, '')
       : null;

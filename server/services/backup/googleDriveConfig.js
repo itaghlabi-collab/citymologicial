@@ -95,8 +95,15 @@ function getServiceAccountEmail() {
   }
 }
 
+/** Si false, échec Drive → succès ERP avec drive_synced=false (warning). */
+function isDriveRequired() {
+  if (!isGoogleDriveEnabled()) return false;
+  return process.env.BACKUP_GOOGLE_DRIVE_REQUIRED !== 'false';
+}
+
 module.exports = {
   isGoogleDriveEnabled,
+  isDriveRequired,
   getServiceAccountCredentials,
   getDriveRootFolderId,
   normalizeDriveFolderId,

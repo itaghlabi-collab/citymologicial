@@ -3,7 +3,8 @@
  */
 const { DOMAINS } = require('./backupErrors');
 const { verifyRequiredArchives, countStorageFilesUnder } = require('./backupArtifacts');
-const { verifyDriveBackupFiles, listBackupTree } = require('./googleDriveStorageProvider');
+const { verifyBackupArchivesOnDrive } = require('./googleDriveBackupUploader');
+const { listBackupTree } = require('./googleDriveStorageProvider');
 
 function requiredArchives(typeKey, backupPrefix) {
   const paths = [];
@@ -115,9 +116,9 @@ async function assertBackupIntegrity(ctx) {
     }
 
     try {
-      await verifyDriveBackupFiles(backupPrefix, archives);
+      await verifyBackupArchivesOnDrive(backupPrefix);
     } catch (err) {
-      issues.push(`[${DOMAINS.DRIVE}] Archives absentes sur Drive — ${err.message}`);
+      issues.push(`[${DOMAINS.DRIVE}] ${err.message}`);
     }
 
     if (typeKey === 'complete' && manifest?.mode === 'full') {

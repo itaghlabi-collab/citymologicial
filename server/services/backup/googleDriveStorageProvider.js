@@ -358,4 +358,10 @@ module.exports = {
   removeBackupFolder,
   assertRootFolderAccessible,
   resetDriveClient,
+  getDrive,
+  getDriveRootFolderId,
+  findChildFolder,
+  getOrCreateFolder,
+  findFileInFolder,
+  DRIVE_LIST_OPTS,
 };
