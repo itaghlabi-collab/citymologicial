@@ -7,7 +7,8 @@ import { getSupabaseAdmin } from '../../lib/supabaseAdminVercel.mjs';
 export const config = { maxDuration: 60 };
 
 const SKIP_STATUTS = ['Annulé', 'Refusé', 'Refusée', 'Brouillon'];
-const PAID_STATUTS = ['Payé', 'Validé', 'Comptabilisée', 'Exécuté'];
+const CHARGE_SYNC_STATUT = 'Payé';
+const OP_SYNC_STATUT = 'Payé';
 
 function normalizeName(s) {
   return String(s || '')
@@ -58,8 +59,9 @@ function chargeRow(charge, projectId) {
     origine: 'charge_manuelle',
     source_type: 'finance_charge',
     source_id: charge.id,
-    statut: PAID_STATUTS.includes(charge.statut) ? 'valide' : 'en_attente',
+    statut: 'payee',
     mode_paiement: charge.mode_paiement,
+    montant_paye: Number(charge.montant) || 0,
   };
 }
 
@@ -97,6 +99,7 @@ export default async function handler(req, res) {
       admin
         .from('finance_charges')
         .select('id, project_id, projet_lie, date_charge, libelle, categorie, fournisseur, montant, mode_paiement, statut, ref_charge, commentaire')
+        .eq('statut', CHARGE_SYNC_STATUT)
         .or('project_id.not.is.null,projet_lie.not.is.null'),
     ]);
 
@@ -108,7 +111,7 @@ export default async function handler(req, res) {
     const stats = { created: 0, updated: 0, skipped: 0, errors: 0 };
 
     for (const charge of charges || []) {
-      if (SKIP_STATUTS.includes(charge.statut)) {
+      if (charge.statut !== CHARGE_SYNC_STATUT) {
         stats.skipped++;
         continue;
       }

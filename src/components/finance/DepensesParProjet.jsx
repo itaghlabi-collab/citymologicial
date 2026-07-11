@@ -3,7 +3,7 @@
  */
 import { useState, useRef, useMemo } from 'react';
 import {
-  Loader2, RefreshCw, Plus, Upload, Eye, Download, FileSpreadsheet,
+  Loader2, Plus, Upload, Eye, Download, FileSpreadsheet,
   Building2, TrendingDown, Calendar, Target, ArrowLeft, BarChart3,
   AlertTriangle, LayoutDashboard, FolderKanban, CreditCard, LineChart,
   Search, User, Wallet, ShoppingCart, ChevronDown, ChevronUp, Users, Tags,
@@ -13,6 +13,7 @@ import { formatMAD, Modal, INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE, MODES_PAIE
 import { FinanceDonutChart } from './FinanceCharts.jsx';
 import { importDepenseChantierFile } from '../../services/finance/projectExpenseImport';
 import { filterProjectExpenses, ORIGINE_LABELS } from '../../services/finance/projectExpenses';
+import { isCountedProjectExpense } from '../../services/finance/projectExpenseRules';
 import { getProjectDetailData } from '../../services/finance/projectExpenseData';
 import { exportProjectExpensesPdf } from '../../services/finance/projectExpensePdf';
 import { exportProjectExpensesExcel, exportAllProjectsExcel } from '../../services/finance/projectExpenseExport';
@@ -288,8 +289,8 @@ function ExpenseFormModal({ open, onClose, projects, onSave, initial }) {
 
 export default function DepensesParProjet() {
   const {
-    configured, loading, syncing, error, projects, expenses, dashboard, summaries,
-    unmatched, reload, create, syncNow, erpContext,
+    configured, loading, error, projects, expenses, dashboard, summaries,
+    unmatched, reload, create, erpContext,
   } = useProjectExpenses();
 
   const [view, setView] = useState('vue');
@@ -313,7 +314,7 @@ export default function DepensesParProjet() {
 
   const monthlyChart = useMemo(() => {
     const byMonth = {};
-    expenses.filter((e) => e.statut !== 'annule').forEach((e) => {
+    expenses.filter(isCountedProjectExpense).forEach((e) => {
       const m = e.date_depense?.slice(0, 7);
       if (m) byMonth[m] = (byMonth[m] || 0) + e.montant;
     });
@@ -324,7 +325,7 @@ export default function DepensesParProjet() {
 
   const topDepensesChart = useMemo(() => (
     [...expenses]
-      .filter((e) => e.statut !== 'annule')
+      .filter(isCountedProjectExpense)
       .sort((a, b) => b.montant - a.montant)
       .slice(0, 8)
       .map((e) => ({
@@ -350,12 +351,9 @@ export default function DepensesParProjet() {
       <div className="page-header flex-between finance-page-header dpp-header">
         <div>
           <h1 className="page-title">DÉPENSES PAR PROJET</h1>
-          <p className="page-subtitle">Suivi financier des chantiers — alimentation automatique ERP</p>
+          <p className="page-subtitle">Suivi financier des chantiers — alimenté automatiquement à chaque paiement (OP payé ou dépense payée)</p>
         </div>
         <div className="finance-page-actions">
-          <button type="button" className="btn btn-secondary btn-sm" onClick={() => syncNow()} disabled={syncing}>
-            <RefreshCw size={14} className={syncing ? 'cin-spin' : ''} /> Sync ERP
-          </button>
           <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowImport(true)}>
             <Upload size={14} /> Import Excel initial
           </button>

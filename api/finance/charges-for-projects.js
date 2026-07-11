@@ -6,6 +6,8 @@ import { getSupabaseAdmin } from '../../lib/supabaseAdminVercel.mjs';
 
 export const config = { maxDuration: 30 };
 
+const CHARGE_SYNC_STATUT = 'Payé';
+
 export default async function handler(req, res) {
   if (req.method !== 'GET') {
     return res.status(405).json({ error: 'Méthode non autorisée.' });
@@ -38,6 +40,7 @@ export default async function handler(req, res) {
     const { data, error } = await admin
       .from('finance_charges')
       .select('id, project_id, projet_lie, date_charge, libelle, categorie, fournisseur, montant, mode_paiement, statut, ref_charge, commentaire')
+      .eq('statut', CHARGE_SYNC_STATUT)
       .or('project_id.not.is.null,projet_lie.not.is.null')
       .order('date_charge', { ascending: false });
 

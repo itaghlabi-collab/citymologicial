@@ -15,15 +15,22 @@ import {
   syncChargesToProjectsViaApi,
 } from './projectExpenseMerge';
 
-const PAID_STATUTS = ['Payé', 'Validé', 'Comptabilisée', 'Exécuté'];
+import {
+  buildProjectIndexes,
+  resolveChargeProject,
+  syncChargesToProjectsViaApi,
+} from './projectExpenseMerge';
+import { CHARGE_SYNC_STATUT, isChargePaidForProject } from './projectExpenseRules';
+
 const SKIP_STATUTS = ['Annulé', 'Refusé', 'Refusée', 'Brouillon'];
+const OP_PAID_STATUTS = ['Payé'];
 
 function isActiveStatut(statut) {
   return statut && !SKIP_STATUTS.includes(statut);
 }
 
-function isPaidStatut(statut) {
-  return PAID_STATUTS.includes(statut);
+function isPaidOpStatut(statut) {
+  return OP_PAID_STATUTS.includes(statut);
 }
 
 export async function syncProjectExpensesFromErp() {
@@ -43,8 +50,6 @@ export async function syncProjectExpensesFromErp() {
 
   await syncCharges(stats, resolveProject);
   await syncPaymentOrders(stats, resolveProject);
-  await syncAcquisitionOrders(stats, resolveProject);
-  await syncPurchaseRequests(stats, resolveProject);
 
   return stats;
 }
@@ -59,21 +64,22 @@ function chargeProjectExpensePayload(charge, projectId) {
     description: charge.commentaire,
     fournisseur: charge.fournisseur,
     montant: charge.montant,
+    montant_paye: Number(charge.montant) || 0,
     observation: ref ? `Réf. ${ref}` : null,
     origine: 'charge_manuelle',
     source_type: 'finance_charge',
     source_id: charge.id,
-    statut: isPaidStatut(charge.statut) ? 'valide' : 'en_attente',
+    statut: 'payee',
     mode_paiement: charge.mode_paiement,
   };
 }
 
-/** Synchronise une dépense générale vers project_expenses (immédiat à l'enregistrement). */
+/** Synchronise une dépense générale vers project_expenses — uniquement si statut Payé. */
 export async function syncChargeToProjectExpense(charge) {
   if (!charge?.id) return null;
   const sb = getSupabase();
 
-  if (!isActiveStatut(charge.statut)) {
+  if (!isChargePaidForProject(charge)) {
     if (['Annulé', 'Refusé', 'Refusée'].includes(charge.statut)) {
       const { data: existing } = await sb
         .from('project_expenses')
@@ -123,7 +129,7 @@ async function syncCharges(stats, resolveProject) {
   if (error) throw error;
 
   for (const c of (data || []).filter((row) => row.project_id || String(row.projet_lie || '').trim())) {
-    if (!isActiveStatut(c.statut)) { stats.skipped++; continue; }
+    if (!isChargePaidForProject(c)) { stats.skipped++; continue; }
     const project = resolveProject(c);
     if (!project?.id) { stats.skipped++; continue; }
     try {
@@ -145,7 +151,7 @@ async function syncPaymentOrders(stats, resolveProject) {
   if (error) throw error;
 
   for (const o of data || []) {
-    if (!isActiveStatut(o.statut)) { stats.skipped++; continue; }
+    if (!isPaidOpStatut(o.statut)) { stats.skipped++; continue; }
     if (o.purchase_request_id) {
       stats.skipped++;
       continue;
@@ -163,7 +169,7 @@ async function syncPaymentOrders(stats, resolveProject) {
         origine: 'ordre_paiement',
         source_type: 'payment_order',
         source_id: o.id,
-        statut: isPaidStatut(o.statut) ? 'valide' : 'en_attente',
+        statut: 'valide',
         payment_order_id: o.id,
         mode_paiement: o.mode_paiement,
       });

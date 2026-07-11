@@ -3,9 +3,13 @@
  */
 import { getSupabase } from '../../lib/supabase';
 import { ORIGINE_LABELS } from './projectExpenses';
+import {
+  CHARGE_SYNC_STATUT,
+  isChargePaidForProject,
+  isCountedProjectExpense,
+} from './projectExpenseRules';
 
 const SKIP_CHARGE_STATUTS = ['Annulé', 'Refusé', 'Refusée', 'Brouillon'];
-const PAID_CHARGE_STATUTS = ['Payé', 'Validé', 'Comptabilisée', 'Exécuté'];
 
 function normalizeName(s) {
   return String(s || '')
@@ -74,7 +78,7 @@ export function chargeMatchesProject(charge, project) {
 
 function chargeExpenseStatut(statut) {
   if (SKIP_CHARGE_STATUTS.includes(statut)) return 'annule';
-  return PAID_CHARGE_STATUTS.includes(statut) ? 'valide' : 'en_attente';
+  return statut === CHARGE_SYNC_STATUT ? 'payee' : 'en_attente';
 }
 
 export function chargeToProjectExpenseRow(charge, projectId, projects) {
@@ -98,13 +102,13 @@ export function chargeToProjectExpenseRow(charge, projectId, projects) {
     source_type: 'finance_charge',
     source_id: String(charge.id),
     statut: chargeExpenseStatut(charge.statut),
-    statut_label: chargeExpenseStatut(charge.statut) === 'valide' ? 'Validée' : 'En attente',
+    statut_label: chargeExpenseStatut(charge.statut) === 'payee' ? 'Payée' : 'En attente',
     mode_paiement: charge.mode_paiement || '',
     _fromCharge: true,
   };
 }
 
-/** Ajoute les dépenses générales non encore présentes dans project_expenses. */
+/** Ajoute les dépenses générales payées non encore présentes dans project_expenses. */
 export function mergeChargesIntoProjectExpenses(expenses, charges, projects) {
   const indexes = buildProjectIndexes(projects);
   const syncedChargeIds = new Set(
@@ -113,8 +117,9 @@ export function mergeChargesIntoProjectExpenses(expenses, charges, projects) {
       .map((e) => String(e.source_id)),
   );
 
-  const merged = [...(expenses || [])];
+  const merged = (expenses || []).filter(isCountedProjectExpense);
   for (const charge of charges || []) {
+    if (!isChargePaidForProject(charge)) continue;
     if (SKIP_CHARGE_STATUTS.includes(charge.statut)) continue;
     if (syncedChargeIds.has(String(charge.id))) continue;
 
@@ -154,6 +159,7 @@ export async function fetchLinkedChargesForProjects() {
   const { data, error } = await getSupabase()
     .from('finance_charges')
     .select('id, project_id, projet_lie, date_charge, libelle, categorie, fournisseur, montant, mode_paiement, statut, ref_charge, commentaire')
+    .eq('statut', CHARGE_SYNC_STATUT)
     .or('project_id.not.is.null,projet_lie.not.is.null')
     .order('date_charge', { ascending: false });
 

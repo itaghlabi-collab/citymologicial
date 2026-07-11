@@ -3,14 +3,15 @@
  */
 import { getSupabase } from '../../lib/supabase';
 import { expenseMatchesProject } from './projectExpenseMerge';
+import { isCountedProjectExpense } from './projectExpenseRules';
 
-const PAID_OP = ['Payé', 'Exécuté', 'Comptabilisé'];
+const PAID_OP = ['Payé'];
 
 export function buildProjectExpenseDashboard(expenses, projects, orders = [], acquisitionOrders = []) {
   const now = new Date();
   const monthPrefix = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
 
-  const active = (expenses || []).filter((e) => e.statut !== 'annule');
+  const active = (expenses || []).filter(isCountedProjectExpense);
   const totalDepenses = active.reduce((s, e) => s + e.montant, 0);
   const depensesMois = active
     .filter((e) => e.date_depense?.startsWith(monthPrefix))
@@ -83,7 +84,7 @@ export function buildProjectExpenseDashboard(expenses, projects, orders = [], ac
 
 export function buildProjectSummaries(projects, expenses, orders = [], acquisitionOrders = []) {
   const expByProject = {};
-  const active = (expenses || []).filter((e) => e.statut !== 'annule');
+  const active = (expenses || []).filter(isCountedProjectExpense);
   (projects || []).forEach((p) => {
     const key = String(p.id);
     active.forEach((e) => {
@@ -150,7 +151,7 @@ export function getProjectDetailData(project, expenses, orders, acquisitionOrder
   const projectOa = (acquisitionOrders || []).filter((o) => o.project_id === project.id);
 
   const fournisseurs = [...new Set(projectExpenses.map((e) => e.fournisseur).filter(Boolean))];
-  const total = projectExpenses.filter((e) => e.statut !== 'annule').reduce((s, e) => s + e.montant, 0);
+  const total = projectExpenses.filter(isCountedProjectExpense).reduce((s, e) => s + e.montant, 0);
   const budget = Number(project.budget_approuve) || 0;
 
   const byCategorie = {};
