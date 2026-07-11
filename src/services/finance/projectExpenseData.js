@@ -2,6 +2,7 @@
  * projectExpenseData.js — Agrégations dashboard / liste projets
  */
 import { getSupabase } from '../../lib/supabase';
+import { expenseMatchesProject } from './projectExpenseMerge';
 
 const PAID_OP = ['Payé', 'Exécuté', 'Comptabilisé'];
 
@@ -82,14 +83,18 @@ export function buildProjectExpenseDashboard(expenses, projects, orders = [], ac
 
 export function buildProjectSummaries(projects, expenses, orders = [], acquisitionOrders = []) {
   const expByProject = {};
-  (expenses || []).filter((e) => e.statut !== 'annule').forEach((e) => {
-    if (!e.project_id) return;
-    if (!expByProject[e.project_id]) {
-      expByProject[e.project_id] = { total: 0, count: 0, fournisseurs: new Set() };
-    }
-    expByProject[e.project_id].total += e.montant;
-    expByProject[e.project_id].count++;
-    if (e.fournisseur) expByProject[e.project_id].fournisseurs.add(e.fournisseur);
+  const active = (expenses || []).filter((e) => e.statut !== 'annule');
+  (projects || []).forEach((p) => {
+    const key = String(p.id);
+    active.forEach((e) => {
+      if (!expenseMatchesProject(e, p)) return;
+      if (!expByProject[key]) {
+        expByProject[key] = { total: 0, count: 0, fournisseurs: new Set() };
+      }
+      expByProject[key].total += e.montant;
+      expByProject[key].count++;
+      if (e.fournisseur) expByProject[key].fournisseurs.add(e.fournisseur);
+    });
   });
 
   const commandeByProject = {};
@@ -105,7 +110,7 @@ export function buildProjectSummaries(projects, expenses, orders = [], acquisiti
   });
 
   return (projects || []).map((p) => {
-    const exp = expByProject[p.id] || { total: 0, count: 0, fournisseurs: new Set() };
+    const exp = expByProject[String(p.id)] || { total: 0, count: 0, fournisseurs: new Set() };
     const budget = Number(p.budget_approuve) || 0;
     return {
       ...p,
@@ -140,7 +145,7 @@ export async function fetchErpContextForProjects() {
 }
 
 export function getProjectDetailData(project, expenses, orders, acquisitionOrders) {
-  const projectExpenses = (expenses || []).filter((e) => e.project_id === project.id);
+  const projectExpenses = (expenses || []).filter((e) => expenseMatchesProject(e, project));
   const projectOrders = (orders || []).filter((o) => o.project_id === project.id);
   const projectOa = (acquisitionOrders || []).filter((o) => o.project_id === project.id);
 

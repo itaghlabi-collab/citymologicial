@@ -9,6 +9,11 @@ import {
   dedupePurchaseProjectExpenses,
 } from './projectExpenses';
 import { listProjects, listProjectsForSelect } from '../projects/projects';
+import {
+  buildProjectIndexes,
+  resolveChargeProject,
+  syncChargesToProjectsViaApi,
+} from './projectExpenseMerge';
 
 const PAID_STATUTS = ['Payé', 'Validé', 'Comptabilisée', 'Exécuté'];
 const SKIP_STATUTS = ['Annulé', 'Refusé', 'Refusée', 'Brouillon'];
@@ -42,30 +47,6 @@ export async function syncProjectExpensesFromErp() {
   await syncPurchaseRequests(stats, resolveProject);
 
   return stats;
-}
-
-function buildProjectIndexes(projects) {
-  const projectById = Object.fromEntries(projects.map((p) => [p.id, p]));
-  const projectByName = {};
-  const projectByRef = {};
-  projects.forEach((p) => {
-    projectByName[normalizeName(p.nom)] = p;
-    if (p.ref) projectByRef[p.ref] = p;
-  });
-  return { projectById, projectByName, projectByRef };
-}
-
-function resolveChargeProject(charge, indexes) {
-  const { projectById, projectByName, projectByRef } = indexes;
-  if (charge.project_id) {
-    return projectById[charge.project_id] || { id: charge.project_id };
-  }
-  const label = String(charge.projet_lie || charge.project_name || '').trim();
-  if (!label) return null;
-  const refPart = label.split(' — ')[0]?.trim();
-  if (refPart && projectByRef[refPart]) return projectByRef[refPart];
-  const nomPart = label.split(' — ')[1]?.trim() || label;
-  return projectByName[normalizeName(nomPart)] || projectByName[normalizeName(label)] || null;
 }
 
 function chargeProjectExpensePayload(charge, projectId) {
@@ -119,7 +100,13 @@ export async function syncChargeToProjectExpense(charge) {
   const project = resolveChargeProject(charge, buildProjectIndexes(projects));
   if (!project?.id) return null;
 
-  return upsertProjectExpenseFromSource(chargeProjectExpensePayload(charge, project.id));
+  try {
+    return await upsertProjectExpenseFromSource(chargeProjectExpensePayload(charge, project.id));
+  } catch (err) {
+    console.warn('[CITYMO] sync charge → project_expense direct', err);
+    await syncChargesToProjectsViaApi();
+    return null;
+  }
 }
 
 export async function removeProjectExpenseForCharge(chargeId) {
@@ -129,16 +116,6 @@ export async function removeProjectExpenseForCharge(chargeId) {
     .delete()
     .eq('source_type', 'finance_charge')
     .eq('source_id', chargeId);
-}
-
-function normalizeName(s) {
-  return String(s || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
 }
 
 async function syncCharges(stats, resolveProject) {

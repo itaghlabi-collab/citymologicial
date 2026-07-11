@@ -59,6 +59,14 @@
     "api/projects/for-select.js": {
       "maxDuration": 30,
       "memory": 512
+    },
+    "api/finance/charges-for-projects.js": {
+      "maxDuration": 30,
+      "memory": 512
+    },
+    "api/finance/sync-charges-to-projects.js": {
+      "maxDuration": 60,
+      "memory": 512
     }
   }
 }

@@ -16,18 +16,35 @@ import {
   buildProjectSummaries,
   fetchErpContextForProjects,
 } from '../services/finance/projectExpenseData';
+import {
+  fetchLinkedChargesForProjects,
+  mergeChargesIntoProjectExpenses,
+  syncChargesToProjectsViaApi,
+} from '../services/finance/projectExpenseMerge';
 import { isSupabaseConfigured } from '../lib/supabase';
 
-const SYNC_COOLDOWN_MS = 5 * 60 * 1000; // sync auto max 1× / 5 min
+const SYNC_COOLDOWN_MS = 5 * 60 * 1000;
 let lastAutoSyncAt = 0;
+let hasMountedOnce = false;
 
 function enrichExpensesWithProjects(expenses, projects) {
-  const byId = Object.fromEntries((projects || []).map((p) => [p.id, p]));
+  const byId = Object.fromEntries((projects || []).map((p) => [String(p.id), p]));
   return (expenses || []).map((e) => {
-    const p = e.project_id ? byId[e.project_id] : null;
+    const p = e.project_id ? byId[String(e.project_id)] : null;
     if (!p) return e;
     return { ...e, project_nom: p.nom || e.project_nom || e.project_name_raw || '' };
   });
+}
+
+async function loadExpenseBundle() {
+  const [projs, exps, ctx, charges] = await Promise.all([
+    listProjects({ light: true }),
+    listProjectExpenses(),
+    fetchErpContextForProjects(),
+    fetchLinkedChargesForProjects(),
+  ]);
+  const merged = mergeChargesIntoProjectExpenses(exps, charges, projs);
+  return { projs, expenses: enrichExpensesWithProjects(merged, projs), ctx };
 }
 
 export function useProjectExpenses() {
@@ -48,13 +65,9 @@ export function useProjectExpenses() {
     setLoading(true);
     setError(null);
     try {
-      const [projs, exps, ctx] = await Promise.all([
-        listProjects({ light: true }),
-        listProjectExpenses(),
-        fetchErpContextForProjects(),
-      ]);
+      const { projs, expenses: merged, ctx } = await loadExpenseBundle();
       setProjects(projs);
-      setExpenses(enrichExpensesWithProjects(exps, projs));
+      setExpenses(merged);
       setErpContext(ctx);
     } catch (err) {
       setError(err.message || 'Erreur chargement');
@@ -62,24 +75,22 @@ export function useProjectExpenses() {
       setLoading(false);
     }
 
-    // Sync ERP uniquement sur demande explicite (bouton), ou 1× toutes les 5 min max
     const now = Date.now();
-    const canAuto = withSync && now - lastAutoSyncAt > SYNC_COOLDOWN_MS;
+    const firstMount = !hasMountedOnce;
+    hasMountedOnce = true;
+    const canAuto = withSync && (firstMount || now - lastAutoSyncAt > SYNC_COOLDOWN_MS);
     if (!canAuto && !opts.forceSync) return;
 
     setSyncing(true);
     try {
-      lastAutoSyncAt = Date.now();
+      await syncChargesToProjectsViaApi();
       await syncProjectExpensesFromErp().catch(() => {});
       await purgeImportedTotalSummaryRows().catch(() => {});
-      const [projs2, exps2, ctx2] = await Promise.all([
-        listProjects({ light: true }),
-        listProjectExpenses(),
-        fetchErpContextForProjects(),
-      ]);
+      const { projs: projs2, expenses: merged2, ctx: ctx2 } = await loadExpenseBundle();
       setProjects(projs2);
-      setExpenses(enrichExpensesWithProjects(exps2, projs2));
+      setExpenses(merged2);
       setErpContext(ctx2);
+      lastAutoSyncAt = Date.now();
     } finally {
       setSyncing(false);
     }
@@ -133,10 +144,14 @@ export function useProjectExpenses() {
     syncNow: async () => {
       setSyncing(true);
       try {
-        lastAutoSyncAt = Date.now();
+        await syncChargesToProjectsViaApi();
         await syncProjectExpensesFromErp();
         await purgeImportedTotalSummaryRows().catch(() => {});
-        await reload({ withSync: false });
+        const { projs, expenses: merged, ctx } = await loadExpenseBundle();
+        setProjects(projs);
+        setExpenses(merged);
+        setErpContext(ctx);
+        lastAutoSyncAt = Date.now();
       } finally {
         setSyncing(false);
       }
