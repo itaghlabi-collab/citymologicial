@@ -17,6 +17,7 @@ const {
   getDriveListOpts,
   formatDriveApiError,
 } = require('./googleDriveContext');
+const { getSharedDriveApiFlags } = require('./googleDriveAuth');
 
 /** backupRef → folderId Google Drive (conservé pour tout le job). */
 const backupFolderCache = new Map();
@@ -103,6 +104,7 @@ async function uploadBufferToBackup(backupRef, relativePath, buffer, contentType
   logDrive(`target parent: ${parentId}`);
 
   const drive = getDrive();
+  const apiFlags = getSharedDriveApiFlags();
   const existingId = await findFileInFolder(parentId, fileName);
   const media = {
     mimeType: contentType || 'application/octet-stream',
@@ -117,8 +119,8 @@ async function uploadBufferToBackup(backupRef, relativePath, buffer, contentType
       const res = await drive.files.update({
         fileId: existingId,
         media,
-        supportsAllDrives: true,
         fields: 'id, size',
+        ...apiFlags,
       });
       fileId = res.data.id;
       size = Number(res.data.size) || buffer.length;
@@ -129,8 +131,8 @@ async function uploadBufferToBackup(backupRef, relativePath, buffer, contentType
           parents: [parentId],
         },
         media,
-        supportsAllDrives: true,
         fields: 'id, size',
+        ...apiFlags,
       });
       fileId = res.data.id;
       size = Number(res.data.size) || buffer.length;

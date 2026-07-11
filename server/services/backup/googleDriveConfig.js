@@ -1,14 +1,24 @@
 /**
- * Configuration Google Drive — compte de service (pas OAuth utilisateur).
+ * Configuration Google Drive — OAuth utilisateur (Mon Drive) ou Service Account (Shared Drive).
  */
 const fs = require('fs');
+const {
+  detectAuthMode,
+  isOAuthConfigured,
+  isServiceAccountConfigured,
+  AUTH_MODES,
+} = require('./googleDriveAuth');
 
 function isGoogleDriveEnabled() {
   return (
     process.env.BACKUP_GOOGLE_DRIVE_ENABLED === 'true'
     && Boolean(process.env.GOOGLE_DRIVE_FOLDER_ID?.trim())
-    && Boolean(process.env.GOOGLE_SERVICE_ACCOUNT_JSON?.trim())
+    && Boolean(detectAuthMode())
   );
+}
+
+function getDriveAuthMode() {
+  return detectAuthMode();
 }
 
 function normalizePrivateKey(key) {
@@ -18,7 +28,6 @@ function normalizePrivateKey(key) {
 
 function parseServiceAccountJson(raw) {
   let text = String(raw).trim();
-  // Corrige erreurs fréquentes de copier-coller
   text = text.replace(/"universe_domain":\s*"googleapis.com"\s*\./g, '"universe_domain": "googleapis.com"');
   if (!text.endsWith('}')) {
     text = text.replace(/\.\s*$/, '');
@@ -67,7 +76,6 @@ function getServiceAccountCredentials() {
   }
 }
 
-/** Extrait l'ID dossier depuis une URL Drive ou un ID brut. */
 function normalizeDriveFolderId(raw) {
   let id = String(raw || '').trim();
   if (!id) throw new Error('GOOGLE_DRIVE_FOLDER_ID manquant sur Railway.');
@@ -77,7 +85,7 @@ function normalizeDriveFolderId(raw) {
 
   if (id === '.' || !/^[a-zA-Z0-9_-]{10,}$/.test(id)) {
     throw new Error(
-      `GOOGLE_DRIVE_FOLDER_ID invalide : "${id}". Utilisez l'ID du dossier partagé (ex. 1EmDiULTRrP2BuLlaLhh1A1CFXkGgN59t).`,
+      `GOOGLE_DRIVE_FOLDER_ID invalide : "${id}". Utilisez l'ID du dossier Drive (URL .../folders/XXXX).`,
     );
   }
   return id;
@@ -95,17 +103,31 @@ function getServiceAccountEmail() {
   }
 }
 
-/** Si false, échec Drive → succès ERP avec drive_synced=false (warning). */
 function isDriveRequired() {
   if (!isGoogleDriveEnabled()) return false;
   return process.env.BACKUP_GOOGLE_DRIVE_REQUIRED !== 'false';
 }
 
+function getDriveAuthStatus() {
+  const mode = detectAuthMode();
+  return {
+    mode: mode || 'none',
+    oauth_configured: isOAuthConfigured(),
+    service_account_configured: isServiceAccountConfigured(),
+    forced_mode: process.env.BACKUP_GOOGLE_DRIVE_AUTH_MODE || 'auto',
+  };
+}
+
 module.exports = {
+  AUTH_MODES,
   isGoogleDriveEnabled,
   isDriveRequired,
+  getDriveAuthMode,
+  getDriveAuthStatus,
   getServiceAccountCredentials,
   getDriveRootFolderId,
   normalizeDriveFolderId,
   getServiceAccountEmail,
+  isOAuthConfigured,
+  isServiceAccountConfigured,
 };

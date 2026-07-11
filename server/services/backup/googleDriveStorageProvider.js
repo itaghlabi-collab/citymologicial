@@ -1,15 +1,11 @@
 /**
- * Stockage Google Drive — 2e copie de sécurité (compte de service).
- * Projet GCP : citymo-erp-sauvegardes
+ * Stockage Google Drive — OAuth (Mon Drive) ou Service Account (Shared Drive).
  */
-const { google } = require('googleapis');
-const { JWT } = require('google-auth-library');
 const {
-  getServiceAccountCredentials,
   getDriveRootFolderId,
-  getServiceAccountEmail,
   isGoogleDriveEnabled,
 } = require('./googleDriveConfig');
+const { getDrive, getSharedDriveApiFlags, resetDriveAuth } = require('./googleDriveAuth');
 const {
   loadDriveContext,
   getDriveListOpts,
@@ -17,31 +13,11 @@ const {
   resetDriveContext,
 } = require('./googleDriveContext');
 
-/** Scope complet — Drive partagé (Shared Drive) obligatoire pour compte de service. */
-const DRIVE_SCOPES = ['https://www.googleapis.com/auth/drive'];
-
-const DRIVE_LIST_OPTS = { supportsAllDrives: true, includeItemsFromAllDrives: true };
-
-let driveClient = null;
 let rootFolderVerified = false;
 const folderCache = new Map();
 
-function getDrive() {
-  if (driveClient) return driveClient;
-
-  const credentials = getServiceAccountCredentials();
-  const auth = new JWT({
-    email: credentials.client_email,
-    key: credentials.private_key,
-    scopes: DRIVE_SCOPES,
-  });
-
-  driveClient = google.drive({ version: 'v3', auth });
-  return driveClient;
-}
-
 function resetDriveClient() {
-  driveClient = null;
+  resetDriveAuth();
   rootFolderVerified = false;
   folderCache.clear();
   resetDriveContext();
@@ -61,6 +37,10 @@ async function assertRootFolderAccessible() {
 
 function escapeDriveQuery(value) {
   return String(value).replace(/'/g, "\\'");
+}
+
+function apiFlags() {
+  return getSharedDriveApiFlags();
 }
 
 async function findChildFolder(parentId, name) {
@@ -108,7 +88,7 @@ async function getOrCreateFolder(parentId, name) {
       parents: [parentId],
     },
     fields: 'id',
-    supportsAllDrives: true,
+    ...apiFlags(),
   });
 
   folderCache.set(cacheKey, created.data.id);
@@ -141,6 +121,7 @@ async function upload(filePath, buffer, contentType = 'application/gzip') {
   await assertRootFolderAccessible();
 
   const drive = getDrive();
+  const flags = apiFlags();
   const { parentId, fileName } = await resolvePathFolderIds(filePath);
   const existingId = await findFileInFolder(parentId, fileName);
 
@@ -152,7 +133,7 @@ async function upload(filePath, buffer, contentType = 'application/gzip') {
       await drive.files.update({
         fileId: existingId,
         media,
-        supportsAllDrives: true,
+        ...flags,
       });
       return { path: filePath, fileId: existingId, bucket: 'google_drive' };
     }
@@ -164,7 +145,7 @@ async function upload(filePath, buffer, contentType = 'application/gzip') {
       },
       media,
       fields: 'id, webViewLink, webContentLink, size',
-      supportsAllDrives: true,
+      ...flags,
     });
 
     return {
@@ -182,12 +163,13 @@ async function upload(filePath, buffer, contentType = 'application/gzip') {
 
 async function download(filePath) {
   const drive = getDrive();
+  const flags = apiFlags();
   const { parentId, fileName } = await resolvePathFolderIds(filePath);
   const fileId = await findFileInFolder(parentId, fileName);
   if (!fileId) throw new Error(`Fichier Drive introuvable : ${filePath}`);
 
   const res = await drive.files.get(
-    { fileId, alt: 'media', supportsAllDrives: true },
+    { fileId, alt: 'media', ...flags },
     { responseType: 'arraybuffer' },
   );
   return Buffer.from(res.data);
@@ -195,6 +177,7 @@ async function download(filePath) {
 
 async function getSignedUrl(filePath) {
   const drive = getDrive();
+  const flags = apiFlags();
   const { parentId, fileName } = await resolvePathFolderIds(filePath);
   const fileId = await findFileInFolder(parentId, fileName);
   if (!fileId) throw new Error(`Fichier Drive introuvable : ${filePath}`);
@@ -202,7 +185,7 @@ async function getSignedUrl(filePath) {
   const meta = await drive.files.get({
     fileId,
     fields: 'webViewLink, webContentLink',
-    supportsAllDrives: true,
+    ...flags,
   });
   return meta.data.webContentLink || meta.data.webViewLink;
 }
@@ -211,6 +194,7 @@ async function getBackupFolderLink(backupRef) {
   await assertRootFolderAccessible();
 
   const drive = getDrive();
+  const flags = apiFlags();
   const rootId = getDriveRootFolderId();
   let folderId = await findChildFolder(rootId, backupRef);
   if (!folderId) folderId = await getOrCreateFolder(rootId, backupRef);
@@ -218,17 +202,18 @@ async function getBackupFolderLink(backupRef) {
   const meta = await drive.files.get({
     fileId: folderId,
     fields: 'webViewLink',
-    supportsAllDrives: true,
+    ...flags,
   });
   return { folderId, url: meta.data.webViewLink };
 }
 
 async function remove(filePath) {
   const drive = getDrive();
+  const flags = apiFlags();
   const { parentId, fileName } = await resolvePathFolderIds(filePath);
   const fileId = await findFileInFolder(parentId, fileName);
   if (fileId) {
-    await drive.files.delete({ fileId });
+    await drive.files.delete({ fileId, ...flags });
   }
 }
 
@@ -238,17 +223,20 @@ async function removeBackupFolder(backupRef) {
   if (!folderId) return;
 
   const drive = getDrive();
+  const listOpts = await getDriveListOpts();
+  const flags = apiFlags();
+
   const children = await drive.files.list({
     q: `'${folderId}' in parents and trashed=false`,
     fields: 'files(id)',
     pageSize: 1000,
-    ...DRIVE_LIST_OPTS,
+    ...listOpts,
   });
 
   for (const child of children.data.files || []) {
-    await drive.files.delete({ fileId: child.id });
+    await drive.files.delete({ fileId: child.id, ...flags });
   }
-  await drive.files.delete({ fileId: folderId });
+  await drive.files.delete({ fileId: folderId, ...flags });
   folderCache.delete(`${rootId}/${backupRef}`);
 }
 
@@ -259,6 +247,7 @@ async function listBackupTree(backupRef) {
   if (!folderId) return [];
 
   const drive = getDrive();
+  const listOpts = await getDriveListOpts();
   const files = [];
 
   async function walk(parentId, relPrefix) {
@@ -269,7 +258,7 @@ async function listBackupTree(backupRef) {
         fields: 'nextPageToken, files(id, name, mimeType, size)',
         pageSize: 1000,
         pageToken: pageToken || undefined,
-        ...DRIVE_LIST_OPTS,
+        ...listOpts,
       });
 
       for (const f of res.data.files || []) {
@@ -300,11 +289,12 @@ async function listBackupFiles(backupRef) {
   if (!folderId) return [];
 
   const drive = getDrive();
+  const listOpts = await getDriveListOpts();
   const res = await drive.files.list({
     q: `'${folderId}' in parents and trashed=false and mimeType!='application/vnd.google-apps.folder'`,
     fields: 'files(id, name, size)',
     pageSize: 100,
-    ...DRIVE_LIST_OPTS,
+    ...listOpts,
   });
   return res.data.files || [];
 }
@@ -324,6 +314,7 @@ async function verifyDriveBackupFiles(backupRef, expectedPaths) {
 
 async function list(prefix) {
   const drive = getDrive();
+  const listOpts = await getDriveListOpts();
   const rootId = getDriveRootFolderId();
   const folderId = prefix ? (await findChildFolder(rootId, prefix) || rootId) : rootId;
 
@@ -331,7 +322,7 @@ async function list(prefix) {
     q: `'${folderId}' in parents and trashed=false`,
     fields: 'files(id, name, size)',
     pageSize: 1000,
-    ...DRIVE_LIST_OPTS,
+    ...listOpts,
   });
 
   return (res.data.files || []).map((f) => ({ name: f.name, id: f.id, size: f.size }));
@@ -355,5 +346,4 @@ module.exports = {
   findChildFolder,
   getOrCreateFolder,
   findFileInFolder,
-  DRIVE_LIST_OPTS,
 };

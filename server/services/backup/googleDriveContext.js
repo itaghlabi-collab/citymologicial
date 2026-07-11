@@ -1,17 +1,19 @@
 /**
- * Contexte Google Drive — détecte Drive partagé vs Mon Drive personnel.
- *
- * CAUSE RACINE des échecs persistants :
- * Les comptes de service n'ont AUCUN quota sur « Mon Drive » personnel.
- * Erreur Google : "Service Accounts do not have storage quota"
- * → le dossier GOOGLE_DRIVE_FOLDER_ID DOIT être dans un Drive partagé (Shared Drive).
+ * Contexte Google Drive — adapté au mode d'authentification (OAuth vs Service Account).
  */
 const { Readable } = require('stream');
 const {
   getDriveRootFolderId,
   getServiceAccountEmail,
-  normalizeDriveFolderId,
 } = require('./googleDriveConfig');
+const {
+  getDrive,
+  getAuthMode,
+  getSharedDriveApiFlags,
+  isOAuthMode,
+  isServiceAccountMode,
+  AUTH_MODES,
+} = require('./googleDriveAuth');
 
 let contextCache = null;
 
@@ -19,67 +21,65 @@ function resetDriveContext() {
   contextCache = null;
 }
 
-function getDrive() {
-  return require('./googleDriveStorageProvider').getDrive();
-}
-
 function isServiceAccountQuotaError(message) {
   const msg = String(message || '').toLowerCase();
   return msg.includes('service accounts do not have storage quota')
-    || msg.includes('storage quota')
-    || msg.includes('cannot upload to my drive');
+    || (msg.includes('storage quota') && msg.includes('service account'));
 }
 
 function formatDriveApiError(err, context = {}) {
   const raw = String(err?.message || err || 'erreur inconnue');
+  const mode = context.authMode || getAuthMode();
 
   if (isServiceAccountQuotaError(raw)) {
-    const email = getServiceAccountEmail() || 'le compte de service';
-    return (
-      'Google Drive : compte de service sans quota sur Mon Drive personnel. '
-      + 'Le dossier configuré doit être dans un Drive partagé (Shared Drive), pas dans « Mon Drive ». '
-      + `Étapes : 1) Google Drive → Drives partagés → créer « CITYMO Sauvegardes ». `
-      + `2) Ajouter ${email} comme Gestionnaire de contenu. `
-      + `3) Créer le dossier sauvegardes DANS ce drive partagé. `
-      + `4) Mettre à jour GOOGLE_DRIVE_FOLDER_ID sur Railway avec le nouvel ID. `
-      + `(Détail Google : ${raw})`
-    );
+    if (mode === AUTH_MODES.SERVICE_ACCOUNT) {
+      const email = getServiceAccountEmail() || 'le compte de service';
+      return (
+        'Service Account sans quota sur Mon Drive. '
+        + 'Solutions : (1) configurer OAuth (GOOGLE_OAUTH_CLIENT_ID/SECRET/REFRESH_TOKEN) pour Mon Drive, '
+        + `ou (2) placer le dossier dans un Drive partagé avec ${email} comme Gestionnaire de contenu. `
+        + `(Détail Google : ${raw})`
+      );
+    }
   }
 
   if (context.rootFolderId && raw.includes('File not found')) {
+    if (mode === AUTH_MODES.OAUTH) {
+      return `Dossier Drive inaccessible (ID ${context.rootFolderId}). Vérifiez GOOGLE_DRIVE_FOLDER_ID et le refresh token OAuth. Détail : ${raw}`;
+    }
     const email = getServiceAccountEmail();
-    return `Dossier Drive inaccessible (ID ${context.rootFolderId}). Partagez-le avec ${email} (Éditeur ou Gestionnaire de contenu). Détail : ${raw}`;
+    return `Dossier Drive inaccessible (ID ${context.rootFolderId}). Partagez-le avec ${email}. Détail : ${raw}`;
   }
 
   return raw;
 }
 
-/**
- * Charge métadonnées du dossier racine et détecte s'il est dans un Drive partagé.
- */
 async function loadDriveContext() {
   if (contextCache) return contextCache;
 
+  const authMode = getAuthMode();
   const rootFolderId = getDriveRootFolderId();
   const configuredDriveId = process.env.GOOGLE_DRIVE_SHARED_DRIVE_ID?.trim() || null;
   const drive = getDrive();
+  const apiFlags = getSharedDriveApiFlags();
 
   let data;
   try {
     const res = await drive.files.get({
       fileId: rootFolderId,
       fields: 'id, name, driveId, mimeType, capabilities, parents',
-      supportsAllDrives: true,
+      ...apiFlags,
     });
     data = res.data;
   } catch (err) {
-    throw new Error(formatDriveApiError(err, { rootFolderId }));
+    throw new Error(formatDriveApiError(err, { rootFolderId, authMode }));
   }
 
   const sharedDriveId = data.driveId || configuredDriveId || null;
   const isSharedDrive = Boolean(sharedDriveId);
 
   contextCache = {
+    authMode,
     rootFolderId,
     rootFolderName: data.name || rootFolderId,
     sharedDriveId,
@@ -90,20 +90,28 @@ async function loadDriveContext() {
   };
 
   console.info('[DRIVE] context loaded', {
+    authMode: contextCache.authMode,
     folder: contextCache.rootFolderName,
     folderId: contextCache.rootFolderId,
-    sharedDriveId: contextCache.sharedDriveId || '(aucun — Mon Drive personnel)',
+    sharedDriveId: contextCache.sharedDriveId || (authMode === AUTH_MODES.OAUTH ? '(Mon Drive OAuth)' : '(aucun)'),
     isSharedDrive: contextCache.isSharedDrive,
   });
+
+  if (isServiceAccountMode() && contextCache.isPersonalDrive) {
+    console.warn(
+      '[DRIVE] ATTENTION : Service Account + Mon Drive personnel = uploads impossibles. '
+      + 'Passez en mode OAuth ou utilisez un Drive partagé.',
+    );
+  }
 
   return contextCache;
 }
 
 function getListOptsForContext(ctx) {
-  const opts = {
-    supportsAllDrives: true,
-    includeItemsFromAllDrives: true,
-  };
+  if (isOAuthMode()) {
+    return {};
+  }
+  const opts = getSharedDriveApiFlags();
   if (ctx?.sharedDriveId) {
     opts.corpora = 'drive';
     opts.driveId = ctx.sharedDriveId;
@@ -117,25 +125,25 @@ async function getDriveListOpts() {
 }
 
 /**
- * Vérifie que le dossier est dans un Drive partagé (requis pour compte de service).
+ * Service Account uniquement — le dossier doit être dans un Shared Drive.
  */
 async function assertSharedDriveRequired() {
+  if (!isServiceAccountMode()) return loadDriveContext();
+
   const ctx = await loadDriveContext();
-  const email = getServiceAccountEmail() || 'citymo-backup-service@...';
+  const email = getServiceAccountEmail() || 'compte de service';
 
   if (ctx.isPersonalDrive) {
     throw new Error(
-      `Configuration invalide : « ${ctx.rootFolderName} » est dans Mon Drive personnel (ID ${ctx.rootFolderId}). `
-      + 'Les comptes de service Google ne peuvent pas y uploader de fichiers (aucun quota). '
-      + 'Créez un Drive partagé (Shared Drive) dans Google Workspace, placez-y le dossier sauvegardes, '
-      + `ajoutez ${email} comme Gestionnaire de contenu, puis mettez à jour GOOGLE_DRIVE_FOLDER_ID.`,
+      `Mode Service Account : « ${ctx.rootFolderName} » est dans Mon Drive personnel. `
+      + 'Interdit — aucun quota. Utilisez OAuth (GOOGLE_OAUTH_*) ou un Drive partagé.',
     );
   }
 
   if (!ctx.canAddChildren && !ctx.canEdit) {
     throw new Error(
-      `Le compte de service ${email} n'a pas la permission d'écrire dans le dossier ${ctx.rootFolderId}. `
-      + 'Attribuez le rôle Gestionnaire de contenu sur le Drive partagé.',
+      `Le compte de service ${email} ne peut pas écrire dans ${ctx.rootFolderId}. `
+      + 'Rôle Gestionnaire de contenu requis sur le Shared Drive.',
     );
   }
 
@@ -143,17 +151,19 @@ async function assertSharedDriveRequired() {
 }
 
 /**
- * Test réel d'upload + suppression (détecte quota / permissions avant le job).
+ * Test upload + suppression — adapté au mode auth.
  */
 async function probeDriveWriteAccess() {
-  const ctx = await assertSharedDriveRequired();
+  const ctx = isServiceAccountMode()
+    ? await assertSharedDriveRequired()
+    : await loadDriveContext();
+
   const drive = getDrive();
+  const apiFlags = getSharedDriveApiFlags();
   const probeName = `.citymo-probe-${Date.now()}.txt`;
   const body = Buffer.from('citymo-drive-probe-ok', 'utf8');
 
-  console.info('[DRIVE] probe upload start');
-  console.info('[DRIVE] probe target folder:', ctx.rootFolderId);
-  console.info('[DRIVE] probe shared drive:', ctx.sharedDriveId);
+  console.info('[DRIVE] probe upload start', { mode: ctx.authMode, folder: ctx.rootFolderId });
 
   let fileId;
   try {
@@ -166,8 +176,8 @@ async function probeDriveWriteAccess() {
         mimeType: 'text/plain',
         body: Readable.from(body),
       },
-      supportsAllDrives: true,
       fields: 'id, size',
+      ...apiFlags,
     });
     fileId = created.data.id;
     console.info(`[DRIVE] probe upload success: ${fileId}`);
@@ -176,18 +186,20 @@ async function probeDriveWriteAccess() {
   }
 
   try {
-    await drive.files.delete({ fileId, supportsAllDrives: true });
+    await drive.files.delete({ fileId, ...apiFlags });
     console.info('[DRIVE] probe cleanup ok');
   } catch (err) {
     console.warn('[DRIVE] probe cleanup failed (non bloquant):', err.message);
   }
 
-  return { ok: true, folderId: ctx.rootFolderId, sharedDriveId: ctx.sharedDriveId };
+  return {
+    ok: true,
+    authMode: ctx.authMode,
+    folderId: ctx.rootFolderId,
+    sharedDriveId: ctx.sharedDriveId || null,
+  };
 }
 
-/**
- * Résout un ID depuis URL drives/ ou folders/ pour GOOGLE_DRIVE_SHARED_DRIVE_ID.
- */
 function normalizeSharedDriveId(raw) {
   if (!raw?.trim()) return null;
   let id = String(raw).trim();
