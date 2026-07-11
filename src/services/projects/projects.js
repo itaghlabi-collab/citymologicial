@@ -112,7 +112,29 @@ const SELECT_FOR_LINK = 'id, nom, ref, client_nom, statut, created_at';
 
 /** Liste légère pour listes déroulantes (Achats, Finance) — sans jointure clients. */
 export async function listProjectsForSelect() {
-  return listProjects({ forSelect: true });
+  const sb = getSupabase();
+  const { data, error } = await sb.rpc('list_projects_for_purchase_select');
+
+  if (!error && Array.isArray(data)) {
+    return data.map(normalizeProject);
+  }
+
+  try {
+    const rows = await listProjects({ forSelect: true });
+    if (rows.length) return rows;
+  } catch (directErr) {
+    console.warn('[CITYMO] projects list direct', directErr);
+  }
+
+  if (error) {
+    const msg = String(error.message || '').toLowerCase();
+    const rpcMissing = error.code === 'PGRST202'
+      || error.code === '42883'
+      || msg.includes('list_projects_for_purchase_select');
+    if (!rpcMissing) console.warn('[CITYMO] list_projects_for_purchase_select', error);
+  }
+
+  return [];
 }
 
 export async function listProjects(options = {}) {

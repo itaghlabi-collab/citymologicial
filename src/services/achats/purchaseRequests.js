@@ -363,9 +363,12 @@ export function employeeOptionLabel(emp) {
 
 export async function loadPurchaseRequestFormOptions() {
   const [projects, employees] = await Promise.all([
-    listProjectsForSelect().catch(() => []),
+    listProjectsForSelect(),
     listAchatsEmployees().catch(() => []),
   ]);
+  if (!projects.length) {
+    console.warn('[CITYMO] Aucun projet pour le select Achats — exécutez RUN_PROJECTS_SELECT_ACHATS_FINANCE.sql');
+  }
   return { projects, employees };
 }
 
