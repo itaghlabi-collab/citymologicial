@@ -5,6 +5,7 @@ import { getSupabase } from '../../lib/supabase';
 import { listProjectsForSelect } from '../projects/projects';
 import { syncChargeToTransaction } from './financeTransactions';
 import { syncFinanceTransaction, FINANCE_SOURCE_TYPES } from './financeSync';
+import { removeProjectExpenseForCharge, syncChargeToProjectExpense } from './projectExpenseSync';
 
 const TABLE = 'finance_charges';
 
@@ -151,6 +152,9 @@ export async function createFinanceCharge(form, categoryName) {
   if (error) throw error;
   const charge = normalizeCharge(data);
   await syncChargeToTransaction(charge);
+  await syncChargeToProjectExpense(charge).catch((err) => {
+    console.warn('[CITYMO] sync charge → project_expense', err);
+  });
   return charge;
 }
 
@@ -169,6 +173,9 @@ export async function updateFinanceCharge(id, form, categoryName) {
   if (error) throw error;
   const charge = normalizeCharge(data);
   await syncChargeToTransaction(charge);
+  await syncChargeToProjectExpense(charge).catch((err) => {
+    console.warn('[CITYMO] sync charge → project_expense', err);
+  });
   return charge;
 }
 
@@ -178,6 +185,7 @@ export async function deleteFinanceCharge(id) {
     entity: { statut: 'Annulé', montant: 0 },
     active: false,
   }).catch(() => {});
+  await removeProjectExpenseForCharge(id).catch(() => {});
   const { error } = await getSupabase().from(TABLE).delete().eq('id', id);
   if (error) throw error;
 }

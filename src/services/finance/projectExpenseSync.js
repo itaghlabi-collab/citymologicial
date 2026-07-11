@@ -8,7 +8,7 @@ import {
   upsertPurchaseProjectExpense,
   dedupePurchaseProjectExpenses,
 } from './projectExpenses';
-import { listProjects } from '../projects/projects';
+import { listProjects, listProjectsForSelect } from '../projects/projects';
 
 const PAID_STATUTS = ['Payé', 'Validé', 'Comptabilisée', 'Exécuté'];
 const SKIP_STATUTS = ['Annulé', 'Refusé', 'Refusée', 'Brouillon'];
@@ -23,20 +23,11 @@ function isPaidStatut(statut) {
 
 export async function syncProjectExpensesFromErp() {
   const projects = await listProjects();
-  const projectById = Object.fromEntries(projects.map((p) => [p.id, p]));
-  const projectByName = {};
-  projects.forEach((p) => {
-    projectByName[normalizeName(p.nom)] = p;
-  });
+  const indexes = buildProjectIndexes(projects);
 
   const stats = { created: 0, updated: 0, skipped: 0, errors: 0, deduped: 0 };
 
-  const resolveProject = (row) => {
-    if (row.project_id && projectById[row.project_id]) return projectById[row.project_id];
-    const name = row.project_name || row.projet_lie || '';
-    if (name) return projectByName[normalizeName(name)] || null;
-    return null;
-  };
+  const resolveProject = (row) => resolveChargeProject(row, indexes);
 
   try {
     const dedupe = await dedupePurchaseProjectExpenses();
@@ -51,6 +42,93 @@ export async function syncProjectExpensesFromErp() {
   await syncPurchaseRequests(stats, resolveProject);
 
   return stats;
+}
+
+function buildProjectIndexes(projects) {
+  const projectById = Object.fromEntries(projects.map((p) => [p.id, p]));
+  const projectByName = {};
+  const projectByRef = {};
+  projects.forEach((p) => {
+    projectByName[normalizeName(p.nom)] = p;
+    if (p.ref) projectByRef[p.ref] = p;
+  });
+  return { projectById, projectByName, projectByRef };
+}
+
+function resolveChargeProject(charge, indexes) {
+  const { projectById, projectByName, projectByRef } = indexes;
+  if (charge.project_id) {
+    return projectById[charge.project_id] || { id: charge.project_id };
+  }
+  const label = String(charge.projet_lie || charge.project_name || '').trim();
+  if (!label) return null;
+  const refPart = label.split(' — ')[0]?.trim();
+  if (refPart && projectByRef[refPart]) return projectByRef[refPart];
+  const nomPart = label.split(' — ')[1]?.trim() || label;
+  return projectByName[normalizeName(nomPart)] || projectByName[normalizeName(label)] || null;
+}
+
+function chargeProjectExpensePayload(charge, projectId) {
+  const ref = charge.ref || charge.ref_charge || '';
+  return {
+    project_id: projectId,
+    date_depense: charge.date || charge.date_charge,
+    categorie: charge.categorie,
+    element_depense: charge.libelle || charge.categorie || 'Charge',
+    description: charge.commentaire,
+    fournisseur: charge.fournisseur,
+    montant: charge.montant,
+    observation: ref ? `Réf. ${ref}` : null,
+    origine: 'charge_manuelle',
+    source_type: 'finance_charge',
+    source_id: charge.id,
+    statut: isPaidStatut(charge.statut) ? 'valide' : 'en_attente',
+    mode_paiement: charge.mode_paiement,
+  };
+}
+
+/** Synchronise une dépense générale vers project_expenses (immédiat à l'enregistrement). */
+export async function syncChargeToProjectExpense(charge) {
+  if (!charge?.id) return null;
+  const sb = getSupabase();
+
+  if (!isActiveStatut(charge.statut)) {
+    if (['Annulé', 'Refusé', 'Refusée'].includes(charge.statut)) {
+      const { data: existing } = await sb
+        .from('project_expenses')
+        .select('id')
+        .eq('source_type', 'finance_charge')
+        .eq('source_id', charge.id)
+        .maybeSingle();
+      if (existing?.id) {
+        await sb.from('project_expenses').update({ statut: 'annule' }).eq('id', existing.id);
+      }
+    } else {
+      await removeProjectExpenseForCharge(charge.id);
+    }
+    return null;
+  }
+
+  const hasLink = charge.project_id || String(charge.projet_lie || '').trim();
+  if (!hasLink) {
+    await removeProjectExpenseForCharge(charge.id);
+    return null;
+  }
+
+  const projects = await listProjectsForSelect().catch(() => []);
+  const project = resolveChargeProject(charge, buildProjectIndexes(projects));
+  if (!project?.id) return null;
+
+  return upsertProjectExpenseFromSource(chargeProjectExpensePayload(charge, project.id));
+}
+
+export async function removeProjectExpenseForCharge(chargeId) {
+  if (!chargeId) return;
+  await getSupabase()
+    .from('project_expenses')
+    .delete()
+    .eq('source_type', 'finance_charge')
+    .eq('source_id', chargeId);
 }
 
 function normalizeName(s) {
@@ -69,24 +147,12 @@ async function syncCharges(stats, resolveProject) {
 
   for (const c of (data || []).filter((row) => row.project_id || String(row.projet_lie || '').trim())) {
     if (!isActiveStatut(c.statut)) { stats.skipped++; continue; }
-    const project = c.project_id ? { id: c.project_id } : resolveProject(c);
+    const project = resolveProject(c);
     if (!project?.id) { stats.skipped++; continue; }
     try {
-      const result = await upsertProjectExpenseFromSource({
-        project_id: project.id,
-        date_depense: c.date_charge,
-        categorie: c.categorie,
-        element_depense: c.libelle || c.categorie || 'Charge',
-        description: c.commentaire,
-        fournisseur: c.fournisseur,
-        montant: c.montant,
-        observation: c.ref_charge ? `Réf. ${c.ref_charge}` : null,
-        origine: 'charge_manuelle',
-        source_type: 'finance_charge',
-        source_id: c.id,
-        statut: isPaidStatut(c.statut) ? 'valide' : 'en_attente',
-        mode_paiement: c.mode_paiement,
-      });
+      const result = await upsertProjectExpenseFromSource(
+        chargeProjectExpensePayload(c, project.id),
+      );
       stats[result.action]++;
     } catch {
       stats.errors++;

@@ -86,8 +86,8 @@ export function useProjectExpenses() {
   }, [configured]);
 
   useEffect(() => {
-    // Premier affichage : lecture seule (rapide) — pas de sync ERP
-    reload({ withSync: false });
+    // Premier affichage : sync ERP (rattrape les dépenses générales non encore liées)
+    reload({ withSync: true });
   }, [reload]);
 
   const dashboard = useMemo(
