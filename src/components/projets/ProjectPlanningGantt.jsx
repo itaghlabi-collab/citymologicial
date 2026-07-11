@@ -36,7 +36,7 @@ import {
   PLANNING_TASK_PALETTE,
 } from '../../constants/projectPlanning';
 import { hasPlanningWbsTemplate, countPlanningWbsTemplateTasks } from '../../constants/projectPlanningWbsTemplates';
-import { listActiveEmployees, employeeSelectLabel, filterPlanningResponsables } from '../../services/rh/employees';
+import { listPlanningResponsableEmployees, employeeSelectLabel, filterPlanningResponsables } from '../../services/rh/employees';
 
 const ROW_H = 34;
 const HDR_H = 50;
@@ -778,7 +778,7 @@ export default function ProjectPlanningGantt({
     try {
       const [rows, emps] = await Promise.all([
         listProjectPlanningTasks(projectId),
-        listActiveEmployees().catch(() => []),
+        listPlanningResponsableEmployees().catch(() => []),
       ]);
       setInternalTasks(rows);
       setInternalEmployees(emps);

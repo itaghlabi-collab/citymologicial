@@ -26,7 +26,7 @@ import {
 } from '../../services/rh/resourceRequests';
 import { recruitmentStatutBadge, recruitmentStatutLabel } from '../../constants/projectBesoins';
 import { listAssignmentsByProject, listSubcontractors, saveProjectSubcontractorAssignments, removeSubcontractorFromProject, subcontractorFullName } from '../../services/rh/subcontractors';
-import { listActiveEmployees, employeeSelectLabel, findEmployeeByStoredLabel, filterChefsProjet, filterChefsChantierEmployees, withSelectedEmployee } from '../../services/rh/employees';
+import { listPlanningResponsableEmployees, employeeSelectLabel, findEmployeeByStoredLabel, filterChefsProjet, filterChefsChantierEmployees, withSelectedEmployee } from '../../services/rh/employees';
 import { listCrmDevis, crmDevisSelectLabel, findCrmDevisByReference } from '../../services/crm/crmDevis';
 
 // ── Shared primitives ───────────────────────────────────────────────────────
@@ -250,7 +250,7 @@ function FormulaireProjet({ initial, onSave, onCancel, saving, clients = [] }) {
   useEffect(() => {
     let cancelled = false;
     Promise.all([
-      listActiveEmployees().catch(() => []),
+      listPlanningResponsableEmployees().catch(() => []),
       listCrmDevis().catch(() => []),
     ])
       .then(([rows, devisRows]) => {

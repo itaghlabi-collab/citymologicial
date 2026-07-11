@@ -195,6 +195,32 @@ export async function listActiveEmployees() {
   });
 }
 
+/**
+ * Responsables planning (chef projet / chef de chantier) — accessible aux chefs de projet
+ * sans permission RH « employes » (RPC SECURITY DEFINER).
+ */
+export async function listPlanningResponsableEmployees() {
+  const sb = getSupabase();
+  const { data, error } = await sb.rpc('list_planning_responsables');
+
+  if (!error) {
+    return (data || []).map(normalizeEmployee);
+  }
+
+  const msg = String(error.message || '').toLowerCase();
+  const rpcMissing = error.code === 'PGRST202'
+    || error.code === '42883'
+    || msg.includes('list_planning_responsables')
+    || msg.includes('does not exist');
+
+  if (rpcMissing) {
+    const rows = await listActiveEmployees().catch(() => []);
+    return filterPlanningResponsables(rows);
+  }
+
+  throw error;
+}
+
 function normPoste(poste) {
   return (poste || '')
     .toLowerCase()

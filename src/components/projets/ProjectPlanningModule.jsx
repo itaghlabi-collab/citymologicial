@@ -12,7 +12,7 @@ import { listProjectPlanningResources, createProjectPlanningResource, updateProj
 import { listProjectPlanningComments, addProjectPlanningComment, deleteProjectPlanningComment } from '../../services/projects/projectPlanningComments';
 import { exportPlanningTasksCsv, exportPlanningResourcesCsv, exportPlanningMilestonesCsv } from '../../services/projects/projectPlanningExport';
 import { generateProjectPlanningPdfSynthesis, generateProjectPlanningPdfDetailed } from '../../services/projects/projectPlanningPdf';
-import { listActiveEmployees } from '../../services/rh/employees';
+import { listPlanningResponsableEmployees } from '../../services/rh/employees';
 import ProjectPlanningGantt from './ProjectPlanningGantt';
 import PlanningWbsView from './PlanningWbsView';
 import PlanningResourcesView from './PlanningResourcesView';
@@ -52,7 +52,7 @@ export default function ProjectPlanningModule({ projet }) {
         listProjectMilestones(projectId).catch(() => []),
         listProjectPlanningResources(projectId).catch(() => []),
         listProjectPlanningComments(projectId).catch(() => []),
-        listActiveEmployees().catch(() => []),
+        listPlanningResponsableEmployees().catch(() => []),
       ]);
       setTasks(t);
       setMilestones(m);
