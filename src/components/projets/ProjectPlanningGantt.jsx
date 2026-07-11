@@ -36,7 +36,7 @@ import {
   PLANNING_TASK_PALETTE,
 } from '../../constants/projectPlanning';
 import { hasPlanningWbsTemplate, countPlanningWbsTemplateTasks } from '../../constants/projectPlanningWbsTemplates';
-import { listPlanningResponsableEmployees, employeeSelectLabel, filterPlanningResponsables } from '../../services/rh/employees';
+import { listPlanningResponsableEmployees, employeeSelectLabel, filterPlanningResponsables, collectPlanningResponsableLabels } from '../../services/rh/employees';
 
 const ROW_H = 34;
 const HDR_H = 50;
@@ -155,7 +155,7 @@ function TaskColorPicker({ lot, value, onChange }) {
   );
 }
 
-function TaskModal({ open, task, tasks, employees, saving, importingTemplate, onClose, onSave, onImportTemplate, defaultParentId }) {
+function TaskModal({ open, task, tasks, employees, fallbackResponsables, saving, importingTemplate, onClose, onSave, onImportTemplate, defaultParentId }) {
   const [form, setForm] = useState(EMPTY_TASK);
   const [err, setErr] = useState('');
 
@@ -216,6 +216,10 @@ function TaskModal({ open, task, tasks, employees, saving, importingTemplate, on
   }
 
   const predecessors = tasks.filter((t) => t.id !== task?.id);
+  const employeeLabels = new Set(employees.map((e) => employeeSelectLabel(e)));
+  const extraResponsables = (fallbackResponsables || []).filter(
+    (label) => label && !employeeLabels.has(label),
+  );
 
   async function handleImportTemplate() {
     if (!showWbsTemplate || !onImportTemplate) return;
@@ -339,9 +343,12 @@ function TaskModal({ open, task, tasks, employees, saving, importingTemplate, on
               <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase' }}>Responsable</span>
               <select value={form.responsable} onChange={(e) => setField('responsable', e.target.value)} style={{ ...IS, cursor: 'pointer' }}>
                 <option value="">— Choisir —</option>
-                {form.responsable && !employees.some((e) => employeeSelectLabel(e) === form.responsable) && (
+                {form.responsable && !employeeLabels.has(form.responsable) && !extraResponsables.includes(form.responsable) && (
                   <option value={form.responsable}>{form.responsable}</option>
                 )}
+                {extraResponsables.map((label) => (
+                  <option key={`fb-${label}`} value={label}>{label}</option>
+                ))}
                 {employees.map((e) => (
                   <option key={e.id} value={employeeSelectLabel(e)}>{employeeSelectLabel(e)}</option>
                 ))}
@@ -814,6 +821,11 @@ export default function ProjectPlanningGantt({
     [employees],
   );
 
+  const fallbackResponsables = useMemo(
+    () => collectPlanningResponsableLabels(tasks, projet),
+    [tasks, projet],
+  );
+
   const lotOptions = useMemo(() => mergePlanningLots(tasks), [tasks]);
 
   const filtered = useMemo(
@@ -1041,7 +1053,8 @@ export default function ProjectPlanningGantt({
         open={modalOpen}
         task={editTask}
         tasks={tasks}
-        employees={responsableEmployees}
+        employees={responsableEmployees.length ? responsableEmployees : employees}
+        fallbackResponsables={fallbackResponsables}
         saving={saving}
         importingTemplate={importingTemplate}
         defaultParentId={addChildParent?.id}

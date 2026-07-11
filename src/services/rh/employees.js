@@ -197,28 +197,48 @@ export async function listActiveEmployees() {
 
 /**
  * Responsables planning (chef projet / chef de chantier) — accessible aux chefs de projet
- * sans permission RH « employes » (RPC SECURITY DEFINER).
+ * sans permission RH « employes » (RPC SECURITY DEFINER + policy RLS dédiée).
  */
 export async function listPlanningResponsableEmployees() {
   const sb = getSupabase();
-  const { data, error } = await sb.rpc('list_planning_responsables');
 
-  if (!error) {
-    return (data || []).map(normalizeEmployee);
+  const { data: rpcData, error: rpcError } = await sb.rpc('list_planning_responsables');
+  if (!rpcError && rpcData?.length) {
+    return rpcData.map(normalizeEmployee);
   }
 
-  const msg = String(error.message || '').toLowerCase();
-  const rpcMissing = error.code === 'PGRST202'
-    || error.code === '42883'
-    || msg.includes('list_planning_responsables')
-    || msg.includes('does not exist');
+  const rows = await listActiveEmployees().catch(() => []);
+  const filtered = filterPlanningResponsables(rows);
+  if (filtered.length) return filtered;
 
-  if (rpcMissing) {
-    const rows = await listActiveEmployees().catch(() => []);
-    return filterPlanningResponsables(rows);
+  if (!rpcError && Array.isArray(rpcData) && rpcData.length) {
+    return rpcData.map(normalizeEmployee);
   }
 
-  throw error;
+  if (rpcError) {
+    const msg = String(rpcError.message || '').toLowerCase();
+    const rpcMissing = rpcError.code === 'PGRST202'
+      || rpcError.code === '42883'
+      || msg.includes('list_planning_responsables')
+      || msg.includes('does not exist');
+    if (!rpcMissing) console.warn('[CITYMO] list_planning_responsables:', rpcError.message);
+  }
+
+  return filtered;
+}
+
+/** Libellés responsables de secours (tâches existantes + chefs projet/chantier). */
+export function collectPlanningResponsableLabels(tasks = [], projet = null) {
+  const labels = new Set();
+  for (const t of tasks || []) {
+    const r = (t.responsable || '').trim();
+    if (r) labels.add(r);
+  }
+  for (const raw of [projet?.chef_projet, projet?.responsable, projet?.chef_chantier]) {
+    const v = (raw || '').trim();
+    if (v) labels.add(v);
+  }
+  return [...labels].sort((a, b) => a.localeCompare(b, 'fr'));
 }
 
 function normPoste(poste) {
@@ -234,6 +254,7 @@ export function isChefProjetPoste(poste) {
   if (!p) return false;
   if (p.includes('project manager')) return true;
   if (p.includes('chef') && p.includes('projet')) return true;
+  if (p.includes('cheffe') && p.includes('projet')) return true;
   if (p.includes('responsable') && p.includes('projet')) return true;
   return false;
 }
@@ -243,6 +264,7 @@ export function isChefChantierPoste(poste) {
   const p = normPoste(poste);
   if (!p) return false;
   if (p.includes('chef') && p.includes('chantier')) return true;
+  if (p.includes('cheffe') && p.includes('chantier')) return true;
   if (p.includes('conducteur') && p.includes('travaux')) return true;
   if (p.includes('responsable') && p.includes('chantier')) return true;
   return false;
