@@ -15,6 +15,7 @@ import {
   resolveChargeProject,
   sourceKey,
   upsertProjectExpenseRow,
+  projectExpenseRowNeedsUpdate,
   OP_LIVE_STATUT,
   SKIP_CHARGE_STATUTS,
 } from '../../lib/financeProjectExpenseSync.mjs';
@@ -74,7 +75,7 @@ export default async function handler(req, res) {
         .not('project_id', 'is', null),
       admin
         .from('project_expenses')
-        .select('id, source_type, source_id, project_id, montant, element_depense')
+        .select('id, source_type, source_id, project_id, montant, element_depense, statut')
         .not('source_type', 'is', null)
         .not('source_id', 'is', null),
     ]);
@@ -126,6 +127,13 @@ export default async function handler(req, res) {
         continue;
       }
 
+      const row = chargeProjectExpenseRow(charge, project.id, { backfill: true });
+      const existing = existingByKey.get(key);
+      if (hadExisting && !projectExpenseRowNeedsUpdate(existing, row)) {
+        report.stats.skipped++;
+        continue;
+      }
+
       if (!hadExisting) {
         report.missing.charges.push({
           id: charge.id,
@@ -140,7 +148,6 @@ export default async function handler(req, res) {
 
       if (dryRun) continue;
 
-      const row = chargeProjectExpenseRow(charge, project.id, { backfill: true });
       const result = await upsertProjectExpenseRow(admin, row);
       if (result.action === 'created') {
         report.stats.created++;
@@ -170,6 +177,13 @@ export default async function handler(req, res) {
       const hadExisting = existingByKey.has(key);
       if (hadExisting) report.analyzed.alreadyLinked++;
 
+      const row = paymentOrderProjectExpenseRow(order);
+      const existing = existingByKey.get(key);
+      if (hadExisting && !projectExpenseRowNeedsUpdate(existing, row)) {
+        report.stats.skipped++;
+        continue;
+      }
+
       if (!hadExisting) {
       report.missing.orders.push({
         id: order.id,
@@ -182,7 +196,6 @@ export default async function handler(req, res) {
 
       if (dryRun) continue;
 
-      const row = paymentOrderProjectExpenseRow(order);
       const result = await upsertProjectExpenseRow(admin, row);
       if (result.action === 'created') {
         report.stats.created++;

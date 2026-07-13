@@ -19,9 +19,11 @@ export const FINANCE_COMPANY = {
   ice: null,
 };
 
-async function loadImage(url) {
+async function loadImage(url, timeoutMs = 5000) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const res = await fetch(url, { mode: 'cors' });
+    const res = await fetch(url, { mode: 'cors', signal: controller.signal });
     if (!res.ok) return null;
     const blob = await res.blob();
     return await new Promise((resolve) => {
@@ -32,6 +34,8 @@ async function loadImage(url) {
     });
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 

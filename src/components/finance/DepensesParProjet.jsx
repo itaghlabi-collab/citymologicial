@@ -15,6 +15,7 @@ import { importDepenseChantierFile } from '../../services/finance/projectExpense
 import { filterProjectExpenses, ORIGINE_LABELS } from '../../services/finance/projectExpenses';
 import { isCountedProjectExpense } from '../../services/finance/projectExpenseRules';
 import { getProjectDetailData } from '../../services/finance/projectExpenseData';
+import { expenseMatchesProject } from '../../services/finance/projectExpenseMerge';
 import { exportProjectExpensesPdf } from '../../services/finance/projectExpensePdf';
 import { exportProjectExpensesExcel, exportAllProjectsExcel } from '../../services/finance/projectExpenseExport';
 
@@ -289,7 +290,7 @@ function ExpenseFormModal({ open, onClose, projects, onSave, initial }) {
 
 export default function DepensesParProjet() {
   const {
-    configured, loading, error, projects, expenses, dashboard, summaries,
+    configured, loading, syncing, error, projects, expenses, dashboard, summaries,
     unmatched, reload, create, erpContext,
   } = useProjectExpenses();
 
@@ -299,6 +300,19 @@ export default function DepensesParProjet() {
   const [filterOrigine, setFilterOrigine] = useState('');
   const [showImport, setShowImport] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const [exportingPdf, setExportingPdf] = useState(false);
+
+  async function handleExportPdf({ project, expenses: rows }) {
+    if (exportingPdf) return;
+    setExportingPdf(true);
+    try {
+      await exportProjectExpensesPdf({ project, expenses: rows });
+    } catch (err) {
+      console.error('[CITYMO] export PDF dépenses projet', err);
+    } finally {
+      setExportingPdf(false);
+    }
+  }
 
   const filteredExpenses = filterProjectExpenses(expenses, { search, origine: filterOrigine });
   const detail = selectedProject
@@ -345,13 +359,23 @@ export default function DepensesParProjet() {
     );
   }
 
+  const pdfBusy = exportingPdf;
+
   return (
     <div className="depenses-par-projet dpp-root animate-fade-in">
       {/* Header */}
       <div className="page-header flex-between finance-page-header dpp-header">
         <div>
           <h1 className="page-title">DÉPENSES PAR PROJET</h1>
-          <p className="page-subtitle">Suivi financier des chantiers — alimenté automatiquement à chaque paiement (OP payé ou dépense payée)</p>
+          <p className="page-subtitle">
+            Suivi financier des chantiers — alimenté automatiquement à chaque paiement (OP payé ou dépense payée)
+            {syncing && (
+              <span style={{ marginLeft: 8, color: 'var(--text-3)', fontSize: '0.8rem' }}>
+                <Loader2 size={12} className="cin-spin" style={{ verticalAlign: 'middle', marginRight: 4 }} />
+                Synchronisation en cours…
+              </span>
+            )}
+          </p>
         </div>
         <div className="finance-page-actions">
           <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowImport(true)}>
@@ -513,8 +537,17 @@ export default function DepensesParProjet() {
                           <button type="button" className="btn btn-secondary btn-sm" title="Voir" onClick={() => { setSelectedProject(p); setView('projets'); }}>
                             <Eye size={13} />
                           </button>
-                          <button type="button" className="btn btn-ghost btn-sm" title="PDF" onClick={() => exportProjectExpensesPdf({ project: p, expenses: expenses.filter((e) => e.project_id === p.id) })}>
-                            <Download size={13} />
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            title="PDF"
+                            disabled={pdfBusy}
+                            onClick={() => handleExportPdf({
+                              project: p,
+                              expenses: expenses.filter((e) => expenseMatchesProject(e, p)),
+                            })}
+                          >
+                            {pdfBusy ? <Loader2 size={13} className="cin-spin" /> : <Download size={13} />}
                           </button>
                         </div>
                       </td>
@@ -541,8 +574,14 @@ export default function DepensesParProjet() {
                 <h2 className="dpp-project-hero-title">{selectedProject.nom}</h2>
               </div>
               <div className="dpp-project-hero-actions">
-                <button type="button" className="btn btn-secondary btn-sm" onClick={() => exportProjectExpensesPdf({ project: selectedProject, expenses: detail.expenses })}>
-                  <Download size={14} /> PDF
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  disabled={pdfBusy}
+                  onClick={() => handleExportPdf({ project: selectedProject, expenses: detail.expenses })}
+                >
+                  {pdfBusy ? <Loader2 size={14} className="cin-spin" /> : <Download size={14} />}
+                  {pdfBusy ? ' Génération…' : ' PDF'}
                 </button>
                 <button type="button" className="btn btn-secondary btn-sm" onClick={() => exportProjectExpensesExcel({ project: selectedProject, expenses: detail.expenses })}>
                   <FileSpreadsheet size={14} /> Excel
@@ -659,7 +698,7 @@ export default function DepensesParProjet() {
       )}
 
       <ImportModal open={showImport} onClose={() => setShowImport(false)} projects={projects} onDone={() => reload()} />
-      <ExpenseFormModal open={showForm} onClose={() => setShowForm(false)} projects={projects} onSave={async (f) => { await create(f); reload(false); }} />
+      <ExpenseFormModal open={showForm} onClose={() => setShowForm(false)} projects={projects} onSave={async (f) => { await create(f); reload({ forceBackfill: true }); }} />
 
       <style>{`
         .dpp-root { --dpp-gap: 32px; --dpp-radius: 12px; padding-bottom: 48px; }

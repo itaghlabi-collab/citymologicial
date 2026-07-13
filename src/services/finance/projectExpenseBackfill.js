@@ -4,6 +4,7 @@
 import { getSupabase } from '../../lib/supabase';
 
 export const BACKFILL_SINCE = '2026-07-01';
+const BACKFILL_TIMEOUT_MS = 25_000;
 
 export async function backfillProjectExpensesViaApi({ since = BACKFILL_SINCE, dryRun = false } = {}) {
   try {
@@ -11,6 +12,9 @@ export async function backfillProjectExpensesViaApi({ since = BACKFILL_SINCE, dr
     const sb = getSupabase();
     const { data: { session } } = await sb.auth.getSession();
     if (!session?.access_token) return null;
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), BACKFILL_TIMEOUT_MS);
 
     const res = await fetch(`${resolveApiBaseUrl()}/finance/backfill-project-expenses`, {
       method: 'POST',
@@ -20,7 +24,8 @@ export async function backfillProjectExpensesViaApi({ since = BACKFILL_SINCE, dr
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({ since, dryRun }),
-    });
+      signal: controller.signal,
+    }).finally(() => clearTimeout(timer));
 
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
