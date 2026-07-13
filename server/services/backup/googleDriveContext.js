@@ -5,6 +5,7 @@ const { Readable } = require('stream');
 const {
   getDriveRootFolderId,
   getServiceAccountEmail,
+  setResolvedDriveRootFolderId,
 } = require('./googleDriveConfig');
 const {
   getDrive,
@@ -19,6 +20,56 @@ let contextCache = null;
 
 function resetDriveContext() {
   contextCache = null;
+  const { resetResolvedDriveRootFolderId } = require('./googleDriveConfig');
+  resetResolvedDriveRootFolderId();
+}
+
+function escapeDriveQuery(value) {
+  return String(value).replace(/'/g, "\\'");
+}
+
+/**
+ * Scope drive.file : le dossier manuel (GOOGLE_DRIVE_FOLDER_ID) est invisible.
+ * On réutilise ou crée un dossier racine via l'API (accessible à l'app).
+ */
+async function resolveOAuthAppRootFolder(drive, configuredId) {
+  const folderName = (process.env.GOOGLE_DRIVE_FOLDER_NAME || 'citymo-erp-sauvegardes').trim();
+
+  try {
+    const list = await drive.files.list({
+      q: [
+        `name='${escapeDriveQuery(folderName)}'`,
+        "mimeType='application/vnd.google-apps.folder'",
+        'trashed=false',
+      ].join(' and '),
+      fields: 'files(id,name)',
+      pageSize: 10,
+    });
+    const match = list.data.files?.[0];
+    if (match?.id) {
+      console.warn(
+        `[DRIVE] Dossier configuré ${configuredId} inaccessible (scope drive.file probable). `
+        + `Utilisation du dossier app « ${match.name} » (${match.id}).`,
+      );
+      return match;
+    }
+  } catch (err) {
+    console.warn('[DRIVE] recherche dossier app échouée:', err.message);
+  }
+
+  const created = await drive.files.create({
+    requestBody: {
+      name: folderName,
+      mimeType: 'application/vnd.google-apps.folder',
+      parents: ['root'],
+    },
+    fields: 'id,name',
+  });
+  console.info(
+    `[DRIVE] Dossier racine créé : ${created.data.id} (« ${folderName} »). `
+    + `Mettez GOOGLE_DRIVE_FOLDER_ID=${created.data.id} sur Railway.`,
+  );
+  return created.data;
 }
 
 function isServiceAccountQuotaError(message) {
@@ -45,7 +96,13 @@ function formatDriveApiError(err, context = {}) {
 
   if (context.rootFolderId && raw.includes('File not found')) {
     if (mode === AUTH_MODES.OAUTH) {
-      return `Dossier Drive inaccessible (ID ${context.rootFolderId}). Vérifiez GOOGLE_DRIVE_FOLDER_ID et le refresh token OAuth. Détail : ${raw}`;
+      return (
+        `Dossier Drive inaccessible (ID ${context.rootFolderId}). `
+        + 'Cause fréquente : refresh token OAuth avec scope drive.file au lieu de drive. '
+        + 'Régénérez le token avec https://www.googleapis.com/auth/drive dans OAuth Playground, '
+        + 'ou laissez l\'app créer le dossier automatiquement. '
+        + `Détail : ${raw}`
+      );
     }
     const email = getServiceAccountEmail();
     return `Dossier Drive inaccessible (ID ${context.rootFolderId}). Partagez-le avec ${email}. Détail : ${raw}`;
@@ -58,7 +115,7 @@ async function loadDriveContext() {
   if (contextCache) return contextCache;
 
   const authMode = getAuthMode();
-  const rootFolderId = getDriveRootFolderId();
+  const configuredFolderId = getDriveRootFolderId();
   const configuredDriveId = process.env.GOOGLE_DRIVE_SHARED_DRIVE_ID?.trim() || null;
   const drive = getDrive();
   const apiFlags = getSharedDriveApiFlags();
@@ -66,13 +123,30 @@ async function loadDriveContext() {
   let data;
   try {
     const res = await drive.files.get({
-      fileId: rootFolderId,
+      fileId: configuredFolderId,
       fields: 'id, name, driveId, mimeType, capabilities, parents',
       ...apiFlags,
     });
     data = res.data;
   } catch (err) {
-    throw new Error(formatDriveApiError(err, { rootFolderId, authMode }));
+    const raw = String(err?.message || err);
+    if (isOAuthMode() && raw.includes('File not found')) {
+      const resolved = await resolveOAuthAppRootFolder(drive, configuredFolderId);
+      setResolvedDriveRootFolderId(resolved.id);
+      const res = await drive.files.get({
+        fileId: resolved.id,
+        fields: 'id, name, driveId, mimeType, capabilities, parents',
+        ...apiFlags,
+      });
+      data = res.data;
+    } else {
+      throw new Error(formatDriveApiError(err, { rootFolderId: configuredFolderId, authMode }));
+    }
+  }
+
+  const rootFolderId = data.id || configuredFolderId;
+  if (data.id && data.id !== configuredFolderId) {
+    setResolvedDriveRootFolderId(data.id);
   }
 
   const sharedDriveId = data.driveId || configuredDriveId || null;

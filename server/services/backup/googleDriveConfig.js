@@ -91,7 +91,18 @@ function normalizeDriveFolderId(raw) {
   return id;
 }
 
+let resolvedDriveRootFolderId = null;
+
+function setResolvedDriveRootFolderId(id) {
+  resolvedDriveRootFolderId = id?.trim() || null;
+}
+
+function resetResolvedDriveRootFolderId() {
+  resolvedDriveRootFolderId = null;
+}
+
 function getDriveRootFolderId() {
+  if (resolvedDriveRootFolderId) return resolvedDriveRootFolderId;
   return normalizeDriveFolderId(process.env.GOOGLE_DRIVE_FOLDER_ID);
 }
 
@@ -126,6 +137,8 @@ module.exports = {
   getDriveAuthStatus,
   getServiceAccountCredentials,
   getDriveRootFolderId,
+  setResolvedDriveRootFolderId,
+  resetResolvedDriveRootFolderId,
   normalizeDriveFolderId,
   getServiceAccountEmail,
   isOAuthConfigured,

@@ -4,6 +4,7 @@
 const {
   getDriveRootFolderId,
   isGoogleDriveEnabled,
+  resetResolvedDriveRootFolderId,
 } = require('./googleDriveConfig');
 const { getDrive, getSharedDriveApiFlags, resetDriveAuth } = require('./googleDriveAuth');
 const {
@@ -18,6 +19,7 @@ const folderCache = new Map();
 
 function resetDriveClient() {
   resetDriveAuth();
+  resetResolvedDriveRootFolderId();
   rootFolderVerified = false;
   folderCache.clear();
   resetDriveContext();
