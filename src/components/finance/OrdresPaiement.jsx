@@ -6,10 +6,10 @@ import { useState, useCallback } from 'react';
 import { Loader2 } from 'lucide-react';
 import { usePaymentOrders } from '../../hooks/usePaymentOrders';
 import { exportPaymentOrderPdf } from '../../services/finance/paymentOrderPdf';
-import { normalizePaymentOrderStatut, getPaymentOrderStatusLabel, PAYMENT_ORDER_UI_STATUTS } from '../../services/finance/paymentOrders';
+import { normalizePaymentOrderStatut, getPaymentOrderStatusLabel, getPaymentOrderStatusBadge, PAYMENT_ORDER_UI_STATUTS } from '../../services/finance/paymentOrders';
 import {
   CreditCard, Plus, Eye, Edit2, Trash2, Download,
-  CheckCircle, Search, Filter, FileText,
+  CheckCircle, Search, Filter, FileText, Send,
   Paperclip, BookOpen, Clock, AlertTriangle,
 } from 'lucide-react';
 import {
@@ -28,7 +28,7 @@ const EMPTY_FORM = {
 };
 
 function paymentOrderStatusBadge(statut) {
-  return normalizePaymentOrderStatut(statut) === 'Payé' ? 'badge-green' : 'badge-orange';
+  return getPaymentOrderStatusBadge(statut);
 }
 
 function OrdreForm({ initial, categories, onSave, onCancel }) {
@@ -145,7 +145,8 @@ function OrdreForm({ initial, categories, onSave, onCancel }) {
   );
 }
 
-function DetailOrdre({ ordre, onBack, onEdit, onDelete, onExecuter, onComptabiliser }) {
+function DetailOrdre({ ordre, onBack, onEdit, onDelete, onInitier, onExecuter, onComptabiliser }) {
+  const statutNorm = normalizePaymentOrderStatut(ordre.statut);
   return (
     <div className="animate-fade-in">
       <button className="btn btn-ghost btn-sm" style={{ marginBottom: 14, display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={onBack}>
@@ -161,9 +162,14 @@ function DetailOrdre({ ordre, onBack, onEdit, onDelete, onExecuter, onComptabili
           <button className="btn btn-secondary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => exportPaymentOrderPdf(ordre)}>
             <Download size={13} /> PDF
           </button>
-          {normalizePaymentOrderStatut(ordre.statut) !== 'Payé' && (
+          {statutNorm === 'À préparer' && (
+            <button className="btn btn-primary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => onInitier(ordre)}>
+              <Send size={13} /> Initier virement
+            </button>
+          )}
+          {statutNorm === 'Initié' && (
             <button className="btn btn-primary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => onExecuter(ordre)}>
-              <CheckCircle size={13} /> Marquer payé
+              <CheckCircle size={13} /> Valider paiement
             </button>
           )}
           {ordre.statut === 'Payé' && ordre.comptabilise === 'Non' && (
@@ -245,7 +251,7 @@ function DetailOrdre({ ordre, onBack, onEdit, onDelete, onExecuter, onComptabili
 }
 
 export default function OrdresPaiement({ categories = [] }) {
-  const { records: ordres, loading, error, save, remove } = usePaymentOrders();
+  const { records: ordres, loading, error, save, remove, initiate, markPaid } = usePaymentOrders();
   const [search, setSearch] = useState('');
   const [filterStatut, setFilterStatut] = useState('');
   const [filterMode, setFilterMode] = useState('');
@@ -276,13 +282,14 @@ export default function OrdresPaiement({ categories = [] }) {
     }
   }
 
+  async function handleInitier(ordre) {
+    if (!window.confirm(`Initier le virement pour ${ordre.ref} — ${ordre.beneficiaire} ?`)) return;
+    await initiate(ordre.id);
+  }
+
   async function handleExecuter(ordre) {
-    await save({
-      ...ordre,
-      statut: 'Payé',
-      comptabilise: 'Oui',
-      date_paiement: ordre.date_paiement || today,
-    }, ordre.id);
+    if (!window.confirm(`Valider le paiement de ${ordre.ref} — ${formatMAD(ordre.montant)} ?`)) return;
+    await markPaid(ordre.id);
   }
 
   async function handleComptabiliser(ordre) {
@@ -292,16 +299,15 @@ export default function OrdresPaiement({ categories = [] }) {
   const filtered = ordres.filter(o => {
     const q = search.toLowerCase();
     const matchQ = !q || o.ref?.toLowerCase().includes(q) || o.beneficiaire?.toLowerCase().includes(q) || (o.motif || '').toLowerCase().includes(q) || (o.fournisseur_lie || '').toLowerCase().includes(q) || (o.purchase_request_ref || '').toLowerCase().includes(q) || (o.purchase_oa_ref || '').toLowerCase().includes(q);
-    const matchS = !filterStatut || (filterStatut === 'Payé'
-      ? normalizePaymentOrderStatut(o.statut) === 'Payé'
-      : normalizePaymentOrderStatut(o.statut) !== 'Payé');
+    const matchS = !filterStatut || normalizePaymentOrderStatut(o.statut) === normalizePaymentOrderStatut(filterStatut);
     const matchM = !filterMode || o.mode_paiement === filterMode;
     const matchC = !filterCompta || o.comptabilise === filterCompta;
     const matchO = !filterOrigine || o.origine === filterOrigine;
     return matchQ && matchS && matchM && matchC && matchO;
   });
 
-  const enAttente = ordres.filter((o) => normalizePaymentOrderStatut(o.statut) !== 'Payé').length;
+  const enAttente = ordres.filter((o) => normalizePaymentOrderStatut(o.statut) === 'À préparer').length;
+  const inities = ordres.filter((o) => normalizePaymentOrderStatut(o.statut) === 'Initié').length;
   const executes = ordres.filter((o) => normalizePaymentOrderStatut(o.statut) === 'Payé').length;
   const montantAttente = ordres
     .filter((o) => normalizePaymentOrderStatut(o.statut) !== 'Payé')
@@ -325,7 +331,8 @@ export default function OrdresPaiement({ categories = [] }) {
         onBack={() => setDetailId(null)}
         onEdit={() => { setEditOrdre(ordre); setShowModal(true); setDetailId(null); }}
         onDelete={handleDelete}
-        onExecuter={() => handleExecuter(ordre)}
+        onInitier={handleInitier}
+        onExecuter={handleExecuter}
         onComptabiliser={() => handleComptabiliser(ordre)}
       />
     );
@@ -358,6 +365,7 @@ export default function OrdresPaiement({ categories = [] }) {
       {/* KPIs */}
       <div className="stat-grid finance-kpi-grid finance-kpi-strip">
         <KpiCard icon={<Clock size={17} />}        label="En attente"          value={enAttente}              color="orange" />
+        <KpiCard icon={<Send size={17} />}          label="Initiés"           value={inities}                color="blue"   />
         <KpiCard icon={<CheckCircle size={17} />}  label="Payés"               value={executes}               color="green"  />
         <KpiCard icon={<AlertTriangle size={17} />} label="Montant en attente" value={formatMAD(montantAttente)} color="red"  />
         <KpiCard icon={<BookOpen size={17} />}     label="Comptabilisés"       value={comptabilises}          color="purple" />
@@ -468,8 +476,11 @@ export default function OrdresPaiement({ categories = [] }) {
                         <button className="btn btn-secondary btn-sm" title="Voir" onClick={() => setDetailId(o.id)}><Eye size={13} /></button>
                         <button className="btn btn-ghost btn-sm" title="Modifier" onClick={() => { setEditOrdre(o); setShowModal(true); }}><Edit2 size={13} /></button>
                         <button className="btn btn-ghost btn-sm" title="PDF" onClick={() => exportPaymentOrderPdf(o)}><Download size={13} /></button>
-                        {normalizePaymentOrderStatut(o.statut) !== 'Payé' && (
-                          <button className="btn btn-ghost btn-sm" title="Marquer payé" onClick={() => handleExecuter(o)} style={{ color: '#2E7D32' }}><CheckCircle size={13} /></button>
+                        {normalizePaymentOrderStatut(o.statut) === 'À préparer' && (
+                          <button className="btn btn-ghost btn-sm" title="Initier virement" onClick={() => handleInitier(o)} style={{ color: '#1565C0' }}><Send size={13} /></button>
+                        )}
+                        {normalizePaymentOrderStatut(o.statut) === 'Initié' && (
+                          <button className="btn btn-ghost btn-sm" title="Valider paiement" onClick={() => handleExecuter(o)} style={{ color: '#2E7D32' }}><CheckCircle size={13} /></button>
                         )}
                         <button className="btn btn-ghost btn-sm" title="Supprimer" onClick={() => handleDelete(o.id)} style={{ color: 'var(--red)' }}><Trash2 size={13} /></button>
                       </div>

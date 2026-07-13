@@ -7,27 +7,39 @@ import { syncPaymentOrderPaidOutcome } from './paymentOrderPaidSync';
 
 const TABLE = 'payment_orders';
 
-export const PAYMENT_ORDER_STATUTS = ['À préparer', 'Préparé', 'Payé'];
+export const PAYMENT_ORDER_STATUTS = ['À préparer', 'Initié', 'Payé'];
+
+const PAYMENT_ORDER_STATUS_LABELS = {
+  'À préparer': 'En attente de paiement',
+  'Initié': 'Initié',
+  'Payé': 'Payé',
+};
 
 export const PAYMENT_ORDER_UI_STATUTS = [
   { value: 'À préparer', label: 'En attente de paiement' },
+  { value: 'Initié', label: 'Initié' },
   { value: 'Payé', label: 'Payé' },
 ];
 
 export function getPaymentOrderStatusLabel(statut) {
-  return normalizePaymentOrderStatut(statut) === 'Payé' ? 'Payé' : 'En attente de paiement';
+  return PAYMENT_ORDER_STATUS_LABELS[normalizePaymentOrderStatut(statut)] || 'En attente de paiement';
 }
 
 export function getPaymentOrderStatusSelectValue(statut) {
-  return normalizePaymentOrderStatut(statut) === 'Payé' ? 'Payé' : 'À préparer';
+  return normalizePaymentOrderStatut(statut);
+}
+
+export function getPaymentOrderStatusBadge(statut) {
+  const n = normalizePaymentOrderStatut(statut);
+  if (n === 'Payé') return 'badge-green';
+  if (n === 'Initié') return 'badge-blue';
+  return 'badge-orange';
 }
 
 export function normalizePaymentOrderStatut(statut) {
   const s = String(statut || '').trim();
-  if (s === 'Payé') return 'Payé';
-  if (['Préparé', 'Validé', 'Soumis', 'Exécuté', 'Comptabilisé', 'En attente validation DG'].includes(s)) {
-    return 'Préparé';
-  }
+  if (s === 'Payé' || s === 'Comptabilisé' || s === 'Exécuté') return 'Payé';
+  if (['Initié', 'Validé', 'Préparé', 'Soumis', 'En attente validation DG'].includes(s)) return 'Initié';
   return 'À préparer';
 }
 
@@ -216,17 +228,95 @@ export async function createPaymentOrder(form) {
 export async function updatePaymentOrder(id, form) {
   await requireUser();
   const { data: prev } = await getSupabase().from(TABLE).select('statut').eq('id', id).maybeSingle();
+  const nextRow = toPaymentOrderRow(form);
+  const prevNorm = normalizePaymentOrderStatut(prev?.statut);
+  const nextNorm = normalizePaymentOrderStatut(nextRow.statut);
+  if (nextNorm === 'Payé' && prevNorm === 'À préparer') {
+    const err = new Error('Initiez le virement avant de marquer le paiement comme payé.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  if (nextNorm === 'Payé' && prevNorm !== 'Payé' && prevNorm !== 'Initié') {
+    const err = new Error('Seul un paiement initié peut être validé et marqué payé.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
   const { data, error } = await getSupabase()
     .from(TABLE)
-    .update(toPaymentOrderRow(form))
+    .update(nextRow)
     .eq('id', id)
     .select()
     .single();
   if (error) throw error;
   const order = normalizePaymentOrder(data);
   await syncPaymentOrderToTransaction(order);
-  if (order.statut === 'Payé' && normalizePaymentOrderStatut(prev?.statut) !== 'Payé') {
+  if (order.statut === 'Payé' && prevNorm !== 'Payé') {
     await syncPaymentOrderPaidOutcome(order);
+  }
+  return order;
+}
+
+export async function initiatePaymentOrder(id, { prepare_par } = {}) {
+  await requireUser();
+  const { data: { user } } = await getSupabase().auth.getUser();
+  const preparer = prepare_par
+    || user?.user_metadata?.full_name
+    || user?.email?.split('@')[0]
+    || null;
+  const { data: prev, error: fetchErr } = await getSupabase().from(TABLE).select('statut').eq('id', id).maybeSingle();
+  if (fetchErr) throw fetchErr;
+  if (normalizePaymentOrderStatut(prev?.statut) !== 'À préparer') {
+    const err = new Error('Seuls les ordres en attente peuvent être initiés.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .update({ statut: 'Initié', prepare_par: preparer })
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+  const order = normalizePaymentOrder(data);
+  await syncPaymentOrderToTransaction(order);
+  const { notifyPaymentInitiated } = await import('../notifications/purchaseWorkflowNotifications');
+  await notifyPaymentInitiated(order);
+  return order;
+}
+
+export async function markPaymentOrderPaid(id, { valide_par, date_paiement } = {}) {
+  await requireUser();
+  const { data: { user } } = await getSupabase().auth.getUser();
+  const validator = valide_par
+    || user?.user_metadata?.full_name
+    || user?.email?.split('@')[0]
+    || null;
+  const { data: prev, error: fetchErr } = await getSupabase().from(TABLE).select('statut, purchase_request_id').eq('id', id).maybeSingle();
+  if (fetchErr) throw fetchErr;
+  if (normalizePaymentOrderStatut(prev?.statut) !== 'Initié') {
+    const err = new Error('Seul un paiement initié peut être validé et marqué payé.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  const paymentDate = date_paiement || new Date().toISOString().slice(0, 10);
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .update({
+      statut: 'Payé',
+      comptabilise: true,
+      date_paiement: paymentDate,
+      valide_par: validator,
+    })
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+  const order = normalizePaymentOrder(data);
+  await syncPaymentOrderToTransaction(order);
+  await syncPaymentOrderPaidOutcome(order);
+  if (prev?.purchase_request_id) {
+    const { notifyPaymentValidated } = await import('../notifications/purchaseWorkflowNotifications');
+    await notifyPaymentValidated(order);
   }
   return order;
 }

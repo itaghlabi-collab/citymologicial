@@ -22,7 +22,7 @@ export const STATUTS_DEMANDE  = [
 export const PRIORITES        = ['Faible', 'Normale', 'Haute', 'Urgente'];
 export const STATUTS_BC       = ['Brouillon', 'Envoyé', 'Validé', 'Partiellement reçu', 'Reçu', 'Annulé'];
 export const STATUTS_ORDRE    = ['Brouillon', 'Validé', 'Envoyé fournisseur', 'En attente réception', 'Réceptionné', 'Clôturé'];
-export const STATUTS_OP_ACHATS = ['À préparer', 'En attente validation DG', 'Validé', 'Payé', 'Annulé'];
+export const STATUTS_OP_ACHATS = ['À préparer', 'Initié', 'Payé', 'Annulé'];
 export const DEVISES          = ['MAD', 'EUR', 'USD'];
 export const TVA_OPTIONS      = [0, 7, 10, 14, 20];
 export const CATEGORIES_FOURN = ['Matériaux', 'Équipements', 'Services', 'Fournitures', 'Transport', 'Sous-traitance', 'Informatique', 'Autre'];
@@ -46,8 +46,9 @@ export const BADGE_ORDRE = {
   'En attente validation': 'badge-orange', 'Refusé': 'badge-red', 'Commandé': 'badge-blue',
 };
 export const BADGE_OP_ACHATS = {
-  'À préparer': 'badge-grey', 'En attente validation DG': 'badge-orange', 'Validé': 'badge-green',
-  'Payé': 'badge-purple', 'Annulé': 'badge-red', Brouillon: 'badge-grey', 'En attente': 'badge-orange',
+  'À préparer': 'badge-orange', 'Initié': 'badge-blue', 'Payé': 'badge-green',
+  'En attente validation DG': 'badge-orange', 'Validé': 'badge-blue',
+  'Annulé': 'badge-red', Brouillon: 'badge-grey', 'En attente': 'badge-orange',
 };
 export const BADGE_PRIORITE = {
   'Faible': 'badge-grey', 'Normale': 'badge-blue', 'Haute': 'badge-orange', 'Urgente': 'badge-red',

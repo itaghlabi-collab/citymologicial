@@ -4,7 +4,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import {
   CreditCard, Eye, Search, ChevronLeft, Loader2, RefreshCw,
-  CheckCircle, DollarSign, FileText, History, Send, Trash2,
+  CheckCircle, FileText, History, Send, Trash2,
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
 import { resolveCurrentPurchaseRole, purchasePermissions } from '../../services/achats/purchaseWorkflowRoles';
@@ -12,16 +12,16 @@ import {
   listAchatsPaymentOrders,
   getAchatsPaymentOrder,
   updateAchatsPaymentOrder,
-  validateAchatsPaymentOrder,
+  initiateAchatsPaymentOrder,
   markAchatsPaymentOrderPaid,
-  submitAchatsPaymentForDgValidation,
   deleteAchatsPaymentOrder,
 } from '../../services/achats/purchasePaymentOrdersAchats';
 import { getSupplierById } from '../../services/achats/suppliers';
 import { generateAchatsPaymentOrderPdf } from '../../services/achats/purchasePaymentOrderAchatsPdf';
 import { listPurchaseRequestHistory } from '../../services/achats/purchaseRequestHistory';
+import { normalizePaymentOrderStatut, getPaymentOrderStatusLabel, getPaymentOrderStatusBadge } from '../../services/finance/paymentOrders';
 import {
-  INPUT_STYLE, SELECT_STYLE, STATUTS_OP_ACHATS, BADGE_OP_ACHATS,
+  INPUT_STYLE, SELECT_STYLE, STATUTS_OP_ACHATS,
   MODES_PAIEMENT, KpiCard, EmptyState, SectionTitle, FField, FRow, formatMAD, Modal,
 } from './shared.jsx';
 
@@ -58,7 +58,7 @@ function DetailOP({ op, history, onBack, perms, onAction, saving }) {
           <h1 className="page-title" style={{ marginBottom: 4 }}>{op.ref}</h1>
           <p className="page-subtitle">{op.motif || op.beneficiaire}</p>
         </div>
-        <span className={`badge ${BADGE_OP_ACHATS[op.statut] || 'badge-grey'}`}>{op.statut}</span>
+        <span className={`badge ${getPaymentOrderStatusBadge(op.statut)}`}>{getPaymentOrderStatusLabel(op.statut)}</span>
       </div>
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 16 }}>
@@ -97,19 +97,14 @@ function DetailOP({ op, history, onBack, perms, onAction, saving }) {
             <button type="button" className="btn btn-ghost btn-sm" disabled={pdfLoading} onClick={handlePdf}>
               {pdfLoading ? <Loader2 size={13} className="cin-spin" /> : <FileText size={13} />} Télécharger PDF
             </button>
-            {op.statut === 'À préparer' && (
-              <button type="button" className="btn btn-secondary btn-sm" disabled={saving} onClick={() => onAction('submit', op.id)}>
-                <Send size={13} /> Soumettre validation DG
+            {normalizePaymentOrderStatut(op.statut) === 'À préparer' && (
+              <button type="button" className="btn btn-primary btn-sm" disabled={saving} onClick={() => onAction('initiate', op.id)}>
+                <Send size={13} /> Initier virement
               </button>
             )}
-            {perms.canValidatePayment && op.statut === 'En attente validation DG' && (
-              <button type="button" className="btn btn-primary btn-sm" disabled={saving} onClick={() => onAction('validate', op.id)}>
-                <CheckCircle size={13} /> Valider DG
-              </button>
-            )}
-            {['Validé', 'En attente validation DG'].includes(op.statut) && perms.canValidatePayment && (
+            {perms.canValidatePayment && normalizePaymentOrderStatut(op.statut) === 'Initié' && (
               <button type="button" className="btn btn-primary btn-sm" disabled={saving} onClick={() => onAction('paid', op.id)}>
-                <DollarSign size={13} /> Marquer payé
+                <CheckCircle size={13} /> Valider paiement
               </button>
             )}
           </div>
@@ -210,9 +205,10 @@ export default function OrdresPaiementAchats() {
     setActionId(id);
     try {
       const userName = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Utilisateur';
-      if (type === 'validate') await validateAchatsPaymentOrder(id, userName);
+      if (type === 'initiate') await initiateAchatsPaymentOrder(id, userName);
+      else if (type === 'validate') await initiateAchatsPaymentOrder(id, userName);
       else if (type === 'paid') await markAchatsPaymentOrderPaid(id, userName);
-      else if (type === 'submit') await submitAchatsPaymentForDgValidation(id);
+      else if (type === 'submit') await initiateAchatsPaymentOrder(id, userName);
       else if (type === 'delete') await deleteAchatsPaymentOrder(id);
       else if (type === 'update') await updateAchatsPaymentOrder(id, form);
       await load();
@@ -239,7 +235,7 @@ export default function OrdresPaiementAchats() {
   const filtered = items.filter((o) => {
     const q = search.toLowerCase();
     return (!q || o.ref?.toLowerCase().includes(q) || o.beneficiaire?.toLowerCase().includes(q) || o.purchase_request_ref?.toLowerCase().includes(q))
-      && (!filterStatut || o.statut === filterStatut);
+      && (!filterStatut || normalizePaymentOrderStatut(o.statut) === normalizePaymentOrderStatut(filterStatut));
   });
 
   async function handleListPdf(id) {
@@ -269,9 +265,9 @@ export default function OrdresPaiementAchats() {
     );
   }
 
-  const aPreparer = items.filter((o) => o.statut === 'À préparer').length;
-  const enAttente = items.filter((o) => o.statut === 'En attente validation DG').length;
-  const payes = items.filter((o) => o.statut === 'Payé').length;
+  const aPreparer = items.filter((o) => normalizePaymentOrderStatut(o.statut) === 'À préparer').length;
+  const inities = items.filter((o) => normalizePaymentOrderStatut(o.statut) === 'Initié').length;
+  const payes = items.filter((o) => normalizePaymentOrderStatut(o.statut) === 'Payé').length;
 
   return (
     <div className="animate-fade-in">
@@ -289,8 +285,8 @@ export default function OrdresPaiementAchats() {
 
       <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', marginBottom: 20 }}>
         <KpiCard icon={<CreditCard size={17} />} label="Total OP" value={items.length} color="blue" />
-        <KpiCard icon={<CreditCard size={17} />} label="À préparer" value={aPreparer} color="grey" />
-        <KpiCard icon={<Send size={17} />} label="En attente DG" value={enAttente} color="orange" />
+        <KpiCard icon={<CreditCard size={17} />} label="À préparer" value={aPreparer} color="orange" />
+        <KpiCard icon={<Send size={17} />} label="Initiés" value={inities} color="blue" />
         <KpiCard icon={<CheckCircle size={17} />} label="Payés" value={payes} color="green" />
       </div>
 
@@ -336,45 +332,33 @@ export default function OrdresPaiementAchats() {
                     <td>{o.fournisseur_lie || o.beneficiaire}</td>
                     <td>{formatMAD(o.montant_ttc || o.montant)}</td>
                     <td>{o.date_prevue || o.date || '—'}</td>
-                    <td><span className={`badge ${BADGE_OP_ACHATS[o.statut] || 'badge-grey'}`}>{o.statut}</span></td>
+                    <td><span className={`badge ${getPaymentOrderStatusBadge(o.statut)}`}>{getPaymentOrderStatusLabel(o.statut)}</span></td>
                     <td>
                       <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
                         <button type="button" className="btn btn-secondary btn-sm" title="Voir" onClick={() => openDetail(o.id)}><Eye size={13} /></button>
                         <button type="button" className="btn btn-ghost btn-sm" title="PDF" disabled={pdfLoadingId === o.id} onClick={() => handleListPdf(o.id)}>
                           {pdfLoadingId === o.id ? <Loader2 size={12} className="cin-spin" /> : <FileText size={12} />}
                         </button>
-                        {o.statut === 'À préparer' && (
+                        {normalizePaymentOrderStatut(o.statut) === 'À préparer' && (
                           <button
                             type="button"
                             className="btn btn-primary btn-sm"
-                            title="Soumettre validation DG"
+                            title="Initier virement"
                             disabled={actionId === o.id}
-                            onClick={() => handleAction('submit', o.id)}
+                            onClick={() => handleAction('initiate', o.id)}
                           >
                             {actionId === o.id ? <Loader2 size={12} className="cin-spin" /> : <Send size={12} />}
                           </button>
                         )}
-                        {perms.canValidatePayment && o.statut === 'En attente validation DG' && (
+                        {perms.canValidatePayment && normalizePaymentOrderStatut(o.statut) === 'Initié' && (
                           <button
                             type="button"
                             className="btn btn-primary btn-sm"
-                            title="Valider (DG)"
-                            disabled={actionId === o.id}
-                            onClick={() => handleAction('validate', o.id)}
-                          >
-                            {actionId === o.id ? <Loader2 size={12} className="cin-spin" /> : <CheckCircle size={12} />}
-                          </button>
-                        )}
-                        {perms.canValidatePayment && o.statut === 'Validé' && (
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-sm"
-                            title="Marquer payé"
+                            title="Valider paiement (DG)"
                             disabled={actionId === o.id}
                             onClick={() => handleAction('paid', o.id)}
-                            style={{ color: '#2E7D32' }}
                           >
-                            {actionId === o.id ? <Loader2 size={12} className="cin-spin" /> : <DollarSign size={12} />}
+                            {actionId === o.id ? <Loader2 size={12} className="cin-spin" /> : <CheckCircle size={12} />}
                           </button>
                         )}
                         <button

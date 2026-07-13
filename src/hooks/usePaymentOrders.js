@@ -6,6 +6,8 @@ import {
   createPaymentOrder,
   updatePaymentOrder,
   deletePaymentOrder,
+  initiatePaymentOrder,
+  markPaymentOrderPaid,
 } from '../services/finance/paymentOrders';
 
 export function usePaymentOrders() {
@@ -67,5 +69,37 @@ export function usePaymentOrders() {
     }
   }
 
-  return { records, loading, saving, error, configured, reload: load, save, remove };
+  async function initiate(id, opts = {}) {
+    setSaving(true);
+    setError(null);
+    try {
+      await initiatePaymentOrder(id, opts);
+      await load();
+      return { success: true };
+    } catch (err) {
+      const msg = formatSupabaseError(err, 'Erreur initiation du virement.');
+      setError(msg);
+      return { success: false, error: msg };
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function markPaid(id, opts = {}) {
+    setSaving(true);
+    setError(null);
+    try {
+      await markPaymentOrderPaid(id, opts);
+      await load();
+      return { success: true };
+    } catch (err) {
+      const msg = formatSupabaseError(err, 'Erreur validation du paiement.');
+      setError(msg);
+      return { success: false, error: msg };
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return { records, loading, saving, error, configured, reload: load, save, remove, initiate, markPaid };
 }

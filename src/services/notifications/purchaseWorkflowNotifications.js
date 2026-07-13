@@ -172,6 +172,28 @@ export async function notifyPaymentOrderCreated(request, oa, op) {
   }, NOTIFICATION_SUBMODULES.ORDRES_PAIEMENT);
 }
 
+export async function notifyPaymentInitiated(op) {
+  await notifyDg({
+    title: 'Paiement initié — validation requise',
+    message: `Le comptable a initié le virement pour l'OP ${op?.ref || ''} — ${op?.beneficiaire || ''} (${Number(op?.montant || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} MAD). Merci de valider le paiement.`,
+    type: NOTIFICATION_TYPES.PAYMENT,
+    priority: NOTIFICATION_PRIORITIES.HIGH,
+    entityType: 'payment_initiated',
+    entityId: op?.id,
+    actionUrl: 'module:ordres-paiement',
+  });
+  await notifyFinanceUsers({
+    title: 'Virement initié',
+    message: `OP ${op?.ref || ''} — en attente de validation DG.`,
+    type: NOTIFICATION_TYPES.PAYMENT,
+    priority: NOTIFICATION_PRIORITIES.NORMAL,
+    entityType: 'payment_initiated_finance',
+    entityId: op?.id,
+    actionUrl: 'module:ordres-paiement',
+    submoduleCode: NOTIFICATION_SUBMODULES.ORDRES_PAIEMENT,
+  }, NOTIFICATION_SUBMODULES.ORDRES_PAIEMENT);
+}
+
 export async function notifyPaymentValidated(op) {
   await notifyChargeeAchats({
     title: 'Paiement validé',

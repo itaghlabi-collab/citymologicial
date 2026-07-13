@@ -2,11 +2,11 @@
  * purchasePaymentOrdersAchats.js — Ordres de paiement liés aux achats
  */
 import { getSupabase } from '../../lib/supabase';
-import { normalizePaymentOrder, toPaymentOrderRow, generatePaymentOrderRef } from '../finance/paymentOrders';
+import { normalizePaymentOrder, normalizePaymentOrderStatut, toPaymentOrderRow, generatePaymentOrderRef } from '../finance/paymentOrders';
 import { syncPaymentOrderPaidOutcome } from '../finance/paymentOrderPaidSync';
 import { appendPurchaseRequestHistory } from './purchaseRequestHistory';
 import { PURCHASE_ASSIGNEE } from '../../constants/purchaseWorkflow';
-import { notifyPaymentOrderCreated, notifyPaymentValidated } from '../notifications/purchaseWorkflowNotifications';
+import { notifyPaymentOrderCreated, notifyPaymentInitiated, notifyPaymentValidated } from '../notifications/purchaseWorkflowNotifications';
 
 const TABLE = 'payment_orders';
 
@@ -143,34 +143,52 @@ export async function syncAchatsPaymentOrderFromRequest(paymentOrderId, { reques
   return updated;
 }
 
-export async function validateAchatsPaymentOrder(id, userName) {
+export async function initiateAchatsPaymentOrder(id, userName) {
   const op = await getAchatsPaymentOrder(id);
+  if (normalizePaymentOrderStatut(op?.statut) !== 'À préparer') {
+    const err = new Error('Seuls les ordres en attente peuvent être initiés.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
   const { data, error } = await getSupabase()
     .from(TABLE)
-    .update({ statut: 'Validé', valide_par: userName })
+    .update({ statut: 'Initié', prepare_par: userName })
     .eq('id', id)
     .select()
     .single();
   if (error) throw error;
   const updated = normalizeAchatsPaymentOrder(data);
+  const { syncPaymentOrderToTransaction } = await import('../finance/financeTransactions');
+  await syncPaymentOrderToTransaction(updated);
   if (op.purchase_request_id) {
     await appendPurchaseRequestHistory({
       purchaseRequestId: op.purchase_request_id,
-      action: 'Validation paiement',
+      action: 'Virement initié',
       detail: updated.ref,
       userName,
     });
-    await notifyPaymentValidated(updated);
   }
+  await notifyPaymentInitiated(updated);
   return updated;
+}
+
+/** @deprecated Utiliser initiateAchatsPaymentOrder */
+export async function validateAchatsPaymentOrder(id, userName) {
+  return initiateAchatsPaymentOrder(id, userName);
 }
 
 export async function markAchatsPaymentOrderPaid(id, userName) {
   const op = await getAchatsPaymentOrder(id);
+  if (normalizePaymentOrderStatut(op?.statut) !== 'Initié') {
+    const err = new Error('Seul un paiement initié peut être validé et marqué payé.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
   const { data, error } = await getSupabase()
     .from(TABLE)
     .update({
       statut: 'Payé',
+      comptabilise: true,
       date_paiement: new Date().toISOString().slice(0, 10),
       valide_par: userName,
     })
@@ -185,23 +203,17 @@ export async function markAchatsPaymentOrderPaid(id, userName) {
   if (op.purchase_request_id) {
     await appendPurchaseRequestHistory({
       purchaseRequestId: op.purchase_request_id,
-      action: 'Paiement effectué',
+      action: 'Paiement validé',
       detail: updated.ref,
       userName,
     });
+    await notifyPaymentValidated(updated);
   }
   return updated;
 }
 
-export async function submitAchatsPaymentForDgValidation(id) {
-  const { data, error } = await getSupabase()
-    .from(TABLE)
-    .update({ statut: 'En attente validation DG' })
-    .eq('id', id)
-    .select()
-    .single();
-  if (error) throw error;
-  return normalizeAchatsPaymentOrder(data);
+export async function submitAchatsPaymentForDgValidation(id, userName) {
+  return initiateAchatsPaymentOrder(id, userName || 'Utilisateur');
 }
 
 export async function deleteAchatsPaymentOrder(id) {
