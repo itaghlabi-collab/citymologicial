@@ -128,11 +128,19 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
   try {
     await pipeline.run('testSupabaseConnection', () => testSupabaseConnection());
 
-    const driveCheck = await pipeline.run(
-      'googleDrive.validate',
-      () => validateGoogleDriveForBackup(),
-    );
-    driveUploadAllowed = Boolean(driveCheck.uploadAllowed);
+    let driveValidationError = null;
+    try {
+      const driveCheck = await pipeline.run(
+        'googleDrive.validate',
+        () => validateGoogleDriveForBackup(),
+      );
+      driveUploadAllowed = Boolean(driveCheck.uploadAllowed);
+    } catch (err) {
+      if (isDriveRequired()) throw err;
+      driveValidationError = err.message?.replace(/^\[Google Drive\]\s*/, '') || String(err.message || err);
+      driveUploadAllowed = false;
+      console.warn('[backup] Google Drive ignoré (BACKUP_GOOGLE_DRIVE_REQUIRED=false):', driveValidationError);
+    }
 
     if (driveUploadAllowed) {
       await pipeline.run('ensureBackupFolder', () => ensureBackupFolder(backupPrefix));
@@ -337,10 +345,12 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
       taille_bytes: totalSize,
       drive_synced: driveSynced,
       drive_folder_id: driveFolderId,
-      drive_sync_error: driveSyncError,
+      drive_sync_error: driveSyncError || driveValidationError,
       description: driveSynced
         ? `Intégrité OK — ${integrityReport.tables_exported} tables, ${integrityReport.files_copied} fichiers copiés, Drive sync OK`
-        : `Intégrité OK — Supabase OK, Drive ⚠ ${driveSyncError || 'non synchronisé'}`,
+        : driveValidationError
+          ? `Intégrité OK — Supabase OK, Drive ignoré (${driveValidationError})`
+          : `Intégrité OK — Supabase OK, Drive ⚠ ${driveSyncError || 'non synchronisé'}`,
     }));
 
     logger.backupDone(backupPrefix, {
