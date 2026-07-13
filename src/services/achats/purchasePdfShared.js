@@ -2,7 +2,7 @@
  * purchasePdfShared.js — Utilitaires PDF module Achats CITYMO
  */
 import { jsPDF } from 'jspdf';
-import { formatPdfMAD, loadCompanyLogoFit } from '../finance/pdfShared';
+import { formatPdfMAD, formatPdfQty, formatPdfAmount, loadCompanyLogoFit } from '../finance/pdfShared';
 
 export const PDF_RED = [198, 40, 40];
 export const PDF_TEXT = [33, 33, 33];
@@ -30,6 +30,7 @@ export function dash(v) {
 /** Valeurs sûres pour jsPDF (Helvetica standard = pas de glyphes Unicode étendus). */
 export function pdfSafeText(v) {
   return dash(v)
+    .replace(/\u00A0/g, ' ')
     .replace(/\u2014/g, '-')
     .replace(/\u2013/g, '-')
     .replace(/\u2026/g, '...');
@@ -177,7 +178,46 @@ export function drawKeyValueTable(doc, rows, startY) {
   return y + 4;
 }
 
-/** Tableau à colonnes */
+function drawCellBorder(doc, x, y, w, h) {
+  doc.setDrawColor(...PDF_BORDER);
+  doc.setLineWidth(0.12);
+  doc.rect(x, y, w, h);
+}
+
+function fillCellBackground(doc, x, y, w, h, shaded) {
+  doc.setFillColor(...(shaded ? PDF_ROW_GRAY : [255, 255, 255]));
+  doc.rect(x, y, w, h, 'F');
+}
+
+function textRight(doc, text, rightX, y) {
+  doc.text(String(text ?? '-'), rightX, y, { align: 'right' });
+}
+
+function textCenter(doc, text, centerX, y) {
+  doc.text(String(text ?? '-'), centerX, y, { align: 'center' });
+}
+
+function formatDataCellText(col, raw, row) {
+  if (col.format) return pdfSafeText(String(col.format(raw, row) ?? '-'));
+  return pdfSafeText(dash(raw));
+}
+
+function drawAlignedCellText(doc, text, x, y, w, h, align = 'left') {
+  const pad = 2;
+  const midY = y + h / 2 + 1;
+  const val = String(text ?? '-');
+  if (align === 'right') {
+    textRight(doc, val, x + w - pad, midY);
+    return;
+  }
+  if (align === 'center') {
+    textCenter(doc, val, x + w / 2, midY);
+    return;
+  }
+  doc.text(val, x + pad, midY);
+}
+
+/** Tableau à colonnes — bordures uniquement, montants alignés à droite (compatible jsPDF). */
 export function drawDataTable(doc, columns, rows, startY) {
   const totalW = CONTENT_W;
   const colWidths = columns.map((c) => c.width || totalW / columns.length);
@@ -196,33 +236,51 @@ export function drawDataTable(doc, columns, rows, startY) {
 
   let x = MARGIN;
   columns.forEach((col, i) => {
-    doc.text(col.label, x + 2, y + 5.5);
+    const align = col.align || 'left';
+    drawAlignedCellText(doc, col.label || '', x, y, widths[i], headerH, align);
     x += widths[i];
   });
   y += headerH;
 
   rows.forEach((row, ri) => {
-    doc.setFontSize(8);
-    const cellTexts = columns.map((col, i) => {
-      const raw = row[col.key];
-      const val = col.format ? col.format(raw, row) : dash(raw);
-      return doc.splitTextToSize(pdfSafeText(val), Math.max(8, widths[i] - 4));
+    const cells = columns.map((col, i) => {
+      const text = formatDataCellText(col, row[col.key], row);
+      const align = col.align || (i === 0 ? 'left' : 'right');
+      if (col.wrap) {
+        return {
+          align,
+          lines: doc.splitTextToSize(text, Math.max(12, widths[i] - 4)),
+        };
+      }
+      return { align, lines: [text] };
     });
-    const rowH = Math.max(7, ...cellTexts.map((t) => t.length * 3.8 + 2));
 
-    if (ri % 2 === 0) doc.setFillColor(255, 255, 255);
-    else doc.setFillColor(...PDF_ROW_GRAY);
+    const rowH = Math.max(
+      7,
+      ...cells.map((c) => (c.lines.length > 1 ? c.lines.length * 3.8 + 2 : 7)),
+    );
 
     x = MARGIN;
-    columns.forEach((_, i) => {
-      doc.rect(x, y, widths[i], rowH, 'F');
-      doc.setDrawColor(...PDF_BORDER);
-      doc.setLineWidth(0.12);
-      doc.rect(x, y, widths[i], rowH);
-      doc.setFont('helvetica', 'normal');
+    columns.forEach((col, i) => {
+      const { lines, align } = cells[i];
+      const shaded = ri % 2 === 1;
+      fillCellBackground(doc, x, y, widths[i], rowH, shaded);
+      drawCellBorder(doc, x, y, widths[i], rowH);
+
+      doc.setFont('helvetica', col.bold ? 'bold' : 'normal');
+      doc.setFontSize(8);
       doc.setTextColor(...PDF_TEXT);
-      const lines = cellTexts[i].map((line) => pdfSafeText(line));
-      doc.text(lines, x + 2, y + 4.5);
+
+      if (lines.length > 1 || col.wrap) {
+        let ty = y + 4.5;
+        lines.forEach((line) => {
+          doc.text(String(line), x + 2, ty);
+          ty += 3.8;
+        });
+      } else {
+        drawAlignedCellText(doc, lines[0], x, y, widths[i], rowH, align);
+      }
+
       x += widths[i];
     });
     y += rowH;
@@ -302,4 +360,4 @@ export function normalizeOaLines(oa) {
   });
 }
 
-export { formatPdfMAD };
+export { formatPdfMAD, formatPdfQty, formatPdfAmount };

@@ -15,6 +15,7 @@ import {
   safeFilename,
   fmtDate,
   formatPdfMAD,
+  formatPdfQty,
 } from './purchasePdfShared';
 
 export async function generateAcquisitionOrderPdf(oa, { quote, request } = {}) {
@@ -47,16 +48,16 @@ export async function generateAcquisitionOrderPdf(oa, { quote, request } = {}) {
   const lines = normalizeOaLines(oa);
   y = drawSectionTitle(doc, 'DÉTAIL ARTICLES / PRESTATIONS', y);
   y = drawDataTable(doc, [
-    { label: 'Article / Prestation', key: 'designation', width: 65 },
-    { label: 'Qté', key: 'quantite', width: 18 },
-    { label: 'P.U. HT', key: 'prix_unitaire', width: 28, format: (v) => formatPdfMAD(v) },
-    { label: 'Total HT', key: 'total_ht', width: 28, format: (v) => formatPdfMAD(v) },
+    { label: 'Article / Prestation', key: 'designation', width: 65, wrap: true },
+    { label: 'Qté', key: 'quantite', width: 18, align: 'center', format: (v) => formatPdfQty(v) },
+    { label: 'P.U. HT', key: 'prix_unitaire', width: 28, align: 'right', format: (v) => formatPdfMAD(v) },
+    { label: 'Total HT', key: 'total_ht', width: 28, align: 'right', format: (v) => formatPdfMAD(v) },
   ], lines, y);
 
   y = drawDataTable(doc, [
-    { label: '', key: 'label', width: 111 },
-    { label: 'TVA', key: 'tva', width: 28 },
-    { label: 'Total TTC', key: 'ttc', width: 41 },
+    { label: '', key: 'label', width: 111, wrap: true, bold: true },
+    { label: 'TVA', key: 'tva', width: 28, align: 'right' },
+    { label: 'Total TTC', key: 'ttc', width: 41, align: 'right' },
   ], [
     { label: 'TOTAUX', tva: `${tva}%`, ttc: formatPdfMAD(ttc) },
   ], y);

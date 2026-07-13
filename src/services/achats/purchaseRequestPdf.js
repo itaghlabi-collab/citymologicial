@@ -63,11 +63,11 @@ export async function generatePurchaseRequestPdf(request, { attachments = [] } =
 
   y = drawSectionTitle(doc, 'ARTICLES / BESOINS', y);
   y = drawDataTable(doc, [
-    { label: 'Désignation', key: 'designation', width: 52 },
-    { label: 'Qté', key: 'quantite', width: 18 },
-    { label: 'Unité', key: 'unite', width: 18 },
+    { label: 'Désignation', key: 'designation', width: 52, wrap: true },
+    { label: 'Qté', key: 'quantite', width: 18, align: 'center' },
+    { label: 'Unité', key: 'unite', width: 18, align: 'center' },
     { label: 'Fournisseur', key: 'fournisseur', width: 38 },
-    { label: 'Observation', key: 'observation', width: 54 },
+    { label: 'Observation', key: 'observation', width: 54, wrap: true },
   ], normalizeRequestLines(request).map((line) => ({
     ...line,
     fournisseur: line.fournisseur || fournisseur,
