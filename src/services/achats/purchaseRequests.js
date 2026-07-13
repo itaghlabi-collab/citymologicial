@@ -4,22 +4,22 @@
 import { getSupabase } from '../../lib/supabase';
 import { employeeFullName } from '../rh/employees';
 import { PURCHASE_ASSIGNEE, normalizePurchaseStatus } from '../../constants/purchaseWorkflow';
-import { listProjectsForSelect } from '../projects/projects';
+import { listProjectsForSelect, projectDisplayLabel } from '../projects/projects';
 import { isGroupedPurchaseRequest, groupedProjectLabel } from './purchaseGrouped';
 
 const TABLE = 'purchase_requests';
 const ACHATS_DEPARTMENT_ID = 3;
 
+export const PURCHASE_REQUEST_SELECT = '*, projects ( id, nom, ref, client_nom )';
+
 export function projectOptionLabel(p) {
-  if (!p) return '';
-  const client = p.client || p.client_nom || '';
-  return [p.ref, p.nom, client].filter(Boolean).join(' — ');
+  return projectDisplayLabel(p);
 }
 
 const PRJ_REF_RE = /^PRJ-[A-Z0-9-]+$/i;
 const COMPANY_HINT_RE = /\b(LOGISTICS|SARL|SA|GROUPE|GROUP|AFRICA|INC|LTD|MAROC|HOLDING)\b/i;
 
-/** Affichage compact projet lié — supprime doublons PRJ et répétitions. */
+/** Anciens libellés (ref répétée, etc.) → format rubrique Projets. */
 export function compactProjectLinkLabel(label) {
   if (!label) return '—';
   const raw = String(label).trim();
@@ -46,17 +46,36 @@ export function compactProjectLinkLabel(label) {
   return `${prev} — ${last}`;
 }
 
+function labelFromProjectJoin(projectRow) {
+  if (!projectRow) return '';
+  return projectDisplayLabel({
+    nom: projectRow.nom,
+    client: projectRow.client_nom,
+    client_nom: projectRow.client_nom,
+    ref: projectRow.ref,
+  });
+}
+
 function resolveProjectLabel(row) {
+  const fromJoin = labelFromProjectJoin(row?.projects);
+  if (fromJoin) return fromJoin;
+
   const ref = String(row.project_ref || '').trim();
   const name = String(row.project_name || '').trim();
   if (!name && !ref) return '';
-  if (name && (name.includes(' — ') || (ref && name.toUpperCase().startsWith(ref.toUpperCase())))) {
+
+  if (name && !PRJ_REF_RE.test(name) && !name.includes('PRJ-')) {
     return compactProjectLinkLabel(name);
   }
-  if (ref && name) {
-    return compactProjectLinkLabel(projectOptionLabel({ ref, nom: name, client: '' }));
-  }
+
   return compactProjectLinkLabel(name || ref);
+}
+
+export function purchaseLineProjectLabel(line) {
+  if (!line) return '—';
+  const raw = line.projet_lie || line.project_name || '';
+  if (!raw) return '—';
+  return compactProjectLinkLabel(raw);
 }
 
 export { isGroupedPurchaseRequest } from './purchaseGrouped';
@@ -72,7 +91,7 @@ export function purchaseRequestProjectLabel(request) {
   if (!request) return '—';
   if (isGroupedPurchaseRequest(request)) return groupedProjectLabel(request);
   if (isOffProjectPurchaseRequest(request)) return 'Hors projet';
-  return compactProjectLinkLabel(request.projet_lie || request.project_name || request.project_ref || '—');
+  return request.projet_lie || compactProjectLinkLabel(request.project_name || request.project_ref || '—');
 }
 
 export function normalizePurchaseRequest(row) {
@@ -210,7 +229,7 @@ export async function listPurchaseRequests() {
   await requireUser();
   const { data, error } = await getSupabase()
     .from(TABLE)
-    .select('*')
+    .select(PURCHASE_REQUEST_SELECT)
     .order('created_at', { ascending: false });
   if (error) throw error;
   return (data || []).map(normalizePurchaseRequest);
@@ -243,7 +262,7 @@ export async function findPurchaseRequestBySiteMaterialRequest(siteRequestId) {
   await requireUser();
   const { data, error } = await getSupabase()
     .from(TABLE)
-    .select('*')
+    .select(PURCHASE_REQUEST_SELECT)
     .eq('payload->>site_material_request_id', String(siteRequestId))
     .order('created_at', { ascending: false })
     .limit(1)

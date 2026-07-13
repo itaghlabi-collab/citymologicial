@@ -13,7 +13,7 @@ import {
 } from './purchaseRequestQuotes';
 import { createAcquisitionOrderFromQuote, updateAcquisitionOrder, syncAcquisitionOrderFromRequest, getAcquisitionOrder } from './purchaseAcquisitionOrders';
 import { createAchatsPaymentOrderFromAcquisition, syncAchatsPaymentOrderFromRequest } from './purchasePaymentOrdersAchats';
-import { normalizePurchaseRequest, toPurchaseRequestRow, generatePurchaseRequestRef, isOffProjectPurchaseRequest, isGroupedPurchaseRequest } from './purchaseRequests';
+import { normalizePurchaseRequest, toPurchaseRequestRow, generatePurchaseRequestRef, isOffProjectPurchaseRequest, isGroupedPurchaseRequest, PURCHASE_REQUEST_SELECT } from './purchaseRequests';
 import { buildProjectSplitsFromQuote, validateGroupedRequestLines } from './purchaseGrouped';
 import { upsertPurchaseProjectExpense } from '../finance/projectExpenses';
 import { getPurchaseRequestQuote } from './purchaseRequestQuotes';
@@ -70,7 +70,7 @@ export async function resolveCreatorAssignee(ctx) {
 async function fetchRequest(id) {
   const { data, error } = await getSupabase()
     .from(TABLE)
-    .select('*')
+    .select(PURCHASE_REQUEST_SELECT)
     .eq('id', id)
     .single();
   if (error) throw error;
@@ -83,7 +83,7 @@ async function patchRequest(id, patch, historyAction, historyDetail, ctx, commen
     .from(TABLE)
     .update(patch)
     .eq('id', id)
-    .select()
+    .select(PURCHASE_REQUEST_SELECT)
     .single();
   if (error) throw error;
   if (historyAction) {

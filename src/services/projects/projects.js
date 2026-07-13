@@ -7,6 +7,15 @@ import { normalizeTypesIntervention } from '../../constants/projects';
 
 const TABLE = 'projects';
 
+/** Libellé projet identique à la rubrique Projets (nom + client). */
+export function projectDisplayLabel(project) {
+  if (!project) return '';
+  const nom = String(project.nom || '').trim();
+  const client = String(project.client || project.client_nom || '').trim();
+  if (nom && client) return `${nom} — ${client}`;
+  return nom || client || String(project.ref || '').trim();
+}
+
 const SELECT = `
   *,
   clients ( id, nom, prenom, email, telephone, ville, adresse )

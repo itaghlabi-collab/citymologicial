@@ -24,7 +24,7 @@ import {
   QUOTE_STATUS_BADGE,
 } from '../../constants/purchaseWorkflow';
 import { generatePurchaseRequestPdf } from '../../services/achats/purchaseRequestPdf';
-import { purchaseRequestProjectLabel, isGroupedPurchaseRequest, compactProjectLinkLabel } from '../../services/achats/purchaseRequests';
+import { purchaseRequestProjectLabel, isGroupedPurchaseRequest, purchaseLineProjectLabel } from '../../services/achats/purchaseRequests';
 import { isSuperAdmin } from '../../services/rh/isSuperAdmin';
 import { normalizeRequestLines } from '../../services/achats/purchasePdfShared';
 import {
@@ -775,7 +775,7 @@ export default function DemandeAchatDetail({
                         <td style={{ fontWeight: 600 }}>{line.designation || '—'}</td>
                         <td>{line.quantite !== '—' && line.quantite != null && line.quantite !== '' ? line.quantite : '—'}</td>
                         <td>{line.unite || '—'}</td>
-                        {isGrouped && <td style={{ fontSize: '0.78rem' }}>{compactProjectLinkLabel(line.projet_lie || line.project_name || '—')}</td>}
+                        {isGrouped && <td style={{ fontSize: '0.78rem' }}>{purchaseLineProjectLabel(line)}</td>}
                         {isGrouped && <td style={{ fontSize: '0.78rem' }}>{line.fournisseur || '—'}</td>}
                         {isGrouped && <td style={{ fontSize: '0.78rem', color: 'var(--text-2)' }}>{line.commentaire || '—'}</td>}
                       </tr>

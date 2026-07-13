@@ -3,7 +3,7 @@
  */
 import Big from 'big.js';
 import { normalizeQuoteLines } from './purchaseRequestQuotes';
-import { compactProjectLinkLabel, projectOptionLabel } from './purchaseRequests';
+import { compactProjectLinkLabel, projectOptionLabel, purchaseLineProjectLabel } from './purchaseRequests';
 
 export function isGroupedPurchaseRequest(formOrRequest) {
   if (!formOrRequest) return false;
@@ -20,7 +20,7 @@ export function groupedProjectLabel(request) {
   if (n === 0) return 'Achats groupés';
   if (n === 1) {
     const line = (request?.payload?.lines || []).find((l) => l.project_id);
-    return compactProjectLinkLabel(line?.projet_lie || line?.project_name || 'Achats groupés (1 projet)');
+    return purchaseLineProjectLabel(line) || 'Achats groupés (1 projet)';
   }
   return `Achats groupés (${n} projets)`;
 }
