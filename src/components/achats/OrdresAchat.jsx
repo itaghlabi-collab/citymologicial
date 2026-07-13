@@ -283,7 +283,7 @@ export default function OrdresAchat() {
         ) : filtered.length === 0 ? (
           <EmptyState icon={<ShoppingBag size={24} />} title="Aucun ordre d'achat" sub="Les OA sont générés automatiquement lors de la validation d'un devis par le DG." />
         ) : (
-          <div className="table-wrap">
+          <div className="table-wrap table-wrap--wide">
             <table>
               <thead>
                 <tr>

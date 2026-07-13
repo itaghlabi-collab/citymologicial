@@ -66,8 +66,8 @@ function QuoteComparisonTable({
     );
   }
   return (
-    <div className="table-wrap">
-      <table>
+    <div className="table-wrap table-wrap--wide">
+      <table className="data-table data-table--wide">
         <thead>
           <tr>
             <th>Fournisseur</th>
@@ -91,35 +91,35 @@ function QuoteComparisonTable({
             const canEditQuote = (canManage && !locked) || (canSuperAdminEditSelectedQuote && q.selected);
             return (
               <tr key={q.id} style={q.selected ? { background: 'rgba(46, 125, 50, 0.08)' } : undefined}>
-                <td style={{ fontWeight: 700 }}>{q.supplier_name}</td>
-                <td style={{ maxWidth: 160, fontSize: '0.78rem' }}>
+                <td data-label="Fournisseur" style={{ fontWeight: 700 }}>{q.supplier_name}</td>
+                <td data-label="Référence devis" style={{ maxWidth: 160, fontSize: '0.78rem' }}>
                   {q.lines?.length
                     ? formatQuoteReferencesSummary(q.lines)
                     : (q.ref_devis || '-')}
                 </td>
-                <td>{formatMAD(q.montant_ht)}</td>
-                <td>{q.tva_rate}%</td>
-                <td style={{ fontWeight: 700 }}>{formatMAD(q.montant_ttc)}</td>
-                <td>{q.delai || '-'}</td>
-                <td>{q.garantie || '-'}</td>
-                <td style={{ maxWidth: 120, fontSize: '0.78rem' }}>{q.conditions_paiement || '-'}</td>
-                <td style={{ maxWidth: 140, fontSize: '0.78rem' }}>{q.observations || '-'}</td>
-                <td>
+                <td data-label="Montant HT">{formatMAD(q.montant_ht)}</td>
+                <td data-label="TVA">{q.tva_rate}%</td>
+                <td data-label="TTC" style={{ fontWeight: 700 }}>{formatMAD(q.montant_ttc)}</td>
+                <td data-label="Délai">{q.delai || '-'}</td>
+                <td data-label="Garantie">{q.garantie || '-'}</td>
+                <td data-label="Conditions" style={{ maxWidth: 120, fontSize: '0.78rem' }}>{q.conditions_paiement || '-'}</td>
+                <td data-label="Observations" style={{ maxWidth: 140, fontSize: '0.78rem' }}>{q.observations || '-'}</td>
+                <td data-label="Pièce jointe">
                   {q.attachment_url ? (
                     <a href={q.attachment_url} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm" title="Voir PDF">
                       <FileText size={12} />
                     </a>
                   ) : '-'}
                 </td>
-                <td>
+                <td data-label="Statut">
                   <span className={`badge ${QUOTE_STATUS_BADGE[q.statut] || 'badge-grey'}`} style={{ fontSize: '0.68rem' }}>
                     {q.statut}
                   </span>
                 </td>
-                <td style={{ fontWeight: 700, color: q.selected ? 'var(--green)' : 'var(--text-3)' }}>
+                <td data-label="Devis retenu" style={{ fontWeight: 700, color: q.selected ? 'var(--green)' : 'var(--text-3)' }}>
                   {q.selected ? 'Oui' : 'Non'}
                 </td>
-                <td>
+                <td data-label="Actions">
                   <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
                     <button type="button" className="btn btn-ghost btn-sm" title="Voir détail" onClick={() => onView(q)}>
                       <Eye size={12} />

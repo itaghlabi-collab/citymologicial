@@ -364,7 +364,7 @@ export default function Fournisseurs({ onFournisseursChange }) {
             onAction={() => { setEditItem(null); setShowModal(true); }}
           />
         ) : (
-          <div className="table-wrap">
+          <div className="table-wrap table-wrap--wide">
             <table>
               <thead>
                 <tr>

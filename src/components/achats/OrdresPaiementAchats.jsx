@@ -313,7 +313,7 @@ export default function OrdresPaiementAchats() {
         ) : filtered.length === 0 ? (
           <EmptyState icon={<CreditCard size={24} />} title="Aucun ordre de paiement" sub="Les OP sont générés automatiquement à la validation d'un devis." />
         ) : (
-          <div className="table-wrap">
+          <div className="table-wrap table-wrap--wide">
             <table>
               <thead>
                 <tr>

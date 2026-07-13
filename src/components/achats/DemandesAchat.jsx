@@ -1008,7 +1008,7 @@ export default function DemandesAchat() {
         ) : filtered.length === 0 ? (
           <EmptyState icon={<ClipboardList size={24} />} title="Aucune demande" sub="Créez votre première demande d'achat" action={perms.canCreateRequest ? 'Nouvelle demande' : undefined} onAction={() => openCreateModal('simple')} />
         ) : (
-          <div className="table-wrap">
+          <div className="table-wrap table-wrap--wide">
             <table>
               <thead>
                 <tr>

@@ -192,7 +192,7 @@ function DetailBC({ item, onBack, onEdit, onDelete, onDupliquer, onPdf, pdfLoadi
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 16, alignItems: 'start' }}>
         <div className="card">
           <SectionTitle icon={<Package size={13} />}>Lignes articles</SectionTitle>
-          <div className="table-wrap">
+          <div className="table-wrap table-wrap--wide">
             <table>
               <thead><tr><th>#</th><th>Désignation</th><th>Qté</th><th>Unité</th><th>Prix HT</th><th>TVA</th><th>Total HT</th></tr></thead>
               <tbody>
@@ -412,7 +412,7 @@ export default function BonsCommande() {
             ) : filtered.length === 0 ? (
               <EmptyState icon={<ShoppingCart size={24} />} title="Aucun bon de commande" sub="Créez votre premier BC" action="Nouveau BC" onAction={() => setTab('nouveau')} />
             ) : (
-              <div className="table-wrap">
+              <div className="table-wrap table-wrap--wide">
                 <table>
                   <thead><tr><th>Référence</th><th>Fournisseur</th><th>Total TTC</th><th>Date création</th><th>Date prévue</th><th>Statut</th><th>Actions</th></tr></thead>
                   <tbody>

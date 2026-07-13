@@ -1089,7 +1089,13 @@ html, body, #root {
   padding: 28px;
   background: var(--bg);
   max-width: 100%;
+  min-width: 0;
   box-sizing: border-box;
+}
+
+.page-content > * {
+  min-width: 0;
+  max-width: 100%;
 }
 
 .page-content::-webkit-scrollbar { width: 6px; }
@@ -1224,7 +1230,47 @@ html, body, #root {
    ============================================= */
 .table-wrap {
   overflow-x: auto;
+  overflow-y: visible;
+  max-width: 100%;
+  -webkit-overflow-scrolling: touch;
   border-radius: var(--radius);
+  scrollbar-gutter: stable;
+}
+
+/* Tableaux larges (comparatifs, listes multi-colonnes) — scroll horizontal + colonne actions visible */
+.table-wrap--wide {
+  margin-left: -4px;
+  margin-right: -4px;
+  padding-bottom: 2px;
+}
+
+.table-wrap--wide table {
+  width: max-content;
+  min-width: 100%;
+}
+
+.table-wrap--wide th:last-child,
+.table-wrap--wide td:last-child {
+  position: sticky;
+  right: 0;
+  z-index: 1;
+  background: var(--surface);
+  box-shadow: -6px 0 10px rgba(0, 0, 0, 0.06);
+}
+
+.table-wrap--wide thead th:last-child {
+  background: var(--surface-2);
+  z-index: 2;
+}
+
+.table-wrap--wide tbody tr:hover td:last-child {
+  background: #fafbfc;
+}
+
+/* Cartes : ne pas couper le scroll horizontal des tableaux */
+.card:has(.table-wrap) {
+  overflow-x: auto;
+  overflow-y: visible;
 }
 
 table {
@@ -1628,6 +1674,13 @@ tbody tr:last-child td { border-bottom: none; }
     background: transparent;
     border-radius: 0;
     box-shadow: none;
+  }
+
+  .table-wrap--wide th:last-child,
+  .table-wrap--wide td:last-child {
+    position: static;
+    box-shadow: none;
+    background: inherit;
   }
 
   .table-wrap table {
@@ -5427,9 +5480,20 @@ tbody tr:last-child td { border-bottom: none; }
 
 .finance-detail-grid {
   display: grid;
-  grid-template-columns: 1fr 300px;
+  grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
   gap: 16px;
   align-items: start;
+}
+
+.finance-detail-grid > * {
+  min-width: 0;
+  max-width: 100%;
+}
+
+@media (max-width: 1400px) {
+  .finance-detail-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 .inventaire-module .finance-detail-grid {
