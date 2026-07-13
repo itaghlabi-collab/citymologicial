@@ -16,6 +16,49 @@ export function projectOptionLabel(p) {
   return [p.ref, p.nom, client].filter(Boolean).join(' — ');
 }
 
+const PRJ_REF_RE = /^PRJ-[A-Z0-9-]+$/i;
+const COMPANY_HINT_RE = /\b(LOGISTICS|SARL|SA|GROUPE|GROUP|AFRICA|INC|LTD|MAROC|HOLDING)\b/i;
+
+/** Affichage compact projet lié — supprime doublons PRJ et répétitions. */
+export function compactProjectLinkLabel(label) {
+  if (!label) return '—';
+  const raw = String(label).trim();
+  if (!raw) return '—';
+
+  const parts = raw.split(' — ').map((p) => p.trim()).filter(Boolean);
+  if (!parts.length) return '—';
+
+  const deduped = parts.filter((p, i) => i === 0 || p.toLowerCase() !== parts[i - 1].toLowerCase());
+  const withoutRefs = deduped.filter((p) => !PRJ_REF_RE.test(p));
+  const meaningful = withoutRefs.length ? withoutRefs : deduped;
+
+  if (meaningful.length === 1) return meaningful[0];
+
+  const last = meaningful[meaningful.length - 1];
+  const prev = meaningful[meaningful.length - 2];
+
+  if (meaningful.length === 2) {
+    if (COMPANY_HINT_RE.test(last) && !COMPANY_HINT_RE.test(prev)) return last;
+    return `${prev} — ${last}`;
+  }
+
+  if (COMPANY_HINT_RE.test(last)) return last;
+  return `${prev} — ${last}`;
+}
+
+function resolveProjectLabel(row) {
+  const ref = String(row.project_ref || '').trim();
+  const name = String(row.project_name || '').trim();
+  if (!name && !ref) return '';
+  if (name && (name.includes(' — ') || (ref && name.toUpperCase().startsWith(ref.toUpperCase())))) {
+    return compactProjectLinkLabel(name);
+  }
+  if (ref && name) {
+    return compactProjectLinkLabel(projectOptionLabel({ ref, nom: name, client: '' }));
+  }
+  return compactProjectLinkLabel(name || ref);
+}
+
 export { isGroupedPurchaseRequest } from './purchaseGrouped';
 
 export function isOffProjectPurchaseRequest(formOrRequest) {
@@ -29,14 +72,12 @@ export function purchaseRequestProjectLabel(request) {
   if (!request) return '—';
   if (isGroupedPurchaseRequest(request)) return groupedProjectLabel(request);
   if (isOffProjectPurchaseRequest(request)) return 'Hors projet';
-  return request.projet_lie || request.project_name || request.project_ref || '—';
+  return compactProjectLinkLabel(request.projet_lie || request.project_name || request.project_ref || '—');
 }
 
 export function normalizePurchaseRequest(row) {
   if (!row) return null;
-  const projectLabel = row.project_ref && row.project_name
-    ? projectOptionLabel({ ref: row.project_ref, nom: row.project_name, client: '' })
-    : row.project_name || row.project_ref || '';
+  const projectLabel = resolveProjectLabel(row);
 
   return {
     id: row.id,
@@ -276,9 +317,26 @@ export async function updatePurchaseRequestTitle(id, titre) {
     err.code = 'VALIDATION';
     throw err;
   }
+
+  const { data: existing, error: fetchErr } = await getSupabase()
+    .from(TABLE)
+    .select('payload')
+    .eq('id', id)
+    .maybeSingle();
+  if (fetchErr) throw fetchErr;
+
+  const payload = { ...(existing?.payload || {}) };
+  const lines = [...(payload.lines || [])];
+  if (lines.length === 1) {
+    lines[0] = { ...lines[0], designation: trimmed };
+    payload.lines = lines;
+  } else if (!lines.length) {
+    payload.lines = [{ designation: trimmed, quantite: null, unite: 'u' }];
+  }
+
   const { data, error } = await getSupabase()
     .from(TABLE)
-    .update({ titre: trimmed })
+    .update({ titre: trimmed, payload })
     .eq('id', id)
     .select()
     .single();

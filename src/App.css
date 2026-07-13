@@ -7585,3 +7585,309 @@ tbody tr:last-child td { border-bottom: none; }
   font-size: 1rem;
   margin-top: 4px;
 }
+
+/* =============================================
+   ACHATS MODULE — ergonomie mobile & onglets
+   ============================================= */
+.achats-module .achats-da-mobile,
+.achats-module .achats-quote-mobile {
+  display: none;
+}
+
+.achats-da-tabs {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-2);
+}
+
+.achats-da-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1.5px solid var(--border);
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.achats-da-tab:hover {
+  border-color: var(--text-3);
+  color: var(--text);
+}
+
+.achats-da-tab.is-active {
+  background: var(--red);
+  border-color: var(--red);
+  color: #fff;
+}
+
+.achats-da-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.08);
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.achats-da-tab.is-active .achats-da-tab-count {
+  background: rgba(255, 255, 255, 0.22);
+  color: #fff;
+}
+
+.achats-da-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+}
+
+.achats-da-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 12px 14px;
+  box-shadow: var(--shadow);
+}
+
+.achats-da-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.achats-da-card-ref {
+  font-family: var(--font-head);
+  font-weight: 700;
+  font-size: 0.82rem;
+  color: var(--red);
+}
+
+.achats-da-card-title {
+  margin-bottom: 10px;
+}
+
+.achats-da-card-title-btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0;
+  font-weight: 600;
+  font-size: 0.92rem;
+  color: var(--text);
+  cursor: text;
+  line-height: 1.35;
+  word-break: break-word;
+}
+
+.achats-da-card-title-btn:disabled {
+  cursor: default;
+}
+
+.achats-da-card-meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px 12px;
+  margin-bottom: 12px;
+  font-size: 0.78rem;
+}
+
+.achats-da-card-meta > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+
+.achats-da-card-meta span {
+  color: var(--text-3);
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.achats-da-card-meta strong {
+  font-weight: 600;
+  color: var(--text);
+  word-break: break-word;
+}
+
+.achats-da-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.achats-quote-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.achats-quote-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 12px 14px;
+  box-shadow: var(--shadow);
+}
+
+.achats-quote-card.is-selected {
+  border-color: rgba(46, 125, 50, 0.45);
+  background: rgba(46, 125, 50, 0.06);
+}
+
+.achats-quote-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.achats-quote-card-supplier {
+  font-weight: 700;
+  font-size: 0.9rem;
+}
+
+.achats-quote-card-ref {
+  font-size: 0.76rem;
+  color: var(--text-2);
+  margin-top: 3px;
+  word-break: break-word;
+}
+
+.achats-quote-card-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 8px 12px;
+  margin-bottom: 12px;
+  font-size: 0.78rem;
+}
+
+.achats-quote-card-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.achats-quote-card-grid span {
+  color: var(--text-3);
+  font-size: 0.65rem;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.achats-quote-card-ttc {
+  color: var(--red);
+}
+
+.achats-quote-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+
+.achats-quote-validate-btn {
+  margin-left: auto;
+}
+
+@media (max-width: 767px) {
+  .achats-module .achats-da-desktop,
+  .achats-module .achats-quote-desktop {
+    display: none !important;
+  }
+
+  .achats-module .achats-da-mobile,
+  .achats-module .achats-quote-mobile {
+    display: block;
+  }
+
+  .achats-module .achats-besoins-table {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .achats-module .achats-besoins-table table {
+    width: 100%;
+    min-width: 520px;
+    border-collapse: collapse;
+    border-spacing: 0;
+  }
+
+  .achats-module .achats-besoins-table thead {
+    display: table-header-group !important;
+  }
+
+  .achats-module .achats-besoins-table tbody {
+    display: table-row-group !important;
+  }
+
+  .achats-module .achats-besoins-table tbody tr {
+    display: table-row !important;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    margin: 0 !important;
+    padding: 0 !important;
+  }
+
+  .achats-module .achats-besoins-table tbody td {
+    display: table-cell !important;
+    padding: 8px 10px !important;
+    border-bottom: 1px solid var(--border) !important;
+    white-space: normal !important;
+    word-break: normal !important;
+    overflow-wrap: break-word !important;
+    min-height: 0 !important;
+    justify-content: initial !important;
+  }
+
+  .achats-module .achats-besoins-table tbody td::before {
+    content: none !important;
+    display: none !important;
+  }
+
+  .achats-module .page-title {
+    font-size: 1.15rem;
+  }
+
+  .achats-da-tabs {
+    padding: 10px 12px;
+    gap: 6px;
+  }
+
+  .achats-da-tab {
+    font-size: 0.72rem;
+    padding: 7px 10px;
+  }
+}
+
+@media (min-width: 768px) {
+  .achats-module .achats-da-mobile,
+  .achats-module .achats-quote-mobile {
+    display: none !important;
+  }
+}

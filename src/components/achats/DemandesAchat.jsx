@@ -13,7 +13,7 @@ import { useAuth } from '../../hooks/useAuth';
 import {
   canEditPurchaseRequest, canDeletePurchaseRequest, normalizePurchaseStatus,
   canSubmitPurchaseRequest, canAddQuoteToRequest, canValidateQuoteOnRequest,
-  getPurchaseStatusBadge, getPurchaseStatusLabel,
+  getPurchaseStatusBadge, getPurchaseStatusLabel, PURCHASE_DASHBOARD_TABS,
 } from '../../constants/purchaseWorkflow';
 import { submitPurchaseRequest, getPurchaseRequestBundle, reconcileLegacySoumiseRequests, reconcilePurchaseRequestSentStatus } from '../../services/achats/purchaseWorkflow';
 import { projectOptionLabel, purchaseRequestProjectLabel, updatePurchaseRequestTitle, reconcileMissingPurchaseRequestRefs, isGroupedPurchaseRequest } from '../../services/achats/purchaseRequests';
@@ -703,6 +703,133 @@ function computeDashboardKpis(items) {
   };
 }
 
+const DASHBOARD_TABS = [
+  { key: 'en_cours', label: 'En cours de traitement' },
+  { key: 'attente_dg', label: 'En attente validation DG' },
+  { key: 'validee', label: 'Validée' },
+];
+
+const ACTIVE_STATUS_PRIORITY = {
+  'En étude': 0,
+  'Devis reçus': 1,
+  'En attente validation DG': 2,
+  Soumise: 3,
+};
+
+function matchesStatusTab(item, tabKey) {
+  if (!tabKey) return true;
+  const statuses = PURCHASE_DASHBOARD_TABS[tabKey];
+  if (!statuses?.length) return true;
+  return statuses.includes(normalizePurchaseStatus(item.statut));
+}
+
+function comparePurchaseRequests(a, b) {
+  const sa = normalizePurchaseStatus(a.statut);
+  const sb = normalizePurchaseStatus(b.statut);
+  const pa = ACTIVE_STATUS_PRIORITY[sa] ?? 50;
+  const pb = ACTIVE_STATUS_PRIORITY[sb] ?? 50;
+  if (pa !== pb) return pa - pb;
+  if (a.priorite === 'Urgente' && b.priorite !== 'Urgente') return -1;
+  if (b.priorite === 'Urgente' && a.priorite !== 'Urgente') return 1;
+  const da = a.created_at ? new Date(a.created_at).getTime() : 0;
+  const db = b.created_at ? new Date(b.created_at).getTime() : 0;
+  return db - da;
+}
+
+function DaRowActions({
+  item, perms, superAdmin, submittingId, pdfLoadingId, onView, onEdit, onPrintPdf, onSubmit, onAddQuote, onDelete,
+}) {
+  return (
+    <div className="achats-da-actions">
+      <button type="button" className="btn btn-secondary btn-sm" title="Voir" onClick={() => onView(item.id)}><Eye size={13} /></button>
+      {canEditPurchaseRequest(item.statut, { isSuperAdmin: superAdmin }) && (
+        <button type="button" className="btn btn-ghost btn-sm" title={superAdmin && item.statut !== 'Brouillon' ? 'Modifier (super admin)' : 'Modifier'} onClick={() => onEdit(item)}><Edit2 size={13} /></button>
+      )}
+      <button type="button" className="btn btn-ghost btn-sm" title="PDF" disabled={pdfLoadingId === item.id} onClick={() => onPrintPdf(item)}>
+        {pdfLoadingId === item.id ? <Loader2 size={12} className="cin-spin" /> : <FileText size={13} />}
+      </button>
+      {canSubmitPurchaseRequest(item.statut) && (
+        <button type="button" className="btn btn-primary btn-sm" title="Soumettre" disabled={submittingId === item.id} onClick={() => onSubmit(item.id)}>
+          {submittingId === item.id ? <Loader2 size={12} className="cin-spin" /> : <Send size={12} />}
+        </button>
+      )}
+      {perms.canManageQuotes && canAddQuoteToRequest(item.statut) && (
+        <button type="button" className="btn btn-ghost btn-sm" title="Ajouter devis" onClick={() => onAddQuote(item.id)}><Plus size={12} /></button>
+      )}
+      {perms.canValidateSupplier && canValidateQuoteOnRequest(item.statut) && (
+        <button type="button" className="btn btn-primary btn-sm" title="Valider (DG)" onClick={() => onView(item.id)}><CheckCircle size={12} /></button>
+      )}
+      {canDeletePurchaseRequest() && (
+        <button type="button" className="btn btn-ghost btn-sm" title="Supprimer" onClick={() => onDelete(item.id)} style={{ color: 'var(--red)' }}><Trash2 size={12} /></button>
+      )}
+    </div>
+  );
+}
+
+function DaMobileCard({
+  item, perms, superAdmin, submittingId, pdfLoadingId,
+  titleEditId, titleEditValue, titleSavingId, canEditTitle,
+  onView, onEdit, onPrintPdf, onSubmit, onAddQuote, onDelete,
+  onStartTitleEdit, onTitleChange, onCommitTitleEdit, onCancelTitleEdit,
+}) {
+  return (
+    <article className="achats-da-card">
+      <div className="achats-da-card-head">
+        <span className="achats-da-card-ref">{item.ref}</span>
+        <span className={`badge ${getPurchaseStatusBadge(item.statut)}`} style={{ fontSize: '0.68rem' }}>
+          {getPurchaseStatusLabel(item.statut)}
+        </span>
+      </div>
+      <div className="achats-da-card-title">
+        {titleEditId === item.id ? (
+          <input
+            value={titleEditValue}
+            onChange={(e) => onTitleChange(e.target.value)}
+            onBlur={() => onCommitTitleEdit(item)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') { e.preventDefault(); onCommitTitleEdit(item); }
+              if (e.key === 'Escape') { e.preventDefault(); onCancelTitleEdit(); }
+            }}
+            autoFocus
+            disabled={titleSavingId === item.id}
+            style={{ ...INPUT_STYLE, fontWeight: 600, fontSize: '0.9rem', width: '100%' }}
+          />
+        ) : (
+          <button
+            type="button"
+            className="achats-da-card-title-btn"
+            disabled={!canEditTitle(item) || titleSavingId === item.id}
+            onClick={() => onStartTitleEdit(item)}
+          >
+            {titleSavingId === item.id ? <Loader2 size={12} className="cin-spin" style={{ display: 'inline', marginRight: 6 }} /> : null}
+            {item.titre}
+          </button>
+        )}
+      </div>
+      <div className="achats-da-card-meta">
+        <div><span>Projet</span><strong>{purchaseRequestProjectLabel(item)}</strong></div>
+        <div><span>Demandeur</span><strong>{item.requester_name || item.demandeur || '—'}</strong></div>
+        <div><span>Création</span><strong>{item.date_creation || '—'}</strong></div>
+        <div><span>Date souhaitée</span><strong>{item.date_limite || '—'}</strong></div>
+        <div><span>Priorité</span><strong><span className={`badge ${BADGE_PRIORITE[item.priorite] || 'badge-grey'}`} style={{ fontSize: '0.68rem' }}>{item.priorite}</span></strong></div>
+      </div>
+      <DaRowActions
+        item={item}
+        perms={perms}
+        superAdmin={superAdmin}
+        submittingId={submittingId}
+        pdfLoadingId={pdfLoadingId}
+        onView={onView}
+        onEdit={onEdit}
+        onPrintPdf={onPrintPdf}
+        onSubmit={onSubmit}
+        onAddQuote={onAddQuote}
+        onDelete={onDelete}
+      />
+    </article>
+  );
+}
+
 export default function DemandesAchat() {
   const { user } = useAuth();
   const superAdmin = isSuperAdmin(user);
@@ -726,6 +853,7 @@ export default function DemandesAchat() {
   const [titleEditId, setTitleEditId] = useState(null);
   const [titleEditValue, setTitleEditValue] = useState('');
   const [titleSavingId, setTitleSavingId] = useState(null);
+  const [statusTab, setStatusTab] = useState('en_cours');
   const [role, setRole] = useState(null);
 
   useEffect(() => {
@@ -848,14 +976,36 @@ export default function DemandesAchat() {
     setTitleEditValue('');
   }
 
-  const filtered = visibleItems.filter((x) => {
+  const filtered = useMemo(() => {
     const q = search.toLowerCase();
-    const projectLabel = (x.projet_lie || x.project_name || x.project_ref || '').toLowerCase();
-    return (!q || x.ref?.toLowerCase().includes(q) || x.titre?.toLowerCase().includes(q) || projectLabel.includes(q) || (x.requester_name || '').toLowerCase().includes(q))
-      && (!filterStatut || normalizePurchaseStatus(x.statut) === filterStatut)
-      && (!filterPrio || x.priorite === filterPrio)
-      && (!filterProjet || projectLabel.includes(filterProjet.toLowerCase()));
-  });
+    return visibleItems.filter((x) => {
+      const projectLabel = (x.projet_lie || x.project_name || x.project_ref || '').toLowerCase();
+      return (!q || x.ref?.toLowerCase().includes(q) || x.titre?.toLowerCase().includes(q) || projectLabel.includes(q) || (x.requester_name || '').toLowerCase().includes(q))
+        && matchesStatusTab(x, statusTab)
+        && (!filterStatut || normalizePurchaseStatus(x.statut) === filterStatut)
+        && (!filterPrio || x.priorite === filterPrio)
+        && (!filterProjet || projectLabel.includes(filterProjet.toLowerCase()));
+    });
+  }, [visibleItems, search, statusTab, filterStatut, filterPrio, filterProjet]);
+
+  const filteredSorted = useMemo(
+    () => [...filtered].sort(comparePurchaseRequests),
+    [filtered],
+  );
+
+  const tabCounts = useMemo(() => {
+    const q = search.toLowerCase();
+    const base = visibleItems.filter((x) => {
+      const projectLabel = (x.projet_lie || x.project_name || x.project_ref || '').toLowerCase();
+      return (!q || x.ref?.toLowerCase().includes(q) || x.titre?.toLowerCase().includes(q) || projectLabel.includes(q) || (x.requester_name || '').toLowerCase().includes(q))
+        && (!filterStatut || normalizePurchaseStatus(x.statut) === filterStatut)
+        && (!filterPrio || x.priorite === filterPrio)
+        && (!filterProjet || projectLabel.includes(filterProjet.toLowerCase()));
+    });
+    return Object.fromEntries(
+      DASHBOARD_TABS.map((t) => [t.key, base.filter((x) => matchesStatusTab(x, t.key)).length]),
+    );
+  }, [visibleItems, search, filterStatut, filterPrio, filterProjet]);
 
   const kpis = computeDashboardKpis(visibleItems);
 
@@ -927,7 +1077,7 @@ export default function DemandesAchat() {
   }
 
   return (
-    <div className="animate-fade-in">
+    <div className="animate-fade-in achats-module">
       <div className="page-header flex-between" style={{ flexWrap: 'wrap', gap: 10 }}>
         <div>
           <h1 className="page-title">TABLEAU DE BORD ACHATS</h1>
@@ -1003,110 +1153,147 @@ export default function DemandesAchat() {
       )}
 
       <div className="card" style={{ padding: 0 }}>
+        <div className="achats-da-tabs" role="tablist" aria-label="Filtrer par statut">
+          {DASHBOARD_TABS.map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              role="tab"
+              aria-selected={statusTab === tab.key}
+              className={`achats-da-tab${statusTab === tab.key ? ' is-active' : ''}`}
+              onClick={() => setStatusTab(tab.key)}
+            >
+              {tab.label}
+              <span className="achats-da-tab-count">{tabCounts[tab.key] ?? 0}</span>
+            </button>
+          ))}
+        </div>
         {loading ? (
           <div style={{ padding: 40, textAlign: 'center', color: 'var(--text-3)' }}><Loader2 size={20} className="cin-spin" /> Chargement...</div>
-        ) : filtered.length === 0 ? (
+        ) : filteredSorted.length === 0 ? (
           <EmptyState icon={<ClipboardList size={24} />} title="Aucune demande" sub="Créez votre première demande d'achat" action={perms.canCreateRequest ? 'Nouvelle demande' : undefined} onAction={() => openCreateModal('simple')} />
         ) : (
-          <div className="table-wrap table-wrap--wide">
-            <table>
-              <thead>
-                <tr>
-                  <th>Référence</th>
-                  <th>Titre</th>
-                  <th>Priorité</th>
-                  <th>Demandeur</th>
-                  <th>Projet</th>
-                  <th>Date souhaitée</th>
-                  <th>Statut</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((x) => (
-                  <tr key={x.id}>
-                    <td><span style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.82rem', color: 'var(--red)' }}>{x.ref}</span></td>
-                    <td data-label="Titre">
-                      {titleEditId === x.id ? (
-                        <input
-                          value={titleEditValue}
-                          onChange={(e) => setTitleEditValue(e.target.value)}
-                          onBlur={() => commitTitleEdit(x)}
-                          onKeyDown={(e) => {
-                            if (e.key === 'Enter') { e.preventDefault(); commitTitleEdit(x); }
-                            if (e.key === 'Escape') { e.preventDefault(); cancelTitleEdit(); }
-                          }}
-                          autoFocus
-                          disabled={titleSavingId === x.id}
-                          style={{ ...INPUT_STYLE, fontWeight: 600, fontSize: '0.87rem', padding: '5px 8px' }}
-                        />
-                      ) : (
-                        <div
-                          role={canEditTitle(x) ? 'button' : undefined}
-                          tabIndex={canEditTitle(x) ? 0 : undefined}
-                          title={canEditTitle(x) ? 'Cliquer pour modifier le titre' : undefined}
-                          onClick={() => startTitleEdit(x)}
-                          onKeyDown={(e) => {
-                            if (canEditTitle(x) && (e.key === 'Enter' || e.key === ' ')) {
-                              e.preventDefault();
-                              startTitleEdit(x);
-                            }
-                          }}
-                          style={{
-                            fontWeight: 600,
-                            fontSize: '0.87rem',
-                            maxWidth: 200,
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                            cursor: canEditTitle(x) ? 'text' : 'default',
-                            opacity: titleSavingId === x.id ? 0.6 : 1,
-                          }}
-                        >
-                          {titleSavingId === x.id ? <Loader2 size={12} className="cin-spin" style={{ display: 'inline' }} /> : null}
-                          {x.titre}
-                        </div>
-                      )}
-                    </td>
-                    <td data-label="Priorité"><span className={`badge ${BADGE_PRIORITE[x.priorite] || 'badge-grey'}`} style={{ fontSize: '0.72rem' }}>{x.priorite}</span></td>
-                    <td data-label="Demandeur">{x.requester_name || x.demandeur || '—'}</td>
-                    <td data-label="Projet">{purchaseRequestProjectLabel(x)}</td>
-                    <td data-label="Date">{x.date_limite || '—'}</td>
-                    <td data-label="Statut">
-                      <span className={`badge ${getPurchaseStatusBadge(x.statut)}`} style={{ fontSize: '0.72rem' }}>
-                        {getPurchaseStatusLabel(x.statut)}
-                      </span>
-                    </td>
-                    <td>
-                      <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
-                        <button type="button" className="btn btn-secondary btn-sm" title="Voir" onClick={() => setDetailId(x.id)}><Eye size={13} /></button>
-                        {canEditPurchaseRequest(x.statut, { isSuperAdmin: superAdmin }) && (
-                          <button type="button" className="btn btn-ghost btn-sm" title={superAdmin && x.statut !== 'Brouillon' ? 'Modifier (super admin)' : 'Modifier'} onClick={() => openEditModal(x)}><Edit2 size={13} /></button>
-                        )}
-                        <button type="button" className="btn btn-ghost btn-sm" title="PDF" disabled={pdfLoadingId === x.id} onClick={() => handlePrintPdf(x)}>
-                          {pdfLoadingId === x.id ? <Loader2 size={12} className="cin-spin" /> : <FileText size={13} />}
-                        </button>
-                        {canSubmitPurchaseRequest(x.statut) && (
-                          <button type="button" className="btn btn-primary btn-sm" title="Soumettre" disabled={submittingId === x.id} onClick={() => handleSubmit(x.id)}>
-                            {submittingId === x.id ? <Loader2 size={12} className="cin-spin" /> : <Send size={12} />}
-                          </button>
-                        )}
-                        {perms.canManageQuotes && canAddQuoteToRequest(x.statut) && (
-                          <button type="button" className="btn btn-ghost btn-sm" title="Ajouter devis" onClick={() => { setDetailAddQuote(true); setDetailId(x.id); }}><Plus size={12} /></button>
-                        )}
-                        {perms.canValidateSupplier && canValidateQuoteOnRequest(x.statut) && (
-                          <button type="button" className="btn btn-primary btn-sm" title="Valider (DG)" onClick={() => setDetailId(x.id)}><CheckCircle size={12} /></button>
-                        )}
-                        {canDeletePurchaseRequest() && (
-                          <button type="button" className="btn btn-ghost btn-sm" title="Supprimer" onClick={() => handleDelete(x.id)} style={{ color: 'var(--red)' }}><Trash2 size={12} /></button>
-                        )}
-                      </div>
-                    </td>
+          <>
+            <div className="achats-da-desktop table-wrap table-wrap--wide">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Référence</th>
+                    <th>Titre</th>
+                    <th>Priorité</th>
+                    <th>Demandeur</th>
+                    <th>Projet</th>
+                    <th>Date création</th>
+                    <th>Date souhaitée</th>
+                    <th>Statut</th>
+                    <th>Actions</th>
                   </tr>
+                </thead>
+                <tbody>
+                  {filteredSorted.map((x) => (
+                    <tr key={x.id}>
+                      <td><span style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.82rem', color: 'var(--red)' }}>{x.ref}</span></td>
+                      <td data-label="Titre">
+                        {titleEditId === x.id ? (
+                          <input
+                            value={titleEditValue}
+                            onChange={(e) => setTitleEditValue(e.target.value)}
+                            onBlur={() => commitTitleEdit(x)}
+                            onKeyDown={(e) => {
+                              if (e.key === 'Enter') { e.preventDefault(); commitTitleEdit(x); }
+                              if (e.key === 'Escape') { e.preventDefault(); cancelTitleEdit(); }
+                            }}
+                            autoFocus
+                            disabled={titleSavingId === x.id}
+                            style={{ ...INPUT_STYLE, fontWeight: 600, fontSize: '0.87rem', padding: '5px 8px' }}
+                          />
+                        ) : (
+                          <div
+                            role={canEditTitle(x) ? 'button' : undefined}
+                            tabIndex={canEditTitle(x) ? 0 : undefined}
+                            title={canEditTitle(x) ? 'Cliquer pour modifier le titre' : undefined}
+                            onClick={() => startTitleEdit(x)}
+                            onKeyDown={(e) => {
+                              if (canEditTitle(x) && (e.key === 'Enter' || e.key === ' ')) {
+                                e.preventDefault();
+                                startTitleEdit(x);
+                              }
+                            }}
+                            style={{
+                              fontWeight: 600,
+                              fontSize: '0.87rem',
+                              maxWidth: 200,
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                              cursor: canEditTitle(x) ? 'text' : 'default',
+                              opacity: titleSavingId === x.id ? 0.6 : 1,
+                            }}
+                          >
+                            {titleSavingId === x.id ? <Loader2 size={12} className="cin-spin" style={{ display: 'inline' }} /> : null}
+                            {x.titre}
+                          </div>
+                        )}
+                      </td>
+                      <td data-label="Priorité"><span className={`badge ${BADGE_PRIORITE[x.priorite] || 'badge-grey'}`} style={{ fontSize: '0.72rem' }}>{x.priorite}</span></td>
+                      <td data-label="Demandeur">{x.requester_name || x.demandeur || '—'}</td>
+                      <td data-label="Projet">{purchaseRequestProjectLabel(x)}</td>
+                      <td data-label="Date création">{x.date_creation || '—'}</td>
+                      <td data-label="Date souhaitée">{x.date_limite || '—'}</td>
+                      <td data-label="Statut">
+                        <span className={`badge ${getPurchaseStatusBadge(x.statut)}`} style={{ fontSize: '0.72rem' }}>
+                          {getPurchaseStatusLabel(x.statut)}
+                        </span>
+                      </td>
+                      <td>
+                        <DaRowActions
+                          item={x}
+                          perms={perms}
+                          superAdmin={superAdmin}
+                          submittingId={submittingId}
+                          pdfLoadingId={pdfLoadingId}
+                          onView={setDetailId}
+                          onEdit={openEditModal}
+                          onPrintPdf={handlePrintPdf}
+                          onSubmit={handleSubmit}
+                          onAddQuote={(id) => { setDetailAddQuote(true); setDetailId(id); }}
+                          onDelete={handleDelete}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="achats-da-mobile">
+              <div className="achats-da-cards">
+                {filteredSorted.map((x) => (
+                  <DaMobileCard
+                    key={x.id}
+                    item={x}
+                    perms={perms}
+                    superAdmin={superAdmin}
+                    submittingId={submittingId}
+                    pdfLoadingId={pdfLoadingId}
+                    titleEditId={titleEditId}
+                    titleEditValue={titleEditValue}
+                    titleSavingId={titleSavingId}
+                    canEditTitle={canEditTitle}
+                    onView={setDetailId}
+                    onEdit={openEditModal}
+                    onPrintPdf={handlePrintPdf}
+                    onSubmit={handleSubmit}
+                    onAddQuote={(id) => { setDetailAddQuote(true); setDetailId(id); }}
+                    onDelete={handleDelete}
+                    onStartTitleEdit={startTitleEdit}
+                    onTitleChange={setTitleEditValue}
+                    onCommitTitleEdit={commitTitleEdit}
+                    onCancelTitleEdit={cancelTitleEdit}
+                  />
                 ))}
-              </tbody>
-            </table>
-          </div>
+              </div>
+            </div>
+          </>
         )}
       </div>
 

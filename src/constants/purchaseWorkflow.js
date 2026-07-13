@@ -85,6 +85,22 @@ export function getPurchaseStatusBadge(statut) {
 /** Libellé affiché dans l'UI (le statut en base reste normalisé). */
 export const PURCHASE_STATUS_LABEL = {
   'En étude': 'En cours de traitement',
+  'Commande envoyée': 'Validée',
+};
+
+/** Filtres onglets tableau de bord Achats (statuts normalisés en base). */
+export const PURCHASE_DASHBOARD_TABS = {
+  en_cours: ['Soumise', 'En étude', 'Devis reçus'],
+  attente_dg: ['En attente validation DG'],
+  validee: [
+    'Devis validé',
+    'Ordre d\'achat créé',
+    'Ordre de paiement créé',
+    'Commande envoyée',
+    'En attente réception',
+    'Réceptionnée',
+    'Clôturée',
+  ],
 };
 
 export function getPurchaseStatusLabel(statut) {

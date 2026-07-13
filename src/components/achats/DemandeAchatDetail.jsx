@@ -24,7 +24,7 @@ import {
   QUOTE_STATUS_BADGE,
 } from '../../constants/purchaseWorkflow';
 import { generatePurchaseRequestPdf } from '../../services/achats/purchaseRequestPdf';
-import { purchaseRequestProjectLabel, isGroupedPurchaseRequest } from '../../services/achats/purchaseRequests';
+import { purchaseRequestProjectLabel, isGroupedPurchaseRequest, compactProjectLinkLabel } from '../../services/achats/purchaseRequests';
 import { isSuperAdmin } from '../../services/rh/isSuperAdmin';
 import { normalizeRequestLines } from '../../services/achats/purchasePdfShared';
 import {
@@ -55,6 +55,61 @@ const EMPTY_QUOTE = {
   attachment_url: '',
 };
 
+function QuoteComparisonMobile({
+  quotes, onValidate, canValidate, validatingId, canManage, canSuperAdminEditSelectedQuote, onEdit, onDelete, onView,
+}) {
+  return (
+    <div className="achats-quote-cards">
+      {quotes.map((q) => {
+        const locked = q.selected || q.verrouille;
+        const canEditQuote = (canManage && !locked) || (canSuperAdminEditSelectedQuote && q.selected);
+        return (
+          <article key={q.id} className={`achats-quote-card${q.selected ? ' is-selected' : ''}`}>
+            <div className="achats-quote-card-head">
+              <div>
+                <div className="achats-quote-card-supplier">{q.supplier_name}</div>
+                <div className="achats-quote-card-ref">
+                  {q.lines?.length ? formatQuoteReferencesSummary(q.lines) : (q.ref_devis || '—')}
+                </div>
+              </div>
+              <span className={`badge ${QUOTE_STATUS_BADGE[q.statut] || 'badge-grey'}`}>{q.statut}</span>
+            </div>
+            <div className="achats-quote-card-grid">
+              <div><span>HT</span><strong>{formatMAD(q.montant_ht)}</strong></div>
+              <div><span>TVA</span><strong>{q.tva_rate}%</strong></div>
+              <div><span>TTC</span><strong className="achats-quote-card-ttc">{formatMAD(q.montant_ttc)}</strong></div>
+              <div><span>Retenu</span><strong style={{ color: q.selected ? 'var(--green)' : 'var(--text-3)' }}>{q.selected ? 'Oui' : 'Non'}</strong></div>
+            </div>
+            <div className="achats-quote-card-actions">
+              <button type="button" className="btn btn-ghost btn-sm" title="Voir" onClick={() => onView(q)}><Eye size={14} /></button>
+              {canEditQuote && (
+                <button type="button" className="btn btn-ghost btn-sm" title="Modifier" onClick={() => onEdit(q)}><Edit2 size={14} /></button>
+              )}
+              {q.attachment_url && (
+                <a href={q.attachment_url} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm" title="PDF"><Download size={14} /></a>
+              )}
+              {canManage && !locked && (
+                <button type="button" className="btn btn-ghost btn-sm" title="Supprimer" style={{ color: 'var(--red)' }} onClick={() => onDelete(q.id)}><Trash2 size={14} /></button>
+              )}
+              {canValidate && !locked && (
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm achats-quote-validate-btn"
+                  disabled={validatingId === q.id}
+                  onClick={() => onValidate(q.id)}
+                >
+                  {validatingId === q.id ? <Loader2 size={13} className="cin-spin" /> : <CheckCircle size={13} />}
+                  Valider
+                </button>
+              )}
+            </div>
+          </article>
+        );
+      })}
+    </div>
+  );
+}
+
 function QuoteComparisonTable({
   quotes, onValidate, canValidate, validatingId, canManage, canSuperAdminEditSelectedQuote, onEdit, onDelete, onView,
 }) {
@@ -66,8 +121,9 @@ function QuoteComparisonTable({
     );
   }
   return (
-    <div className="table-wrap table-wrap--wide">
-      <table className="data-table data-table--wide">
+    <>
+      <div className="achats-quote-desktop table-wrap table-wrap--wide">
+        <table className="data-table data-table--wide">
         <thead>
           <tr>
             <th>Fournisseur</th>
@@ -167,7 +223,21 @@ function QuoteComparisonTable({
           })}
         </tbody>
       </table>
-    </div>
+      </div>
+      <div className="achats-quote-mobile">
+        <QuoteComparisonMobile
+          quotes={quotes}
+          canValidate={canValidate}
+          canManage={canManage}
+          canSuperAdminEditSelectedQuote={canSuperAdminEditSelectedQuote}
+          validatingId={validatingId}
+          onView={onView}
+          onEdit={onEdit}
+          onDelete={onDelete}
+          onValidate={onValidate}
+        />
+      </div>
+    </>
   );
 }
 
@@ -567,7 +637,13 @@ export default function DemandeAchatDetail({
   const isGrouped = isGroupedPurchaseRequest(request);
   const besoinsLines = isGrouped
     ? (request.payload?.lines || [])
-    : normalizeRequestLines(request);
+    : (() => {
+      const lines = normalizeRequestLines(request);
+      if (lines.length === 1 && request.titre) {
+        return [{ ...lines[0], designation: request.titre }];
+      }
+      return lines;
+    })();
 
   const canEdit = canEditPurchaseRequest(request.statut, { isSuperAdmin: superAdmin });
   const isTerminal = ['Clôturée', 'Refusée'].includes(request.statut);
@@ -578,7 +654,7 @@ export default function DemandeAchatDetail({
   const canValidateDg = perms.canValidateSupplier && canValidateQuoteOnRequest(request.statut);
 
   return (
-    <div className="animate-fade-in">
+    <div className="animate-fade-in achats-module">
       <button type="button" className="btn btn-ghost btn-sm" style={{ marginBottom: 14, display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={onBack}>
         <ChevronLeft size={15} /> Retour
       </button>
@@ -679,7 +755,7 @@ export default function DemandeAchatDetail({
             {besoinsLines.length === 0 ? (
               <p style={{ fontSize: '0.84rem', color: 'var(--text-3)', margin: 0 }}>Aucune ligne enregistrée.</p>
             ) : (
-              <div className="table-wrap" style={{ marginTop: 4 }}>
+              <div className="table-wrap achats-besoins-table" style={{ marginTop: 4 }}>
                 <table>
                   <thead>
                     <tr>
@@ -699,7 +775,7 @@ export default function DemandeAchatDetail({
                         <td style={{ fontWeight: 600 }}>{line.designation || '—'}</td>
                         <td>{line.quantite !== '—' && line.quantite != null && line.quantite !== '' ? line.quantite : '—'}</td>
                         <td>{line.unite || '—'}</td>
-                        {isGrouped && <td style={{ fontSize: '0.78rem' }}>{line.projet_lie || line.project_name || '—'}</td>}
+                        {isGrouped && <td style={{ fontSize: '0.78rem' }}>{compactProjectLinkLabel(line.projet_lie || line.project_name || '—')}</td>}
                         {isGrouped && <td style={{ fontSize: '0.78rem' }}>{line.fournisseur || '—'}</td>}
                         {isGrouped && <td style={{ fontSize: '0.78rem', color: 'var(--text-2)' }}>{line.commentaire || '—'}</td>}
                       </tr>
