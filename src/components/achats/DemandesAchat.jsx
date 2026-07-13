@@ -704,6 +704,7 @@ function computeDashboardKpis(items) {
 }
 
 const DASHBOARD_TABS = [
+  { key: 'toutes', label: 'Toutes' },
   { key: 'en_cours', label: 'En cours de traitement' },
   { key: 'attente_dg', label: 'En attente validation DG' },
   { key: 'validee', label: 'Validée' },
@@ -717,7 +718,7 @@ const ACTIVE_STATUS_PRIORITY = {
 };
 
 function matchesStatusTab(item, tabKey) {
-  if (!tabKey) return true;
+  if (!tabKey || tabKey === 'toutes') return true;
   const statuses = PURCHASE_DASHBOARD_TABS[tabKey];
   if (!statuses?.length) return true;
   return statuses.includes(normalizePurchaseStatus(item.statut));
@@ -853,7 +854,7 @@ export default function DemandesAchat() {
   const [titleEditId, setTitleEditId] = useState(null);
   const [titleEditValue, setTitleEditValue] = useState('');
   const [titleSavingId, setTitleSavingId] = useState(null);
-  const [statusTab, setStatusTab] = useState('en_cours');
+  const [statusTab, setStatusTab] = useState('toutes');
   const [role, setRole] = useState(null);
 
   useEffect(() => {
