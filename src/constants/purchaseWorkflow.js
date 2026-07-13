@@ -159,6 +159,11 @@ export function getAcquisitionOrderStatusLabel(statut) {
   return OA_STATUS_LABEL[statut] || statut;
 }
 
+export function getAcquisitionOrderStatusBadge(statut) {
+  if (getAcquisitionOrderStatusLabel(statut) === 'Validé') return 'badge-green';
+  return OA_STATUS_BADGE[statut] || 'badge-grey';
+}
+
 export const OA_STATUS_BADGE = {
   Brouillon: 'badge-grey',
   Validé: 'badge-green',

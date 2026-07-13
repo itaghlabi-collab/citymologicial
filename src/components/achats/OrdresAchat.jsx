@@ -4,16 +4,16 @@
 import { useState } from 'react';
 import {
   ShoppingBag, Eye, Search, ChevronLeft, Loader2, RefreshCw, CheckCircle,
-  Send, Package, FileText, History, Edit2, Trash2,
+  Package, FileText, History, Edit2, Trash2,
 } from 'lucide-react';
 import { useAcquisitionOrders } from '../../hooks/useAcquisitionOrders';
-import { updateAcquisitionOrder, updateAcquisitionOrderStatus, deleteAcquisitionOrder } from '../../services/achats/purchaseAcquisitionOrders';
+import { updateAcquisitionOrder, updateAcquisitionOrderStatus, deleteAcquisitionOrder, acquisitionOrderProjectLabel } from '../../services/achats/purchaseAcquisitionOrders';
 import { getPurchaseRequestQuote } from '../../services/achats/purchaseRequestQuotes';
 import { generateAcquisitionOrderPdf } from '../../services/achats/purchaseAcquisitionOrderPdf';
 import { listPurchaseRequestHistory } from '../../services/achats/purchaseRequestHistory';
-import { PURCHASE_ASSIGNEE, getAcquisitionOrderStatusLabel } from '../../constants/purchaseWorkflow';
+import { PURCHASE_ASSIGNEE, getAcquisitionOrderStatusLabel, getAcquisitionOrderStatusBadge } from '../../constants/purchaseWorkflow';
 import {
-  INPUT_STYLE, SELECT_STYLE, STATUTS_ORDRE, BADGE_ORDRE,
+  INPUT_STYLE, SELECT_STYLE, STATUTS_ORDRE,
   KpiCard, EmptyState, SectionTitle, FField, FRow, formatMAD, Modal,
 } from './shared.jsx';
 
@@ -58,7 +58,7 @@ function DetailOA({ ordre, history, onBack, onStatusChange, onSave, saving }) {
           <h1 className="page-title" style={{ marginBottom: 4 }}>{ordre.ref}</h1>
           <p className="page-subtitle">{ordre.objet}</p>
         </div>
-        <span className={`badge ${BADGE_ORDRE[ordre.statut] || 'badge-grey'}`}>{getAcquisitionOrderStatusLabel(ordre.statut)}</span>
+        <span className={`badge ${getAcquisitionOrderStatusBadge(ordre.statut)}`}>{getAcquisitionOrderStatusLabel(ordre.statut)}</span>
       </div>
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 16 }}>
         <div className="card">
@@ -93,13 +93,12 @@ function DetailOA({ ordre, history, onBack, onStatusChange, onSave, saving }) {
             <button type="button" className="btn btn-ghost btn-sm" disabled={pdfLoading} onClick={handlePdf}>
               {pdfLoading ? <Loader2 size={13} className="cin-spin" /> : <FileText size={13} />} Télécharger PDF
             </button>
-            {next && (
+            {next && ordre.statut !== 'Validé' && (
               <button type="button" className="btn btn-primary btn-sm" disabled={saving} onClick={() => onStatusChange(ordre.id, next)}>
-                {ordre.statut === 'Validé' && <><Send size={13} /> Envoyer fournisseur</>}
                 {ordre.statut === 'Envoyé fournisseur' && <><Package size={13} /> En attente réception</>}
                 {ordre.statut === 'En attente réception' && <><CheckCircle size={13} /> Réceptionner</>}
                 {ordre.statut === 'Réceptionné' && 'Clôturer'}
-                {!['Validé', 'Envoyé fournisseur', 'En attente réception', 'Réceptionné'].includes(ordre.statut) && next}
+                {!['Envoyé fournisseur', 'En attente réception', 'Réceptionné'].includes(ordre.statut) && next}
               </button>
             )}
           </div>
@@ -295,26 +294,15 @@ export default function OrdresAchat() {
                     <td>{o.purchase_request_ref || '—'}</td>
                     <td>{o.objet}</td>
                     <td>{o.supplier_name}</td>
-                    <td>{o.project_ref || '—'}</td>
+                    <td>{acquisitionOrderProjectLabel(o)}</td>
                     <td>{formatMAD(o.montant_ttc)}</td>
-                    <td><span className={`badge ${BADGE_ORDRE[o.statut] || 'badge-grey'}`}>{getAcquisitionOrderStatusLabel(o.statut)}</span></td>
+                    <td><span className={`badge ${getAcquisitionOrderStatusBadge(o.statut)}`}>{getAcquisitionOrderStatusLabel(o.statut)}</span></td>
                     <td>
                       <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
                         <button type="button" className="btn btn-secondary btn-sm" title="Voir" onClick={() => openDetail(o.id)}><Eye size={13} /></button>
                         <button type="button" className="btn btn-ghost btn-sm" title="PDF" disabled={pdfLoadingId === o.id} onClick={() => handleListPdf(o.id)}>
                           {pdfLoadingId === o.id ? <Loader2 size={12} className="cin-spin" /> : <FileText size={12} />}
                         </button>
-                        {o.statut === 'Validé' && (
-                          <button
-                            type="button"
-                            className="btn btn-primary btn-sm"
-                            title="Envoyer au fournisseur"
-                            disabled={actionId === o.id}
-                            onClick={() => handleStatusChange(o.id, 'Envoyé fournisseur')}
-                          >
-                            {actionId === o.id ? <Loader2 size={12} className="cin-spin" /> : <Send size={12} />}
-                          </button>
-                        )}
                         <button
                           type="button"
                           className="btn btn-ghost btn-sm"

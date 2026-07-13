@@ -4,8 +4,18 @@
 import { getSupabase } from '../../lib/supabase';
 
 import { PURCHASE_ASSIGNEE } from '../../constants/purchaseWorkflow';
+import { compactProjectLinkLabel } from './purchaseRequests';
 
 const TABLE = 'purchase_acquisition_orders';
+
+export function acquisitionOrderProjectLabel(ordre) {
+  if (!ordre) return '—';
+  const hasProject = ordre.project_id || ordre.project_ref || ordre.project_name;
+  if (!hasProject) return 'Hors projet';
+  const name = String(ordre.project_name || '').trim();
+  if (name) return compactProjectLinkLabel(name);
+  return compactProjectLinkLabel(ordre.project_ref || '—');
+}
 
 export function normalizeAcquisitionOrder(row) {
   if (!row) return null;
@@ -21,7 +31,7 @@ export function normalizeAcquisitionOrder(row) {
     project_id: row.project_id,
     project_ref: row.project_ref || '',
     project_name: row.project_name || '',
-    projet_lie: row.project_ref && row.project_name ? `${row.project_ref} — ${row.project_name}` : row.project_name || '',
+    projet_lie: acquisitionOrderProjectLabel(row),
     objet: row.objet || '',
     montant_ht: Number(row.montant_ht) || 0,
     tva_rate: Number(row.tva_rate) || 20,
