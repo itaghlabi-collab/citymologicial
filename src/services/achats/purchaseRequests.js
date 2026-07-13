@@ -4,7 +4,7 @@
 import { getSupabase } from '../../lib/supabase';
 import { employeeFullName } from '../rh/employees';
 import { PURCHASE_ASSIGNEE, normalizePurchaseStatus } from '../../constants/purchaseWorkflow';
-import { listProjectsForSelect, projectDisplayLabel } from '../projects/projects';
+import { listProjectsForSelect } from '../projects/projects';
 import { isGroupedPurchaseRequest, groupedProjectLabel } from './purchaseGrouped';
 
 const TABLE = 'purchase_requests';
@@ -12,14 +12,21 @@ const ACHATS_DEPARTMENT_ID = 3;
 
 export const PURCHASE_REQUEST_SELECT = '*, projects ( id, nom, ref, client_nom )';
 
+/** Libellé achats : nom du projet uniquement (colonne « Nom projet »). */
+export function purchaseProjectNameLabel(project) {
+  if (!project) return '';
+  const nom = String(project.nom || project.project_name || '').trim();
+  if (nom) return nom;
+  return String(project.ref || '').trim();
+}
+
 export function projectOptionLabel(p) {
-  return projectDisplayLabel(p);
+  return purchaseProjectNameLabel(p);
 }
 
 const PRJ_REF_RE = /^PRJ-[A-Z0-9-]+$/i;
-const COMPANY_HINT_RE = /\b(LOGISTICS|SARL|SA|GROUPE|GROUP|AFRICA|INC|LTD|MAROC|HOLDING)\b/i;
 
-/** Anciens libellés (ref répétée, etc.) → format rubrique Projets. */
+/** Anciens libellés → nom projet seul (sans client ni ref PRJ). */
 export function compactProjectLinkLabel(label) {
   if (!label) return '—';
   const raw = String(label).trim();
@@ -32,28 +39,12 @@ export function compactProjectLinkLabel(label) {
   const withoutRefs = deduped.filter((p) => !PRJ_REF_RE.test(p));
   const meaningful = withoutRefs.length ? withoutRefs : deduped;
 
-  if (meaningful.length === 1) return meaningful[0];
-
-  const last = meaningful[meaningful.length - 1];
-  const prev = meaningful[meaningful.length - 2];
-
-  if (meaningful.length === 2) {
-    if (COMPANY_HINT_RE.test(last) && !COMPANY_HINT_RE.test(prev)) return last;
-    return `${prev} — ${last}`;
-  }
-
-  if (COMPANY_HINT_RE.test(last)) return last;
-  return `${prev} — ${last}`;
+  return meaningful[0] || '—';
 }
 
 function labelFromProjectJoin(projectRow) {
   if (!projectRow) return '';
-  return projectDisplayLabel({
-    nom: projectRow.nom,
-    client: projectRow.client_nom,
-    client_nom: projectRow.client_nom,
-    ref: projectRow.ref,
-  });
+  return purchaseProjectNameLabel({ nom: projectRow.nom, ref: projectRow.ref });
 }
 
 function resolveProjectLabel(row) {
