@@ -346,10 +346,25 @@ export async function reconcileLegacySoumiseRequests() {
   return data.length;
 }
 
-const POST_DG_STATUSES = [
-  'En attente validation DG', 'Devis validé', 'Ordre d\'achat créé', 'Ordre de paiement créé',
-  'Commande envoyée', 'En attente réception', 'Réceptionnée', 'Clôturée',
-];
+/** Anciennes DA « En attente validation DG » sans devis validé → « Devis reçus ». */
+export async function reconcileLegacyDgValidationRequests() {
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .select('id, payment_order_id, selected_quote_id')
+    .eq('statut', 'En attente validation DG');
+  if (error || !data?.length) return 0;
+
+  let fixed = 0;
+  for (const req of data) {
+    if (req.payment_order_id || req.selected_quote_id) continue;
+    await getSupabase()
+      .from(TABLE)
+      .update({ statut: 'Devis reçus' })
+      .eq('id', req.id);
+    fixed += 1;
+  }
+  return fixed;
+}
 
 export async function addQuoteToRequest(id, quoteForm) {
   const ctx = await getAuthContext();
@@ -383,17 +398,6 @@ export async function addQuoteToRequest(id, quoteForm) {
   }
 
   await notifyPurchaseQuoteAdded(existing);
-
-  if (!POST_DG_STATUSES.includes(statut)) {
-    existing = await patchRequest(
-      id,
-      { statut: 'En attente validation DG' },
-      'Envoi validation DG',
-      'Notification envoyée au Directeur Général',
-      ctx,
-    );
-    await notifyPurchaseReadyForDg(existing);
-  }
 
   return { request: existing, quote };
 }
@@ -454,27 +458,15 @@ export async function removeQuoteFromRequest(requestId, quoteId) {
 }
 
 export async function sendRequestToDgValidation(id) {
-  const ctx = await getAuthContext();
   const existing = await fetchRequest(id);
-  const statut = normalizePurchaseStatus(existing.statut);
   const quotes = await listQuotesForRequest(id);
   if (!quotes.length) {
     const err = new Error('Ajoutez au moins un devis avant l\'envoi au DG.');
     err.code = 'VALIDATION';
     throw err;
   }
-  if (purchaseStatusRank(statut) >= purchaseStatusRank('En attente validation DG')) {
-    return existing;
-  }
-  const request = await patchRequest(
-    id,
-    { statut: 'En attente validation DG' },
-    'Envoi validation DG',
-    `${quotes.length} devis à comparer`,
-    ctx,
-  );
-  await notifyPurchaseReadyForDg(request);
-  return request;
+  await notifyPurchaseReadyForDg(existing);
+  return existing;
 }
 
 async function validateGroupedSupplierQuote(request, quote, ctx) {

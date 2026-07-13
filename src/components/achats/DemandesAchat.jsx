@@ -15,7 +15,7 @@ import {
   canSubmitPurchaseRequest, canAddQuoteToRequest, canValidateQuoteOnRequest,
   getPurchaseStatusBadge, getPurchaseStatusLabel, PURCHASE_DASHBOARD_TABS,
 } from '../../constants/purchaseWorkflow';
-import { submitPurchaseRequest, getPurchaseRequestBundle, reconcileLegacySoumiseRequests, reconcilePurchaseRequestSentStatus } from '../../services/achats/purchaseWorkflow';
+import { submitPurchaseRequest, getPurchaseRequestBundle, reconcileLegacySoumiseRequests, reconcileLegacyDgValidationRequests, reconcilePurchaseRequestSentStatus } from '../../services/achats/purchaseWorkflow';
 import { projectOptionLabel, purchaseRequestProjectLabel, updatePurchaseRequestTitle, reconcileMissingPurchaseRequestRefs, isGroupedPurchaseRequest } from '../../services/achats/purchaseRequests';
 import { buildGroupedFormPayload } from '../../services/achats/purchaseGrouped';
 import { generatePurchaseRequestPdf } from '../../services/achats/purchaseRequestPdf';
@@ -677,9 +677,9 @@ function computeDashboardKpis(items) {
   const norm = (s) => normalizePurchaseStatus(s);
   const ouvertes = items.filter((x) => !['Clôturée', 'Refusée', 'Brouillon'].includes(norm(x.statut))).length;
   const soumises = items.filter((x) => norm(x.statut) === 'Soumise').length;
-  const enCoursTraitement = items.filter((x) => norm(x.statut) === 'En étude').length;
+  const enCoursTraitement = items.filter((x) => ['Soumise', 'En étude'].includes(norm(x.statut))).length;
   const rechercheDevis = items.filter((x) => norm(x.statut) === 'Devis reçus').length;
-  const attenteDg = items.filter((x) => norm(x.statut) === 'En attente validation DG').length;
+  const attenteDg = items.filter((x) => ['Devis reçus', 'En attente validation DG'].includes(norm(x.statut))).length;
   const devisValides = items.filter((x) => norm(x.statut) === 'Devis validé').length;
   const oaEnCours = items.filter((x) => ['Ordre d\'achat créé', 'Ordre de paiement créé', 'Commande envoyée'].includes(norm(x.statut))).length;
   const enAttenteReception = items.filter((x) => norm(x.statut) === 'En attente réception').length;
@@ -706,15 +706,15 @@ function computeDashboardKpis(items) {
 const DASHBOARD_TABS = [
   { key: 'toutes', label: 'Toutes' },
   { key: 'en_cours', label: 'En cours de traitement' },
-  { key: 'attente_dg', label: 'En attente validation DG' },
+  { key: 'attente_dg', label: 'Devis à valider (DG)' },
   { key: 'validee', label: 'Validée' },
 ];
 
 const ACTIVE_STATUS_PRIORITY = {
   'En étude': 0,
-  'Devis reçus': 1,
+  Soumise: 1,
+  'Devis reçus': 2,
   'En attente validation DG': 2,
-  Soumise: 3,
 };
 
 function matchesStatusTab(item, tabKey) {
@@ -886,9 +886,10 @@ export default function DemandesAchat() {
     if (!configured || !perms.canManageQuotes) return;
     Promise.all([
       reconcileLegacySoumiseRequests(),
+      reconcileLegacyDgValidationRequests(),
       reconcilePurchaseRequestSentStatus(),
     ])
-      .then(([legacy, sent]) => { if ((legacy || 0) + (sent || 0) > 0) reload(); })
+      .then(([legacy, dg, sent]) => { if ((legacy || 0) + (dg || 0) + (sent || 0) > 0) reload(); })
       .catch(() => {});
   }, [configured, perms.canManageQuotes, reload]);
 
@@ -1119,7 +1120,7 @@ export default function DemandesAchat() {
         <KpiCard icon={<Send size={17} />} label="Soumises" value={kpis.soumises} sub="En attente prise en charge" color="blue" />
         <KpiCard icon={<Clock size={17} />} label="En cours de traitement" value={kpis.enCoursTraitement} sub="Prise en charge Achats" color="orange" />
         <KpiCard icon={<BarChart2 size={17} />} label="Recherche devis" value={kpis.rechercheDevis} sub="Devis fournisseurs reçus" color="purple" />
-        <KpiCard icon={<BarChart2 size={17} />} label="Attente validation DG" value={kpis.attenteDg} color="purple" />
+        <KpiCard icon={<BarChart2 size={17} />} label="Devis à valider (DG)" value={kpis.attenteDg} sub="En attente choix fournisseur" color="purple" />
         <KpiCard icon={<CheckCircle size={17} />} label="Devis validés" value={kpis.devisValides} color="green" />
         <KpiCard icon={<Package size={17} />} label="OA en cours" value={kpis.oaEnCours} color="blue" />
         <KpiCard icon={<AlertTriangle size={17} />} label="En attente réception" value={kpis.enAttenteReception} color="orange" />

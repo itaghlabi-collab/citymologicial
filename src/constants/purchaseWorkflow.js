@@ -100,8 +100,8 @@ export function getPurchaseStatusBadge(statut) {
 
 /** Filtres onglets tableau de bord Achats (statuts normalisés en base). */
 export const PURCHASE_DASHBOARD_TABS = {
-  en_cours: ['Soumise', 'En étude', 'Devis reçus'],
-  attente_dg: ['En attente validation DG'],
+  en_cours: ['Soumise', 'En étude'],
+  attente_dg: ['Devis reçus', 'En attente validation DG'],
   validee: [
     'Devis validé',
     'Ordre d\'achat créé',
@@ -217,5 +217,5 @@ export function canAddQuoteToRequest(statut) {
 
 export function canValidateQuoteOnRequest(statut) {
   const s = normalizePurchaseStatus(statut);
-  return ['Devis reçus', 'En attente validation DG'].includes(s);
+  return ['En étude', 'Devis reçus', 'En attente validation DG'].includes(s);
 }
