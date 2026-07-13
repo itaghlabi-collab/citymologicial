@@ -7,7 +7,7 @@
  * Détection auto (BACKUP_GOOGLE_DRIVE_AUTH_MODE=auto) : OAuth si configuré, sinon Service Account.
  */
 const { google } = require('googleapis');
-const { JWT, OAuth2 } = require('google-auth-library');
+const { JWT, OAuth2Client } = require('google-auth-library');
 
 const AUTH_MODES = {
   OAUTH: 'oauth',
@@ -63,7 +63,7 @@ function resetDriveAuth() {
 }
 
 function createOAuthClient() {
-  const client = new OAuth2(
+  const client = new OAuth2Client(
     process.env.GOOGLE_OAUTH_CLIENT_ID.trim(),
     process.env.GOOGLE_OAUTH_CLIENT_SECRET.trim(),
   );
