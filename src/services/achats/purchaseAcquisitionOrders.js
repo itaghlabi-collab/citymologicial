@@ -62,6 +62,7 @@ async function requireUser() {
 
 export async function listAcquisitionOrders() {
   await requireUser();
+  await reconcileDraftAcquisitionOrders().catch(() => {});
   const { data, error } = await getSupabase()
     .from(TABLE)
     .select('*')
@@ -113,7 +114,7 @@ export async function createAcquisitionOrderFromQuote({
     conditions_paiement: quote.conditions_paiement || null,
     garantie: quote.garantie || null,
     mode_paiement: quote.conditions_paiement || null,
-    statut: 'Brouillon',
+    statut: 'Validé',
     lines: linesSubset || request.payload?.lines || [],
     purchase_request_ref: request.ref,
     responsable_achats: PURCHASE_ASSIGNEE.label,
@@ -132,6 +133,21 @@ export async function createAcquisitionOrderFromQuote({
     .single();
   if (error) throw error;
   return normalizeAcquisitionOrder(data);
+}
+
+/** Les OA issus de la validation DG ne passent plus par Brouillon. */
+export async function reconcileDraftAcquisitionOrders() {
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .select('id')
+    .eq('statut', 'Brouillon');
+  if (error || !data?.length) return 0;
+  const { error: updateErr } = await getSupabase()
+    .from(TABLE)
+    .update({ statut: 'Validé' })
+    .eq('statut', 'Brouillon');
+  if (updateErr) throw updateErr;
+  return data.length;
 }
 
 export async function updateAcquisitionOrder(id, patch) {

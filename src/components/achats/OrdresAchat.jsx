@@ -18,7 +18,6 @@ import {
 } from './shared.jsx';
 
 const NEXT_STATUS = {
-  Brouillon: 'Validé',
   Validé: 'Envoyé fournisseur',
   'Envoyé fournisseur': 'En attente réception',
   'En attente réception': 'Réceptionné',
@@ -96,12 +95,11 @@ function DetailOA({ ordre, history, onBack, onStatusChange, onSave, saving }) {
             </button>
             {next && (
               <button type="button" className="btn btn-primary btn-sm" disabled={saving} onClick={() => onStatusChange(ordre.id, next)}>
-                {ordre.statut === 'Brouillon' && <><CheckCircle size={13} /> Valider</>}
                 {ordre.statut === 'Validé' && <><Send size={13} /> Envoyer fournisseur</>}
                 {ordre.statut === 'Envoyé fournisseur' && <><Package size={13} /> En attente réception</>}
                 {ordre.statut === 'En attente réception' && <><CheckCircle size={13} /> Réceptionner</>}
                 {ordre.statut === 'Réceptionné' && 'Clôturer'}
-                {!['Brouillon', 'Validé', 'Envoyé fournisseur', 'En attente réception', 'Réceptionné'].includes(ordre.statut) && next}
+                {!['Validé', 'Envoyé fournisseur', 'En attente réception', 'Réceptionné'].includes(ordre.statut) && next}
               </button>
             )}
           </div>
@@ -239,7 +237,7 @@ export default function OrdresAchat() {
     );
   }
 
-  const brouillons = ordres.filter((o) => o.statut === 'Brouillon').length;
+  const valides = ordres.filter((o) => o.statut === 'Validé').length;
   const enCours = ordres.filter((o) => ['Validé', 'Envoyé fournisseur', 'En attente réception'].includes(o.statut)).length;
   const montantTotal = ordres.reduce((s, o) => s + (Number(o.montant_ttc) || 0), 0);
 
@@ -248,7 +246,7 @@ export default function OrdresAchat() {
       <div className="page-header flex-between" style={{ flexWrap: 'wrap', gap: 10 }}>
         <div>
           <h1 className="page-title">ORDRES D&apos;ACHAT</h1>
-          <p className="page-subtitle">Créés automatiquement après validation du devis par le DG.</p>
+          <p className="page-subtitle">Créés et validés automatiquement après validation du devis par le DG.</p>
         </div>
         <button type="button" className="btn btn-ghost btn-sm" onClick={reload} disabled={loading}>
           <RefreshCw size={14} /> Actualiser
@@ -259,7 +257,7 @@ export default function OrdresAchat() {
 
       <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', marginBottom: 20 }}>
         <KpiCard icon={<ShoppingBag size={17} />} label="Total OA" value={ordres.length} color="blue" />
-        <KpiCard icon={<ShoppingBag size={17} />} label="Brouillons" value={brouillons} color="grey" />
+        <KpiCard icon={<CheckCircle size={17} />} label="Validés" value={valides} color="green" />
         <KpiCard icon={<CheckCircle size={17} />} label="En cours" value={enCours} color="orange" />
         <KpiCard icon={<ShoppingBag size={17} />} label="Montant total" value={formatMAD(montantTotal)} color="red" />
       </div>
@@ -306,17 +304,6 @@ export default function OrdresAchat() {
                         <button type="button" className="btn btn-ghost btn-sm" title="PDF" disabled={pdfLoadingId === o.id} onClick={() => handleListPdf(o.id)}>
                           {pdfLoadingId === o.id ? <Loader2 size={12} className="cin-spin" /> : <FileText size={12} />}
                         </button>
-                        {o.statut === 'Brouillon' && (
-                          <button
-                            type="button"
-                            className="btn btn-primary btn-sm"
-                            title="Valider l'ordre d'achat"
-                            disabled={actionId === o.id}
-                            onClick={() => handleStatusChange(o.id, 'Validé')}
-                          >
-                            {actionId === o.id ? <Loader2 size={12} className="cin-spin" /> : <CheckCircle size={12} />}
-                          </button>
-                        )}
                         {o.statut === 'Validé' && (
                           <button
                             type="button"
