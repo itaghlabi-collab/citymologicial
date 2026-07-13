@@ -98,13 +98,13 @@ function DetailOP({ op, history, onBack, perms, onAction, saving }) {
               {pdfLoading ? <Loader2 size={13} className="cin-spin" /> : <FileText size={13} />} Télécharger PDF
             </button>
             {normalizePaymentOrderStatut(op.statut) === 'À préparer' && (
-              <button type="button" className="btn btn-primary btn-sm" disabled={saving} onClick={() => onAction('initiate', op.id)}>
-                <Send size={13} /> Initier virement
+              <button type="button" className="btn btn-ghost btn-sm" disabled={saving} title="Initier virement" onClick={() => onAction('initiate', op.id)} style={{ color: '#1565C0' }}>
+                <Send size={13} />
               </button>
             )}
             {perms.canValidatePayment && normalizePaymentOrderStatut(op.statut) === 'Initié' && (
-              <button type="button" className="btn btn-primary btn-sm" disabled={saving} onClick={() => onAction('paid', op.id)}>
-                <CheckCircle size={13} /> Valider paiement
+              <button type="button" className="btn btn-ghost btn-sm" disabled={saving} title="Valider paiement (DG)" onClick={() => onAction('paid', op.id)} style={{ color: '#2E7D32' }}>
+                <CheckCircle size={13} />
               </button>
             )}
           </div>
@@ -342,10 +342,11 @@ export default function OrdresPaiementAchats() {
                         {normalizePaymentOrderStatut(o.statut) === 'À préparer' && (
                           <button
                             type="button"
-                            className="btn btn-primary btn-sm"
+                            className="btn btn-ghost btn-sm"
                             title="Initier virement"
                             disabled={actionId === o.id}
                             onClick={() => handleAction('initiate', o.id)}
+                            style={{ color: '#1565C0' }}
                           >
                             {actionId === o.id ? <Loader2 size={12} className="cin-spin" /> : <Send size={12} />}
                           </button>
@@ -353,10 +354,11 @@ export default function OrdresPaiementAchats() {
                         {perms.canValidatePayment && normalizePaymentOrderStatut(o.statut) === 'Initié' && (
                           <button
                             type="button"
-                            className="btn btn-primary btn-sm"
+                            className="btn btn-ghost btn-sm"
                             title="Valider paiement (DG)"
                             disabled={actionId === o.id}
                             onClick={() => handleAction('paid', o.id)}
+                            style={{ color: '#2E7D32' }}
                           >
                             {actionId === o.id ? <Loader2 size={12} className="cin-spin" /> : <CheckCircle size={12} />}
                           </button>

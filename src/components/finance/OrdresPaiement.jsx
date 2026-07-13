@@ -31,6 +31,40 @@ function paymentOrderStatusBadge(statut) {
   return getPaymentOrderStatusBadge(statut);
 }
 
+/** Flèche bleue → initier ; check vert → valider (DG). Même emplacement dans la ligne. */
+function PaymentOrderWorkflowButton({ statut, onInitier, onValider, disabled = false }) {
+  const norm = normalizePaymentOrderStatut(statut);
+  if (norm === 'À préparer') {
+    return (
+      <button
+        type="button"
+        className="btn btn-ghost btn-sm"
+        title="Initier virement"
+        disabled={disabled}
+        onClick={onInitier}
+        style={{ color: '#1565C0' }}
+      >
+        <Send size={13} />
+      </button>
+    );
+  }
+  if (norm === 'Initié') {
+    return (
+      <button
+        type="button"
+        className="btn btn-ghost btn-sm"
+        title="Valider paiement (DG)"
+        disabled={disabled}
+        onClick={onValider}
+        style={{ color: '#2E7D32' }}
+      >
+        <CheckCircle size={13} />
+      </button>
+    );
+  }
+  return null;
+}
+
 function OrdreForm({ initial, categories, onSave, onCancel }) {
   const [form, setForm] = useState(initial || EMPTY_FORM);
   const [errors, setErrors] = useState({});
@@ -145,8 +179,7 @@ function OrdreForm({ initial, categories, onSave, onCancel }) {
   );
 }
 
-function DetailOrdre({ ordre, onBack, onEdit, onDelete, onInitier, onExecuter, onComptabiliser }) {
-  const statutNorm = normalizePaymentOrderStatut(ordre.statut);
+function DetailOrdre({ ordre, onBack, onEdit, onDelete, onInitier, onExecuter, onComptabiliser, saving }) {
   return (
     <div className="animate-fade-in">
       <button className="btn btn-ghost btn-sm" style={{ marginBottom: 14, display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={onBack}>
@@ -162,16 +195,12 @@ function DetailOrdre({ ordre, onBack, onEdit, onDelete, onInitier, onExecuter, o
           <button className="btn btn-secondary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => exportPaymentOrderPdf(ordre)}>
             <Download size={13} /> PDF
           </button>
-          {statutNorm === 'À préparer' && (
-            <button className="btn btn-primary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => onInitier(ordre)}>
-              <Send size={13} /> Initier virement
-            </button>
-          )}
-          {statutNorm === 'Initié' && (
-            <button className="btn btn-primary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => onExecuter(ordre)}>
-              <CheckCircle size={13} /> Valider paiement
-            </button>
-          )}
+          <PaymentOrderWorkflowButton
+            statut={ordre.statut}
+            disabled={saving}
+            onInitier={() => onInitier(ordre)}
+            onValider={() => onExecuter(ordre)}
+          />
           {ordre.statut === 'Payé' && ordre.comptabilise === 'Non' && (
             <button className="btn btn-secondary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => onComptabiliser(ordre)}>
               <BookOpen size={13} /> Comptabiliser
@@ -251,7 +280,7 @@ function DetailOrdre({ ordre, onBack, onEdit, onDelete, onInitier, onExecuter, o
 }
 
 export default function OrdresPaiement({ categories = [] }) {
-  const { records: ordres, loading, error, save, remove, initiate, markPaid } = usePaymentOrders();
+  const { records: ordres, loading, saving, error, save, remove, initiate, markPaid } = usePaymentOrders();
   const [search, setSearch] = useState('');
   const [filterStatut, setFilterStatut] = useState('');
   const [filterMode, setFilterMode] = useState('');
@@ -334,6 +363,7 @@ export default function OrdresPaiement({ categories = [] }) {
         onInitier={handleInitier}
         onExecuter={handleExecuter}
         onComptabiliser={() => handleComptabiliser(ordre)}
+        saving={saving}
       />
     );
   }
@@ -476,12 +506,12 @@ export default function OrdresPaiement({ categories = [] }) {
                         <button className="btn btn-secondary btn-sm" title="Voir" onClick={() => setDetailId(o.id)}><Eye size={13} /></button>
                         <button className="btn btn-ghost btn-sm" title="Modifier" onClick={() => { setEditOrdre(o); setShowModal(true); }}><Edit2 size={13} /></button>
                         <button className="btn btn-ghost btn-sm" title="PDF" onClick={() => exportPaymentOrderPdf(o)}><Download size={13} /></button>
-                        {normalizePaymentOrderStatut(o.statut) === 'À préparer' && (
-                          <button className="btn btn-ghost btn-sm" title="Initier virement" onClick={() => handleInitier(o)} style={{ color: '#1565C0' }}><Send size={13} /></button>
-                        )}
-                        {normalizePaymentOrderStatut(o.statut) === 'Initié' && (
-                          <button className="btn btn-ghost btn-sm" title="Valider paiement" onClick={() => handleExecuter(o)} style={{ color: '#2E7D32' }}><CheckCircle size={13} /></button>
-                        )}
+                        <PaymentOrderWorkflowButton
+                          statut={o.statut}
+                          disabled={saving}
+                          onInitier={() => handleInitier(o)}
+                          onValider={() => handleExecuter(o)}
+                        />
                         <button className="btn btn-ghost btn-sm" title="Supprimer" onClick={() => handleDelete(o.id)} style={{ color: 'var(--red)' }}><Trash2 size={13} /></button>
                       </div>
                     </td>
