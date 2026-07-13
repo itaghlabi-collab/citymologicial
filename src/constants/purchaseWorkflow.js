@@ -78,15 +78,25 @@ export function purchaseStatusRank(statut) {
   return index >= 0 ? index : 0;
 }
 
-export function getPurchaseStatusBadge(statut) {
-  return PURCHASE_STATUS_BADGE[normalizePurchaseStatus(statut)] || 'badge-grey';
-}
+/** Après validation DG : un seul libellé affiché tant que la réception n'a pas commencé. */
+export const PURCHASE_STATUS_COLLAPSED_TO_OP = [
+  'Devis validé',
+  'Ordre d\'achat créé',
+  'Commande envoyée',
+];
 
 /** Libellé affiché dans l'UI (le statut en base reste normalisé). */
 export const PURCHASE_STATUS_LABEL = {
   'En étude': 'En cours de traitement',
-  'Commande envoyée': 'Validée',
 };
+
+export function getPurchaseStatusBadge(statut) {
+  const normalized = normalizePurchaseStatus(statut);
+  if (PURCHASE_STATUS_COLLAPSED_TO_OP.includes(normalized)) {
+    return PURCHASE_STATUS_BADGE['Ordre de paiement créé'] || 'badge-green';
+  }
+  return PURCHASE_STATUS_BADGE[normalized] || 'badge-grey';
+}
 
 /** Filtres onglets tableau de bord Achats (statuts normalisés en base). */
 export const PURCHASE_DASHBOARD_TABS = {
@@ -105,6 +115,9 @@ export const PURCHASE_DASHBOARD_TABS = {
 
 export function getPurchaseStatusLabel(statut) {
   const normalized = normalizePurchaseStatus(statut);
+  if (PURCHASE_STATUS_COLLAPSED_TO_OP.includes(normalized)) {
+    return 'Ordre de paiement créé';
+  }
   return PURCHASE_STATUS_LABEL[normalized] || normalized;
 }
 
@@ -132,7 +145,6 @@ export const OA_STATUSES = [
 ];
 
 export const OA_TO_REQUEST_STATUS = {
-  'Envoyé fournisseur': 'Commande envoyée',
   'En attente réception': 'En attente réception',
   Réceptionné: 'Réceptionnée',
   Clôturé: 'Clôturée',

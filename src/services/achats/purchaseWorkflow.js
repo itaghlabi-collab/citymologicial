@@ -653,7 +653,6 @@ export async function validateSupplierQuote(requestId, quoteId) {
 }
 
 const OA_SYNC_HISTORY = {
-  'Commande envoyée': 'Commande envoyée',
   'En attente réception': 'Commande expédiée — en attente de réception',
   Réceptionnée: 'Réception enregistrée',
   Clôturée: 'Processus terminé',
@@ -685,23 +684,18 @@ export async function syncPurchaseRequestFromAcquisitionOrder(oa) {
   return request;
 }
 
-/** Corrige les DA dont le statut « Commande envoyée » ne correspond pas à un envoi réel au fournisseur. */
-export async function reconcilePurchaseRequestSentStatus() {
+/** Unifie les DA validées sur « Ordre de paiement créé » (plus de statut Validée/Commande envoyée). */
+export async function reconcilePurchaseRequestOpStatus() {
   const { data: requests, error } = await getSupabase()
     .from(TABLE)
-    .select('id, statut, acquisition_order_id')
-    .eq('statut', 'Commande envoyée');
+    .select('id, statut, payment_order_id')
+    .in('statut', ['Devis validé', 'Ordre d\'achat créé', 'Commande envoyée']);
   if (error || !requests?.length) return 0;
 
   let fixed = 0;
   for (const req of requests) {
-    if (!req.acquisition_order_id) continue;
-    const { data: oa } = await getSupabase()
-      .from('purchase_acquisition_orders')
-      .select('statut')
-      .eq('id', req.acquisition_order_id)
-      .maybeSingle();
-    if (!oa || oa.statut === 'Envoyé fournisseur') continue;
+    if (!req.payment_order_id) continue;
+    if (req.statut === 'Ordre de paiement créé') continue;
     await getSupabase()
       .from(TABLE)
       .update({ statut: 'Ordre de paiement créé' })
@@ -709,6 +703,11 @@ export async function reconcilePurchaseRequestSentStatus() {
     fixed += 1;
   }
   return fixed;
+}
+
+/** @deprecated Utiliser reconcilePurchaseRequestOpStatus */
+export async function reconcilePurchaseRequestSentStatus() {
+  return reconcilePurchaseRequestOpStatus();
 }
 
 export async function closePurchaseRequest(id) {
