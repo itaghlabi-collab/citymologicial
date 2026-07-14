@@ -1,11 +1,15 @@
 /**
- * Pipeline sauvegarde — étapes numérotées, timeouts 30s, progression max 60s.
+ * Pipeline sauvegarde — étapes numérotées, timeouts, heartbeat DB périodique.
  */
 const OP_TIMEOUT_MS = Number(process.env.BACKUP_OP_TIMEOUT_MS) || 30_000;
-/** Délai sans heartbeat UI/DB avant échec du job (ms). */
-const PROGRESS_STALE_MS = Number(process.env.BACKUP_PROGRESS_STALE_MS) || 120_000;
+/** Upload archives volumineuses (database.json.gz) — plus large que OP_TIMEOUT. */
+const UPLOAD_TIMEOUT_MS = Number(process.env.BACKUP_UPLOAD_TIMEOUT_MS) || 10 * 60_000;
+/** Délai sans heartbeat mémoire avant échec du job (ms). */
+const PROGRESS_STALE_MS = Number(process.env.BACKUP_PROGRESS_STALE_MS) || 10 * 60_000;
 const COMPRESS_TIMEOUT_MS = Number(process.env.BACKUP_COMPRESS_TIMEOUT_MS) || 5 * 60_000;
 const WATCHDOG_POLL_MS = 5_000;
+/** Heartbeat DB pendant les étapes longues (ms). */
+const DB_HEARTBEAT_MS = Number(process.env.BACKUP_DB_HEARTBEAT_MS) || 30_000;
 
 class TimeoutError extends Error {
   constructor(message, meta = {}) {
@@ -74,8 +78,16 @@ function runTimed(stepLabel, location, fn, timeoutMs = OP_TIMEOUT_MS) {
 function createPipeline(ref, onProgress) {
   let step = 0;
   let lastProgressAt = Date.now();
+  let lastDbHeartbeatAt = 0;
   let lastLocation = 'pipeline:init';
+  let lastProgressMsg = `Sauvegarde ${ref} en cours…`;
   let staleError = null;
+
+  function writeDbProgress(msg) {
+    if (!onProgress) return;
+    lastDbHeartbeatAt = Date.now();
+    Promise.resolve(onProgress(msg || lastProgressMsg)).catch(() => {});
+  }
 
   const watchdog = setInterval(() => {
     const idle = Date.now() - lastProgressAt;
@@ -85,14 +97,18 @@ function createPipeline(ref, onProgress) {
         { location: lastLocation, elapsedMs: idle },
       );
       console.error(`[backup:pipeline] WATCHDOG | ${ref} | ${staleError.message}`);
+      return;
+    }
+    // Heartbeat DB même si l'étape est longue et silencieuse (upload Drive, etc.)
+    if (Date.now() - lastDbHeartbeatAt >= DB_HEARTBEAT_MS) {
+      writeDbProgress(`${lastProgressMsg} (${lastLocation})`);
     }
   }, WATCHDOG_POLL_MS);
 
   function touchProgress(msg) {
     lastProgressAt = Date.now();
-    if (msg && onProgress) {
-      Promise.resolve(onProgress(msg)).catch(() => {});
-    }
+    if (msg) lastProgressMsg = msg;
+    writeDbProgress(msg || lastProgressMsg);
   }
 
   function assertAlive() {
@@ -104,12 +120,12 @@ function createPipeline(ref, onProgress) {
     step += 1;
     lastLocation = location;
     const label = `STEP ${step}`;
-    touchProgress(opts.progressMsg);
+    touchProgress(opts.progressMsg || `Étape ${step} — ${location}`);
     const result = await runTimed(label, location, async () => {
       assertAlive();
       return fn();
     }, opts.timeoutMs ?? OP_TIMEOUT_MS);
-    touchProgress(opts.progressMsg);
+    touchProgress(opts.progressMsg || `Étape ${step} OK — ${location}`);
     return result;
   }
 
@@ -130,6 +146,7 @@ function createPipeline(ref, onProgress) {
 module.exports = {
   TimeoutError,
   OP_TIMEOUT_MS,
+  UPLOAD_TIMEOUT_MS,
   PROGRESS_STALE_MS,
   COMPRESS_TIMEOUT_MS,
   runTimed,

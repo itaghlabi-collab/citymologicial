@@ -3,7 +3,7 @@
  */
 const supabaseStorageProvider = require('./supabaseStorageProvider');
 const { isGoogleDriveEnabled, isDriveRequired } = require('./googleDriveConfig');
-const { runTimed, OP_TIMEOUT_MS } = require('./backupPipeline');
+const { runTimed, UPLOAD_TIMEOUT_MS } = require('./backupPipeline');
 const {
   uploadFromSupabasePath,
   uploadBufferToBackup,
@@ -18,10 +18,14 @@ function wrapStorageUpload(storage, pipeline, label, options = {}) {
   const { driveUploadAllowed = false, backupRef = null } = options;
 
   return async (path, buffer, contentType) => {
+    const fileLabel = path.split('/').pop() || path;
     const primary = await pipeline.run(
       `${label}.supabase.upload(${path})`,
       () => supabaseStorageProvider.upload(path, buffer, contentType),
-      { timeoutMs: OP_TIMEOUT_MS },
+      {
+        timeoutMs: UPLOAD_TIMEOUT_MS,
+        progressMsg: `Upload Supabase — ${fileLabel}…`,
+      },
     );
 
     let driveError = null;
@@ -32,6 +36,7 @@ function wrapStorageUpload(storage, pipeline, label, options = {}) {
       driveError = 'Upload Google Drive ignoré — dossier non validé avant upload.';
     } else if (driveRequested && driveUploadAllowed) {
       try {
+        pipeline.touchProgress(`Google Drive : envoi ${fileLabel}…`);
         driveResult = await runTimed(
           'drive-upload',
           `${label}.googleDrive.upload(${path})`,
@@ -42,7 +47,7 @@ function wrapStorageUpload(storage, pipeline, label, options = {}) {
           },
           DRIVE_UPLOAD_TIMEOUT_MS,
         );
-        pipeline.touchProgress(`Google Drive : ${path.split('/').pop()} envoyé`);
+        pipeline.touchProgress(`Google Drive : ${fileLabel} envoyé`);
         logger.googleDriveUploadOk(path);
       } catch (err) {
         driveError = err.message;

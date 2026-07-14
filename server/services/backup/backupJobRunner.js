@@ -15,10 +15,10 @@ function isJobActiveInMemory(ref) {
 }
 
 /** Sauvegarde éligible à réconciliation (ms depuis création). */
-const STUCK_BACKUP_MS = Number(process.env.BACKUP_STUCK_AFTER_MS) || 10 * 60 * 1000;
+const STUCK_BACKUP_MS = Number(process.env.BACKUP_STUCK_AFTER_MS) || 15 * 60 * 1000;
 
 /** Sans heartbeat DB depuis ce délai → réconciliation (ms). */
-const HEARTBEAT_STALE_MS = Number(process.env.BACKUP_HEARTBEAT_STALE_MS) || 3 * 60 * 1000;
+const HEARTBEAT_STALE_MS = Number(process.env.BACKUP_HEARTBEAT_STALE_MS) || 10 * 60 * 1000;
 
 /** Durée max absolue d'un job (ms). */
 const JOB_TIMEOUT_MS = Number(process.env.BACKUP_JOB_TIMEOUT_MS) || 90 * 60 * 1000;
