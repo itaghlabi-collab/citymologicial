@@ -9,7 +9,9 @@
     "start:ocr": "node ocr-server.js",
     "dev": "nodemon index.js",
     "migrate": "node db/migrate.js",
-    "seed": "node db/seed.js"
+    "seed": "node db/seed.js",
+    "test:backup-mime": "node --test tests/backupContentType.test.js",
+    "test:backup-bucket": "node scripts/test-backup-bucket-mime.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.108.2",

@@ -71,15 +71,11 @@ VALUES (
   'citymo-backups',
   false,
   524288000,
-  ARRAY[
-    'application/json',
-    'application/gzip',
-    'application/x-gzip',
-    'application/octet-stream',
-    'text/plain'
-  ]
+  NULL
 )
-ON CONFLICT (id) DO NOTHING;
+ON CONFLICT (id) DO UPDATE
+SET allowed_mime_types = NULL,
+    file_size_limit = COALESCE(storage.buckets.file_size_limit, EXCLUDED.file_size_limit);
 
 DROP POLICY IF EXISTS citymo_backups_select ON storage.objects;
 CREATE POLICY citymo_backups_select ON storage.objects

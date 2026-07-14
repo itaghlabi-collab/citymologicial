@@ -4,6 +4,7 @@
 const { getSupabaseAdmin } = require('../../lib/supabaseAdmin');
 const supabaseStorageProvider = require('./supabaseStorageProvider');
 const { OP_TIMEOUT_MS } = require('./backupPipeline');
+const { resolveBackupContentType } = require('./backupContentType');
 
 const SOURCE_BUCKETS_FALLBACK = [
   'citymo-workers',
@@ -112,7 +113,7 @@ async function listBucketFiles(bucket, pipeline, onProgress) {
   return files;
 }
 
-async function copyFileToBackup(bucket, filePath, backupPrefix, pipeline, { mirrorDrive } = {}) {
+async function copyFileToBackup(bucket, filePath, backupPrefix, pipeline, { mirrorDrive, sourceMime } = {}) {
   const label = `${bucket}/${filePath}`;
   const sb = getSupabaseAdmin();
 
@@ -131,21 +132,33 @@ async function copyFileToBackup(bucket, filePath, backupPrefix, pipeline, { mirr
     throw new Error(`Fichier trop volumineux (${buf.length} o, max ${MAX_FILE_BYTES})`);
   }
 
+  const blobMime = data?.type || null;
+  const resolved = resolveBackupContentType(sourceMime || blobMime, filePath);
   const destPath = `${backupPrefix}/files/${bucket}/${filePath}`;
+
   await pipeline.run(
     `supabaseStorage.upload(${destPath})`,
-    () => supabaseStorageProvider.upload(destPath, buf, data.type || 'application/octet-stream'),
+    () => supabaseStorageProvider.upload(destPath, buf, resolved.contentType, {
+      sourceBucket: bucket,
+      sourcePath: filePath,
+    }),
   );
 
   if (mirrorDrive) {
     await pipeline.run(
       `googleDrive.mirror(${destPath})`,
-      () => mirrorDrive(destPath, buf, data.type || 'application/octet-stream'),
+      () => mirrorDrive(destPath, buf, resolved.contentType),
       { timeoutMs: Number(process.env.BACKUP_DRIVE_UPLOAD_TIMEOUT_MS) || 300_000 },
     );
   }
 
-  return { source: label, dest: destPath, size: buf.length };
+  return {
+    source: label,
+    dest: destPath,
+    size: buf.length,
+    mimetype: resolved.contentType,
+    mimetype_source: resolved.source,
+  };
 }
 
 async function copyFilesParallel(files, backupPrefix, pipeline, onProgress, { mirrorDrive } = {}) {
@@ -162,13 +175,23 @@ async function copyFilesParallel(files, backupPrefix, pipeline, onProgress, { mi
       index += 1;
       const file = files[i];
       try {
-        const copied = await copyFileToBackup(file.bucket, file.path, backupPrefix, pipeline, { mirrorDrive });
+        const copied = await copyFileToBackup(file.bucket, file.path, backupPrefix, pipeline, {
+          mirrorDrive,
+          sourceMime: file.mimetype,
+        });
         manifestEntries.push(copied);
         done += 1;
         onProgress?.({ phase: 'copied', bucket: file.bucket, path: file.path, copied: done, total: files.length });
         pipeline.touchProgress(`Copie ${done}/${files.length} — ${file.bucket}/${file.path}`);
       } catch (err) {
-        errors.push({ bucket: file.bucket, path: file.path, error: err.message });
+        errors.push({
+          bucket: file.bucket,
+          path: file.path,
+          dest: `${backupPrefix}/files/${file.bucket}/${file.path}`,
+          mimetype: file.mimetype || null,
+          size: file.size || null,
+          error: err.message,
+        });
         done += 1;
         onProgress?.({ phase: 'copy_error', bucket: file.bucket, path: file.path, error: err.message, copied: done, total: files.length });
         pipeline.touchProgress(`Erreur copie ${file.bucket}/${file.path}: ${err.message}`);
