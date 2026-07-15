@@ -6,6 +6,7 @@ import { AuthProvider } from './context/AuthContext';
 import { ToastProvider } from './utils/toast';
 import PwaUpdateBanner from './pwa/PwaUpdateBanner';
 import PwaInstallBanner from './pwa/PwaInstallBanner';
+import PwaSafeBoundary from './pwa/PwaSafeBoundary';
 import './index.css';
 
 const BUILD_ID = import.meta.env.VITE_BUILD_ID || 'dev';
@@ -39,7 +40,9 @@ ReactDOM.createRoot(root).render(
       <ToastProvider>
         {shareToken ? <PublicSharePage token={shareToken} /> : <App />}
         <PwaUpdateBanner />
-        <PwaInstallBanner />
+        <PwaSafeBoundary>
+          <PwaInstallBanner />
+        </PwaSafeBoundary>
       </ToastProvider>
     </AuthProvider>
   </React.StrictMode>,

@@ -18,14 +18,9 @@ export default function PwaInstallBanner() {
     try {
       const { outcome } = await promptInstall();
       if (outcome !== 'accepted') setBusy(false);
-      // accepted → état partagé masque bannière + icône sans reload
     } catch {
       setBusy(false);
     }
-  };
-
-  const handleLater = () => {
-    dismissBannerForSession();
   };
 
   return (
@@ -46,7 +41,13 @@ export default function PwaInstallBanner() {
         <button
           type="button"
           className="pwa-install-banner__btn pwa-install-banner__btn--ghost"
-          onClick={handleLater}
+          onClick={() => {
+            try {
+              dismissBannerForSession();
+            } catch {
+              /* ignore */
+            }
+          }}
           disabled={busy}
         >
           Plus tard

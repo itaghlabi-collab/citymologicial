@@ -1,32 +1,37 @@
 /**
  * Logique partagée d'installation PWA (beforeinstallprompt).
- * Une seule source pour bannière + icône header.
+ * Snapshot référentiellement stable : getPwaInstallState() ne recalcule jamais.
  */
 
 const SESSION_LATER_KEY = 'citymo_pwa_install_later';
+
+const EMPTY_SNAPSHOT = Object.freeze({
+  canInstall: false,
+  installed: false,
+  showBanner: false,
+  showButton: false,
+});
 
 let initialized = false;
 let deferredPrompt = null;
 let installed = false;
 const listeners = new Set();
 
-/** Snapshot stable pour useSyncExternalStore (référence inchangée si l'état n'a pas bougé). */
-let cachedSnapshot = {
-  canInstall: false,
-  installed: false,
-  showBanner: false,
-  showButton: false,
-};
+/** Référence stable — remplacée uniquement après un vrai changement d'état. */
+let cachedSnapshot = EMPTY_SNAPSHOT;
 
-function isStandalone() {
-  if (typeof window === 'undefined') return false;
-  if (window.matchMedia('(display-mode: standalone)').matches) return true;
-  // iOS Safari (legacy)
-  if (typeof navigator !== 'undefined' && navigator.standalone === true) return true;
+function safeStandalone() {
+  try {
+    if (typeof window === 'undefined') return false;
+    if (window.matchMedia?.('(display-mode: standalone)')?.matches) return true;
+    if (typeof navigator !== 'undefined' && navigator.standalone === true) return true;
+  } catch {
+    /* ignore */
+  }
   return false;
 }
 
-function readSessionLater() {
+function safeSessionLater() {
   try {
     return sessionStorage.getItem(SESSION_LATER_KEY) === '1';
   } catch {
@@ -35,14 +40,18 @@ function readSessionLater() {
 }
 
 function computeSnapshot() {
-  const standalone = isStandalone() || installed;
-  const canInstall = !standalone && Boolean(deferredPrompt);
-  return {
-    canInstall,
-    installed: standalone,
-    showBanner: canInstall && !readSessionLater(),
-    showButton: canInstall,
-  };
+  try {
+    const standalone = safeStandalone() || installed;
+    const canInstall = !standalone && Boolean(deferredPrompt);
+    return {
+      canInstall,
+      installed: standalone,
+      showBanner: canInstall && !safeSessionLater(),
+      showButton: canInstall,
+    };
+  } catch {
+    return EMPTY_SNAPSHOT;
+  }
 }
 
 function snapshotsEqual(a, b) {
@@ -54,98 +63,141 @@ function snapshotsEqual(a, b) {
   );
 }
 
-function refreshSnapshot() {
+/**
+ * Recalcule et notifie UNIQUEMENT si l'état a changé.
+ * Jamais appelé depuis getPwaInstallState.
+ */
+function commitSnapshot() {
   const next = computeSnapshot();
-  if (!snapshotsEqual(cachedSnapshot, next)) {
-    cachedSnapshot = next;
-  }
-  return cachedSnapshot;
-}
-
-function emit() {
-  refreshSnapshot();
+  if (snapshotsEqual(cachedSnapshot, next)) return false;
+  cachedSnapshot = next;
   listeners.forEach((listener) => {
     try {
       listener();
     } catch {
-      /* ignore subscriber errors */
+      /* never break the app */
     }
   });
+  return true;
 }
 
 export function initPwaInstall() {
-  if (typeof window === 'undefined' || initialized) return;
-  initialized = true;
+  try {
+    if (typeof window === 'undefined' || initialized) return;
+    initialized = true;
 
-  if (isStandalone()) {
-    installed = true;
-    deferredPrompt = null;
-    refreshSnapshot();
-    return;
+    if (safeStandalone()) {
+      installed = true;
+      deferredPrompt = null;
+      commitSnapshot();
+      return;
+    }
+
+    window.addEventListener('beforeinstallprompt', (event) => {
+      try {
+        event.preventDefault();
+        if (safeStandalone() || installed) return;
+        deferredPrompt = event;
+        commitSnapshot();
+      } catch {
+        /* ignore */
+      }
+    });
+
+    window.addEventListener('appinstalled', () => {
+      try {
+        installed = true;
+        deferredPrompt = null;
+        commitSnapshot();
+      } catch {
+        /* ignore */
+      }
+    });
+
+    commitSnapshot();
+  } catch {
+    cachedSnapshot = EMPTY_SNAPSHOT;
   }
-
-  window.addEventListener('beforeinstallprompt', (event) => {
-    event.preventDefault();
-    if (isStandalone() || installed) return;
-    deferredPrompt = event;
-    emit();
-  });
-
-  window.addEventListener('appinstalled', () => {
-    installed = true;
-    deferredPrompt = null;
-    emit();
-  });
-
-  refreshSnapshot();
 }
 
 export function subscribePwaInstall(listener) {
   listeners.add(listener);
-  return () => listeners.delete(listener);
+  return () => {
+    listeners.delete(listener);
+  };
 }
 
+/** Retourne TOUJOURS la même référence tant que l'état n'a pas changé. */
 export function getPwaInstallState() {
-  return refreshSnapshot();
+  return cachedSnapshot;
 }
 
-/** Lance le prompt natif. Retourne { outcome: 'accepted' | 'dismissed' | 'unavailable' }. */
-export async function promptInstall() {
-  if (!deferredPrompt || isStandalone() || installed) {
-    return { outcome: 'unavailable' };
-  }
+/** @internal test helper — force un commit après mutation manuelle du prompt (tests). */
+export function __testSetDeferredPrompt(event) {
+  deferredPrompt = event || null;
+  return commitSnapshot();
+}
 
-  const promptEvent = deferredPrompt;
+/** @internal test helper */
+export function __testResetPwaInstallStore() {
   deferredPrompt = null;
-
+  installed = false;
+  cachedSnapshot = EMPTY_SNAPSHOT;
   try {
+    sessionStorage.removeItem(SESSION_LATER_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Lance le prompt natif. */
+export async function promptInstall() {
+  try {
+    if (!deferredPrompt || safeStandalone() || installed) {
+      return { outcome: 'unavailable' };
+    }
+
+    const promptEvent = deferredPrompt;
+    deferredPrompt = null;
+
     await promptEvent.prompt();
     const choice = await promptEvent.userChoice;
     if (choice?.outcome === 'accepted') {
       installed = true;
       deferredPrompt = null;
-      emit();
+      commitSnapshot();
       return { outcome: 'accepted' };
     }
-    // Refusé : on n'a plus l'événement — plus rien à proposer jusqu'au prochain beforeinstallprompt
-    emit();
+    commitSnapshot();
     return { outcome: choice?.outcome || 'dismissed' };
   } catch {
-    emit();
+    try {
+      commitSnapshot();
+    } catch {
+      /* ignore */
+    }
     return { outcome: 'unavailable' };
   }
 }
 
-/** Masque la bannière pour la session courante uniquement (icône header reste). */
+/** Masque la bannière pour la session courante (icône header reste). */
 export function dismissInstallBannerForSession() {
   try {
     sessionStorage.setItem(SESSION_LATER_KEY, '1');
   } catch {
     /* private mode */
   }
-  emit();
+  try {
+    commitSnapshot();
+  } catch {
+    /* ignore */
+  }
 }
 
 if (typeof window !== 'undefined') {
-  initPwaInstall();
+  try {
+    initPwaInstall();
+  } catch {
+    cachedSnapshot = EMPTY_SNAPSHOT;
+  }
 }
