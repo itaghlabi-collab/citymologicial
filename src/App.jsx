@@ -5,6 +5,7 @@ import './App.css';
 import NotificationCenter from './components/notifications/NotificationCenter';
 import UserProfileMenu from './components/dashboard/UserProfileMenu';
 import ForcePasswordChangeModal from './components/dashboard/ForcePasswordChangeModal';
+import PwaInstallButton from './pwa/PwaInstallButton';
 
 import Dashboard from './components/Dashboard';
 import RH from './components/RH';
@@ -529,6 +530,7 @@ function Header({ module, onToggleSidebar, user, onLogout, onNavigate }) {
           <Search size={18} />
         </button>
         <NotificationCenter user={user} onNavigate={onNavigate} />
+        <PwaInstallButton />
         <UserProfileMenu user={user} onLogout={onLogout} onNavigate={onNavigate} />
       </div>
     </header>
