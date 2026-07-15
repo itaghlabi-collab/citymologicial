@@ -1,14 +1,61 @@
+/* Reserve space so the fixed banner never covers the login CTA. */
+body.pwa-install-banner-active {
+  padding-bottom: calc(120px + env(safe-area-inset-bottom, 0px));
+}
+
+/* Login page is flex-centered + overflow:hidden — shift content when banner is open */
+body.pwa-install-banner-active .login-page {
+  align-items: flex-start;
+  justify-content: center;
+  overflow-x: hidden;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  box-sizing: border-box;
+  min-height: 100dvh;
+  height: 100dvh;
+  padding: 12px 12px calc(160px + env(safe-area-inset-bottom, 0px));
+}
+
+body.pwa-install-banner-active .btn-login {
+  scroll-margin-bottom: calc(140px + env(safe-area-inset-bottom, 0px));
+}
+
+@media (max-width: 560px) and (max-height: 700px) {
+  body.pwa-install-banner-active .login-center {
+    gap: 12px;
+    padding-top: 4px;
+    padding-bottom: 4px;
+  }
+
+  body.pwa-install-banner-active .login-brand {
+    transform: scale(0.88);
+    transform-origin: top center;
+    margin-bottom: -4px;
+  }
+
+  body.pwa-install-banner-active .login-page {
+    padding-top: 8px;
+    padding-bottom: calc(130px + env(safe-area-inset-bottom, 0px));
+  }
+
+  body.pwa-install-banner-active .btn-login {
+    scroll-margin-bottom: calc(120px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
 .pwa-install-banner {
   position: fixed;
-  bottom: 20px;
   left: 50%;
+  bottom: calc(12px + env(safe-area-inset-bottom, 0px));
   transform: translateX(-50%);
   z-index: 10040;
+  box-sizing: border-box;
   display: flex;
   align-items: center;
-  gap: 14px;
+  gap: 12px;
+  width: min(440px, calc(100vw - 24px));
   max-width: calc(100vw - 24px);
-  padding: 12px 14px 12px 16px;
+  padding: 12px 14px;
   border: 1px solid var(--border, #E0E2E8);
   border-radius: 10px;
   background: var(--surface, #FFFFFF);
@@ -53,6 +100,7 @@
   font-weight: 600;
   cursor: pointer;
   line-height: 1.2;
+  white-space: nowrap;
 }
 
 .pwa-install-banner__btn:disabled {
@@ -79,19 +127,91 @@
   background: var(--surface-2, #F0F1F4);
 }
 
+/* Mobile / tablettes étroites */
 @media (max-width: 560px) {
+  body.pwa-install-banner-active {
+    padding-bottom: calc(160px + env(safe-area-inset-bottom, 0px));
+  }
+
   .pwa-install-banner {
+    left: 12px;
+    right: 12px;
+    transform: none;
+    width: auto;
+    max-width: none;
+    bottom: calc(10px + env(safe-area-inset-bottom, 0px));
     flex-direction: column;
     align-items: stretch;
-    bottom: 12px;
-    gap: 10px;
+    gap: 8px;
+    padding: 12px;
+  }
+
+  .pwa-install-banner--ios {
+    /* texte un peu plus long */
+  }
+
+  body.pwa-install-banner-active:has(.pwa-install-banner--ios) {
+    padding-bottom: calc(200px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .pwa-install-banner__subtitle {
+    font-size: 0.8rem;
+    line-height: 1.4;
   }
 
   .pwa-install-banner__actions {
-    justify-content: stretch;
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
   }
 
   .pwa-install-banner__btn {
-    flex: 1;
+    min-height: 44px;
+    padding: 10px 12px;
+    font-size: 0.875rem;
+    width: 100%;
+  }
+}
+
+@media (max-width: 360px) {
+  body.pwa-install-banner-active {
+    padding-bottom: calc(180px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .pwa-install-banner {
+    left: 8px;
+    right: 8px;
+    bottom: calc(8px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+/* Très petits viewports (iPhone SE hauteur) : bannière compacte */
+@media (max-width: 560px) and (max-height: 700px) {
+  body.pwa-install-banner-active {
+    padding-bottom: calc(140px + env(safe-area-inset-bottom, 0px));
+  }
+
+  body.pwa-install-banner-active:has(.pwa-install-banner--ios) {
+    padding-bottom: calc(170px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .pwa-install-banner {
+    padding: 10px;
+    gap: 6px;
+  }
+
+  .pwa-install-banner__title {
+    font-size: 0.85rem;
+  }
+
+  .pwa-install-banner__subtitle {
+    font-size: 0.75rem;
+  }
+
+  .pwa-install-banner__btn {
+    min-height: 40px;
+    padding: 8px 10px;
+    font-size: 0.8125rem;
   }
 }

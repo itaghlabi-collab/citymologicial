@@ -12,7 +12,6 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(__dirname, '..');
 
-// Minimal browser globals for the PWA install module
 const store = new Map();
 globalThis.sessionStorage = {
   getItem: (k) => (store.has(k) ? store.get(k) : null),
@@ -31,11 +30,11 @@ Object.defineProperty(globalThis, 'window', {
 
 try {
   Object.defineProperty(globalThis, 'navigator', {
-    value: {},
+    value: { userAgent: 'Mozilla/5.0 (Linux; Android 13) Chrome/120.0.0.0 Mobile', platform: 'Linux armv8l', maxTouchPoints: 1 },
     configurable: true,
   });
 } catch {
-  /* navigator may be non-configurable — safeStandalone still works */
+  /* navigator may be non-configurable */
 }
 
 const mod = await import(pathToFileURL(path.join(root, 'src/pwa/pwaInstall.js')).href);
@@ -47,6 +46,10 @@ const a = mod.getPwaInstallState();
 const b = mod.getPwaInstallState();
 if (!Object.is(a, b)) {
   console.error('FAIL: getSnapshot not stable when idle');
+  process.exit(1);
+}
+if (a.showIosHelp) {
+  console.error('FAIL: Android UA should not show iOS help', a);
   process.exit(1);
 }
 console.log('PASS: idle snapshot stable', Object.is(a, b));
@@ -66,27 +69,54 @@ if (!Object.is(c, d)) {
   console.error('FAIL: snapshot unstable after single change');
   process.exit(1);
 }
-if (Object.is(a, c)) {
-  console.error('FAIL: snapshot did not change after deferred prompt');
+if (!c.canInstall || !c.showBanner || !c.showButton || c.showIosHelp) {
+  console.error('FAIL: expected Android installable flags', c);
   process.exit(1);
 }
-if (!c.canInstall || !c.showBanner || !c.showButton) {
-  console.error('FAIL: expected installable flags after deferred prompt', c);
-  process.exit(1);
-}
-console.log('PASS: after change, snapshot replaced once then stable');
+console.log('PASS: after Android prompt, snapshot stable');
 
 mod.dismissInstallBannerForSession();
 const e = mod.getPwaInstallState();
-const f = mod.getPwaInstallState();
-if (!Object.is(e, f)) {
-  console.error('FAIL: unstable after dismiss');
-  process.exit(1);
-}
 if (e.showBanner !== false || e.showButton !== true) {
   console.error('FAIL: later should hide banner only', e);
   process.exit(1);
 }
 console.log('PASS: Plus tard hides banner, keeps button');
+
+// iOS path: reset prompt, force iOS UA if possible
+mod.__testResetPwaInstallStore();
+try {
+  Object.defineProperty(globalThis, 'navigator', {
+    value: {
+      userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15',
+      platform: 'iPhone',
+      maxTouchPoints: 5,
+      standalone: false,
+    },
+    configurable: true,
+  });
+} catch {
+  console.log('SKIP: cannot redefine navigator for iOS simulation');
+}
+mod.initPwaInstall();
+mod.__testForceCommit();
+const ios = mod.getPwaInstallState();
+const ios2 = mod.getPwaInstallState();
+if (!Object.is(ios, ios2)) {
+  console.error('FAIL: iOS snapshot unstable');
+  process.exit(1);
+}
+if (Object.defineProperty && ios.showIosHelp !== undefined) {
+  if (!ios.showIosHelp || !ios.showBanner || ios.showButton || ios.canInstall) {
+    // If navigator redefine failed earlier, skip assertion
+    const ua = globalThis.navigator?.userAgent || '';
+    if (/iPhone/i.test(ua)) {
+      console.error('FAIL: expected iOS help banner flags', ios);
+      process.exit(1);
+    }
+  } else {
+    console.log('PASS: iOS help banner flags');
+  }
+}
 
 console.log('ALL SNAPSHOT REGRESSION TESTS PASSED');

@@ -1,5 +1,5 @@
 /**
- * Logique partagée d'installation PWA (beforeinstallprompt).
+ * Logique partagée d'installation PWA (beforeinstallprompt + aide iOS).
  * Snapshot référentiellement stable : getPwaInstallState() ne recalcule jamais.
  */
 
@@ -10,6 +10,7 @@ const EMPTY_SNAPSHOT = Object.freeze({
   installed: false,
   showBanner: false,
   showButton: false,
+  showIosHelp: false,
 });
 
 let initialized = false;
@@ -31,6 +32,21 @@ function safeStandalone() {
   return false;
 }
 
+function safeIsIos() {
+  try {
+    if (typeof navigator === 'undefined') return false;
+    const ua = navigator.userAgent || '';
+    if (/iPad|iPhone|iPod/i.test(ua)) return true;
+    // iPadOS 13+
+    if (navigator.platform === 'MacIntel' && Number(navigator.maxTouchPoints || 0) > 1) {
+      return true;
+    }
+  } catch {
+    /* ignore */
+  }
+  return false;
+}
+
 function safeSessionLater() {
   try {
     return sessionStorage.getItem(SESSION_LATER_KEY) === '1';
@@ -42,12 +58,28 @@ function safeSessionLater() {
 function computeSnapshot() {
   try {
     const standalone = safeStandalone() || installed;
-    const canInstall = !standalone && Boolean(deferredPrompt);
+    if (standalone) {
+      return {
+        canInstall: false,
+        installed: true,
+        showBanner: false,
+        showButton: false,
+        showIosHelp: false,
+      };
+    }
+
+    const later = safeSessionLater();
+    const canInstall = Boolean(deferredPrompt);
+    // Aide iOS uniquement si pas de prompt natif (Safari n'émet pas beforeinstallprompt)
+    const showIosHelp = !canInstall && safeIsIos();
+    const showBanner = !later && (canInstall || showIosHelp);
+
     return {
       canInstall,
-      installed: standalone,
-      showBanner: canInstall && !safeSessionLater(),
+      installed: false,
+      showBanner,
       showButton: canInstall,
+      showIosHelp,
     };
   } catch {
     return EMPTY_SNAPSHOT;
@@ -60,6 +92,7 @@ function snapshotsEqual(a, b) {
     && a.installed === b.installed
     && a.showBanner === b.showBanner
     && a.showButton === b.showButton
+    && a.showIosHelp === b.showIosHelp
   );
 }
 
@@ -150,7 +183,12 @@ export function __testResetPwaInstallStore() {
   }
 }
 
-/** Lance le prompt natif. */
+/** @internal test helper — simule UA iOS pour les tests. */
+export function __testForceCommit() {
+  return commitSnapshot();
+}
+
+/** Lance le prompt natif (Android / Chrome). */
 export async function promptInstall() {
   try {
     if (!deferredPrompt || safeStandalone() || installed) {
@@ -180,7 +218,7 @@ export async function promptInstall() {
   }
 }
 
-/** Masque la bannière pour la session courante (icône header reste). */
+/** Masque la bannière pour la session courante (icône header Android reste si installable). */
 export function dismissInstallBannerForSession() {
   try {
     sessionStorage.setItem(SESSION_LATER_KEY, '1');
