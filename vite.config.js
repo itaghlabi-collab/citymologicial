@@ -1,5 +1,6 @@
 import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
+import { VitePWA } from 'vite-plugin-pwa'
 import os from 'node:os'
 
 function lanIp() {
@@ -68,6 +69,32 @@ export default defineConfig(async ({ mode }) => {
         );
       },
     },
+    VitePWA({
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.js',
+      registerType: 'prompt',
+      injectRegister: false,
+      manifest: false,
+      injectManifest: {
+        globPatterns: [
+          '**/*.{js,mjs,css,woff,woff2,ttf,otf,eot,png,jpg,jpeg,gif,svg,webp,ico,webmanifest}',
+        ],
+        globIgnores: [
+          '**/*.map',
+          '**/sw.js',
+          '**/sw.mjs',
+          '**/sounds/**',
+        ],
+        // Bundle principal > 2 MiB : autorisé (assets JS générés uniquement)
+        maximumFileSizeToCacheInBytes: 5 * 1024 * 1024,
+        // Pas de skipWaiting / clientsClaim automatiques
+        injectionPoint: 'self.__WB_MANIFEST',
+      },
+      devOptions: {
+        enabled: false,
+      },
+    }),
   ]
   if (mode !== 'production') {
     plugins.push(...(await devPlugins()))
