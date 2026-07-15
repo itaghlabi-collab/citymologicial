@@ -10,6 +10,14 @@ let deferredPrompt = null;
 let installed = false;
 const listeners = new Set();
 
+/** Snapshot stable pour useSyncExternalStore (référence inchangée si l'état n'a pas bougé). */
+let cachedSnapshot = {
+  canInstall: false,
+  installed: false,
+  showBanner: false,
+  showButton: false,
+};
+
 function isStandalone() {
   if (typeof window === 'undefined') return false;
   if (window.matchMedia('(display-mode: standalone)').matches) return true;
@@ -18,22 +26,47 @@ function isStandalone() {
   return false;
 }
 
-function getSnapshot() {
+function readSessionLater() {
+  try {
+    return sessionStorage.getItem(SESSION_LATER_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function computeSnapshot() {
   const standalone = isStandalone() || installed;
   const canInstall = !standalone && Boolean(deferredPrompt);
   return {
     canInstall,
     installed: standalone,
-    showBanner: canInstall && sessionStorage.getItem(SESSION_LATER_KEY) !== '1',
+    showBanner: canInstall && !readSessionLater(),
     showButton: canInstall,
   };
 }
 
+function snapshotsEqual(a, b) {
+  return (
+    a.canInstall === b.canInstall
+    && a.installed === b.installed
+    && a.showBanner === b.showBanner
+    && a.showButton === b.showButton
+  );
+}
+
+function refreshSnapshot() {
+  const next = computeSnapshot();
+  if (!snapshotsEqual(cachedSnapshot, next)) {
+    cachedSnapshot = next;
+  }
+  return cachedSnapshot;
+}
+
 function emit() {
-  const snapshot = getSnapshot();
+  refreshSnapshot();
   listeners.forEach((listener) => {
     try {
-      listener(snapshot);
+      listener();
     } catch {
       /* ignore subscriber errors */
     }
@@ -47,6 +80,7 @@ export function initPwaInstall() {
   if (isStandalone()) {
     installed = true;
     deferredPrompt = null;
+    refreshSnapshot();
     return;
   }
 
@@ -62,16 +96,17 @@ export function initPwaInstall() {
     deferredPrompt = null;
     emit();
   });
+
+  refreshSnapshot();
 }
 
 export function subscribePwaInstall(listener) {
   listeners.add(listener);
-  listener(getSnapshot());
   return () => listeners.delete(listener);
 }
 
 export function getPwaInstallState() {
-  return getSnapshot();
+  return refreshSnapshot();
 }
 
 /** Lance le prompt natif. Retourne { outcome: 'accepted' | 'dismissed' | 'unavailable' }. */
