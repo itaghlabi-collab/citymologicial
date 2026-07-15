@@ -5,7 +5,8 @@ import './pwa-install.css';
 /**
  * Bannière d'installation PWA :
  * - Android/Chrome : Installer + Plus tard (beforeinstallprompt)
- * - iOS/Safari : consignes Partager + Compris / Plus tard
+ * - iOS/Safari : bouton Installer (visuel) qui révèle la consigne Partager →
+ *   Ajouter à l'écran d'accueil (pas de prompt natif)
  */
 export default function PwaInstallBanner() {
   const {
@@ -15,6 +16,7 @@ export default function PwaInstallBanner() {
     dismissBannerForSession,
   } = usePwaInstall();
   const [busy, setBusy] = useState(false);
+  const [iosTipOpen, setIosTipOpen] = useState(false);
 
   useEffect(() => {
     if (!showBanner) return undefined;
@@ -47,7 +49,7 @@ export default function PwaInstallBanner() {
       window.cancelAnimationFrame(id);
       document.body.classList.remove('pwa-install-banner-active');
     };
-  }, [showBanner]);
+  }, [showBanner, iosTipOpen]);
 
   if (!showBanner) return null;
 
@@ -60,7 +62,11 @@ export default function PwaInstallBanner() {
   };
 
   const handleInstall = async () => {
-    if (busy || showIosHelp) return;
+    if (busy) return;
+    if (showIosHelp) {
+      setIosTipOpen(true);
+      return;
+    }
     setBusy(true);
     try {
       const { outcome } = await promptInstall();
@@ -72,23 +78,22 @@ export default function PwaInstallBanner() {
 
   return (
     <div
-      className={`pwa-install-banner${showIosHelp ? ' pwa-install-banner--ios' : ''}`}
+      className={`pwa-install-banner${showIosHelp ? ' pwa-install-banner--ios' : ''}${iosTipOpen ? ' pwa-install-banner--ios-tip' : ''}`}
       role="status"
       aria-live="polite"
     >
       <div className="pwa-install-banner__text">
         <p className="pwa-install-banner__title">Installez CITYMO</p>
-        {showIosHelp ? (
+        {showIosHelp && iosTipOpen ? (
           <p className="pwa-install-banner__subtitle">
-            Pour ajouter l&apos;application à votre écran d&apos;accueil :
-            appuyez sur Partager puis sur « Ajouter à l&apos;écran d&apos;accueil ».
+            Partager → Ajouter à l&apos;écran d&apos;accueil
           </p>
         ) : (
           <p className="pwa-install-banner__subtitle">Accédez plus rapidement !</p>
         )}
       </div>
       <div className="pwa-install-banner__actions">
-        {showIosHelp ? (
+        {showIosHelp && iosTipOpen ? (
           <button
             type="button"
             className="pwa-install-banner__btn pwa-install-banner__btn--primary"

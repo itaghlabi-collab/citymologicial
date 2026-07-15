@@ -146,12 +146,8 @@ body.pwa-install-banner-active .btn-login {
     padding: 12px;
   }
 
-  .pwa-install-banner--ios {
-    /* texte un peu plus long */
-  }
-
-  body.pwa-install-banner-active:has(.pwa-install-banner--ios) {
-    padding-bottom: calc(200px + env(safe-area-inset-bottom, 0px));
+  body.pwa-install-banner-active:has(.pwa-install-banner--ios-tip) {
+    padding-bottom: calc(180px + env(safe-area-inset-bottom, 0px));
   }
 
   .pwa-install-banner__subtitle {
@@ -192,8 +188,8 @@ body.pwa-install-banner-active .btn-login {
     padding-bottom: calc(140px + env(safe-area-inset-bottom, 0px));
   }
 
-  body.pwa-install-banner-active:has(.pwa-install-banner--ios) {
-    padding-bottom: calc(170px + env(safe-area-inset-bottom, 0px));
+  body.pwa-install-banner-active:has(.pwa-install-banner--ios-tip) {
+    padding-bottom: calc(160px + env(safe-area-inset-bottom, 0px));
   }
 
   .pwa-install-banner {

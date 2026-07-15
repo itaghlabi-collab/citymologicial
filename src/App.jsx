@@ -515,20 +515,27 @@ function Sidebar({ active, onNavigate, collapsed, mobileOpen, onMobileClose, use
 /* =============================================
    HEADER
    ============================================= */
-function Header({ module, onToggleSidebar, user, onLogout, onNavigate }) {
+function Header({ module, onToggleSidebar, user, onLogout, onNavigate, mobileMenuOpen }) {
+  const moduleLabel = MODULE_LABELS[module] || 'Tableau de Bord';
   return (
     <header className="header">
-      <button className="header-toggle" onClick={onToggleSidebar}>
-        <Menu size={20} />
+      <button
+        type="button"
+        className="header-toggle"
+        onClick={onToggleSidebar}
+        aria-label={mobileMenuOpen ? 'Fermer le menu' : 'Ouvrir le menu'}
+        aria-expanded={Boolean(mobileMenuOpen)}
+      >
+        <Menu size={20} aria-hidden />
       </button>
       <div className="header-breadcrumb">
         <span className="text-muted" style={{ fontSize: '0.8rem' }}>CITYMO</span>
-        <ChevronRight size={14} style={{ color: 'var(--text-3)' }} />
-        <span className="header-module">{MODULE_LABELS[module] || 'Tableau de Bord'}</span>
+        <ChevronRight size={14} style={{ color: 'var(--text-3)' }} aria-hidden />
+        <span className="header-module" title={moduleLabel}>{moduleLabel}</span>
       </div>
       <div className="header-right">
-        <button type="button" className="icon-btn" aria-label="Rechercher">
-          <Search size={18} />
+        <button type="button" className="icon-btn header-search-btn" aria-label="Rechercher">
+          <Search size={18} aria-hidden />
         </button>
         <NotificationCenter user={user} onNavigate={onNavigate} />
         <PwaSafeBoundary>
@@ -635,6 +642,7 @@ export default function App() {
           user={user}
           onLogout={logout}
           onNavigate={setModule}
+          mobileMenuOpen={mobileOpen}
         />
         <main className="page-content">
           <PageContent
