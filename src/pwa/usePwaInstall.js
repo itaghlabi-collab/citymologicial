@@ -12,12 +12,12 @@ const SAFE = {
   installed: false,
   showBanner: false,
   showButton: false,
+  showIosHelp: false,
 };
 
 /**
  * Accès React à l'état d'installation PWA.
- * useState + subscribe (pas useSyncExternalStore) pour éviter toute boucle
- * liée à des snapshots objets instables.
+ * useState + subscribe (pas useSyncExternalStore) pour éviter toute boucle.
  */
 export function usePwaInstall() {
   const [state, setState] = useState(() => {
@@ -36,7 +36,6 @@ export function usePwaInstall() {
       setState(getPwaInstallState());
       unsub = subscribePwaInstall(() => {
         try {
-          // Même référence si inchangé → React ignore le setState
           setState(getPwaInstallState());
         } catch {
           setState(SAFE);
@@ -59,6 +58,7 @@ export function usePwaInstall() {
     installed: state.installed,
     showBanner: state.showBanner,
     showButton: state.showButton,
+    showIosHelp: state.showIosHelp,
     promptInstall,
     dismissBannerForSession: dismissInstallBannerForSession,
   };
