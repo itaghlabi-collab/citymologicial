@@ -1854,6 +1854,7 @@ tbody tr:last-child td { border-bottom: none; }
     position: relative;
     z-index: 331;
     overflow: visible;
+    padding-right: max(10px, env(safe-area-inset-right, 0px));
   }
 
   /* Search adds clutter on narrow phones — desktop unchanged */
@@ -1879,14 +1880,19 @@ tbody tr:last-child td { border-bottom: none; }
     flex-shrink: 0;
     position: relative;
     z-index: 1;
+    width: 44px;
+    flex: 0 0 44px;
+    max-width: 44px;
+    overflow: visible;
   }
 
   .user-profile-menu {
     flex-shrink: 0;
     margin-left: 0;
     position: relative;
-    z-index: 2;
+    z-index: 402;
     overflow: visible;
+    isolation: isolate;
   }
 
   .user-profile-menu .user-profile-trigger {
@@ -1902,7 +1908,7 @@ tbody tr:last-child td { border-bottom: none; }
     -webkit-tap-highlight-color: transparent;
     touch-action: manipulation;
     position: relative;
-    z-index: 2;
+    z-index: 403;
   }
 
   .header-avatar {
@@ -1916,13 +1922,22 @@ tbody tr:last-child td { border-bottom: none; }
     display: none;
   }
 
-  .user-profile-dropdown {
+  /* Menu profil mobile : rendu via portal (UserProfileMenu) — au-dessus notif + header */
+  .user-profile-dropdown--portaled {
     position: fixed;
-    top: calc(env(safe-area-inset-top, 0px) + var(--header-h) + 6px);
-    right: 10px;
     left: auto;
-    z-index: 1200;
-    max-width: calc(100vw - 20px);
+    z-index: 1300;
+    max-width: min(320px, calc(100vw - 20px));
+  }
+
+  .user-profile-menu-backdrop {
+    position: fixed;
+    inset: 0;
+    top: calc(env(safe-area-inset-top, 0px) + var(--header-h));
+    z-index: 1290;
+    background: transparent;
+    pointer-events: auto;
+    touch-action: manipulation;
   }
 
   /* --- MAIN AREA --- */
