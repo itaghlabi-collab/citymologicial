@@ -28,16 +28,23 @@ export default function UserProfileMenu({ user, onLogout, onNavigate }) {
 
   useEffect(() => {
     if (!open) return undefined;
-    function onDocClick(e) {
+
+    function onDocPointerDown(e) {
       if (rootRef.current && !rootRef.current.contains(e.target)) close();
     }
     function onKey(e) {
       if (e.key === 'Escape') close();
     }
-    document.addEventListener('mousedown', onDocClick);
+
+    // Defer so the opening tap/click cannot immediately close the menu (mobile).
+    const timer = window.setTimeout(() => {
+      document.addEventListener('pointerdown', onDocPointerDown);
+    }, 0);
     document.addEventListener('keydown', onKey);
+
     return () => {
-      document.removeEventListener('mousedown', onDocClick);
+      window.clearTimeout(timer);
+      document.removeEventListener('pointerdown', onDocPointerDown);
       document.removeEventListener('keydown', onKey);
     };
   }, [open, close]);
@@ -85,7 +92,10 @@ export default function UserProfileMenu({ user, onLogout, onNavigate }) {
         <button
           type="button"
           className={'header-avatar user-profile-trigger' + (open ? ' is-open' : '')}
-          onClick={() => setOpen((o) => !o)}
+          onClick={(e) => {
+            e.stopPropagation();
+            setOpen((o) => !o);
+          }}
           aria-expanded={open}
           aria-haspopup="menu"
           title={user?.nom}

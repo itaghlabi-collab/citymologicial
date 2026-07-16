@@ -1808,7 +1808,8 @@ tbody tr:last-child td { border-bottom: none; }
     box-sizing: border-box;
     width: 100%;
     max-width: 100%;
-    overflow: hidden;
+    /* Must stay visible: overflow:hidden clipped the profile dropdown (avatar looked dead) */
+    overflow: visible;
   }
 
   .header-toggle {
@@ -1850,6 +1851,9 @@ tbody tr:last-child td { border-bottom: none; }
     gap: 2px;
     margin-left: auto;
     max-width: none;
+    position: relative;
+    z-index: 331;
+    overflow: visible;
   }
 
   /* Search adds clutter on narrow phones — desktop unchanged */
@@ -1873,33 +1877,52 @@ tbody tr:last-child td { border-bottom: none; }
 
   .notif-center-wrap {
     flex-shrink: 0;
+    position: relative;
+    z-index: 1;
   }
 
   .user-profile-menu {
     flex-shrink: 0;
     margin-left: 0;
+    position: relative;
+    z-index: 2;
+    overflow: visible;
   }
 
-  .user-profile-trigger {
+  .user-profile-menu .user-profile-trigger {
     box-sizing: border-box;
     min-width: 44px;
     min-height: 44px;
-    width: auto;
+    width: 44px;
     height: 44px;
-    padding: 0 4px !important;
+    padding: 0 !important;
     margin-left: 0;
     justify-content: center;
+    pointer-events: auto;
+    -webkit-tap-highlight-color: transparent;
+    touch-action: manipulation;
+    position: relative;
+    z-index: 2;
   }
 
   .header-avatar {
-    width: 32px;
-    height: 32px;
+    width: 44px;
+    height: 44px;
     font-size: 0.75rem;
     margin-left: 0;
   }
 
   .user-profile-chevron {
     display: none;
+  }
+
+  .user-profile-dropdown {
+    position: fixed;
+    top: calc(env(safe-area-inset-top, 0px) + var(--header-h) + 6px);
+    right: 10px;
+    left: auto;
+    z-index: 1200;
+    max-width: calc(100vw - 20px);
   }
 
   /* --- MAIN AREA --- */
