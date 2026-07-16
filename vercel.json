@@ -71,6 +71,10 @@
     "api/finance/backfill-project-expenses.js": {
       "maxDuration": 120,
       "memory": 512
+    },
+    "api/push/vapid-public-key.js": {
+      "maxDuration": 10,
+      "memory": 256
     }
   }
 }
