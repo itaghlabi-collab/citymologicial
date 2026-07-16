@@ -5,6 +5,7 @@ import {
   subscribePwaInstall,
   promptInstall,
   dismissInstallBannerForSession,
+  getInstallAction,
 } from './pwaInstall';
 
 const SAFE = {
@@ -13,6 +14,7 @@ const SAFE = {
   showBanner: false,
   showButton: false,
   showIosHelp: false,
+  showBrowserHelp: false,
 };
 
 /**
@@ -59,6 +61,8 @@ export function usePwaInstall() {
     showBanner: state.showBanner,
     showButton: state.showButton,
     showIosHelp: state.showIosHelp,
+    showBrowserHelp: state.showBrowserHelp,
+    installAction: getInstallAction(),
     promptInstall,
     dismissBannerForSession: dismissInstallBannerForSession,
   };

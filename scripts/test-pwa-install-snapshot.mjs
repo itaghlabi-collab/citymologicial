@@ -52,6 +52,10 @@ if (a.showIosHelp) {
   console.error('FAIL: Android UA should not show iOS help', a);
   process.exit(1);
 }
+if (!a.showBrowserHelp || a.canInstall || a.showButton) {
+  console.error('FAIL: Android idle without deferredPrompt should show browser help', a);
+  process.exit(1);
+}
 console.log('PASS: idle snapshot stable', Object.is(a, b));
 
 const changed = mod.__testSetDeferredPrompt({
@@ -69,7 +73,7 @@ if (!Object.is(c, d)) {
   console.error('FAIL: snapshot unstable after single change');
   process.exit(1);
 }
-if (!c.canInstall || !c.showBanner || !c.showButton || c.showIosHelp) {
+if (!c.canInstall || !c.showBanner || !c.showButton || c.showIosHelp || c.showBrowserHelp) {
   console.error('FAIL: expected Android installable flags', c);
   process.exit(1);
 }
@@ -107,7 +111,7 @@ if (!Object.is(ios, ios2)) {
   process.exit(1);
 }
 if (Object.defineProperty && ios.showIosHelp !== undefined) {
-  if (!ios.showIosHelp || !ios.showBanner || ios.showButton || ios.canInstall) {
+  if (!ios.showIosHelp || !ios.showBanner || ios.showButton || ios.canInstall || ios.showBrowserHelp) {
     // If navigator redefine failed earlier, skip assertion
     const ua = globalThis.navigator?.userAgent || '';
     if (/iPhone/i.test(ua)) {

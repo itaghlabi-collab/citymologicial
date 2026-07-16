@@ -127,6 +127,11 @@ body.pwa-install-banner-active .btn-login {
   background: var(--surface-2, #F0F1F4);
 }
 
+.pwa-install-banner--browser-tip {
+  flex-direction: column;
+  align-items: stretch;
+}
+
 /* Mobile / tablettes étroites */
 @media (max-width: 560px) {
   body.pwa-install-banner-active {
@@ -188,7 +193,7 @@ body.pwa-install-banner-active .btn-login {
     padding-bottom: calc(140px + env(safe-area-inset-bottom, 0px));
   }
 
-  body.pwa-install-banner-active:has(.pwa-install-banner--ios-tip) {
+  body.pwa-install-banner-active:has(.pwa-install-banner--browser-tip) {
     padding-bottom: calc(160px + env(safe-area-inset-bottom, 0px));
   }
 
@@ -209,5 +214,52 @@ body.pwa-install-banner-active .btn-login {
     min-height: 40px;
     padding: 8px 10px;
     font-size: 0.8125rem;
+  }
+}
+
+/* Navigateur sans prompt natif — panneau modal (icône header) */
+.pwa-browser-hint-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 10050;
+  background: rgba(17, 19, 24, 0.45);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  box-sizing: border-box;
+}
+
+.pwa-browser-hint-modal {
+  width: min(400px, calc(100vw - 32px));
+  padding: 16px;
+  border-radius: 10px;
+  border: 1px solid var(--border, #E0E2E8);
+  background: var(--surface, #FFFFFF);
+  box-shadow: 0 12px 40px rgba(17, 19, 24, 0.18);
+  box-sizing: border-box;
+}
+
+.pwa-browser-hint-modal__text {
+  margin: 0 0 14px;
+  font-size: 0.875rem;
+  line-height: 1.45;
+  color: var(--text, #1A1D23);
+}
+
+.pwa-browser-hint-modal__actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+@media (max-width: 560px) {
+  body.pwa-install-banner-active:has(.pwa-install-banner--browser-tip) {
+    padding-bottom: calc(200px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .pwa-install-banner--browser-tip {
+    flex-direction: column;
+    align-items: stretch;
   }
 }

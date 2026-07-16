@@ -1,5 +1,5 @@
 /**
- * Logique partagée d'installation PWA (beforeinstallprompt + aide iOS).
+ * Logique partagée d'installation PWA (état réel du store uniquement).
  * Snapshot référentiellement stable : getPwaInstallState() ne recalcule jamais.
  */
 
@@ -11,6 +11,7 @@ const EMPTY_SNAPSHOT = Object.freeze({
   showBanner: false,
   showButton: false,
   showIosHelp: false,
+  showBrowserHelp: false,
 });
 
 let initialized = false;
@@ -32,12 +33,15 @@ function safeStandalone() {
   return false;
 }
 
+/**
+ * iOS : pas de beforeinstallprompt — UA indispensable faute d'API alternative.
+ * Conservé pour le flux Partager → Ajouter à l'écran d'accueil existant.
+ */
 function safeIsIos() {
   try {
     if (typeof navigator === 'undefined') return false;
     const ua = navigator.userAgent || '';
     if (/iPad|iPhone|iPod/i.test(ua)) return true;
-    // iPadOS 13+
     if (navigator.platform === 'MacIntel' && Number(navigator.maxTouchPoints || 0) > 1) {
       return true;
     }
@@ -45,6 +49,51 @@ function safeIsIos() {
     /* ignore */
   }
   return false;
+}
+
+function safeIsMobileTouch() {
+  try {
+    return Number(navigator?.maxTouchPoints || 0) > 0;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Source de vérité unique : deferredPrompt réel et exploitable.
+ * — event existe
+ * — prompt est une fonction
+ * — userChoice existe
+ */
+export function isDeferredPromptUsable(event) {
+  try {
+    if (!event) return false;
+    if (typeof event.prompt !== 'function') return false;
+    if (event.userChoice == null) return false;
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function canUseNativeInstallPrompt() {
+  return isDeferredPromptUsable(deferredPrompt);
+}
+
+/**
+ * Action d'installation recommandée pour l'UI.
+ * @returns {'native'|'ios'|'browser'|'none'}
+ */
+export function getInstallAction() {
+  try {
+    const state = cachedSnapshot;
+    if (state.canInstall) return 'native';
+    if (state.showIosHelp) return 'ios';
+    if (state.showBrowserHelp) return 'browser';
+    return 'none';
+  } catch {
+    return 'none';
+  }
 }
 
 function safeSessionLater() {
@@ -65,14 +114,16 @@ function computeSnapshot() {
         showBanner: false,
         showButton: false,
         showIosHelp: false,
+        showBrowserHelp: false,
       };
     }
 
     const later = safeSessionLater();
-    const canInstall = Boolean(deferredPrompt);
-    // Aide iOS uniquement si pas de prompt natif (Safari n'émet pas beforeinstallprompt)
+    const canInstall = canUseNativeInstallPrompt();
     const showIosHelp = !canInstall && safeIsIos();
-    const showBanner = !later && (canInstall || showIosHelp);
+    // Pas de prompt exploitable → aide navigateur (mobile). Jamais basé sur la présence d'une API.
+    const showBrowserHelp = !canInstall && !showIosHelp && safeIsMobileTouch();
+    const showBanner = !later && (canInstall || showIosHelp || showBrowserHelp);
 
     return {
       canInstall,
@@ -80,6 +131,7 @@ function computeSnapshot() {
       showBanner,
       showButton: canInstall,
       showIosHelp,
+      showBrowserHelp,
     };
   } catch {
     return EMPTY_SNAPSHOT;
@@ -93,13 +145,10 @@ function snapshotsEqual(a, b) {
     && a.showBanner === b.showBanner
     && a.showButton === b.showButton
     && a.showIosHelp === b.showIosHelp
+    && a.showBrowserHelp === b.showBrowserHelp
   );
 }
 
-/**
- * Recalcule et notifie UNIQUEMENT si l'état a changé.
- * Jamais appelé depuis getPwaInstallState.
- */
 function commitSnapshot() {
   const next = computeSnapshot();
   if (snapshotsEqual(cachedSnapshot, next)) return false;
@@ -130,7 +179,7 @@ export function initPwaInstall() {
       try {
         event.preventDefault();
         if (safeStandalone() || installed) return;
-        deferredPrompt = event;
+        deferredPrompt = isDeferredPromptUsable(event) ? event : null;
         commitSnapshot();
       } catch {
         /* ignore */
@@ -160,18 +209,15 @@ export function subscribePwaInstall(listener) {
   };
 }
 
-/** Retourne TOUJOURS la même référence tant que l'état n'a pas changé. */
 export function getPwaInstallState() {
   return cachedSnapshot;
 }
 
-/** @internal test helper — force un commit après mutation manuelle du prompt (tests). */
 export function __testSetDeferredPrompt(event) {
-  deferredPrompt = event || null;
+  deferredPrompt = isDeferredPromptUsable(event) ? event : null;
   return commitSnapshot();
 }
 
-/** @internal test helper */
 export function __testResetPwaInstallStore() {
   deferredPrompt = null;
   installed = false;
@@ -181,17 +227,40 @@ export function __testResetPwaInstallStore() {
   } catch {
     /* ignore */
   }
+  commitSnapshot();
 }
 
-/** @internal test helper — simule UA iOS pour les tests. */
 export function __testForceCommit() {
   return commitSnapshot();
 }
 
-/** Lance le prompt natif (Android / Chrome). */
+export async function copyCurrentPageUrl() {
+  try {
+    if (typeof window === 'undefined') return false;
+    const url = window.location.href;
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(url);
+      return true;
+    }
+    const ta = document.createElement('textarea');
+    ta.value = url;
+    ta.setAttribute('readonly', '');
+    ta.style.position = 'fixed';
+    ta.style.left = '-9999px';
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand('copy');
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
+/** Lance le prompt natif uniquement si le store a un deferredPrompt exploitable. */
 export async function promptInstall() {
   try {
-    if (!deferredPrompt || safeStandalone() || installed) {
+    if (!canUseNativeInstallPrompt() || safeStandalone() || installed) {
       return { outcome: 'unavailable' };
     }
 
@@ -218,7 +287,6 @@ export async function promptInstall() {
   }
 }
 
-/** Masque la bannière pour la session courante (icône header Android reste si installable). */
 export function dismissInstallBannerForSession() {
   try {
     sessionStorage.setItem(SESSION_LATER_KEY, '1');
