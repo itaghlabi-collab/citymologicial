@@ -9,6 +9,7 @@ import {
 } from './notificationRecipients';
 import { resolveNotificationRecipients } from './notificationTargeting';
 import { queueWhatsappNotification } from './whatsappNotifications';
+import { dispatchWebPushForNotification } from './webPushDispatch';
 import { logNotificationDebug } from './notificationDebug';
 
 const TABLE = 'notifications';
@@ -105,6 +106,18 @@ function buildNotificationRow(payload, recipientUserId) {
   };
 }
 
+/** Canaux secondaires (WhatsApp file + Web Push) — jamais bloquants pour l'ERP. */
+function enqueueSecondaryChannels(normalized, recipientUserId) {
+  if (!normalized?.id || !recipientUserId) return;
+  queueWhatsappNotification({
+    notificationId: normalized.id,
+    userId: recipientUserId,
+    title: normalized.title,
+    message: normalized.message,
+  }).catch(() => {});
+  dispatchWebPushForNotification(normalized).catch(() => {});
+}
+
 /**
  * Crée une notification pour un destinataire précis (anti-doublon via index unique).
  */
@@ -143,12 +156,7 @@ export async function createNotification(payload) {
       if (!rpcErr && upserted) {
         const normalized = normalizeNotification(upserted);
         logNotificationDebug('create.rpc.upsert', { id: normalized.id, recipientUserId, title: normalized.title });
-        queueWhatsappNotification({
-          notificationId: normalized.id,
-          userId: recipientUserId,
-          title: normalized.title,
-          message: normalized.message,
-        }).catch(() => {});
+        enqueueSecondaryChannels(normalized, recipientUserId);
         return normalized;
       }
       if (rpcErr?.code !== 'PGRST202') {
@@ -160,12 +168,7 @@ export async function createNotification(payload) {
     if (!rpcErr && inserted) {
       const normalized = normalizeNotification(inserted);
       logNotificationDebug('create.rpc.insert', { id: normalized.id, recipientUserId, title: normalized.title });
-      queueWhatsappNotification({
-        notificationId: normalized.id,
-        userId: recipientUserId,
-        title: normalized.title,
-        message: normalized.message,
-      }).catch(() => {});
+      enqueueSecondaryChannels(normalized, recipientUserId);
       return normalized;
     }
     if (rpcErr?.code !== 'PGRST202') {

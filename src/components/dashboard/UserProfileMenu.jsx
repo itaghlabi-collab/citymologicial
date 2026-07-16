@@ -9,6 +9,7 @@ import { isSuperAdmin } from '../../services/rh/isSuperAdmin';
 import { ROUTES } from '../../config/routes';
 import UserProfileModal from './UserProfileModal';
 import ChangePasswordModal from './ChangePasswordModal';
+import MesNotificationsModal from '../settings/MesNotificationsModal';
 
 function roleLabel(role) {
   if (!role) return 'Utilisateur';
@@ -19,6 +20,7 @@ export default function UserProfileMenu({ user, onLogout, onNavigate }) {
   const [open, setOpen] = useState(false);
   const [showProfile, setShowProfile] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [showNotificationsSettings, setShowNotificationsSettings] = useState(false);
   const rootRef = useRef(null);
   const admin = isSuperAdmin(user);
 
@@ -54,7 +56,7 @@ export default function UserProfileMenu({ user, onLogout, onNavigate }) {
         setShowPassword(true);
         break;
       case 'notifications':
-        window.dispatchEvent(new CustomEvent('citymo:open-notifications'));
+        setShowNotificationsSettings(true);
         break;
       case 'logout':
         onLogout?.();
@@ -127,6 +129,14 @@ export default function UserProfileMenu({ user, onLogout, onNavigate }) {
       )}
       {showPassword && (
         <ChangePasswordModal onClose={() => setShowPassword(false)} />
+      )}
+      {showNotificationsSettings && (
+        <MesNotificationsModal
+          onClose={() => setShowNotificationsSettings(false)}
+          onOpenCenter={() => {
+            window.dispatchEvent(new CustomEvent('citymo:open-notifications'));
+          }}
+        />
       )}
     </>
   );

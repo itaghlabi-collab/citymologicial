@@ -7,6 +7,7 @@ import UserProfileMenu from './components/dashboard/UserProfileMenu';
 import ForcePasswordChangeModal from './components/dashboard/ForcePasswordChangeModal';
 import PwaInstallButton from './pwa/PwaInstallButton';
 import PwaSafeBoundary from './pwa/PwaSafeBoundary';
+import { navigateFromPushUrl, parseModuleFromSearch } from './pwa/pushNavigate';
 
 import Dashboard from './components/Dashboard';
 import RH from './components/RH';
@@ -552,13 +553,33 @@ function Header({ module, onToggleSidebar, user, onLogout, onNavigate, mobileMen
    ============================================= */
 export default function App() {
   const { user, loading, logout, refreshUser } = useAuth();
-  const [module, setModule] = useState(() => (parseInventaireArticlePath() ? 'articles-stock' : 'dashboard'));
+  const [module, setModule] = useState(() => {
+    if (parseInventaireArticlePath()) return 'articles-stock';
+    return parseModuleFromSearch() || 'dashboard';
+  });
   const [inventaireArticleCode, setInventaireArticleCode] = useState(() => parseInventaireArticlePath());
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
   const { canShowRoute } = usePermissions(user);
   const mustChangePassword = Boolean(user?.must_change_password);
+
+  useEffect(() => {
+    if (!('serviceWorker' in navigator)) return undefined;
+    function onSwMessage(event) {
+      const msg = event?.data;
+      if (!msg || msg.type !== 'CITYMO_PUSH_NAVIGATE') return;
+      try {
+        navigateFromPushUrl(msg.url || msg.data?.action_url || msg.data?.url, setModule);
+      } catch {
+        /* ignore */
+      }
+    }
+    navigator.serviceWorker.addEventListener('message', onSwMessage);
+    return () => {
+      navigator.serviceWorker.removeEventListener('message', onSwMessage);
+    };
+  }, []);
 
   useEffect(() => {
     function onPopState() {

@@ -75,6 +75,26 @@
     "api/push/vapid-public-key.js": {
       "maxDuration": 10,
       "memory": 256
+    },
+    "api/push/subscribe.js": {
+      "maxDuration": 15,
+      "memory": 256
+    },
+    "api/push/unsubscribe.js": {
+      "maxDuration": 15,
+      "memory": 256
+    },
+    "api/push/status.js": {
+      "maxDuration": 15,
+      "memory": 256
+    },
+    "api/push/test.js": {
+      "maxDuration": 20,
+      "memory": 256
+    },
+    "api/push/deliver.js": {
+      "maxDuration": 30,
+      "memory": 256
     }
   }
 }

@@ -1,18 +1,20 @@
 /**
- * CITYMO Service Worker — assets statiques uniquement.
+ * CITYMO Service Worker — assets statiques + affichage Web Push.
  *
  * Cache autorisé : JS build, CSS, fonts, images, logo, manifest.
  * Tout le reste (API, auth, Supabase, Railway, Drive, uploads, etc.) = NetworkOnly.
  *
  * Ne pas appeler skipWaiting() ni clientsClaim() automatiquement.
  * skipWaiting() uniquement si le client envoie { type: 'SKIP_WAITING' } (bouton "Mettre à jour").
- * Ne pas enregistrer de handlers push / notification.
+ *
+ * Push : affichage système uniquement (pas de logique métier / pas d'API / pas de Supabase).
  */
 import { cleanupOutdatedCaches, precacheAndRoute } from 'workbox-precaching'
 import { registerRoute, setDefaultHandler } from 'workbox-routing'
 import { CacheFirst, NetworkOnly } from 'workbox-strategies'
 import { CacheableResponsePlugin } from 'workbox-cacheable-response'
 import { ExpirationPlugin } from 'workbox-expiration'
+import { parsePushPayload, resolvePushOpenUrl } from './pwa/swPushPayload.js'
 
 cleanupOutdatedCaches()
 precacheAndRoute(self.__WB_MANIFEST)
@@ -22,6 +24,77 @@ self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting()
   }
+})
+
+/** Réception Push → notification système (aucune logique métier). */
+self.addEventListener('push', (event) => {
+  event.waitUntil((async () => {
+    let raw = null
+    try {
+      raw = event.data ? await event.data.text() : null
+    } catch {
+      try {
+        raw = event.data ? event.data.json() : null
+      } catch {
+        raw = null
+      }
+    }
+
+    const payload = parsePushPayload(raw)
+    await self.registration.showNotification(payload.title, {
+      body: payload.body,
+      icon: payload.icon,
+      badge: payload.badge,
+      tag: payload.tag,
+      renotify: Boolean(payload.tag),
+      data: payload.data,
+    })
+  })())
+})
+
+/** Clic notification → focus client CITYMO ou openWindow. */
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close()
+
+  const data = event.notification?.data && typeof event.notification.data === 'object'
+    ? event.notification.data
+    : {}
+  const targetUrl = resolvePushOpenUrl(
+    data.url || data.action_url || data.actionUrl || '/',
+    self.location.origin,
+  )
+
+  event.waitUntil((async () => {
+    const allClients = await self.clients.matchAll({
+      type: 'window',
+      includeUncontrolled: true,
+    })
+
+    for (const client of allClients) {
+      try {
+        const clientUrl = new URL(client.url)
+        if (clientUrl.origin === self.location.origin && 'focus' in client) {
+          await client.focus()
+          try {
+            client.postMessage({
+              type: 'CITYMO_PUSH_NAVIGATE',
+              url: targetUrl,
+              data,
+            })
+          } catch {
+            /* ignore */
+          }
+          return
+        }
+      } catch {
+        /* ignore bad client url */
+      }
+    }
+
+    if (self.clients.openWindow) {
+      await self.clients.openWindow(targetUrl)
+    }
+  })())
 })
 
 const networkOnly = new NetworkOnly()
