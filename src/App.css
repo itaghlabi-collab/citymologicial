@@ -1803,12 +1803,11 @@ tbody tr:last-child td { border-bottom: none; }
     gap: 8px;
     position: sticky;
     top: 0;
-    /* Above overlay/sidebar so hamburger stays tappable to open/close */
-    z-index: 330;
+    /* Au-dessus du contenu scrollable + overlays internes */
+    z-index: 500;
     box-sizing: border-box;
     width: 100%;
     max-width: 100%;
-    /* Must stay visible: overflow:hidden clipped the profile dropdown (avatar looked dead) */
     overflow: visible;
   }
 
@@ -1848,13 +1847,29 @@ tbody tr:last-child td { border-bottom: none; }
 
   .header-right {
     flex: 0 0 auto;
-    gap: 2px;
+    gap: 8px;
     margin-left: auto;
     max-width: none;
     position: relative;
-    z-index: 331;
+    z-index: 501;
     overflow: visible;
-    padding-right: max(10px, env(safe-area-inset-right, 0px));
+    padding-right: max(12px, env(safe-area-inset-right, 0px));
+  }
+
+  .header-search-btn {
+    order: 0;
+  }
+
+  .notif-center-wrap {
+    order: 2;
+  }
+
+  .pwa-install-btn {
+    order: 3;
+  }
+
+  .user-profile-menu {
+    order: 4;
   }
 
   /* Search adds clutter on narrow phones — desktop unchanged */
@@ -1883,37 +1898,59 @@ tbody tr:last-child td { border-bottom: none; }
     width: 44px;
     flex: 0 0 44px;
     max-width: 44px;
-    overflow: visible;
+    overflow: hidden;
+    order: 2;
+  }
+
+  .notif-bell-btn {
+    position: relative;
+    z-index: 1;
+    overflow: hidden;
+  }
+
+  .notif-count-badge {
+    right: 2px;
+    top: 2px;
+    max-width: 26px;
+    font-size: 0.58rem;
+    padding: 0 3px;
   }
 
   .user-profile-menu {
     flex-shrink: 0;
-    margin-left: 0;
+    margin-left: 2px;
     position: relative;
-    z-index: 402;
+    z-index: 510;
     overflow: visible;
-    isolation: isolate;
+    order: 4;
   }
 
   .user-profile-menu .user-profile-trigger {
     box-sizing: border-box;
-    min-width: 44px;
-    min-height: 44px;
-    width: 44px;
-    height: 44px;
+    min-width: 48px;
+    min-height: 48px;
+    width: 48px;
+    height: 48px;
     padding: 0 !important;
     margin-left: 0;
     justify-content: center;
+    align-items: center;
     pointer-events: auto;
     -webkit-tap-highlight-color: transparent;
     touch-action: manipulation;
     position: relative;
-    z-index: 403;
+    z-index: 511;
+    cursor: pointer;
+  }
+
+  .user-profile-trigger__initials {
+    pointer-events: none;
+    user-select: none;
   }
 
   .header-avatar {
-    width: 44px;
-    height: 44px;
+    width: 48px;
+    height: 48px;
     font-size: 0.75rem;
     margin-left: 0;
   }
@@ -1926,7 +1963,7 @@ tbody tr:last-child td { border-bottom: none; }
   .user-profile-dropdown--portaled {
     position: fixed;
     left: auto;
-    z-index: 1300;
+    z-index: 10050;
     max-width: min(320px, calc(100vw - 20px));
   }
 
@@ -1934,7 +1971,7 @@ tbody tr:last-child td { border-bottom: none; }
     position: fixed;
     inset: 0;
     top: calc(env(safe-area-inset-top, 0px) + var(--header-h));
-    z-index: 1290;
+    z-index: 10040;
     background: transparent;
     pointer-events: auto;
     touch-action: manipulation;

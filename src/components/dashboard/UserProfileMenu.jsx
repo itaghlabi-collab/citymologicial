@@ -17,28 +17,18 @@ function roleLabel(role) {
   return String(role).replace(/_/g, ' ');
 }
 
-function isMobileHeader() {
+/** Mobile / tactile : portal + menu fixed (responsive, PWA, téléphone). */
+function detectCompactHeader() {
   try {
-    return window.matchMedia('(max-width: 768px)').matches;
+    return window.matchMedia('(max-width: 768px), (hover: none) and (pointer: coarse)').matches;
   } catch {
     return false;
   }
 }
 
-function profileDebugLog(event, detail) {
-  try {
-    if (import.meta.env?.DEV) {
-      // eslint-disable-next-line no-console
-      console.info('[CITYMO profile]', event, detail);
-    }
-  } catch {
-    /* ignore */
-  }
-}
-
 export default function UserProfileMenu({ user, onLogout, onNavigate }) {
   const [open, setOpen] = useState(false);
-  const [mobile, setMobile] = useState(isMobileHeader);
+  const [compact, setCompact] = useState(() => detectCompactHeader());
   const [menuCoords, setMenuCoords] = useState({ top: 0, right: 10 });
   const [showProfile, setShowProfile] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
@@ -46,17 +36,16 @@ export default function UserProfileMenu({ user, onLogout, onNavigate }) {
   const rootRef = useRef(null);
   const triggerRef = useRef(null);
   const ignoreOutsideUntilRef = useRef(0);
+  const lastToggleAtRef = useRef(0);
   const admin = isSuperAdmin(user);
 
-  const close = useCallback(() => {
-    profileDebugLog('close', { mobile });
-    setOpen(false);
-  }, [mobile]);
+  const close = useCallback(() => setOpen(false), []);
 
   useEffect(() => {
     try {
-      const mq = window.matchMedia('(max-width: 768px)');
-      const onChange = () => setMobile(mq.matches);
+      const mq = window.matchMedia('(max-width: 768px), (hover: none) and (pointer: coarse)');
+      const onChange = () => setCompact(mq.matches);
+      onChange();
       mq.addEventListener('change', onChange);
       return () => mq.removeEventListener('change', onChange);
     } catch {
@@ -65,7 +54,7 @@ export default function UserProfileMenu({ user, onLogout, onNavigate }) {
   }, []);
 
   useLayoutEffect(() => {
-    if (!open || !mobile || !triggerRef.current) return undefined;
+    if (!open || !compact || !triggerRef.current) return undefined;
 
     function updateCoords() {
       const rect = triggerRef.current?.getBoundingClientRect();
@@ -83,10 +72,10 @@ export default function UserProfileMenu({ user, onLogout, onNavigate }) {
       window.removeEventListener('resize', updateCoords);
       window.removeEventListener('scroll', updateCoords, true);
     };
-  }, [open, mobile]);
+  }, [open, compact]);
 
   useEffect(() => {
-    if (!open || mobile) return undefined;
+    if (!open || compact) return undefined;
 
     function onDocPointerDown(e) {
       if (Date.now() < ignoreOutsideUntilRef.current) return;
@@ -106,39 +95,38 @@ export default function UserProfileMenu({ user, onLogout, onNavigate }) {
       document.removeEventListener('pointerdown', onDocPointerDown);
       document.removeEventListener('keydown', onKey);
     };
-  }, [open, mobile, close]);
+  }, [open, compact, close]);
 
   useEffect(() => {
-    if (!open || !mobile) return undefined;
+    if (!open || !compact) return undefined;
     function onKey(e) {
       if (e.key === 'Escape') close();
     }
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [open, mobile, close]);
+  }, [open, compact, close]);
 
-  const toggleOpen = useCallback((source) => {
+  const toggleOpen = useCallback(() => {
+    const now = Date.now();
+    if (now - lastToggleAtRef.current < 280) return;
+    lastToggleAtRef.current = now;
+
     setOpen((wasOpen) => {
       const next = !wasOpen;
       if (next) {
-        ignoreOutsideUntilRef.current = Date.now() + 400;
-      }
-      profileDebugLog('tap', { source, next, mobile });
-      if (import.meta.env?.DEV && triggerRef.current) {
-        const rect = triggerRef.current.getBoundingClientRect();
-        const x = Math.round(rect.left + rect.width / 2);
-        const y = Math.round(rect.top + rect.height / 2);
-        const top = document.elementFromPoint(x, y);
-        profileDebugLog('elementFromPoint', {
-          x,
-          y,
-          top: top ? `${top.tagName}${top.id ? `#${top.id}` : ''}` : null,
-          avatarHit: top === triggerRef.current || triggerRef.current.contains(top),
-        });
+        ignoreOutsideUntilRef.current = Date.now() + 450;
       }
       return next;
     });
-  }, [mobile]);
+  }, []);
+
+  const onTriggerActivate = useCallback((e) => {
+    if (e.type === 'pointerup' && e.pointerType === 'mouse' && e.button !== 0) return;
+    if (e.type === 'keydown' && e.key !== 'Enter' && e.key !== ' ') return;
+    if (e.type === 'keydown') e.preventDefault();
+    e.stopPropagation();
+    toggleOpen();
+  }, [toggleOpen]);
 
   function handleAction(id) {
     close();
@@ -179,9 +167,9 @@ export default function UserProfileMenu({ user, onLogout, onNavigate }) {
 
   const dropdown = open ? (
     <div
-      className={'user-profile-dropdown' + (mobile ? ' user-profile-dropdown--portaled' : '')}
+      className={'user-profile-dropdown' + (compact ? ' user-profile-dropdown--portaled' : '')}
       role="menu"
-      style={mobile ? {
+      style={compact ? {
         top: `${menuCoords.top}px`,
         right: `${menuCoords.right}px`,
       } : undefined}
@@ -214,7 +202,7 @@ export default function UserProfileMenu({ user, onLogout, onNavigate }) {
     </div>
   ) : null;
 
-  const mobilePortal = mobile && open && typeof document !== 'undefined'
+  const mobilePortal = compact && open && typeof document !== 'undefined'
     ? createPortal(
       <>
         <div
@@ -239,23 +227,18 @@ export default function UserProfileMenu({ user, onLogout, onNavigate }) {
           ref={triggerRef}
           type="button"
           className={'header-avatar user-profile-trigger' + (open ? ' is-open' : '')}
-          onPointerDown={(e) => {
-            e.stopPropagation();
-          }}
-          onClick={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            toggleOpen('click');
-          }}
+          onPointerUp={onTriggerActivate}
+          onKeyDown={onTriggerActivate}
           aria-expanded={open}
           aria-haspopup="menu"
+          aria-label="Menu profil"
           title={user?.nom}
         >
-          <span>{initials}</span>
+          <span className="user-profile-trigger__initials">{initials}</span>
           <ChevronDown size={12} className="user-profile-chevron" aria-hidden />
         </button>
 
-        {!mobile && dropdown}
+        {!compact && dropdown}
       </div>
 
       {mobilePortal}
