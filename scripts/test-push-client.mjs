@@ -78,9 +78,11 @@ if (clientSrc.includes('export async function readPushActivationState')
 console.log('PASS: permission only on enable()');
 
 assertIncludes(hookSrc, 'L’abonnement n’a pas pu être confirmé', 'no false success');
-assertIncludes(uiSrc, 'Activer les notifications', 'UI enable');
-assertIncludes(uiSrc, 'Désactiver les notifications', 'UI disable');
-assertIncludes(uiSrc, 'Notifications sur cet appareil', 'UI title');
+assertIncludes(uiSrc, 'Activer', 'UI enable');
+assertIncludes(uiSrc, 'Désactiver', 'UI disable');
+assertIncludes(uiSrc, 'Notifications Web Push', 'UI title');
+assertIncludes(uiSrc, 'Activées sur cet appareil', 'UI active state');
+assertIncludes(uiSrc, 'Dernière synchronisation', 'UI sync');
 assertIncludes(uiSrc, 'Navigateur incompatible', 'UI incompatible');
 assertIncludes(uiSrc, 'Autorisation refusée', 'UI denied');
 assertIncludes(modalSrc, 'Mes notifications', 'modal title');
