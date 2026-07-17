@@ -174,17 +174,27 @@ export default function EmployeeDocuments({ employee, onClose, mode = 'manage' }
         aria-label={`${readOnly ? 'Dossier administratif' : 'Dossier documentaire'} — ${fullName}`}
       >
         <header className="rh-emp-docs-drawer-header">
-          <div>
-            <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-              {readOnly ? 'Dossier administratif' : 'Dossier documentaire'}
-            </div>
-            <h2 className="rh-emp-docs-drawer-title">
-              {readOnly ? 'DOSSIER ADMINISTRATIF' : 'DOSSIER DOCUMENTAIRE'} — {fullName}
-            </h2>
+          <div className="rh-emp-docs-nav rh-m-only">
+            <button type="button" className="rh-back-btn" onClick={onClose} aria-label="Retour aux employés">
+              ← Retour aux employés
+            </button>
+            <button type="button" className="rh-emp-modal-close" onClick={onClose} aria-label="Fermer">
+              <X size={20} />
+            </button>
           </div>
-          <button type="button" className="rh-emp-modal-close" onClick={onClose} aria-label="Fermer">
-            <X size={20} />
-          </button>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, width: '100%' }}>
+            <div>
+              <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                {readOnly ? 'Dossier administratif' : 'Dossier documentaire'}
+              </div>
+              <h2 className="rh-emp-docs-drawer-title">
+                {readOnly ? 'DOSSIER ADMINISTRATIF' : 'DOSSIER DOCUMENTAIRE'} — {fullName}
+              </h2>
+            </div>
+            <button type="button" className="rh-emp-modal-close rh-desk-close" onClick={onClose} aria-label="Fermer">
+              <X size={20} />
+            </button>
+          </div>
         </header>
 
         <div className="rh-emp-docs-drawer-body">
@@ -319,14 +329,14 @@ export default function EmployeeDocuments({ employee, onClose, mode = 'manage' }
                   </h3>
 
                   {sectionDocs.length === 0 ? (
-                    <div className="rh-emp-docs-empty">Aucun document dans cette catégorie.</div>
+                    <div className="rh-emp-docs-empty">Aucun document</div>
                   ) : (
                     <ul className="rh-emp-docs-list">
                       {sectionDocs.map((doc) => (
                         <li key={doc.id} className="rh-emp-docs-item">
                           <span className="rh-emp-docs-item-icon"><FileText size={16} /></span>
                           <div className="rh-emp-docs-item-main">
-                            <div className="rh-emp-docs-item-name">{doc.file_name}</div>
+                            <div className="rh-emp-docs-item-name" title={doc.file_name}>{doc.file_name}</div>
                             <div className="rh-emp-docs-item-meta">
                               <span>{doc.doc_type_label}</span>
                               <span>·</span>
@@ -338,21 +348,22 @@ export default function EmployeeDocuments({ employee, onClose, mode = 'manage' }
                             </div>
                           </div>
                           <div className="rh-emp-docs-item-actions">
-                            <button type="button" className="btn btn-ghost btn-sm" title="Visualiser" onClick={() => handleView(doc)}>
+                            <button type="button" className="btn btn-ghost btn-sm" title="Visualiser" aria-label="Voir" onClick={() => handleView(doc)}>
                               <Eye size={13} />
                             </button>
-                            <button type="button" className="btn btn-ghost btn-sm" title="Télécharger" onClick={() => handleDownload(doc)}>
+                            <button type="button" className="btn btn-ghost btn-sm" title="Télécharger" aria-label="Télécharger" onClick={() => handleDownload(doc)}>
                               <Download size={13} />
                             </button>
                             {!readOnly && (
                               <>
-                                <button type="button" className="btn btn-ghost btn-sm" title="Renommer" onClick={() => handleRename(doc)}>
+                                <button type="button" className="btn btn-ghost btn-sm" title="Renommer" aria-label="Modifier" onClick={() => handleRename(doc)}>
                                   <Pencil size={13} />
                                 </button>
                                 <button
                                   type="button"
                                   className="btn btn-ghost btn-sm"
                                   title="Supprimer"
+                                  aria-label="Supprimer"
                                   onClick={() => handleDelete(doc)}
                                   style={{ color: 'var(--red)' }}
                                 >

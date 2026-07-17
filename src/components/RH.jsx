@@ -213,7 +213,7 @@ export default function RH() {
   }
 
   return (
-    <div className="animate-fade-in">
+    <div className="animate-fade-in rh-page">
       <Toast toast={toast} />
 
       <div className="page-header">
@@ -263,7 +263,7 @@ export default function RH() {
         </div>
       )}
 
-      <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }}>
+      <div className="stat-grid rh-kpi-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))' }}>
         <div className="stat-card">
           <div className="stat-icon blue"><Users size={18} /></div>
           <div className="stat-body">
@@ -295,8 +295,8 @@ export default function RH() {
             <Users size={16} /> Liste des employés
           </div>
 
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
-            <div style={{ position: 'relative' }}>
+          <div className="rh-m-toolbar">
+            <div className="rh-m-toolbar-search">
               <Search
                 size={14}
                 style={{
@@ -308,56 +308,40 @@ export default function RH() {
                 }}
               />
               <input
-                style={{
-                  paddingLeft: 30,
-                  paddingRight: 12,
-                  paddingTop: 8,
-                  paddingBottom: 8,
-                  border: '1.5px solid var(--border)',
-                  borderRadius: 'var(--radius)',
-                  fontSize: '0.85rem',
-                  outline: 'none',
-                  fontFamily: 'var(--font-body)',
-                }}
                 placeholder="Rechercher..."
                 value={search}
                 onChange={(e) => setSearch(e.target.value)}
+                aria-label="Rechercher un employé"
               />
             </div>
 
-            <select
-              value={statutFilter}
-              onChange={(e) => setStatutFilter(e.target.value)}
-              style={{
-                padding: '8px 12px',
-                border: '1.5px solid var(--border)',
-                borderRadius: 'var(--radius)',
-                fontSize: '0.85rem',
-                fontFamily: 'var(--font-body)',
-                background: '#fff',
-                outline: 'none',
-              }}
-              aria-label="Filtrer par statut"
-            >
-              <option value="">Tous statuts</option>
-              <option value="Actif">Actif</option>
-              <option value="Conge">Congé</option>
-              <option value="Inactif">Inactif</option>
-            </select>
+            <div className="rh-m-toolbar-row">
+              <select
+                className="rh-m-toolbar-select"
+                value={statutFilter}
+                onChange={(e) => setStatutFilter(e.target.value)}
+                aria-label="Filtrer par statut"
+              >
+                <option value="">Tous statuts</option>
+                <option value="Actif">Actif</option>
+                <option value="Conge">Congé</option>
+                <option value="Inactif">Inactif</option>
+              </select>
 
-            <button
-              type="button"
-              className="btn btn-secondary btn-sm"
-              onClick={handleImportSeed}
-              disabled={!configured || saving}
-              title="Importer la liste employés (sans doublons)"
-            >
-              <Upload size={14} /> Importer liste
-            </button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={handleImportSeed}
+                disabled={!configured || saving}
+                title="Importer la liste employés (sans doublons)"
+              >
+                <Upload size={14} /> Importer
+              </button>
 
-            <button className="btn btn-primary btn-sm" onClick={openCreate} disabled={!configured || saving}>
-              <Plus size={14} /> Ajouter
-            </button>
+              <button type="button" className="btn btn-primary btn-sm" onClick={openCreate} disabled={!configured || saving}>
+                <Plus size={14} /> Ajouter
+              </button>
+            </div>
           </div>
         </div>
 
@@ -384,138 +368,240 @@ export default function RH() {
             )}
           </div>
         ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Nom</th>
-                  <th>Email</th>
-                  <th>Téléphone</th>
-                  <th>CIN</th>
-                  <th>Poste</th>
-                  <th>Département</th>
-                  <th>Salaire</th>
-                  <th>Statut</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
+          <>
+            <div className="rh-m-only rh-m-cards">
+              {filtered.map((emp) => {
+                const statutBadge =
+                  emp.statut === 'Actif'
+                    ? 'badge-green'
+                    : emp.statut === 'Conge'
+                      ? 'badge-orange'
+                      : 'badge-grey';
+                const tel = emp.telephone || '';
+                const mail = emp.email || '';
+                const contactLine = [tel, mail].filter(Boolean).join(' · ');
+                const cinSalaire = [
+                  emp.numero_cin ? `CIN ${emp.numero_cin}` : '',
+                  emp.salaire != null && emp.salaire !== '' ? fmtMAD(emp.salaire) : '',
+                ].filter(Boolean).join(' · ');
 
-              <tbody>
-                {filtered.map((emp) => (
-                  <tr key={emp.id}>
-                    <td style={{ fontWeight: 600 }}>
-                      {emp.firstname} {emp.lastname}
-                    </td>
-
-                    <td style={{ fontSize: '0.85rem' }}>{emp.email || '—'}</td>
-
-                    <td style={{ fontSize: '0.85rem' }}>{emp.telephone || '—'}</td>
-
-                    <td style={{ fontFamily: 'var(--font-head)', fontSize: '0.85rem' }}>
-                      {emp.numero_cin || '—'}
-                    </td>
-
-                    <td>{emp.poste || '—'}</td>
-
-                    <td>
-                      <span className="badge badge-blue">
-                        {emp.department || '—'}
+                return (
+                  <article key={emp.id} className="rh-m-card">
+                    <div className="rh-m-card-head">
+                      <div className="rh-m-card-name">{emp.firstname} {emp.lastname}</div>
+                      <span className={`badge ${statutBadge}`}>{emp.statut || 'Actif'}</span>
+                    </div>
+                    {emp.department ? (
+                      <span className="badge badge-blue" style={{ marginBottom: 6, display: 'inline-block' }}>
+                        {emp.department}
                       </span>
-                    </td>
-
-                    <td style={{ fontFamily: 'var(--font-head)', fontWeight: 700 }}>
-                      {fmtMAD(emp.salaire)}
-                    </td>
-
-                    <td>
-                      <span
-                        className={
-                          'badge ' +
-                          (emp.statut === 'Actif'
-                            ? 'badge-green'
-                            : emp.statut === 'Conge'
-                              ? 'badge-orange'
-                              : 'badge-grey')
-                        }
+                    ) : null}
+                    {emp.poste ? <div className="rh-m-card-poste">{emp.poste}</div> : null}
+                    {contactLine ? <div className="rh-m-card-meta">{contactLine}</div> : null}
+                    {cinSalaire ? <div className="rh-m-card-meta">{cinSalaire}</div> : null}
+                    <div className="rh-m-card-actions">
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        title="Voir la fiche employé"
+                        aria-label="Voir fiche"
+                        onClick={() => openView(emp)}
                       >
-                        {emp.statut || 'Actif'}
-                      </span>
-                    </td>
+                        <Eye size={16} />
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        title="Gérer les documents"
+                        aria-label="Documents"
+                        onClick={() => setDocsEmployee(emp)}
+                      >
+                        <FolderOpen size={16} />
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        title="Modifier"
+                        aria-label="Modifier"
+                        onClick={() => openEdit(emp)}
+                      >
+                        <Edit2 size={16} />
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        title="Télécharger fiche employé"
+                        aria-label="Télécharger"
+                        disabled={pdfLoadingId === emp.id}
+                        onClick={() => handleDownloadPdf(emp)}
+                      >
+                        {pdfLoadingId === emp.id ? (
+                          <Loader size={16} style={{ animation: 'spin 0.8s linear infinite' }} />
+                        ) : (
+                          <Download size={16} />
+                        )}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        title="Supprimer"
+                        aria-label="Supprimer"
+                        onClick={() => handleDelete(emp.id)}
+                      >
+                        <Trash2 size={16} style={{ color: 'var(--red)' }} />
+                      </button>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
 
-                    <td>
-                      <div style={{ display: 'flex', gap: 4 }}>
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-sm"
-                          style={{ padding: '4px 8px' }}
-                          title="Télécharger fiche employé"
-                          disabled={pdfLoadingId === emp.id}
-                          onClick={() => handleDownloadPdf(emp)}
-                        >
-                          {pdfLoadingId === emp.id ? (
-                            <Loader size={13} style={{ animation: 'spin 0.8s linear infinite' }} />
-                          ) : (
-                            <Download size={13} />
-                          )}
-                        </button>
-
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-sm"
-                          style={{ padding: '4px 8px' }}
-                          title="Voir la fiche employé"
-                          onClick={() => openView(emp)}
-                        >
-                          <Eye size={13} />
-                        </button>
-
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-sm"
-                          style={{ padding: '4px 8px' }}
-                          title="Gérer les documents"
-                          onClick={() => { setDocsEmployee(emp); }}
-                        >
-                          <FolderOpen size={13} />
-                        </button>
-
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-sm"
-                          style={{ padding: '4px 8px' }}
-                          title="Modifier"
-                          onClick={() => openEdit(emp)}
-                        >
-                          <Edit2 size={13} />
-                        </button>
-
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-sm"
-                          style={{ padding: '4px 8px' }}
-                          title="Supprimer"
-                          onClick={() => handleDelete(emp.id)}
-                        >
-                          <Trash2 size={13} style={{ color: 'var(--red)' }} />
-                        </button>
-                      </div>
-                    </td>
+            <div className="table-wrap rh-desk-only">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Nom</th>
+                    <th>Email</th>
+                    <th>Téléphone</th>
+                    <th>CIN</th>
+                    <th>Poste</th>
+                    <th>Département</th>
+                    <th>Salaire</th>
+                    <th>Statut</th>
+                    <th>Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+
+                <tbody>
+                  {filtered.map((emp) => (
+                    <tr key={emp.id}>
+                      <td style={{ fontWeight: 600 }}>
+                        {emp.firstname} {emp.lastname}
+                      </td>
+
+                      <td style={{ fontSize: '0.85rem' }}>{emp.email || '—'}</td>
+
+                      <td style={{ fontSize: '0.85rem' }}>{emp.telephone || '—'}</td>
+
+                      <td style={{ fontFamily: 'var(--font-head)', fontSize: '0.85rem' }}>
+                        {emp.numero_cin || '—'}
+                      </td>
+
+                      <td>{emp.poste || '—'}</td>
+
+                      <td>
+                        <span className="badge badge-blue">
+                          {emp.department || '—'}
+                        </span>
+                      </td>
+
+                      <td style={{ fontFamily: 'var(--font-head)', fontWeight: 700 }}>
+                        {fmtMAD(emp.salaire)}
+                      </td>
+
+                      <td>
+                        <span
+                          className={
+                            'badge ' +
+                            (emp.statut === 'Actif'
+                              ? 'badge-green'
+                              : emp.statut === 'Conge'
+                                ? 'badge-orange'
+                                : 'badge-grey')
+                          }
+                        >
+                          {emp.statut || 'Actif'}
+                        </span>
+                      </td>
+
+                      <td>
+                        <div style={{ display: 'flex', gap: 4 }}>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            style={{ padding: '4px 8px' }}
+                            title="Télécharger fiche employé"
+                            aria-label="Télécharger"
+                            disabled={pdfLoadingId === emp.id}
+                            onClick={() => handleDownloadPdf(emp)}
+                          >
+                            {pdfLoadingId === emp.id ? (
+                              <Loader size={13} style={{ animation: 'spin 0.8s linear infinite' }} />
+                            ) : (
+                              <Download size={13} />
+                            )}
+                          </button>
+
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            style={{ padding: '4px 8px' }}
+                            title="Voir la fiche employé"
+                            aria-label="Voir fiche"
+                            onClick={() => openView(emp)}
+                          >
+                            <Eye size={13} />
+                          </button>
+
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            style={{ padding: '4px 8px' }}
+                            title="Gérer les documents"
+                            aria-label="Documents"
+                            onClick={() => { setDocsEmployee(emp); }}
+                          >
+                            <FolderOpen size={13} />
+                          </button>
+
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            style={{ padding: '4px 8px' }}
+                            title="Modifier"
+                            aria-label="Modifier"
+                            onClick={() => openEdit(emp)}
+                          >
+                            <Edit2 size={13} />
+                          </button>
+
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            style={{ padding: '4px 8px' }}
+                            title="Supprimer"
+                            aria-label="Supprimer"
+                            onClick={() => handleDelete(emp.id)}
+                          >
+                            <Trash2 size={13} style={{ color: 'var(--red)' }} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
 
       {showModal && (
         <div className="rh-emp-modal-overlay">
           <div className="rh-emp-modal-box">
+            <div className="rh-back-bar rh-m-only">
+              <button type="button" className="rh-back-btn" onClick={closeModal} aria-label="Retour">
+                ← Retour
+              </button>
+              <button type="button" className="rh-emp-modal-close" onClick={closeModal} aria-label="Fermer">
+                <X size={20} />
+              </button>
+            </div>
             <div className="flex-between rh-emp-modal-header">
               <h2 className="rh-emp-modal-title">
                 {editingId ? 'Modifier employé' : 'Nouvel employé'}
               </h2>
-              <button type="button" className="rh-emp-modal-close" onClick={closeModal} aria-label="Fermer">
+              <button type="button" className="rh-emp-modal-close rh-desk-only" onClick={closeModal} aria-label="Fermer">
                 <X size={20} />
               </button>
             </div>

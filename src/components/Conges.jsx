@@ -277,7 +277,7 @@ export default function Conges() {
   const canOpenModal = configured && (canManageLeaves || myEmployee);
 
   return (
-    <div className="animate-fade-in">
+    <div className="animate-fade-in rh-page">
       <Toast toast={toast} />
 
       <div className="page-header flex-between">
@@ -326,7 +326,7 @@ export default function Conges() {
       )}
 
       {/* Stats */}
-      <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', marginBottom: 16 }}>
+      <div className="stat-grid rh-kpi-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', marginBottom: 16 }}>
         {[
           { key: 'all', label: 'Toutes', icon: CalendarOff, color: 'blue' },
           { key: 'pending', label: 'En attente', icon: Clock, color: 'orange' },
@@ -336,8 +336,11 @@ export default function Conges() {
           <div
             key={key}
             className="stat-card"
+            role="button"
+            tabIndex={0}
             style={{ cursor: 'pointer', border: filter === key ? '2px solid var(--red)' : '1px solid var(--border)', transition: 'border 0.15s' }}
             onClick={() => setFilter(key)}
+            onKeyDown={(e) => e.key === 'Enter' && setFilter(key)}
           >
             <div className={"stat-icon " + color}><Icon size={18} /></div>
             <div className="stat-body">
@@ -363,133 +366,249 @@ export default function Conges() {
             {leaves.length === 0 ? 'Aucune demande de conge. Soumettez la premiere.' : 'Aucune demande dans cette categorie.'}
           </div>
         ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Employe</th>
-                  <th>Type</th>
-                  <th>Du</th>
-                  <th>Au</th>
-                  <th>Retour</th>
-                  <th>Jours</th>
-                  <th>Raison</th>
-                  <th>Justificatif</th>
-                  <th>Statut</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((r, i) => {
-                  const statLabel = STATUS_LABEL[r._statut] || r._statut;
-                  const statBadge = STATUS_BADGE[r._statut] || 'badge-grey';
-                  const isPending = r._statut === 'En attente';
-                  const showEdit = canEdit(r);
-                  const showDelete = canDelete(r);
-                  return (
-                    <tr key={r.id || i}>
-                      <td style={{ fontWeight: 600 }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                          <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--red-light)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                            <User size={13} style={{ color: 'var(--red)' }} />
-                          </div>
-                          {r.employe || '-'}
+          <>
+            <div className="rh-m-only rh-m-cards">
+              {filtered.map((r, i) => {
+                const statLabel = STATUS_LABEL[r._statut] || r._statut;
+                const statBadge = STATUS_BADGE[r._statut] || 'badge-grey';
+                const isPending = r._statut === 'En attente';
+                const showEdit = canEdit(r);
+                const showDelete = canDelete(r);
+                return (
+                  <article key={r.id || i} className="rh-m-card">
+                    <div className="rh-m-card-head">
+                      <div className="rh-m-card-name">{r.employe || '—'}</div>
+                      <span className={`badge ${statBadge}`}>{statLabel}</span>
+                    </div>
+                    {r.type ? <div className="rh-m-card-poste">{r.type}</div> : null}
+                    <div className="rh-m-card-grid">
+                      {r.dateDebut ? (
+                        <div className="rh-m-card-kv">
+                          <div className="rh-m-card-kv-label">Du</div>
+                          <div className="rh-m-card-kv-value">{r.dateDebut}</div>
                         </div>
-                      </td>
-                      <td><span className="badge badge-blue" style={{ fontSize: '0.72rem' }}>{r.type || '-'}</span></td>
-                      <td style={{ whiteSpace: 'nowrap' }}>{r.dateDebut || '-'}</td>
-                      <td style={{ whiteSpace: 'nowrap' }}>{r.dateFin || '-'}</td>
-                      <td style={{ whiteSpace: 'nowrap', color: 'var(--text-2)' }}>{r.dateRetour || '-'}</td>
-                      <td>
-                        <span style={{ fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--red)' }}>
-                          {r.jours != null ? r.jours : '-'}
-                        </span>
-                      </td>
-                      <td style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-2)', fontSize: '0.82rem' }}>
-                        {r.raison || <span style={{ color: 'var(--text-3)' }}>—</span>}
-                      </td>
-                      <td>
-                        {r.fichier
-                          ? <span style={{ fontSize: '0.75rem', color: 'var(--red)', display: 'flex', alignItems: 'center', gap: 3 }}><Upload size={11} /> {r.fichier}</span>
-                          : <span style={{ color: 'var(--text-3)', fontSize: '0.75rem' }}>—</span>
-                        }
-                      </td>
-                      <td><span className={"badge " + statBadge}>{statLabel}</span></td>
-                      <td>
-                        <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
-                          {isPending && canApproveRefuse && (
-                            <>
-                              <button
-                                type="button"
-                                className="btn btn-sm"
-                                style={{ background: '#E8F5E9', color: '#2E7D32', border: 'none', cursor: 'pointer', borderRadius: 6, padding: '4px 10px', fontSize: '0.78rem', fontWeight: 600 }}
-                                onClick={() => handleApprove(r.id)}
-                                disabled={saving}
-                              >
-                                Approuver
-                              </button>
-                              <button
-                                type="button"
-                                className="btn btn-sm"
-                                style={{ background: '#FFEBEE', color: 'var(--red)', border: 'none', cursor: 'pointer', borderRadius: 6, padding: '4px 10px', fontSize: '0.78rem', fontWeight: 600 }}
-                                onClick={() => handleRefuse(r.id)}
-                                disabled={saving}
-                              >
-                                Refuser
-                              </button>
-                            </>
-                          )}
+                      ) : null}
+                      {r.dateFin ? (
+                        <div className="rh-m-card-kv">
+                          <div className="rh-m-card-kv-label">Au</div>
+                          <div className="rh-m-card-kv-value">{r.dateFin}</div>
+                        </div>
+                      ) : null}
+                      {r.dateRetour ? (
+                        <div className="rh-m-card-kv">
+                          <div className="rh-m-card-kv-label">Retour</div>
+                          <div className="rh-m-card-kv-value">{r.dateRetour}</div>
+                        </div>
+                      ) : null}
+                      {r.jours != null ? (
+                        <div className="rh-m-card-kv">
+                          <div className="rh-m-card-kv-label">Durée</div>
+                          <div className="rh-m-card-kv-value" style={{ color: 'var(--red)' }}>{r.jours} j</div>
+                        </div>
+                      ) : null}
+                    </div>
+                    {r.raison ? <div className="rh-m-card-meta">{r.raison}</div> : null}
+                    <div className="rh-m-card-actions">
+                      {isPending && canApproveRefuse && (
+                        <>
                           <button
                             type="button"
-                            title="Telecharger PDF"
-                            onClick={() => handleDownloadPdf(r)}
-                            disabled={saving || pdfLoadingId === r.id}
-                            style={{ background: 'none', border: 'none', cursor: pdfLoadingId === r.id ? 'wait' : 'pointer', color: 'var(--red)', padding: 4, opacity: pdfLoadingId === r.id ? 0.5 : 1 }}
+                            className="btn btn-sm rh-m-btn-text"
+                            style={{ background: '#E8F5E9', color: '#2E7D32', border: 'none' }}
+                            onClick={() => handleApprove(r.id)}
+                            disabled={saving}
+                            aria-label="Approuver"
                           >
-                            <FileDown size={15} />
+                            Approuver
                           </button>
-                          {showEdit && (
+                          <button
+                            type="button"
+                            className="btn btn-sm rh-m-btn-text"
+                            style={{ background: '#FFEBEE', color: 'var(--red)', border: 'none' }}
+                            onClick={() => handleRefuse(r.id)}
+                            disabled={saving}
+                            aria-label="Refuser"
+                          >
+                            Refuser
+                          </button>
+                        </>
+                      )}
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
+                        title="Telecharger PDF"
+                        aria-label="Voir justificatif"
+                        onClick={() => handleDownloadPdf(r)}
+                        disabled={saving || pdfLoadingId === r.id}
+                      >
+                        <FileDown size={16} />
+                      </button>
+                      {showEdit && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          title="Modifier"
+                          aria-label="Modifier"
+                          onClick={() => openEdit(r)}
+                          disabled={saving}
+                        >
+                          <Edit2 size={16} />
+                        </button>
+                      )}
+                      {showDelete && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          title="Supprimer"
+                          aria-label="Supprimer"
+                          onClick={() => handleDelete(r.id)}
+                          disabled={saving}
+                        >
+                          <Trash2 size={16} style={{ color: 'var(--red)' }} />
+                        </button>
+                      )}
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+
+            <div className="table-wrap rh-desk-only">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Employe</th>
+                    <th>Type</th>
+                    <th>Du</th>
+                    <th>Au</th>
+                    <th>Retour</th>
+                    <th>Jours</th>
+                    <th>Raison</th>
+                    <th>Justificatif</th>
+                    <th>Statut</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((r, i) => {
+                    const statLabel = STATUS_LABEL[r._statut] || r._statut;
+                    const statBadge = STATUS_BADGE[r._statut] || 'badge-grey';
+                    const isPending = r._statut === 'En attente';
+                    const showEdit = canEdit(r);
+                    const showDelete = canDelete(r);
+                    return (
+                      <tr key={r.id || i}>
+                        <td style={{ fontWeight: 600 }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                            <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--red-light)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                              <User size={13} style={{ color: 'var(--red)' }} />
+                            </div>
+                            {r.employe || '-'}
+                          </div>
+                        </td>
+                        <td><span className="badge badge-blue" style={{ fontSize: '0.72rem' }}>{r.type || '-'}</span></td>
+                        <td style={{ whiteSpace: 'nowrap' }}>{r.dateDebut || '-'}</td>
+                        <td style={{ whiteSpace: 'nowrap' }}>{r.dateFin || '-'}</td>
+                        <td style={{ whiteSpace: 'nowrap', color: 'var(--text-2)' }}>{r.dateRetour || '-'}</td>
+                        <td>
+                          <span style={{ fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--red)' }}>
+                            {r.jours != null ? r.jours : '-'}
+                          </span>
+                        </td>
+                        <td style={{ maxWidth: 160, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--text-2)', fontSize: '0.82rem' }}>
+                          {r.raison || <span style={{ color: 'var(--text-3)' }}>—</span>}
+                        </td>
+                        <td>
+                          {r.fichier
+                            ? <span style={{ fontSize: '0.75rem', color: 'var(--red)', display: 'flex', alignItems: 'center', gap: 3 }}><Upload size={11} /> {r.fichier}</span>
+                            : <span style={{ color: 'var(--text-3)', fontSize: '0.75rem' }}>—</span>
+                          }
+                        </td>
+                        <td><span className={"badge " + statBadge}>{statLabel}</span></td>
+                        <td>
+                          <div style={{ display: 'flex', gap: 4, alignItems: 'center', flexWrap: 'wrap' }}>
+                            {isPending && canApproveRefuse && (
+                              <>
+                                <button
+                                  type="button"
+                                  className="btn btn-sm"
+                                  style={{ background: '#E8F5E9', color: '#2E7D32', border: 'none', cursor: 'pointer', borderRadius: 6, padding: '4px 10px', fontSize: '0.78rem', fontWeight: 600 }}
+                                  onClick={() => handleApprove(r.id)}
+                                  disabled={saving}
+                                >
+                                  Approuver
+                                </button>
+                                <button
+                                  type="button"
+                                  className="btn btn-sm"
+                                  style={{ background: '#FFEBEE', color: 'var(--red)', border: 'none', cursor: 'pointer', borderRadius: 6, padding: '4px 10px', fontSize: '0.78rem', fontWeight: 600 }}
+                                  onClick={() => handleRefuse(r.id)}
+                                  disabled={saving}
+                                >
+                                  Refuser
+                                </button>
+                              </>
+                            )}
                             <button
                               type="button"
-                              title="Modifier"
-                              onClick={() => openEdit(r)}
-                              disabled={saving}
-                              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: 4 }}
+                              title="Telecharger PDF"
+                              onClick={() => handleDownloadPdf(r)}
+                              disabled={saving || pdfLoadingId === r.id}
+                              style={{ background: 'none', border: 'none', cursor: pdfLoadingId === r.id ? 'wait' : 'pointer', color: 'var(--red)', padding: 4, opacity: pdfLoadingId === r.id ? 0.5 : 1 }}
                             >
-                              <Edit2 size={15} />
+                              <FileDown size={15} />
                             </button>
-                          )}
-                          {showDelete && (
-                            <button
-                              type="button"
-                              title="Supprimer"
-                              onClick={() => handleDelete(r.id)}
-                              disabled={saving}
-                              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', padding: 4 }}
-                            >
-                              <Trash2 size={15} />
-                            </button>
-                          )}
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
+                            {showEdit && (
+                              <button
+                                type="button"
+                                title="Modifier"
+                                onClick={() => openEdit(r)}
+                                disabled={saving}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: 4 }}
+                              >
+                                <Edit2 size={15} />
+                              </button>
+                            )}
+                            {showDelete && (
+                              <button
+                                type="button"
+                                title="Supprimer"
+                                onClick={() => handleDelete(r.id)}
+                                disabled={saving}
+                                style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', padding: 4 }}
+                              >
+                                <Trash2 size={15} />
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </>
         )}
       </div>
 
       {/* Modal */}
       {showModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
-          <div style={{ background: '#fff', borderRadius: 14, padding: 32, width: '100%', maxWidth: 540, boxShadow: '0 8px 40px rgba(0,0,0,0.2)', maxHeight: '90vh', overflowY: 'auto' }}>
+        <div className="rh-leave-modal-overlay">
+          <div className="rh-leave-modal-box">
+            <div className="rh-back-bar rh-m-only">
+              <button type="button" className="rh-back-btn" onClick={closeModal} aria-label="Retour">
+                ← Retour
+              </button>
+              <button type="button" className="rh-emp-modal-close" onClick={closeModal} aria-label="Fermer">
+                <X size={20} />
+              </button>
+            </div>
             <div className="flex-between" style={{ marginBottom: 20 }}>
-              <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.2rem', textTransform: 'uppercase', letterSpacing: '0.03em' }}>
+              <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.2rem', textTransform: 'uppercase', letterSpacing: '0.03em', margin: 0 }}>
                 {editingId ? 'Modifier demande de conge' : 'Nouvelle demande de conge'}
               </h2>
-              <button type="button" onClick={closeModal} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)' }}>
+              <button type="button" className="rh-desk-close" onClick={closeModal} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)' }} aria-label="Fermer">
                 <X size={20} />
               </button>
             </div>
@@ -531,7 +650,7 @@ export default function Conges() {
               </div>
 
               {/* Dates */}
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div className="rh-leave-modal-dates">
                 <div className="form-group">
                   <label>Date de debut</label>
                   <input
@@ -605,7 +724,7 @@ export default function Conges() {
                 />
               </div>
 
-              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 6 }}>
+              <div className="rh-leave-modal-footer">
                 <button type="button" className="btn btn-secondary" onClick={closeModal} disabled={saving}>Annuler</button>
                 <button type="submit" className="btn btn-primary" disabled={saving}>
                   <Plus size={14} /> {saving ? 'Enregistrement...' : editingId ? 'Enregistrer' : 'Soumettre la demande'}

@@ -886,21 +886,21 @@ function CINScanner({
 function MobileOuvrierRow({ w, cfg, pdfLoading, onView, onEdit, onPdf, onDelete }) {
   return (
     <div className="rh-ext-mobile-row">
-      <button type="button" className="rh-ext-mobile-row-main" onClick={onView}>
-        <Avatar worker={w} size={28} />
-        <div>
+      <button type="button" className="rh-ext-mobile-row-main" onClick={onView} aria-label={`Voir fiche ${w.prenom} ${w.nom}`}>
+        <Avatar worker={w} size={36} />
+        <div style={{ minWidth: 0, flex: 1 }}>
           <strong>{w.prenom} {w.nom}</strong>
           <span>{w.fonction || '—'}</span>
         </div>
       </button>
-      <span className={`badge ${cfg.cls}`} style={{ fontSize: '0.65rem', flexShrink: 0 }}>{cfg.label}</span>
+      <span className={`badge ${cfg.cls}`} style={{ fontSize: '0.65rem', flexShrink: 0, marginTop: 4 }}>{cfg.label}</span>
       <div className="rh-ext-mobile-row-actions">
-        <button type="button" className="btn btn-ghost btn-sm" title="Voir" onClick={onView}><Eye size={14} /></button>
-        <button type="button" className="btn btn-ghost btn-sm" title="Modifier" onClick={onEdit}><Edit2 size={14} /></button>
-        <button type="button" className="btn btn-ghost btn-sm" title="PDF" disabled={pdfLoading} onClick={onPdf}>
+        <button type="button" className="btn btn-ghost btn-sm" title="Voir fiche" aria-label="Voir fiche" onClick={onView}><Eye size={14} /></button>
+        <button type="button" className="btn btn-ghost btn-sm" title="Modifier" aria-label="Modifier" onClick={onEdit}><Edit2 size={14} /></button>
+        <button type="button" className="btn btn-ghost btn-sm" title="Télécharger PDF" aria-label="Télécharger" disabled={pdfLoading} onClick={onPdf}>
           {pdfLoading ? <Loader size={14} style={{ animation: 'spin 0.8s linear infinite' }} /> : <Download size={14} />}
         </button>
-        <button type="button" className="btn btn-ghost btn-sm" title="Supprimer" onClick={onDelete} style={{ color: 'var(--red)' }}><Trash2 size={14} /></button>
+        <button type="button" className="btn btn-ghost btn-sm" title="Supprimer" aria-label="Supprimer" onClick={onDelete} style={{ color: 'var(--red)' }}><Trash2 size={14} /></button>
       </div>
     </div>
   );
@@ -921,9 +921,14 @@ function OuvrierDetail({ worker, onBack, onEdit, onDownloadPdf, pdfLoading }) {
 
   return (
     <div className="animate-fade-in rh-ext-page">
-      <button onClick={onBack} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-2)', fontSize: '0.875rem', fontWeight: 600, marginBottom: 16, padding: 0 }}>
-        <ChevronLeft size={16} /> Retour aux ouvriers
-      </button>
+      <div className="rh-ext-back-bar">
+        <button type="button" className="rh-ext-back-btn" onClick={onBack} aria-label="Retour aux ouvriers">
+          <ChevronLeft size={16} /> Retour aux ouvriers
+        </button>
+        <button type="button" className="rh-ext-back-close" onClick={onBack} aria-label="Fermer" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', minWidth: 44, minHeight: 44, alignItems: 'center', justifyContent: 'center' }}>
+          <X size={20} />
+        </button>
+      </div>
 
       {/* Profile header */}
       <div className="card rh-ext-profile-card">
@@ -1271,22 +1276,27 @@ function OuvrierModal({ worker, onClose, onSave, saving }) {
         <div className="ouv-modal-box">
           {/* Modal header */}
           <div className="ouv-modal-header">
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <div style={{ width: 36, height: 36, borderRadius: 8, background: '#FFEBEE', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                <HardHat size={18} style={{ color: 'var(--red)' }} />
-              </div>
-              <div>
-                <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.05rem', textTransform: 'uppercase' }}>
-                  {isEdit ? 'Modifier ouvrier' : 'Ajouter un ouvrier'}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0, flex: 1 }}>
+              <button type="button" className="rh-ext-back-btn" onClick={onClose} aria-label="Retour aux ouvriers">
+                ← Retour aux ouvriers
+              </button>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <div style={{ width: 36, height: 36, borderRadius: 8, background: '#FFEBEE', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                  <HardHat size={18} style={{ color: 'var(--red)' }} />
                 </div>
-                {isEdit && <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>{form.prenom} {form.nom}</div>}
+                <div>
+                  <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.05rem', textTransform: 'uppercase' }}>
+                    {isEdit ? 'Modifier ouvrier' : 'Ajouter un ouvrier'}
+                  </div>
+                  {isEdit && <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>{form.prenom} {form.nom}</div>}
+                </div>
               </div>
             </div>
             <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
               <button type="button" className="btn btn-ghost btn-sm" onClick={openCINScanner} style={{ display: 'flex', alignItems: 'center', gap: 5, color: 'var(--red)' }}>
                 <ScanLine size={13} /> <span className="ouv-scanner-label">Scanner CIN</span>
               </button>
-              <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: 4 }}><X size={20} /></button>
+              <button type="button" onClick={onClose} aria-label="Fermer" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: 4, minWidth: 44, minHeight: 44 }}><X size={20} /></button>
             </div>
           </div>
 

@@ -464,7 +464,9 @@ export default function SousTraitants() {
         <>
           <div className="page-header flex-between">
             <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <button className="btn btn-ghost" onClick={openList}><ChevronLeft size={16} /> Retour</button>
+              <button type="button" className="btn btn-ghost rh-ext-back-btn" onClick={openList} aria-label="Retour aux sous-traitants">
+                <ChevronLeft size={16} /> Retour aux sous-traitants
+              </button>
               <div>
                 <h1 className="page-title">{sub?.fullName || 'Sous-traitant'}</h1>
                 <p className="page-subtitle">{sub?.fonction || '—'} · {sub?.ville || '—'} · {sub?.cinLabel}</p>

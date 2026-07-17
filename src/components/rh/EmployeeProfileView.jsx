@@ -85,15 +85,25 @@ export default function EmployeeProfileView({ employee, onClose, onOpenDocuments
       <div className="rh-emp-modal-overlay" onClick={onClose} aria-hidden="true" />
       <aside className="rh-emp-profile-drawer" role="dialog" aria-label={`Fiche employé — ${fullName}`}>
         <header className="rh-emp-docs-drawer-header">
-          <div>
-            <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-              Fiche employé
-            </div>
-            <h2 className="rh-emp-docs-drawer-title">{fullName || '—'}</h2>
+          <div className="rh-emp-docs-nav rh-m-only">
+            <button type="button" className="rh-back-btn" onClick={onClose} aria-label="Retour aux employés">
+              ← Retour aux employés
+            </button>
+            <button type="button" className="rh-emp-modal-close" onClick={onClose} aria-label="Fermer">
+              <X size={20} />
+            </button>
           </div>
-          <button type="button" className="rh-emp-modal-close" onClick={onClose} aria-label="Fermer">
-            <X size={20} />
-          </button>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, width: '100%' }}>
+            <div>
+              <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                Fiche employé
+              </div>
+              <h2 className="rh-emp-docs-drawer-title">{fullName || '—'}</h2>
+            </div>
+            <button type="button" className="rh-emp-modal-close rh-desk-close" onClick={onClose} aria-label="Fermer">
+              <X size={20} />
+            </button>
+          </div>
         </header>
 
         <div className="rh-emp-profile-body">

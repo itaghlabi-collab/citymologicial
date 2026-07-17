@@ -92,20 +92,28 @@ export default function RhAssignWorkersModal({
   if (!open || !request) return null;
 
   return (
-    <div className="rh-emp-modal-overlay" style={{ zIndex: 1400 }}>
-      <div className="card" style={{ width: 'min(98vw, 960px)', maxHeight: '94vh', display: 'flex', flexDirection: 'column', padding: 0 }}>
-        <header style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '16px 20px', borderBottom: '1px solid var(--border)' }}>
-          <div>
-            <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase' }}>Affectation RH</div>
-            <h3 style={{ margin: 0, fontWeight: 800, fontFamily: 'var(--font-head)' }}>
-              {request.ref} — {request.fonction} ({request.quantite} demandé)
-            </h3>
-            <div style={{ fontSize: '0.82rem', color: 'var(--text-3)' }}>{request.project_name}</div>
+    <div className="rh-emp-modal-overlay rh-assign-modal-overlay" style={{ zIndex: 1400 }}>
+      <div className="card rh-assign-modal-box" style={{ width: 'min(98vw, 960px)', maxHeight: '94vh', display: 'flex', flexDirection: 'column', padding: 0 }}>
+        <header className="rh-assign-modal-header" style={{ display: 'flex', flexDirection: 'column', gap: 8, padding: '12px 16px', borderBottom: '1px solid var(--border)' }}>
+          <div className="rh-emp-docs-nav rh-m-only" style={{ display: 'none' }}>
+            <button type="button" className="rh-back-btn" onClick={onClose} aria-label="Retour">
+              ← Retour
+            </button>
+            <button type="button" className="rh-emp-modal-close" onClick={onClose} aria-label="Fermer"><X size={20} /></button>
           </div>
-          <button type="button" className="rh-emp-modal-close" onClick={onClose}><X size={20} /></button>
+          <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
+            <div>
+              <div style={{ fontSize: '0.68rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase' }}>Affectation RH</div>
+              <h3 style={{ margin: 0, fontWeight: 800, fontFamily: 'var(--font-head)', fontSize: '1rem' }}>
+                {request.ref} — {request.fonction} ({request.quantite} demandé)
+              </h3>
+              <div style={{ fontSize: '0.82rem', color: 'var(--text-3)' }}>{request.project_name}</div>
+            </div>
+            <button type="button" className="rh-emp-modal-close rh-desk-close" onClick={onClose} aria-label="Fermer"><X size={20} /></button>
+          </div>
         </header>
 
-        <div style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 8 }}>
+        <div className="rh-assign-filters" style={{ padding: '14px 20px', borderBottom: '1px solid var(--border)', display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 8 }}>
           <div style={{ position: 'relative', gridColumn: 'span 2' }}>
             <Search size={14} style={{ position: 'absolute', left: 8, top: 9, color: 'var(--text-3)' }} />
             <input value={filters.search} onChange={(e) => setFilters((p) => ({ ...p, search: e.target.value }))} placeholder="Rechercher…" style={{ ...IS, paddingLeft: 28 }} />

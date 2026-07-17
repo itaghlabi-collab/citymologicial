@@ -379,11 +379,22 @@ export default function HeuresSupp() {
       {showModal && (
         <div className="rh-ext-modal-overlay" style={{ zIndex: 1000 }}>
           <div className="card rh-ext-modal-box rh-ext-modal-box--md">
-            <div className="flex-between" style={{ marginBottom: 20 }}>
-              <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.2rem', textTransform: 'uppercase' }}>
-                {editId ? 'Modifier heures sup' : 'Heures supplementaires'}
-              </h2>
-              <button onClick={() => { setShowModal(false); setEditId(null); }} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={20} /></button>
+            <div className="flex-between" style={{ marginBottom: 20, flexWrap: 'wrap', gap: 8 }}>
+              <div>
+                <button
+                  type="button"
+                  className="rh-ext-back-btn"
+                  onClick={() => { setShowModal(false); setEditId(null); }}
+                  aria-label="Retour aux heures supplémentaires"
+                  style={{ marginBottom: 8 }}
+                >
+                  ← Retour
+                </button>
+                <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.2rem', textTransform: 'uppercase', margin: 0 }}>
+                  {editId ? 'Modifier heures sup' : 'Heures supplementaires'}
+                </h2>
+              </div>
+              <button type="button" onClick={() => { setShowModal(false); setEditId(null); }} style={{ background: 'none', border: 'none', cursor: 'pointer', minWidth: 44, minHeight: 44 }} aria-label="Fermer"><X size={20} /></button>
             </div>
             <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               {editId ? (

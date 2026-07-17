@@ -80,8 +80,13 @@ export default function AttendanceDetailModal({
         aria-labelledby="attendance-detail-title"
       >
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 18 }}>
-          <div style={{ fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--text-3)', paddingTop: 4 }}>
-            Détail présence ouvrier
+          <div>
+            <button type="button" className="rh-ext-back-btn" onClick={onClose} aria-label="Retour aux présences" style={{ marginBottom: 8 }}>
+              ← Retour aux présences
+            </button>
+            <div style={{ fontSize: '0.72rem', fontWeight: 800, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--text-3)', paddingTop: 4 }}>
+              Détail présence ouvrier
+            </div>
           </div>
           <div className="rh-ext-detail-header-actions" style={{ flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             <button type="button" className="btn btn-ghost btn-sm" onClick={onPdf} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
@@ -90,7 +95,7 @@ export default function AttendanceDetailModal({
             <button type="button" className="btn btn-ghost btn-sm" onClick={onPrint} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
               <Printer size={14} /> Imprimer
             </button>
-            <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, marginLeft: 4, color: 'var(--text-3)' }} aria-label="Fermer">
+            <button type="button" onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', padding: 4, marginLeft: 4, color: 'var(--text-3)', minWidth: 44, minHeight: 44 }} aria-label="Fermer">
               <X size={20} />
             </button>
           </div>

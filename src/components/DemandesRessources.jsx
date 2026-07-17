@@ -299,7 +299,7 @@ export default function DemandesRessources() {
 
   if (view === 'detail') {
     return (
-      <div className="animate-fade-in crm-module">
+      <div className="animate-fade-in crm-module rh-page">
         {error && (
           <div style={{ background: '#FFEBEE', color: 'var(--red)', borderRadius: 8, padding: '10px 14px', fontSize: '0.84rem', marginBottom: 16 }}>
             {error}
@@ -335,7 +335,7 @@ export default function DemandesRessources() {
   }
 
   return (
-    <div className="animate-fade-in crm-module">
+    <div className="animate-fade-in crm-module rh-page">
       <div className="page-header flex-between" style={{ marginBottom: 20 }}>
         <div>
           <h1 className="page-title">Demandes ressources</h1>
@@ -348,7 +348,7 @@ export default function DemandesRessources() {
         </button>
       </div>
 
-      <div className="stat-grid finance-kpi-grid" style={{ marginBottom: 16 }}>
+      <div className="stat-grid finance-kpi-grid rh-kpi-grid" style={{ marginBottom: 16 }}>
         <KpiCard icon={<ClipboardList size={17} />} label="Total demandes" value={loading ? '—' : stats.total} color="grey" />
         <KpiCard icon={<Clock size={17} />} label="En attente RH" value={loading ? '—' : stats.enAttente} color="orange" />
         <KpiCard icon={<Users size={17} />} label="En cours / partielles" value={loading ? '—' : stats.enCoursPartiel} sub={`${stats.recrutement} en recrutement`} color="blue" />
@@ -367,20 +367,21 @@ export default function DemandesRessources() {
         </div>
       </div>
 
-      <div className="card" style={{ marginBottom: 16, padding: '12px 16px' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-          <TrendingUp size={16} style={{ color: 'var(--text-3)' }} />
-          <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-2)' }}>Taux de couverture global</span>
+      <div className="card rh-coverage-compact">
+        <div className="rh-coverage-compact-row">
+          <TrendingUp size={16} style={{ color: 'var(--text-3)', flexShrink: 0 }} />
+          <span style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--text-2)' }}>Taux de couverture</span>
           <div style={{ flex: '1 1 180px', maxWidth: 280 }}>
             <CoverageProgressBar
               taux={stats.taux}
               color={stats.taux >= 100 ? '#2E7D32' : stats.taux >= 50 ? '#F57C00' : '#C62828'}
             />
           </div>
+          <span style={{ fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-2)' }}>{stats.taux}%</span>
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 16 }}>
+      <div className="rh-filter-chips" role="tablist" aria-label="Filtres demandes ressources">
         {RH_REQUEST_TABS.map((tab) => {
           const count = tabCount(requests, tab.key);
           const active = activeTab === tab.key;
@@ -388,30 +389,26 @@ export default function DemandesRessources() {
             <button
               key={tab.key}
               type="button"
+              role="tab"
+              aria-selected={active}
               onClick={() => setActiveTab(tab.key)}
-              className={`btn btn-sm ${active ? 'btn-primary' : 'btn-ghost'}`}
-              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              className={`rh-filter-chip${active ? ' is-active' : ''}`}
             >
               {tab.label}
-              <span style={{
-                fontSize: '0.68rem', fontWeight: 800, padding: '1px 6px', borderRadius: 10,
-                background: active ? 'rgba(255,255,255,0.25)' : 'var(--surface-2)',
-              }}
-              >
-                {loading ? '—' : count}
-              </span>
+              <span className="rh-filter-chip-count">{loading ? '—' : count}</span>
             </button>
           );
         })}
       </div>
 
       <div className="card finance-toolbar" style={{ marginBottom: 16, padding: '14px 18px' }}>
-        <div style={{ position: 'relative', maxWidth: 320 }}>
-          <Search size={14} style={{ position: 'absolute', left: 10, top: 10, color: 'var(--text-3)' }} />
+        <div className="rh-m-toolbar-search" style={{ maxWidth: 320 }}>
+          <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
           <input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             placeholder="Rechercher référence, projet, fonction…"
+            aria-label="Rechercher une demande"
             style={{ ...INPUT_STYLE, paddingLeft: 32 }}
           />
         </div>
@@ -430,88 +427,162 @@ export default function DemandesRessources() {
           Aucune demande pour ce filtre.
         </div>
       ) : (
-        <div className="card" style={{ padding: 0 }}>
-          <div className="table-wrap" style={{ overflowX: 'auto' }}>
-            <table style={{ minWidth: 1200 }}>
-              <thead>
-                <tr>
-                  <th>Référence</th>
-                  <th>Projet</th>
-                  <th>Fonction demandée</th>
-                  <th>Demandé</th>
-                  <th>Affecté</th>
-                  <th>Manquant</th>
-                  <th>Couverture</th>
-                  <th>Priorité</th>
-                  <th>Date souhaitée</th>
-                  <th>Statut</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((r) => {
-                  const cov = getRequestCoverage(r);
-                  const derived = getDerivedRequestStatut(r);
-                  return (
-                    <tr key={r.id}>
-                      <td data-label="Référence"><strong>{r.ref || '—'}</strong></td>
-                      <td data-label="Projet">
-                        <div style={{ fontWeight: 600 }}>{r.project_name}</div>
-                        {r.project_ref && <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>{r.project_ref}</div>}
-                      </td>
-                      <td data-label="Fonction" style={{ fontWeight: 600 }}>{r.fonction}</td>
-                      <td data-label="Demandé">{cov.demanded}</td>
-                      <td data-label="Affecté">{cov.assigned}</td>
-                      <td data-label="Manquant" style={{ fontWeight: 700, color: cov.manque > 0 ? 'var(--red)' : '#2E7D32' }}>{cov.manque}</td>
-                      <td data-label="Couverture" style={{ minWidth: 130 }}>
-                        <CoverageProgressBar taux={cov.taux} color={cov.color} />
-                        <div style={{ marginTop: 4 }}><CoverageBadge coverage={cov} /></div>
-                      </td>
-                      <td data-label="Priorité">
-                        <span className={`badge ${prioriteBadgeClass(r.priorite)}`}>{r.priorite}</span>
-                      </td>
-                      <td data-label="Date souhaitée">{fmtDate(r.date_souhaitee)}</td>
-                      <td data-label="Statut">
-                        <span className={`badge ${statutBadgeClass(derived.statut)}`}>{derived.label}</span>
-                      </td>
-                      <td data-label="Actions">
-                        <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                          <button type="button" className="btn btn-ghost btn-sm" title="Voir" onClick={() => openDetail(r.id)}>
-                            <Eye size={13} />
-                          </button>
-                          {canAssignRequest(r) && (
-                            <button type="button" className="btn btn-ghost btn-sm" title="Affecter" onClick={() => openDetail(r.id, true)}>
-                              <Users size={13} />
-                            </button>
-                          )}
-                          {canRecruitRequest(r) && (
-                            <button type="button" className="btn btn-ghost btn-sm" title="Créer recrutement" onClick={() => handleRecruitment(r.id)}>
-                              <UserPlus size={13} />
-                            </button>
-                          )}
-                          {canCloseRequest(r) && (
-                            <button type="button" className="btn btn-ghost btn-sm" title="Clôturer" onClick={() => handleClose(r.id)}>
-                              <CheckCircle size={13} />
-                            </button>
-                          )}
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-sm"
-                            title="Supprimer"
-                            style={{ color: 'var(--red)' }}
-                            onClick={() => handleDelete(r.id)}
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+        <>
+          <div className="rh-m-only rh-m-cards">
+            {filtered.map((r) => {
+              const cov = getRequestCoverage(r);
+              const derived = getDerivedRequestStatut(r);
+              return (
+                <article key={r.id} className="rh-m-card">
+                  <div className="rh-m-card-head">
+                    <div className="rh-m-card-name">{r.project_name || r.ref || '—'}</div>
+                    {r.priorite ? (
+                      <span className={`badge ${prioriteBadgeClass(r.priorite)}`}>{r.priorite}</span>
+                    ) : null}
+                  </div>
+                  {r.fonction ? <div className="rh-m-card-poste">{r.fonction}</div> : null}
+                  {r.ref ? <div className="rh-m-card-meta">{r.ref}</div> : null}
+                  <div className="rh-m-card-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+                    <div className="rh-m-card-kv">
+                      <div className="rh-m-card-kv-label">Demandé</div>
+                      <div className="rh-m-card-kv-value">{cov.demanded}</div>
+                    </div>
+                    <div className="rh-m-card-kv">
+                      <div className="rh-m-card-kv-label">Affecté</div>
+                      <div className="rh-m-card-kv-value">{cov.assigned}</div>
+                    </div>
+                    <div className="rh-m-card-kv">
+                      <div className="rh-m-card-kv-label">Manquant</div>
+                      <div className="rh-m-card-kv-value" style={{ color: cov.manque > 0 ? 'var(--red)' : '#2E7D32' }}>{cov.manque}</div>
+                    </div>
+                  </div>
+                  <div style={{ margin: '6px 0 4px' }}>
+                    <CoverageProgressBar taux={cov.taux} color={cov.color} />
+                  </div>
+                  {r.date_souhaitee ? (
+                    <div className="rh-m-card-meta">Souhaitée : {fmtDate(r.date_souhaitee)}</div>
+                  ) : null}
+                  <div style={{ marginTop: 6 }}>
+                    <span className={`badge ${statutBadgeClass(derived.statut)}`}>{derived.label}</span>
+                  </div>
+                  <div className="rh-m-card-actions">
+                    <button type="button" className="btn btn-ghost btn-sm" title="Voir" aria-label="Voir" onClick={() => openDetail(r.id)}>
+                      <Eye size={16} />
+                    </button>
+                    {canAssignRequest(r) && (
+                      <button type="button" className="btn btn-ghost btn-sm" title="Affecter" aria-label="Affecter" onClick={() => openDetail(r.id, true)}>
+                        <Users size={16} />
+                      </button>
+                    )}
+                    {canRecruitRequest(r) && (
+                      <button type="button" className="btn btn-ghost btn-sm" title="Créer recrutement" aria-label="Recruter" onClick={() => handleRecruitment(r.id)}>
+                        <UserPlus size={16} />
+                      </button>
+                    )}
+                    {canCloseRequest(r) && (
+                      <button type="button" className="btn btn-ghost btn-sm" title="Clôturer" aria-label="Modifier" onClick={() => handleClose(r.id)}>
+                        <CheckCircle size={16} />
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm"
+                      title="Supprimer"
+                      aria-label="Supprimer"
+                      style={{ color: 'var(--red)' }}
+                      onClick={() => handleDelete(r.id)}
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  </div>
+                </article>
+              );
+            })}
           </div>
-        </div>
+
+          <div className="card rh-desk-only" style={{ padding: 0 }}>
+            <div className="table-wrap" style={{ overflowX: 'auto' }}>
+              <table style={{ minWidth: 1200 }}>
+                <thead>
+                  <tr>
+                    <th>Référence</th>
+                    <th>Projet</th>
+                    <th>Fonction demandée</th>
+                    <th>Demandé</th>
+                    <th>Affecté</th>
+                    <th>Manquant</th>
+                    <th>Couverture</th>
+                    <th>Priorité</th>
+                    <th>Date souhaitée</th>
+                    <th>Statut</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((r) => {
+                    const cov = getRequestCoverage(r);
+                    const derived = getDerivedRequestStatut(r);
+                    return (
+                      <tr key={r.id}>
+                        <td data-label="Référence"><strong>{r.ref || '—'}</strong></td>
+                        <td data-label="Projet">
+                          <div style={{ fontWeight: 600 }}>{r.project_name}</div>
+                          {r.project_ref && <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>{r.project_ref}</div>}
+                        </td>
+                        <td data-label="Fonction" style={{ fontWeight: 600 }}>{r.fonction}</td>
+                        <td data-label="Demandé">{cov.demanded}</td>
+                        <td data-label="Affecté">{cov.assigned}</td>
+                        <td data-label="Manquant" style={{ fontWeight: 700, color: cov.manque > 0 ? 'var(--red)' : '#2E7D32' }}>{cov.manque}</td>
+                        <td data-label="Couverture" style={{ minWidth: 130 }}>
+                          <CoverageProgressBar taux={cov.taux} color={cov.color} />
+                          <div style={{ marginTop: 4 }}><CoverageBadge coverage={cov} /></div>
+                        </td>
+                        <td data-label="Priorité">
+                          <span className={`badge ${prioriteBadgeClass(r.priorite)}`}>{r.priorite}</span>
+                        </td>
+                        <td data-label="Date souhaitée">{fmtDate(r.date_souhaitee)}</td>
+                        <td data-label="Statut">
+                          <span className={`badge ${statutBadgeClass(derived.statut)}`}>{derived.label}</span>
+                        </td>
+                        <td data-label="Actions">
+                          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                            <button type="button" className="btn btn-ghost btn-sm" title="Voir" onClick={() => openDetail(r.id)}>
+                              <Eye size={13} />
+                            </button>
+                            {canAssignRequest(r) && (
+                              <button type="button" className="btn btn-ghost btn-sm" title="Affecter" onClick={() => openDetail(r.id, true)}>
+                                <Users size={13} />
+                              </button>
+                            )}
+                            {canRecruitRequest(r) && (
+                              <button type="button" className="btn btn-ghost btn-sm" title="Créer recrutement" onClick={() => handleRecruitment(r.id)}>
+                                <UserPlus size={13} />
+                              </button>
+                            )}
+                            {canCloseRequest(r) && (
+                              <button type="button" className="btn btn-ghost btn-sm" title="Clôturer" onClick={() => handleClose(r.id)}>
+                                <CheckCircle size={13} />
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              title="Supprimer"
+                              style={{ color: 'var(--red)' }}
+                              onClick={() => handleDelete(r.id)}
+                            >
+                              <Trash2 size={13} />
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );

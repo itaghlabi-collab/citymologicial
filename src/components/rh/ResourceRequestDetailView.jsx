@@ -90,8 +90,8 @@ export default function ResourceRequestDetailView({
           padding: '16px 20px', borderBottom: '1px solid var(--border)',
         }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={onBack} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+            <button type="button" className="btn btn-ghost btn-sm rh-back-btn" onClick={onBack} aria-label="Retour" style={{ border: '1px solid var(--border)' }}>
               <ChevronLeft size={16} /> Retour
             </button>
             <div>

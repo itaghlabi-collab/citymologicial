@@ -6,14 +6,19 @@ import { syncPayrollAfterAttendanceChange } from '../services/rh/workerPayroll';
 import { computeAttendanceWorkMetrics, STANDARD_SHIFT_START, STANDARD_SHIFT_END, groupAttendanceSummariesByProjectWeek, collectAttendanceWeeks, fmtWeekRange, weekStartMonday, filterProjectOptionsForChef, personNamesMatch, collectAttendancePdfSummaries } from '../services/rh/attendance';
 import AttendanceDetailModal from './rh/AttendanceDetailModal';
 
-function EmptyState({ icon, title, sub }) {
+function EmptyState({ icon, title, sub, action, onAction }) {
   return (
-    <div style={{ textAlign: 'center', padding: '48px 24px', color: 'var(--text-3)' }}>
-      <div style={{ width: 52, height: 52, borderRadius: '50%', background: 'var(--surface)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px' }}>
+    <div className="rh-ext-empty" style={{ textAlign: 'center', padding: '48px 24px', color: 'var(--text-3)' }}>
+      <div className="rh-ext-empty-icon" style={{ width: 52, height: 52, borderRadius: '50%', background: 'var(--surface)', border: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'center', margin: '0 auto 14px' }}>
         {icon}
       </div>
       <div style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.95rem', color: 'var(--text-2)', marginBottom: 5 }}>{title}</div>
       <div style={{ fontSize: '0.83rem' }}>{sub}</div>
+      {action && onAction && (
+        <button type="button" className="btn btn-secondary btn-sm" onClick={onAction} style={{ marginTop: 14, minHeight: 44 }}>
+          {action}
+        </button>
+      )}
     </div>
   );
 }
@@ -817,11 +822,22 @@ export default function Presence() {
       {showModal && (
         <div className="rh-ext-modal-overlay" style={{ zIndex: 1000 }}>
           <div className="card rh-ext-modal-box rh-ext-modal-box--md">
-            <div className="flex-between" style={{ marginBottom: 20 }}>
-              <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.2rem', textTransform: 'uppercase' }}>
-                {editId ? 'Modifier la presence' : 'Ajouter une presence'}
-              </h2>
-              <button onClick={() => { setShowModal(false); setEditId(null); }} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={20} /></button>
+            <div className="flex-between" style={{ marginBottom: 20, flexWrap: 'wrap', gap: 8 }}>
+              <div>
+                <button
+                  type="button"
+                  className="rh-ext-back-btn"
+                  onClick={() => { setShowModal(false); setEditId(null); }}
+                  aria-label="Retour aux présences"
+                  style={{ marginBottom: 8 }}
+                >
+                  ← Retour aux présences
+                </button>
+                <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.2rem', textTransform: 'uppercase', margin: 0 }}>
+                  {editId ? 'Modifier la presence' : 'Ajouter une presence'}
+                </h2>
+              </div>
+              <button type="button" onClick={() => { setShowModal(false); setEditId(null); }} style={{ background: 'none', border: 'none', cursor: 'pointer', minWidth: 44, minHeight: 44 }} aria-label="Fermer"><X size={20} /></button>
             </div>
             <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>

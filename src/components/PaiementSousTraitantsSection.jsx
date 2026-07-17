@@ -231,11 +231,16 @@ export default function PaiementSousTraitantsSection({ onNotify, standalone = fa
       {showModal && (
         <div className="rh-ext-modal-overlay">
           <div className="card rh-ext-modal-box rh-ext-modal-box--lg">
-            <div className="flex-between" style={{ marginBottom: 16 }}>
-              <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.05rem', margin: 0 }}>
-                Paiement sous-traitant
-              </h2>
-              <button type="button" onClick={() => setShowModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
+            <div className="flex-between" style={{ marginBottom: 16, flexWrap: 'wrap', gap: 8 }}>
+              <div>
+                <button type="button" className="rh-ext-back-btn" onClick={() => setShowModal(false)} aria-label="Retour aux sous-traitants" style={{ marginBottom: 8 }}>
+                  ← Retour aux sous-traitants
+                </button>
+                <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.05rem', margin: 0 }}>
+                  Paiement sous-traitant
+                </h2>
+              </div>
+              <button type="button" onClick={() => setShowModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', minWidth: 44, minHeight: 44 }} aria-label="Fermer">
                 <X size={18} />
               </button>
             </div>
@@ -255,12 +260,15 @@ export default function PaiementSousTraitantsSection({ onNotify, standalone = fa
       {editRecord && editForm && (
         <div className="rh-ext-modal-overlay">
           <div className="card rh-ext-modal-box rh-ext-modal-box--md">
-            <div className="flex-between" style={{ marginBottom: 12 }}>
+            <div className="flex-between" style={{ marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
               <div>
+                <button type="button" className="rh-ext-back-btn" onClick={() => { setEditRecord(null); setEditForm(null); }} aria-label="Retour aux sous-traitants" style={{ marginBottom: 8 }}>
+                  ← Retour aux sous-traitants
+                </button>
                 <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.05rem', margin: 0 }}>Modifier paiement sous-traitant</h2>
                 <p style={{ margin: '4px 0 0', fontSize: '0.82rem', color: 'var(--text-3)' }}>{editRecord.subcontractorName} · {editRecord.projectName || '—'}</p>
               </div>
-              <button type="button" onClick={() => { setEditRecord(null); setEditForm(null); }} style={{ background: 'none', border: 'none', cursor: 'pointer' }}>
+              <button type="button" onClick={() => { setEditRecord(null); setEditForm(null); }} style={{ background: 'none', border: 'none', cursor: 'pointer', minWidth: 44, minHeight: 44 }} aria-label="Fermer">
                 <X size={18} />
               </button>
             </div>
