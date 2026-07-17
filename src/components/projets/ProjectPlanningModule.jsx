@@ -3,14 +3,14 @@
  */
 import { useState, useCallback, useEffect } from 'react';
 import {
-  LayoutGrid, GitBranch, Users, Milestone, MessageSquare, Download, FileSpreadsheet, FileText, Loader2, AlertCircle,
+  LayoutGrid, GitBranch, Users, Milestone, MessageSquare, Download, FileSpreadsheet, FileText, Loader2, AlertCircle, MoreHorizontal, X,
 } from 'lucide-react';
 import { PLANNING_VIEWS } from '../../constants/projectPlanning';
 import { listProjectPlanningTasks } from '../../services/projects/projectPlanningTasks';
 import { listProjectMilestones, createProjectMilestone, updateProjectMilestone, deleteProjectMilestone } from '../../services/projects/projectPlanningMilestones';
 import { listProjectPlanningResources, createProjectPlanningResource, updateProjectPlanningResource, deleteProjectPlanningResource } from '../../services/projects/projectPlanningResources';
 import { listProjectPlanningComments, addProjectPlanningComment, deleteProjectPlanningComment } from '../../services/projects/projectPlanningComments';
-import { exportPlanningTasksCsv, exportPlanningResourcesCsv, exportPlanningMilestonesCsv } from '../../services/projects/projectPlanningExport';
+import { exportPlanningTasksCsv, exportPlanningResourcesCsv } from '../../services/projects/projectPlanningExport';
 import { generateProjectPlanningPdfSynthesis, generateProjectPlanningPdfDetailed } from '../../services/projects/projectPlanningPdf';
 import { listPlanningResponsableEmployees } from '../../services/rh/employees';
 import ProjectPlanningGantt from './ProjectPlanningGantt';
@@ -27,6 +27,8 @@ const VIEW_ICONS = {
   collab: MessageSquare,
 };
 
+const MOBILE_PRIMARY_VIEWS = ['gantt', 'wbs', 'ressources'];
+
 export default function ProjectPlanningModule({ projet }) {
   const projectId = projet?.id;
   const [view, setView] = useState('gantt');
@@ -41,6 +43,7 @@ export default function ProjectPlanningModule({ projet }) {
   const [toast, setToast] = useState('');
   const [wbsEdit, setWbsEdit] = useState(null);
   const [addChildParent, setAddChildParent] = useState(null);
+  const [moreOpen, setMoreOpen] = useState(false);
 
   const load = useCallback(async () => {
     if (!projectId) return;
@@ -84,6 +87,11 @@ export default function ProjectPlanningModule({ projet }) {
     }
   }
 
+  function selectView(id) {
+    setView(id);
+    setMoreOpen(false);
+  }
+
   if (!projectId) {
     return (
       <div style={{ padding: 24, background: 'var(--surface-2)', borderRadius: 8, color: 'var(--text-3)', fontSize: '0.84rem', textAlign: 'center' }}>
@@ -92,16 +100,18 @@ export default function ProjectPlanningModule({ projet }) {
     );
   }
 
+  const primaryMobileViews = PLANNING_VIEWS.filter((v) => MOBILE_PRIMARY_VIEWS.includes(v.id));
+
   return (
-    <div>
+    <div className="pj-planning">
       {toast && (
         <div style={{ position: 'fixed', bottom: 28, right: 28, background: 'var(--text)', color: '#fff', borderRadius: 8, padding: '12px 20px', fontSize: '0.875rem', fontWeight: 600, zIndex: 9999 }}>
           {toast}
         </div>
       )}
 
-      {/* Navigation vues */}
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 14, alignItems: 'center', justifyContent: 'space-between' }}>
+      {/* Navigation vues — desktop */}
+      <div className="pj-planning-toolbar-desktop" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 14, alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
           {PLANNING_VIEWS.map((v) => {
             const Icon = VIEW_ICONS[v.id] || LayoutGrid;
@@ -140,6 +150,75 @@ export default function ProjectPlanningModule({ projet }) {
           </button>
         </div>
       </div>
+
+      {/* Navigation vues — mobile */}
+      <div className="pj-planning-toolbar-mobile" aria-label="Vues planning">
+        {primaryMobileViews.map((v) => {
+          const Icon = VIEW_ICONS[v.id] || LayoutGrid;
+          const active = view === v.id;
+          return (
+            <button
+              key={v.id}
+              type="button"
+              className={`pj-planning-view-btn${active ? ' is-active' : ''}`}
+              onClick={() => selectView(v.id)}
+            >
+              <Icon size={14} />
+              <span>{v.label}</span>
+            </button>
+          );
+        })}
+        <button
+          type="button"
+          className={`pj-planning-view-btn${moreOpen ? ' is-active' : ''}`}
+          onClick={() => setMoreOpen(true)}
+          aria-haspopup="dialog"
+          aria-expanded={moreOpen}
+        >
+          <MoreHorizontal size={14} />
+          <span>Plus</span>
+        </button>
+      </div>
+
+      {moreOpen && (
+        <div className="pj-sheet-overlay" onClick={() => setMoreOpen(false)} role="presentation">
+          <div
+            className="pj-sheet"
+            role="dialog"
+            aria-label="Plus d'actions planning"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="pj-sheet-handle" />
+            <div className="pj-sheet-head">
+              <h3>Plus</h3>
+              <button type="button" className="pj-sheet-close" onClick={() => setMoreOpen(false)} aria-label="Fermer">
+                <X size={18} />
+              </button>
+            </div>
+            <div className="pj-sheet-body">
+              <button type="button" className="pj-sheet-item" onClick={() => selectView('timeline')}>
+                <Milestone size={16} /> Jalons
+              </button>
+              <button type="button" className="pj-sheet-item" onClick={() => selectView('collab')}>
+                <MessageSquare size={16} /> Collaboration
+              </button>
+              <div className="pj-sheet-divider" />
+              <button type="button" className="pj-sheet-item" onClick={() => { setMoreOpen(false); exportPdf('synthesis'); }}>
+                <FileText size={16} /> PDF synthèse
+              </button>
+              <button type="button" className="pj-sheet-item" onClick={() => { setMoreOpen(false); exportPdf('detailed'); }}>
+                <FileText size={16} /> PDF détaillé
+              </button>
+              <button type="button" className="pj-sheet-item" onClick={() => { setMoreOpen(false); exportPlanningTasksCsv(projet, tasks); setToast('Excel (CSV) exporté'); }}>
+                <FileSpreadsheet size={16} /> Excel
+              </button>
+              <button type="button" className="pj-sheet-item" onClick={() => { setMoreOpen(false); exportPlanningResourcesCsv(projet, resources); setToast('Ressources exportées'); }}>
+                <Download size={16} /> Ressources
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {error && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: 'var(--red-light)', color: 'var(--red)', borderRadius: 8, marginBottom: 12, fontSize: '0.84rem' }}>

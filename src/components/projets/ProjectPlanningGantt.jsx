@@ -4,7 +4,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   Plus, Edit2, Trash2, Download, Filter, X, Loader2, AlertCircle,
-  ChevronLeft, ChevronRight, ChevronDown, ChevronUp,
+  ChevronLeft, ChevronRight, ChevronDown, ChevronUp, RefreshCw, Upload, FileSpreadsheet,
 } from 'lucide-react';
 import {
   listProjectPlanningTasks,
@@ -26,6 +26,7 @@ import {
   withDefaultPlanningDates,
 } from '../../services/projects/projectPlanningTasks';
 import { generateProjectPlanningPdfSynthesis, generateProjectPlanningPdfDetailed } from '../../services/projects/projectPlanningPdf';
+import { exportPlanningTasksCsv } from '../../services/projects/projectPlanningExport';
 import {
   PLANNING_STATUTS,
   mergePlanningLots,
@@ -777,6 +778,9 @@ export default function ProjectPlanningGantt({
   const [editTask, setEditTask] = useState(null);
   const [collapsedLots, setCollapsedLots] = useState(new Set());
   const [filters, setFilters] = useState({ lot: '', statut: '', responsable: '', periodStart: '', periodEnd: '' });
+  const [showFilters, setShowFilters] = useState(false);
+  const [draftFilters, setDraftFilters] = useState({ lot: '', statut: '', responsable: '', periodStart: '', periodEnd: '' });
+  const [fabOpen, setFabOpen] = useState(false);
 
   const load = useCallback(async () => {
     if (!projectId || embedded) return;
@@ -968,10 +972,11 @@ export default function ProjectPlanningGantt({
   }
 
   return (
-    <div>
+    <div className="pj-gantt">
       <Toast msg={toast} onClose={() => setToast('')} />
 
-      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 14, alignItems: 'center', justifyContent: 'space-between' }}>
+      {/* Filtres — desktop (inchangé) */}
+      <div className="pj-gantt-filters-desktop" style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 14, alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
           <Filter size={14} style={{ color: 'var(--text-3)' }} />
           <select value={filters.lot} onChange={(e) => setFilters((f) => ({ ...f, lot: e.target.value }))} style={{ ...IS, width: 'auto', minWidth: 130, cursor: 'pointer' }}>
@@ -1010,6 +1015,83 @@ export default function ProjectPlanningGantt({
         </div>
       </div>
 
+      {/* Filtres — mobile (repliés) */}
+      <div className="pj-gantt-filters-mobile">
+        <button
+          type="button"
+          className="pj-filters-toggle"
+          onClick={() => {
+            setDraftFilters(filters);
+            setShowFilters((v) => !v);
+          }}
+          aria-expanded={showFilters}
+        >
+          <Filter size={15} />
+          <span>Filtres</span>
+          {(filters.lot || filters.statut || filters.responsable || filters.periodStart || filters.periodEnd) && (
+            <span className="pj-filters-dot" aria-hidden="true" />
+          )}
+          {showFilters ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+        </button>
+        {showFilters && (
+          <div className="pj-filters-panel">
+            <label className="pj-filters-field">
+              <span>Lot</span>
+              <select value={draftFilters.lot} onChange={(e) => setDraftFilters((f) => ({ ...f, lot: e.target.value }))} style={IS}>
+                <option value="">Tous les lots</option>
+                {lotOptions.map((l) => <option key={l} value={l}>{l}</option>)}
+              </select>
+            </label>
+            <label className="pj-filters-field">
+              <span>Statut</span>
+              <select value={draftFilters.statut} onChange={(e) => setDraftFilters((f) => ({ ...f, statut: e.target.value }))} style={IS}>
+                <option value="">Tous statuts</option>
+                {PLANNING_STATUTS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+              </select>
+            </label>
+            <label className="pj-filters-field">
+              <span>Responsable</span>
+              <select value={draftFilters.responsable} onChange={(e) => setDraftFilters((f) => ({ ...f, responsable: e.target.value }))} style={IS}>
+                <option value="">Tous responsables</option>
+                {responsables.map((r) => <option key={r} value={r}>{r}</option>)}
+              </select>
+            </label>
+            <label className="pj-filters-field">
+              <span>Date début</span>
+              <input type="date" value={draftFilters.periodStart} onChange={(e) => setDraftFilters((f) => ({ ...f, periodStart: e.target.value }))} style={IS} />
+            </label>
+            <label className="pj-filters-field">
+              <span>Date fin</span>
+              <input type="date" value={draftFilters.periodEnd} onChange={(e) => setDraftFilters((f) => ({ ...f, periodEnd: e.target.value }))} style={IS} />
+            </label>
+            <div className="pj-filters-actions">
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                onClick={() => {
+                  const empty = { lot: '', statut: '', responsable: '', periodStart: '', periodEnd: '' };
+                  setDraftFilters(empty);
+                  setFilters(empty);
+                  setShowFilters(false);
+                }}
+              >
+                Réinitialiser
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                onClick={() => {
+                  setFilters(draftFilters);
+                  setShowFilters(false);
+                }}
+              >
+                Appliquer
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
       {error && (
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 14px', background: 'var(--red-light)', color: 'var(--red)', borderRadius: 8, marginBottom: 12, fontSize: '0.84rem' }}>
           <AlertCircle size={16} /> {error}
@@ -1033,21 +1115,141 @@ export default function ProjectPlanningGantt({
           </button>
         </div>
       ) : (
-        <GanttChart
-          displayRows={displayRows}
-          days={days}
-          monthGroups={monthGroups}
-          minDate={minDate}
-          timelineWidth={timelineWidth}
-          collapsedLots={collapsedLots}
-          onToggleLot={toggleLot}
-          onEdit={(row) => { setEditTask(row); setModalOpen(true); }}
-          onDelete={handleDelete}
-          onShift={handleShift}
-          onBarChange={handleBarChange}
-          taskById={taskById}
-        />
+        <>
+          <div className="pj-gantt-desktop">
+            <GanttChart
+              displayRows={displayRows}
+              days={days}
+              monthGroups={monthGroups}
+              minDate={minDate}
+              timelineWidth={timelineWidth}
+              collapsedLots={collapsedLots}
+              onToggleLot={toggleLot}
+              onEdit={(row) => { setEditTask(row); setModalOpen(true); }}
+              onDelete={handleDelete}
+              onShift={handleShift}
+              onBarChange={handleBarChange}
+              taskById={taskById}
+            />
+          </div>
+
+          <div className="pj-gantt-mobile" aria-label="Tâches planning">
+            {displayRows.map((row) => {
+              const isSummary = row.type === 'summary';
+              const pct = Math.min(100, Math.max(0, Number(row.avancement) || 0));
+              if (isSummary) {
+                const collapsed = collapsedLots.has(row.lot);
+                return (
+                  <article key={row.id} className="pj-task-card pj-task-card--lot">
+                    <div className="pj-task-card-kicker">Lot · {row.wbs}</div>
+                    <div className="pj-task-card-name">{row.nom}</div>
+                    <div className="pj-task-card-meta">
+                      <div><span>Durée</span><strong>{row.duree_jours ? `${row.duree_jours} j` : '—'}</strong></div>
+                      <div><span>Dates</span><strong>{fmtDateTable(row.date_debut)} → {fmtDateTable(row.date_fin)}</strong></div>
+                    </div>
+                    <div className="pj-task-progress">
+                      <div className="pj-task-progress-label"><span>Progression</span><strong>{pct}%</strong></div>
+                      <div className="pj-task-progress-bar"><span style={{ width: `${pct}%` }} /></div>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm pj-task-subtasks-btn"
+                      onClick={() => toggleLot(row.lot)}
+                    >
+                      {collapsed ? `Voir les sous-tâches (${row.childCount})` : 'Masquer les sous-tâches'}
+                    </button>
+                  </article>
+                );
+              }
+              const st = planningStatutMeta(row.statut);
+              return (
+                <article key={row.id} className="pj-task-card">
+                  <div className="pj-task-card-head">
+                    <div className="pj-task-card-kicker">{row.wbs_code || row.wbs}</div>
+                    <span className="badge" style={{ background: st.bg, color: st.color }}>{st.label}</span>
+                  </div>
+                  <div className="pj-task-card-name">{row.nom}</div>
+                  <div className="pj-task-card-meta">
+                    <div><span>Durée</span><strong>{row.duree_jours ? `${row.duree_jours} j` : '—'}</strong></div>
+                    <div><span>Dates</span><strong>{fmtDateTable(row.date_debut)} → {fmtDateTable(row.date_fin)}</strong></div>
+                  </div>
+                  <div className="pj-task-progress">
+                    <div className="pj-task-progress-label"><span>Progression</span><strong>{pct}%</strong></div>
+                    <div className="pj-task-progress-bar"><span style={{ width: `${pct}%` }} /></div>
+                  </div>
+                  <button
+                    type="button"
+                    className="btn btn-ghost btn-sm pj-task-edit-btn"
+                    onClick={() => { setEditTask(row); setModalOpen(true); }}
+                  >
+                    <Edit2 size={13} /> Modifier
+                  </button>
+                </article>
+              );
+            })}
+          </div>
+        </>
       )}
+
+      {/* FAB mobile */}
+      <div className="pj-fab-wrap">
+        {fabOpen && (
+          <>
+            <div className="pj-fab-backdrop" onClick={() => setFabOpen(false)} aria-hidden="true" />
+            <div className="pj-fab-menu" role="menu">
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => { setFabOpen(false); setEditTask(null); setModalOpen(true); }}
+              >
+                <Plus size={15} /> Nouvelle tâche
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => { setFabOpen(false); setEditTask(null); setModalOpen(true); }}
+              >
+                <Upload size={15} /> Importer
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setFabOpen(false);
+                  try {
+                    exportPlanningTasksCsv(projet, tasks);
+                    setToast('Excel (CSV) exporté');
+                  } catch (err) {
+                    setError(err?.message || 'Erreur export');
+                  }
+                }}
+              >
+                <FileSpreadsheet size={15} /> Exporter
+              </button>
+              <button
+                type="button"
+                role="menuitem"
+                onClick={() => {
+                  setFabOpen(false);
+                  if (onReload) onReload();
+                  else load();
+                }}
+              >
+                <RefreshCw size={15} /> Actualiser
+              </button>
+            </div>
+          </>
+        )}
+        <button
+          type="button"
+          className={`pj-fab${fabOpen ? ' is-open' : ''}`}
+          aria-label={fabOpen ? 'Fermer le menu' : 'Actions planning'}
+          aria-expanded={fabOpen}
+          onClick={() => setFabOpen((v) => !v)}
+        >
+          {fabOpen ? <X size={22} /> : <Plus size={22} />}
+        </button>
+      </div>
 
       <TaskModal
         open={modalOpen}

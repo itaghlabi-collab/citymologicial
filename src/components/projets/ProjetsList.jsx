@@ -9,9 +9,10 @@ import {
   X, ChevronLeft, RefreshCw, AlertCircle, CheckCircle, FileText,
   User, Calendar, MapPin, TrendingUp, BarChart3, Clock,
   AlertTriangle, Settings, Archive, ChevronDown, DollarSign,
-  HardHat, Users, ClipboardList, Layers, Gauge, Wrench, Loader2
+  HardHat, Users, ClipboardList, Layers, Gauge, Wrench, Loader2,
 } from 'lucide-react';
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
+import CrmOverflowMenu from '../crm/CrmOverflowMenu';
 import { useProjects } from '../../hooks/useProjects';
 import { listClients, clientDisplayName } from '../../services/crm/clients';
 import { TYPE_PROJET_VALUES, TYPE_PROJET_LABEL } from '../../constants/commercial';
@@ -948,29 +949,27 @@ function DetailProjet({ projet, onBack, onEdit, onCreateSAV, initialTab = 'gener
     : 0;
 
   return (
-    <div className="animate-fade-in">
+    <div className="animate-fade-in pj-detail">
       {/* Header retour */}
-      <div style={{ marginBottom: 20 }}>
-        <button className="btn btn-ghost btn-sm" style={{ marginBottom: 12, display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={onBack}>
+      <div className="pj-detail-header">
+        <button className="btn btn-ghost btn-sm pj-detail-back" type="button" onClick={onBack}>
           <ChevronLeft size={15} /> Retour aux projets
         </button>
-        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', flexWrap: 'wrap', gap: 12 }}>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4 }}>
-              <span style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '0.75rem', letterSpacing: '0.12em', color: 'var(--text-3)' }}>
-                {projet.ref}
-              </span>
+        <div className="pj-detail-head-row">
+          <div className="pj-detail-identity">
+            <div className="pj-detail-meta">
+              <span className="pj-detail-ref">{projet.ref}</span>
               <Badge type={projet.statut} />
               <Badge type={projet.priorite} />
             </div>
-            <h1 className="page-title" style={{ marginBottom: 4 }}>{projet.nom}</h1>
-            <p className="page-subtitle">{projet.client}{projet.ville ? ` — ${projet.ville}` : ''}</p>
+            <h1 className="page-title pj-detail-title">{projet.nom}</h1>
+            <p className="page-subtitle pj-detail-sub">{projet.client}{projet.ville ? ` — ${projet.ville}` : ''}</p>
           </div>
-          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-            <button className="btn btn-secondary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={onEdit}>
+          <div className="pj-detail-actions-desktop">
+            <button className="btn btn-secondary btn-sm" type="button" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={onEdit}>
               <Edit2 size={13} /> Modifier
             </button>
-            <button className="btn btn-ghost btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => generateProjectRecapPdf(projet).catch((e) => alert(e.message || 'Erreur PDF'))}>
+            <button className="btn btn-ghost btn-sm" type="button" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => generateProjectRecapPdf(projet).catch((e) => alert(e.message || 'Erreur PDF'))}>
               <Download size={13} /> PDF récap
             </button>
             {onCreateSAV && (
@@ -979,11 +978,31 @@ function DetailProjet({ projet, onBack, onEdit, onCreateSAV, initialTab = 'gener
               </button>
             )}
           </div>
+          <div className={`pj-detail-actions-mobile${onCreateSAV ? '' : ' pj-detail-actions-mobile--2'}`} aria-label="Actions projet">
+            <button type="button" className="pj-detail-action-btn" onClick={onEdit}>
+              <Edit2 size={15} />
+              <span>Modifier</span>
+            </button>
+            <button
+              type="button"
+              className="pj-detail-action-btn"
+              onClick={() => generateProjectRecapPdf(projet).catch((e) => alert(e.message || 'Erreur PDF'))}
+            >
+              <Download size={15} />
+              <span>PDF</span>
+            </button>
+            {onCreateSAV && (
+              <button type="button" className="pj-detail-action-btn pj-detail-action-btn--primary" onClick={() => onCreateSAV(projet)}>
+                <Wrench size={15} />
+                <span>SAV</span>
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
       {/* KPI row */}
-      <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', marginBottom: 20 }}>
+      <div className="stat-grid pj-detail-kpis" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', marginBottom: 20 }}>
         <KpiCard icon={<Gauge size={17} />}      label="Avancement"        value={projet.avancement + '%'}                                  color="blue"  />
         <KpiCard icon={<DollarSign size={17} />} label="Budget approuvé"   value={(projet.budget_approuve || 0).toLocaleString('fr-MA') + ' MAD'} color="green" />
         <KpiCard icon={<TrendingUp size={17} />} label="Budget consommé"   value={(projet.budget_consomme || 0).toLocaleString('fr-MA') + ' MAD'} color={budgetPct > 80 ? 'red' : 'orange'} />
@@ -991,15 +1010,16 @@ function DetailProjet({ projet, onBack, onEdit, onCreateSAV, initialTab = 'gener
       </div>
 
       {/* Tabs */}
-      <div style={{ display: 'flex', gap: 0, marginBottom: 16, borderBottom: '2px solid var(--border)', overflowX: 'auto' }}>
+      <div className="pj-detail-tabs">
         {tabs.map(t => (
-          <button key={t.k} onClick={() => setActiveTab(t.k)} style={{
-            padding: '9px 18px', border: 'none', cursor: 'pointer', whiteSpace: 'nowrap',
-            fontFamily: 'var(--font-body)', fontWeight: 600, fontSize: '0.875rem', background: 'none',
-            color: activeTab === t.k ? 'var(--red)' : 'var(--text-2)',
-            borderBottom: activeTab === t.k ? '2px solid var(--red)' : '2px solid transparent',
-            marginBottom: -2, transition: 'color 0.15s'
-          }}>{t.label}</button>
+          <button
+            key={t.k}
+            type="button"
+            className={`pj-detail-tab${activeTab === t.k ? ' is-active' : ''}`}
+            onClick={() => setActiveTab(t.k)}
+          >
+            {t.label}
+          </button>
         ))}
       </div>
 
@@ -1416,11 +1436,20 @@ export default function ProjetsList({ onCreateSAV }) {
                     <div><span>Fin prévue</span><span>{p.date_fin_prevue || '—'}</span></div>
                   </div>
                   <div className="projet-mobile-actions">
-                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => openDetail(p)}><Eye size={13} /> Voir</button>
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => openDetail(p, 'equipe')} style={{ color: '#1565C0' }}><Users size={13} /> Équipe</button>
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => openEdit(p)}><Edit2 size={13} /> Modifier</button>
-                    <button type="button" className="btn btn-ghost btn-sm" disabled={pdfLoadingId === p.id} onClick={() => handlePdf(p)}><Download size={13} /> PDF</button>
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleDelete(p.id)} style={{ color: 'var(--red)' }}><Trash2 size={13} /></button>
+                    <button type="button" className="btn btn-secondary btn-sm projet-mobile-voir" onClick={() => openDetail(p)}>
+                      <Eye size={13} /> Voir
+                    </button>
+                    <CrmOverflowMenu
+                      title="Actions projet"
+                      ariaLabel="Plus d'actions projet"
+                      items={[
+                        { id: 'equipe', icon: Users, label: 'Équipe', onClick: () => openDetail(p, 'equipe') },
+                        { id: 'edit', icon: Edit2, label: 'Modifier', onClick: () => openEdit(p) },
+                        { id: 'pdf', icon: Download, label: 'PDF', onClick: () => handlePdf(p), disabled: pdfLoadingId === p.id },
+                        { divider: true },
+                        { id: 'delete', icon: Trash2, label: 'Supprimer', onClick: () => handleDelete(p.id), danger: true },
+                      ]}
+                    />
                   </div>
                 </div>
               ))}
