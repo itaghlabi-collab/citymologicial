@@ -104,14 +104,32 @@ export function EmptyState({ icon, title, sub, action, onAction }) {
 export function Modal({ open, onClose, title, children, width }) {
   if (!open) return null;
   return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 2000, background: 'rgba(0,0,0,0.45)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}
-      onClick={e => e.target === e.currentTarget && onClose()}>
-      <div style={{ background: '#fff', borderRadius: 12, width: '100%', maxWidth: width || 640, maxHeight: '92vh', overflowY: 'auto', boxShadow: 'var(--shadow-lg)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 24px', borderBottom: '1px solid var(--border)', position: 'sticky', top: 0, background: '#fff', zIndex: 1 }}>
-          <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.05rem', letterSpacing: '0.04em' }}>{title}</div>
-          <button className="btn btn-ghost btn-sm" style={{ padding: '4px 8px' }} onClick={onClose}><X size={16} /></button>
+    <div
+      className="achats-modal-overlay"
+      role="presentation"
+      onClick={(e) => e.target === e.currentTarget && onClose()}
+    >
+      <div
+        className="achats-modal-box"
+        role="dialog"
+        aria-modal="true"
+        aria-label={title || 'Dialogue'}
+        style={{ maxWidth: width || 640 }}
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="achats-modal-header">
+          <h2 className="achats-modal-title">{title}</h2>
+          <button
+            type="button"
+            className="achats-modal-close"
+            onClick={onClose}
+            aria-label="Fermer"
+            title="Fermer"
+          >
+            <X size={20} strokeWidth={2.5} aria-hidden="true" />
+          </button>
         </div>
-        <div style={{ padding: '24px' }}>{children}</div>
+        <div className="achats-modal-body">{children}</div>
       </div>
     </div>
   );
