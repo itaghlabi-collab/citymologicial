@@ -8295,6 +8295,177 @@ tbody tr:last-child td { border-bottom: none; }
   display: flex;
 }
 
+/* WBS cartes — styles liés au rendu mobile JS (.pj-wbs--mobile) */
+.pj-wbs--mobile {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 100%;
+  width: 100%;
+  box-sizing: border-box;
+  overflow-x: hidden;
+}
+
+.pj-wbs--mobile .pj-wbs-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px;
+  box-shadow: var(--shadow);
+  box-sizing: border-box;
+  max-width: 100%;
+  overflow: hidden;
+}
+
+.pj-wbs--mobile .pj-wbs-card--parent {
+  background: var(--surface-2);
+}
+
+.pj-wbs--mobile .pj-wbs-card-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.pj-wbs--mobile .pj-wbs-card-id {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.pj-wbs--mobile .pj-wbs-toggle {
+  width: 36px;
+  height: 36px;
+  min-width: 36px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: var(--text-2);
+  cursor: pointer;
+  padding: 0;
+}
+
+.pj-wbs--mobile .pj-wbs-toggle-spacer {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+}
+
+.pj-wbs--mobile .pj-wbs-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+
+.pj-wbs--mobile .pj-wbs-code {
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: var(--text-3);
+  letter-spacing: 0.03em;
+}
+
+.pj-wbs--mobile .pj-wbs-card-name {
+  font-weight: 600;
+  font-size: 0.92rem;
+  line-height: 1.35;
+  margin-bottom: 6px;
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+
+.pj-wbs--mobile .pj-wbs-card-name.is-parent {
+  font-weight: 800;
+  font-family: var(--font-head);
+}
+
+.pj-wbs--mobile .pj-wbs-lot {
+  font-size: 0.75rem;
+  color: var(--text-2);
+  margin-bottom: 8px;
+}
+
+.pj-wbs--mobile .pj-wbs-card-meta {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.pj-wbs--mobile .pj-wbs-card-meta span {
+  display: block;
+  font-size: 0.62rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-3);
+  margin-bottom: 2px;
+}
+
+.pj-wbs--mobile .pj-wbs-card-meta strong {
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text);
+  word-break: normal;
+  overflow-wrap: anywhere;
+}
+
+.pj-wbs--mobile .pj-wbs-progress {
+  margin-bottom: 10px;
+}
+
+.pj-wbs--mobile .pj-wbs-progress-label {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.72rem;
+  margin-bottom: 4px;
+  color: var(--text-2);
+}
+
+.pj-wbs--mobile .pj-wbs-progress-bar {
+  height: 8px;
+  border-radius: 999px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.pj-wbs--mobile .pj-wbs-progress-bar > span {
+  display: block;
+  height: 100%;
+  background: var(--red);
+  border-radius: 999px;
+}
+
+.pj-wbs--mobile .pj-wbs-card-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
+.pj-wbs--mobile .pj-wbs-card-actions .btn {
+  min-height: 44px;
+  flex: 1 1 auto;
+  justify-content: center;
+  font-size: 0.76rem;
+}
+
+.pj-wbs--mobile .pj-wbs-add-child {
+  color: var(--red) !important;
+}
+
+@media (max-width: 480px) {
+  .pj-wbs--mobile .pj-wbs-card-meta {
+    grid-template-columns: 1fr;
+  }
+}
+
 @media (max-width: 900px) {
   .logistique-module .stat-grid,
   .projets-module .stat-grid {
@@ -8830,7 +9001,17 @@ tbody tr:last-child td { border-bottom: none; }
     background: var(--surface-2);
   }
 
-  /* ── WBS mobile cards ── */
+  /* ── WBS mobile cards (rendu JS matchMedia ; styles toujours actifs sous .pj-wbs--mobile) ── */
+  .pj-wbs--mobile {
+    display: flex !important;
+    flex-direction: column;
+    gap: 10px;
+    max-width: 100%;
+    overflow-x: hidden;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
   .pj-wbs-desktop {
     display: none !important;
   }
@@ -8843,6 +9024,7 @@ tbody tr:last-child td { border-bottom: none; }
     overflow-x: hidden;
   }
 
+  .pj-wbs--mobile .pj-wbs-card,
   .pj-wbs-card {
     background: var(--surface);
     border: 1px solid var(--border);
