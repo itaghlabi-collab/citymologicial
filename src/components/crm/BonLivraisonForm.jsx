@@ -324,7 +324,7 @@ export default function BonLivraisonForm({ bl, onBack, onSaved, saving: savingPr
 
   return (
     <div className="animate-fade-in">
-      <button onClick={onBack} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-2)', fontSize: '0.875rem', fontWeight: 600, marginBottom: 16, padding: 0 }}>
+      <button type="button" className="crm-back-btn" onClick={onBack} aria-label="Retour aux bons de livraison">
         <ChevronLeft size={16} /> Retour aux bons de livraison
       </button>
 

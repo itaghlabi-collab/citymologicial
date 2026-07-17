@@ -8,6 +8,7 @@ import {
 import { useDeliveryNotes } from '../../hooks/useDeliveryNotes';
 import { generateDeliveryNotePdf } from '../../services/crm/deliveryNotePdf';
 import BonLivraisonForm from './BonLivraisonForm';
+import CrmOverflowMenu from './CrmOverflowMenu';
 
 /* ── Helpers ── */
 function fmtDate(d) {
@@ -130,7 +131,7 @@ function BonLivraisonDetail({ bl, onBack, onEdit, onPdf, pdfLoading }) {
   const lignes = bl.lignes || [];
   return (
     <div className="animate-fade-in crm-module crm-module--bl">
-      <button type="button" onClick={onBack} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-2)', fontSize: '0.875rem', fontWeight: 600, marginBottom: 16, padding: 0 }}>
+      <button type="button" className="crm-back-btn" onClick={onBack} aria-label="Retour aux bons de livraison">
         <ChevronLeft size={16} /> Retour aux bons de livraison
       </button>
       <div className="page-header" style={{ marginBottom: 20 }}>
@@ -147,7 +148,7 @@ function BonLivraisonDetail({ bl, onBack, onEdit, onPdf, pdfLoading }) {
           </button>
         </div>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+      <div className="crm-detail-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
         <div className="card" style={{ padding: '18px 20px' }}>
           <div style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 12 }}>Informations</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8, fontSize: '0.85rem' }}>
@@ -675,36 +676,35 @@ export default function BonLivraison() {
                     <span className="crm-doc-ref">{b.numero || '—'}</span>
                     <StatutBadge statut={b.statut} />
                   </div>
-                  <div className="crm-doc-title">{clientNom}{b.projet ? ` — ${b.projet}` : ''}</div>
+                  <div className="crm-doc-title">{clientNom}</div>
                   <div className="crm-doc-meta">
+                    {b.projet ? <span className="crm-doc-meta-line">{b.projet}</span> : null}
                     <span>Livraison {fmtDate(b.date_livraison)}</span>
-                    {b.commercial && <span>· {b.commercial}</span>}
-                    <span>· Avancement {pct}%</span>
-                    {overdue && <span style={{ color: 'var(--red)', fontWeight: 700 }}>· Retard</span>}
-                    {dueSoon && <span style={{ color: '#E65100', fontWeight: 700 }}>· Bientot</span>}
+                    {overdue && <span style={{ color: 'var(--red)', fontWeight: 700 }}> · Retard</span>}
+                    {dueSoon && <span style={{ color: '#E65100', fontWeight: 700 }}> · Bientôt</span>}
                   </div>
                   <div className="crm-doc-footer">
                     <div>
-                      <span className="crm-doc-amount" style={{ fontSize: '0.88rem', color: 'var(--text)' }}>
-                        {b.est_facture || b.statut === 'facture' ? 'Facturé' : 'Non facturé'}
+                      <span className="crm-doc-amount" style={{ fontSize: '0.95rem' }}>
+                        {b.est_facture || b.statut === 'facture' ? 'Facturé' : `${pct}% livré`}
                       </span>
-                      <span className="crm-doc-amount-sub">{b.adresse_livraison || '—'}</span>
                     </div>
                     <div className="crm-doc-actions">
-                      <button type="button" title="Voir" onClick={() => openDetail(b)}
+                      <button type="button" title="Voir" aria-label="Voir" onClick={() => openDetail(b)}
                         className="btn btn-ghost btn-sm crm-icon-btn"><Eye size={14} /></button>
-                      <button type="button" title="PDF" onClick={() => handlePdf(b)} disabled={pdfLoadingId === b.id}
+                      <button type="button" title="PDF" aria-label="Télécharger PDF" onClick={() => handlePdf(b)} disabled={pdfLoadingId === b.id}
                         className="btn btn-ghost btn-sm crm-icon-btn"><Download size={14} /></button>
-                      <button type="button" title="Modifier" onClick={() => openEdit(b)}
-                        className="btn btn-ghost btn-sm crm-icon-btn"><Edit2 size={14} /></button>
-                      {b.statut !== 'livre' && b.statut !== 'facture' && b.statut !== 'annule' && (
-                        <button type="button" title="Marquer livre" onClick={() => handleMarquerLivre(b)}
-                          className="btn btn-ghost btn-sm crm-icon-btn" style={{ color: '#388E3C' }}><CheckCircle size={14} /></button>
-                      )}
-                      <button type="button" title="Dupliquer" onClick={() => handleDuplicate(b)}
-                        className="btn btn-ghost btn-sm crm-icon-btn"><Copy size={14} /></button>
-                      <button type="button" title="Supprimer" onClick={() => handleDelete(b.id)}
-                        className="btn btn-ghost btn-sm crm-icon-btn"><Trash2 size={14} style={{ color: 'var(--red)' }} /></button>
+                      <CrmOverflowMenu
+                        items={[
+                          { icon: Edit2, label: 'Modifier', onClick: () => openEdit(b) },
+                          ...(b.statut !== 'livre' && b.statut !== 'facture' && b.statut !== 'annule'
+                            ? [{ icon: CheckCircle, label: 'Marquer livré', onClick: () => handleMarquerLivre(b) }]
+                            : []),
+                          { icon: Copy, label: 'Dupliquer', onClick: () => handleDuplicate(b) },
+                          { divider: true },
+                          { icon: Trash2, label: 'Supprimer', danger: true, onClick: () => handleDelete(b.id) },
+                        ]}
+                      />
                     </div>
                   </div>
                 </div>

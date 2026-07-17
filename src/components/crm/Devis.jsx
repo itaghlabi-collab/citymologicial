@@ -4,6 +4,7 @@ import {
   FileText, Send, CheckCircle, TrendingUp, Clock,
   XCircle, AlertCircle, ChevronLeft, ChevronRight,
   RefreshCw, ArrowUpDown, FolderKanban, Download, Eye, Receipt,
+  Copy, Trash2,
 } from 'lucide-react';
 import { useCrmDevis } from '../../hooks/useCrmDevis';
 import { listCategories } from '../../services/crm/categories';
@@ -17,6 +18,7 @@ import { enrichLignesDescriptions } from '../../utils/crm/devisLineDescription';
 import DevisForm from './DevisForm';
 import DevisPreviewModal from './DevisPreviewModal';
 import DevisActionsMenu from './DevisActionsMenu';
+import CrmOverflowMenu from './CrmOverflowMenu';
 import { listImportedCrmArchives, repairImportedArchivesInBackground } from '../../services/crm/crmArchives';
 import {
   archiveToDevisRow,
@@ -753,18 +755,46 @@ export default function Devis() {
                     {d.titre || '—'}
                   </button>
                   <div className="crm-doc-meta">
-                    <span>{clientNom}</span>
-                    {d.commercial && <span>· {fmtCommercial(d.commercial)}</span>}
-                    <span>· {fmtDate(d.date_creation)}</span>
-                    {expSoon && <span style={{ color: '#E65100', fontWeight: 700 }}>· Expire bientot</span>}
+                    <span className="crm-doc-meta-line">{clientNom}</span>
+                    <span className="crm-doc-meta-line">{fmtDate(d.date_creation)}</span>
+                    {expSoon && <span className="crm-doc-meta-line" style={{ color: '#E65100', fontWeight: 700 }}>Expire bientôt</span>}
                   </div>
                   <div className="crm-doc-footer">
                     <div>
                       <span className="crm-doc-amount">{fmtMAD(d.total_ttc)}</span>
-                      <span className="crm-doc-amount-sub">TTC · HT {fmtMAD(d.total_ht)}</span>
                     </div>
                     <div className="crm-doc-actions">
-                      {renderActionsMenu(d)}
+                      {d.__isImportedArchive ? (
+                        <>
+                          <button type="button" title="Voir PDF" aria-label="Voir" className="btn btn-ghost btn-sm crm-icon-btn"
+                            onClick={() => openArchivePdf(d.__archive).catch((e) => showToast(e.message, 'error'))}>
+                            <Eye size={14} />
+                          </button>
+                          <button type="button" title="Télécharger PDF" aria-label="Télécharger PDF" className="btn btn-ghost btn-sm crm-icon-btn"
+                            onClick={() => downloadArchivePdf(d.__archive).catch((e) => showToast(e.message, 'error'))}>
+                            <Download size={14} />
+                          </button>
+                        </>
+                      ) : (
+                        <>
+                          <button type="button" title="Voir" aria-label="Voir" className="btn btn-ghost btn-sm crm-icon-btn"
+                            onClick={() => handlePreview(d)}>
+                            <Eye size={14} />
+                          </button>
+                          <button type="button" title="Télécharger PDF" aria-label="Télécharger PDF" className="btn btn-ghost btn-sm crm-icon-btn"
+                            disabled={pdfLoadingId === d.id}
+                            onClick={() => handlePdf(d)}>
+                            <Download size={14} />
+                          </button>
+                          <CrmOverflowMenu
+                            items={[
+                              { icon: Copy, label: 'Dupliquer', onClick: () => handleDuplicate(d) },
+                              { divider: true },
+                              { icon: Trash2, label: 'Supprimer', danger: true, onClick: () => handleDelete(d.id) },
+                            ]}
+                          />
+                        </>
+                      )}
                     </div>
                   </div>
                 </div>

@@ -9,6 +9,7 @@ import { TYPE_PROJET_VALUES, TYPE_PROJET_LABEL } from '../../constants/commercia
 import { useClients } from '../../hooks/useClients';
 import { listClientImportedArchives } from '../../services/crm/crmArchives';
 import { openArchivePdf, downloadArchivePdf } from './crmArchiveDisplay';
+import CrmOverflowMenu from './CrmOverflowMenu';
 
 /* ── Helpers ── */
 function fmtMAD(v) {
@@ -159,8 +160,10 @@ function ClientDetail({ client, initialTab = 'overview', onBack, onEdit, onDevis
     <div className="animate-fade-in crm-module crm-module--clients">
       {/* Back button */}
       <button
+        type="button"
+        className="crm-back-btn"
         onClick={onBack}
-        style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-2)', fontSize: '0.875rem', fontWeight: 600, marginBottom: 16, padding: 0 }}
+        aria-label="Retour aux clients"
       >
         <ChevronLeft size={16} /> Retour aux clients
       </button>
@@ -231,16 +234,12 @@ function ClientDetail({ client, initialTab = 'overview', onBack, onEdit, onDevis
 
       {/* ── Vue d'ensemble ── */}
       {tab === 'overview' && (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16 }}>
+        <div className="crm-detail-sections" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))', gap: 16 }}>
           <div className="card">
-            <div className="card-title" style={{ marginBottom: 14 }}><User size={15} /> Informations client</div>
+            <div className="card-title" style={{ marginBottom: 14 }}><User size={15} /> Informations</div>
             {[
               ['Nom complet', nomComplet],
               ['ICE', client.ice || '-'],
-              ['Telephone', client.telephone || '-'],
-              ['Email', client.email || '-'],
-              ['Adresse', client.adresse || '-'],
-              ['Ville', client.ville || '-'],
               ['Secteur', client.secteur || '-'],
               ['Responsable', client.responsable || '-'],
             ].map(([label, val]) => (
@@ -254,6 +253,20 @@ function ClientDetail({ client, initialTab = 'overview', onBack, onEdit, onDevis
                 {client.notes}
               </div>
             )}
+          </div>
+          <div className="card">
+            <div className="card-title" style={{ marginBottom: 14 }}><Phone size={15} /> Contacts</div>
+            {[
+              ['Telephone', client.telephone || '-'],
+              ['Email', client.email || '-'],
+              ['Adresse', client.adresse || '-'],
+              ['Ville', client.ville || '-'],
+            ].map(([label, val]) => (
+              <div key={label} style={{ display: 'flex', justifyContent: 'space-between', padding: '8px 0', borderBottom: '1px solid var(--border)', fontSize: '0.875rem' }}>
+                <span style={{ color: 'var(--text-3)', fontWeight: 600 }}>{label}</span>
+                <span style={{ color: 'var(--text)', fontWeight: 500, textAlign: 'right', maxWidth: '55%' }}>{val}</span>
+              </div>
+            ))}
           </div>
           <div className="card">
             <div className="card-title" style={{ marginBottom: 14 }}><Activity size={15} /> Activite recente</div>
@@ -501,8 +514,11 @@ function ClientModal({ client, onClose, onSave, saving }) {
 
   return (
     <Modal title={client ? 'Modifier client' : 'Nouveau client'} onClose={onClose} maxWidth={600}>
-      <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+      <form className="crm-form" onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <button type="button" className="crm-back-btn crm-back-btn--modal" onClick={onClose} aria-label="Retour aux clients">
+          <ChevronLeft size={16} /> Retour aux clients
+        </button>
+        <div className="crm-form-grid">
           <div className="form-group">
             <label>Nom *</label>
             <input value={form.nom} onChange={e => setField('nom', e.target.value)} placeholder="Nom ou societe" style={IS(errors.nom)} />
@@ -513,7 +529,7 @@ function ClientModal({ client, onClose, onSave, saving }) {
             <input value={form.prenom} onChange={e => setField('prenom', e.target.value)} placeholder="Prenom" style={IS(false)} />
           </div>
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div className="crm-form-grid">
           <div className="form-group">
             <label>Telephone</label>
             <input value={form.telephone} onChange={e => setField('telephone', e.target.value)} placeholder="+212 600 000 000" style={IS(false)} />
@@ -527,7 +543,7 @@ function ClientModal({ client, onClose, onSave, saving }) {
           <label>ICE</label>
           <input value={form.ice} onChange={e => setField('ice', e.target.value)} placeholder="000000000000000" style={IS(false)} />
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div className="crm-form-grid">
           <div className="form-group">
             <label>Responsable</label>
             <input value={form.responsable || ''} onChange={e => setField('responsable', e.target.value)} placeholder="Nom du responsable" style={IS(false)} />
@@ -544,7 +560,7 @@ function ClientModal({ client, onClose, onSave, saving }) {
           <label>Adresse</label>
           <input value={form.adresse} onChange={e => setField('adresse', e.target.value)} placeholder="Adresse complete" style={IS(false)} />
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+        <div className="crm-form-grid">
           <div className="form-group">
             <label>Ville</label>
             <select value={form.ville} onChange={e => setField('ville', e.target.value)} style={IS(false)}>
@@ -561,11 +577,13 @@ function ClientModal({ client, onClose, onSave, saving }) {
             </div>
           )}
         </div>
-        <div className="form-group">
-          <label>Notes</label>
-          <textarea rows={3} value={form.notes} onChange={e => setField('notes', e.target.value)} placeholder="Notes internes..." style={{ ...IS(false), resize: 'vertical' }} />
-        </div>
-        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 6 }}>
+        <details className="crm-form-collapse" open>
+          <summary>Notes</summary>
+          <div className="form-group" style={{ marginTop: 10 }}>
+            <textarea rows={3} value={form.notes} onChange={e => setField('notes', e.target.value)} placeholder="Notes internes..." style={{ ...IS(false), resize: 'vertical' }} />
+          </div>
+        </details>
+        <div className="crm-form-actions">
           <button type="button" className="btn btn-ghost" onClick={onClose}>Annuler</button>
           <button type="submit" className="btn btn-primary" disabled={saving}>
             {saving
@@ -922,26 +940,40 @@ export default function Clients() {
               return (
                 <div key={c.id} className="crm-client-card">
                   <div className="crm-client-top">
-                    <div className="crm-client-avatar">{initials}</div>
+                    <div className="crm-client-avatar" aria-hidden="true">{initials}</div>
                     <div className="crm-client-info">
                       <div className="crm-client-name">{nomComplet}</div>
-                      <div className="crm-client-sub">{[c.telephone, c.email].filter(Boolean).join(' · ') || c.secteur || '—'}</div>
+                      {(c.responsable || c.secteur) && (
+                        <div className="crm-client-contact">{c.responsable || c.secteur}</div>
+                      )}
+                      <div className="crm-client-sub">
+                        {[c.telephone, c.email].filter(Boolean).join(' · ') || '—'}
+                      </div>
                     </div>
                     <span className={'badge ' + STATUT_CLIENT_BADGE[c.statut]}>{STATUT_CLIENT_LABEL[c.statut]}</span>
                   </div>
                   <div className="crm-client-stats">
                     <span>Devis <strong>{stats.nDevis}</strong></span>
-                    <span>Facture <strong>{stats.totalFacture > 0 ? fmtMAD(stats.totalFacture) : '—'}</strong></span>
+                    <span>Factures <strong>{stats.totalFacture > 0 ? fmtMAD(stats.totalFacture) : '—'}</strong></span>
                     <span>Reste <strong style={{ color: stats.restant > 0 ? 'var(--red)' : '#2E7D32' }}>{stats.totalFacture > 0 ? fmtMAD(stats.restant) : '—'}</strong></span>
                   </div>
                   <div className="crm-client-actions">
-                    <button type="button" className="btn btn-ghost btn-sm crm-icon-btn" title="Voir" onClick={() => openView(c, 'overview')}><Eye size={14} /></button>
-                    <button type="button" className="btn btn-ghost btn-sm crm-icon-btn" title="Modifier" onClick={() => openEdit(c)}><Edit2 size={14} /></button>
-                    <button type="button" className="btn btn-ghost btn-sm crm-icon-btn" title="Devis" onClick={() => openClientDevis(c)}><FileText size={14} /></button>
-                    <button type="button" className="btn btn-ghost btn-sm crm-icon-btn" title="Factures" onClick={() => openClientFactures(c)}><Receipt size={14} /></button>
-                    <button type="button" className="btn btn-ghost btn-sm crm-icon-btn" title="Supprimer" disabled={deletingId === c.id || saving} onClick={() => handleDelete(c.id)}>
-                      {deletingId === c.id ? <Loader2 size={14} className="spin" style={{ color: 'var(--red)' }} /> : <Trash2 size={14} style={{ color: 'var(--red)' }} />}
-                    </button>
+                    <button type="button" className="btn btn-ghost btn-sm crm-icon-btn" title="Voir" aria-label="Voir" onClick={() => openView(c, 'overview')}><Eye size={14} /></button>
+                    <button type="button" className="btn btn-ghost btn-sm crm-icon-btn" title="Modifier" aria-label="Modifier" onClick={() => openEdit(c)}><Edit2 size={14} /></button>
+                    <CrmOverflowMenu
+                      items={[
+                        { icon: FileText, label: 'Documents / Devis', onClick: () => openClientDevis(c) },
+                        { icon: Receipt, label: 'Factures', onClick: () => openClientFactures(c) },
+                        { divider: true },
+                        {
+                          icon: Trash2,
+                          label: deletingId === c.id ? 'Suppression…' : 'Supprimer',
+                          danger: true,
+                          disabled: deletingId === c.id || saving,
+                          onClick: () => handleDelete(c.id),
+                        },
+                      ]}
+                    />
                   </div>
                 </div>
               );
@@ -951,12 +983,15 @@ export default function Clients() {
 
         {/* Pagination */}
         {totalPages > 1 && (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6, marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
-            <button className="btn btn-ghost btn-sm" disabled={page === 1} onClick={() => setPage(p => p - 1)}>Precedent</button>
-            {Array.from({ length: totalPages }, (_, i) => i + 1).map(n => (
-              <button key={n} onClick={() => setPage(n)} style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid ' + (n === page ? 'var(--red)' : 'var(--border)'), background: n === page ? 'var(--red)' : '#fff', color: n === page ? '#fff' : 'var(--text)', fontWeight: 600, fontSize: '0.82rem', cursor: 'pointer' }}>{n}</button>
-            ))}
-            <button className="btn btn-ghost btn-sm" disabled={page === totalPages} onClick={() => setPage(p => p + 1)}>Suivant</button>
+          <div className="crm-pagination">
+            <button className="btn btn-ghost btn-sm" disabled={page === 1} onClick={() => setPage(p => p - 1)}>Prec.</button>
+            {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
+              const start = Math.max(1, Math.min(page - 2, totalPages - 4));
+              const n = start + i;
+              return (
+              <button key={n} onClick={() => setPage(n)} className={'crm-page-btn' + (n === page ? ' crm-page-btn--active' : '')}>{n}</button>
+            );})}
+            <button className="btn btn-ghost btn-sm" disabled={page === totalPages} onClick={() => setPage(p => p + 1)}>Suiv.</button>
           </div>
         )}
       </div>

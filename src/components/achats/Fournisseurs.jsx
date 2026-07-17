@@ -287,7 +287,7 @@ export default function Fournisseurs({ onFournisseursChange }) {
   }
 
   return (
-    <div className="animate-fade-in">
+    <div className="animate-fade-in achats-fourn-page">
       {!configured && (
         <div className="card" style={{ marginBottom: 12, padding: 12, color: 'var(--red)', fontSize: '0.85rem' }}>
           Supabase non configuré — exécutez supabase/RUN_PURCHASE_SUPPLIERS.sql puis reconnectez-vous.
@@ -354,7 +354,7 @@ export default function Fournisseurs({ onFournisseursChange }) {
         </div>
       )}
 
-      <div className="card" style={{ padding: 0 }}>
+      <div className="card achats-fourn-list-card" style={{ padding: 0 }}>
         {filtered.length === 0 ? (
           <EmptyState
             icon={<UserCog size={24} />}
@@ -364,7 +364,8 @@ export default function Fournisseurs({ onFournisseursChange }) {
             onAction={() => { setEditItem(null); setShowModal(true); }}
           />
         ) : (
-          <div className="table-wrap table-wrap--wide">
+          <>
+          <div className="table-wrap table-wrap--wide achats-fourn-desktop">
             <table>
               <thead>
                 <tr>
@@ -417,6 +418,83 @@ export default function Fournisseurs({ onFournisseursChange }) {
               </tbody>
             </table>
           </div>
+
+          <div className="achats-fourn-mobile" aria-label="Liste fournisseurs">
+            {filtered.map((x) => {
+              const initials = (x.company_name || '?')
+                .split(/\s+/)
+                .filter(Boolean)
+                .map((w) => w[0])
+                .slice(0, 2)
+                .join('')
+                .toUpperCase();
+              return (
+                <article key={x.id} className="achats-fourn-card">
+                  <header className="achats-fourn-card-head">
+                    <div className="achats-fourn-avatar" aria-hidden="true">{initials}</div>
+                    <div className="achats-fourn-card-title-wrap">
+                      <h3 className="achats-fourn-card-name">{x.company_name}</h3>
+                    </div>
+                    <span className={`badge ${badgeStatut(x.statut)}`}>{x.statut}</span>
+                  </header>
+
+                  <dl className="achats-fourn-card-fields">
+                    <div className="achats-fourn-field">
+                      <dt>ICE</dt>
+                      <dd>{x.ice || '—'}</dd>
+                    </div>
+                    <div className="achats-fourn-field">
+                      <dt>Téléphone</dt>
+                      <dd>{x.phone || '—'}</dd>
+                    </div>
+                    <div className="achats-fourn-field achats-fourn-field--email">
+                      <dt>E-mail</dt>
+                      <dd className="achats-fourn-email">{x.email || '—'}</dd>
+                    </div>
+                    <div className="achats-fourn-field-grid">
+                      <div className="achats-fourn-field">
+                        <dt>Ville</dt>
+                        <dd className="achats-fourn-ellipsis">{x.city || '—'}</dd>
+                      </div>
+                      <div className="achats-fourn-field">
+                        <dt>Catégorie</dt>
+                        <dd className="achats-fourn-ellipsis">{x.supplier_category || '—'}</dd>
+                      </div>
+                    </div>
+                  </dl>
+
+                  <footer className="achats-fourn-card-actions">
+                    <button type="button" className="btn btn-secondary btn-sm achats-fourn-action" onClick={() => setDetailId(x.id)}>
+                      <Eye size={14} /> Voir
+                    </button>
+                    <button type="button" className="btn btn-ghost btn-sm achats-fourn-action" onClick={() => { setEditItem(x); setShowModal(true); }}>
+                      <Edit2 size={14} /> Modifier
+                    </button>
+                    {x.status !== 'archived' && (
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm achats-fourn-action"
+                        title={x.status === 'active' ? 'Désactiver' : 'Activer'}
+                        onClick={() => toggleStatut(x)}
+                      >
+                        <ToggleLeft size={14} /> {x.status === 'active' ? 'Désactiver' : 'Activer'}
+                      </button>
+                    )}
+                    {x.status !== 'archived' && (
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm achats-fourn-action achats-fourn-action--danger"
+                        onClick={() => handleArchive(x.id)}
+                      >
+                        <Archive size={14} /> Archiver
+                      </button>
+                    )}
+                  </footer>
+                </article>
+              );
+            })}
+          </div>
+          </>
         )}
       </div>
 

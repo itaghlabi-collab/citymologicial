@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useMemo } from 'react';
 import {
-  Layers, Plus, Edit2, Trash2, Search, X, AlertCircle, Package, Loader2
+  Layers, Plus, Edit2, Trash2, Search, X, AlertCircle, Package, Loader2, ChevronLeft
 } from 'lucide-react';
 import { useCategories } from '../../hooks/useCategories';
 import { formatCategoryDisplayName } from '../../utils/crm/categoryDisplay';
@@ -101,7 +101,10 @@ function CategorieModal({ categorie, onClose, onSave, saving }) {
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: 4 }}><X size={20} /></button>
         </div>
 
-        <form onSubmit={handleSubmit} style={{ padding: '22px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+        <form className="crm-form" onSubmit={handleSubmit} style={{ padding: '22px 24px', display: 'flex', flexDirection: 'column', gap: 14 }}>
+          <button type="button" className="crm-back-btn crm-back-btn--modal" onClick={onClose} aria-label="Retour aux catégories">
+            <ChevronLeft size={16} /> Retour aux catégories
+          </button>
           {apiError && (
             <div style={{ background: '#FFEBEE', color: 'var(--red)', border: '1px solid rgba(211,47,47,0.25)', borderRadius: 7, padding: '10px 14px', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: 8 }}>
               <AlertCircle size={15} /> {apiError}
@@ -114,10 +117,12 @@ function CategorieModal({ categorie, onClose, onSave, saving }) {
             {errors.nom && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.nom}</span>}
           </div>
 
-          <div className="form-group">
-            <label>Description</label>
-            <textarea rows={2} value={form.description} onChange={e => setField('description', e.target.value)} placeholder="Description optionnelle..." style={{ ...IS(false), resize: 'vertical' }} />
-          </div>
+          <details className="crm-form-collapse">
+            <summary>Description</summary>
+            <div className="form-group" style={{ marginTop: 10 }}>
+              <textarea rows={2} value={form.description} onChange={e => setField('description', e.target.value)} placeholder="Description optionnelle..." style={{ ...IS(false), resize: 'vertical' }} />
+            </div>
+          </details>
 
           <div className="form-group">
             <label>Couleur</label>
@@ -141,7 +146,7 @@ function CategorieModal({ categorie, onClose, onSave, saving }) {
             </select>
           </div>
 
-          <div style={{ borderTop: '1px solid var(--border)', paddingTop: 14, display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <div className="crm-form-actions">
             <button type="button" className="btn btn-ghost" onClick={onClose} disabled={saving}>Annuler</button>
             <button type="submit" className="btn btn-primary" disabled={saving} style={{ minWidth: 110 }}>
               {saving

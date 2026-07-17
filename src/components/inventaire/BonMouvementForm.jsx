@@ -72,9 +72,9 @@ function emplacementOptions(current) {
 
 function BonDocumentHeader({ form, onFieldChange }) {
   return (
-    <div className="devis-doc-header card" style={{ padding: 0, overflow: 'visible', marginBottom: 16 }}>
-      <div style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 0, borderBottom: '1px solid var(--border)' }}>
-        <div style={{ padding: '24px 28px', borderRight: '1px solid var(--border)', background: '#FAFAFA' }}>
+    <div className="devis-doc-header card bm-doc-header" style={{ padding: 0, overflow: 'visible', marginBottom: 16 }}>
+      <div className="bm-doc-header-grid" style={{ display: 'grid', gridTemplateColumns: 'minmax(0,1fr) minmax(0,1fr)', gap: 0, borderBottom: '1px solid var(--border)' }}>
+        <div className="bm-doc-panel bm-doc-panel--brand" style={{ padding: '24px 28px', borderRight: '1px solid var(--border)', background: '#FAFAFA' }}>
           <img src={CITYMO_LOGO} alt="CITYMO" style={{ height: 48, objectFit: 'contain', marginBottom: 14 }} />
           <div style={{ fontSize: '0.92rem', color: 'var(--text-2)', lineHeight: 1.75 }}>
             <div>{CITYMO_COMPANY.address}</div>
@@ -83,22 +83,24 @@ function BonDocumentHeader({ form, onFieldChange }) {
             <div style={{ fontWeight: 600, marginTop: 4 }}>{CITYMO_COMPANY.ice}</div>
           </div>
         </div>
-        <div style={{ padding: '24px 28px', background: '#fff' }}>
+        <div className="bm-doc-panel bm-doc-panel--meta" style={{ padding: '24px 28px', background: '#fff', minWidth: 0 }}>
           <div style={{ fontFamily: 'var(--font-head)', fontWeight: 900, fontSize: '1.75rem', color: 'var(--red)', letterSpacing: '0.04em', marginBottom: 16 }}>
             BON DE MOUVEMENT
           </div>
-          <div style={{ display: 'grid', gap: 10, fontSize: '0.95rem' }}>
-            <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontWeight: 700, color: 'var(--text-3)', fontSize: '0.8rem' }}>Référence</span>
+          <div className="bm-doc-meta-list" style={{ display: 'grid', gap: 10, fontSize: '0.95rem' }}>
+            <div className="bm-doc-meta-row">
+              <span className="bm-doc-meta-label">Référence</span>
               <input
+                className="bm-doc-meta-input"
                 value={form.ref || 'Auto'}
                 readOnly
                 style={{ ...IS(false), fontFamily: 'var(--font-head)', fontWeight: 700, background: '#F5F5F5' }}
               />
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '110px 1fr', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontWeight: 700, color: 'var(--text-3)', fontSize: '0.8rem' }}>Date</span>
+            <div className="bm-doc-meta-row">
+              <span className="bm-doc-meta-label">Date</span>
               <input
+                className="bm-doc-meta-input"
                 type="date"
                 value={form.date_creation}
                 onChange={(e) => onFieldChange('date_creation', e.target.value)}

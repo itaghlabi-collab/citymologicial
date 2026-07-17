@@ -1177,7 +1177,7 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
         }
       `}</style>
 
-      <button type="button" onClick={onBack} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-2)', fontSize: '0.875rem', fontWeight: 600, marginBottom: 16, padding: 0 }}>
+      <button type="button" className="crm-back-btn" onClick={onBack} aria-label="Retour aux devis">
         <ChevronLeft size={16} /> Retour aux devis
       </button>
 

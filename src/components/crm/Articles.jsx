@@ -1,12 +1,13 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import {
   Package, Plus, Edit2, Trash2, Eye, Copy, Search, X,
-  ChevronUp, ChevronDown, AlertCircle, Loader, Tag, DollarSign, Layers, GripVertical,
+  ChevronUp, ChevronDown, ChevronLeft, AlertCircle, Loader, Tag, DollarSign, Layers, GripVertical,
 } from 'lucide-react';
 import { listCategories } from '../../services/crm/categories';
 import { mergeArticleReorder } from '../../services/crm/articles';
 import { useArticles } from '../../hooks/useArticles';
 import { formatCategoryDisplayName } from '../../utils/crm/categoryDisplay';
+import CrmOverflowMenu from './CrmOverflowMenu';
 
 /* ── Helpers ── */
 function fmtMAD(v) {
@@ -160,7 +161,10 @@ function ArticleModal({ article, categories, onClose, onSave, saving }) {
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: 4 }}><X size={20} /></button>
         </div>
 
-        <form onSubmit={handleSubmit} style={{ padding: '22px 26px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+        <form className="crm-form" onSubmit={handleSubmit} style={{ padding: '22px 26px', display: 'flex', flexDirection: 'column', gap: 20 }}>
+          <button type="button" className="crm-back-btn crm-back-btn--modal" onClick={onClose} aria-label="Retour aux articles">
+            <ChevronLeft size={16} /> Retour aux articles
+          </button>
           {apiError && (
             <div style={{ background: '#FFEBEE', color: 'var(--red)', border: '1px solid rgba(211,47,47,0.25)', borderRadius: 7, padding: '10px 14px', fontSize: '0.85rem', display: 'flex', alignItems: 'center', gap: 8 }}>
               <AlertCircle size={15} /> {apiError}
@@ -168,11 +172,11 @@ function ArticleModal({ article, categories, onClose, onSave, saving }) {
           )}
 
           {/* Section 1 – Informations principales */}
-          <div>
-            <div style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 13 }}>Informations principales</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <details className="crm-form-collapse" open>
+            <summary>Informations principales</summary>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 12 }}>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div className="crm-form-grid">
                 <div className="form-group" style={{ gridColumn: '1 / -1' }}>
                   <label>Nom article *</label>
                   <input value={form.nom} onChange={e => setField('nom', e.target.value)} placeholder="Ex : Ciment Portland 50kg" style={IS(errors.nom)} autoFocus />
@@ -180,7 +184,7 @@ function ArticleModal({ article, categories, onClose, onSave, saving }) {
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div className="crm-form-grid">
                 <div className="form-group">
                   <label>Categorie</label>
                   <select value={form.categorie_id} onChange={e => setField('categorie_id', e.target.value)} style={IS(false)}>
@@ -194,7 +198,7 @@ function ArticleModal({ article, categories, onClose, onSave, saving }) {
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 12 }}>
+              <div className="crm-form-grid crm-form-grid--4">
                 <div className="form-group" style={{ gridColumn: 'span 2' }}>
                   <label>Prix unitaire HT (MAD) *</label>
                   <input type="number" min="0" step="0.01" value={form.prix_ht} onChange={e => setField('prix_ht', e.target.value)} placeholder="0.00" style={IS(errors.prix_ht)} />
@@ -212,7 +216,7 @@ function ArticleModal({ article, categories, onClose, onSave, saving }) {
                 </div>
               </div>
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div className="crm-form-grid">
                 <div className="form-group">
                   <label>Unite</label>
                   <select value={form.unite} onChange={e => setField('unite', e.target.value)} style={IS(false)}>
@@ -227,14 +231,11 @@ function ArticleModal({ article, categories, onClose, onSave, saving }) {
                 </div>
               </div>
             </div>
-          </div>
+          </details>
 
-          <div style={{ borderTop: '1px solid var(--border)' }} />
-
-          {/* Section 2 – Description */}
-          <div>
-            <div style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 13 }}>Description article</div>
-            <div className="form-group">
+          <details className="crm-form-collapse">
+            <summary>Description article</summary>
+            <div className="form-group" style={{ marginTop: 12 }}>
               <label>Description</label>
               <textarea
                 rows={5}
@@ -247,13 +248,10 @@ function ArticleModal({ article, categories, onClose, onSave, saving }) {
                 Utilisee dans les devis, factures et bons de livraison. Soyez precis pour une generation documentaire optimale.
               </div>
             </div>
-          </div>
+          </details>
 
-          <div style={{ borderTop: '1px solid var(--border)' }} />
-
-          {/* Section 3 – Actions */}
-          <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-            <button type="button" className="btn btn-ghost" onClick={onClose} disabled={saving}>Fermer</button>
+          <div className="crm-form-actions">
+            <button type="button" className="btn btn-ghost" onClick={onClose} disabled={saving}>Annuler</button>
             <button type="submit" className="btn btn-primary" disabled={saving} style={{ background: '#E65100', borderColor: '#E65100', minWidth: 120 }}>
               {saving ? <Spinner small /> : <><Plus size={14} /> {isEdit ? 'Enregistrer' : 'Ajouter'}</>}
             </button>
@@ -735,21 +733,31 @@ export default function Articles() {
                   <div className="crm-compact-main">
                     <div className="crm-compact-title">{a.nom}</div>
                     <div className="crm-compact-meta">
-                      <strong>{fmtMAD(a.prix_ht)}</strong>
-                      {a.categorie_id ? ` · ${catName(a.categorie_id)}` : ''}
-                      {' · '}
-                      <span className={'badge ' + STATUT_BADGE[a.statut || 'actif']} style={{ fontSize: '0.68rem', padding: '1px 6px', verticalAlign: 'middle' }}>
+                      <strong className="crm-compact-price">{fmtMAD(a.prix_ht)}</strong>
+                      {a.categorie_id ? <span className="crm-compact-dot"> · {catName(a.categorie_id)}</span> : null}
+                    </div>
+                    <div className="crm-compact-badge-row">
+                      <span className={'badge ' + STATUT_BADGE[a.statut || 'actif']}>
                         {STATUT_LABEL[a.statut || 'actif']}
                       </span>
                     </div>
                   </div>
                   <div className="crm-compact-actions">
-                    <button type="button" className="btn btn-ghost btn-sm crm-icon-btn" title="Voir" onClick={() => setViewingArticle(a)}><Eye size={14} /></button>
-                    <button type="button" className="btn btn-ghost btn-sm crm-icon-btn" title="Modifier" onClick={() => openEdit(a)}><Edit2 size={14} /></button>
-                    <button type="button" className="btn btn-ghost btn-sm crm-icon-btn" title="Dupliquer" onClick={() => handleDuplicate(a)}><Copy size={14} /></button>
-                    <button type="button" className="btn btn-ghost btn-sm crm-icon-btn" title="Supprimer" disabled={deletingId === a.id || saving} onClick={() => handleDelete(a.id)}>
-                      {deletingId === a.id ? <Loader size={14} className="spin" style={{ color: 'var(--red)' }} /> : <Trash2 size={14} style={{ color: 'var(--red)' }} />}
-                    </button>
+                    <button type="button" className="btn btn-ghost btn-sm crm-icon-btn" title="Voir" aria-label="Voir" onClick={() => setViewingArticle(a)}><Eye size={14} /></button>
+                    <button type="button" className="btn btn-ghost btn-sm crm-icon-btn" title="Modifier" aria-label="Modifier" onClick={() => openEdit(a)}><Edit2 size={14} /></button>
+                    <CrmOverflowMenu
+                      items={[
+                        { icon: Copy, label: 'Dupliquer', onClick: () => handleDuplicate(a) },
+                        { divider: true },
+                        {
+                          icon: Trash2,
+                          label: deletingId === a.id ? 'Suppression…' : 'Supprimer',
+                          danger: true,
+                          disabled: deletingId === a.id || saving,
+                          onClick: () => handleDelete(a.id),
+                        },
+                      ]}
+                    />
                   </div>
                 </div>
               ))}
@@ -760,12 +768,15 @@ export default function Articles() {
 
         {/* Pagination */}
         {!loading && totalPages > 1 && (
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 6, marginTop: 14, paddingTop: 14, borderTop: '1px solid var(--border)' }}>
-            <button className="btn btn-ghost btn-sm" disabled={safePagedPage === 1} onClick={() => setPage(p => p - 1)}>Precedent</button>
-            {Array.from({ length: totalPages }, (_, i) => i + 1).map(n => (
-              <button key={n} onClick={() => setPage(n)} style={{ padding: '5px 10px', borderRadius: 6, border: '1px solid ' + (n === safePagedPage ? 'var(--red)' : 'var(--border)'), background: n === safePagedPage ? 'var(--red)' : '#fff', color: n === safePagedPage ? '#fff' : 'var(--text)', fontWeight: 600, fontSize: '0.82rem', cursor: 'pointer' }}>{n}</button>
-            ))}
-            <button className="btn btn-ghost btn-sm" disabled={safePagedPage === totalPages} onClick={() => setPage(p => p + 1)}>Suivant</button>
+          <div className="crm-pagination">
+            <button className="btn btn-ghost btn-sm" disabled={safePagedPage === 1} onClick={() => setPage(p => p - 1)}>Prec.</button>
+            {Array.from({ length: Math.min(totalPages, 5) }, (_, i) => {
+              const start = Math.max(1, Math.min(safePagedPage - 2, totalPages - 4));
+              const n = start + i;
+              return (
+              <button key={n} onClick={() => setPage(n)} className={'crm-page-btn' + (n === safePagedPage ? ' crm-page-btn--active' : '')}>{n}</button>
+            );})}
+            <button className="btn btn-ghost btn-sm" disabled={safePagedPage === totalPages} onClick={() => setPage(p => p + 1)}>Suiv.</button>
           </div>
         )}
       </div>

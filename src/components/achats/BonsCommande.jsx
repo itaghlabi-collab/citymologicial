@@ -189,8 +189,8 @@ function DetailBC({ item, onBack, onEdit, onDelete, onDupliquer, onPdf, pdfLoadi
           <button className="btn btn-ghost btn-sm" style={{ color: 'var(--red)', display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => onDelete(item.id)}><Trash2 size={13} /></button>
         </div>
       </div>
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 280px', gap: 16, alignItems: 'start' }}>
-        <div className="card">
+      <div className="bc-detail-layout">
+        <div className="card bc-detail-lignes">
           <SectionTitle icon={<Package size={13} />}>Lignes articles</SectionTitle>
           <div className="table-wrap table-wrap--wide">
             <table>
@@ -242,7 +242,7 @@ function DetailBC({ item, onBack, onEdit, onDelete, onDupliquer, onPdf, pdfLoadi
             </div>
           )}
         </div>
-        <div className="card">
+        <div className="card bc-detail-synthese">
           <SectionTitle icon={<ShoppingCart size={13} />}>Synthèse</SectionTitle>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             {[['Fournisseur', item.fournisseur || '—'], ['Date commande', item.date || '—'], ['Livraison prévue', item.date_livraison || '—'], ['Devise', item.devise || 'MAD'], ['Sous-total HT', formatMAD(item.subtotal_ht)], ['TVA', formatMAD(item.total_vat)], ['Total TTC', formatMAD(item.total_ttc)], ['Statut', <span className={'badge ' + (BADGE_BC[item.statut] || 'badge-grey')}>{item.statut}</span>], ['Créé le', item.date_creation || '—']].map(([l, v]) => (

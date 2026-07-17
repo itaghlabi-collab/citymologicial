@@ -20,6 +20,7 @@ import {
   ARCHIVE_IMPORTED_BADGE,
   normalizeArchiveAmounts,
 } from './crmArchiveDisplay';
+import CrmOverflowMenu from './CrmOverflowMenu';
 
 /* ── Helpers ── */
 function fmtMAD(v) {
@@ -713,11 +714,10 @@ export default function Factures() {
                     {f.__isImportedArchive ? (f.titre || '—') : (f.titre || clientNom)}
                   </button>
                   <div className="crm-doc-meta">
-                    <span>{clientNom}</span>
-                    {f.commercial && <span>· {fmtCommercial(f.commercial)}</span>}
-                    <span>· {fmtDate(f.date_emission)}</span>
-                    {overdue && <span style={{ color: 'var(--red)', fontWeight: 700 }}>· En retard</span>}
-                    {dueSoon && <span style={{ color: '#E65100', fontWeight: 700 }}>· Echeance proche</span>}
+                    <span className="crm-doc-meta-line">{clientNom}</span>
+                    <span className="crm-doc-meta-line">{fmtDate(f.date_emission)}</span>
+                    {overdue && <span className="crm-doc-meta-line" style={{ color: 'var(--red)', fontWeight: 700 }}>En retard</span>}
+                    {dueSoon && <span className="crm-doc-meta-line" style={{ color: '#E65100', fontWeight: 700 }}>Échéance proche</span>}
                   </div>
                   <div className="crm-doc-footer">
                     <div>
@@ -729,27 +729,28 @@ export default function Factures() {
                     <div className="crm-doc-actions">
                       {f.__isImportedArchive ? (
                         <>
-                          <button type="button" title="Voir PDF" onClick={() => openArchivePdf(f.__archive).catch((e) => showToast(e.message, 'error'))}
+                          <button type="button" title="Voir PDF" aria-label="Voir" onClick={() => openArchivePdf(f.__archive).catch((e) => showToast(e.message, 'error'))}
                             className="btn btn-ghost btn-sm crm-icon-btn"><Eye size={14} /></button>
-                          <button type="button" title="Telecharger" onClick={() => downloadArchivePdf(f.__archive).catch((e) => showToast(e.message, 'error'))}
+                          <button type="button" title="Telecharger" aria-label="Télécharger PDF" onClick={() => downloadArchivePdf(f.__archive).catch((e) => showToast(e.message, 'error'))}
                             className="btn btn-ghost btn-sm crm-icon-btn"><Download size={14} /></button>
                         </>
                       ) : (
                         <>
-                      <button type="button" title="PDF" onClick={() => handlePdf(f)} disabled={pdfLoadingId === f.id}
+                      <button type="button" title="Voir" aria-label="Voir" onClick={() => openEdit(f)}
+                        className="btn btn-ghost btn-sm crm-icon-btn"><Eye size={14} /></button>
+                      <button type="button" title="PDF" aria-label="Télécharger PDF" onClick={() => handlePdf(f)} disabled={pdfLoadingId === f.id}
                         className="btn btn-ghost btn-sm crm-icon-btn"><Download size={14} /></button>
-                      {f.statut !== 'payee' && f.statut !== 'annulee' && (
-                        <button type="button" title="Marquer payée" onClick={() => handleMarkPaid(f)} disabled={saving}
-                          className="btn btn-ghost btn-sm crm-icon-btn" style={{ color: '#2E7D32' }}>
-                          <CheckCircle size={14} />
-                        </button>
-                      )}
-                      <button type="button" title="Modifier" onClick={() => openEdit(f)}
-                        className="btn btn-ghost btn-sm crm-icon-btn"><Edit2 size={14} /></button>
-                      <button type="button" title="Dupliquer" onClick={() => handleDuplicate(f)}
-                        className="btn btn-ghost btn-sm crm-icon-btn"><Copy size={14} /></button>
-                      <button type="button" title="Supprimer" onClick={() => handleDelete(f.id)}
-                        className="btn btn-ghost btn-sm crm-icon-btn"><Trash2 size={14} style={{ color: 'var(--red)' }} /></button>
+                      <CrmOverflowMenu
+                        items={[
+                          ...(f.statut !== 'payee' && f.statut !== 'annulee'
+                            ? [{ icon: CheckCircle, label: 'Marquer payée', onClick: () => handleMarkPaid(f), disabled: saving }]
+                            : []),
+                          { icon: Edit2, label: 'Modifier', onClick: () => openEdit(f) },
+                          { icon: Copy, label: 'Dupliquer', onClick: () => handleDuplicate(f) },
+                          { divider: true },
+                          { icon: Trash2, label: 'Supprimer', danger: true, onClick: () => handleDelete(f.id) },
+                        ]}
+                      />
                         </>
                       )}
                     </div>

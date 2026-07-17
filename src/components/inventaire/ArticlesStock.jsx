@@ -390,8 +390,9 @@ function DetailArticle({
   const stateBadge = BADGE_CURRENT_STATE[article.current_state] || 'badge-grey';
 
   return (
-    <div className="animate-fade-in">
-      <div className="finance-page-actions finance-detail-actions" style={{ marginBottom: 20, flexWrap: 'wrap', gap: 10 }}>
+    <div className="animate-fade-in inv-article-detail">
+      {/* Header Desktop — présentation inchangée */}
+      <div className="finance-page-actions finance-detail-actions inv-article-detail-header-desktop" style={{ marginBottom: 20, flexWrap: 'wrap', gap: 10 }}>
         <button type="button" className="btn btn-ghost btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }} onClick={onBack}>
           <ChevronLeft size={15} /> Retour
         </button>
@@ -409,6 +410,50 @@ function DetailArticle({
           <button type="button" className="btn btn-ghost btn-sm" onClick={onArchive}><Archive size={13} /> Archiver</button>
         )}
       </div>
+
+      {/* Header Mobile PWA — hiérarchie compacte */}
+      <header className="inv-article-detail-header-mobile">
+        <div className="inv-article-detail-code-block">
+          <span className="inv-article-detail-kicker">Code article</span>
+          <div className="inv-article-detail-code">{article.code}</div>
+        </div>
+        <div className="inv-article-detail-title-block">
+          <span className="inv-article-detail-kicker">Désignation</span>
+          <h2 className="inv-article-detail-title">{article.designation}</h2>
+        </div>
+        <div className="inv-article-detail-badges">
+          <span className={`badge ${stateBadge}`}>{article.current_state || 'Disponible'}</span>
+          <span className={`badge ${article.etat === 'Neuf' ? 'badge-green' : article.etat === 'Utilisé' ? 'badge-blue' : 'badge-orange'}`}>{article.etat}</span>
+          {article.statut && article.statut !== 'Actif' && (
+            <span className={`badge ${article.statut === 'Archivé' ? 'badge-orange' : 'badge-grey'}`}>{article.statut}</span>
+          )}
+        </div>
+        <div className="inv-article-detail-toolbar" role="toolbar" aria-label="Actions article">
+          <button type="button" className="btn btn-ghost btn-sm inv-article-detail-tool" onClick={onBack} title="Retour" aria-label="Retour">
+            <ChevronLeft size={18} />
+          </button>
+          <button type="button" className="btn btn-ghost btn-sm inv-article-detail-tool" onClick={onBarcode} title="Code-barres" aria-label="Code-barres">
+            <Barcode size={18} />
+          </button>
+          <button type="button" className="btn btn-ghost btn-sm inv-article-detail-tool" onClick={() => downloadStockArticleLabel(article, 'standard')} title="Télécharger" aria-label="Télécharger">
+            <Download size={18} />
+          </button>
+          <button type="button" className="btn btn-ghost btn-sm inv-article-detail-tool" onClick={() => printStockArticleLabel(article, 'standard')} title="Imprimer" aria-label="Imprimer">
+            <Printer size={18} />
+          </button>
+          <button type="button" className="btn btn-ghost btn-sm inv-article-detail-tool" onClick={onHistory} title="Historique" aria-label="Historique">
+            <History size={18} />
+          </button>
+          <button type="button" className="btn btn-secondary btn-sm inv-article-detail-tool" onClick={onEdit} title="Modifier" aria-label="Modifier">
+            <Edit2 size={18} />
+          </button>
+          {article.statut !== 'Archivé' && (
+            <button type="button" className="btn btn-ghost btn-sm inv-article-detail-tool" onClick={onArchive} title="Archiver" aria-label="Archiver">
+              <Archive size={18} />
+            </button>
+          )}
+        </div>
+      </header>
 
       <ArticleScanBar
         onScan={onScan}
