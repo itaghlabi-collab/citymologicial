@@ -5316,6 +5316,17 @@ tbody tr:last-child td { border-bottom: none; }
   display: none;
 }
 
+/* Demandes chantier — dual DOM (desktop tableau / mobile cartes) */
+.inv-dc-desktop,
+.inv-dc-lines-desktop {
+  display: block;
+}
+
+.inv-dc-mobile,
+.inv-dc-lines-mobile {
+  display: none;
+}
+
 /* Bon de mouvement — header Référence / Date (desktop = 2 col label+valeur) */
 .bm-doc-meta-row {
   display: grid;
@@ -5722,6 +5733,250 @@ tbody tr:last-child td { border-bottom: none; }
     height: 18px;
   }
 
+  /* ── Demandes chantier — cartes mobile ── */
+  .inv-dc-page .inv-dc-desktop {
+    display: none !important;
+  }
+
+  .inv-dc-page .inv-dc-mobile {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    padding: 10px;
+    max-width: 100%;
+    box-sizing: border-box;
+    overflow-x: hidden;
+  }
+
+  .inv-dc-page .inv-dc-list-card {
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    overflow: visible;
+  }
+
+  .inv-dc-page .inv-dc-toolbar {
+    padding: 10px 12px !important;
+  }
+
+  .inv-dc-page .inv-dc-toolbar .finance-toolbar-inner > * {
+    flex: 1 1 100% !important;
+    max-width: none !important;
+    width: 100%;
+  }
+
+  .inv-dc-card {
+    width: 100%;
+    box-sizing: border-box;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: var(--shadow);
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    overflow: hidden;
+  }
+
+  .inv-dc-card-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .inv-dc-card-ref {
+    font-family: var(--font-head);
+    font-weight: 800;
+    font-size: 0.9rem;
+    color: var(--red);
+    letter-spacing: 0.02em;
+    word-break: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .inv-dc-card-title {
+    margin: 0;
+    font-weight: 700;
+    font-size: 0.92rem;
+    color: var(--text);
+    line-height: 1.3;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    word-break: normal;
+    overflow-wrap: break-word;
+  }
+
+  .inv-dc-card-fields {
+    margin: 0;
+    padding: 8px 0 0;
+    border-top: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .inv-dc-field {
+    margin: 0;
+    min-width: 0;
+  }
+
+  .inv-dc-field dt {
+    margin: 0 0 2px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-3);
+  }
+
+  .inv-dc-field dd {
+    margin: 0;
+    font-size: 0.84rem;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.35;
+    word-break: normal;
+    overflow-wrap: break-word;
+  }
+
+  .inv-dc-field-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px 12px;
+  }
+
+  .inv-dc-card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    border-top: 1px solid var(--border);
+    padding-top: 10px;
+  }
+
+  .inv-dc-action {
+    min-height: 44px;
+    min-width: 44px;
+    padding: 8px 12px !important;
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    font-size: 0.76rem;
+    font-weight: 600;
+  }
+
+  .inv-dc-action--danger {
+    color: var(--red);
+  }
+
+  /* Drawer détail */
+  .inv-dc-drawer-head-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+    width: 100%;
+  }
+
+  .inv-dc-drawer-head-text {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .inv-dc-drawer-ref {
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: var(--text-3);
+  }
+
+  .inv-dc-drawer .rh-emp-docs-drawer-header {
+    flex-direction: row !important;
+    align-items: flex-start;
+  }
+
+  .inv-dc-drawer-close {
+    flex-shrink: 0;
+    min-width: 44px;
+    min-height: 44px;
+    display: inline-flex !important;
+    align-items: center;
+    justify-content: center;
+  }
+
+  .inv-dc-drawer .inv-dc-info-grid {
+    grid-template-columns: 1fr 1fr !important;
+    gap: 10px;
+  }
+
+  .inv-dc-drawer .inv-dc-lines-desktop {
+    display: none !important;
+  }
+
+  .inv-dc-drawer .inv-dc-lines-mobile {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .inv-dc-line-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+  }
+
+  .inv-dc-line-card.is-prepared {
+    background: #F1F8E9;
+    border-color: #C8E6C9;
+  }
+
+  .inv-dc-line-name {
+    font-weight: 700;
+    font-size: 0.9rem;
+    margin-bottom: 10px;
+    word-break: normal;
+    overflow-wrap: break-word;
+  }
+
+  .inv-dc-line-ok {
+    color: #2E7D32;
+    margin-right: 6px;
+  }
+
+  .inv-dc-line-metrics {
+    margin: 0;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .inv-dc-line-input {
+    width: 100% !important;
+    min-width: 0 !important;
+    min-height: 44px;
+    box-sizing: border-box;
+    padding: 8px 10px !important;
+  }
+
+  .inv-dc-line-input--full {
+    width: 100% !important;
+  }
+
+  .inv-dc-detail-actions {
+    flex-direction: column !important;
+    align-items: stretch !important;
+  }
+
+  .inv-dc-detail-actions .btn {
+    width: 100%;
+    min-height: 44px;
+    justify-content: center;
+  }
+
   /* Bon de mouvement — header mobile : 1 col + Référence/Date empilés */
   .inventaire-module .bm-doc-header {
     overflow: hidden;
@@ -5777,6 +6032,14 @@ tbody tr:last-child td { border-bottom: none; }
   .rh-ext-desktop-only { display: none !important; }
   .mes-docs-folder-grid {
     grid-template-columns: repeat(auto-fill, minmax(130px, 1fr));
+  }
+}
+
+@media (max-width: 340px) {
+  .inv-dc-field-grid,
+  .inv-dc-drawer .inv-dc-info-grid,
+  .inv-dc-line-metrics {
+    grid-template-columns: 1fr !important;
   }
 }
 

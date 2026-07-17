@@ -356,7 +356,7 @@ export default function DemandesChantier({ projet, embedded = false }) {
   }
 
   return (
-    <div className={embedded ? '' : 'animate-fade-in'}>
+    <div className={embedded ? 'inv-dc-page inv-dc-page--embedded' : 'animate-fade-in inv-dc-page'}>
       {!embedded && (
         <div className="page-header flex-between finance-page-header">
           <div>
@@ -394,7 +394,7 @@ export default function DemandesChantier({ projet, embedded = false }) {
         </div>
       )}
 
-      <div className="card finance-toolbar" style={{ marginBottom: 16, padding: '14px 20px' }}>
+      <div className="card finance-toolbar inv-dc-toolbar" style={{ marginBottom: 16, padding: '14px 20px' }}>
         <div className="finance-toolbar-inner" style={{ flexWrap: 'wrap', gap: 10 }}>
           <div style={{ position: 'relative', flex: '1 1 200px', maxWidth: 280 }}>
             <Search size={14} style={{ position: 'absolute', left: 10, top: 10, color: 'var(--text-3)' }} />
@@ -426,8 +426,8 @@ export default function DemandesChantier({ projet, embedded = false }) {
             : 'Aucune demande chantier. Créez la première demande de matériel.'}
         </div>
       ) : (
-        <div className="card" style={{ padding: 0 }}>
-          <div className="table-wrap" style={{ overflowX: 'auto' }}>
+        <div className="card inv-dc-list-card" style={{ padding: 0 }}>
+          <div className="table-wrap inv-dc-desktop" style={{ overflowX: 'auto' }}>
             <table style={{ minWidth: embedded ? 900 : 1100 }}>
               <thead>
                 <tr>
@@ -506,6 +506,88 @@ export default function DemandesChantier({ projet, embedded = false }) {
               </tbody>
             </table>
           </div>
+
+          <div className="inv-dc-mobile" aria-label="Liste demandes chantier">
+            {filtered.map((r) => (
+              <article key={r.id} className="inv-dc-card">
+                <header className="inv-dc-card-head">
+                  <div className="inv-dc-card-ref">{r.ref}</div>
+                  <span
+                    className="badge"
+                    style={{ background: `${siteRequestStatutColor(r.statut)}22`, color: siteRequestStatutColor(r.statut) }}
+                  >
+                    {r.statutLabel}
+                  </span>
+                </header>
+                {!embedded && (
+                  <div className="inv-dc-card-title">{r.project_name || '—'}</div>
+                )}
+                <dl className="inv-dc-card-fields">
+                  <div className="inv-dc-field">
+                    <dt>Client</dt>
+                    <dd>{r.client_name || '—'}</dd>
+                  </div>
+                  <div className="inv-dc-field-grid">
+                    <div className="inv-dc-field">
+                      <dt>Nb articles</dt>
+                      <dd>{r.distinct_articles ?? '—'}</dd>
+                    </div>
+                    <div className="inv-dc-field">
+                      <dt>Qté totale</dt>
+                      <dd>{r.total_articles ?? '—'}</dd>
+                    </div>
+                  </div>
+                  <div className="inv-dc-field">
+                    <dt>Date souhaitée</dt>
+                    <dd>{fmtDate(r.date_souhaitee)}</dd>
+                  </div>
+                  <div className="inv-dc-field-grid">
+                    <div className="inv-dc-field">
+                      <dt>Préparation</dt>
+                      <dd>
+                        <span className={`badge ${prepBadgeClass(r.statut)}`}>
+                          {siteRequestPreparationStatut(r.statut)}
+                        </span>
+                      </dd>
+                    </div>
+                    <div className="inv-dc-field">
+                      <dt>Livraison</dt>
+                      <dd>
+                        <span className={`badge ${livBadgeClass(r.statut)}`}>
+                          {siteRequestLivraisonStatut(r.statut)}
+                        </span>
+                      </dd>
+                    </div>
+                  </div>
+                </dl>
+                <footer className="inv-dc-card-actions">
+                  {getRowActions(r, rowHandlers, { embedded }).map((action) => {
+                    const Icon = action.icon;
+                    return (
+                      <button
+                        key={action.key}
+                        type="button"
+                        className="btn btn-ghost btn-sm inv-dc-action"
+                        onClick={action.onClick}
+                        disabled={saving}
+                      >
+                        <Icon size={14} /> {action.label}
+                      </button>
+                    );
+                  })}
+                  {r.statut === 'brouillon' && (
+                    <button
+                      type="button"
+                      className="btn btn-ghost btn-sm inv-dc-action inv-dc-action--danger"
+                      onClick={() => handleDelete(r.id)}
+                    >
+                      <Trash2 size={14} /> Supprimer
+                    </button>
+                  )}
+                </footer>
+              </article>
+            ))}
+          </div>
         </div>
       )}
 
@@ -513,16 +595,20 @@ export default function DemandesChantier({ projet, embedded = false }) {
       {detail && (
         <>
           <div className="rh-emp-docs-drawer-overlay" onClick={() => setDetail(null)} aria-hidden="true" />
-          <aside className="rh-emp-docs-drawer" style={{ maxWidth: 920, width: 'min(96vw, 920px)' }} role="dialog">
-            <header className="rh-emp-docs-drawer-header">
-              <div>
-                <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-3)' }}>{detail.ref}</div>
-                <h2 className="rh-emp-docs-drawer-title">DEMANDE — {detail.project_name}</h2>
+          <aside className="rh-emp-docs-drawer inv-dc-drawer" style={{ maxWidth: 920, width: 'min(96vw, 920px)' }} role="dialog">
+            <header className="rh-emp-docs-drawer-header inv-dc-drawer-header">
+              <div className="inv-dc-drawer-head-top">
+                <div className="inv-dc-drawer-head-text">
+                  <div className="inv-dc-drawer-ref">{detail.ref}</div>
+                  <h2 className="rh-emp-docs-drawer-title">DEMANDE — {detail.project_name}</h2>
+                </div>
+                <button type="button" className="rh-emp-modal-close inv-dc-drawer-close" onClick={() => setDetail(null)} aria-label="Fermer">
+                  <X size={20} />
+                </button>
               </div>
-              <button type="button" className="rh-emp-modal-close" onClick={() => setDetail(null)}><X size={20} /></button>
             </header>
             <div className="rh-emp-docs-drawer-body">
-              <div className="rh-emp-docs-info-grid" style={{ marginBottom: 16 }}>
+              <div className="rh-emp-docs-info-grid inv-dc-info-grid" style={{ marginBottom: 16 }}>
                 <div><div className="rh-emp-docs-info-label">Client</div><div className="rh-emp-docs-info-value">{detail.client_name || '—'}</div></div>
                 <div><div className="rh-emp-docs-info-label">Chef chantier</div><div className="rh-emp-docs-info-value">{detail.chef_chantier || '—'}</div></div>
                 <div><div className="rh-emp-docs-info-label">Priorité</div><div className="rh-emp-docs-info-value">{detail.priorite}</div></div>
@@ -542,7 +628,7 @@ export default function DemandesChantier({ projet, embedded = false }) {
                       compact
                     />
                   )}
-                <div className="table-wrap" style={{ marginBottom: 16 }}>
+                <div className="table-wrap inv-dc-lines-desktop" style={{ marginBottom: 16 }}>
                   <table style={{ fontSize: '0.82rem' }}>
                     <thead>
                       <tr>
@@ -594,6 +680,65 @@ export default function DemandesChantier({ projet, embedded = false }) {
                     </tbody>
                   </table>
                 </div>
+
+                <div className="inv-dc-lines-mobile" style={{ marginBottom: 16 }}>
+                  {(detail.lines || []).filter((l) => Number(l.quantite_demandee) > 0).map((l) => {
+                    const prepared = isLineFullyPrepared(l);
+                    return (
+                      <div
+                        key={l.id || `m-${l.category_id}-${l.article_name}`}
+                        className={`inv-dc-line-card${prepared ? ' is-prepared' : ''}`}
+                      >
+                        <div className="inv-dc-line-name">
+                          {prepared && <span className="inv-dc-line-ok" title="Préparée">✓</span>}
+                          {l.article_name}
+                        </div>
+                        <dl className="inv-dc-line-metrics">
+                          <div className="inv-dc-field">
+                            <dt>Demandé</dt>
+                            <dd>{l.quantite_demandee}</dd>
+                          </div>
+                          <div className="inv-dc-field">
+                            <dt>Préparé</dt>
+                            <dd>
+                              {embedded ? (
+                                l.quantite_preparee ?? '—'
+                              ) : (
+                                <input
+                                  type="number"
+                                  min="0"
+                                  value={l.quantite_preparee ?? l.quantite_demandee ?? ''}
+                                  onChange={(e) => updateDetailLine(l.id, { quantite_preparee: Number(e.target.value) || 0 })}
+                                  className="inv-dc-line-input"
+                                  style={INPUT_STYLE}
+                                  disabled={['prete', 'livree', 'annulee'].includes(detail.statut)}
+                                />
+                              )}
+                            </dd>
+                          </div>
+                          <div className="inv-dc-field">
+                            <dt>Stock</dt>
+                            <dd>{l.stock_actuel ?? '—'}</dd>
+                          </div>
+                        </dl>
+                        {!embedded && (
+                          <dl className="inv-dc-field" style={{ marginTop: 8 }}>
+                            <dt>Remarque magasin</dt>
+                            <dd>
+                              <input
+                                value={l.remarque_magasinier || ''}
+                                onChange={(e) => updateDetailLine(l.id, { remarque_magasinier: e.target.value })}
+                                className="inv-dc-line-input inv-dc-line-input--full"
+                                style={INPUT_STYLE}
+                                disabled={['prete', 'livree', 'annulee'].includes(detail.statut)}
+                              />
+                            </dd>
+                          </dl>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
                 </>
               )}
 
@@ -609,7 +754,7 @@ export default function DemandesChantier({ projet, embedded = false }) {
                 </div>
               )}
 
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
+              <div className="inv-dc-detail-actions" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
                 <button type="button" className="btn btn-secondary btn-sm" onClick={() => handlePdf(detail.id)}><Download size={14} /> Télécharger PDF</button>
                 {!embedded && detail.statut === 'soumise' && (
                   <button type="button" className="btn btn-primary btn-sm" disabled={saving} onClick={() => runAction((id) => prepareSiteMaterialRequest(id, detail.lines))}>
