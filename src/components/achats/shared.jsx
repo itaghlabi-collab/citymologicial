@@ -101,7 +101,7 @@ export function EmptyState({ icon, title, sub, action, onAction }) {
   );
 }
 
-export function Modal({ open, onClose, title, children, width }) {
+export function Modal({ open, onClose, title, children, width, contentClassName = '' }) {
   if (!open) return null;
   return (
     <div
@@ -129,7 +129,7 @@ export function Modal({ open, onClose, title, children, width }) {
             <X size={20} strokeWidth={2.5} aria-hidden="true" />
           </button>
         </div>
-        <div className="achats-modal-body">{children}</div>
+        <div className={`achats-modal-body${contentClassName ? ` ${contentClassName}` : ''}`}>{children}</div>
       </div>
     </div>
   );

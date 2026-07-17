@@ -10025,14 +10025,14 @@ tbody tr:last-child td { border-bottom: none; }
 
 .achats-modal-header {
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: space-between;
-  gap: 12px;
+  gap: 10px;
   flex-shrink: 0;
   padding: 14px 16px;
   border-bottom: 1px solid var(--border);
   background: #fff;
-  z-index: 2;
+  z-index: 5;
 }
 
 .achats-modal-title {
@@ -10043,10 +10043,12 @@ tbody tr:last-child td { border-bottom: none; }
   font-weight: 800;
   font-size: 1.05rem;
   letter-spacing: 0.04em;
-  line-height: 1.25;
+  line-height: 1.3;
   color: var(--text);
   overflow-wrap: anywhere;
   word-break: normal;
+  padding-top: 10px;
+  padding-right: 4px;
 }
 
 .achats-modal-close {
@@ -10067,6 +10069,8 @@ tbody tr:last-child td { border-bottom: none; }
   cursor: pointer;
   box-sizing: border-box;
   -webkit-tap-highlight-color: transparent;
+  position: relative;
+  z-index: 6;
 }
 
 .achats-modal-close:hover,
@@ -10087,42 +10091,161 @@ tbody tr:last-child td { border-bottom: none; }
   overflow-x: hidden;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
-  padding: 20px 16px 24px;
+  padding: 16px;
   box-sizing: border-box;
+}
+
+/* Détail devis — layout compact (évite table-wrap mobile) */
+.achats-quote-detail-inner {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.achats-quote-fields {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.achats-quote-row {
+  display: grid;
+  grid-template-columns: minmax(110px, 38%) minmax(0, 1fr);
+  gap: 8px 12px;
+  align-items: baseline;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.achats-quote-row:last-child {
+  border-bottom: none;
+}
+
+.achats-quote-row dt {
+  margin: 0;
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-3);
+}
+
+.achats-quote-row dd {
+  margin: 0;
+  font-size: 0.86rem;
+  font-weight: 600;
+  color: var(--text);
+  word-break: normal;
+  overflow-wrap: anywhere;
+  text-align: right;
+}
+
+.achats-quote-refs-title {
+  margin: 0 0 8px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+}
+
+.achats-quote-refs-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.achats-quote-line {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: var(--surface, #fff);
+  box-sizing: border-box;
+}
+
+.achats-quote-line-top {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-bottom: 8px;
+  min-width: 0;
+}
+
+.achats-quote-line-ref {
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--text-3);
+}
+
+.achats-quote-line-name {
+  font-size: 0.84rem;
+  font-weight: 600;
+  line-height: 1.35;
+  color: var(--text);
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+
+.achats-quote-line-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  font-size: 0.78rem;
+  color: var(--text-2);
+}
+
+.achats-quote-line-meta strong {
+  margin-left: auto;
+  color: var(--text);
+  font-size: 0.84rem;
 }
 
 @media (max-width: 768px) {
   .achats-modal-overlay {
     align-items: flex-end;
-    padding: 0;
-    padding-top: env(safe-area-inset-top, 0px);
+    /* Sous la barre d’app + safe-area → le × n’est plus coupé / caché */
+    padding: calc(var(--header-h, 60px) + env(safe-area-inset-top, 0px) + 8px)
+      0
+      0
+      0;
   }
 
   .achats-modal-box {
     max-width: 100% !important;
     width: 100%;
-    max-height: min(90dvh, calc(100dvh - env(safe-area-inset-top, 0px) - 8px));
+    max-height: 100%;
+    height: auto;
     border-radius: 16px 16px 0 0;
     padding-bottom: env(safe-area-inset-bottom, 0px);
   }
 
   .achats-modal-header {
-    padding: 12px 14px;
-    padding-right: max(14px, env(safe-area-inset-right, 0px));
-    padding-left: max(14px, env(safe-area-inset-left, 0px));
+    padding: 10px 12px;
+    padding-right: max(12px, env(safe-area-inset-right, 0px));
+    padding-left: max(12px, env(safe-area-inset-left, 0px));
     position: relative;
+    background: #fff;
     box-shadow: 0 1px 0 var(--border);
   }
 
   .achats-modal-title {
-    font-size: 0.95rem;
+    font-size: 0.88rem;
+    padding-top: 8px;
+    line-height: 1.25;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
   }
 
   .achats-modal-close {
-    width: 48px;
-    height: 48px;
-    min-width: 48px;
-    min-height: 48px;
+    width: 44px;
+    height: 44px;
+    min-width: 44px;
+    min-height: 44px;
     border: 2px solid var(--text-2, #555);
     background: #fff;
     color: var(--text, #111);
@@ -10130,7 +10253,29 @@ tbody tr:last-child td { border-bottom: none; }
   }
 
   .achats-modal-body {
-    padding: 16px 14px calc(20px + env(safe-area-inset-bottom, 0px));
+    padding: 12px 14px calc(14px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .achats-quote-row {
+    grid-template-columns: minmax(100px, 36%) minmax(0, 1fr);
+    padding: 5px 0;
+    gap: 6px 10px;
+  }
+
+  .achats-quote-row dt {
+    font-size: 0.64rem;
+  }
+
+  .achats-quote-row dd {
+    font-size: 0.82rem;
+  }
+
+  .achats-quote-line {
+    padding: 8px 10px;
+  }
+
+  .achats-quote-line-meta {
+    gap: 6px 10px;
   }
 }
 

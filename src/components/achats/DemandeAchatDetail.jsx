@@ -939,54 +939,54 @@ export default function DemandeAchatDetail({
         </div>
       </div>
 
-      <Modal open={!!viewQuote} onClose={() => setViewQuote(null)} title="Détail devis fournisseur" width={640}>
+      <Modal
+        open={!!viewQuote}
+        onClose={() => setViewQuote(null)}
+        title="Détail devis fournisseur"
+        width={640}
+        contentClassName="achats-quote-detail"
+      >
         {viewQuote && (
-          <div style={{ fontSize: '0.84rem', display: 'grid', gap: 10 }}>
-            {[
-              ['Fournisseur', viewQuote.supplier_name],
-              ['Réf. devis', viewQuote.ref_devis || '—'],
-              ['HT', formatMAD(viewQuote.montant_ht)],
-              ['TVA', `${viewQuote.tva_rate}%`],
-              ['TTC', formatMAD(viewQuote.montant_ttc)],
-              ['Délai', viewQuote.delai],
-              ['Validité', viewQuote.validite],
-              ['Conditions paiement', viewQuote.conditions_paiement],
-              ['Observations', viewQuote.observations],
-            ].map(([l, v]) => (
-              <div key={l}><span style={{ color: 'var(--text-3)', fontSize: '0.72rem', fontWeight: 700 }}>{l}</span><div>{v || '—'}</div></div>
-            ))}
-            {viewQuote.lines?.length > 0 && (
-              <div>
-                <span style={{ color: 'var(--text-3)', fontSize: '0.72rem', fontWeight: 700 }}>Références</span>
-                <div className="table-wrap" style={{ marginTop: 8 }}>
-                  <table style={{ fontSize: '0.78rem' }}>
-                    <thead>
-                      <tr>
-                        <th>Réf.</th>
-                        <th>Désignation</th>
-                        <th>Qté</th>
-                        <th>Unité</th>
-                        <th>P.U. HT</th>
-                        <th>Remise</th>
-                        <th>Total HT</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {viewQuote.lines.map((line) => (
-                        <tr key={line.id}>
-                          <td>{line.reference || '—'}</td>
-                          <td>{line.designation || '—'}</td>
-                          <td>{line.quantite || '—'}</td>
-                          <td>{line.unite || '—'}</td>
-                          <td>{line.prix_unitaire_ht ? formatMAD(line.prix_unitaire_ht) : '—'}</td>
-                          <td>{line.remise_pct ? `${line.remise_pct}%` : '—'}</td>
-                          <td style={{ fontWeight: 700 }}>{formatMAD(line.montant_ht)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+          <div className="achats-quote-detail-inner">
+            <dl className="achats-quote-fields">
+              {[
+                ['Fournisseur', viewQuote.supplier_name],
+                ['Réf. devis', viewQuote.ref_devis || '—'],
+                ['HT', formatMAD(viewQuote.montant_ht)],
+                ['TVA', `${viewQuote.tva_rate}%`],
+                ['TTC', formatMAD(viewQuote.montant_ttc)],
+                ['Délai', viewQuote.delai],
+                ['Validité', viewQuote.validite],
+                ['Conditions paiement', viewQuote.conditions_paiement],
+                ['Observations', viewQuote.observations],
+              ].map(([l, v]) => (
+                <div key={l} className="achats-quote-row">
+                  <dt>{l}</dt>
+                  <dd>{v || '—'}</dd>
                 </div>
-              </div>
+              ))}
+            </dl>
+
+            {viewQuote.lines?.length > 0 && (
+              <section className="achats-quote-refs" aria-label="Références">
+                <h3 className="achats-quote-refs-title">Références</h3>
+                <div className="achats-quote-refs-list">
+                  {viewQuote.lines.map((line) => (
+                    <article key={line.id} className="achats-quote-line">
+                      <div className="achats-quote-line-top">
+                        {line.reference ? <span className="achats-quote-line-ref">{line.reference}</span> : null}
+                        <span className="achats-quote-line-name">{line.designation || '—'}</span>
+                      </div>
+                      <div className="achats-quote-line-meta">
+                        <span>{line.quantite ?? '—'}{line.unite ? ` ${line.unite}` : ''}</span>
+                        <span>{line.prix_unitaire_ht ? formatMAD(line.prix_unitaire_ht) : '—'}</span>
+                        {line.remise_pct ? <span>-{line.remise_pct}%</span> : null}
+                        <strong>{formatMAD(line.montant_ht)}</strong>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
             )}
           </div>
         )}
