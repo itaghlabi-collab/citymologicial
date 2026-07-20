@@ -11,6 +11,8 @@ import {
   generateCrmProformaNumero,
   CRM_PROFORMA_STATUTS,
   CRM_PROFORMA_STATUT_LABEL,
+  mapDevisLigneToProformaLigne,
+  resolveLignePrixHt,
 } from '../../services/crm/crmProformas';
 import Big from 'big.js';
 import { moneyLineHt, moneyLineTtc, moneyComputeDocumentTotals, moneyToNumber, moneyFormatMAD } from '../../utils/decimalMoney';
@@ -122,7 +124,7 @@ function LigneRow({ ligne, categories, articles, onChange, onDelete, onDuplicate
               ...ligne,
               article_id: e.target.value,
               designation: art?.designation || art?.nom || ligne.designation,
-              prix_ht: art?.prix_ht ?? ligne.prix_ht,
+              prix_ht: art?.prix_ht ?? art?.prix ?? ligne.prix_ht,
               unite: art?.unite || ligne.unite,
               tva: art?.tva ?? ligne.tva,
             });
@@ -192,7 +194,15 @@ export default function ProformaForm({ proforma, initialClientId = '', onBack, o
         ...proforma,
         client_id: proforma.client_id || initialClientId || '',
         lignes: proforma.lignes?.length
-          ? proforma.lignes.map(l => ({ ...EMPTY_LIGNE(), ...l, _id: l._id || Date.now() + Math.random() }))
+          ? proforma.lignes.map((l) => {
+              const mapped = mapDevisLigneToProformaLigne(l);
+              return {
+                ...EMPTY_LIGNE(),
+                ...mapped,
+                prix_ht: resolveLignePrixHt(mapped),
+                _id: l._id || l.id || Date.now() + Math.random(),
+              };
+            })
           : [EMPTY_LIGNE()],
       };
     }
@@ -239,7 +249,15 @@ export default function ProformaForm({ proforma, initialClientId = '', onBack, o
         type_projet: dv.type_projet || p.type_projet,
         modalites_paiement: dv.modalites_paiement || p.modalites_paiement,
         conditions: dv.conditions || p.conditions,
-        lignes: dv.lignes?.length ? dv.lignes.map(l => ({ ...EMPTY_LIGNE(), ...l, _id: Date.now() + Math.random() })) : p.lignes,
+        notes_internes: dv.notes_internes || p.notes_internes,
+        date_validite: dv.date_validite || p.date_validite,
+        lignes: dv.lignes?.length
+          ? dv.lignes.map((l) => ({
+              ...EMPTY_LIGNE(),
+              ...mapDevisLigneToProformaLigne(l),
+              _id: Date.now() + Math.random(),
+            }))
+          : p.lignes,
         titre: dv.titre ? 'Proforma — ' + dv.titre : p.titre,
       }));
     } catch {

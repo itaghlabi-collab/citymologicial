@@ -48,6 +48,47 @@ function ligneTotalHt(l) {
   }));
 }
 
+/**
+ * Prix unitaire robuste depuis une ligne devis/facture.
+ * Si prix_ht est vide mais total_ht est renseigné → déduit PU = total / (qté × facteur remise).
+ */
+export function resolveLignePrixHt(l) {
+  if (!l || (l.type && l.type !== 'article')) return 0;
+  let prix = moneyToNumber(l.prix_ht ?? l.prix ?? 0);
+  const qty = moneyToNumber(l.quantite ?? 0);
+  const remise = moneyToNumber(l.remise ?? 0);
+  const total = moneyToNumber(l.total_ht ?? 0);
+  if (prix === 0 && total > 0 && qty > 0) {
+    const factor = 1 - (remise / 100);
+    prix = moneyToNumber(total / (qty * (factor > 0 ? factor : 1)));
+  }
+  return prix;
+}
+
+/** Mappe une ligne devis → ligne proforma (formulaire / insert) */
+export function mapDevisLigneToProformaLigne(l) {
+  const type = l?.type || 'article';
+  const quantite = type === 'article' ? (moneyToNumber(l.quantite ?? 1) || 1) : moneyToNumber(l.quantite ?? 0);
+  const remise = moneyToNumber(l?.remise ?? 0);
+  const tva = l?.tva == null || l?.tva === '' ? 20 : moneyToNumber(l.tva);
+  const prix_ht = resolveLignePrixHt({ ...l, type, quantite, remise });
+  return {
+    type,
+    designation: l?.designation || '',
+    description: l?.description || '',
+    article_id: l?.article_id ? String(l.article_id) : '',
+    categorie_id: l?.categorie_id ? String(l.categorie_id) : '',
+    quantite,
+    unite: l?.unite || 'unite',
+    prix_ht,
+    remise,
+    tva,
+    total_ht: type === 'article'
+      ? moneyToNumber(moneyLineHt({ qty: quantite, unitPriceHt: prix_ht, remisePct: remise }))
+      : 0,
+  };
+}
+
 function computeTotals(lignes = []) {
   const result = moneyComputeDocumentTotals(lignes, (l) => {
     if (l.type !== 'article') return null;
@@ -89,10 +130,10 @@ export function normalizeProformaLigne(row) {
     categorie_id: row.categorie_id ? String(row.categorie_id) : '',
     quantite: Number(row.quantite ?? 1),
     unite: row.unite || 'unite',
-    prix_ht: Number(row.prix_ht ?? 0),
+    prix_ht: resolveLignePrixHt(row),
     remise: Number(row.remise ?? 0),
     tva: Number(row.tva ?? 20),
-    total_ht: Number(row.total_ht ?? ligneTotalHt(row)),
+    total_ht: Number(row.total_ht ?? ligneTotalHt({ ...row, prix_ht: resolveLignePrixHt(row) })),
   };
 }
 
@@ -183,10 +224,10 @@ function toLigneRow(ligne, proformaId, ordre) {
     categorie_id: ligne.categorie_id || null,
     quantite: Number(ligne.quantite) || 1,
     unite: ligne.unite || 'unite',
-    prix_ht: Number(ligne.prix_ht) || 0,
-    remise: Number(ligne.remise) || 0,
-    tva: Number(ligne.tva) ?? 20,
-    total_ht: Number(ligne.total_ht) || ligneTotalHt(ligne),
+    prix_ht: resolveLignePrixHt(ligne),
+    remise: moneyToNumber(ligne.remise) || 0,
+    tva: ligne.tva == null || ligne.tva === '' ? 20 : moneyToNumber(ligne.tva),
+    total_ht: moneyToNumber(ligne.total_ht) || ligneTotalHt({ ...ligne, prix_ht: resolveLignePrixHt(ligne) }),
   };
 }
 
@@ -415,19 +456,7 @@ export async function createCrmProformaFromDevis(devisId) {
     conditions: devis.conditions || '',
     notes_internes: devis.notes_internes || '',
     notes: '',
-    lignes: (devis.lignes || []).map((l) => ({
-      type: l.type || 'article',
-      designation: l.designation,
-      description: l.description,
-      article_id: l.article_id,
-      categorie_id: l.categorie_id,
-      quantite: l.quantite,
-      unite: l.unite,
-      prix_ht: l.prix_ht,
-      remise: l.remise,
-      tva: l.tva,
-      total_ht: l.total_ht,
-    })),
+    lignes: (devis.lignes || []).map((l) => mapDevisLigneToProformaLigne(l)),
   });
 }
 

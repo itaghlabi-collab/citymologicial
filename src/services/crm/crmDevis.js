@@ -42,6 +42,14 @@ function computeTotals(lignes = []) {
 
 export function normalizeLigne(row) {
   if (!row) return null;
+  const quantite = Number(row.quantite ?? 1);
+  const remise = Number(row.remise ?? 0);
+  let prix_ht = Number(row.prix_ht ?? row.prix ?? 0);
+  const totalStored = Number(row.total_ht ?? 0);
+  if ((!prix_ht || Number.isNaN(prix_ht)) && totalStored > 0 && quantite > 0 && (row.type || 'article') === 'article') {
+    const factor = 1 - (remise / 100);
+    prix_ht = totalStored / (quantite * (factor > 0 ? factor : 1));
+  }
   return {
     id: row.id,
     _id: row.id,
@@ -52,12 +60,12 @@ export function normalizeLigne(row) {
     description: row.description || '',
     article_id: row.article_id ? String(row.article_id) : '',
     categorie_id: row.categorie_id ? String(row.categorie_id) : '',
-    quantite: Number(row.quantite ?? 1),
+    quantite,
     unite: row.unite || 'unite',
-    prix_ht: Number(row.prix_ht ?? 0),
-    remise: Number(row.remise ?? 0),
+    prix_ht: Number.isFinite(prix_ht) ? prix_ht : 0,
+    remise,
     tva: Number(row.tva ?? 20),
-    total_ht: Number(row.total_ht ?? ligneTotalHt(row)),
+    total_ht: totalStored || ligneTotalHt({ ...row, prix_ht, quantite, remise }),
   };
 }
 
