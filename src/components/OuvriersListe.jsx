@@ -18,7 +18,7 @@ import { WORKER_HOURS_PER_DAY } from '../services/rh/workers';
 export const SEED_WORKERS = [];
 
 /* ── Constants ── */
-const FONCTIONS   = ['Macon', 'Coffreur', 'Ferrailleur', 'Electricien', 'Peintre', 'Plombier', 'Carreleur', 'Menuisier', 'Soudeur', 'Chauffeur', 'Manoeuvre', 'Chef equipe', 'Conducteur engins', 'Topographe'];
+const FONCTIONS   = ['Macon', 'Coffreur', 'Ferrailleur', 'Electricien', 'Peintre', 'Plombier', 'Carreleur', 'Menuisier', 'Soudeur', 'Chauffeur', 'Manoeuvre', 'Chef equipe', 'Conducteur engins', 'Topographe', 'Gardien'];
 const EXPERIENCES = ['debutant', 'intermediaire', 'confirme', 'expert'];
 const EXP_LABEL   = { debutant: 'Debutant', intermediaire: 'Intermediaire', confirme: 'Confirme', expert: 'Expert' };
 const GROUPES     = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
