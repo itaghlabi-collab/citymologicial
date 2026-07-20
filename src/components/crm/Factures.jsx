@@ -506,8 +506,8 @@ export default function Factures() {
         ) : (
           <>
           <div className="crm-table-desktop">
-            <div className="table-wrap">
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+            <div className="table-wrap crm-table-scroll-x">
+              <table style={{ borderCollapse: 'separate', borderSpacing: 0, fontSize: '0.85rem' }}>
               <thead>
                 <tr style={{ borderBottom: '1.5px solid var(--border)', background: 'var(--bg)' }}>
                   {[
@@ -562,13 +562,13 @@ export default function Factures() {
                       </td>
 
                       {/* Titre */}
-                      <td data-label="Titre" style={{ padding: '10px 12px', maxWidth: 180 }}>
+                      <td data-label="Titre" style={{ padding: '10px 12px' }}>
                         <button
                           type="button"
-                          title="Ouvrir le PDF"
+                          title={f.titre || 'Ouvrir le PDF'}
                           disabled={pdfLoadingId === f.id}
                           onClick={() => handlePdfInTab(f)}
-                          style={pdfOpenButtonStyle(pdfLoadingId === f.id, { fontWeight: 600, color: 'var(--text)', width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' })}
+                          style={pdfOpenButtonStyle(pdfLoadingId === f.id, { fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap' })}
                         >
                           {f.titre || '—'}
                         </button>

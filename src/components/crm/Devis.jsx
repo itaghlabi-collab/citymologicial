@@ -624,8 +624,8 @@ export default function Devis({ onNavigate }) {
         ) : (
           <>
           <div className="crm-table-desktop">
-            <div className="table-wrap">
-              <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+            <div className="table-wrap crm-table-scroll-x">
+              <table style={{ borderCollapse: 'separate', borderSpacing: 0, fontSize: '0.85rem' }}>
               <thead>
                 <tr style={{ borderBottom: '1.5px solid var(--border)', background: 'var(--bg)' }}>
                   {[
@@ -674,18 +674,18 @@ export default function Devis({ onNavigate }) {
                       </td>
 
                       {/* Titre */}
-                      <td data-label="Titre" style={{ padding: '10px 12px', maxWidth: 220 }}>
+                      <td data-label="Titre" style={{ padding: '10px 12px' }}>
                         <button
                           type="button"
-                          title="Ouvrir le PDF"
+                          title={d.titre || 'Ouvrir le PDF'}
                           disabled={pdfLoadingId === d.id}
                           onClick={() => handlePdfInTab(d)}
-                          style={pdfOpenButtonStyle(pdfLoadingId === d.id, { fontWeight: 600, color: 'var(--text)', width: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' })}
+                          style={pdfOpenButtonStyle(pdfLoadingId === d.id, { fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap' })}
                         >
                           {d.titre || '—'}
                         </button>
                         {d.type_projet && (
-                          <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 2 }}>{d.type_projet}</div>
+                          <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 2, whiteSpace: 'nowrap' }}>{d.type_projet}</div>
                         )}
                       </td>
 
