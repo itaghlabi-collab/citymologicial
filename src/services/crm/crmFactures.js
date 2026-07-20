@@ -122,6 +122,8 @@ export function normalizeCrmFacture(row, lignes = [], paiements = []) {
     } : null,
     devis_id: row.devis_id ? String(row.devis_id) : '',
     devis_reference: devisRef,
+    proforma_id: row.proforma_id ? String(row.proforma_id) : '',
+    proforma_numero: '',
     facture_type: row.type || 'facture',
     pourcentage_acompte: row.pourcentage_acompte != null ? Number(row.pourcentage_acompte) : null,
     devise: row.devise || 'MAD',
@@ -144,7 +146,7 @@ export function normalizeCrmFacture(row, lignes = [], paiements = []) {
 }
 
 function toFactureRow(form, totals, payeInfo) {
-  return {
+  const row = {
     type: form.facture_type || form.type || 'facture',
     numero: form.numero?.trim() || '',
     titre: form.titre?.trim() || '',
@@ -169,6 +171,11 @@ function toFactureRow(form, totals, payeInfo) {
     total_paye: payeInfo.total_paye,
     reste_a_payer: payeInfo.reste_a_payer,
   };
+  // Lien inverse proforma → facture (colonne optionnelle, ajoutée par migration proformas)
+  if (form.proforma_id) {
+    row.proforma_id = form.proforma_id;
+  }
+  return row;
 }
 
 function toLigneRow(ligne, factureId, ordre) {
