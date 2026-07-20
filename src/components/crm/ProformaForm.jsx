@@ -5,7 +5,7 @@
 import { useState, useEffect } from 'react';
 import {
   ChevronLeft, Plus, Trash2, Copy, AlertCircle,
-  FileText, ChevronDown, ChevronUp, GripVertical, X, Check,
+  FileText, ChevronDown, ChevronUp, GripVertical, X, Check, Download,
 } from 'lucide-react';
 import { listClients } from '../../services/crm/clients';
 import { listArticles } from '../../services/crm/articles';
@@ -16,6 +16,7 @@ import {
   CRM_PROFORMA_STATUTS,
   CRM_PROFORMA_STATUT_LABEL,
 } from '../../services/crm/crmProformas';
+import { generateProformaPdf } from '../../services/crm/proformaPdf';
 import Big from 'big.js';
 import { moneyLineHt, moneyLineTtc, moneyComputeDocumentTotals, moneyToNumber, moneyFormatMAD } from '../../utils/decimalMoney';
 import { hydrateDocLigneFromSource } from '../../utils/crm/docLigneHydrate';
@@ -367,6 +368,27 @@ export default function ProformaForm({ proforma, initialClientId = '', onBack, o
     }
   }
 
+  async function handlePdf() {
+    if (!isEdit || !proforma?.id) return;
+    try {
+      const catMap = Object.fromEntries(categories.map((c) => [String(c.id), c.nom]));
+      await generateProformaPdf({
+        ...form,
+        id: proforma.id,
+        client: selectedClient,
+        client_nom: selectedClient
+          ? [selectedClient.prenom, selectedClient.nom].filter(Boolean).join(' ') || selectedClient.nom
+          : '',
+        devis_reference: devisList.find((d) => String(d.id) === String(form.devis_id))?.reference || '',
+        total_ht: totalHT,
+        total_tva: totalTVA,
+        total_ttc: totalTTC,
+      }, catMap);
+    } catch (err) {
+      setApiError(err.message || 'Erreur génération PDF.');
+    }
+  }
+
   return (
     <div className="animate-fade-in">
       <button type="button" className="crm-back-btn" onClick={onBack} aria-label="Retour aux proformas">
@@ -593,6 +615,11 @@ export default function ProformaForm({ proforma, initialClientId = '', onBack, o
                 <button type="submit" className="btn btn-primary" disabled={isSaving || locked} style={{ justifyContent: 'center' }}>
                   {isSaving ? <Spinner /> : <><FileText size={14} /> {isEdit ? 'Enregistrer' : 'Créer la proforma'}</>}
                 </button>
+                {isEdit && (
+                  <button type="button" className="btn btn-ghost" onClick={handlePdf} style={{ justifyContent: 'center', display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Download size={14} /> Telecharger PDF
+                  </button>
+                )}
                 <button type="button" className="btn btn-ghost" onClick={onBack} style={{ justifyContent: 'center' }}>Annuler</button>
               </div>
             </div>

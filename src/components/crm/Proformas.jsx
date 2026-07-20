@@ -2,11 +2,13 @@ import { useState, useRef, useEffect } from 'react';
 import {
   Plus, Search, Edit2, Copy, Trash2, FileText,
   CheckCircle, XCircle, AlertCircle, RefreshCw, ArrowUpDown,
-  Ban, Send, X, ChevronLeft, ChevronRight, Eye,
+  Ban, Send, X, ChevronLeft, ChevronRight, Eye, Download,
 } from 'lucide-react';
 import { useCrmProformas } from '../../hooks/useCrmProformas';
 import { listClients } from '../../services/crm/clients';
+import { listCategories } from '../../services/crm/categories';
 import { CRM_PROFORMA_STATUT_LABEL } from '../../services/crm/crmProformas';
+import { generateProformaPdf } from '../../services/crm/proformaPdf';
 import ProformaForm from './ProformaForm';
 import CrmOverflowMenu from './CrmOverflowMenu';
 import CrmDocTabs from './CrmDocTabs';
@@ -95,6 +97,7 @@ export default function Proformas({ onSwitchDoc }) {
   const [editing, setEditing] = useState(null);
   const [initialClientId, setInitialClientId] = useState('');
   const [clientsList, setClientsList] = useState([]);
+  const [pdfLoadingId, setPdfLoadingId] = useState(null);
 
   const [search, setSearch] = useState('');
   const [filterStatut, setFilterStatut] = useState('');
@@ -213,6 +216,20 @@ export default function Proformas({ onSwitchDoc }) {
     if (!window.confirm('Supprimer cette proforma ? Cette action est irréversible.')) return;
     const result = await remove(id);
     showToast(result.success ? 'Proforma supprimée.' : (result.error || 'Erreur suppression.'), result.success ? 'success' : 'error');
+  }
+
+  async function handlePdf(p) {
+    setPdfLoadingId(p.id);
+    try {
+      const full = await getById(p.id);
+      const cats = await listCategories();
+      const catMap = Object.fromEntries((cats || []).map((c) => [String(c.id), c.nom]));
+      await generateProformaPdf(full, catMap);
+    } catch (err) {
+      showToast(err.message || 'Erreur génération PDF.', 'error');
+    } finally {
+      setPdfLoadingId(null);
+    }
   }
 
   if (view === 'form') {
@@ -382,6 +399,8 @@ export default function Proformas({ onSwitchDoc }) {
                         <td style={{ padding: '10px 12px' }}><StatutBadge statut={p.statut} /></td>
                         <td style={{ padding: '10px 10px', whiteSpace: 'nowrap' }}>
                           <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
+                            <button type="button" title="Télécharger PDF" onClick={() => handlePdf(p)} disabled={pdfLoadingId === p.id}
+                              className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }}><Download size={13} /></button>
                             <button type="button" title="Modifier" onClick={() => openEdit(p)} className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }}><Edit2 size={13} /></button>
                             <button type="button" title="Dupliquer" onClick={() => handleDuplicate(p)} className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }}><Copy size={13} /></button>
                             {p.statut !== 'convertie' && p.statut !== 'annulee' && (
@@ -419,8 +438,11 @@ export default function Proformas({ onSwitchDoc }) {
                     </div>
                     <div className="crm-doc-actions">
                       <button type="button" title="Voir" aria-label="Voir" onClick={() => openEdit(p)} className="btn btn-ghost btn-sm crm-icon-btn"><Eye size={14} /></button>
+                      <button type="button" title="PDF" aria-label="Télécharger PDF" onClick={() => handlePdf(p)} disabled={pdfLoadingId === p.id}
+                        className="btn btn-ghost btn-sm crm-icon-btn"><Download size={14} /></button>
                       <CrmOverflowMenu
                         items={[
+                          { icon: Download, label: 'Télécharger PDF', onClick: () => handlePdf(p), disabled: pdfLoadingId === p.id },
                           { icon: Edit2, label: 'Modifier', onClick: () => openEdit(p) },
                           { icon: Copy, label: 'Dupliquer', onClick: () => handleDuplicate(p) },
                           ...(p.statut !== 'convertie' && p.statut !== 'annulee'

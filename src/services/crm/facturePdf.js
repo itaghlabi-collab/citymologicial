@@ -265,6 +265,7 @@ export async function generateFacturePdf(facture, catMap = {}, options = {}) {
   const client = facture.client || {};
   const clientNom = facture.client_nom || clientDisplayName(client) || 'CLIENT';
   const isAcompte = facture.facture_type === 'acompte';
+  const isProforma = options.documentKind === 'proforma' || facture.document_kind === 'proforma';
   const rows = buildPdfRows(facture);
   const conditionsText = facture.conditions?.trim() || facture.modalites_paiement?.trim() || DEFAULT_CONDITIONS;
   const footerLayout = getFooterQrLayout(qrMeta);
@@ -533,9 +534,11 @@ export async function generateFacturePdf(facture, catMap = {}, options = {}) {
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(15);
   doc.setTextColor(0, 0, 0);
-  const docTitle = isAcompte
-    ? `FACTURE D'ACOMPTE ${facture.numero || ''}`
-    : `FACTURE ${facture.numero || ''}`;
+  const docTitle = isProforma
+    ? `FACTURE PROFORMA ${facture.numero || ''}`
+    : isAcompte
+      ? `FACTURE D'ACOMPTE ${facture.numero || ''}`
+      : `FACTURE ${facture.numero || ''}`;
   doc.text(docTitle, M, y);
   y += 3;
   doc.setDrawColor(...RED);
@@ -545,7 +548,7 @@ export async function generateFacturePdf(facture, catMap = {}, options = {}) {
 
   const infoFields = [
     ['Date d\'émission', fmtDate(facture.date_emission)],
-    ['Date d\'échéance', fmtDate(facture.date_echeance)],
+    [isProforma ? 'Date de validité' : 'Date d\'échéance', fmtDate(facture.date_validite || facture.date_echeance)],
     ['Intitulé', factureIntitule(facture.titre).toUpperCase()],
     ['Réalisé par', (facture.commercial || '—').toUpperCase()],
     ...(facture.devis_reference ? [['Devis source', facture.devis_reference]] : []),
@@ -636,6 +639,6 @@ export async function generateFacturePdf(facture, catMap = {}, options = {}) {
     drawFooter(p, totalPages);
   }
 
-  const pdfPrefix = isAcompte ? 'Facture_Acompte' : 'Facture';
-  deliverPdf(doc, `${pdfPrefix}_${(facture.numero || 'facture').replace(/\s+/g, '_')}.pdf`, options);
+  const pdfPrefix = isProforma ? 'Proforma' : isAcompte ? 'Facture_Acompte' : 'Facture';
+  deliverPdf(doc, `${pdfPrefix}_${(facture.numero || 'document').replace(/\s+/g, '_')}.pdf`, options);
 }
