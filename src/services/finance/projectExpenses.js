@@ -3,6 +3,7 @@
  */
 import { getSupabase } from '../../lib/supabase';
 import { isTotalSummaryRow } from './projectExpenseImportUtils';
+import { isWorkerPaymentSourceType } from './projectExpenseRules';
 
 const TABLE = 'project_expenses';
 
@@ -11,6 +12,7 @@ export const ORIGINE_LABELS = {
   achat: 'Achat',
   ordre_paiement: 'Ordre de paiement',
   charge_manuelle: 'Charge manuelle',
+  main_oeuvre: "Main d'œuvre",
 };
 
 export const STATUT_LABELS = {
@@ -51,7 +53,9 @@ export function normalizeProjectExpense(row) {
     montant: Number(row.montant) || 0,
     observation: row.observation || '',
     origine: row.origine || 'charge_manuelle',
-    origine_label: ORIGINE_LABELS[row.origine] || row.origine,
+    origine_label: isWorkerPaymentSourceType(row.source_type)
+      ? ORIGINE_LABELS.main_oeuvre
+      : (ORIGINE_LABELS[row.origine] || row.origine),
     source_type: row.source_type || '',
     source_id: row.source_id ? String(row.source_id) : '',
     statut: row.statut || 'valide',

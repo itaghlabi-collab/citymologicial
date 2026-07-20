@@ -14,10 +14,15 @@ import {
   resolveChargeProject,
   syncChargesToProjectsViaApi,
 } from './projectExpenseMerge';
-import { isChargePaidForProject } from './projectExpenseRules';
+import {
+  isChargePaidForProject,
+  isInternalCostCenterName,
+  isWorkerPaymentSourceType,
+} from './projectExpenseRules';
 
 const SKIP_STATUTS = ['Annulé', 'Refusé', 'Refusée', 'Brouillon'];
 const OP_PAID_STATUTS = ['Payé'];
+const WORKER_EXPENSE_CATEGORY = "Main d'œuvre";
 
 function isActiveStatut(statut) {
   return statut && !SKIP_STATUTS.includes(statut);
@@ -96,6 +101,12 @@ export async function syncChargeToProjectExpense(charge) {
     return null;
   }
 
+  // ATELIER / DÉPÔT : jamais de dépense chantier (même si un libellé projet est présent).
+  if (isInternalCostCenterName(charge.projet_lie)) {
+    await removeProjectExpenseForCharge(charge.id);
+    return null;
+  }
+
   const projects = await listProjectsForSelect().catch(() => []);
   const project = resolveChargeProject(charge, buildProjectIndexes(projects));
   if (!project?.id) return null;
@@ -118,6 +129,103 @@ export async function removeProjectExpenseForCharge(chargeId) {
     .delete()
     .eq('source_type', 'finance_charge')
     .eq('source_id', chargeId);
+}
+
+/**
+ * Supprime la dépense chantier liée à un paiement ouvrier consolidé (source_type + source_id).
+ * Idempotent — ne touche pas aux autres origines.
+ */
+export async function removeProjectExpenseForWorkerPayment(sourceType, sourceId) {
+  if (!sourceId) return;
+  const sb = getSupabase();
+  const types = isWorkerPaymentSourceType(sourceType)
+    ? ['worker_weekly_payment', 'worker_payment']
+    : [sourceType].filter(Boolean);
+  for (const type of types) {
+    await sb
+      .from('project_expenses')
+      .delete()
+      .eq('source_type', type)
+      .eq('source_id', sourceId);
+  }
+}
+
+function workerPaymentProjectExpensePayload(entity, sourceType, sourceId) {
+  const ouvrier = String(entity?.ouvrier || '').trim() || 'Ouvrier';
+  const ref = entity?.reference ? `Réf. ${entity.reference}` : null;
+  const montant = Number(entity?.net_to_pay ?? entity?.paid_amount ?? entity?.montantNet) || 0;
+  const datePay = entity?.paymentDate || entity?.paidAt?.slice?.(0, 10) || new Date().toISOString().slice(0, 10);
+  return {
+    project_id: entity.projectId,
+    date_depense: datePay,
+    categorie: WORKER_EXPENSE_CATEGORY,
+    element_depense: `Paiement ouvrier — ${ouvrier}`,
+    description: ref || 'Paiement hebdomadaire (pipeline RH)',
+    fournisseur: ouvrier,
+    montant,
+    montant_paye: montant,
+    observation: ref,
+    origine: 'main_oeuvre',
+    source_type: sourceType,
+    source_id: sourceId,
+    statut: 'payee',
+    date_paiement: datePay,
+    mode_paiement: entity?.paymentMethod || null,
+  };
+}
+
+/**
+ * Après validation / paiement RH : dépense chantier « Main d'œuvre » pour les projets clients.
+ * ATELIER / DÉPÔT sont exclus ici (voir syncWorkerPaymentToGeneralCharge).
+ * Réutilise upsertProjectExpenseFromSource (même clé source_type + source_id que la caisse).
+ */
+export async function syncWorkerPaymentToProjectExpense({ entity, sourceType, sourceId } = {}) {
+  if (!sourceId || !isWorkerPaymentSourceType(sourceType)) {
+    return { action: 'none', id: null };
+  }
+
+  const projectId = entity?.projectId || entity?.project_id || null;
+  if (!projectId) {
+    await removeProjectExpenseForWorkerPayment(sourceType, sourceId);
+    return { action: 'skipped_no_project', id: null };
+  }
+
+  // Nom officiel du projet ERP (fiable pour ATELIER / DÉPÔT), fallback libellé paie.
+  let projectName = entity?.projet || entity?.project_name || entity?.projectNom || '';
+  try {
+    const projects = await listProjectsForSelect();
+    const matched = (projects || []).find((p) => String(p.id) === String(projectId));
+    if (matched?.nom) projectName = matched.nom;
+  } catch {
+    /* keep entity label */
+  }
+
+  if (isInternalCostCenterName(projectName)) {
+    await removeProjectExpenseForWorkerPayment(sourceType, sourceId);
+    return { action: 'skipped_internal', id: null };
+  }
+
+  const montant = Number(entity?.net_to_pay ?? entity?.paid_amount ?? entity?.montantNet) || 0;
+  if (montant <= 0) {
+    await removeProjectExpenseForWorkerPayment(sourceType, sourceId);
+    return { action: 'skipped_zero', id: null };
+  }
+
+  try {
+    return await upsertProjectExpenseFromSource(
+      workerPaymentProjectExpensePayload(entity, sourceType, sourceId),
+    );
+  } catch (err) {
+    // Fallback si contrainte origine pas encore élargie en prod : même ligne, origine autorisée.
+    if (String(err?.message || '').includes('origine') || err?.code === '23514') {
+      return upsertProjectExpenseFromSource({
+        ...workerPaymentProjectExpensePayload(entity, sourceType, sourceId),
+        origine: 'charge_manuelle',
+      });
+    }
+    console.warn('[CITYMO] sync worker_payment → project_expense', err);
+    throw err;
+  }
 }
 
 async function syncCharges(stats, resolveProject) {

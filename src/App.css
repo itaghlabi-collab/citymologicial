@@ -11789,3 +11789,13 @@ tbody tr:last-child td { border-bottom: none; }
     min-height: 44px;
   }
 }
+
+/* Import pointage Excel — aperçu responsive */
+@media (max-width: 767px) {
+  .att-xlsx-sites-table {
+    display: none !important;
+  }
+  .att-xlsx-sites-cards {
+    display: flex !important;
+  }
+}

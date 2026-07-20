@@ -170,7 +170,7 @@ export function filterActiveAttendance(records, assignmentLookup = cachedAssignm
 /** Form UI → DB row */
 export function toAttendanceRow(form) {
   const projetLabel = (form.projetNom || form.projet || '').trim();
-  return {
+  const row = {
     worker_id: form.workerId || null,
     project_id: form.projectId || null,
     date: form.date,
@@ -185,6 +185,10 @@ export function toAttendanceRow(form) {
     source_version: ATTENDANCE_SOURCE_PROJECT,
     validated_new_logic: true,
   };
+  /** Colonnes optionnelles (migration import Excel) — ignorées si absentes côté DB. */
+  if (form.importBatchId) row.import_batch_id = form.importBatchId;
+  if (form.importSource) row.import_source = form.importSource;
+  return row;
 }
 
 async function assertWorkerAssignedToProject(workerId, projectId) {
@@ -321,11 +325,24 @@ export async function createAttendance(form) {
 
   await assertWorkerAssignedToProject(row.worker_id, row.project_id);
 
-  const { data, error } = await getSupabase()
+  let { data, error } = await getSupabase()
     .from(TABLE)
     .insert([row])
     .select(ATTENDANCE_SELECT)
     .single();
+
+  if (error && /import_batch_id|import_source|column|schema cache/i.test(error.message || '')) {
+    const fallback = { ...row };
+    delete fallback.import_batch_id;
+    delete fallback.import_source;
+    const retry = await getSupabase()
+      .from(TABLE)
+      .insert([fallback])
+      .select(ATTENDANCE_SELECT)
+      .single();
+    data = retry.data;
+    error = retry.error;
+  }
 
   if (error) {
     console.error('[CITYMO] attendance insert', error, row);

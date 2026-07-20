@@ -172,6 +172,47 @@ export async function saveProjectWorkerAssignments(projectId, workerIds = [], { 
   return listWorkersByProject(pid);
 }
 
+/**
+ * Ajoute / réactive UNE affectation sans retirer les autres ouvriers du projet.
+ * Utilisé par l’import Excel (« Affecter maintenant »).
+ */
+export async function ensureWorkerAssignedToProject(projectId, workerId) {
+  if (!projectId || !workerId) {
+    const err = new Error('Projet et ouvrier requis.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  await getAuthUserId();
+  const pid = String(projectId);
+  const wid = String(workerId);
+
+  const { data: existing, error: listErr } = await getSupabase()
+    .from(TABLE)
+    .select('id, status')
+    .eq('project_id', pid)
+    .eq('worker_id', wid)
+    .maybeSingle();
+  if (listErr) throw listErr;
+
+  if (existing?.id) {
+    if (existing.status !== 'active') {
+      const { error } = await getSupabase()
+        .from(TABLE)
+        .update({ status: 'active', assigned_at: new Date().toISOString() })
+        .eq('id', existing.id);
+      if (error) throw error;
+    }
+  } else {
+    const { error } = await getSupabase()
+      .from(TABLE)
+      .insert([{ worker_id: wid, project_id: pid, status: 'active' }]);
+    if (error) throw error;
+  }
+
+  await syncStaffNeedsAfterAssignment(pid);
+  return true;
+}
+
 export async function removeWorkersFromProject(projectId, workerIds = []) {
   for (const workerId of workerIds) {
     await removeWorkerFromProject(projectId, workerId);

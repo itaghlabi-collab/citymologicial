@@ -1,10 +1,11 @@
-import { ClockIcon, Plus, X, Filter, CheckCircle, XCircle, CalendarOff, Pencil, Loader2, Search, Users, HardHat, Download, Eye, Printer, Building2 } from 'lucide-react';
+import { ClockIcon, Plus, X, Filter, CheckCircle, XCircle, CalendarOff, Pencil, Loader2, Search, Users, HardHat, Download, Eye, Printer, Building2, Upload } from 'lucide-react';
 import { useState, useRef, useMemo } from 'react';
 import { useAttendance } from '../hooks/useAttendance';
 import { generateAttendanceWeeklyPdf } from '../services/rh/attendanceSheetPdf';
 import { syncPayrollAfterAttendanceChange } from '../services/rh/workerPayroll';
 import { computeAttendanceWorkMetrics, STANDARD_SHIFT_START, STANDARD_SHIFT_END, groupAttendanceSummariesByProjectWeek, collectAttendanceWeeks, fmtWeekRange, weekStartMonday, filterProjectOptionsForChef, personNamesMatch, collectAttendancePdfSummaries } from '../services/rh/attendance';
 import AttendanceDetailModal from './rh/AttendanceDetailModal';
+import AttendanceExcelImportWizard from './rh/AttendanceExcelImportWizard';
 
 function EmptyState({ icon, title, sub, action, onAction }) {
   return (
@@ -225,6 +226,7 @@ export default function Presence() {
   const [filterSemaine, setFilterSemaine] = useState('');
   const [pdfLoading, setPdfLoading] = useState(false);
   const [showPdfModal, setShowPdfModal] = useState(false);
+  const [showImportWizard, setShowImportWizard] = useState(false);
   const [pdfGroupKey, setPdfGroupKey] = useState('');
   const [pdfCandidates, setPdfCandidates] = useState([]);
   const [showModal, setShowModal] = useState(false);
@@ -583,12 +585,29 @@ export default function Presence() {
     <div className="animate-fade-in rh-ext-page">
       <Toast toast={toast} />
 
+      <AttendanceExcelImportWizard
+        open={showImportWizard}
+        onClose={() => setShowImportWizard(false)}
+        workers={workers}
+        projects={projects}
+        chefsChantier={chefsChantier}
+        onImported={() => { load(); notify('success', 'Import Excel terminé — présences / HS créées.'); }}
+      />
+
       <div className="page-header flex-between finance-page-header">
         <div>
           <h1 className="page-title">Presence ouvriers</h1>
           <p className="page-subtitle finance-sub-hide-mobile">Une ligne par ouvrier — dates et détail journalier dans « Détail »</p>
         </div>
-        <div className="finance-page-actions finance-page-actions--solo">
+        <div className="finance-page-actions" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => setShowImportWizard(true)}
+            disabled={loading || saving}
+          >
+            <Upload size={15} /> Importer un pointage Excel
+          </button>
           <button className="btn btn-primary" onClick={openCreate} disabled={loading || saving}>
             <Plus size={15} /> Ajouter une presence
           </button>
