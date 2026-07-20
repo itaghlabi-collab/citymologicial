@@ -562,13 +562,21 @@ export default function Factures() {
                       </td>
 
                       {/* Titre */}
-                      <td data-label="Titre" style={{ padding: '10px 12px' }}>
+                      <td data-label="Titre" style={{ padding: '10px 12px', maxWidth: 160 }}>
                         <button
                           type="button"
                           title={f.titre || 'Ouvrir le PDF'}
                           disabled={pdfLoadingId === f.id}
                           onClick={() => handlePdfInTab(f)}
-                          style={pdfOpenButtonStyle(pdfLoadingId === f.id, { fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap' })}
+                          style={pdfOpenButtonStyle(pdfLoadingId === f.id, {
+                            fontWeight: 600,
+                            color: 'var(--text)',
+                            display: 'block',
+                            maxWidth: '100%',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          })}
                         >
                           {f.titre || '—'}
                         </button>

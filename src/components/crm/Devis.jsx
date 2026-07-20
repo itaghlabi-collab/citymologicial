@@ -674,18 +674,31 @@ export default function Devis({ onNavigate }) {
                       </td>
 
                       {/* Titre */}
-                      <td data-label="Titre" style={{ padding: '10px 12px' }}>
+                      <td data-label="Titre" style={{ padding: '10px 12px', maxWidth: 160 }}>
                         <button
                           type="button"
                           title={d.titre || 'Ouvrir le PDF'}
                           disabled={pdfLoadingId === d.id}
                           onClick={() => handlePdfInTab(d)}
-                          style={pdfOpenButtonStyle(pdfLoadingId === d.id, { fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap' })}
+                          style={pdfOpenButtonStyle(pdfLoadingId === d.id, {
+                            fontWeight: 600,
+                            color: 'var(--text)',
+                            display: 'block',
+                            maxWidth: '100%',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          })}
                         >
                           {d.titre || '—'}
                         </button>
                         {d.type_projet && (
-                          <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 2, whiteSpace: 'nowrap' }}>{d.type_projet}</div>
+                          <div
+                            title={d.type_projet}
+                            style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                          >
+                            {d.type_projet}
+                          </div>
                         )}
                       </td>
 
