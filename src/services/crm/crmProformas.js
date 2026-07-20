@@ -34,9 +34,9 @@ export const CRM_PROFORMA_STATUT_LABEL = {
 
 const PROFORMA_SELECT = `
   *,
-  clients ( id, nom, prenom, email, telephone, ice, adresse, ville, responsable ),
-  crm_devis ( id, reference ),
-  crm_factures ( id, numero )
+  clients!client_id ( id, nom, prenom, email, telephone, ice, adresse, ville, responsable ),
+  crm_devis!devis_id ( id, reference ),
+  crm_factures!facture_id ( id, numero )
 `;
 
 function ligneTotalHt(l) {

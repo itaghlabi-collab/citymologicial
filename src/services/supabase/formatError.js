@@ -94,8 +94,22 @@ export function formatSupabaseError(error, fallback = 'Une erreur est survenue.'
   if (code === '42P01' || message.includes('crm_devis')) {
     return 'Tables devis CRM absentes — exécutez supabase/migrations/20260526030000_crm_devis.sql';
   }
-  if (code === '42P01' || message.includes('crm_factures')) {
+  if (
+    code === '42P01'
+    || /crm_proformas/i.test(message)
+    || /crm_proforma_lignes/i.test(message)
+  ) {
+    return 'Tables proformas absentes — exécutez supabase/RUN_CRM_PROFORMAS.sql dans Supabase SQL Editor.';
+  }
+  if (
+    (code === '42P01' && /crm_factures/i.test(message))
+    || /Could not find the table ['"]public\.crm_factures['"]/i.test(message)
+    || /relation ['"]public\.crm_factures['"] does not exist/i.test(message)
+  ) {
     return 'Tables factures CRM absentes — exécutez supabase/migrations/20260526040000_factures.sql';
+  }
+  if (/Could not find a relationship between ['"]crm_proformas['"] and ['"]crm_factures['"]/i.test(message)) {
+    return 'Lien proforma ↔ facture ambigu — rechargez le schéma API (Settings → API → Reload) ou réexécutez supabase/RUN_CRM_PROFORMAS.sql.';
   }
   if (code === 'PGRST301' || message.includes('JWT')) {
     return 'Session expirée. Veuillez vous reconnecter.';
