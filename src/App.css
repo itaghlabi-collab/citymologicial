@@ -7289,8 +7289,8 @@ tbody tr:last-child td { border-bottom: none; }
 }
 
 /* =============================================
-   CRM MODULE — Responsive (breakpoint 1024px)
-   Desktop : tableau seul | Mobile : cartes seules
+   CRM MODULE — Responsive (breakpoint 1400px)
+   Large : tableau | Fenêtre réduite / tablette : cartes
    ============================================= */
 
 .crm-table-desktop,
@@ -7513,8 +7513,8 @@ tbody tr:last-child td { border-bottom: none; }
   -webkit-overflow-scrolling: touch;
 }
 
-/* Desktop ≥ 1024px : 5+ KPI sur une ligne, filtres sur une ligne */
-@media (min-width: 1024px) {
+/* Desktop large ≥ 1400px : tableau CRM (évite colonnes écrasées en fenêtre réduite) */
+@media (min-width: 1400px) {
   .crm-filter-row {
     flex-wrap: nowrap;
   }
@@ -7543,12 +7543,10 @@ tbody tr:last-child td { border-bottom: none; }
     grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
   }
 
-  /* Factures / BL : 6 KPI — une ligne si largeur suffisante */
   .page-content .stats-grid:has(.stat-card:nth-child(6)) {
     grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
   }
 
-  /* Ne pas transformer le tableau CRM en cartes (règle globale 768px) */
   .crm-table-desktop .table-wrap table,
   .crm-table-desktop .table-wrap thead,
   .crm-table-desktop .table-wrap tbody tr,
@@ -7557,8 +7555,8 @@ tbody tr:last-child td { border-bottom: none; }
   }
 }
 
-/* Tablette < 1024px : cartes seules, KPI 2–3 colonnes */
-@media (max-width: 1023px) {
+/* Fenêtre / tablette < 1400px : cartes CRM (plus de colonnes qui disparaissent) */
+@media (max-width: 1399px) {
   .crm-table-desktop,
   .crm-table-desktop.crm-table-scroll {
     display: none !important;
@@ -7585,6 +7583,48 @@ tbody tr:last-child td { border-bottom: none; }
     width: 100%;
     text-align: right;
     padding-top: 4px;
+  }
+}
+
+@media (min-width: 1024px) and (max-width: 1399px) {
+  .page-content .stat-grid,
+  .page-content .stats-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+  }
+
+  .page-content .stats-grid:has(.stat-card:nth-child(6)) {
+    grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+  }
+}
+
+/* Formulaire facture / proforma — lignes scrollables + layout empilé */
+.crm-form-lignes-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  max-width: 100%;
+  margin-bottom: 12px;
+}
+
+.crm-form-lignes-wrap > table {
+  min-width: 720px;
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.crm-form-layout {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 16px;
+  align-items: start;
+}
+
+@media (max-width: 1023px) {
+  .crm-form-layout {
+    grid-template-columns: 1fr !important;
+  }
+
+  .crm-form-layout > .crm-form-sidebar {
+    order: -1;
   }
 }
 

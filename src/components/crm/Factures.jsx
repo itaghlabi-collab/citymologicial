@@ -11,6 +11,8 @@ import { listCategories } from '../../services/crm/categories';
 import { generateFacturePdf } from '../../services/crm/facturePdf';
 import FactureForm from './FactureForm';
 import FactureAcompte from './FactureAcompte';
+import Proformas from './Proformas';
+import CrmDocTabs from './CrmDocTabs';
 import { listImportedCrmArchives, repairImportedArchivesInBackground } from '../../services/crm/crmArchives';
 import {
   archiveToFactureRow,
@@ -21,6 +23,8 @@ import {
   normalizeArchiveAmounts,
 } from './crmArchiveDisplay';
 import CrmOverflowMenu from './CrmOverflowMenu';
+
+const PROFORMA_INTENT_KEY = 'crm_proforma_intent';
 
 /* ── Helpers ── */
 function fmtMAD(v) {
@@ -157,6 +161,18 @@ export default function Factures() {
     filterCrmFactures,
     computeCrmFactureStats,
   } = useCrmFactures();
+
+  const [docKind, setDocKind] = useState(() => {
+    try {
+      const raw = sessionStorage.getItem(PROFORMA_INTENT_KEY);
+      if (raw) {
+        const intent = JSON.parse(raw);
+        if (intent?.openCreate || intent?.openList) return 'proformas';
+        return 'proformas';
+      }
+    } catch { /* ignore */ }
+    return 'factures';
+  });
 
   const [view, setView]               = useState('list');
   const [editingFacture, setEditing]  = useState(null);
@@ -354,6 +370,10 @@ export default function Factures() {
   }
 
   /* ── Sub-views ── */
+  if (docKind === 'proformas') {
+    return <Proformas onSwitchDoc={setDocKind} />;
+  }
+
   if (view === 'form') {
     return <FactureForm facture={editingFacture} onBack={backToList} onSaved={handleSaved} saving={saving} />;
   }
@@ -377,12 +397,12 @@ export default function Factures() {
       <Toast toast={toast} />
 
       {/* Page header */}
-      <div className="page-header" style={{ marginBottom: 20 }}>
+      <div className="page-header" style={{ marginBottom: 12 }}>
         <div>
           <h1 className="page-title">Factures</h1>
           <p className="page-subtitle">Gestion des factures, paiements et suivi des reglements.</p>
         </div>
-        <div className="crm-page-header-actions" style={{ display: 'flex', gap: 8 }}>
+        <div className="crm-page-header-actions" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button className="btn btn-ghost" onClick={load} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <RefreshCw size={14} />
           </button>
@@ -394,6 +414,8 @@ export default function Factures() {
           </button>
         </div>
       </div>
+
+      <CrmDocTabs active="factures" onChange={setDocKind} />
 
       {!configured && (
         <div style={{ background: '#FFF3E0', border: '1px solid #FFB74D', borderRadius: 'var(--radius)', padding: '10px 16px', marginBottom: 16, fontSize: '0.85rem', color: '#E65100' }}>

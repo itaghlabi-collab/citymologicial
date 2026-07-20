@@ -106,7 +106,7 @@ function clientDisplayName(c) {
 /* ═══════════════════════════════════════════════
    DETAIL CLIENT
    ═══════════════════════════════════════════════ */
-function ClientDetail({ client, initialTab = 'overview', onBack, onEdit, onDevisEmpty, onFactureEmpty, onProjetEmpty }) {
+function ClientDetail({ client, initialTab = 'overview', onBack, onEdit, onDevisEmpty, onFactureEmpty, onProjetEmpty, onCreateProforma }) {
   const [tab, setTab] = useState(initialTab);
 
   useEffect(() => {
@@ -193,6 +193,7 @@ function ClientDetail({ client, initialTab = 'overview', onBack, onEdit, onDevis
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
             <button type="button" className="btn btn-ghost btn-sm" style={{ display: 'flex', alignItems: 'center', gap: 5 }} onClick={onEdit}><Edit2 size={13} /> Modifier</button>
             <button type="button" className="btn btn-primary btn-sm" style={{ display: 'flex', alignItems: 'center', gap: 5 }} onClick={() => (devis.length ? setTab('devis') : onDevisEmpty?.())}><Plus size={13} /> Devis</button>
+            <button type="button" className="btn btn-primary btn-sm" style={{ background: '#455A64', borderColor: '#455A64', display: 'flex', alignItems: 'center', gap: 5 }} onClick={() => onCreateProforma?.(client)}><FileText size={13} /> Proforma</button>
             <button type="button" className="btn btn-primary btn-sm" style={{ background: '#1976D2', borderColor: '#1976D2', display: 'flex', alignItems: 'center', gap: 5 }} onClick={() => (factures.length ? setTab('factures') : onFactureEmpty?.())}><Receipt size={13} /> Facture</button>
             <button type="button" className="btn btn-primary btn-sm" style={{ background: '#2E7D32', borderColor: '#2E7D32', display: 'flex', alignItems: 'center', gap: 5 }} onClick={() => (projets.length ? setTab('projets') : onProjetEmpty?.())}><FolderOpen size={13} /> Projet</button>
           </div>
@@ -600,7 +601,7 @@ function ClientModal({ client, onClose, onSave, saving }) {
 /* ═══════════════════════════════════════════════
    PAGE PRINCIPALE CLIENTS
    ═══════════════════════════════════════════════ */
-export default function Clients() {
+export default function Clients({ onNavigate }) {
   const {
     records: clients,
     responsables,
@@ -731,6 +732,23 @@ export default function Clients() {
     }
   }
 
+  function openCreateProforma(c) {
+    try {
+      sessionStorage.setItem('crm_proforma_intent', JSON.stringify({
+        openCreate: true,
+        clientId: c?.id ? String(c.id) : '',
+      }));
+    } catch { /* ignore */ }
+    if (typeof onNavigate === 'function') {
+      onNavigate('factures');
+      return;
+    }
+    setInfoModal({
+      title: 'Proforma',
+      message: 'Ouvrez le menu CRM → Factures → onglet Proformas pour créer la proforma.',
+    });
+  }
+
   const freshSelectedClient = selectedClient
     ? clients.find(c => String(c.id) === String(selectedClient.id)) || selectedClient
     : null;
@@ -747,6 +765,7 @@ export default function Clients() {
           onDevisEmpty={() => openClientDevis(freshSelectedClient)}
           onFactureEmpty={() => openClientFactures(freshSelectedClient)}
           onProjetEmpty={() => openClientProjets(freshSelectedClient)}
+          onCreateProforma={openCreateProforma}
         />
         {infoModal && (
           <ActionInfoModal

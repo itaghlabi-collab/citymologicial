@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
   MoreHorizontal, Eye, Download, FolderKanban, CheckCircle, XCircle,
-  Edit2, Copy, Trash2, ClipboardCheck, Receipt,
+  Edit2, Copy, Trash2, ClipboardCheck, Receipt, FileText,
 } from 'lucide-react';
 
 function MenuItem({ icon: Icon, label, onClick, disabled, danger }) {
@@ -30,6 +30,8 @@ export default function DevisActionsMenu({
   onConvert,
   onConvertToFacture,
   factureLoading,
+  onGenerateProforma,
+  proformaLoading,
   onApprove,
   onRefuse,
   onEdit,
@@ -143,6 +145,12 @@ export default function DevisActionsMenu({
         label="Convertir en facture"
         onClick={closeAnd(onConvertToFacture)}
         disabled={factureLoading}
+      />
+      <MenuItem
+        icon={FileText}
+        label="Générer une proforma"
+        onClick={closeAnd(onGenerateProforma)}
+        disabled={proformaLoading}
       />
 
       <div className="crm-devis-menu-divider" />

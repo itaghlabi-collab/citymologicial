@@ -464,8 +464,8 @@ export default function FactureForm({ facture, onBack, onSaved, saving = false }
           </div>
         )}
 
-        {/* 2-col grid */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 340px', gap: 16, alignItems: 'start' }}>
+        {/* 2-col grid — empile sous 1024px via .crm-form-layout */}
+        <div className="crm-form-layout">
 
           {/* ── LEFT ── */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -565,8 +565,8 @@ export default function FactureForm({ facture, onBack, onSaved, saving = false }
             {/* Lignes */}
             <div className="card" style={{ padding: '20px 22px' }}>
               <SectionTitle>Lignes de facturation</SectionTitle>
-              <div style={{ overflowX: 'auto', marginBottom: 12 }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '0.85rem' }}>
+              <div className="crm-form-lignes-wrap">
+                <table style={{ fontSize: '0.85rem' }}>
                   <thead>
                     <tr style={{ borderBottom: '1.5px solid var(--border)' }}>
                       <th style={{ width: 20, padding: '6px 5px' }} />
@@ -698,7 +698,7 @@ export default function FactureForm({ facture, onBack, onSaved, saving = false }
           </div>
 
           {/* ── RIGHT COLUMN ── */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16, position: 'sticky', top: 80 }}>
+          <div className="crm-form-sidebar" style={{ display: 'flex', flexDirection: 'column', gap: 16, position: 'sticky', top: 80 }}>
 
             {/* Totaux */}
             <div className="card" style={{ padding: '20px 22px' }}>

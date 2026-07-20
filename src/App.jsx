@@ -284,10 +284,10 @@ function PageContent({ module, onNavigate, inventaireArticleCode, onInventaireAr
     case 'depenses-com':        return <DepensesCom />;
     case 'propositions':        return <PropositionsMarketing />;
     /* CRM */
-    case 'clients':             return <Clients />;
+    case 'clients':             return <Clients onNavigate={onNavigate} />;
     case 'articles':            return <Articles />;
     case 'categories':          return <Categories />;
-    case 'devis':               return <Devis />;
+    case 'devis':               return <Devis onNavigate={onNavigate} />;
     case 'factures':            return <Factures />;
     case 'bon-livraison':       return <BonLivraison />;
     /* Logistique */

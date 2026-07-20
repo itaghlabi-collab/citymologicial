@@ -12,6 +12,7 @@ import { formatCategoryDisplayName } from '../../utils/crm/categoryDisplay';
 import { generateDevisPdf } from '../../services/crm/devisPdf';
 import { generateFacturePdf } from '../../services/crm/facturePdf';
 import { createCrmFactureFromDevis, getCrmFactureById } from '../../services/crm/crmFactures';
+import { createCrmProformaFromDevis } from '../../services/crm/crmProformas';
 import { generateReceptionChecklistPdf } from '../../services/crm/receptionChecklistPdf';
 import { listArticles } from '../../services/crm/articles';
 import { enrichLignesDescriptions } from '../../utils/crm/devisLineDescription';
@@ -143,7 +144,7 @@ const PER_PAGE = 15;
 /* ════════════════════════════════════════════════
    DEVIS LIST — MAIN COMPONENT
    ════════════════════════════════════════════════ */
-export default function Devis() {
+export default function Devis({ onNavigate }) {
   const {
     records: devis,
     loading,
@@ -167,6 +168,7 @@ export default function Devis() {
   const [editingDevis, setEditingDevis] = useState(null);
   const [pdfLoadingId, setPdfLoadingId] = useState(null);
   const [factureLoadingId, setFactureLoadingId] = useState(null);
+  const [proformaLoadingId, setProformaLoadingId] = useState(null);
   const [checklistLoadingId, setChecklistLoadingId] = useState(null);
   const [previewDevis, setPreviewDevis] = useState(null);
   const [previewArticles, setPreviewArticles] = useState([]);
@@ -437,6 +439,23 @@ export default function Devis() {
     }
   }
 
+  async function handleGenerateProforma(d) {
+    if (!window.confirm(`Générer une proforma PF depuis le devis ${d.reference} ?\n(Aucun impact comptable / caisse.)`)) return;
+    setProformaLoadingId(d.id);
+    try {
+      const proforma = await createCrmProformaFromDevis(d.id);
+      showToast(`Proforma créée : ${proforma.numero}`);
+      try {
+        sessionStorage.setItem('crm_proforma_intent', JSON.stringify({ openList: true }));
+      } catch { /* ignore */ }
+      if (typeof onNavigate === 'function') onNavigate('factures');
+    } catch (err) {
+      showToast(err.message || 'Erreur création proforma.', 'error');
+    } finally {
+      setProformaLoadingId(null);
+    }
+  }
+
   function isDevisConverted(d) {
     return convertedIds.has(String(d.id)) || d.statut === 'converti';
   }
@@ -475,11 +494,13 @@ export default function Devis() {
           pdfLoading={pdfLoadingId === d.id}
           checklistLoading={checklistLoadingId === d.id}
           factureLoading={factureLoadingId === d.id}
+          proformaLoading={proformaLoadingId === d.id}
           onPreview={() => handlePreview(d)}
           onPdf={() => handlePdf(d)}
           onReceptionChecklist={() => handleReceptionChecklist(d)}
           onConvert={() => handleConvert(d)}
           onConvertToFacture={() => handleConvertToFacture(d)}
+          onGenerateProforma={() => handleGenerateProforma(d)}
           onApprove={() => handleApprove(d)}
           onRefuse={() => handleRefuse(d)}
           onEdit={() => openEdit(d)}
@@ -788,6 +809,8 @@ export default function Devis() {
                           </button>
                           <CrmOverflowMenu
                             items={[
+                              { icon: Receipt, label: 'Convertir en facture', onClick: () => handleConvertToFacture(d), disabled: factureLoadingId === d.id },
+                              { icon: FileText, label: 'Générer une proforma', onClick: () => handleGenerateProforma(d), disabled: proformaLoadingId === d.id },
                               { icon: Copy, label: 'Dupliquer', onClick: () => handleDuplicate(d) },
                               { divider: true },
                               { icon: Trash2, label: 'Supprimer', danger: true, onClick: () => handleDelete(d.id) },
