@@ -12,6 +12,7 @@ import { generateCrmFactureNumero } from '../../services/crm/crmFactures';
 import { generateFacturePdf } from '../../services/crm/facturePdf';
 import Big from 'big.js';
 import { moneyLineHt, moneyLineTtc, moneyComputeDocumentTotals, moneyToNumber, moneyFormatMAD } from '../../utils/decimalMoney';
+import { hydrateDocLigneFromSource } from '../../utils/crm/docLigneHydrate';
 
 /* ── Helpers ── */
 function fmtMAD(v) {
@@ -255,6 +256,8 @@ export default function FactureForm({ facture, onBack, onSaved, saving = false }
     }
     try {
       const dv = await getCrmDevisById(devisId);
+      const arts = articles.length ? articles : await listArticles().catch(() => []);
+      if (arts.length && !articles.length) setArticles(arts);
       setForm(p => ({
         ...p,
         devis_id: devisId,
@@ -263,7 +266,9 @@ export default function FactureForm({ facture, onBack, onSaved, saving = false }
         type_projet: dv.type_projet || p.type_projet,
         modalites_paiement: dv.modalites_paiement || p.modalites_paiement,
         conditions: dv.conditions || p.conditions,
-        lignes: dv.lignes?.length ? dv.lignes.map(l => ({ ...EMPTY_LIGNE(), ...l, _id: Date.now() + Math.random() })) : p.lignes,
+        lignes: dv.lignes?.length
+          ? dv.lignes.map((l) => hydrateDocLigneFromSource(l, arts))
+          : p.lignes,
         titre: dv.titre ? 'Facture — ' + dv.titre : p.titre,
       }));
     } catch {

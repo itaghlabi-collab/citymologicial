@@ -7,6 +7,8 @@ import { getSupabase } from '../../lib/supabase';
 import { clientDisplayName } from './clients';
 import { getCrmDevisById } from './crmDevis';
 import { moneyLineHt, moneyComputeDocumentTotals, moneyToNumber } from '../../utils/decimalMoney';
+import { hydrateDocLigneFromSource } from '../../utils/crm/docLigneHydrate';
+import { listArticles } from './articles';
 
 const TABLE = 'crm_proformas';
 const LIGNES = 'crm_proforma_lignes';
@@ -442,6 +444,7 @@ export async function createCrmProformaFromDevis(devisId) {
     err.code = 'NOT_FOUND';
     throw err;
   }
+  const articles = await listArticles().catch(() => []);
   return createCrmProforma({
     titre: devis.titre || `Proforma — ${devis.reference || ''}`.trim(),
     objet: devis.titre || '',
@@ -456,7 +459,7 @@ export async function createCrmProformaFromDevis(devisId) {
     conditions: devis.conditions || '',
     notes_internes: devis.notes_internes || '',
     notes: '',
-    lignes: (devis.lignes || []).map((l) => mapDevisLigneToProformaLigne(l)),
+    lignes: (devis.lignes || []).map((l) => hydrateDocLigneFromSource(l, articles)),
   });
 }
 

@@ -4,8 +4,10 @@
 import { getSupabase } from '../../lib/supabase';
 import { clientDisplayName } from './clients';
 import { getCrmDevisById } from './crmDevis';
+import { listArticles } from './articles';
 import { syncFacturePaymentsToCash } from '../finance/financeSync';
 import { moneyLineHt, moneyLineTtc, moneyComputeDocumentTotals, moneyToNumber } from '../../utils/decimalMoney';
+import { hydrateDocLigneFromSource } from '../../utils/crm/docLigneHydrate';
 
 const TABLE = 'crm_factures';
 const LIGNES = 'crm_facture_lignes';
@@ -581,6 +583,7 @@ export async function createCrmFactureFromDevis(devisId) {
   }
 
   const today = new Date().toISOString().slice(0, 10);
+  const articles = await listArticles().catch(() => []);
   return createCrmFacture({
     devis_id: devisId,
     client_id: devis.client_id || '',
@@ -595,13 +598,7 @@ export async function createCrmFactureFromDevis(devisId) {
     total_ht: devis.total_ht,
     total_tva: devis.total_tva,
     total_ttc: devis.total_ttc,
-    lignes: (devis.lignes || []).map((l) => ({
-      ...l,
-      id: undefined,
-      _id: undefined,
-      devis_id: undefined,
-      facture_id: undefined,
-    })),
+    lignes: (devis.lignes || []).map((l) => hydrateDocLigneFromSource(l, articles)),
     paiements: [],
     acompte_montant: 0,
     acompte_type: 'fixe', // contrainte DB : 'fixe' | 'pct' uniquement
