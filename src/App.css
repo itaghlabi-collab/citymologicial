@@ -7530,23 +7530,22 @@ tbody tr:last-child td { border-bottom: none; }
 
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x > table,
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x > table {
-    width: max-content;
-    min-width: 100%;
+    /* Pleine largeur de la carte ; colonnes contrôlées (pas de bande vide avant Actions) */
+    width: 100%;
+    min-width: 1180px;
     border-collapse: separate;
     border-spacing: 0;
-    table-layout: auto;
+    table-layout: fixed;
     font-size: 0.875rem;
   }
 
-  /* Sans TVA / Expiration — largeur fixe ; scroll X dès que le cadre est trop étroit */
-  .crm-module--devis .crm-table-desktop .crm-table-scroll-x > table,
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x > table {
-    min-width: 1180px;
+    min-width: 1320px;
   }
 
   .crm-module--devis .crm-table-desktop .table-wrap.crm-table-scroll-x,
   .crm-module--factures .crm-table-desktop .table-wrap.crm-table-scroll-x {
-    overflow-x: scroll;
+    overflow-x: auto;
     scrollbar-width: thin;
     scrollbar-color: rgba(0, 0, 0, 0.35) transparent;
   }
@@ -7591,31 +7590,33 @@ tbody tr:last-child td { border-bottom: none; }
     white-space: nowrap;
   }
 
-  /* Titre — plus large après retrait TVA / dates ; ellipsis + tooltip */
+  /* Titre — seule colonne fluide : absorbe l’espace (plus de trou avant Actions) */
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x .crm-col-title,
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x .crm-col-title,
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x th:nth-child(2),
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x th:nth-child(2) {
-    min-width: 280px;
-    max-width: 380px;
-    width: 320px;
+    width: 100%;
+    min-width: 220px;
+    max-width: none;
   }
 
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x .crm-col-title button,
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x .crm-col-title button {
     display: block;
+    width: 100%;
     max-width: 100%;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+    text-align: left;
   }
 
   /* Client */
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x .crm-col-client,
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x .crm-col-client {
-    min-width: 160px;
+    width: 160px;
+    min-width: 140px;
     max-width: 200px;
-    width: 180px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -7624,9 +7625,9 @@ tbody tr:last-child td { border-bottom: none; }
   /* Commercial */
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x .crm-col-commercial,
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x .crm-col-commercial {
-    min-width: 140px;
-    max-width: 180px;
-    width: 150px;
+    width: 140px;
+    min-width: 120px;
+    max-width: 160px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -7634,32 +7635,34 @@ tbody tr:last-child td { border-bottom: none; }
 
   /* Devis lié (Factures) */
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x .crm-col-devis-lie {
+    width: 128px;
     min-width: 120px;
-    width: 130px;
     white-space: nowrap;
   }
 
   /* Montants — une ligne, jamais coupés */
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x .crm-col-money,
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x .crm-col-money {
-    min-width: 112px;
     width: 118px;
+    min-width: 110px;
     white-space: nowrap !important;
     overflow: visible;
   }
 
-  /* Statut / dates */
+  /* Statut / dates — largeurs fixes pour éviter le trou blanc */
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x .crm-col-statut,
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x .crm-col-statut {
-    min-width: 110px;
-    width: 120px;
+    width: 128px;
+    min-width: 120px;
+    max-width: 140px;
     white-space: nowrap;
   }
 
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x .crm-col-date,
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x .crm-col-date {
-    min-width: 104px;
     width: 110px;
+    min-width: 100px;
+    max-width: 120px;
     white-space: nowrap;
   }
 
