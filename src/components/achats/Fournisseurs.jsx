@@ -445,6 +445,21 @@ export default function Fournisseurs({ onFournisseursChange, onNavigate }) {
     }
   }
 
+  async function handleSaveRating(item, { rating_quality_price, rating_comment }) {
+    const res = await save({
+      ...item,
+      rating_quality_price,
+      rating_comment,
+      primary_category_id: item.primary_category_id ?? null,
+      secondary_category_ids: item.secondary_category_ids || [],
+    }, item.id);
+    if (!res.success) {
+      window.alert(res.error || 'Impossible d’enregistrer la note. Vérifiez RUN_PURCHASE_SUPPLIERS_RATING.sql.');
+      return false;
+    }
+    return true;
+  }
+
   function handleCreateBC(item) {
     try {
       sessionStorage.setItem('citymo_bc_prefill_supplier', JSON.stringify({
@@ -512,6 +527,8 @@ export default function Fournisseurs({ onFournisseursChange, onNavigate }) {
           onToggleFavorite={handleToggleFavorite}
           onCreateBC={handleCreateBC}
           onNavigate={onNavigate}
+          onSaveRating={handleSaveRating}
+          savingRating={saving}
         />
         {modal}
       </>

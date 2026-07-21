@@ -7,7 +7,7 @@ import {
   UserCog, Edit2, Archive, Phone, Mail, MapPin, Tag, Star,
   MessageCircle, Truck, Wrench, ShieldCheck, BadgeCheck, ExternalLink, Loader2,
 } from 'lucide-react';
-import { SectionTitle } from './shared.jsx';
+import { SectionTitle, INPUT_STYLE } from './shared.jsx';
 import {
   listExpensesForSupplierName,
   listPurchaseOrdersForSupplier,
@@ -16,7 +16,7 @@ import {
   telHref,
   whatsappHref,
 } from '../../services/achats/supplierAnnuaire';
-import { StarRatingDisplay } from './StarRating.jsx';
+import { StarRatingInput } from './StarRating.jsx';
 
 function DetailRow({ label, value }) {
   return (
@@ -46,10 +46,21 @@ export default function FournisseurFiche({
   onToggleFavorite,
   onCreateBC,
   onNavigate,
+  onSaveRating,
+  savingRating,
 }) {
   const [orders, setOrders] = useState([]);
   const [expenses, setExpenses] = useState([]);
   const [loadingLinks, setLoadingLinks] = useState(true);
+  const [rating, setRating] = useState(item?.rating_quality_price ?? null);
+  const [ratingComment, setRatingComment] = useState(item?.rating_comment || '');
+  const [ratingSaved, setRatingSaved] = useState(false);
+
+  useEffect(() => {
+    setRating(item?.rating_quality_price ?? null);
+    setRatingComment(item?.rating_comment || '');
+    setRatingSaved(false);
+  }, [item?.id, item?.rating_quality_price, item?.rating_comment]);
 
   useEffect(() => {
     if (!item?.id) return undefined;
@@ -69,6 +80,15 @@ export default function FournisseurFiche({
     })();
     return () => { cancelled = true; };
   }, [item?.id, item?.company_name]);
+
+  async function handleSaveRating() {
+    if (!onSaveRating) return;
+    const ok = await onSaveRating(item, {
+      rating_quality_price: rating,
+      rating_comment: ratingComment,
+    });
+    if (ok) setRatingSaved(true);
+  }
 
   if (!item) return null;
 
@@ -168,11 +188,55 @@ export default function FournisseurFiche({
           <DetailRow label="Installation" value={yn(item.installation_available)} />
           <DetailRow label="SAV" value={yn(item.sav_available)} />
           <DetailRow label="Recommandé" value={yn(item.is_recommended)} />
-          <DetailRow
-            label="Qualité / prix"
-            value={<StarRatingDisplay value={item.rating_quality_price} size={14} />}
-          />
-          <DetailRow label="Commentaire note" value={item.rating_comment} />
+        </div>
+
+        <div className="card" style={{ gridColumn: '1 / -1' }}>
+          <SectionTitle icon={<Star size={13} />}>Notation — Rapport qualité / prix</SectionTitle>
+          <p style={{ margin: '0 0 12px', fontSize: '0.82rem', color: 'var(--text-2)' }}>
+            La responsable Achats note chaque fournisseur de <strong>1 à 5 étoiles</strong> selon le rapport qualité / prix.
+            Cliquez sur les étoiles puis enregistrez.
+          </p>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, alignItems: 'flex-start' }}>
+            <div>
+              <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 6 }}>
+                Étoiles (1 = faible · 5 = excellent)
+              </div>
+              <StarRatingInput
+                value={rating}
+                onChange={(v) => { setRating(v); setRatingSaved(false); }}
+                disabled={savingRating}
+              />
+            </div>
+            <div style={{ flex: 1, minWidth: 220 }}>
+              <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 6 }}>
+                Commentaire (optionnel)
+              </div>
+              <input
+                value={ratingComment}
+                onChange={(e) => { setRatingComment(e.target.value); setRatingSaved(false); }}
+                placeholder="Ex: bon rapport qualité/prix, délais OK…"
+                style={INPUT_STYLE}
+                disabled={savingRating}
+              />
+            </div>
+            <div style={{ alignSelf: 'flex-end' }}>
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                disabled={savingRating}
+                onClick={handleSaveRating}
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              >
+                {savingRating ? <Loader2 size={13} className="cin-spin" /> : <Star size={13} />}
+                Enregistrer la note
+              </button>
+            </div>
+          </div>
+          {ratingSaved && (
+            <div style={{ marginTop: 10, fontSize: '0.8rem', color: 'var(--green, #2e7d32)', fontWeight: 600 }}>
+              Note enregistrée.
+            </div>
+          )}
         </div>
 
         <div className="card">
