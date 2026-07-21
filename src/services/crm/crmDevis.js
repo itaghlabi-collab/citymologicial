@@ -227,7 +227,10 @@ export async function getCrmDevisById(id) {
   return normalizeCrmDevis(data, lignes);
 }
 
-async function upsertLignes(devisId, lignes) {
+/** Sérialise les upserts concurrentes (même onglet) pour éviter delete+insert entrelacés → doublons. */
+const ligneUpsertChainByDevis = new Map();
+
+async function upsertLignesOnce(devisId, lignes) {
   await getSupabase().from(LIGNES).delete().eq('devis_id', devisId);
   const rows = (lignes || [])
     .filter((l) => {
@@ -240,6 +243,22 @@ async function upsertLignes(devisId, lignes) {
   if (error) {
     console.error('[CITYMO] crmDevis lignes insert', error, rows);
     throw error;
+  }
+}
+
+async function upsertLignes(devisId, lignes) {
+  const key = String(devisId);
+  const prev = ligneUpsertChainByDevis.get(key) || Promise.resolve();
+  const next = prev
+    .catch(() => {})
+    .then(() => upsertLignesOnce(devisId, lignes));
+  ligneUpsertChainByDevis.set(key, next);
+  try {
+    await next;
+  } finally {
+    if (ligneUpsertChainByDevis.get(key) === next) {
+      ligneUpsertChainByDevis.delete(key);
+    }
   }
 }
 

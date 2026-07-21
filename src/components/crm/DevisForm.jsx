@@ -843,6 +843,8 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
   const [draftError, setDraftError] = useState('');
   const [saveToast, setSaveToast] = useState('');
   const lastDraftCommitRef = useRef({ key: '', at: 0 });
+  /** Verrou synchrone : setSavingLocal(true) ne bloque le 2e clic qu'après re-render. */
+  const saveInFlightRef = useRef(false);
   const isSaving = saving || savingLocal;
   const isPersisted = !!(devis?.id || form.id);
 
@@ -1081,9 +1083,11 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
 
   async function handleSave(e) {
     e.preventDefault();
+    if (saveInFlightRef.current) return;
     setApiError('');
     const errs = validate();
     if (Object.keys(errs).length) { setErrors(errs); return; }
+    saveInFlightRef.current = true;
     setSavingLocal(true);
     try {
       const payload = {
@@ -1100,14 +1104,17 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
     } catch (err) {
       setApiError(err.message || "Erreur lors de l'enregistrement.");
     } finally {
+      saveInFlightRef.current = false;
       setSavingLocal(false);
     }
   }
 
   async function handleEnregistrer() {
+    if (saveInFlightRef.current) return;
     setApiError('');
     const errs = validate();
     if (Object.keys(errs).length) { setErrors(errs); return; }
+    saveInFlightRef.current = true;
     setSavingLocal(true);
     try {
       const payload = {
@@ -1142,6 +1149,7 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
     } catch (err) {
       setApiError(err.message || "Erreur lors de l'enregistrement.");
     } finally {
+      saveInFlightRef.current = false;
       setSavingLocal(false);
     }
   }
