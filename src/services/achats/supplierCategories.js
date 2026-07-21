@@ -1,11 +1,48 @@
 /**
- * supplierCategories.js — Catalogue catégories fournisseurs (annuaire étape 1)
+ * supplierCategories.js — Catalogue catégories fournisseurs (annuaire)
  * Tables : purchase_supplier_categories + purchase_supplier_category_links
  */
 import { getSupabase } from '../../lib/supabase';
 
 const CAT_TABLE = 'purchase_supplier_categories';
 const LINK_TABLE = 'purchase_supplier_category_links';
+
+/** Liste initiale affichée (trim catalogue) — ordre = sort_order */
+export const INITIAL_SUPPLIER_CATEGORIES = [
+  'Matériaux de construction',
+  'Électricité',
+  'Plomberie',
+  'Climatisation & Ventilation (CVC)',
+  'Menuiserie Bois',
+  'Menuiserie Aluminium',
+  'Menuiserie Métallique',
+  'Vitrerie',
+  'Carrelage',
+  'Marbre & Pierre',
+  'Faux plafond',
+  'Cloisons sèches (BA13)',
+  'Peinture',
+  'Étanchéité',
+  'Revêtement de sol',
+  'Sanitaire',
+  'Quincaillerie',
+  'Outillage',
+  'Location matériel',
+  'Engins & Terrassement',
+  'Béton & Préfabriqués',
+  'Acier & Métallurgie',
+  'Signalisation & Sécurité',
+  'Mobilier',
+  'Décoration',
+  'Éclairage',
+  'Informatique',
+  'Fournitures de bureau',
+  'Nettoyage',
+  'Transport & Logistique',
+  'Laboratoire & Contrôle qualité',
+  'Topographie',
+  'Divers',
+];
 
 /** Mapping anciennes valeurs liste fixe → slug catalogue */
 export const LEGACY_CATEGORY_SLUG = {
@@ -41,6 +78,7 @@ export function normalizeCategory(row) {
     sort_order: Number(row.sort_order) || 0,
     created_at: row.created_at,
     updated_at: row.updated_at,
+    usage_count: Number(row.usage_count) || 0,
   };
 }
 
@@ -57,7 +95,17 @@ export function isMissingCategorySchema(err) {
   return code === '42P01' || code === 'PGRST205' || msg.includes('does not exist') || msg.includes('schema cache');
 }
 
-export async function listSupplierCategories({ activeOnly = true } = {}) {
+export async function countCategoryUsage(categoryId) {
+  if (!categoryId) return 0;
+  const { count, error } = await getSupabase()
+    .from(LINK_TABLE)
+    .select('id', { count: 'exact', head: true })
+    .eq('category_id', categoryId);
+  if (error) throw error;
+  return count || 0;
+}
+
+export async function listSupplierCategories({ activeOnly = true, withUsage = false } = {}) {
   await requireUser();
   let q = getSupabase()
     .from(CAT_TABLE)
@@ -67,7 +115,18 @@ export async function listSupplierCategories({ activeOnly = true } = {}) {
   if (activeOnly) q = q.eq('is_active', true);
   const { data, error } = await q;
   if (error) throw error;
-  return (data || []).map(normalizeCategory).filter(Boolean);
+  const list = (data || []).map(normalizeCategory).filter(Boolean);
+  if (!withUsage || !list.length) return list;
+
+  const { data: links, error: linkErr } = await getSupabase()
+    .from(LINK_TABLE)
+    .select('category_id');
+  if (linkErr) throw linkErr;
+  const counts = {};
+  (links || []).forEach((l) => {
+    counts[l.category_id] = (counts[l.category_id] || 0) + 1;
+  });
+  return list.map((c) => ({ ...c, usage_count: counts[c.id] || 0 }));
 }
 
 export async function createSupplierCategory({ name }) {
@@ -127,6 +186,27 @@ export async function updateSupplierCategory(id, { name, is_active } = {}) {
 /** Désactivation douce — jamais de DELETE hard sur une catégorie utilisée */
 export async function deactivateSupplierCategory(id) {
   return updateSupplierCategory(id, { is_active: false });
+}
+
+export async function activateSupplierCategory(id) {
+  return updateSupplierCategory(id, { is_active: true });
+}
+
+/**
+ * Supprime si non utilisée ; sinon désactive.
+ * @returns {{ action: 'deleted'|'deactivated', category?: object, usage: number }}
+ */
+export async function removeOrDeactivateSupplierCategory(id) {
+  await requireUser();
+  if (!id) throw new Error('Catégorie requise.');
+  const usage = await countCategoryUsage(id);
+  if (usage > 0) {
+    const category = await deactivateSupplierCategory(id);
+    return { action: 'deactivated', category, usage };
+  }
+  const { error } = await getSupabase().from(CAT_TABLE).delete().eq('id', id);
+  if (error) throw error;
+  return { action: 'deleted', usage: 0 };
 }
 
 export async function listCategoryLinksForSuppliers(supplierIds) {

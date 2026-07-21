@@ -26,7 +26,41 @@ export const STATUTS_OP_ACHATS = ['À préparer', 'Initié', 'Payé', 'Annulé']
 export const DEVISES          = ['MAD', 'EUR', 'USD'];
 export const TVA_OPTIONS      = [0, 7, 10, 14, 20];
 /** Liste fixe legacy — fallback si catalogue Supabase pas encore migré */
-export const CATEGORIES_FOURN = ['Matériaux', 'Équipements', 'Services', 'Fournitures', 'Transport', 'Sous-traitance', 'Informatique', 'Autre'];
+export const CATEGORIES_FOURN = [
+  'Matériaux de construction',
+  'Électricité',
+  'Plomberie',
+  'Climatisation & Ventilation (CVC)',
+  'Menuiserie Bois',
+  'Menuiserie Aluminium',
+  'Menuiserie Métallique',
+  'Vitrerie',
+  'Carrelage',
+  'Marbre & Pierre',
+  'Faux plafond',
+  'Cloisons sèches (BA13)',
+  'Peinture',
+  'Étanchéité',
+  'Revêtement de sol',
+  'Sanitaire',
+  'Quincaillerie',
+  'Outillage',
+  'Location matériel',
+  'Engins & Terrassement',
+  'Béton & Préfabriqués',
+  'Acier & Métallurgie',
+  'Signalisation & Sécurité',
+  'Mobilier',
+  'Décoration',
+  'Éclairage',
+  'Informatique',
+  'Fournitures de bureau',
+  'Nettoyage',
+  'Transport & Logistique',
+  'Laboratoire & Contrôle qualité',
+  'Topographie',
+  'Divers',
+];
 
 export const BADGE_DEMANDE = {
   'Brouillon': 'badge-grey', 'Soumise': 'badge-blue', 'En étude': 'badge-orange',

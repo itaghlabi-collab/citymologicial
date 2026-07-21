@@ -6,6 +6,7 @@ import { useState } from 'react';
 import DemandesAchat    from './achats/DemandesAchat.jsx';
 import BonsCommande     from './achats/BonsCommande.jsx';
 import Fournisseurs     from './achats/Fournisseurs.jsx';
+import CategoriesFournisseurs from './achats/CategoriesFournisseurs.jsx';
 import OrdresAchat      from './achats/OrdresAchat.jsx';
 
 export default function Achats({ activeTab, onNavigate }) {
@@ -24,6 +25,7 @@ export default function Achats({ activeTab, onNavigate }) {
           onNavigate={onNavigate}
         />
       )}
+      {tab === 'categories-fournisseurs' && <CategoriesFournisseurs />}
       {tab === 'ordres-achat'      && <OrdresAchat />}
     </div>
   );

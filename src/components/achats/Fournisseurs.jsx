@@ -5,7 +5,7 @@
 import { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   UserCog, Plus, Eye, Edit2, Search, Filter, Download,
-  ToggleLeft, Phone, Mail, MapPin, Loader2, RefreshCw, Archive, Tag, BookUser, List,
+  ToggleLeft, MapPin, Loader2, RefreshCw, Archive, Tag, BookUser, List,
 } from 'lucide-react';
 import { useSuppliers } from '../../hooks/useSuppliers';
 import {
@@ -20,10 +20,9 @@ import {
 } from '../../services/achats/supplierAnnuaire';
 import FournisseursAnnuaire from './FournisseursAnnuaire.jsx';
 import FournisseurFiche from './FournisseurFiche.jsx';
-import { StarRatingInput } from './StarRating.jsx';
 import {
   INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE,
-  MODES_PAIEMENT, CATEGORIES_FOURN,
+  CATEGORIES_FOURN,
   KpiCard, EmptyState, Modal, SectionTitle, FField, FRow,
 } from './shared.jsx';
 
@@ -82,12 +81,8 @@ function badgeStatut(statut) {
 
 function formatCategoriesLabel(item) {
   const primary = item.supplier_category || item.categories?.find((c) => c.is_primary)?.name || '';
-  const secondaryNames = (item.secondary_categories || item.categories?.filter((c) => !c.is_primary) || [])
-    .map((c) => c.name)
-    .filter(Boolean);
-  if (!primary && !secondaryNames.length) return '—';
-  if (!secondaryNames.length) return primary;
-  return `${primary || '—'} (+${secondaryNames.length})`;
+  if (!primary) return 'Sans catégorie';
+  return primary;
 }
 
 function CheckField({ label, checked, onChange }) {
@@ -109,7 +104,7 @@ function FournisseurForm({
       ...initial,
       status: initial.status || 'active',
       primary_category_id: initial.primary_category_id || null,
-      secondary_category_ids: Array.isArray(initial.secondary_category_ids) ? initial.secondary_category_ids : [],
+      secondary_category_ids: [],
       delivery_available: !!initial.delivery_available,
       installation_available: !!initial.installation_available,
       sav_available: !!initial.sav_available,
@@ -134,18 +129,8 @@ function FournisseurForm({
       ...p,
       primary_category_id: id || null,
       supplier_category: cat?.name || '',
-      secondary_category_ids: (p.secondary_category_ids || []).filter((sid) => sid !== id),
+      secondary_category_ids: [],
     }));
-  }
-
-  function toggleSecondary(id) {
-    setForm((p) => {
-      if (id === p.primary_category_id) return p;
-      const cur = new Set(p.secondary_category_ids || []);
-      if (cur.has(id)) cur.delete(id);
-      else cur.add(id);
-      return { ...p, secondary_category_ids: [...cur] };
-    });
   }
 
   async function handleQuickCreateCategory() {
@@ -167,8 +152,11 @@ function FournisseurForm({
 
   function handleSubmit(ev) {
     ev.preventDefault();
-    if (!form.company_name.trim()) {
-      setErrors({ company_name: 'Requis' });
+    const e = {};
+    if (!form.company_name.trim()) e.company_name = 'Requis';
+    if (!String(form.phone || '').trim()) e.phone = 'Requis';
+    if (Object.keys(e).length) {
+      setErrors(e);
       return;
     }
     const similar = findSimilarSuppliers(allSuppliers, form, { excludeId: initial?.id });
@@ -184,7 +172,7 @@ function FournisseurForm({
       onSave({
         ...form,
         primary_category_id: form.primary_category_id || null,
-        secondary_category_ids: form.secondary_category_ids || [],
+        secondary_category_ids: [],
       });
     } else {
       const { primary_category_id: _p, secondary_category_ids: _s, ...legacy } = form;
@@ -194,9 +182,9 @@ function FournisseurForm({
 
   return (
     <form onSubmit={handleSubmit}>
-      <SectionTitle icon={<UserCog size={12} />}>1. Identité</SectionTitle>
+      <SectionTitle icon={<UserCog size={12} />}>1. Informations principales</SectionTitle>
       <FRow>
-        <FField label="Raison sociale" required>
+        <FField label="Nom de la société" required>
           <input
             value={form.company_name}
             onChange={(e) => set('company_name', e.target.value)}
@@ -205,104 +193,94 @@ function FournisseurForm({
           />
           {errors.company_name && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.company_name}</div>}
         </FField>
-        <FField label="Nom commercial"><input value={form.trade_name} onChange={(e) => set('trade_name', e.target.value)} placeholder="Nom commercial..." style={INPUT_STYLE} /></FField>
-        <FField label="ICE"><input value={form.ice} onChange={(e) => set('ice', e.target.value)} placeholder="N° ICE" style={INPUT_STYLE} /></FField>
-        <FField label="RC"><input value={form.rc} onChange={(e) => set('rc', e.target.value)} placeholder="N° RC" style={INPUT_STYLE} /></FField>
-        <FField label="IF"><input value={form.tax_id} onChange={(e) => set('tax_id', e.target.value)} placeholder="Identifiant fiscal" style={INPUT_STYLE} /></FField>
-        <FField label="CNSS"><input value={form.cnss} onChange={(e) => set('cnss', e.target.value)} placeholder="N° CNSS" style={INPUT_STYLE} /></FField>
-      </FRow>
-
-      <SectionTitle icon={<MapPin size={12} />}>Adresse</SectionTitle>
-      <FRow>
-        <FField label="Adresse"><input value={form.address} onChange={(e) => set('address', e.target.value)} placeholder="Adresse complète..." style={INPUT_STYLE} /></FField>
-        <FField label="Ville"><input value={form.city} onChange={(e) => set('city', e.target.value)} placeholder="Ville..." style={INPUT_STYLE} /></FField>
-        <FField label="Région"><input value={form.region} onChange={(e) => set('region', e.target.value)} placeholder="Région..." style={INPUT_STYLE} /></FField>
-      </FRow>
-
-      <SectionTitle icon={<Phone size={12} />}>2. Contact</SectionTitle>
-      <FRow>
-        <FField label="Téléphone principal"><input value={form.phone} onChange={(e) => set('phone', e.target.value)} placeholder="+212..." style={INPUT_STYLE} /></FField>
-        <FField label="Téléphone secondaire"><input value={form.phone_secondary} onChange={(e) => set('phone_secondary', e.target.value)} placeholder="+212..." style={INPUT_STYLE} /></FField>
-        <FField label="WhatsApp"><input value={form.whatsapp} onChange={(e) => set('whatsapp', e.target.value)} placeholder="+212..." style={INPUT_STYLE} /></FField>
-        <FField label="Email"><input type="email" value={form.email} onChange={(e) => set('email', e.target.value)} placeholder="contact@societe.ma" style={INPUT_STYLE} /></FField>
-        <FField label="Site web"><input value={form.website} onChange={(e) => set('website', e.target.value)} placeholder="https://..." style={INPUT_STYLE} /></FField>
-        <FField label="Contact principal"><input value={form.main_contact} onChange={(e) => set('main_contact', e.target.value)} placeholder="Nom contact" style={INPUT_STYLE} /></FField>
-        <FField label="Fonction"><input value={form.contact_role} onChange={(e) => set('contact_role', e.target.value)} placeholder="Responsable achats..." style={INPUT_STYLE} /></FField>
-        <FField label="Tél. contact"><input value={form.contact_phone} onChange={(e) => set('contact_phone', e.target.value)} placeholder="+212..." style={INPUT_STYLE} /></FField>
-        <FField label="Email contact"><input type="email" value={form.contact_email} onChange={(e) => set('contact_email', e.target.value)} placeholder="email@contact.ma" style={INPUT_STYLE} /></FField>
-      </FRow>
-
-      <SectionTitle icon={<Tag size={12} />}>3. Catégories</SectionTitle>
-      {useCatalog ? (
-        <div style={{ marginBottom: 16 }}>
-          <FRow>
-            <FField label="Catégorie principale">
-              <select value={form.primary_category_id || ''} onChange={(e) => setPrimary(e.target.value || null)} style={SELECT_STYLE}>
-                <option value="">Sélectionner...</option>
-                {catalogOptions.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-              </select>
-            </FField>
-          </FRow>
-          <FField label="Catégories secondaires">
-            <div className="achats-fourn-cat-grid">
-              {catalogOptions.filter((c) => c.id !== form.primary_category_id).map((c) => {
-                const checked = (form.secondary_category_ids || []).includes(c.id);
-                return (
-                  <label key={c.id} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.8rem', cursor: 'pointer' }}>
-                    <input type="checkbox" checked={checked} onChange={() => toggleSecondary(c.id)} />
-                    <span>{c.name}</span>
-                  </label>
-                );
-              })}
-            </div>
+        <FField label="Numéro de téléphone" required>
+          <input
+            value={form.phone}
+            onChange={(e) => set('phone', e.target.value)}
+            placeholder="+212..."
+            style={{ ...INPUT_STYLE, borderColor: errors.phone ? 'var(--red)' : 'var(--border)' }}
+          />
+          {errors.phone && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.phone}</div>}
+        </FField>
+        {useCatalog ? (
+          <FField label="Catégorie">
+            <select value={form.primary_category_id || ''} onChange={(e) => setPrimary(e.target.value || null)} style={SELECT_STYLE}>
+              <option value="">Sans catégorie</option>
+              {catalogOptions.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              {form.primary_category_id
+                && !catalogOptions.some((c) => c.id === form.primary_category_id)
+                && (
+                  <option value={form.primary_category_id}>
+                    {form.supplier_category || 'Catégorie inactive'}
+                  </option>
+                )}
+            </select>
           </FField>
-          <div style={{ display: 'flex', gap: 8, marginTop: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-            <input value={newCatName} onChange={(e) => setNewCatName(e.target.value)} placeholder="Nouvelle catégorie..." style={{ ...INPUT_STYLE, flex: 1, minWidth: 180 }} />
-            <button type="button" className="btn btn-secondary btn-sm" disabled={creatingCat || !newCatName.trim()} onClick={handleQuickCreateCategory}>
-              {creatingCat ? <Loader2 size={13} className="cin-spin" /> : <Plus size={13} />} Créer catégorie
-            </button>
-          </div>
-          {catError && <div style={{ color: 'var(--red)', fontSize: '0.75rem', marginTop: 6 }}>{catError}</div>}
-        </div>
-      ) : (
-        <FRow>
-          <FField label="Catégorie fournisseur">
+        ) : (
+          <FField label="Catégorie">
             <select value={form.supplier_category} onChange={(e) => set('supplier_category', e.target.value)} style={SELECT_STYLE}>
-              <option value="">Sélectionner...</option>
+              <option value="">Sans catégorie</option>
               {CATEGORIES_FOURN.map((c) => <option key={c} value={c}>{c}</option>)}
             </select>
-            {!categoriesReady && (
-              <div style={{ fontSize: '0.7rem', color: 'var(--text-3)', marginTop: 4 }}>
-                Exécutez RUN_PURCHASE_SUPPLIER_CATEGORIES.sql pour le catalogue multi-catégories.
-              </div>
-            )}
           </FField>
-        </FRow>
+        )}
+        <FField label="Nom du contact">
+          <input value={form.main_contact} onChange={(e) => set('main_contact', e.target.value)} placeholder="Nom contact" style={INPUT_STYLE} />
+        </FField>
+        <FField label="Email">
+          <input type="email" value={form.email} onChange={(e) => set('email', e.target.value)} placeholder="contact@societe.ma" style={INPUT_STYLE} />
+        </FField>
+        <FField label="WhatsApp">
+          <input value={form.whatsapp} onChange={(e) => set('whatsapp', e.target.value)} placeholder="+212..." style={INPUT_STYLE} />
+        </FField>
+        <FField label="ICE">
+          <input value={form.ice} onChange={(e) => set('ice', e.target.value)} placeholder="N° ICE" style={INPUT_STYLE} />
+        </FField>
+      </FRow>
+      {useCatalog && (
+        <div style={{ display: 'flex', gap: 8, marginBottom: 16, flexWrap: 'wrap', alignItems: 'center' }}>
+          <input
+            value={newCatName}
+            onChange={(e) => setNewCatName(e.target.value)}
+            placeholder="Nouvelle catégorie…"
+            style={{ ...INPUT_STYLE, flex: 1, minWidth: 180 }}
+          />
+          <button type="button" className="btn btn-secondary btn-sm" disabled={creatingCat || !newCatName.trim()} onClick={handleQuickCreateCategory}>
+            {creatingCat ? <Loader2 size={13} className="cin-spin" /> : <Plus size={13} />} Créer catégorie
+          </button>
+          {catError && <div style={{ color: 'var(--red)', fontSize: '0.75rem', width: '100%' }}>{catError}</div>}
+        </div>
       )}
 
-      <SectionTitle icon={<Tag size={12} />}>4. Produits / services & marques</SectionTitle>
+      <SectionTitle icon={<MapPin size={12} />}>2. Localisation</SectionTitle>
+      <FRow>
+        <FField label="Ville"><input value={form.city} onChange={(e) => set('city', e.target.value)} placeholder="Ville..." style={INPUT_STYLE} /></FField>
+        <FField label="Adresse"><input value={form.address} onChange={(e) => set('address', e.target.value)} placeholder="Adresse..." style={INPUT_STYLE} /></FField>
+      </FRow>
+
+      <SectionTitle icon={<Tag size={12} />}>3. Activité</SectionTitle>
       <FRow>
         <FField label="Produits / services proposés">
-          <textarea value={form.products_services} onChange={(e) => set('products_services', e.target.value)} placeholder="Ex: câbles, tableaux, éclairage LED…" style={TEXTAREA_STYLE} />
+          <textarea value={form.products_services} onChange={(e) => set('products_services', e.target.value)} placeholder="Ex: câbles, tableaux…" style={TEXTAREA_STYLE} />
         </FField>
-        <FField label="Marques distribuées">
+        <FField label="Marques">
           <input value={form.brands} onChange={(e) => set('brands', e.target.value)} placeholder="Séparer par des virgules" style={INPUT_STYLE} />
         </FField>
       </FRow>
+      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 16 }}>
+        <CheckField label="Livraison disponible" checked={form.delivery_available} onChange={(v) => set('delivery_available', v)} />
+        <CheckField label="Installation disponible" checked={form.installation_available} onChange={(v) => set('installation_available', v)} />
+        <CheckField label="SAV disponible" checked={form.sav_available} onChange={(v) => set('sav_available', v)} />
+      </div>
 
-      <SectionTitle icon={<UserCog size={12} />}>5. Conditions commerciales</SectionTitle>
+      <SectionTitle icon={<UserCog size={12} />}>4. Conditions</SectionTitle>
       <FRow>
-        <FField label="Zone de livraison"><input value={form.delivery_zone} onChange={(e) => set('delivery_zone', e.target.value)} placeholder="Casablanca, Rabat…" style={INPUT_STYLE} /></FField>
-        <FField label="Délai moyen livraison"><input value={form.avg_delivery_delay} onChange={(e) => set('avg_delivery_delay', e.target.value)} placeholder="Ex: 48h, 5 jours…" style={INPUT_STYLE} /></FField>
-        <FField label="Délai paiement"><input value={form.payment_terms} onChange={(e) => set('payment_terms', e.target.value)} placeholder="Ex: 30 jours…" style={INPUT_STYLE} /></FField>
-        <FField label="Mode règlement">
-          <select value={form.preferred_payment_method} onChange={(e) => set('preferred_payment_method', e.target.value)} style={SELECT_STYLE}>
-            {MODES_PAIEMENT.map((m) => <option key={m} value={m}>{m}</option>)}
-          </select>
+        <FField label="Conditions de paiement">
+          <input value={form.payment_terms} onChange={(e) => set('payment_terms', e.target.value)} placeholder="Ex: 30 jours…" style={INPUT_STYLE} />
         </FField>
-        <FField label="Montant min. commande"><input type="number" step="0.01" value={form.min_order_amount} onChange={(e) => set('min_order_amount', e.target.value)} placeholder="0" style={INPUT_STYLE} /></FField>
-        <FField label="Banque"><input value={form.bank} onChange={(e) => set('bank', e.target.value)} placeholder="Banque..." style={INPUT_STYLE} /></FField>
-        <FField label="RIB"><input value={form.rib} onChange={(e) => set('rib', e.target.value)} placeholder="RIB / IBAN..." style={INPUT_STYLE} /></FField>
+        <FField label="Délai de livraison">
+          <input value={form.avg_delivery_delay} onChange={(e) => set('avg_delivery_delay', e.target.value)} placeholder="Ex: 48h, 5 jours…" style={INPUT_STYLE} />
+        </FField>
         <FField label="Statut">
           <select value={form.status} onChange={(e) => set('status', e.target.value)} style={SELECT_STYLE}>
             {STATUT_OPTIONS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
@@ -310,34 +288,14 @@ function FournisseurForm({
         </FField>
       </FRow>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 16, marginBottom: 16 }}>
-        <CheckField label="Livraison disponible" checked={form.delivery_available} onChange={(v) => set('delivery_available', v)} />
-        <CheckField label="Installation disponible" checked={form.installation_available} onChange={(v) => set('installation_available', v)} />
-        <CheckField label="SAV disponible" checked={form.sav_available} onChange={(v) => set('sav_available', v)} />
         <CheckField label="Fournisseur recommandé" checked={form.is_recommended} onChange={(v) => set('is_recommended', v)} />
       </div>
 
-      <SectionTitle icon={<Tag size={12} />}>Notation — Rapport qualité / prix</SectionTitle>
-      <FRow>
-        <FField label="Étoiles (1 à 5)">
-          <StarRatingInput
-            value={form.rating_quality_price}
-            onChange={(v) => set('rating_quality_price', v)}
-            disabled={saving}
-          />
-        </FField>
-        <FField label="Commentaire notation">
-          <input
-            value={form.rating_comment}
-            onChange={(e) => set('rating_comment', e.target.value)}
-            placeholder="Ex: bon rapport qualité/prix, délais respectés…"
-            style={INPUT_STYLE}
-          />
-        </FField>
-      </FRow>
-
-      <SectionTitle icon={<UserCog size={12} />}>6. Notes</SectionTitle>
+      <SectionTitle icon={<UserCog size={12} />}>5. Notes</SectionTitle>
       <div style={{ marginBottom: 16 }}>
-        <FField label="Notes internes"><textarea value={form.notes} onChange={(e) => set('notes', e.target.value)} placeholder="Notes internes..." style={TEXTAREA_STYLE} /></FField>
+        <FField label="Notes">
+          <textarea value={form.notes} onChange={(e) => set('notes', e.target.value)} placeholder="Notes internes..." style={TEXTAREA_STYLE} />
+        </FField>
       </div>
 
       {dupWarn.length > 0 && (

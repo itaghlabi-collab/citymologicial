@@ -169,6 +169,7 @@ const NAV = [
       { id: 'demandes-achat',     label: "Demandes d'achat",     icon: ClipboardList },
       { id: 'bons-commande',      label: 'Bon de commande',      icon: ShoppingCart },
       { id: 'fournisseurs',       label: 'Fournisseurs',         icon: UserCog },
+      { id: 'categories-fournisseurs', label: 'Catégories fournisseurs', icon: Tag },
       { id: 'ordres-achat',       label: "Ordre d'achat",        icon: FileCheck },
     ],
   },
@@ -241,6 +242,7 @@ const MODULE_LABELS = {
   'demandes-achat':    "Demandes d'achat",
   'bons-commande':     'Bon de commande',
   fournisseurs:        'Fournisseurs',
+  'categories-fournisseurs': 'Catégories fournisseurs',
   'ordres-achat':      "Ordre d'achat",
   'ordres-paiement-achats': "Ordre de paiement",
   'categories-stock':  'Categories stock',
@@ -317,6 +319,7 @@ function PageContent({ module, onNavigate, inventaireArticleCode, onInventaireAr
     case 'demandes-achat':      return <Achats activeTab="demandes-achat" onNavigate={onNavigate} />;
     case 'bons-commande':       return <Achats activeTab="bons-commande" onNavigate={onNavigate} />;
     case 'fournisseurs':        return <Achats activeTab="fournisseurs" onNavigate={onNavigate} />;
+    case 'categories-fournisseurs': return <Achats activeTab="categories-fournisseurs" onNavigate={onNavigate} />;
     case 'comparaison-devis':   return <Achats activeTab="demandes-achat" onNavigate={onNavigate} />;
     case 'ordres-achat':        return <Achats activeTab="ordres-achat" onNavigate={onNavigate} />;
     /* Inventaire & Depot */

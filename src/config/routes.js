@@ -76,6 +76,7 @@ export const ROUTES = {
   DEMANDES_ACHAT:     'demandes-achat',
   BONS_COMMANDE:      'bons-commande',
   FOURNISSEURS:       'fournisseurs',
+  CATEGORIES_FOURNISSEURS: 'categories-fournisseurs',
   COMPARAISON_DEVIS:  'comparaison-devis',
   ORDRES_ACHAT:       'ordres-achat',
   ORDRES_PAIEMENT_ACHATS: 'ordres-paiement-achats',
