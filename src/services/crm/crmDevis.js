@@ -231,7 +231,44 @@ export async function getCrmDevisById(id) {
 const ligneUpsertChainByDevis = new Map();
 
 async function upsertLignesOnce(devisId, lignes) {
-  await getSupabase().from(LIGNES).delete().eq('devis_id', devisId);
+  // Compte avant : si le DELETE est bloqué par RLS (ex. chef sans « supprimer »),
+  // PostgREST ne renvoie souvent pas d'erreur → sans ce contrôle on doublerait les lignes.
+  const { count: beforeCount, error: beforeErr } = await getSupabase()
+    .from(LIGNES)
+    .select('id', { count: 'exact', head: true })
+    .eq('devis_id', devisId);
+  if (beforeErr) {
+    console.error('[CITYMO] crmDevis lignes count before', beforeErr);
+    throw beforeErr;
+  }
+
+  const { error: delErr } = await getSupabase()
+    .from(LIGNES)
+    .delete()
+    .eq('devis_id', devisId);
+  if (delErr) {
+    console.error('[CITYMO] crmDevis lignes delete', delErr);
+    throw delErr;
+  }
+
+  if ((beforeCount || 0) > 0) {
+    const { count: afterCount, error: afterErr } = await getSupabase()
+      .from(LIGNES)
+      .select('id', { count: 'exact', head: true })
+      .eq('devis_id', devisId);
+    if (afterErr) {
+      console.error('[CITYMO] crmDevis lignes count after delete', afterErr);
+      throw afterErr;
+    }
+    if ((afterCount || 0) > 0) {
+      const err = new Error(
+        "Impossible de remplacer les lignes du devis (droit manquant). Aucun doublon n'a été ajouté — contactez l'administrateur.",
+      );
+      err.code = 'LIGNES_REPLACE_DENIED';
+      throw err;
+    }
+  }
+
   const rows = (lignes || [])
     .filter((l) => {
       if (l.type !== 'article') return true;
