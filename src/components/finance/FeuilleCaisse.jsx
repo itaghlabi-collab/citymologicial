@@ -2,7 +2,7 @@
  * FeuilleCaisse.jsx — Feuille de caisse (vue journalière + vue mensuelle)
  */
 import { useState, useEffect, useMemo } from 'react';
-import { Loader2, Plus, Download, FileSpreadsheet, Wallet, Edit2, Trash2, TrendingDown, RefreshCw, Bell, CheckCircle, Lock, Unlock, Calendar } from 'lucide-react';
+import { Loader2, Plus, Download, FileSpreadsheet, Wallet, Edit2, Trash2, TrendingDown, RefreshCw, Lock, Calendar } from 'lucide-react';
 import { useFinanceTransactions } from '../../hooks/useFinanceTransactions';
 import { useAuth } from '../../hooks/useAuth';
 import {
@@ -172,8 +172,6 @@ export default function FeuilleCaisse() {
   const isDayValidated = Boolean(dayValidation?.review_date);
 
   const canEditDay = viewMode === 'month' || !isDayValidated || superAdmin;
-
-  const showValidationBlock = viewMode === 'day' && (isDG || superAdmin);
 
   useEffect(() => {
     if (viewMode !== 'day' || (!isDG && !superAdmin)) {
@@ -373,11 +371,6 @@ export default function FeuilleCaisse() {
   const years = [];
   for (let y = now.getFullYear() - 2; y <= now.getFullYear() + 1; y++) years.push(y);
 
-  const showJ1ValidationBanner = (isDG || superAdmin)
-    && pendingJ1Validation?.needsValidation
-    && viewMode === 'day'
-    && tableFilter === 'yesterday';
-
   return (
     <div className="animate-fade-in">
       <div className="page-header flex-between finance-page-header">
@@ -386,7 +379,7 @@ export default function FeuilleCaisse() {
           <p className="page-subtitle">
             <span className="finance-sub-hide-mobile">Journal trésorerie — paiements validés à la date réelle du paiement. </span>
             {viewMode === 'day'
-              ? <>Validation <strong>{formatDateShortFr(selectedDate)}</strong></>
+              ? <>Journée <strong>{formatDateShortFr(selectedDate)}</strong></>
               : <>Mois <strong>{periodLabel}</strong></>}
             {' · '}<strong>{filterLabel}</strong>
           </p>
@@ -494,54 +487,6 @@ export default function FeuilleCaisse() {
         </div>
       )}
 
-      {showJ1ValidationBanner && !isDayValidated && (
-        <div className="card" style={{ marginBottom: 16, padding: '12px 16px', fontSize: '0.86rem', background: '#FFF3E0', border: '1px solid #FFB74D', color: '#E65100' }}>
-          <strong>Validation J-1 en attente</strong> — clôturez la caisse d&apos;hier ({formatDateShortFr(yesterdayStr)}).
-        </div>
-      )}
-
-      {showValidationBlock && !isDayValidated && dailyTotals && (
-        <div className="card" style={{ marginBottom: 16, padding: '14px 18px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12, background: '#E3F2FD', border: '1px solid #90CAF9' }}>
-          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 10, fontSize: '0.88rem', maxWidth: 720 }}>
-            <Bell size={18} style={{ color: '#1565C0', flexShrink: 0, marginTop: 2 }} />
-            <span>
-              <strong>Validation caisse {tableFilter === 'yesterday' ? 'J-1' : 'J'} requise.</strong>
-              {' '}Veuillez valider la caisse du{' '}
-              <strong>{formatDateFr(selectedDate)}</strong>.
-              {dailyTotals.dayCount > 0 && (
-                <> — {dailyTotals.dayCount} opération(s) : entrées {formatMAD(dailyTotals.entreesJour)}, sorties {formatMAD(dailyTotals.sortiesJour)}.</>
-              )}
-              {dailyTotals.dayCount === 0 && ' — Aucune opération enregistrée ce jour-là (validation de clôture).'}
-            </span>
-          </div>
-          <button type="button" className="btn btn-primary btn-sm" onClick={handleValidateDay} disabled={validating}>
-            {validating ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <CheckCircle size={14} />}
-            {' '}Valider {tableFilter === 'yesterday' ? 'J-1' : 'J'}
-          </button>
-        </div>
-      )}
-
-      {showValidationBlock && isDayValidated && (
-        <div className="card" style={{ marginBottom: 16, padding: '12px 18px', display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: 12, background: '#E8F5E9', border: '1px solid #A5D6A7' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: '0.88rem', color: '#2E7D32' }}>
-            <CheckCircle size={18} />
-            <span className="badge badge-green" style={{ fontSize: '0.75rem' }}>Journée validée</span>
-            <span>{formatDateFr(selectedDate)}</span>
-            {!canEditDay && (
-              <span style={{ display: 'flex', alignItems: 'center', gap: 4, color: 'var(--text-3)', fontSize: '0.82rem' }}>
-                <Lock size={14} /> Modifications verrouillées
-              </span>
-            )}
-          </div>
-          {superAdmin && (
-            <button type="button" className="btn btn-secondary btn-sm" onClick={handleUnlockDay} disabled={unlocking}>
-              {unlocking ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : <Unlock size={14} />}
-              {' '}Déverrouiller
-            </button>
-          )}
-        </div>
-      )}
-
       {viewMode === 'day' && dailyTotals ? (
         <div className="stat-grid finance-kpi-grid finance-kpi-strip">
           <KpiCard icon={<Wallet size={17} />} label={`Solde début ${dayKpiLabel}`} value={formatMAD(dailyTotals.soldeDebutJournee)} color="grey" sub="solde cumulé avant cette date" />
@@ -570,7 +515,7 @@ export default function FeuilleCaisse() {
               : `Aucune opération — ${periodLabel}`}
             sub={configured && !error
               ? viewMode === 'month'
-                ? 'Historique complet du mois. Passez en vue jour pour la validation quotidienne.'
+                ? 'Historique complet du mois. Passez en vue jour pour le détail quotidien.'
                 : 'Validez un paiement dans Paiement hebdo ou Sous-traitants — la sortie s\'ajoute automatiquement à la date du paiement.'
               : 'Connectez-vous et vérifiez la configuration Supabase.'}
             action={canManage && canEditDay ? 'Alimentation manuelle' : undefined}
