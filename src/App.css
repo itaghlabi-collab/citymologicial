@@ -7538,26 +7538,25 @@ tbody tr:last-child td { border-bottom: none; }
     font-size: 0.875rem;
   }
 
-  /* Largeur mini aérée — scroll X interne si écran trop étroit (13–15") */
-  .crm-module--devis .crm-table-desktop .crm-table-scroll-x > table {
-    min-width: 1280px;
-  }
-
-  /* Sans TVA / Échéance — largeur fixe ; scroll X dès que le cadre est plus étroit */
+  /* Sans TVA / Expiration — largeur fixe ; scroll X dès que le cadre est trop étroit */
+  .crm-module--devis .crm-table-desktop .crm-table-scroll-x > table,
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x > table {
-    min-width: 1280px;
+    min-width: 1180px;
   }
 
+  .crm-module--devis .crm-table-desktop .table-wrap.crm-table-scroll-x,
   .crm-module--factures .crm-table-desktop .table-wrap.crm-table-scroll-x {
     overflow-x: scroll;
     scrollbar-width: thin;
     scrollbar-color: rgba(0, 0, 0, 0.35) transparent;
   }
 
+  .crm-module--devis .crm-table-desktop .table-wrap.crm-table-scroll-x::-webkit-scrollbar,
   .crm-module--factures .crm-table-desktop .table-wrap.crm-table-scroll-x::-webkit-scrollbar {
     height: 10px;
   }
 
+  .crm-module--devis .crm-table-desktop .table-wrap.crm-table-scroll-x::-webkit-scrollbar-thumb,
   .crm-module--factures .crm-table-desktop .table-wrap.crm-table-scroll-x::-webkit-scrollbar-thumb {
     background: rgba(0, 0, 0, 0.28);
     border-radius: 6px;
@@ -7592,14 +7591,14 @@ tbody tr:last-child td { border-bottom: none; }
     white-space: nowrap;
   }
 
-  /* Titre — ellipsis + tooltip (title HTML) */
+  /* Titre — plus large après retrait TVA / dates ; ellipsis + tooltip */
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x .crm-col-title,
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x .crm-col-title,
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x th:nth-child(2),
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x th:nth-child(2) {
-    min-width: 220px;
-    max-width: 280px;
-    width: 240px;
+    min-width: 280px;
+    max-width: 380px;
+    width: 320px;
   }
 
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x .crm-col-title button,

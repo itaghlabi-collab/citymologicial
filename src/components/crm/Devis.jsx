@@ -619,11 +619,9 @@ export default function Devis({ onNavigate }) {
                     { label: 'Client',          field: 'client_nom' },
                     { label: 'Commercial',      field: 'commercial' },
                     { label: 'Total HT',        field: 'total_ht',  align: 'right' },
-                    { label: 'TVA',             field: 'total_tva', align: 'right' },
                     { label: 'Total TTC',       field: 'total_ttc', align: 'right' },
                     { label: 'Statut',          field: 'statut' },
                     { label: 'Creation',        field: 'date_creation' },
-                    { label: 'Expiration',      field: 'date_validite' },
                     { label: 'Actions',         field: null },
                   ].map(col => (
                     <th key={col.label || 'actions'} onClick={col.field ? () => toggleSort(col.field) : undefined}
@@ -640,7 +638,6 @@ export default function Devis({ onNavigate }) {
               <tbody>
                 {paged.map((d, i) => {
                   const clientNom = d.client_nom || d.client?.nom || '—';
-                  const expSoon = isExpiringSoon(d.date_validite);
                   return (
                     <tr key={d.id ?? i} style={{ borderBottom: '1px solid var(--border)', transition: 'background 0.12s' }}
                       onMouseEnter={e => e.currentTarget.style.background = 'var(--bg)'}
@@ -703,11 +700,6 @@ export default function Devis({ onNavigate }) {
                         {fmtMAD(d.total_ht)}
                       </td>
 
-                      {/* TVA */}
-                      <td data-label="TVA" className="crm-col-money" style={{ padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap', color: 'var(--text-3)' }}>
-                        {fmtMAD(d.total_tva)}
-                      </td>
-
                       {/* Total TTC */}
                       <td data-label="Total TTC" className="crm-col-money" style={{ padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap' }}>
                         <span style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '0.95rem', color: 'var(--red)' }}>
@@ -723,14 +715,6 @@ export default function Devis({ onNavigate }) {
                       {/* Date creation */}
                       <td data-label="Creation" className="crm-col-date" style={{ padding: '12px 14px', whiteSpace: 'nowrap', color: 'var(--text-2)', fontSize: '0.84rem' }}>
                         {fmtDate(d.date_creation)}
-                      </td>
-
-                      {/* Date validite */}
-                      <td data-label="Validite" className="crm-col-date" style={{ padding: '12px 14px', whiteSpace: 'nowrap', fontSize: '0.84rem' }}>
-                        <span style={{ color: expSoon ? '#E65100' : 'var(--text-2)', fontWeight: expSoon ? 700 : 400 }}>
-                          {fmtDate(d.date_validite)}
-                          {expSoon && <span style={{ display: 'block', fontSize: '0.7rem', color: '#E65100' }}>Expire bientot</span>}
-                        </span>
                       </td>
 
                       {/* Actions */}
