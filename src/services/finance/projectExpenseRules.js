@@ -95,3 +95,17 @@ export function isManualProjectExpense(expense) {
   if (expense.source_type) return false;
   return true;
 }
+
+/** Dépense issue de l’import Excel initial (modifiable / suppressible). */
+export function isImportExcelProjectExpense(expense) {
+  return String(expense?.origine || '') === 'import_excel';
+}
+
+/** Actions manuelles autorisées (Nouvelle dépense OU Import Excel initial). */
+export function canEditProjectExpense(expense) {
+  return isManualProjectExpense(expense) || isImportExcelProjectExpense(expense);
+}
+
+export function canDeleteProjectExpense(expense) {
+  return canEditProjectExpense(expense);
+}

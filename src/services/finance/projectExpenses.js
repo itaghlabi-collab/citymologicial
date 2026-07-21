@@ -3,7 +3,11 @@
  */
 import { getSupabase } from '../../lib/supabase';
 import { isTotalSummaryRow } from './projectExpenseImportUtils';
-import { isWorkerPaymentSourceType } from './projectExpenseRules';
+import {
+  canDeleteProjectExpense,
+  canEditProjectExpense,
+  isWorkerPaymentSourceType,
+} from './projectExpenseRules';
 
 const TABLE = 'project_expenses';
 
@@ -155,9 +159,51 @@ export async function createProjectExpense(form) {
 
 export async function updateProjectExpense(id, form) {
   await getAuthUserId();
-  const row = toRow(form, form.created_by);
+  const { data: existing, error: fetchErr } = await getSupabase()
+    .from(TABLE)
+    .select('*')
+    .eq('id', id)
+    .maybeSingle();
+  if (fetchErr) throw fetchErr;
+  if (!existing) {
+    const err = new Error('Dépense introuvable.');
+    err.code = 'NOT_FOUND';
+    throw err;
+  }
+  if (!canEditProjectExpense(existing)) {
+    const err = new Error('Cette dépense ne peut pas être modifiée (origine non autorisée).');
+    err.code = 'FORBIDDEN';
+    throw err;
+  }
+
+  const projectId = form.project_id || existing.project_id || null;
+  const montant = form.montant != null ? Number(form.montant) : Number(existing.montant) || 0;
+  const statut = form.statut || existing.statut || 'valide';
+  const row = toRow({
+    ...form,
+    project_id: projectId,
+    project_match_status: projectId ? 'matched' : (form.project_match_status || existing.project_match_status || 'needs_manual'),
+    montant,
+    montant_paye: statut === 'payee' ? montant : (form.montant_paye ?? existing.montant_paye),
+    date_paiement: form.date_paiement || (statut === 'payee' ? (form.date_depense || existing.date_depense) : existing.date_paiement),
+    // Origine + traçabilité technique verrouillées
+    origine: existing.origine,
+    source_type: existing.source_type,
+    source_id: existing.source_id,
+    payment_order_id: existing.payment_order_id,
+    purchase_request_id: existing.purchase_request_id,
+    purchase_acquisition_order_id: existing.purchase_acquisition_order_id,
+    document_path: existing.document_path,
+    attachment_url: existing.attachment_url,
+  }, existing.created_by);
   delete row.created_by;
-  const { data, error } = await getSupabase().from(TABLE).update(row).eq('id', id).select(SELECT).single();
+
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .update(row)
+    .eq('id', id)
+    .select(SELECT)
+    .single();
   if (error) {
     console.error('[CITYMO] project_expenses update', error);
     throw error;
@@ -178,9 +224,10 @@ export async function deleteProjectExpense(id) {
     err.code = 'NOT_FOUND';
     throw err;
   }
-  // Uniquement les saisies manuelles « Nouvelle dépense » (pas les syncs ERP).
-  if (existing.origine !== 'charge_manuelle' || existing.source_type) {
-    const err = new Error('Seules les dépenses ajoutées manuellement peuvent être supprimées.');
+  if (!canDeleteProjectExpense(existing)) {
+    const err = new Error(
+      'Seules les dépenses « Import Excel initial » ou ajoutées manuellement peuvent être supprimées.',
+    );
     err.code = 'FORBIDDEN';
     throw err;
   }

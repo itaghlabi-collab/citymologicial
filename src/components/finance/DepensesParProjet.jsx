@@ -1,19 +1,24 @@
 /**
  * DepensesParProjet.jsx — Module Finance : Dépenses par projet (UI premium)
  */
-import { useState, useRef, useMemo } from 'react';
+import { useState, useRef, useMemo, useEffect } from 'react';
 import {
   Loader2, Plus, Upload, Eye, Download, FileSpreadsheet,
   Building2, TrendingDown, Calendar, Target, ArrowLeft, BarChart3,
   AlertTriangle, LayoutDashboard, FolderKanban, CreditCard, LineChart,
-  Search, User, Wallet, ShoppingCart, ChevronDown, ChevronUp, Users, Tags, Trash2,
+  Search, User, Wallet, ShoppingCart, ChevronDown, ChevronUp, Users, Tags, Trash2, Pencil,
 } from 'lucide-react';
 import { useProjectExpenses } from '../../hooks/useProjectExpenses';
 import { formatMAD, Modal, INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE, MODES_PAIEMENT } from './shared.jsx';
 import { FinanceDonutChart } from './FinanceCharts.jsx';
 import { importDepenseChantierFile } from '../../services/finance/projectExpenseImport';
-import { filterProjectExpenses, ORIGINE_LABELS } from '../../services/finance/projectExpenses';
-import { isCountedProjectExpense, isManualProjectExpense } from '../../services/finance/projectExpenseRules';
+import { filterProjectExpenses, ORIGINE_LABELS, STATUT_LABELS } from '../../services/finance/projectExpenses';
+import {
+  isCountedProjectExpense,
+  isImportExcelProjectExpense,
+  canEditProjectExpense,
+  canDeleteProjectExpense,
+} from '../../services/finance/projectExpenseRules';
 import { getProjectDetailData } from '../../services/finance/projectExpenseData';
 import { expenseMatchesProject } from '../../services/finance/projectExpenseMerge';
 import { exportProjectExpensesPdf } from '../../services/finance/projectExpensePdf';
@@ -218,14 +223,50 @@ function ImportModal({ open, onClose, projects, onDone }) {
   );
 }
 
+function emptyExpenseForm() {
+  return {
+    project_id: '',
+    date_depense: new Date().toISOString().slice(0, 10),
+    categorie: '',
+    element_depense: '',
+    description: '',
+    fournisseur: '',
+    montant: '',
+    mode_paiement: 'Virement',
+    observation: '',
+    origine: 'charge_manuelle',
+    statut: 'payee',
+  };
+}
+
 function ExpenseFormModal({ open, onClose, projects, onSave, initial }) {
-  const [form, setForm] = useState(initial || {
-    project_id: '', date_depense: new Date().toISOString().slice(0, 10),
-    categorie: '', element_depense: '', description: '', fournisseur: '',
-    montant: '', mode_paiement: 'Virement', observation: '', origine: 'charge_manuelle',
-  });
+  const isEdit = !!initial?.id;
+  const [form, setForm] = useState(emptyExpenseForm);
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState('');
+
+  useEffect(() => {
+    if (!open) return;
+    setFormError('');
+    if (initial?.id) {
+      setForm({
+        project_id: initial.project_id || '',
+        date_depense: initial.date_depense || new Date().toISOString().slice(0, 10),
+        categorie: initial.categorie || '',
+        element_depense: initial.element_depense || '',
+        description: initial.description || '',
+        fournisseur: initial.fournisseur || '',
+        montant: initial.montant != null ? String(initial.montant) : '',
+        mode_paiement: initial.mode_paiement || 'Virement',
+        observation: initial.observation || '',
+        origine: initial.origine || 'import_excel',
+        statut: initial.statut || 'valide',
+        project_name_raw: initial.project_name_raw || '',
+      });
+    } else {
+      setForm(emptyExpenseForm());
+    }
+  }, [open, initial]);
 
   if (!open) return null;
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
@@ -241,19 +282,31 @@ function ExpenseFormModal({ open, onClose, projects, onSave, initial }) {
     try {
       const project = projects.find((p) => String(p.id) === String(form.project_id));
       const montant = Number(form.montant) || 0;
-      await onSave({
-        ...form,
-        montant,
-        montant_paye: montant,
-        date_paiement: form.date_depense,
-        // Comptabilisée immédiatement dans le projet (saisie manuelle).
-        statut: 'payee',
-        project_match_status: 'matched',
-        project_name_raw: project?.nom || form.project_name_raw || null,
-        origine: 'charge_manuelle',
-        source_type: null,
-        source_id: null,
-      });
+      if (isEdit) {
+        await onSave({
+          ...form,
+          montant,
+          montant_paye: form.statut === 'payee' ? montant : null,
+          date_paiement: form.statut === 'payee' ? form.date_depense : null,
+          project_match_status: 'matched',
+          project_name_raw: project?.nom || form.project_name_raw || null,
+          // Origine verrouillée côté service ; on renvoie la valeur actuelle.
+          origine: initial.origine,
+        });
+      } else {
+        await onSave({
+          ...form,
+          montant,
+          montant_paye: montant,
+          date_paiement: form.date_depense,
+          statut: 'payee',
+          project_match_status: 'matched',
+          project_name_raw: project?.nom || null,
+          origine: 'charge_manuelle',
+          source_type: null,
+          source_id: null,
+        });
+      }
       onClose();
     } catch (err) {
       setFormError(err?.message || "Erreur lors de l'enregistrement.");
@@ -263,8 +316,14 @@ function ExpenseFormModal({ open, onClose, projects, onSave, initial }) {
   }
 
   return (
-    <Modal open={open} title="Nouvelle dépense" onClose={onClose}>
+    <Modal open={open} title={isEdit ? 'Modifier la dépense' : 'Nouvelle dépense'} onClose={onClose}>
       <form onSubmit={submit} className="finance-form-grid">
+        {isEdit && (
+          <div style={{ gridColumn: '1 / -1', fontSize: '0.8rem', color: 'var(--text-3)' }}>
+            Origine : <strong>{ORIGINE_LABELS[form.origine] || form.origine}</strong>
+            {' '}(non modifiable)
+          </div>
+        )}
         <label>Projet *
           <select style={SELECT_STYLE} value={form.project_id} onChange={(e) => set('project_id', e.target.value)} required>
             <option value="">— Sélectionner —</option>
@@ -289,11 +348,28 @@ function ExpenseFormModal({ open, onClose, projects, onSave, initial }) {
         <label>Montant (MAD) *
           <input type="number" min="0" step="0.01" style={INPUT_STYLE} value={form.montant} onChange={(e) => set('montant', e.target.value)} required />
         </label>
-        <label>Mode de paiement
-          <select style={SELECT_STYLE} value={form.mode_paiement} onChange={(e) => set('mode_paiement', e.target.value)}>
-            {MODES_PAIEMENT.map((m) => <option key={m} value={m}>{m}</option>)}
-          </select>
-        </label>
+        {isEdit ? (
+          <label>Statut
+            <select style={SELECT_STYLE} value={form.statut} onChange={(e) => set('statut', e.target.value)}>
+              {Object.entries(STATUT_LABELS).map(([k, v]) => (
+                <option key={k} value={k}>{v}</option>
+              ))}
+            </select>
+          </label>
+        ) : (
+          <label>Mode de paiement
+            <select style={SELECT_STYLE} value={form.mode_paiement} onChange={(e) => set('mode_paiement', e.target.value)}>
+              {MODES_PAIEMENT.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </label>
+        )}
+        {isEdit && (
+          <label>Mode de paiement
+            <select style={SELECT_STYLE} value={form.mode_paiement} onChange={(e) => set('mode_paiement', e.target.value)}>
+              {MODES_PAIEMENT.map((m) => <option key={m} value={m}>{m}</option>)}
+            </select>
+          </label>
+        )}
         <label>Observation
           <textarea style={TEXTAREA_STYLE} value={form.observation} onChange={(e) => set('observation', e.target.value)} />
         </label>
@@ -316,7 +392,7 @@ function ExpenseFormModal({ open, onClose, projects, onSave, initial }) {
 export default function DepensesParProjet() {
   const {
     configured, loading, syncing, error, projects, expenses, dashboard, summaries,
-    unmatched, reload, create, remove, erpContext,
+    unmatched, reload, create, update, remove, erpContext,
   } = useProjectExpenses();
 
   const [view, setView] = useState('vue');
@@ -325,18 +401,27 @@ export default function DepensesParProjet() {
   const [filterOrigine, setFilterOrigine] = useState('');
   const [showImport, setShowImport] = useState(false);
   const [showForm, setShowForm] = useState(false);
+  const [editExpense, setEditExpense] = useState(null);
   const [exportingPdf, setExportingPdf] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
 
-  async function handleDeleteManualExpense(expense) {
-    if (!isManualProjectExpense(expense)) return;
-    if (!window.confirm('Supprimer cette dépense manuelle ?')) return;
+  function closeExpenseForm() {
+    setShowForm(false);
+    setEditExpense(null);
+  }
+
+  async function handleDeleteExpense(expense) {
+    if (!canDeleteProjectExpense(expense)) return;
+    const msg = isImportExcelProjectExpense(expense)
+      ? 'Cette dépense importée sera supprimée et les calculs du projet seront automatiquement actualisés. Confirmer ?'
+      : 'Supprimer cette dépense manuelle ?';
+    if (!window.confirm(msg)) return;
     setDeletingId(expense.id);
     try {
       await remove(expense.id);
       await reload();
     } catch (err) {
-      console.error('[CITYMO] delete dépense manuelle', err);
+      console.error('[CITYMO] delete dépense projet', err);
       window.alert(err?.message || 'Suppression impossible.');
     } finally {
       setDeletingId(null);
@@ -422,7 +507,7 @@ export default function DepensesParProjet() {
           <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowImport(true)}>
             <Upload size={14} /> Import Excel initial
           </button>
-          <button type="button" className="btn btn-primary btn-sm" onClick={() => setShowForm(true)}>
+          <button type="button" className="btn btn-primary btn-sm" onClick={() => { setEditExpense(null); setShowForm(true); }}>
             <Plus size={14} /> Nouvelle dépense
           </button>
         </div>
@@ -730,17 +815,27 @@ export default function DepensesParProjet() {
                       <td><span className="badge badge-grey">{e.statut_label || e.statut}</span></td>
                       <td className="dpp-cell-muted">{e.observation || '—'}</td>
                       <td>
-                        {isManualProjectExpense(e) ? (
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-sm"
-                            title="Supprimer la dépense manuelle"
-                            disabled={deletingId === e.id}
-                            onClick={() => handleDeleteManualExpense(e)}
-                            style={{ color: 'var(--red)' }}
-                          >
-                            {deletingId === e.id ? <Loader2 size={14} className="cin-spin" /> : <Trash2 size={14} />}
-                          </button>
+                        {canEditProjectExpense(e) ? (
+                          <div style={{ display: 'inline-flex', gap: 4, alignItems: 'center' }}>
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              title="Modifier"
+                              onClick={() => { setEditExpense(e); setShowForm(true); }}
+                            >
+                              <Pencil size={14} />
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              title="Supprimer"
+                              disabled={deletingId === e.id}
+                              onClick={() => handleDeleteExpense(e)}
+                              style={{ color: 'var(--red)' }}
+                            >
+                              {deletingId === e.id ? <Loader2 size={14} className="cin-spin" /> : <Trash2 size={14} />}
+                            </button>
+                          </div>
                         ) : (
                           <span className="dpp-cell-muted">—</span>
                         )}
@@ -756,11 +851,16 @@ export default function DepensesParProjet() {
 
       <ImportModal open={showImport} onClose={() => setShowImport(false)} projects={projects} onDone={() => reload()} />
       <ExpenseFormModal
-        open={showForm}
-        onClose={() => setShowForm(false)}
+        open={showForm || !!editExpense}
+        onClose={closeExpenseForm}
         projects={projects}
+        initial={editExpense}
         onSave={async (f) => {
-          await create(f);
+          if (editExpense?.id) {
+            await update(editExpense.id, f);
+          } else {
+            await create(f);
+          }
           await reload();
           setView('depenses');
         }}
