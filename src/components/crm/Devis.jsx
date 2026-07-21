@@ -464,50 +464,35 @@ export default function Devis({ onNavigate }) {
     if (d.__isImportedArchive) {
       const archive = d.__archive;
       return (
-        <div style={{ display: 'flex', gap: 2 }}>
-          <button type="button" title="Voir PDF archive" className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }}
-            onClick={() => openArchivePdf(archive).catch((e) => showToast(e.message, 'error'))}>
-            <Eye size={13} />
-          </button>
-          <button type="button" title="Telecharger PDF" className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }}
-            onClick={() => downloadArchivePdf(archive).catch((e) => showToast(e.message, 'error'))}>
-            <Download size={13} />
-          </button>
-        </div>
+        <CrmOverflowMenu
+          title="Actions"
+          items={[
+            { icon: Eye, label: 'Voir', onClick: () => openArchivePdf(archive).catch((e) => showToast(e.message, 'error')) },
+            { icon: Download, label: 'Télécharger PDF', onClick: () => downloadArchivePdf(archive).catch((e) => showToast(e.message, 'error')) },
+          ]}
+        />
       );
     }
     return (
-      <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-        <button
-          type="button"
-          title="Convertir en facture"
-          className="btn btn-ghost btn-sm"
-          style={{ padding: '4px 7px', color: '#1565C0' }}
-          disabled={factureLoadingId === d.id}
-          onClick={() => handleConvertToFacture(d)}
-        >
-          <Receipt size={13} />
-        </button>
-        <DevisActionsMenu
-          devis={d}
-          isConverted={isDevisConverted(d)}
-          pdfLoading={pdfLoadingId === d.id}
-          checklistLoading={checklistLoadingId === d.id}
-          factureLoading={factureLoadingId === d.id}
-          proformaLoading={proformaLoadingId === d.id}
-          onPreview={() => handlePreview(d)}
-          onPdf={() => handlePdf(d)}
-          onReceptionChecklist={() => handleReceptionChecklist(d)}
-          onConvert={() => handleConvert(d)}
-          onConvertToFacture={() => handleConvertToFacture(d)}
-          onGenerateProforma={() => handleGenerateProforma(d)}
-          onApprove={() => handleApprove(d)}
-          onRefuse={() => handleRefuse(d)}
-          onEdit={() => openEdit(d)}
-          onDuplicate={() => handleDuplicate(d)}
-          onDelete={() => handleDelete(d.id)}
-        />
-      </div>
+      <DevisActionsMenu
+        devis={d}
+        isConverted={isDevisConverted(d)}
+        pdfLoading={pdfLoadingId === d.id}
+        checklistLoading={checklistLoadingId === d.id}
+        factureLoading={factureLoadingId === d.id}
+        proformaLoading={proformaLoadingId === d.id}
+        onPreview={() => handlePreview(d)}
+        onPdf={() => handlePdf(d)}
+        onReceptionChecklist={() => handleReceptionChecklist(d)}
+        onConvert={() => handleConvert(d)}
+        onConvertToFacture={() => handleConvertToFacture(d)}
+        onGenerateProforma={() => handleGenerateProforma(d)}
+        onApprove={() => handleApprove(d)}
+        onRefuse={() => handleRefuse(d)}
+        onEdit={() => openEdit(d)}
+        onDuplicate={() => handleDuplicate(d)}
+        onDelete={() => handleDelete(d.id)}
+      />
     );
   }
 
@@ -625,7 +610,7 @@ export default function Devis({ onNavigate }) {
           <>
           <div className="crm-table-desktop">
             <div className="table-wrap crm-table-scroll-x">
-              <table style={{ borderCollapse: 'separate', borderSpacing: 0, fontSize: '0.85rem' }}>
+              <table className="crm-data-table crm-data-table--devis" style={{ borderCollapse: 'separate', borderSpacing: 0 }}>
               <thead>
                 <tr style={{ borderBottom: '1.5px solid var(--border)', background: 'var(--bg)' }}>
                   {[
@@ -639,10 +624,11 @@ export default function Devis({ onNavigate }) {
                     { label: 'Statut',          field: 'statut' },
                     { label: 'Creation',        field: 'date_creation' },
                     { label: 'Expiration',      field: 'date_validite' },
-                    { label: '',                field: null },
+                    { label: 'Actions',         field: null },
                   ].map(col => (
-                    <th key={col.label} onClick={col.field ? () => toggleSort(col.field) : undefined}
-                      style={{ padding: '10px 12px', textAlign: col.align || 'left', fontWeight: 700, fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--text-3)', letterSpacing: '0.06em', whiteSpace: 'nowrap', cursor: col.field ? 'pointer' : 'default', userSelect: 'none' }}>
+                    <th key={col.label || 'actions'} onClick={col.field ? () => toggleSort(col.field) : undefined}
+                      className={col.field ? undefined : 'crm-col-actions'}
+                      style={{ padding: '12px 14px', textAlign: col.align || 'left', fontWeight: 700, fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--text-3)', letterSpacing: '0.06em', whiteSpace: 'nowrap', cursor: col.field ? 'pointer' : 'default', userSelect: 'none' }}>
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                         {col.label}
                         {col.field && <ArrowUpDown size={11} style={{ opacity: sortField === col.field ? 1 : 0.35 }} />}
@@ -661,20 +647,20 @@ export default function Devis({ onNavigate }) {
                       onMouseLeave={e => e.currentTarget.style.background = ''}>
 
                       {/* Reference */}
-                      <td data-label="Ref" style={{ padding: '10px 12px', fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.88rem', color: 'var(--red)', whiteSpace: 'nowrap' }}>
+                      <td data-label="Ref" className="crm-col-ref" style={{ padding: '12px 14px', fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.9rem', color: 'var(--red)', whiteSpace: 'nowrap' }}>
                         <button
                           type="button"
                           title="Ouvrir le PDF"
                           disabled={pdfLoadingId === d.id}
                           onClick={() => handlePdfInTab(d)}
-                          style={pdfOpenButtonStyle(pdfLoadingId === d.id, { fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.88rem', color: 'var(--red)' })}
+                          style={pdfOpenButtonStyle(pdfLoadingId === d.id, { fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.9rem', color: 'var(--red)' })}
                         >
                           {d.reference || '—'}
                         </button>
                       </td>
 
                       {/* Titre */}
-                      <td data-label="Titre" style={{ padding: '10px 12px', maxWidth: 160 }}>
+                      <td data-label="Titre" className="crm-col-title" style={{ padding: '12px 14px' }}>
                         <button
                           type="button"
                           title={d.titre || 'Ouvrir le PDF'}
@@ -703,44 +689,44 @@ export default function Devis({ onNavigate }) {
                       </td>
 
                       {/* Client */}
-                      <td data-label="Client" style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
-                        <span style={{ fontWeight: 500 }}>{clientNom}</span>
+                      <td data-label="Client" className="crm-col-client" title={clientNom} style={{ padding: '12px 14px', fontWeight: 500 }}>
+                        {clientNom}
                       </td>
 
                       {/* Commercial */}
-                      <td data-label="Commercial" style={{ padding: '10px 12px', whiteSpace: 'nowrap', color: 'var(--text-2)' }}>
+                      <td data-label="Commercial" className="crm-col-commercial" title={fmtCommercial(d.commercial)} style={{ padding: '12px 14px', color: 'var(--text-2)' }}>
                         {fmtCommercial(d.commercial)}
                       </td>
 
                       {/* Total HT */}
-                      <td data-label="Total HT" style={{ padding: '10px 12px', textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 500 }}>
+                      <td data-label="Total HT" className="crm-col-money" style={{ padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 500 }}>
                         {fmtMAD(d.total_ht)}
                       </td>
 
                       {/* TVA */}
-                      <td data-label="TVA" style={{ padding: '10px 12px', textAlign: 'right', whiteSpace: 'nowrap', color: 'var(--text-3)' }}>
+                      <td data-label="TVA" className="crm-col-money" style={{ padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap', color: 'var(--text-3)' }}>
                         {fmtMAD(d.total_tva)}
                       </td>
 
                       {/* Total TTC */}
-                      <td data-label="Total TTC" style={{ padding: '10px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
-                        <span style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '0.92rem', color: 'var(--red)' }}>
+                      <td data-label="Total TTC" className="crm-col-money" style={{ padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        <span style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '0.95rem', color: 'var(--red)' }}>
                           {fmtMAD(d.total_ttc)}
                         </span>
                       </td>
 
                       {/* Statut */}
-                      <td data-label="Statut" style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
+                      <td data-label="Statut" className="crm-col-statut" style={{ padding: '12px 14px', whiteSpace: 'nowrap' }}>
                         <StatutBadge statut={d.statut} />
                       </td>
 
                       {/* Date creation */}
-                      <td data-label="Creation" style={{ padding: '10px 12px', whiteSpace: 'nowrap', color: 'var(--text-2)', fontSize: '0.82rem' }}>
+                      <td data-label="Creation" className="crm-col-date" style={{ padding: '12px 14px', whiteSpace: 'nowrap', color: 'var(--text-2)', fontSize: '0.84rem' }}>
                         {fmtDate(d.date_creation)}
                       </td>
 
                       {/* Date validite */}
-                      <td data-label="Validite" style={{ padding: '10px 12px', whiteSpace: 'nowrap', fontSize: '0.82rem' }}>
+                      <td data-label="Validite" className="crm-col-date" style={{ padding: '12px 14px', whiteSpace: 'nowrap', fontSize: '0.84rem' }}>
                         <span style={{ color: expSoon ? '#E65100' : 'var(--text-2)', fontWeight: expSoon ? 700 : 400 }}>
                           {fmtDate(d.date_validite)}
                           {expSoon && <span style={{ display: 'block', fontSize: '0.7rem', color: '#E65100' }}>Expire bientot</span>}
@@ -748,7 +734,7 @@ export default function Devis({ onNavigate }) {
                       </td>
 
                       {/* Actions */}
-                      <td style={{ padding: '10px 10px', whiteSpace: 'nowrap' }}>
+                      <td className="crm-col-actions" style={{ padding: '10px 8px', whiteSpace: 'nowrap', textAlign: 'center' }}>
                         {renderActionsMenu(d)}
                       </td>
                     </tr>

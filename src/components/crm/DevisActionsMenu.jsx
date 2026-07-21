@@ -126,7 +126,7 @@ export default function DevisActionsMenu({
         ...(rect.top != null ? { top: rect.top } : { bottom: rect.bottom }),
       }}
     >
-      <MenuItem icon={Eye} label="Aperçu" onClick={closeAnd(onPreview)} />
+      <MenuItem icon={Eye} label="Voir" onClick={closeAnd(onPreview)} />
       <MenuItem icon={Download} label="Télécharger PDF" onClick={closeAnd(onPdf)} disabled={pdfLoading} />
       <MenuItem
         icon={ClipboardCheck}

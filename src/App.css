@@ -7515,7 +7515,7 @@ tbody tr:last-child td { border-bottom: none; }
   overscroll-behavior-x: contain;
 }
 
-/* ── Devis + Factures : scroll horizontal laptop + sticky ── */
+/* ── Devis + Factures : scroll horizontal laptop + sticky + aération ── */
 @media (min-width: 1024px) {
   .crm-module--devis .crm-table-desktop .table-wrap.crm-table-scroll-x,
   .crm-module--factures .crm-table-desktop .table-wrap.crm-table-scroll-x {
@@ -7525,24 +7525,26 @@ tbody tr:last-child td { border-bottom: none; }
     max-width: 100%;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior-x: contain;
+    scrollbar-gutter: stable;
   }
 
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x > table,
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x > table {
-    width: 100%;
+    width: max-content;
     min-width: 100%;
     border-collapse: separate;
     border-spacing: 0;
-    table-layout: fixed;
+    table-layout: auto;
+    font-size: 0.875rem;
   }
 
-  /* Largeur mini pour éviter d’écraser les montants ; scroll X seulement si trop étroit */
+  /* Largeur mini aérée — scroll X interne si écran trop étroit (13–15") */
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x > table {
-    min-width: 1080px;
+    min-width: 1280px;
   }
 
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x > table {
-    min-width: 1280px;
+    min-width: 1520px;
   }
 
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x,
@@ -7560,32 +7562,32 @@ tbody tr:last-child td { border-bottom: none; }
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x td,
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x th,
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x td {
-    white-space: nowrap;
     vertical-align: middle;
+    box-sizing: border-box;
   }
 
   /* Réf / N° facture */
+  .crm-module--devis .crm-table-desktop .crm-table-scroll-x .crm-col-ref,
+  .crm-module--factures .crm-table-desktop .crm-table-scroll-x .crm-col-ref,
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x th:nth-child(1),
-  .crm-module--devis .crm-table-desktop .crm-table-scroll-x td:nth-child(1),
-  .crm-module--factures .crm-table-desktop .crm-table-scroll-x th:nth-child(1),
-  .crm-module--factures .crm-table-desktop .crm-table-scroll-x td:nth-child(1) {
-    width: 128px;
+  .crm-module--factures .crm-table-desktop .crm-table-scroll-x th:nth-child(1) {
+    min-width: 140px;
+    width: 140px;
+    white-space: nowrap;
   }
 
-  /* Titre : largeur bornée (ne monopolise plus la ligne) */
+  /* Titre — ellipsis + tooltip (title HTML) */
+  .crm-module--devis .crm-table-desktop .crm-table-scroll-x .crm-col-title,
+  .crm-module--factures .crm-table-desktop .crm-table-scroll-x .crm-col-title,
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x th:nth-child(2),
-  .crm-module--devis .crm-table-desktop .crm-table-scroll-x td:nth-child(2),
-  .crm-module--factures .crm-table-desktop .crm-table-scroll-x th:nth-child(2),
-  .crm-module--factures .crm-table-desktop .crm-table-scroll-x td:nth-child(2) {
-    width: 160px;
-    max-width: 160px;
-    overflow: hidden;
+  .crm-module--factures .crm-table-desktop .crm-table-scroll-x th:nth-child(2) {
+    min-width: 220px;
+    max-width: 280px;
+    width: 240px;
   }
 
-  .crm-module--devis .crm-table-desktop .crm-table-scroll-x td:nth-child(2) button,
-  .crm-module--factures .crm-table-desktop .crm-table-scroll-x td:nth-child(2) button,
-  .crm-module--devis .crm-table-desktop .crm-table-scroll-x td:nth-child(2) > div,
-  .crm-module--factures .crm-table-desktop .crm-table-scroll-x td:nth-child(2) > div {
+  .crm-module--devis .crm-table-desktop .crm-table-scroll-x .crm-col-title button,
+  .crm-module--factures .crm-table-desktop .crm-table-scroll-x .crm-col-title button {
     display: block;
     max-width: 100%;
     overflow: hidden;
@@ -7594,72 +7596,85 @@ tbody tr:last-child td { border-bottom: none; }
   }
 
   /* Client */
-  .crm-module--devis .crm-table-desktop .crm-table-scroll-x th:nth-child(3),
-  .crm-module--devis .crm-table-desktop .crm-table-scroll-x td:nth-child(3),
-  .crm-module--factures .crm-table-desktop .crm-table-scroll-x th:nth-child(4),
-  .crm-module--factures .crm-table-desktop .crm-table-scroll-x td:nth-child(4) {
-    width: 120px;
-    max-width: 140px;
+  .crm-module--devis .crm-table-desktop .crm-table-scroll-x .crm-col-client,
+  .crm-module--factures .crm-table-desktop .crm-table-scroll-x .crm-col-client {
+    min-width: 160px;
+    max-width: 200px;
+    width: 180px;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   /* Commercial */
-  .crm-module--devis .crm-table-desktop .crm-table-scroll-x th:nth-child(4),
-  .crm-module--devis .crm-table-desktop .crm-table-scroll-x td:nth-child(4),
-  .crm-module--factures .crm-table-desktop .crm-table-scroll-x th:nth-child(5),
-  .crm-module--factures .crm-table-desktop .crm-table-scroll-x td:nth-child(5) {
-    width: 110px;
-    max-width: 130px;
+  .crm-module--devis .crm-table-desktop .crm-table-scroll-x .crm-col-commercial,
+  .crm-module--factures .crm-table-desktop .crm-table-scroll-x .crm-col-commercial {
+    min-width: 140px;
+    max-width: 180px;
+    width: 150px;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
-  /* Devis lié (Factures col 3) */
-  .crm-module--factures .crm-table-desktop .crm-table-scroll-x th:nth-child(3),
-  .crm-module--factures .crm-table-desktop .crm-table-scroll-x td:nth-child(3) {
+  /* Devis lié (Factures) */
+  .crm-module--factures .crm-table-desktop .crm-table-scroll-x .crm-col-devis-lie {
+    min-width: 120px;
+    width: 130px;
+    white-space: nowrap;
+  }
+
+  /* Montants — une ligne, jamais coupés */
+  .crm-module--devis .crm-table-desktop .crm-table-scroll-x .crm-col-money,
+  .crm-module--factures .crm-table-desktop .crm-table-scroll-x .crm-col-money {
+    min-width: 112px;
     width: 118px;
-  }
-
-  /* Montants — une ligne, pas d’ellipsis sur les chiffres */
-  .crm-module--devis .crm-table-desktop .crm-table-scroll-x th:nth-child(n+5):nth-child(-n+7),
-  .crm-module--devis .crm-table-desktop .crm-table-scroll-x td:nth-child(n+5):nth-child(-n+7),
-  .crm-module--factures .crm-table-desktop .crm-table-scroll-x th:nth-child(n+6):nth-child(-n+10),
-  .crm-module--factures .crm-table-desktop .crm-table-scroll-x td:nth-child(n+6):nth-child(-n+10) {
-    width: 100px;
+    white-space: nowrap !important;
     overflow: visible;
   }
 
-  /* Statut */
-  .crm-module--devis .crm-table-desktop .crm-table-scroll-x th:nth-child(8),
-  .crm-module--devis .crm-table-desktop .crm-table-scroll-x td:nth-child(8),
-  .crm-module--factures .crm-table-desktop .crm-table-scroll-x th:nth-child(13),
-  .crm-module--factures .crm-table-desktop .crm-table-scroll-x td:nth-child(13) {
-    width: 100px;
+  /* Statut / dates */
+  .crm-module--devis .crm-table-desktop .crm-table-scroll-x .crm-col-statut,
+  .crm-module--factures .crm-table-desktop .crm-table-scroll-x .crm-col-statut {
+    min-width: 110px;
+    width: 120px;
+    white-space: nowrap;
   }
 
-  /* Dates */
-  .crm-module--devis .crm-table-desktop .crm-table-scroll-x th:nth-child(9),
-  .crm-module--devis .crm-table-desktop .crm-table-scroll-x td:nth-child(9),
-  .crm-module--devis .crm-table-desktop .crm-table-scroll-x th:nth-child(10),
-  .crm-module--devis .crm-table-desktop .crm-table-scroll-x td:nth-child(10),
-  .crm-module--factures .crm-table-desktop .crm-table-scroll-x th:nth-child(11),
-  .crm-module--factures .crm-table-desktop .crm-table-scroll-x td:nth-child(11),
-  .crm-module--factures .crm-table-desktop .crm-table-scroll-x th:nth-child(12),
-  .crm-module--factures .crm-table-desktop .crm-table-scroll-x td:nth-child(12) {
-    width: 92px;
+  .crm-module--devis .crm-table-desktop .crm-table-scroll-x .crm-col-date,
+  .crm-module--factures .crm-table-desktop .crm-table-scroll-x .crm-col-date {
+    min-width: 104px;
+    width: 110px;
+    white-space: nowrap;
   }
 
-  /* Actions */
-  .crm-module--devis .crm-table-desktop .crm-table-scroll-x th:last-child,
-  .crm-module--devis .crm-table-desktop .crm-table-scroll-x td:last-child,
-  .crm-module--factures .crm-table-desktop .crm-table-scroll-x th:last-child,
-  .crm-module--factures .crm-table-desktop .crm-table-scroll-x td:last-child {
-    width: 148px;
+  /* Actions — colonne compacte (⋯ seulement) */
+  .crm-module--devis .crm-table-desktop .crm-table-scroll-x .crm-col-actions,
+  .crm-module--factures .crm-table-desktop .crm-table-scroll-x .crm-col-actions,
+  .crm-module--devis .crm-table-desktop .crm-table-scroll-x th.crm-col-actions,
+  .crm-module--factures .crm-table-desktop .crm-table-scroll-x th.crm-col-actions {
+    min-width: 56px;
+    width: 56px;
+    max-width: 64px;
+    padding-left: 6px !important;
+    padding-right: 6px !important;
     overflow: visible;
   }
 
-  /* Sticky 1re colonne (référence / n° facture) */
+  .crm-module--devis .crm-table-desktop .crm-devis-menu-trigger,
+  .crm-module--factures .crm-table-desktop .crm-devis-menu-trigger {
+    width: 36px;
+    min-width: 36px;
+    max-width: 36px;
+    height: 36px;
+    min-height: 36px;
+    padding: 0 !important;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Sticky 1re colonne */
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x th:first-child,
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x td:first-child,
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x th:first-child,
@@ -7677,7 +7692,7 @@ tbody tr:last-child td { border-bottom: none; }
     background: var(--bg);
   }
 
-  /* Sticky dernière colonne (actions) */
+  /* Sticky Actions */
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x th:last-child,
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x td:last-child,
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x th:last-child,
@@ -7705,6 +7720,12 @@ tbody tr:last-child td { border-bottom: none; }
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x tbody tr:hover td:first-child,
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x tbody tr:hover td:last-child {
     background: var(--bg);
+  }
+
+  /* KPI aérés sur Devis / Factures (desktop) */
+  .crm-module--devis .stats-grid,
+  .crm-module--factures .stats-grid {
+    gap: 12px;
   }
 }
 
@@ -7750,29 +7771,41 @@ tbody tr:last-child td { border-bottom: none; }
   }
 }
 
-/* Laptop 1024–1399 : tableau + filtres qui wrap, KPI 4/3 cols */
+/* Laptop 1024–1399 : filtres 2 lignes, KPI sans compression */
 @media (min-width: 1024px) and (max-width: 1399px) {
-  .crm-filter-row {
+  .crm-module--devis .crm-filter-row,
+  .crm-module--factures .crm-filter-row {
     flex-wrap: wrap;
+    align-items: stretch;
   }
 
-  .crm-filter-search {
+  .crm-module--devis .crm-filter-search,
+  .crm-module--factures .crm-filter-search {
     flex: 1 1 100%;
   }
 
-  .crm-filter-count {
-    margin-left: 0;
-    width: 100%;
+  .crm-module--devis .crm-filter-select,
+  .crm-module--factures .crm-filter-select,
+  .crm-module--devis .crm-filter-select--sm,
+  .crm-module--factures .crm-filter-select--sm,
+  .crm-module--devis .crm-filter-select--md,
+  .crm-module--factures .crm-filter-select--md {
+    flex: 1 1 160px;
+    min-width: 140px;
+    max-width: none;
+  }
+
+  .crm-module--devis .crm-filter-count,
+  .crm-module--factures .crm-filter-count {
+    margin-left: auto;
+    width: auto;
     text-align: right;
-    padding-top: 4px;
+    padding-top: 0;
+    align-self: center;
   }
 
-  .page-content .stat-grid,
-  .page-content .stats-grid {
-    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
-  }
-
-  .page-content .stats-grid:has(.stat-card:nth-child(6)) {
+  .crm-module--devis .stats-grid,
+  .crm-module--factures .stats-grid {
     grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
   }
 
@@ -7781,6 +7814,14 @@ tbody tr:last-child td { border-bottom: none; }
   .crm-table-desktop .table-wrap tbody tr,
   .crm-table-desktop .table-wrap tbody td {
     display: revert;
+  }
+}
+
+/* Écrans ~13" (1180–1279) : KPI 2–3 cols */
+@media (min-width: 1024px) and (max-width: 1279px) {
+  .crm-module--devis .stats-grid,
+  .crm-module--factures .stats-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
 }
 

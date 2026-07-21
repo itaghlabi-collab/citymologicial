@@ -507,7 +507,7 @@ export default function Factures() {
           <>
           <div className="crm-table-desktop">
             <div className="table-wrap crm-table-scroll-x">
-              <table style={{ borderCollapse: 'separate', borderSpacing: 0, fontSize: '0.85rem' }}>
+              <table className="crm-data-table crm-data-table--factures" style={{ borderCollapse: 'separate', borderSpacing: 0 }}>
               <thead>
                 <tr style={{ borderBottom: '1.5px solid var(--border)', background: 'var(--bg)' }}>
                   {[
@@ -524,10 +524,11 @@ export default function Factures() {
                     { label: 'Emission',        field: 'date_emission' },
                     { label: 'Echeance',        field: 'date_echeance' },
                     { label: 'Statut',          field: 'statut' },
-                    { label: '',                field: null },
+                    { label: 'Actions',         field: null },
                   ].map(col => (
-                    <th key={col.label} onClick={col.field ? () => toggleSort(col.field) : undefined}
-                      style={{ padding: '10px 12px', textAlign: col.align || 'left', fontWeight: 700, fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--text-3)', letterSpacing: '0.06em', whiteSpace: 'nowrap', cursor: col.field ? 'pointer' : 'default', userSelect: 'none' }}>
+                    <th key={col.label || 'actions'} onClick={col.field ? () => toggleSort(col.field) : undefined}
+                      className={col.field ? undefined : 'crm-col-actions'}
+                      style={{ padding: '12px 14px', textAlign: col.align || 'left', fontWeight: 700, fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--text-3)', letterSpacing: '0.06em', whiteSpace: 'nowrap', cursor: col.field ? 'pointer' : 'default', userSelect: 'none' }}>
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                         {col.label}
                         {col.field && <ArrowUpDown size={11} style={{ opacity: sortField === col.field ? 1 : 0.35 }} />}
@@ -549,20 +550,20 @@ export default function Factures() {
                       onMouseLeave={e => e.currentTarget.style.background = ''}>
 
                       {/* N° Facture */}
-                      <td data-label="N° Facture" style={{ padding: '10px 12px', fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.88rem', color: 'var(--red)', whiteSpace: 'nowrap' }}>
+                      <td data-label="N° Facture" className="crm-col-ref" style={{ padding: '12px 14px', fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.9rem', color: 'var(--red)', whiteSpace: 'nowrap' }}>
                         <button
                           type="button"
                           title="Ouvrir le PDF"
                           disabled={pdfLoadingId === f.id}
                           onClick={() => handlePdfInTab(f)}
-                          style={pdfOpenButtonStyle(pdfLoadingId === f.id, { fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.88rem', color: 'var(--red)' })}
+                          style={pdfOpenButtonStyle(pdfLoadingId === f.id, { fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.9rem', color: 'var(--red)' })}
                         >
                           {f.numero || '—'}
                         </button>
                       </td>
 
                       {/* Titre */}
-                      <td data-label="Titre" style={{ padding: '10px 12px', maxWidth: 160 }}>
+                      <td data-label="Titre" className="crm-col-title" style={{ padding: '12px 14px' }}>
                         <button
                           type="button"
                           title={f.titre || 'Ouvrir le PDF'}
@@ -583,7 +584,7 @@ export default function Factures() {
                       </td>
 
                       {/* Devis lie */}
-                      <td data-label="Devis" style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
+                      <td data-label="Devis" className="crm-col-devis-lie" style={{ padding: '12px 14px', whiteSpace: 'nowrap' }}>
                         {f.devis_reference || f.devis_id ? (
                           <span style={{ fontSize: '0.78rem', color: 'var(--text-3)', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, padding: '2px 6px' }}>
                             {f.devis_reference || 'DV-' + String(f.devis_id).slice(0, 8)}
@@ -592,41 +593,41 @@ export default function Factures() {
                       </td>
 
                       {/* Client */}
-                      <td data-label="Client" style={{ padding: '10px 12px', whiteSpace: 'nowrap', fontWeight: 500 }}>
+                      <td data-label="Client" className="crm-col-client" title={clientNom} style={{ padding: '12px 14px', fontWeight: 500 }}>
                         {clientNom}
                       </td>
 
                       {/* Commercial */}
-                      <td data-label="Commercial" style={{ padding: '10px 12px', whiteSpace: 'nowrap', color: 'var(--text-2)' }}>
+                      <td data-label="Commercial" className="crm-col-commercial" title={fmtCommercial(f.commercial)} style={{ padding: '12px 14px', color: 'var(--text-2)' }}>
                         {fmtCommercial(f.commercial)}
                       </td>
 
                       {/* Total HT */}
-                      <td data-label="Total HT" style={{ padding: '10px 12px', textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 500 }}>
+                      <td data-label="Total HT" className="crm-col-money" style={{ padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 500 }}>
                         {fmtMAD(f.total_ht)}
                       </td>
 
                       {/* TVA */}
-                      <td data-label="TVA" style={{ padding: '10px 12px', textAlign: 'right', whiteSpace: 'nowrap', color: 'var(--text-3)' }}>
+                      <td data-label="TVA" className="crm-col-money" style={{ padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap', color: 'var(--text-3)' }}>
                         {fmtMAD(f.total_tva)}
                       </td>
 
                       {/* Total TTC */}
-                      <td data-label="Total TTC" style={{ padding: '10px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
-                        <span style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '0.92rem', color: 'var(--red)' }}>
+                      <td data-label="Total TTC" className="crm-col-money" style={{ padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                        <span style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '0.95rem', color: 'var(--red)' }}>
                           {fmtMAD(f.total_ttc)}
                         </span>
                       </td>
 
                       {/* Payé */}
-                      <td data-label="Payé" style={{ padding: '10px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      <td data-label="Payé" className="crm-col-money" style={{ padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap' }}>
                         <span style={{ fontWeight: 600, color: '#388E3C' }}>
                           {fmtMAD(f.total_paye || 0)}
                         </span>
                       </td>
 
                       {/* Reste */}
-                      <td data-label="Reste" style={{ padding: '10px 12px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      <td data-label="Reste" className="crm-col-money" style={{ padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap' }}>
                         {Number(f.reste_a_payer || 0) <= 0 ? (
                           <span style={{ color: '#388E3C', fontWeight: 700, fontSize: '0.82rem' }}>Solde</span>
                         ) : (
@@ -642,12 +643,12 @@ export default function Factures() {
                       </td>
 
                       {/* Date emission */}
-                      <td data-label="Emission" style={{ padding: '10px 12px', whiteSpace: 'nowrap', color: 'var(--text-2)', fontSize: '0.82rem' }}>
+                      <td data-label="Emission" className="crm-col-date" style={{ padding: '12px 14px', whiteSpace: 'nowrap', color: 'var(--text-2)', fontSize: '0.84rem' }}>
                         {fmtDate(f.date_emission)}
                       </td>
 
                       {/* Date echeance */}
-                      <td data-label="Echeance" style={{ padding: '10px 12px', whiteSpace: 'nowrap', fontSize: '0.82rem' }}>
+                      <td data-label="Echeance" className="crm-col-date" style={{ padding: '12px 14px', whiteSpace: 'nowrap', fontSize: '0.84rem' }}>
                         <span style={{ color: overdue ? 'var(--red)' : dueSoon ? '#E65100' : 'var(--text-2)', fontWeight: (overdue || dueSoon) ? 700 : 400 }}>
                           {fmtDate(f.date_echeance)}
                           {overdue && <span style={{ display: 'block', fontSize: '0.7rem' }}>En retard</span>}
@@ -656,53 +657,35 @@ export default function Factures() {
                       </td>
 
                       {/* Statut */}
-                      <td data-label="Statut" style={{ padding: '10px 12px', whiteSpace: 'nowrap' }}>
+                      <td data-label="Statut" className="crm-col-statut" style={{ padding: '12px 14px', whiteSpace: 'nowrap' }}>
                         <StatutBadge statut={f.statut} />
                       </td>
 
-                      {/* Actions */}
-                      <td style={{ padding: '10px 10px', whiteSpace: 'nowrap' }}>
+                      {/* Actions — desktop : menu ⋯ uniquement */}
+                      <td className="crm-col-actions" style={{ padding: '10px 8px', whiteSpace: 'nowrap', textAlign: 'center' }}>
                         {f.__isImportedArchive ? (
-                          <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-                            <button title="Voir PDF archive" onClick={() => openArchivePdf(f.__archive).catch((e) => showToast(e.message, 'error'))}
-                              className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }}>
-                              <Eye size={13} />
-                            </button>
-                            <button title="Telecharger PDF" onClick={() => downloadArchivePdf(f.__archive).catch((e) => showToast(e.message, 'error'))}
-                              className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }}>
-                              <Download size={13} />
-                            </button>
-                          </div>
+                          <CrmOverflowMenu
+                            title="Actions"
+                            items={[
+                              { icon: Eye, label: 'Voir', onClick: () => openArchivePdf(f.__archive).catch((e) => showToast(e.message, 'error')) },
+                              { icon: Download, label: 'Télécharger PDF', onClick: () => downloadArchivePdf(f.__archive).catch((e) => showToast(e.message, 'error')) },
+                            ]}
+                          />
                         ) : (
-                        <div style={{ display: 'flex', gap: 2, alignItems: 'center' }}>
-                          <button title="PDF" onClick={() => handlePdf(f)} disabled={pdfLoadingId === f.id}
-                            className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }}>
-                            <Download size={13} />
-                          </button>
-                          {f.statut !== 'payee' && f.statut !== 'annulee' && (
-                            <button
-                              title="Marquer payée"
-                              onClick={() => handleMarkPaid(f)}
-                              disabled={saving}
-                              className="btn btn-ghost btn-sm"
-                              style={{ padding: '4px 7px', color: '#2E7D32' }}
-                            >
-                              <CheckCircle size={13} />
-                            </button>
-                          )}
-                          <button title="Modifier" onClick={() => openEdit(f)}
-                            className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }}>
-                            <Edit2 size={13} />
-                          </button>
-                          <button title="Dupliquer" onClick={() => handleDuplicate(f)}
-                            className="btn btn-ghost btn-sm" style={{ padding: '4px 7px' }}>
-                            <Copy size={13} />
-                          </button>
-                          <button title="Supprimer" onClick={() => handleDelete(f.id)}
-                            className="btn btn-ghost btn-sm" style={{ padding: '4px 7px', color: 'var(--red)' }}>
-                            <Trash2 size={13} />
-                          </button>
-                        </div>
+                          <CrmOverflowMenu
+                            title="Actions"
+                            items={[
+                              { icon: Eye, label: 'Voir', onClick: () => handlePdfInTab(f), disabled: pdfLoadingId === f.id },
+                              { icon: Download, label: 'Télécharger PDF', onClick: () => handlePdf(f), disabled: pdfLoadingId === f.id },
+                              ...(f.statut !== 'payee' && f.statut !== 'annulee'
+                                ? [{ icon: CheckCircle, label: 'Marquer comme payée', onClick: () => handleMarkPaid(f), disabled: saving }]
+                                : []),
+                              { icon: Edit2, label: 'Modifier', onClick: () => openEdit(f) },
+                              { icon: Copy, label: 'Dupliquer', onClick: () => handleDuplicate(f) },
+                              { divider: true },
+                              { icon: Trash2, label: 'Supprimer', danger: true, onClick: () => handleDelete(f.id) },
+                            ]}
+                          />
                         )}
                       </td>
                     </tr>
