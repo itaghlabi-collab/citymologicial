@@ -115,6 +115,8 @@ const EMPTY_DRAFT = () => ({
   tva: 20,
 });
 
+const DRAFT_COMMIT_DEDUP_MS = 800;
+
 const DEFAULT_CONDITIONS = [
   '• Les prix sont exprimés en MAD',
   '• Paiement selon les modalités convenues au contrat.',
@@ -183,6 +185,21 @@ function ligneToDraft(ligne, articles = []) {
     remise: ligne.remise ?? 0,
     tva: ligne.tva ?? 20,
   };
+}
+
+function draftCommitSignature(draft) {
+  return JSON.stringify({
+    mode: draft?.mode || 'article',
+    categorie_id: draft?.categorie_id || '',
+    article_id: draft?.article_id || '',
+    designation: draft?.designation?.trim() || '',
+    description: draft?.description?.trim() || '',
+    quantite: Number(draft?.quantite) || 0,
+    unite: draft?.unite || '',
+    prix_ht: Number(draft?.prix_ht) || 0,
+    remise: Number(draft?.remise) || 0,
+    tva: Number(draft?.tva) || 0,
+  });
 }
 
 function Spinner() {
@@ -825,6 +842,7 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
   const [editingIdx, setEditingIdx] = useState(null);
   const [draftError, setDraftError] = useState('');
   const [saveToast, setSaveToast] = useState('');
+  const lastDraftCommitRef = useRef({ key: '', at: 0 });
   const isSaving = saving || savingLocal;
   const isPersisted = !!(devis?.id || form.id);
 
@@ -975,6 +993,17 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
   function commitDraft() {
     const err = validateDraft();
     if (err) { setDraftError(err); return; }
+    if (editingIdx == null) {
+      const key = draftCommitSignature(draft);
+      const now = Date.now();
+      if (
+        lastDraftCommitRef.current.key === key
+        && (now - lastDraftCommitRef.current.at) < DRAFT_COMMIT_DEDUP_MS
+      ) {
+        return;
+      }
+      lastDraftCommitRef.current = { key, at: now };
+    }
     const ligne = enrichLignesDescriptions([draftToLigne(draft, articles)], articles)[0];
     if (editingIdx != null) {
       setForm((p) => {
