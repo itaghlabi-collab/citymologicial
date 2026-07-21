@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { INPUT_STYLE, SELECT_STYLE } from './shared.jsx';
 import { mailHref, telHref, whatsappHref } from '../../services/achats/supplierAnnuaire';
+import { StarRatingDisplay } from './StarRating.jsx';
 
 function badgeStatut(statut) {
   if (statut === 'Actif') return 'badge-green';
@@ -55,6 +56,11 @@ function SupplierCard({
           </span>
         )}
         <span className={`badge ${badgeStatut(item.statut)}`}>{item.statut}</span>
+      </div>
+
+      <div className="achats-annuaire-rating">
+        <span className="achats-annuaire-rating-label">Qualité / prix</span>
+        <StarRatingDisplay value={item.rating_quality_price} size={13} />
       </div>
 
       <div className="achats-annuaire-contacts">
@@ -116,6 +122,7 @@ export default function FournisseursAnnuaire({
   const [filterInstall, setFilterInstall] = useState(false);
   const [filterSav, setFilterSav] = useState(false);
   const [onlyFav, setOnlyFav] = useState(false);
+  const [minRating, setMinRating] = useState('');
   const [sortBy, setSortBy] = useState('name');
 
   const cities = useMemo(() => {
@@ -135,6 +142,10 @@ export default function FournisseursAnnuaire({
       if (filterDelivery && !x.delivery_available) return false;
       if (filterInstall && !x.installation_available) return false;
       if (filterSav && !x.sav_available) return false;
+      if (minRating) {
+        const min = Number(minRating);
+        if (!x.rating_quality_price || x.rating_quality_price < min) return false;
+      }
       if (filterCat) {
         const byId = x.primary_category_id === filterCat || (x.category_ids || []).includes(filterCat);
         const byName = x.supplier_category === filterCat
@@ -154,10 +165,11 @@ export default function FournisseursAnnuaire({
       if (sortBy === 'city') return String(a.city || '').localeCompare(String(b.city || ''), 'fr') || String(a.company_name).localeCompare(String(b.company_name), 'fr');
       if (sortBy === 'category') return String(a.supplier_category || '').localeCompare(String(b.supplier_category || ''), 'fr') || String(a.company_name).localeCompare(String(b.company_name), 'fr');
       if (sortBy === 'recommended') return (b.is_recommended ? 1 : 0) - (a.is_recommended ? 1 : 0) || String(a.company_name).localeCompare(String(b.company_name), 'fr');
+      if (sortBy === 'rating') return (b.rating_quality_price || 0) - (a.rating_quality_price || 0) || String(a.company_name).localeCompare(String(b.company_name), 'fr');
       return String(a.company_name || '').localeCompare(String(b.company_name || ''), 'fr');
     });
     return list;
-  }, [items, q, filterCat, filterCity, filterStatut, filterRec, filterDelivery, filterInstall, filterSav, onlyFav, favoriteIds, sortBy]);
+  }, [items, q, filterCat, filterCity, filterStatut, filterRec, filterDelivery, filterInstall, filterSav, onlyFav, favoriteIds, sortBy, minRating]);
 
   function resetFilters() {
     setQ('');
@@ -169,6 +181,7 @@ export default function FournisseursAnnuaire({
     setFilterInstall(false);
     setFilterSav(false);
     setOnlyFav(false);
+    setMinRating('');
     setSortBy('name');
   }
 
@@ -209,6 +222,15 @@ export default function FournisseursAnnuaire({
             <option value="city">Tri : ville</option>
             <option value="category">Tri : catégorie</option>
             <option value="recommended">Tri : recommandé</option>
+            <option value="rating">Tri : note qualité/prix</option>
+          </select>
+          <select value={minRating} onChange={(e) => setMinRating(e.target.value)} style={SELECT_STYLE}>
+            <option value="">Note min. : toutes</option>
+            <option value="5">5 étoiles</option>
+            <option value="4">≥ 4 étoiles</option>
+            <option value="3">≥ 3 étoiles</option>
+            <option value="2">≥ 2 étoiles</option>
+            <option value="1">≥ 1 étoile</option>
           </select>
           <label className="achats-annuaire-check"><input type="checkbox" checked={filterDelivery} onChange={(e) => setFilterDelivery(e.target.checked)} /> Livraison</label>
           <label className="achats-annuaire-check"><input type="checkbox" checked={filterInstall} onChange={(e) => setFilterInstall(e.target.checked)} /> Installation</label>

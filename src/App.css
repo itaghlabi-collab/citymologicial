@@ -10924,6 +10924,68 @@ tbody tr:last-child td { border-bottom: none; }
   color: var(--text-3);
 }
 
+.achats-annuaire-rating {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.achats-annuaire-rating-label {
+  font-size: 0.68rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-3);
+}
+
+.achats-star-rating {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  color: #c9a227;
+  vertical-align: middle;
+}
+
+.achats-star-rating__star {
+  color: var(--border);
+  flex-shrink: 0;
+}
+
+.achats-star-rating__star.is-on {
+  color: #c9a227;
+}
+
+.achats-star-rating__num {
+  margin-left: 6px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--text-3);
+}
+
+.achats-star-rating--input {
+  gap: 2px;
+}
+
+.achats-star-btn {
+  border: none;
+  background: transparent;
+  padding: 2px;
+  cursor: pointer;
+  color: var(--border);
+  line-height: 0;
+}
+
+.achats-star-btn.is-on,
+.achats-star-btn:hover {
+  color: #c9a227;
+}
+
+.achats-star-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 .achats-annuaire-contacts {
   display: flex;
   flex-direction: column;

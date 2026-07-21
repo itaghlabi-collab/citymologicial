@@ -20,6 +20,7 @@ import {
 } from '../../services/achats/supplierAnnuaire';
 import FournisseursAnnuaire from './FournisseursAnnuaire.jsx';
 import FournisseurFiche from './FournisseurFiche.jsx';
+import { StarRatingInput } from './StarRating.jsx';
 import {
   INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE,
   MODES_PAIEMENT, CATEGORIES_FOURN,
@@ -61,6 +62,8 @@ const EMPTY_FORM = {
   installation_available: false,
   sav_available: false,
   is_recommended: false,
+  rating_quality_price: null,
+  rating_comment: '',
   status: 'active',
   notes: '',
 };
@@ -111,6 +114,8 @@ function FournisseurForm({
       installation_available: !!initial.installation_available,
       sav_available: !!initial.sav_available,
       is_recommended: !!initial.is_recommended,
+      rating_quality_price: initial.rating_quality_price ?? null,
+      rating_comment: initial.rating_comment || '',
     };
   });
   const [errors, setErrors] = useState({});
@@ -310,6 +315,25 @@ function FournisseurForm({
         <CheckField label="SAV disponible" checked={form.sav_available} onChange={(v) => set('sav_available', v)} />
         <CheckField label="Fournisseur recommandé" checked={form.is_recommended} onChange={(v) => set('is_recommended', v)} />
       </div>
+
+      <SectionTitle icon={<Tag size={12} />}>Notation — Rapport qualité / prix</SectionTitle>
+      <FRow>
+        <FField label="Étoiles (1 à 5)">
+          <StarRatingInput
+            value={form.rating_quality_price}
+            onChange={(v) => set('rating_quality_price', v)}
+            disabled={saving}
+          />
+        </FField>
+        <FField label="Commentaire notation">
+          <input
+            value={form.rating_comment}
+            onChange={(e) => set('rating_comment', e.target.value)}
+            placeholder="Ex: bon rapport qualité/prix, délais respectés…"
+            style={INPUT_STYLE}
+          />
+        </FField>
+      </FRow>
 
       <SectionTitle icon={<UserCog size={12} />}>6. Notes</SectionTitle>
       <div style={{ marginBottom: 16 }}>

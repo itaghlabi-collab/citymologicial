@@ -46,6 +46,14 @@ function numOrNull(v) {
   return Number.isFinite(n) ? n : null;
 }
 
+function ratingOrNull(v) {
+  const n = numOrNull(v);
+  if (n == null) return null;
+  const r = Math.round(n);
+  if (r < 1 || r > 5) return null;
+  return r;
+}
+
 export function normalizeSupplier(row) {
   if (!row) return null;
   const status = row.status || 'active';
@@ -83,6 +91,8 @@ export function normalizeSupplier(row) {
     installation_available: boolField(row.installation_available),
     sav_available: boolField(row.sav_available),
     is_recommended: boolField(row.is_recommended),
+    rating_quality_price: ratingOrNull(row.rating_quality_price),
+    rating_comment: row.rating_comment || '',
     status,
     notes: row.notes || '',
     date_creation: row.created_at ? String(row.created_at).slice(0, 10) : '',
@@ -150,6 +160,8 @@ function toSupplierRowExtended(form) {
     installation_available: boolField(form.installation_available),
     sav_available: boolField(form.sav_available),
     is_recommended: boolField(form.is_recommended),
+    rating_quality_price: ratingOrNull(form.rating_quality_price),
+    rating_comment: form.rating_comment?.trim() || null,
   };
 }
 
@@ -301,8 +313,8 @@ export function exportSuppliersCsv(suppliers) {
     'Société', 'Nom commercial', 'ICE', 'RC', 'IF', 'CNSS', 'Téléphone', 'Tél. 2', 'WhatsApp',
     'Email', 'Site web', 'Adresse', 'Ville', 'Région', 'Contact', 'Fonction',
     'Catégorie', 'Marques', 'Produits/services', 'Zone livraison', 'Délai livraison',
-    'Délai paiement', 'Mode paiement', 'Min commande', 'Livraison', 'Installation', 'SAV',
-    'Recommandé', 'RIB', 'Banque', 'Statut', 'Notes',
+    'Délai paiement', 'Mode paiement', 'Min commande',     'Livraison', 'Installation', 'SAV',
+    'Recommandé', 'Note qualité/prix', 'Commentaire note', 'RIB', 'Banque', 'Statut', 'Notes',
   ];
   const esc = (v) => {
     const s = String(v ?? '');
@@ -338,6 +350,8 @@ export function exportSuppliersCsv(suppliers) {
     yn(s.installation_available),
     yn(s.sav_available),
     yn(s.is_recommended),
+    s.rating_quality_price ?? '',
+    s.rating_comment,
     s.rib,
     s.bank,
     s.statut,

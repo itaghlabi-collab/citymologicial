@@ -16,6 +16,7 @@ import {
   telHref,
   whatsappHref,
 } from '../../services/achats/supplierAnnuaire';
+import { StarRatingDisplay } from './StarRating.jsx';
 
 function DetailRow({ label, value }) {
   return (
@@ -167,6 +168,11 @@ export default function FournisseurFiche({
           <DetailRow label="Installation" value={yn(item.installation_available)} />
           <DetailRow label="SAV" value={yn(item.sav_available)} />
           <DetailRow label="Recommandé" value={yn(item.is_recommended)} />
+          <DetailRow
+            label="Qualité / prix"
+            value={<StarRatingDisplay value={item.rating_quality_price} size={14} />}
+          />
+          <DetailRow label="Commentaire note" value={item.rating_comment} />
         </div>
 
         <div className="card">
