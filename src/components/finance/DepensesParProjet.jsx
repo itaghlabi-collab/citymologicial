@@ -6,14 +6,14 @@ import {
   Loader2, Plus, Upload, Eye, Download, FileSpreadsheet,
   Building2, TrendingDown, Calendar, Target, ArrowLeft, BarChart3,
   AlertTriangle, LayoutDashboard, FolderKanban, CreditCard, LineChart,
-  Search, User, Wallet, ShoppingCart, ChevronDown, ChevronUp, Users, Tags,
+  Search, User, Wallet, ShoppingCart, ChevronDown, ChevronUp, Users, Tags, Trash2,
 } from 'lucide-react';
 import { useProjectExpenses } from '../../hooks/useProjectExpenses';
 import { formatMAD, Modal, INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE, MODES_PAIEMENT } from './shared.jsx';
 import { FinanceDonutChart } from './FinanceCharts.jsx';
 import { importDepenseChantierFile } from '../../services/finance/projectExpenseImport';
 import { filterProjectExpenses, ORIGINE_LABELS } from '../../services/finance/projectExpenses';
-import { isCountedProjectExpense } from '../../services/finance/projectExpenseRules';
+import { isCountedProjectExpense, isManualProjectExpense } from '../../services/finance/projectExpenseRules';
 import { getProjectDetailData } from '../../services/finance/projectExpenseData';
 import { expenseMatchesProject } from '../../services/finance/projectExpenseMerge';
 import { exportProjectExpensesPdf } from '../../services/finance/projectExpensePdf';
@@ -225,16 +225,38 @@ function ExpenseFormModal({ open, onClose, projects, onSave, initial }) {
     montant: '', mode_paiement: 'Virement', observation: '', origine: 'charge_manuelle',
   });
   const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState('');
 
   if (!open) return null;
   const set = (k, v) => setForm((f) => ({ ...f, [k]: v }));
 
   async function submit(e) {
     e.preventDefault();
+    setFormError('');
+    if (!form.project_id) {
+      setFormError('Sélectionnez un projet.');
+      return;
+    }
     setSaving(true);
     try {
-      await onSave({ ...form, montant: Number(form.montant) });
+      const project = projects.find((p) => String(p.id) === String(form.project_id));
+      const montant = Number(form.montant) || 0;
+      await onSave({
+        ...form,
+        montant,
+        montant_paye: montant,
+        date_paiement: form.date_depense,
+        // Comptabilisée immédiatement dans le projet (saisie manuelle).
+        statut: 'payee',
+        project_match_status: 'matched',
+        project_name_raw: project?.nom || form.project_name_raw || null,
+        origine: 'charge_manuelle',
+        source_type: null,
+        source_id: null,
+      });
       onClose();
+    } catch (err) {
+      setFormError(err?.message || "Erreur lors de l'enregistrement.");
     } finally {
       setSaving(false);
     }
@@ -275,6 +297,9 @@ function ExpenseFormModal({ open, onClose, projects, onSave, initial }) {
         <label>Observation
           <textarea style={TEXTAREA_STYLE} value={form.observation} onChange={(e) => set('observation', e.target.value)} />
         </label>
+        {formError && (
+          <div style={{ gridColumn: '1 / -1', color: 'var(--red)', fontSize: '0.85rem' }}>{formError}</div>
+        )}
         <div style={{ gridColumn: '1 / -1', display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
           <button type="button" className="btn btn-secondary" onClick={onClose}>Annuler</button>
           <button type="submit" className="btn btn-primary" disabled={saving}>
@@ -291,7 +316,7 @@ function ExpenseFormModal({ open, onClose, projects, onSave, initial }) {
 export default function DepensesParProjet() {
   const {
     configured, loading, syncing, error, projects, expenses, dashboard, summaries,
-    unmatched, reload, create, erpContext,
+    unmatched, reload, create, remove, erpContext,
   } = useProjectExpenses();
 
   const [view, setView] = useState('vue');
@@ -301,6 +326,22 @@ export default function DepensesParProjet() {
   const [showImport, setShowImport] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [exportingPdf, setExportingPdf] = useState(false);
+  const [deletingId, setDeletingId] = useState(null);
+
+  async function handleDeleteManualExpense(expense) {
+    if (!isManualProjectExpense(expense)) return;
+    if (!window.confirm('Supprimer cette dépense manuelle ?')) return;
+    setDeletingId(expense.id);
+    try {
+      await remove(expense.id);
+      await reload();
+    } catch (err) {
+      console.error('[CITYMO] delete dépense manuelle', err);
+      window.alert(err?.message || 'Suppression impossible.');
+    } finally {
+      setDeletingId(null);
+    }
+  }
 
   async function handleExportPdf({ project, expenses: rows }) {
     if (exportingPdf) return;
@@ -668,7 +709,7 @@ export default function DepensesParProjet() {
                 <thead>
                   <tr>
                     <th>Date</th><th>Projet</th><th>Origine</th><th>Élément</th><th>Description</th>
-                    <th>Fournisseur</th><th>Montant</th><th>Statut</th><th>Observation</th>
+                    <th>Fournisseur</th><th>Montant</th><th>Statut</th><th>Observation</th><th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -688,6 +729,22 @@ export default function DepensesParProjet() {
                       <td className="dpp-num"><strong>{formatMAD(e.montant)}</strong></td>
                       <td><span className="badge badge-grey">{e.statut_label || e.statut}</span></td>
                       <td className="dpp-cell-muted">{e.observation || '—'}</td>
+                      <td>
+                        {isManualProjectExpense(e) ? (
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            title="Supprimer la dépense manuelle"
+                            disabled={deletingId === e.id}
+                            onClick={() => handleDeleteManualExpense(e)}
+                            style={{ color: 'var(--red)' }}
+                          >
+                            {deletingId === e.id ? <Loader2 size={14} className="cin-spin" /> : <Trash2 size={14} />}
+                          </button>
+                        ) : (
+                          <span className="dpp-cell-muted">—</span>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
@@ -698,7 +755,16 @@ export default function DepensesParProjet() {
       )}
 
       <ImportModal open={showImport} onClose={() => setShowImport(false)} projects={projects} onDone={() => reload()} />
-      <ExpenseFormModal open={showForm} onClose={() => setShowForm(false)} projects={projects} onSave={async (f) => { await create(f); reload({ forceBackfill: true }); }} />
+      <ExpenseFormModal
+        open={showForm}
+        onClose={() => setShowForm(false)}
+        projects={projects}
+        onSave={async (f) => {
+          await create(f);
+          await reload();
+          setView('depenses');
+        }}
+      />
 
       <style>{`
         .dpp-root { --dpp-gap: 32px; --dpp-radius: 12px; padding-bottom: 48px; }

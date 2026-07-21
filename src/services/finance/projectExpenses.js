@@ -167,6 +167,23 @@ export async function updateProjectExpense(id, form) {
 
 export async function deleteProjectExpense(id) {
   await getAuthUserId();
+  const { data: existing, error: fetchErr } = await getSupabase()
+    .from(TABLE)
+    .select('id, origine, source_type')
+    .eq('id', id)
+    .maybeSingle();
+  if (fetchErr) throw fetchErr;
+  if (!existing) {
+    const err = new Error('Dépense introuvable.');
+    err.code = 'NOT_FOUND';
+    throw err;
+  }
+  // Uniquement les saisies manuelles « Nouvelle dépense » (pas les syncs ERP).
+  if (existing.origine !== 'charge_manuelle' || existing.source_type) {
+    const err = new Error('Seules les dépenses ajoutées manuellement peuvent être supprimées.');
+    err.code = 'FORBIDDEN';
+    throw err;
+  }
   const { error } = await getSupabase().from(TABLE).delete().eq('id', id);
   if (error) throw error;
 }

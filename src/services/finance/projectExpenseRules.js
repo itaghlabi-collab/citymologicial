@@ -69,7 +69,12 @@ export function isWorkerPaymentSourceType(sourceType) {
 export function isCountedProjectExpense(expense) {
   if (!expense || expense.statut === 'annule' || expense.statut === 'en_attente') return false;
   if (expense.origine === 'charge_manuelle') {
-    return expense.statut === 'payee';
+    // Sync dépenses générales → uniquement Payé.
+    // Saisie manuelle « Nouvelle dépense » (sans source ERP) → valide ou payee.
+    if (expense.source_type === 'finance_charge' || expense._fromCharge) {
+      return expense.statut === 'payee';
+    }
+    return expense.statut === 'payee' || expense.statut === 'valide';
   }
   if (expense.origine === 'main_oeuvre') {
     return expense.statut === 'payee' || expense.statut === 'valide';
@@ -81,4 +86,12 @@ export function isCountedProjectExpense(expense) {
     return expense.statut === 'valide' || expense.statut === 'payee';
   }
   return expense.statut === 'payee' || expense.statut === 'valide';
+}
+
+/** Dépense saisie via « Nouvelle dépense » (supprimable) — pas une sync ERP. */
+export function isManualProjectExpense(expense) {
+  if (!expense || expense.origine !== 'charge_manuelle') return false;
+  if (expense._fromCharge) return false;
+  if (expense.source_type) return false;
+  return true;
 }

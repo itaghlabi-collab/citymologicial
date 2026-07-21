@@ -17,24 +17,10 @@ export function buildProjectExpenseDashboard(expenses, projects, orders = [], ac
     .filter((e) => e.date_depense?.startsWith(monthPrefix))
     .reduce((s, e) => s + e.montant, 0);
 
-  const byProject = {};
-  active.forEach((e) => {
-    const key = e.project_id || e.project_name_raw || 'sans_projet';
-    if (!byProject[key]) byProject[key] = { total: 0, count: 0, fournisseurs: new Set() };
-    byProject[key].total += e.montant;
-    byProject[key].count++;
-    if (e.fournisseur) byProject[key].fournisseurs.add(e.fournisseur);
-  });
-
-  let topProject = null;
-  let topAmount = 0;
-  Object.entries(byProject).forEach(([key, v]) => {
-    if (v.total > topAmount) {
-      topAmount = v.total;
-      const p = (projects || []).find((pr) => pr.id === key);
-      topProject = p?.nom || key;
-    }
-  });
+  // Même source de noms que l'onglet Projets (projects.nom via buildProjectSummaries).
+  const summaries = buildProjectSummaries(projects, expenses, orders, acquisitionOrders);
+  const withSpend = summaries.filter((p) => Number(p.total_depenses) > 0);
+  const top = withSpend[0] || null;
 
   const totalBudget = (projects || []).reduce((s, p) => s + (Number(p.budget_approuve) || 0), 0);
   const budgetConsomme = totalDepenses;
@@ -49,13 +35,9 @@ export function buildProjectExpenseDashboard(expenses, projects, orders = [], ac
     byCategorie[c] = (byCategorie[c] || 0) + e.montant;
   });
 
-  const projectChart = Object.entries(byProject)
-    .map(([key, v]) => {
-      const p = (projects || []).find((pr) => pr.id === key);
-      return { label: p?.nom || key, value: v.total };
-    })
-    .sort((a, b) => b.value - a.value)
-    .slice(0, 12);
+  const projectChart = withSpend
+    .slice(0, 12)
+    .map((p) => ({ label: p.nom, value: p.total_depenses }));
 
   const fournisseurChart = Object.entries(byFournisseur)
     .map(([label, value]) => ({ label, value }))
@@ -71,8 +53,8 @@ export function buildProjectExpenseDashboard(expenses, projects, orders = [], ac
     projectCount: (projects || []).length,
     totalDepenses,
     depensesMois,
-    topProject,
-    topProjectAmount: topAmount,
+    topProject: top?.nom || null,
+    topProjectAmount: top ? Number(top.total_depenses) || 0 : 0,
     budgetConsomme,
     budgetRestant,
     totalBudget,
