@@ -7551,7 +7551,7 @@ tbody tr:last-child td { border-bottom: none; }
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x > table,
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x > table {
     width: 100%;
-    min-width: 1280px;
+    min-width: 1400px;
     border-collapse: separate;
     border-spacing: 0;
     table-layout: fixed;
@@ -7560,7 +7560,7 @@ tbody tr:last-child td { border-bottom: none; }
 
   /* Factures : plus de colonnes → min-width plus haute ; scroll X si besoin */
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x > table {
-    min-width: 1520px;
+    min-width: 1680px;
   }
 
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x th,
@@ -7590,19 +7590,19 @@ tbody tr:last-child td { border-bottom: none; }
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x .crm-col-ref,
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x th:nth-child(1),
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x th:nth-child(1) {
-    width: 156px;
-    min-width: 156px;
+    width: 150px;
+    min-width: 150px;
     white-space: nowrap;
   }
 
-  /* Titre — colonne fluide */
+  /* Titre — largeur limitée (NE PAS mettre 100% : ça écrase les autres colonnes) */
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x .crm-col-title,
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x .crm-col-title,
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x th:nth-child(2),
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x th:nth-child(2) {
-    width: 100%;
-    min-width: 260px;
-    max-width: none;
+    width: 240px;
+    min-width: 220px;
+    max-width: 280px;
   }
 
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x .crm-col-title button,
@@ -7620,8 +7620,8 @@ tbody tr:last-child td { border-bottom: none; }
   /* Client */
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x .crm-col-client,
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x .crm-col-client {
-    width: 180px;
-    min-width: 160px;
+    width: 160px;
+    min-width: 150px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -7630,7 +7630,7 @@ tbody tr:last-child td { border-bottom: none; }
   /* Commercial */
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x .crm-col-commercial,
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x .crm-col-commercial {
-    width: 160px;
+    width: 150px;
     min-width: 140px;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -7639,16 +7639,16 @@ tbody tr:last-child td { border-bottom: none; }
 
   /* Devis lié (Factures) */
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x .crm-col-devis-lie {
-    width: 140px;
-    min-width: 132px;
+    width: 136px;
+    min-width: 130px;
     white-space: nowrap;
   }
 
   /* Montants — lisibles, tabular nums */
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x .crm-col-money,
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x .crm-col-money {
-    width: 138px;
-    min-width: 130px;
+    width: 132px;
+    min-width: 126px;
     white-space: nowrap !important;
     overflow: visible;
     font-variant-numeric: tabular-nums;
@@ -7664,8 +7664,8 @@ tbody tr:last-child td { border-bottom: none; }
   /* Statut */
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x .crm-col-statut,
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x .crm-col-statut {
-    width: 148px;
-    min-width: 140px;
+    width: 140px;
+    min-width: 130px;
     white-space: nowrap;
   }
 
@@ -7681,8 +7681,8 @@ tbody tr:last-child td { border-bottom: none; }
   /* Dates */
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x .crm-col-date,
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x .crm-col-date {
-    width: 118px;
-    min-width: 112px;
+    width: 114px;
+    min-width: 110px;
     white-space: nowrap;
     font-size: 0.875rem;
   }
