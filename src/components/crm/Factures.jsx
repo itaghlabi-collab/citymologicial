@@ -42,6 +42,17 @@ function fmtCommercial(v) {
   return String(v).trim().toUpperCase();
 }
 
+/** Affichage liste uniquement — ne modifie pas les données stockées */
+function displayFactureTitre(titre) {
+  if (!titre) return '—';
+  const cleaned = String(titre)
+    .replace(/^Facture\s+acompte\s*[—–\-:]\s*/i, 'Acompte — ')
+    .replace(/^Facture\s*[—–\-:]\s*/i, '')
+    .replace(/^Facture\s+/i, '')
+    .trim();
+  return cleaned || String(titre).trim();
+}
+
 function pdfOpenButtonStyle(disabled, extra = {}) {
   return {
     background: 'none',
@@ -517,12 +528,10 @@ export default function Factures() {
                     { label: 'Client',          field: 'client_nom' },
                     { label: 'Commercial',      field: 'commercial' },
                     { label: 'Total HT',        field: 'total_ht',        align: 'right' },
-                    { label: 'TVA',             field: 'total_tva',       align: 'right' },
                     { label: 'Total TTC',       field: 'total_ttc',       align: 'right' },
                     { label: 'Payé',            field: 'total_paye',      align: 'right' },
                     { label: 'Reste',           field: 'reste_a_payer',   align: 'right' },
                     { label: 'Emission',        field: 'date_emission' },
-                    { label: 'Echeance',        field: 'date_echeance' },
                     { label: 'Statut',          field: 'statut' },
                     { label: 'Actions',         field: null },
                   ].map(col => (
@@ -541,7 +550,7 @@ export default function Factures() {
                 {paged.map((f, i) => {
                   const clientNom = f.client_nom || f.client?.nom || '—';
                   const overdue   = isOverdue(f.date_echeance, f.statut);
-                  const dueSoon   = !overdue && isDueSoon(f.date_echeance, f.statut);
+                  const titreAffiche = displayFactureTitre(f.titre);
                   const restePct  = f.total_ttc > 0 ? Math.round((Number(f.reste_a_payer || 0) / Number(f.total_ttc)) * 100) : 0;
                   return (
                     <tr key={f.id ?? i}
@@ -562,7 +571,7 @@ export default function Factures() {
                         </button>
                       </td>
 
-                      {/* Titre */}
+                      {/* Titre (sans préfixe « Facture ») */}
                       <td data-label="Titre" className="crm-col-title" style={{ padding: '12px 14px' }}>
                         <button
                           type="button"
@@ -579,7 +588,7 @@ export default function Factures() {
                             whiteSpace: 'nowrap',
                           })}
                         >
-                          {f.titre || '—'}
+                          {titreAffiche}
                         </button>
                       </td>
 
@@ -605,11 +614,6 @@ export default function Factures() {
                       {/* Total HT */}
                       <td data-label="Total HT" className="crm-col-money" style={{ padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 500 }}>
                         {fmtMAD(f.total_ht)}
-                      </td>
-
-                      {/* TVA */}
-                      <td data-label="TVA" className="crm-col-money" style={{ padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap', color: 'var(--text-3)' }}>
-                        {fmtMAD(f.total_tva)}
                       </td>
 
                       {/* Total TTC */}
@@ -645,15 +649,6 @@ export default function Factures() {
                       {/* Date emission */}
                       <td data-label="Emission" className="crm-col-date" style={{ padding: '12px 14px', whiteSpace: 'nowrap', color: 'var(--text-2)', fontSize: '0.84rem' }}>
                         {fmtDate(f.date_emission)}
-                      </td>
-
-                      {/* Date echeance */}
-                      <td data-label="Echeance" className="crm-col-date" style={{ padding: '12px 14px', whiteSpace: 'nowrap', fontSize: '0.84rem' }}>
-                        <span style={{ color: overdue ? 'var(--red)' : dueSoon ? '#E65100' : 'var(--text-2)', fontWeight: (overdue || dueSoon) ? 700 : 400 }}>
-                          {fmtDate(f.date_echeance)}
-                          {overdue && <span style={{ display: 'block', fontSize: '0.7rem' }}>En retard</span>}
-                          {dueSoon && !overdue && <span style={{ display: 'block', fontSize: '0.7rem' }}>Bientot</span>}
-                        </span>
                       </td>
 
                       {/* Statut */}
@@ -701,6 +696,7 @@ export default function Factures() {
               const clientNom = f.client_nom || f.client?.nom || '—';
               const overdue = isOverdue(f.date_echeance, f.statut);
               const dueSoon = !overdue && isDueSoon(f.date_echeance, f.statut);
+              const titreAffiche = displayFactureTitre(f.titre);
               return (
                 <div key={f.id ?? i} className="crm-doc-card">
                   <div className="crm-doc-head">
@@ -724,7 +720,7 @@ export default function Factures() {
                     className="crm-doc-title"
                     style={pdfOpenButtonStyle(pdfLoadingId === f.id, { width: '100%', textAlign: 'left' })}
                   >
-                    {f.__isImportedArchive ? (f.titre || '—') : (f.titre || clientNom)}
+                    {titreAffiche !== '—' ? titreAffiche : clientNom}
                   </button>
                   <div className="crm-doc-meta">
                     <span className="crm-doc-meta-line">{clientNom}</span>

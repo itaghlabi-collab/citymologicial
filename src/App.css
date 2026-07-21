@@ -7543,8 +7543,24 @@ tbody tr:last-child td { border-bottom: none; }
     min-width: 1280px;
   }
 
+  /* Sans TVA / Échéance — largeur fixe ; scroll X dès que le cadre est plus étroit */
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x > table {
-    min-width: 1520px;
+    min-width: 1280px;
+  }
+
+  .crm-module--factures .crm-table-desktop .table-wrap.crm-table-scroll-x {
+    overflow-x: scroll;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(0, 0, 0, 0.35) transparent;
+  }
+
+  .crm-module--factures .crm-table-desktop .table-wrap.crm-table-scroll-x::-webkit-scrollbar {
+    height: 10px;
+  }
+
+  .crm-module--factures .crm-table-desktop .table-wrap.crm-table-scroll-x::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.28);
+    border-radius: 6px;
   }
 
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x,
