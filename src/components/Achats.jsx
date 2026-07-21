@@ -8,7 +8,7 @@ import BonsCommande     from './achats/BonsCommande.jsx';
 import Fournisseurs     from './achats/Fournisseurs.jsx';
 import OrdresAchat      from './achats/OrdresAchat.jsx';
 
-export default function Achats({ activeTab }) {
+export default function Achats({ activeTab, onNavigate }) {
   const tab = activeTab || 'demandes-achat';
 
   // État partagé : liste des fournisseurs enregistrés
@@ -18,7 +18,12 @@ export default function Achats({ activeTab }) {
     <div>
       {tab === 'demandes-achat'    && <DemandesAchat />}
       {tab === 'bons-commande'     && <BonsCommande />}
-      {tab === 'fournisseurs'      && <Fournisseurs onFournisseursChange={setFournisseursList} />}
+      {tab === 'fournisseurs'      && (
+        <Fournisseurs
+          onFournisseursChange={setFournisseursList}
+          onNavigate={onNavigate}
+        />
+      )}
       {tab === 'ordres-achat'      && <OrdresAchat />}
     </div>
   );

@@ -314,11 +314,11 @@ function PageContent({ module, onNavigate, inventaireArticleCode, onInventaireAr
     case 'ordres-paiement-achats':
     case 'ordres-paiement':     return <Finance activeTab="ordres-paiement" />;
     /* Achats */
-    case 'demandes-achat':      return <Achats activeTab="demandes-achat" />;
-    case 'bons-commande':       return <Achats activeTab="bons-commande" />;
-    case 'fournisseurs':        return <Achats activeTab="fournisseurs" />;
-    case 'comparaison-devis':   return <Achats activeTab="demandes-achat" />;
-    case 'ordres-achat':        return <Achats activeTab="ordres-achat" />;
+    case 'demandes-achat':      return <Achats activeTab="demandes-achat" onNavigate={onNavigate} />;
+    case 'bons-commande':       return <Achats activeTab="bons-commande" onNavigate={onNavigate} />;
+    case 'fournisseurs':        return <Achats activeTab="fournisseurs" onNavigate={onNavigate} />;
+    case 'comparaison-devis':   return <Achats activeTab="demandes-achat" onNavigate={onNavigate} />;
+    case 'ordres-achat':        return <Achats activeTab="ordres-achat" onNavigate={onNavigate} />;
     /* Inventaire & Depot */
     case 'categories-stock':    return <Inventaire activeTab="categories-stock" />;
     case 'articles-stock':      return (

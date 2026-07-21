@@ -281,6 +281,26 @@ export default function BonsCommande() {
   const [editBc, setEditBc] = useState(null);
   const [detailId, setDetailId] = useState(null);
   const [pdfLoadingId, setPdfLoadingId] = useState(null);
+  const [prefillFromAnnuaire, setPrefillFromAnnuaire] = useState(null);
+
+  // Prefill optionnel depuis Annuaire fournisseurs (sessionStorage) — n'altère pas le workflow BC
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem('citymo_bc_prefill_supplier');
+      if (!raw) return;
+      sessionStorage.removeItem('citymo_bc_prefill_supplier');
+      const parsed = JSON.parse(raw);
+      if (parsed?.id || parsed?.name) {
+        setPrefillFromAnnuaire({
+          supplier_id: parsed.id || '',
+          fournisseur: parsed.name || '',
+        });
+        setTab('nouveau');
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   async function handlePdf(bc) {
     setPdfLoadingId(bc.id);
@@ -301,7 +321,9 @@ export default function BonsCommande() {
       setTab('liste');
       setShowModal(false);
       setEditBc(null);
+      setPrefillFromAnnuaire(null);
     }
+    return result;
   }, [editBc, save]);
 
   async function handleDelete(id) {
@@ -454,9 +476,17 @@ export default function BonsCommande() {
       {tab === 'nouveau' && (
         <div className="card">
           <BCForm
-            initial={editBc}
+            initial={editBc || (prefillFromAnnuaire ? {
+              supplier_id: prefillFromAnnuaire.supplier_id,
+              fournisseur: prefillFromAnnuaire.fournisseur,
+              date: '',
+              date_livraison: '',
+              devise: 'MAD',
+              note: '',
+              lignes: [],
+            } : null)}
             onSave={handleSave}
-            onCancel={() => { setTab('liste'); setEditBc(null); }}
+            onCancel={() => { setTab('liste'); setEditBc(null); setPrefillFromAnnuaire(null); }}
             fournisseurs={suppliers}
             suppliersLoading={suppliersLoading}
             saving={saving}

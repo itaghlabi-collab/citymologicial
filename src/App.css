@@ -10766,6 +10766,324 @@ tbody tr:last-child td { border-bottom: none; }
   }
 }
 
+/* ── Annuaire fournisseurs (complément) ───────────────────────────────────── */
+.achats-fourn-tabs {
+  display: flex;
+  gap: 0;
+  margin-bottom: 16px;
+  border-bottom: 2px solid var(--border);
+}
+
+.achats-fourn-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  background: none;
+  cursor: pointer;
+  font-family: var(--font-body);
+  font-size: 0.875rem;
+  font-weight: 500;
+  color: var(--text-2);
+}
+
+.achats-fourn-tab.is-active {
+  font-weight: 700;
+  color: var(--red);
+  border-bottom-color: var(--red);
+}
+
+.achats-fourn-cat-grid {
+  max-height: 160px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 6px;
+  background: var(--surface);
+}
+
+.achats-annuaire-search {
+  margin-bottom: 16px;
+  padding: 14px 16px;
+}
+
+.achats-annuaire-search-row {
+  position: relative;
+  margin-bottom: 12px;
+}
+
+.achats-annuaire-search-icon {
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-3);
+  pointer-events: none;
+}
+
+.achats-annuaire-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.achats-annuaire-filters select {
+  max-width: 200px;
+}
+
+.achats-annuaire-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  color: var(--text-2);
+  white-space: nowrap;
+}
+
+.achats-annuaire-count {
+  margin-top: 10px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-3);
+}
+
+.achats-annuaire-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 14px;
+}
+
+.achats-annuaire-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 14px;
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.achats-annuaire-card-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.achats-annuaire-card-name {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 700;
+  line-height: 1.25;
+  word-break: break-word;
+}
+
+.achats-annuaire-card-trade {
+  margin: 2px 0 0;
+  font-size: 0.75rem;
+  color: var(--text-3);
+}
+
+.achats-annuaire-fav {
+  border: none;
+  background: transparent;
+  color: var(--text-3);
+  cursor: pointer;
+  padding: 4px;
+}
+
+.achats-annuaire-fav.is-on {
+  color: #c9a227;
+}
+
+.achats-annuaire-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  font-size: 0.75rem;
+}
+
+.achats-annuaire-cat {
+  font-weight: 600;
+  color: var(--text-2);
+}
+
+.achats-annuaire-city {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-3);
+}
+
+.achats-annuaire-contacts {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.8rem;
+  color: var(--text-2);
+}
+
+.achats-annuaire-contacts > div {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.achats-annuaire-email {
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+.achats-annuaire-brands {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.achats-annuaire-chip {
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+
+.achats-annuaire-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.achats-annuaire-flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  padding: 3px 8px;
+  border-radius: 6px;
+  background: var(--surface-2);
+  color: var(--text-2);
+}
+
+.achats-annuaire-flag--rec {
+  background: rgba(46, 125, 50, 0.1);
+  color: #2e7d32;
+}
+
+.achats-annuaire-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  margin-top: auto;
+}
+
+.achats-annuaire-actions a.btn {
+  text-decoration: none;
+}
+
+.achats-annuaire-more {
+  position: relative;
+  margin-left: auto;
+}
+
+.achats-annuaire-menu {
+  position: absolute;
+  right: 0;
+  bottom: 100%;
+  margin-bottom: 4px;
+  min-width: 200px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  box-shadow: var(--shadow);
+  z-index: 5;
+  padding: 4px;
+}
+
+.achats-annuaire-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  border: none;
+  background: none;
+  padding: 8px 10px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  border-radius: 6px;
+  font-family: var(--font-body);
+  color: var(--text);
+}
+
+.achats-annuaire-menu button:hover {
+  background: var(--surface-2);
+}
+
+.achats-fourn-fiche-links {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.achats-fourn-fiche-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.achats-fourn-fiche-list li {
+  display: grid;
+  grid-template-columns: 1.2fr 0.8fr 0.8fr 0.9fr;
+  gap: 8px;
+  font-size: 0.78rem;
+  padding: 8px;
+  background: var(--surface-2);
+  border-radius: 6px;
+}
+
+@media (max-width: 767px) {
+  .achats-fourn-tabs {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .achats-fourn-tab {
+    flex-shrink: 0;
+    font-size: 0.8rem;
+    padding: 10px 14px;
+  }
+
+  .achats-annuaire-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .achats-annuaire-filters select {
+    max-width: none;
+    flex: 1 1 140px;
+  }
+
+  .achats-fourn-fiche-list li {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
 .achats-module .achats-da-mobile,
 .achats-module .achats-quote-mobile {
   display: none;

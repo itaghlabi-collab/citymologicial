@@ -25,6 +25,7 @@ export const STATUTS_ORDRE    = ['Brouillon', 'Validé', 'Envoyé fournisseur', 
 export const STATUTS_OP_ACHATS = ['À préparer', 'Initié', 'Payé', 'Annulé'];
 export const DEVISES          = ['MAD', 'EUR', 'USD'];
 export const TVA_OPTIONS      = [0, 7, 10, 14, 20];
+/** Liste fixe legacy — fallback si catalogue Supabase pas encore migré */
 export const CATEGORIES_FOURN = ['Matériaux', 'Équipements', 'Services', 'Fournitures', 'Transport', 'Sous-traitance', 'Informatique', 'Autre'];
 
 export const BADGE_DEMANDE = {
