@@ -7769,6 +7769,102 @@ tbody tr:last-child td { border-bottom: none; }
   }
 }
 
+/* ── Factures only : scroll X clairement visible (Mac inclus) ── */
+@media (min-width: 1024px) {
+  .crm-module--factures .crm-factures-scroll-shell {
+    position: relative;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+  }
+
+  .crm-module--factures .crm-factures-scroll-hint {
+    padding: 10px 16px 6px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-3);
+    letter-spacing: 0.01em;
+    user-select: none;
+  }
+
+  .crm-module--factures .crm-table-desktop .crm-factures-scroll-x.table-wrap.crm-table-scroll-x {
+    overflow-x: scroll;
+    overflow-y: visible;
+    width: 100%;
+    max-width: 100%;
+    scrollbar-gutter: stable;
+    /* Firefox : barre toujours visible */
+    scrollbar-width: auto;
+    scrollbar-color: #9e9e9e #ececec;
+  }
+
+  .crm-module--factures .crm-table-desktop .crm-factures-scroll-x::-webkit-scrollbar {
+    height: 14px;
+    display: block;
+  }
+
+  .crm-module--factures .crm-table-desktop .crm-factures-scroll-x::-webkit-scrollbar-track {
+    background: #ececec;
+    border-radius: 8px;
+    margin: 0 8px;
+  }
+
+  .crm-module--factures .crm-table-desktop .crm-factures-scroll-x::-webkit-scrollbar-thumb {
+    background: #8d8d8d;
+    border-radius: 8px;
+    border: 3px solid #ececec;
+    min-width: 48px;
+  }
+
+  .crm-module--factures .crm-table-desktop .crm-factures-scroll-x::-webkit-scrollbar-thumb:hover {
+    background: #6d6d6d;
+  }
+
+  /* Ombre bord droit = encore du contenu à droite */
+  .crm-module--factures .crm-factures-scroll-shell.is-overflow:not(.is-at-end)::after {
+    content: '';
+    position: absolute;
+    top: 40px;
+    right: 0;
+    bottom: 36px;
+    width: 32px;
+    pointer-events: none;
+    z-index: 3;
+    background: linear-gradient(to right, transparent, rgba(0, 0, 0, 0.08));
+  }
+
+  /* Barre custom synchronisée (toujours visible sous le tableau) */
+  .crm-module--factures .crm-factures-hscroll {
+    padding: 8px 14px 12px;
+    background: #fff;
+    border-top: 1px solid var(--border);
+  }
+
+  .crm-module--factures .crm-factures-hscroll-track {
+    position: relative;
+    height: 12px;
+    border-radius: 999px;
+    background: #e8e8e8;
+    cursor: pointer;
+    touch-action: none;
+  }
+
+  .crm-module--factures .crm-factures-hscroll-thumb {
+    position: absolute;
+    top: 0;
+    height: 100%;
+    min-width: 40px;
+    border-radius: 999px;
+    background: #9a9a9a;
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.06);
+    pointer-events: none;
+  }
+
+  .crm-module--factures .crm-factures-hscroll-track:hover .crm-factures-hscroll-thumb {
+    background: #757575;
+  }
+}
+
 /* Desktop large ≥ 1400px : filtres sur une ligne si place */
 @media (min-width: 1400px) {
   .crm-filter-row {

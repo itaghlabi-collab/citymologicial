@@ -23,6 +23,7 @@ import {
   normalizeArchiveAmounts,
 } from './crmArchiveDisplay';
 import CrmOverflowMenu from './CrmOverflowMenu';
+import CrmFacturesHScroll from './CrmFacturesHScroll';
 
 const PROFORMA_INTENT_KEY = 'crm_proforma_intent';
 
@@ -517,7 +518,7 @@ export default function Factures() {
         ) : (
           <>
           <div className="crm-table-desktop">
-            <div className="table-wrap crm-table-scroll-x">
+            <CrmFacturesHScroll depsKey={paged.length}>
               <table className="crm-data-table crm-data-table--factures" style={{ borderCollapse: 'separate', borderSpacing: 0 }}>
               <thead>
                 <tr style={{ borderBottom: '1.5px solid var(--border)', background: 'var(--bg)' }}>
@@ -688,7 +689,7 @@ export default function Factures() {
                 })}
               </tbody>
               </table>
-            </div>
+            </CrmFacturesHScroll>
           </div>
 
           <div className="crm-doc-list crm-mobile-only">
