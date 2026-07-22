@@ -130,7 +130,8 @@ export async function createPurchaseRequestWorkflow(form) {
   const row = {
     ...toPurchaseRequestRow({
       ...form,
-      statut: 'Brouillon',
+      // Création = prise en charge immédiate (plus de passage Brouillon → Soumettre)
+      statut: 'En étude',
       department: 'ACHATS',
       assigned_employee_id: form.assigned_employee_id ?? assignee.assigned_employee_id,
       assigned_employee_name: form.assigned_employee_name || assignee.assigned_employee_name,
@@ -166,10 +167,11 @@ export async function createPurchaseRequestWorkflow(form) {
   await appendPurchaseRequestHistory({
     purchaseRequestId: request.id,
     action: 'Création',
-    detail: `Demande ${request.ref} créée`,
+    detail: `Demande ${request.ref} créée et soumise — ${PURCHASE_ASSIGNEE.label} (prise en charge automatique)`,
     userId: ctx.user.id,
     userName: ctx.userName,
   });
+  await notifyPurchaseRequestSubmitted(request);
   return request;
 }
 
