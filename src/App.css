@@ -7737,7 +7737,14 @@ tbody tr:last-child td { border-bottom: none; }
 
   /* Sticky 1re colonne */
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x th:first-child,
-  .crm-module--devis .crm-table-desktop .crm-table-scroll-x td:first-child,
+  .crm-module--devis .crm-table-desktop .crm-table-scroll-x td:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 2;
+    background: #fff;
+    box-shadow: none;
+  }
+
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x th:first-child,
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x td:first-child {
     position: sticky;
@@ -7755,7 +7762,14 @@ tbody tr:last-child td { border-bottom: none; }
 
   /* Sticky Actions */
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x th:last-child,
-  .crm-module--devis .crm-table-desktop .crm-table-scroll-x td:last-child,
+  .crm-module--devis .crm-table-desktop .crm-table-scroll-x td:last-child {
+    position: sticky;
+    right: 0;
+    z-index: 2;
+    background: #fff;
+    box-shadow: none;
+  }
+
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x th:last-child,
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x td:last-child {
     position: sticky;
