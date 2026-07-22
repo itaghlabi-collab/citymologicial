@@ -559,7 +559,9 @@ export async function deleteSiteMaterialRequest(id) {
   await requireUser();
   const req = await getSiteMaterialRequest(id);
   if (!req) return;
-  if (req.statut !== 'brouillon') throw new Error('Seules les demandes brouillon peuvent être supprimées.');
+  if (req.statut === 'livree') {
+    throw new Error('Une demande déjà livrée ne peut pas être supprimée.');
+  }
   const { error } = await getSupabase().from(TABLE).delete().eq('id', id);
   if (error) throw error;
 }

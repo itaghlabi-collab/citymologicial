@@ -84,6 +84,9 @@ function getRowActions(r, handlers, { embedded = false } = {}) {
   if (r.statut === 'brouillon') {
     actions.push({ key: 'edit', label: 'Modifier', icon: Edit2, onClick: () => handlers.openEdit(r.id) });
   }
+  if (r.statut !== 'livree') {
+    actions.push({ key: 'delete', label: 'Supprimer', icon: Trash2, danger: true, onClick: () => handlers.handleDelete(r.id) });
+  }
   if (embedded) return actions;
   if (r.statut === 'soumise') {
     actions.push({ key: 'prepare', label: 'Préparer', icon: Package, onClick: () => handlers.openDetail(r.id) });
@@ -308,10 +311,11 @@ export default function DemandesChantier({ projet, embedded = false }) {
   }
 
   async function handleDelete(id) {
-    if (!window.confirm('Supprimer cette demande brouillon ?')) return;
+    if (!window.confirm('Supprimer cette demande chantier ? Cette action est irréversible.')) return;
     setSaving(true);
     try {
       await deleteSiteMaterialRequest(id);
+      if (detail?.id === id) setDetail(null);
       await load();
     } catch (err) {
       setError(err.message);
@@ -333,7 +337,7 @@ export default function DemandesChantier({ projet, embedded = false }) {
     }
   }
 
-  const rowHandlers = { openDetail, openEdit, handlePdf };
+  const rowHandlers = { openDetail, openEdit, handlePdf, handleDelete };
 
   function updateDetailLine(lineId, patch) {
     setDetail((prev) => ({
@@ -608,22 +612,12 @@ export default function DemandesChantier({ projet, embedded = false }) {
                               title={action.label}
                               onClick={action.onClick}
                               disabled={saving}
+                              style={action.danger ? { color: 'var(--red)' } : undefined}
                             >
                               <Icon size={13} />
                             </button>
                           );
                         })}
-                        {r.statut === 'brouillon' && (
-                          <button
-                            type="button"
-                            className="btn btn-ghost btn-sm"
-                            style={{ color: 'var(--red)' }}
-                            title="Supprimer"
-                            onClick={() => handleDelete(r.id)}
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        )}
                       </div>
                     </td>
                   </tr>
@@ -697,23 +691,15 @@ export default function DemandesChantier({ projet, embedded = false }) {
                       <button
                         key={action.key}
                         type="button"
-                        className="btn btn-ghost btn-sm inv-dc-action"
+                        className={`btn btn-ghost btn-sm inv-dc-action${action.danger ? ' inv-dc-action--danger' : ''}`}
                         onClick={action.onClick}
                         disabled={saving}
+                        style={action.danger ? { color: 'var(--red)' } : undefined}
                       >
                         <Icon size={14} /> {action.label}
                       </button>
                     );
                   })}
-                  {r.statut === 'brouillon' && (
-                    <button
-                      type="button"
-                      className="btn btn-ghost btn-sm inv-dc-action inv-dc-action--danger"
-                      onClick={() => handleDelete(r.id)}
-                    >
-                      <Trash2 size={14} /> Supprimer
-                    </button>
-                  )}
                 </footer>
               </article>
             ))}
