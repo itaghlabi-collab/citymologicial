@@ -91,6 +91,10 @@ function normalizeRequest(row, lines = [], history = []) {
     observation: row.observation || '',
     statut: row.statut || 'brouillon',
     statutLabel: siteRequestStatutLabel(row.statut),
+    origine: row.origine === 'manuelle'
+      || (row.origine == null && activeLines.length > 0 && activeLines.every((l) => l.is_custom))
+      ? 'manuelle'
+      : 'catalogue',
     requires_dg: !!row.requires_dg,
     movement_ref: row.movement_ref || '',
     montant_estime: Number(row.montant_estime) || 0,
@@ -205,6 +209,7 @@ function toLineRows(requestId, lines, stockArticles) {
       unite: l.unite || 'u',
       remarque: l.remarque || null,
       remarque_magasinier: l.remarque_magasinier || null,
+      date_souhaitee: l.date_souhaitee || null,
       stock_actuel: Number(l.stock_actuel) || 0,
       stock_reserve: Number(l.stock_reserve) || 0,
       disponible: !!l.disponible,
@@ -219,7 +224,11 @@ async function replaceLines(requestId, lines, stockArticles) {
   await getSupabase().from(LINES).delete().eq('request_id', requestId);
   const rows = toLineRows(requestId, lines, stockArticles);
   if (!rows.length) return [];
-  const { data, error } = await getSupabase().from(LINES).insert(rows).select('*');
+  let { data, error } = await getSupabase().from(LINES).insert(rows).select('*');
+  if (error && /date_souhaitee/i.test(String(error.message || ''))) {
+    const stripped = rows.map(({ date_souhaitee, ...rest }) => rest);
+    ({ data, error } = await getSupabase().from(LINES).insert(stripped).select('*'));
+  }
   if (error) throw error;
   return data || [];
 }
@@ -273,6 +282,7 @@ export async function createSiteMaterialRequest(form, lines = [], { ipAddress } 
     date_souhaitee: form.date_souhaitee || null,
     priorite: form.priorite || 'Normale',
     observation: form.observation || null,
+    origine: form.origine === 'manuelle' ? 'manuelle' : 'catalogue',
     statut: form.statut || 'brouillon',
     requires_dg: needsDgValidation(form.priorite, montant),
     montant_estime: montant,
@@ -281,7 +291,21 @@ export async function createSiteMaterialRequest(form, lines = [], { ipAddress } 
     updated_at: new Date().toISOString(),
   };
   const { data, error } = await getSupabase().from(TABLE).insert([row]).select().single();
-  if (error) throw error;
+  if (error) {
+    if (/origine/i.test(String(error.message || ''))) {
+      const { origine, ...rest } = row;
+      const retry = await getSupabase().from(TABLE).insert([rest]).select().single();
+      if (retry.error) throw retry.error;
+      const savedLines = await replaceLines(retry.data.id, lines, stockArticles);
+      await logHistory(retry.data.id, 'creation', 'Demande créée', user.id, actorName, actorRole, ipAddress);
+      return normalizeRequest(
+        { ...retry.data, origine: form.origine === 'manuelle' ? 'manuelle' : 'catalogue' },
+        enrichLinesWithStock(savedLines, stockArticles),
+        await loadHistory(retry.data.id),
+      );
+    }
+    throw error;
+  }
   const savedLines = await replaceLines(data.id, lines, stockArticles);
   await logHistory(data.id, 'creation', 'Demande créée', user.id, actorName, actorRole, ipAddress);
   return normalizeRequest(data, enrichLinesWithStock(savedLines, stockArticles), await loadHistory(data.id));
@@ -309,12 +333,27 @@ export async function updateSiteMaterialRequest(id, form, lines = [], { ipAddres
     date_souhaitee: form.date_souhaitee ?? existing.date_souhaitee,
     priorite: form.priorite ?? existing.priorite,
     observation: form.observation ?? existing.observation,
+    origine: form.origine === 'manuelle' || existing.origine === 'manuelle' ? 'manuelle' : 'catalogue',
     requires_dg: needsDgValidation(form.priorite ?? existing.priorite, montant),
     montant_estime: montant,
     updated_at: new Date().toISOString(),
   };
   const { data, error } = await getSupabase().from(TABLE).update(patch).eq('id', id).select().single();
-  if (error) throw error;
+  if (error) {
+    if (/origine/i.test(String(error.message || ''))) {
+      const { origine, ...rest } = patch;
+      const retry = await getSupabase().from(TABLE).update(rest).eq('id', id).select().single();
+      if (retry.error) throw retry.error;
+      const savedLines = await replaceLines(id, lines, stockArticles);
+      await logHistory(id, 'modification', 'Demande modifiée', user.id, actorName, actorRole, ipAddress);
+      return normalizeRequest(
+        { ...retry.data, origine: form.origine === 'manuelle' || existing.origine === 'manuelle' ? 'manuelle' : 'catalogue' },
+        enrichLinesWithStock(savedLines, stockArticles),
+        await loadHistory(id),
+      );
+    }
+    throw error;
+  }
   const savedLines = await replaceLines(id, lines, stockArticles);
   await logHistory(id, 'modification', 'Demande modifiée', user.id, actorName, actorRole, ipAddress);
   return normalizeRequest(data, enrichLinesWithStock(savedLines, stockArticles), await loadHistory(id));
@@ -362,6 +401,9 @@ export async function prepareSiteMaterialRequest(id, lineUpdates = [], {
       remarque_magasinier: upd.remarque_magasinier ?? line.remarque_magasinier,
       replaced_by: upd.replaced_by ?? line.replaced_by,
       rupture: upd.rupture ?? line.rupture,
+      disponible: upd.disponible ?? line.disponible,
+      article_id: upd.article_id !== undefined ? upd.article_id : line.article_id,
+      article_name: upd.article_name ?? line.article_name,
     };
   });
 

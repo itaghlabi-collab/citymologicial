@@ -2,6 +2,23 @@
 
 export const SITE_REQUEST_PRIORITES = ['Normale', 'Urgente', 'Critique'];
 
+/** Origine de création d'une demande chantier */
+export const SITE_REQUEST_ORIGINES = {
+  catalogue: { value: 'catalogue', label: 'Catalogue stock', badge: null },
+  manuelle: { value: 'manuelle', label: 'Demande manuelle', badge: 'Demande manuelle' },
+};
+
+export function siteRequestOrigineLabel(origine) {
+  return SITE_REQUEST_ORIGINES[origine]?.label || 'Catalogue stock';
+}
+
+export function isManualSiteRequest(req) {
+  if (!req) return false;
+  if (req.origine === 'manuelle') return true;
+  const lines = (req.lines || []).filter((l) => Number(l.quantite_demandee) > 0 || l.is_custom);
+  return lines.length > 0 && lines.every((l) => l.is_custom);
+}
+
 export const SITE_REQUEST_STATUTS = [
   { value: 'brouillon', label: 'Brouillon', color: '#757575' },
   { value: 'soumise', label: 'Soumise', color: '#1565C0' },

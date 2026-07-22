@@ -13,6 +13,7 @@ import {
   siteRequestStatutColor,
   siteRequestPreparationStatut,
   siteRequestLivraisonStatut,
+  isManualSiteRequest,
 } from '../../constants/siteMaterialRequests';
 import {
   listSiteMaterialRequests,
@@ -27,10 +28,13 @@ import {
   deliverSiteMaterialRequest,
   cancelSiteMaterialRequest,
   deleteSiteMaterialRequest,
+  enrichLinesWithStock,
 } from '../../services/inventaire/siteMaterialRequests';
 import { generateSiteRequestPdf } from '../../services/inventaire/siteRequestPdf';
-import SiteRequestForm, { buildInitialLines } from './SiteRequestForm.jsx';
+import { buildInitialLines } from './SiteRequestForm.jsx';
 import SiteRequestFormPage from './SiteRequestFormPage.jsx';
+import SiteRequestCreateModeModal from './SiteRequestCreateModeModal.jsx';
+import SiteRequestManualFormPage, { buildManualLines } from './SiteRequestManualFormPage.jsx';
 import ArticleScanBar from './ArticleScanBar.jsx';
 import { useArticleScanner } from '../../hooks/useArticleScanner';
 import {
@@ -45,6 +49,7 @@ const EMPTY_FORM = {
   chef_projet: '', chef_chantier: '',
   date_demande: new Date().toISOString().slice(0, 10),
   date_souhaitee: '', priorite: 'Normale', observation: '',
+  origine: 'catalogue',
 };
 
 function fmtDate(d) {
@@ -116,6 +121,8 @@ export default function DemandesChantier({ projet, embedded = false }) {
   const [statutFilter, setStatutFilter] = useState('');
   const [prioriteFilter, setPrioriteFilter] = useState('');
   const [view, setView] = useState('list');
+  const [formMode, setFormMode] = useState('catalogue');
+  const [showCreateMode, setShowCreateMode] = useState(false);
   const [editId, setEditId] = useState(null);
   const [detail, setDetail] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -165,12 +172,38 @@ export default function DemandesChantier({ projet, embedded = false }) {
     pretes: requests.filter((r) => r.statut === 'prete').length,
   }), [requests]);
 
-  function openCreate() {
+  function openCreateChooser() {
+    setShowCreateMode(true);
+  }
+
+  function openCreateCatalogue() {
+    setShowCreateMode(false);
     setEditId(null);
-    const base = { ...EMPTY_FORM, date_demande: new Date().toISOString().slice(0, 10) };
+    setFormMode('catalogue');
+    const base = {
+      ...EMPTY_FORM,
+      date_demande: new Date().toISOString().slice(0, 10),
+      origine: 'catalogue',
+    };
     if (embedded && projet) Object.assign(base, projectFormFromProjet(projet));
     setForm(base);
     setLines(buildInitialLines());
+    setError('');
+    setView('form');
+  }
+
+  function openCreateManual() {
+    setShowCreateMode(false);
+    setEditId(null);
+    setFormMode('manuelle');
+    const base = {
+      ...EMPTY_FORM,
+      date_demande: new Date().toISOString().slice(0, 10),
+      origine: 'manuelle',
+    };
+    if (embedded && projet) Object.assign(base, projectFormFromProjet(projet));
+    setForm(base);
+    setLines(buildManualLines());
     setError('');
     setView('form');
   }
@@ -179,7 +212,9 @@ export default function DemandesChantier({ projet, embedded = false }) {
     setSaving(true);
     try {
       const req = await getSiteMaterialRequest(id);
+      const manual = isManualSiteRequest(req);
       setEditId(id);
+      setFormMode(manual ? 'manuelle' : 'catalogue');
       setForm({
         ref: req.ref,
         project_id: req.project_id || '',
@@ -192,8 +227,9 @@ export default function DemandesChantier({ projet, embedded = false }) {
         date_souhaitee: req.date_souhaitee,
         priorite: req.priorite,
         observation: req.observation,
+        origine: manual ? 'manuelle' : 'catalogue',
       });
-      setLines(buildInitialLines(req.lines));
+      setLines(manual ? buildManualLines(req.lines) : buildInitialLines(req.lines));
       setError('');
       setView('form');
     } catch (err) {
@@ -217,10 +253,11 @@ export default function DemandesChantier({ projet, embedded = false }) {
   function closeForm() {
     setView('list');
     setEditId(null);
+    setFormMode('catalogue');
     setError('');
   }
 
-  async function handleSave(submitAfter = false) {
+  async function handleSave(submitAfter = false, linesOverride = null) {
     if (!form.project_id) {
       setError('Sélectionnez un projet.');
       return;
@@ -228,12 +265,16 @@ export default function DemandesChantier({ projet, embedded = false }) {
     setSaving(true);
     setError('');
     try {
-      const payload = { ...form };
+      const payload = {
+        ...form,
+        origine: formMode === 'manuelle' ? 'manuelle' : (form.origine || 'catalogue'),
+      };
+      const linesToSave = linesOverride || lines;
       let req;
       if (editId) {
-        req = await updateSiteMaterialRequest(editId, payload, lines);
+        req = await updateSiteMaterialRequest(editId, payload, linesToSave);
       } else {
-        req = await createSiteMaterialRequest(payload, lines);
+        req = await createSiteMaterialRequest(payload, linesToSave);
         setEditId(req.id);
       }
       if (submitAfter) {
@@ -301,6 +342,66 @@ export default function DemandesChantier({ projet, embedded = false }) {
     }));
   }
 
+  function setLineAvailability(line, status) {
+    const demandee = Number(line.quantite_demandee) || 0;
+    if (status === 'ok') {
+      updateDetailLine(line.id, {
+        disponible: true,
+        rupture: false,
+        quantite_preparee: demandee,
+      });
+      return;
+    }
+    if (status === 'partial') {
+      const prep = Math.min(Number(line.quantite_preparee) || 0, demandee);
+      updateDetailLine(line.id, {
+        disponible: false,
+        rupture: false,
+        quantite_preparee: prep > 0 && prep < demandee ? prep : Math.max(1, Math.floor(demandee / 2)),
+      });
+      return;
+    }
+    updateDetailLine(line.id, {
+      disponible: false,
+      rupture: true,
+      quantite_preparee: 0,
+    });
+  }
+
+  function associateLineToArticle(line, articleId) {
+    const art = stockArticles.find((a) => String(a.id) === String(articleId));
+    if (!art) {
+      updateDetailLine(line.id, { article_id: null });
+      return;
+    }
+    const enriched = enrichLinesWithStock([{
+      ...line,
+      article_id: art.id,
+      article_name: line.article_name || art.nom || art.designation,
+    }], stockArticles)[0];
+    updateDetailLine(line.id, {
+      article_id: art.id,
+      stock_actuel: enriched.stock_actuel,
+      disponible: enriched.disponible,
+      rupture: enriched.rupture,
+      stock_status: enriched.stock_status,
+    });
+  }
+
+  function lineAvailabilityStatus(line) {
+    const demandee = Number(line.quantite_demandee) || 0;
+    const prep = Number(line.quantite_preparee) || 0;
+    if (line.rupture || prep <= 0) return 'none';
+    if (line.disponible && prep >= demandee) return 'ok';
+    if (prep > 0 && prep < demandee) return 'partial';
+    if (prep >= demandee) return 'ok';
+    return 'partial';
+  }
+
+  function qtyToBuy(line) {
+    return Math.max(0, (Number(line.quantite_demandee) || 0) - (Number(line.quantite_preparee) || 0));
+  }
+
   const canScanPreparation = detail
     && !embedded
     && ['soumise', 'en_preparation', 'preparation_partielle', 'en_attente_dg', 'validee_dg'].includes(detail.statut)
@@ -332,6 +433,25 @@ export default function DemandesChantier({ projet, embedded = false }) {
       updateDetailLine(line.id, { quantite_preparee: updated.quantite_preparee });
     },
   });
+
+  if (view === 'form' && formMode === 'manuelle') {
+    return (
+      <SiteRequestManualFormPage
+        editId={editId}
+        form={form}
+        setForm={setForm}
+        lines={lines}
+        setLines={setLines}
+        projects={projects}
+        saving={saving}
+        error={error}
+        onBack={closeForm}
+        onSave={handleSave}
+        lockProject={embedded && !!projet?.id}
+        backLabel={embedded ? 'Retour aux besoins matériel' : 'Retour aux demandes'}
+      />
+    );
+  }
 
   if (view === 'form') {
     return (
@@ -367,7 +487,7 @@ export default function DemandesChantier({ projet, embedded = false }) {
             <button type="button" className="btn btn-secondary btn-sm" onClick={load} disabled={loading}>
               <RefreshCw size={14} /> Actualiser
             </button>
-            <button type="button" className="btn btn-primary" onClick={openCreate}>
+            <button type="button" className="btn btn-primary" onClick={openCreateChooser}>
               <Plus size={15} /> Nouvelle demande
             </button>
           </div>
@@ -379,7 +499,7 @@ export default function DemandesChantier({ projet, embedded = false }) {
           <button type="button" className="btn btn-ghost btn-sm" onClick={load} disabled={loading} style={{ marginLeft: 'auto' }}>
             <RefreshCw size={13} /> Actualiser
           </button>
-          <button type="button" className="btn btn-primary btn-sm" onClick={openCreate}>
+          <button type="button" className="btn btn-primary btn-sm" onClick={openCreateChooser}>
             <Plus size={13} /> Ajouter un besoin matériel
           </button>
         </div>
@@ -448,7 +568,12 @@ export default function DemandesChantier({ projet, embedded = false }) {
               <tbody>
                 {filtered.map((r) => (
                   <tr key={r.id}>
-                    <td data-label="Référence"><strong>{r.ref}</strong></td>
+                    <td data-label="Référence">
+                      <strong>{r.ref}</strong>
+                      {isManualSiteRequest(r) && (
+                        <span className="badge badge-orange" style={{ marginLeft: 8, fontSize: '0.68rem' }}>Demande manuelle</span>
+                      )}
+                    </td>
                     {!embedded && <td data-label="Projet">{r.project_name || '—'}</td>}
                     <td data-label="Client">{r.client_name || '—'}</td>
                     <td data-label="Nb articles">{r.distinct_articles}</td>
@@ -511,7 +636,12 @@ export default function DemandesChantier({ projet, embedded = false }) {
             {filtered.map((r) => (
               <article key={r.id} className="inv-dc-card">
                 <header className="inv-dc-card-head">
-                  <div className="inv-dc-card-ref">{r.ref}</div>
+                  <div className="inv-dc-card-ref">
+                    {r.ref}
+                    {isManualSiteRequest(r) && (
+                      <span className="badge badge-orange" style={{ marginLeft: 8, fontSize: '0.68rem' }}>Demande manuelle</span>
+                    )}
+                  </div>
                   <span
                     className="badge"
                     style={{ background: `${siteRequestStatutColor(r.statut)}22`, color: siteRequestStatutColor(r.statut) }}
@@ -599,7 +729,12 @@ export default function DemandesChantier({ projet, embedded = false }) {
             <header className="rh-emp-docs-drawer-header inv-dc-drawer-header">
               <div className="inv-dc-drawer-head-top">
                 <div className="inv-dc-drawer-head-text">
-                  <div className="inv-dc-drawer-ref">{detail.ref}</div>
+                  <div className="inv-dc-drawer-ref">
+                    {detail.ref}
+                    {isManualSiteRequest(detail) && (
+                      <span className="badge badge-orange" style={{ marginLeft: 8, fontSize: '0.72rem' }}>Demande manuelle</span>
+                    )}
+                  </div>
                   <h2 className="rh-emp-docs-drawer-title">DEMANDE — {detail.project_name}</h2>
                 </div>
                 <button type="button" className="rh-emp-modal-close inv-dc-drawer-close" onClick={() => setDetail(null)} aria-label="Fermer">
@@ -634,21 +769,45 @@ export default function DemandesChantier({ projet, embedded = false }) {
                       <tr>
                         <th>Article</th>
                         <th>Demandé</th>
+                        <th>Disponibilité</th>
                         <th>Préparé</th>
+                        <th>À acheter</th>
                         <th>Stock</th>
-                        {!embedded && <th>Remarque magasin</th>}
+                        {!embedded && <th>Associer / Remarque</th>}
                       </tr>
                     </thead>
                     <tbody>
                       {(detail.lines || []).filter((l) => Number(l.quantite_demandee) > 0).map((l) => {
                         const prepared = isLineFullyPrepared(l);
+                        const avail = lineAvailabilityStatus(l);
+                        const locked = ['prete', 'livree', 'annulee'].includes(detail.statut);
                         return (
                         <tr key={l.id || `${l.category_id}-${l.article_name}`} style={prepared ? { background: '#F1F8E9' } : undefined}>
                           <td>
                             {prepared && <span style={{ color: '#2E7D32', marginRight: 6 }} title="Préparée">✓</span>}
                             {l.article_name}
+                            {l.is_custom && !l.article_id && (
+                              <span className="badge badge-orange" style={{ marginLeft: 6, fontSize: '0.65rem' }}>Hors catalogue</span>
+                            )}
                           </td>
-                          <td>{l.quantite_demandee}</td>
+                          <td>{l.quantite_demandee} {l.unite || 'u'}</td>
+                          <td>
+                            {embedded ? (
+                              avail === 'ok' ? 'Disponible' : avail === 'partial' ? 'Partiel' : 'Non disponible'
+                            ) : (
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                                <button type="button" className="btn btn-ghost btn-sm" disabled={locked} title="Disponible"
+                                  style={{ padding: '2px 6px', background: avail === 'ok' ? '#E8F5E9' : undefined }}
+                                  onClick={() => setLineAvailability(l, 'ok')}>✅</button>
+                                <button type="button" className="btn btn-ghost btn-sm" disabled={locked} title="Partiellement"
+                                  style={{ padding: '2px 6px', background: avail === 'partial' ? '#FFF8E1' : undefined }}
+                                  onClick={() => setLineAvailability(l, 'partial')}>🟡</button>
+                                <button type="button" className="btn btn-ghost btn-sm" disabled={locked} title="Non disponible"
+                                  style={{ padding: '2px 6px', background: avail === 'none' ? '#FFEBEE' : undefined }}
+                                  onClick={() => setLineAvailability(l, 'none')}>❌</button>
+                              </div>
+                            )}
+                          </td>
                           <td>
                             {embedded ? (
                               l.quantite_preparee ?? '—'
@@ -656,21 +815,44 @@ export default function DemandesChantier({ projet, embedded = false }) {
                               <input
                                 type="number"
                                 min="0"
-                                value={l.quantite_preparee ?? l.quantite_demandee ?? ''}
-                                onChange={(e) => updateDetailLine(l.id, { quantite_preparee: Number(e.target.value) || 0 })}
+                                value={l.quantite_preparee ?? ''}
+                                onChange={(e) => {
+                                  const prep = Number(e.target.value) || 0;
+                                  const demandee = Number(l.quantite_demandee) || 0;
+                                  updateDetailLine(l.id, {
+                                    quantite_preparee: prep,
+                                    disponible: prep >= demandee,
+                                    rupture: prep <= 0,
+                                  });
+                                }}
                                 style={{ ...INPUT_STYLE, padding: '4px 8px', width: 70 }}
-                                disabled={['prete', 'livree', 'annulee'].includes(detail.statut)}
+                                disabled={locked}
                               />
                             )}
+                          </td>
+                          <td style={{ fontWeight: 700, color: qtyToBuy(l) > 0 ? 'var(--red)' : 'var(--text-2)' }}>
+                            {qtyToBuy(l)}
                           </td>
                           <td>{l.stock_actuel ?? '—'}</td>
                           {!embedded && (
                             <td>
+                              <select
+                                value={l.article_id || ''}
+                                onChange={(e) => associateLineToArticle(l, e.target.value)}
+                                style={{ ...SELECT_STYLE, padding: '4px 8px', marginBottom: 6, fontSize: '0.78rem' }}
+                                disabled={locked}
+                              >
+                                <option value="">Associer au catalogue…</option>
+                                {stockArticles.map((a) => (
+                                  <option key={a.id} value={a.id}>{a.nom || a.designation}</option>
+                                ))}
+                              </select>
                               <input
                                 value={l.remarque_magasinier || ''}
                                 onChange={(e) => updateDetailLine(l.id, { remarque_magasinier: e.target.value })}
                                 style={{ ...INPUT_STYLE, padding: '4px 8px' }}
-                                disabled={['prete', 'livree', 'annulee'].includes(detail.statut)}
+                                placeholder="Remarque magasin"
+                                disabled={locked}
                               />
                             </td>
                           )}
@@ -684,6 +866,8 @@ export default function DemandesChantier({ projet, embedded = false }) {
                 <div className="inv-dc-lines-mobile" style={{ marginBottom: 16 }}>
                   {(detail.lines || []).filter((l) => Number(l.quantite_demandee) > 0).map((l) => {
                     const prepared = isLineFullyPrepared(l);
+                    const avail = lineAvailabilityStatus(l);
+                    const locked = ['prete', 'livree', 'annulee'].includes(detail.statut);
                     return (
                       <div
                         key={l.id || `m-${l.category_id}-${l.article_name}`}
@@ -692,6 +876,9 @@ export default function DemandesChantier({ projet, embedded = false }) {
                         <div className="inv-dc-line-name">
                           {prepared && <span className="inv-dc-line-ok" title="Préparée">✓</span>}
                           {l.article_name}
+                          {l.is_custom && !l.article_id && (
+                            <span className="badge badge-orange" style={{ marginLeft: 6, fontSize: '0.65rem' }}>Hors catalogue</span>
+                          )}
                         </div>
                         <dl className="inv-dc-line-metrics">
                           <div className="inv-dc-field">
@@ -707,14 +894,26 @@ export default function DemandesChantier({ projet, embedded = false }) {
                                 <input
                                   type="number"
                                   min="0"
-                                  value={l.quantite_preparee ?? l.quantite_demandee ?? ''}
-                                  onChange={(e) => updateDetailLine(l.id, { quantite_preparee: Number(e.target.value) || 0 })}
+                                  value={l.quantite_preparee ?? ''}
+                                  onChange={(e) => {
+                                    const prep = Number(e.target.value) || 0;
+                                    const demandee = Number(l.quantite_demandee) || 0;
+                                    updateDetailLine(l.id, {
+                                      quantite_preparee: prep,
+                                      disponible: prep >= demandee,
+                                      rupture: prep <= 0,
+                                    });
+                                  }}
                                   className="inv-dc-line-input"
                                   style={INPUT_STYLE}
-                                  disabled={['prete', 'livree', 'annulee'].includes(detail.statut)}
+                                  disabled={locked}
                                 />
                               )}
                             </dd>
+                          </div>
+                          <div className="inv-dc-field">
+                            <dt>À acheter</dt>
+                            <dd style={{ fontWeight: 700, color: qtyToBuy(l) > 0 ? 'var(--red)' : undefined }}>{qtyToBuy(l)}</dd>
                           </div>
                           <div className="inv-dc-field">
                             <dt>Stock</dt>
@@ -722,18 +921,48 @@ export default function DemandesChantier({ projet, embedded = false }) {
                           </div>
                         </dl>
                         {!embedded && (
-                          <dl className="inv-dc-field" style={{ marginTop: 8 }}>
-                            <dt>Remarque magasin</dt>
-                            <dd>
-                              <input
-                                value={l.remarque_magasinier || ''}
-                                onChange={(e) => updateDetailLine(l.id, { remarque_magasinier: e.target.value })}
-                                className="inv-dc-line-input inv-dc-line-input--full"
-                                style={INPUT_STYLE}
-                                disabled={['prete', 'livree', 'annulee'].includes(detail.statut)}
-                              />
-                            </dd>
-                          </dl>
+                          <>
+                            <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+                              <button type="button" className="btn btn-ghost btn-sm" disabled={locked}
+                                style={{ background: avail === 'ok' ? '#E8F5E9' : undefined }}
+                                onClick={() => setLineAvailability(l, 'ok')}>✅ Disponible</button>
+                              <button type="button" className="btn btn-ghost btn-sm" disabled={locked}
+                                style={{ background: avail === 'partial' ? '#FFF8E1' : undefined }}
+                                onClick={() => setLineAvailability(l, 'partial')}>🟡 Partiel</button>
+                              <button type="button" className="btn btn-ghost btn-sm" disabled={locked}
+                                style={{ background: avail === 'none' ? '#FFEBEE' : undefined }}
+                                onClick={() => setLineAvailability(l, 'none')}>❌ Non dispo</button>
+                            </div>
+                            <dl className="inv-dc-field" style={{ marginTop: 8 }}>
+                              <dt>Associer au catalogue</dt>
+                              <dd>
+                                <select
+                                  value={l.article_id || ''}
+                                  onChange={(e) => associateLineToArticle(l, e.target.value)}
+                                  className="inv-dc-line-input inv-dc-line-input--full"
+                                  style={SELECT_STYLE}
+                                  disabled={locked}
+                                >
+                                  <option value="">— Choisir un article —</option>
+                                  {stockArticles.map((a) => (
+                                    <option key={a.id} value={a.id}>{a.nom || a.designation}</option>
+                                  ))}
+                                </select>
+                              </dd>
+                            </dl>
+                            <dl className="inv-dc-field" style={{ marginTop: 8 }}>
+                              <dt>Remarque magasin</dt>
+                              <dd>
+                                <input
+                                  value={l.remarque_magasinier || ''}
+                                  onChange={(e) => updateDetailLine(l.id, { remarque_magasinier: e.target.value })}
+                                  className="inv-dc-line-input inv-dc-line-input--full"
+                                  style={INPUT_STYLE}
+                                  disabled={locked}
+                                />
+                              </dd>
+                            </dl>
+                          </>
                         )}
                       </div>
                     );
@@ -815,6 +1044,13 @@ export default function DemandesChantier({ projet, embedded = false }) {
           </aside>
         </>
       )}
+
+      <SiteRequestCreateModeModal
+        open={showCreateMode}
+        onClose={() => setShowCreateMode(false)}
+        onSelectCatalogue={openCreateCatalogue}
+        onSelectManual={openCreateManual}
+      />
     </div>
   );
 }
