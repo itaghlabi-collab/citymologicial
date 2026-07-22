@@ -1,12 +1,41 @@
 /**
  * cashSheetDisplay.js — Présentation feuille de caisse
  * worker_weekly_payment : 1 ligne DB = 1 ligne affichée (par semaine payée).
+ * Affiche / consolide uniquement les mouvements en espèces (caisse physique).
  */
 
 const WORKER_SOURCES = new Set(['worker_payment', 'worker_weekly_payment']);
 
 function round2(n) {
   return Math.round((Number(n) || 0) * 100) / 100;
+}
+
+/** Champ mode paiement selon les variantes déjà présentes en base / sync. */
+export function getCashSheetPaymentMode(tx) {
+  if (!tx || typeof tx !== 'object') return '';
+  return String(
+    tx.mode_paiement
+    ?? tx.payment_method
+    ?? tx.mode_reglement
+    ?? tx.paymentMethod
+    ?? tx.mode
+    ?? '',
+  ).trim();
+}
+
+/**
+ * True uniquement pour la caisse physique.
+ * Pas de mode → exclu (ne pas inventer « Espèces »).
+ */
+export function isCashPaymentMode(mode) {
+  const raw = String(mode ?? '').trim();
+  if (!raw) return false;
+  const n = raw
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[\s_-]+/g, '');
+  return n === 'especes' || n === 'espece' || n === 'cash';
 }
 
 function extractProjet(description = '') {
@@ -84,9 +113,11 @@ function mergeLegacyWorkerPaymentGroup(rows) {
   }];
 }
 
-/** Affiche chaque paiement hebdo tel quel ; fusionne uniquement l'ancien format worker_payment. */
+/** Affiche chaque paiement hebdo tel quel ; fusionne uniquement l'ancien format worker_payment. Espèces uniquement. */
 export function consolidateCashSheetTransactions(transactions) {
-  const active = (transactions || []).filter((t) => t.statut !== 'Annulé');
+  const active = (transactions || []).filter((t) => (
+    t.statut !== 'Annulé' && isCashPaymentMode(getCashSheetPaymentMode(t))
+  ));
   const others = [];
   const legacyGroups = new Map();
 

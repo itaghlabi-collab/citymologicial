@@ -49,7 +49,8 @@ export function normalizeTransaction(row) {
     contrepartie: row.contrepartie || '',
     description: row.description || '',
     montant: Number(row.montant) || 0,
-    mode_paiement: row.mode_paiement || 'Espèces',
+    // Ne pas inventer « Espèces » à la lecture : la feuille de caisse exclut les modes vides.
+    mode_paiement: row.mode_paiement || '',
     category_id: row.category_id || null,
     project_id: row.project_id || null,
     vehicle_id: row.vehicle_id || null,
