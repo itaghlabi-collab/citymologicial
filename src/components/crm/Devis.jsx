@@ -4,7 +4,7 @@ import {
   FileText, Send, CheckCircle, TrendingUp, Clock,
   XCircle, AlertCircle, ChevronLeft, ChevronRight,
   RefreshCw, ArrowUpDown, FolderKanban, Download, Eye, Receipt,
-  Copy, Trash2,
+  Copy, Trash2, Edit2, ClipboardCheck,
 } from 'lucide-react';
 import { useCrmDevis } from '../../hooks/useCrmDevis';
 import { listCategories } from '../../services/crm/categories';
@@ -18,7 +18,6 @@ import { listArticles } from '../../services/crm/articles';
 import { enrichLignesDescriptions } from '../../utils/crm/devisLineDescription';
 import DevisForm from './DevisForm';
 import DevisPreviewModal from './DevisPreviewModal';
-import DevisActionsMenu from './DevisActionsMenu';
 import CrmOverflowMenu from './CrmOverflowMenu';
 import { listImportedCrmArchives, repairImportedArchivesInBackground, deleteCrmArchive } from '../../services/crm/crmArchives';
 import {
@@ -472,41 +471,74 @@ export default function Devis({ onNavigate }) {
     return convertedIds.has(String(d.id)) || d.statut === 'converti';
   }
 
-  function renderActionsMenu(d) {
+  function renderDesktopActions(d) {
     if (d.__isImportedArchive) {
       const archive = d.__archive;
       return (
-        <CrmOverflowMenu
-          title="Actions"
-          items={[
-            { icon: Eye, label: 'Voir', onClick: () => openArchivePdf(archive).catch((e) => showToast(e.message, 'error')) },
-            { icon: Download, label: 'Télécharger PDF', onClick: () => downloadArchivePdf(archive).catch((e) => showToast(e.message, 'error')) },
-            { divider: true },
-            { icon: Trash2, label: 'Supprimer', danger: true, onClick: () => handleDeleteArchive(archive) },
-          ]}
-        />
+        <div style={{ display: 'flex', gap: 3, flexWrap: 'nowrap', justifyContent: 'flex-end' }}>
+          <button type="button" className="btn btn-secondary btn-sm" title="Voir" aria-label="Voir"
+            onClick={() => openArchivePdf(archive).catch((e) => showToast(e.message, 'error'))}>
+            <Eye size={13} />
+          </button>
+          <button type="button" className="btn btn-ghost btn-sm" title="Télécharger PDF" aria-label="Télécharger PDF"
+            onClick={() => downloadArchivePdf(archive).catch((e) => showToast(e.message, 'error'))}>
+            <Download size={13} />
+          </button>
+          <button type="button" className="btn btn-ghost btn-sm" title="Supprimer" aria-label="Supprimer"
+            style={{ color: 'var(--red)' }}
+            onClick={() => handleDeleteArchive(archive)}>
+            <Trash2 size={13} />
+          </button>
+        </div>
       );
     }
+
+    const convertDisabled = isDevisConverted(d);
     return (
-      <DevisActionsMenu
-        devis={d}
-        isConverted={isDevisConverted(d)}
-        pdfLoading={pdfLoadingId === d.id}
-        checklistLoading={checklistLoadingId === d.id}
-        factureLoading={factureLoadingId === d.id}
-        proformaLoading={proformaLoadingId === d.id}
-        onPreview={() => handlePreview(d)}
-        onPdf={() => handlePdf(d)}
-        onReceptionChecklist={() => handleReceptionChecklist(d)}
-        onConvert={() => handleConvert(d)}
-        onConvertToFacture={() => handleConvertToFacture(d)}
-        onGenerateProforma={() => handleGenerateProforma(d)}
-        onApprove={() => handleApprove(d)}
-        onRefuse={() => handleRefuse(d)}
-        onEdit={() => openEdit(d)}
-        onDuplicate={() => handleDuplicate(d)}
-        onDelete={() => handleDelete(d.id)}
-      />
+      <div style={{ display: 'flex', gap: 3, flexWrap: 'nowrap', justifyContent: 'flex-end' }}>
+        <button type="button" className="btn btn-secondary btn-sm" title="Voir" aria-label="Voir" onClick={() => handlePreview(d)}>
+          <Eye size={13} />
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm" title="Télécharger PDF" aria-label="Télécharger PDF"
+          disabled={pdfLoadingId === d.id} onClick={() => handlePdf(d)}>
+          <Download size={13} />
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm" title="Liste de réception" aria-label="Liste de réception"
+          disabled={checklistLoadingId === d.id} onClick={() => handleReceptionChecklist(d)}>
+          <ClipboardCheck size={13} />
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm"
+          title={convertDisabled ? 'Convertir en projet (déjà converti)' : 'Convertir en projet'}
+          aria-label="Convertir en projet" disabled={convertDisabled} onClick={() => handleConvert(d)}>
+          <FolderKanban size={13} />
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm" title="Convertir en facture" aria-label="Convertir en facture"
+          disabled={factureLoadingId === d.id} onClick={() => handleConvertToFacture(d)}>
+          <Receipt size={13} />
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm" title="Générer une proforma" aria-label="Générer une proforma"
+          disabled={proformaLoadingId === d.id} onClick={() => handleGenerateProforma(d)}>
+          <FileText size={13} />
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm" title="Approuver" aria-label="Approuver"
+          style={{ color: '#2E7D32' }} onClick={() => handleApprove(d)}>
+          <CheckCircle size={13} />
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm" title="Refuser" aria-label="Refuser"
+          style={{ color: 'var(--red)' }} onClick={() => handleRefuse(d)}>
+          <XCircle size={13} />
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm" title="Modifier" aria-label="Modifier" onClick={() => openEdit(d)}>
+          <Edit2 size={13} />
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm" title="Dupliquer" aria-label="Dupliquer" onClick={() => handleDuplicate(d)}>
+          <Copy size={13} />
+        </button>
+        <button type="button" className="btn btn-ghost btn-sm" title="Supprimer" aria-label="Supprimer"
+          style={{ color: 'var(--red)' }} onClick={() => handleDelete(d.id)}>
+          <Trash2 size={13} />
+        </button>
+      </div>
     );
   }
 
@@ -624,23 +656,22 @@ export default function Devis({ onNavigate }) {
           <>
           <div className="crm-table-desktop">
             <div className="table-wrap crm-table-scroll-x">
-              <table className="crm-data-table crm-data-table--devis" style={{ borderCollapse: 'separate', borderSpacing: 0 }}>
+              <table className="crm-data-table crm-data-table--devis">
               <thead>
-                <tr style={{ borderBottom: '1.5px solid var(--border)', background: 'var(--bg)' }}>
+                <tr>
                   {[
-                    { label: 'Reference',      field: 'reference' },
+                    { label: 'Référence',      field: 'reference' },
                     { label: 'Titre',           field: 'titre' },
                     { label: 'Client',          field: 'client_nom' },
                     { label: 'Commercial',      field: 'commercial' },
-                    { label: 'Total HT',        field: 'total_ht',  align: 'right' },
                     { label: 'Total TTC',       field: 'total_ttc', align: 'right' },
                     { label: 'Statut',          field: 'statut' },
-                    { label: 'Creation',        field: 'date_creation' },
+                    { label: 'Création',        field: 'date_creation' },
                     { label: 'Actions',         field: null },
                   ].map(col => (
                     <th key={col.label || 'actions'} onClick={col.field ? () => toggleSort(col.field) : undefined}
                       className={col.field ? undefined : 'crm-col-actions'}
-                      style={{ padding: '12px 14px', textAlign: col.align || 'left', fontWeight: 700, fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--text-3)', letterSpacing: '0.06em', whiteSpace: 'nowrap', cursor: col.field ? 'pointer' : 'default', userSelect: 'none' }}>
+                      style={{ textAlign: col.align || 'left', cursor: col.field ? 'pointer' : 'default', userSelect: 'none' }}>
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                         {col.label}
                         {col.field && <ArrowUpDown size={11} style={{ opacity: sortField === col.field ? 1 : 0.35 }} />}
@@ -653,12 +684,10 @@ export default function Devis({ onNavigate }) {
                 {paged.map((d, i) => {
                   const clientNom = d.client_nom || d.client?.nom || '—';
                   return (
-                    <tr key={d.id ?? i} style={{ borderBottom: '1px solid var(--border)', transition: 'background 0.12s' }}
-                      onMouseEnter={e => e.currentTarget.style.background = 'var(--bg)'}
-                      onMouseLeave={e => e.currentTarget.style.background = ''}>
+                    <tr key={d.id ?? i}>
 
-                      {/* Reference */}
-                      <td data-label="Ref" className="crm-col-ref" style={{ padding: '12px 14px', fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.9rem', color: 'var(--red)', whiteSpace: 'nowrap' }}>
+                      {/* Référence */}
+                      <td data-label="Référence" className="crm-col-ref" style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.9rem', color: 'var(--red)', whiteSpace: 'nowrap' }}>
                         <button
                           type="button"
                           title="Ouvrir le PDF"
@@ -671,7 +700,7 @@ export default function Devis({ onNavigate }) {
                       </td>
 
                       {/* Titre */}
-                      <td data-label="Titre" className="crm-col-title" style={{ padding: '12px 14px' }}>
+                      <td data-label="Titre" className="crm-col-title">
                         <button
                           type="button"
                           title={d.titre || 'Ouvrir le PDF'}
@@ -700,40 +729,35 @@ export default function Devis({ onNavigate }) {
                       </td>
 
                       {/* Client */}
-                      <td data-label="Client" className="crm-col-client" title={clientNom} style={{ padding: '12px 14px', fontWeight: 500 }}>
+                      <td data-label="Client" className="crm-col-client" title={clientNom} style={{ fontWeight: 500 }}>
                         {clientNom}
                       </td>
 
                       {/* Commercial */}
-                      <td data-label="Commercial" className="crm-col-commercial" title={fmtCommercial(d.commercial)} style={{ padding: '12px 14px', color: 'var(--text-2)' }}>
+                      <td data-label="Commercial" className="crm-col-commercial" title={fmtCommercial(d.commercial)} style={{ color: 'var(--text-2)' }}>
                         {fmtCommercial(d.commercial)}
                       </td>
 
-                      {/* Total HT */}
-                      <td data-label="Total HT" className="crm-col-money" style={{ padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 500 }}>
-                        {fmtMAD(d.total_ht)}
-                      </td>
-
                       {/* Total TTC */}
-                      <td data-label="Total TTC" className="crm-col-money" style={{ padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      <td data-label="Total TTC" className="crm-col-money" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                         <span style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '0.95rem', color: 'var(--red)' }}>
                           {fmtMAD(d.total_ttc)}
                         </span>
                       </td>
 
                       {/* Statut */}
-                      <td data-label="Statut" className="crm-col-statut" style={{ padding: '12px 14px', whiteSpace: 'nowrap' }}>
+                      <td data-label="Statut" className="crm-col-statut" style={{ whiteSpace: 'nowrap' }}>
                         <StatutBadge statut={d.statut} />
                       </td>
 
-                      {/* Date creation */}
-                      <td data-label="Creation" className="crm-col-date" style={{ padding: '12px 14px', whiteSpace: 'nowrap', color: 'var(--text-2)', fontSize: '0.84rem' }}>
+                      {/* Date création */}
+                      <td data-label="Création" className="crm-col-date" style={{ whiteSpace: 'nowrap', color: 'var(--text-2)', fontSize: '0.84rem' }}>
                         {fmtDate(d.date_creation)}
                       </td>
 
-                      {/* Actions */}
-                      <td className="crm-col-actions" style={{ padding: '10px 8px', whiteSpace: 'nowrap', textAlign: 'center' }}>
-                        {renderActionsMenu(d)}
+                      {/* Actions — icônes directes */}
+                      <td className="crm-col-actions" data-label="Actions">
+                        {renderDesktopActions(d)}
                       </td>
                     </tr>
                   );
