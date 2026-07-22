@@ -4,8 +4,9 @@
  * Cache autorisé : JS build, CSS, fonts, images, logo, manifest.
  * Tout le reste (API, auth, Supabase, Railway, Drive, uploads, etc.) = NetworkOnly.
  *
- * Ne pas appeler skipWaiting() ni clientsClaim() automatiquement.
+ * Ne pas appeler skipWaiting() automatiquement.
  * skipWaiting() uniquement si le client envoie { type: 'SKIP_WAITING' } (bouton "Mettre à jour").
+ * clients.claim() au activate : prend le contrôle après skipWaiting (pas de takeover silencieux).
  *
  * Push : affichage système uniquement (pas de logique métier / pas d'API / pas de Supabase).
  */
@@ -24,6 +25,10 @@ self.addEventListener('message', (event) => {
   if (event.data && event.data.type === 'SKIP_WAITING') {
     self.skipWaiting()
   }
+})
+
+self.addEventListener('activate', (event) => {
+  event.waitUntil(self.clients.claim())
 })
 
 /** Réception Push → notification système (aucune logique métier). */

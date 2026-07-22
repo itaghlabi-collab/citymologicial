@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import './pwa-update.css';
 
-const IDLE_MS = 2500;
+const IDLE_MS = 1500;
+const UPDATE_POLL_MS = 60_000;
 
 function isEditableField(el) {
   if (!el || el === document.body || el === document.documentElement) return false;
@@ -25,6 +26,7 @@ function isUserBusy() {
  * - Pas de skipWaiting / clientsClaim / reload automatiques.
  * - Proposition différée si saisie formulaire / activité utilisateur.
  * - Le bouton "Mettre à jour" est une exception (jamais différé).
+ * - Vérifie régulièrement (focus / intervalle) qu’un SW en attente existe.
  */
 export default function PwaUpdateBanner() {
   const [visible, setVisible] = useState(false);
@@ -69,10 +71,33 @@ export default function PwaUpdateBanner() {
       }, IDLE_MS);
     };
 
+    const offerWaiting = (sw) => {
+      if (!sw || dismissedRef.current) return;
+      waitingRef.current = sw;
+      scheduleOffer();
+    };
+
+    const syncWaitingFromRegistration = (registration) => {
+      if (!registration || cancelled) return;
+      const waiting = registration.waiting;
+      if (waiting && navigator.serviceWorker.controller) {
+        offerWaiting(waiting);
+      }
+    };
+
+    const checkForUpdates = () => {
+      const registration = registrationRef.current;
+      if (!registration) return;
+      syncWaitingFromRegistration(registration);
+      registration.update().catch(() => {});
+    };
+
     const markActivity = () => {
       if (ignoreActivityRef.current) return;
       lastActivityRef.current = Date.now();
       if (waitingRef.current && !dismissedRef.current) {
+        scheduleOffer();
+      } else if (pendingOfferRef.current) {
         scheduleOffer();
       }
     };
@@ -82,21 +107,27 @@ export default function PwaUpdateBanner() {
       if (!installing) return;
       installing.addEventListener('statechange', () => {
         if (installing.state === 'installed' && navigator.serviceWorker.controller) {
-          waitingRef.current = registration.waiting || installing;
-          scheduleOffer();
+          offerWaiting(registration.waiting || installing);
         }
       });
     };
 
     const onActivity = (event) => {
-      // Interactions sur la bannière (ex. "Mettre à jour") ≠ activité à différer
       if (event?.target?.closest?.('.pwa-update-banner')) return;
       markActivity();
+    };
+
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') checkForUpdates();
     };
 
     window.addEventListener('pointerdown', onActivity, true);
     window.addEventListener('keydown', onActivity, true);
     window.addEventListener('input', onActivity, true);
+    window.addEventListener('focus', checkForUpdates);
+    document.addEventListener('visibilitychange', onVisibility);
+
+    const pollId = window.setInterval(checkForUpdates, UPDATE_POLL_MS);
 
     navigator.serviceWorker
       .register('/sw.js', { type: 'module' })
@@ -104,12 +135,10 @@ export default function PwaUpdateBanner() {
         if (cancelled) return;
         registrationRef.current = registration;
 
-        if (registration.waiting && navigator.serviceWorker.controller) {
-          waitingRef.current = registration.waiting;
-          scheduleOffer();
-        }
-
+        syncWaitingFromRegistration(registration);
         registration.addEventListener('updatefound', () => onUpdateFound(registration));
+        // Force une vérif dès l’arrivée sur l’app
+        registration.update().catch(() => {});
       })
       .catch(() => {
         /* enregistrement non bloquant */
@@ -118,9 +147,12 @@ export default function PwaUpdateBanner() {
     return () => {
       cancelled = true;
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      window.clearInterval(pollId);
       window.removeEventListener('pointerdown', onActivity, true);
       window.removeEventListener('keydown', onActivity, true);
       window.removeEventListener('input', onActivity, true);
+      window.removeEventListener('focus', checkForUpdates);
+      document.removeEventListener('visibilitychange', onVisibility);
     };
   }, []);
 
@@ -135,7 +167,6 @@ export default function PwaUpdateBanner() {
     const waiting = waitingRef.current || registrationRef.current?.waiting;
     if (!waiting || reloadingRef.current) return;
 
-    // Exception : clic volontaire sur "Mettre à jour" — pas de report
     ignoreActivityRef.current = true;
     if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
     setUpdating(true);
@@ -152,9 +183,15 @@ export default function PwaUpdateBanner() {
 
         navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
         waiting.postMessage({ type: 'SKIP_WAITING' });
-      });
 
-      await navigator.serviceWorker.ready;
+        // Fallback si controllerchange n’arrive pas assez vite
+        window.setTimeout(() => {
+          if (reloadingRef.current) return;
+          clearTimeout(timeout);
+          navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
+          resolve();
+        }, 1200);
+      });
 
       if (reloadingRef.current) return;
       reloadingRef.current = true;
@@ -162,6 +199,8 @@ export default function PwaUpdateBanner() {
     } catch {
       ignoreActivityRef.current = false;
       setUpdating(false);
+      // Dernier recours : recharger quand même pour tenter de prendre la nouvelle version
+      window.location.reload();
     }
   };
 
