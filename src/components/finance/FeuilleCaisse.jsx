@@ -11,6 +11,7 @@ import {
   runRhPaymentsCashBackfill,
   computeCashTotals,
 } from '../../services/finance/financeTransactions';
+import { listProjectsForSelect } from '../../services/projects/projects';
 import { canManageCash, isDGUser } from '../../services/finance/cashAccess';
 import { isSuperAdmin } from '../../services/rh/isSuperAdmin';
 import {
@@ -45,16 +46,25 @@ const TABLE_FILTERS = [
 
 const EMPTY_TX = {
   date: '', sens: 'entree', type_operation: 'alimentation_caisse',
-  contrepartie: '', description: '', montant: '', mode_paiement: 'Espèces',
+  project_id: '', description: '', montant: '', mode_paiement: 'Espèces',
 };
 
 function TxForm({ initial, onSave, onCancel, locked }) {
   const [form, setForm] = useState(initial || EMPTY_TX);
+  const [projects, setProjects] = useState([]);
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
   const types = form.sens === 'entree' ? TYPES_ENTREE : TYPES_SORTIE;
 
+  useEffect(() => {
+    let cancelled = false;
+    listProjectsForSelect()
+      .then((rows) => { if (!cancelled) setProjects(rows || []); })
+      .catch(() => { if (!cancelled) setProjects([]); });
+    return () => { cancelled = true; };
+  }, []);
+
   return (
-    <form onSubmit={(e) => { e.preventDefault(); if (!locked) onSave({ ...form, montant: parseFloat(form.montant) || 0 }); }}>
+    <form onSubmit={(e) => { e.preventDefault(); if (!locked) onSave({ ...form, montant: parseFloat(form.montant) || 0, project_id: form.project_id || null }); }}>
       <FRow>
         <FField label="Date" required>
           <input type="date" value={form.date} onChange={(e) => set('date', e.target.value)} style={INPUT_STYLE} required disabled={locked} />
@@ -75,8 +85,13 @@ function TxForm({ initial, onSave, onCancel, locked }) {
         </FField>
       </FRow>
       <FRow>
-        <FField label="Client / Fournisseur">
-          <input value={form.contrepartie} onChange={(e) => set('contrepartie', e.target.value)} style={INPUT_STYLE} disabled={locked} />
+        <FField label="Projet">
+          <select value={form.project_id || ''} onChange={(e) => set('project_id', e.target.value)} style={SELECT_STYLE} disabled={locked}>
+            <option value="">— Aucun —</option>
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>{p.nom || p.ref || p.id}</option>
+            ))}
+          </select>
         </FField>
         <FField label="Type paiement">
           <select value={form.mode_paiement} onChange={(e) => set('mode_paiement', e.target.value)} style={SELECT_STYLE} disabled={locked}>
