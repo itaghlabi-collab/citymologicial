@@ -475,58 +475,31 @@ export default function Devis({ onNavigate }) {
     if (d.__isImportedArchive) {
       const archive = d.__archive;
       return (
-        <div style={{ display: 'flex', gap: 3, flexWrap: 'nowrap', justifyContent: 'flex-end' }}>
+        <div style={{ display: 'flex', gap: 3, flexWrap: 'nowrap', justifyContent: 'flex-end', alignItems: 'center' }}>
           <button type="button" className="btn btn-secondary btn-sm" title="Voir" aria-label="Voir"
             onClick={() => openArchivePdf(archive).catch((e) => showToast(e.message, 'error'))}>
             <Eye size={13} />
-          </button>
-          <button type="button" className="btn btn-ghost btn-sm" title="Télécharger PDF" aria-label="Télécharger PDF"
-            onClick={() => downloadArchivePdf(archive).catch((e) => showToast(e.message, 'error'))}>
-            <Download size={13} />
           </button>
           <button type="button" className="btn btn-ghost btn-sm" title="Supprimer" aria-label="Supprimer"
             style={{ color: 'var(--red)' }}
             onClick={() => handleDeleteArchive(archive)}>
             <Trash2 size={13} />
           </button>
+          <CrmOverflowMenu
+            title="Actions"
+            items={[
+              { icon: Download, label: 'Télécharger PDF', onClick: () => downloadArchivePdf(archive).catch((e) => showToast(e.message, 'error')) },
+            ]}
+          />
         </div>
       );
     }
 
     const convertDisabled = isDevisConverted(d);
     return (
-      <div style={{ display: 'flex', gap: 3, flexWrap: 'nowrap', justifyContent: 'flex-end' }}>
+      <div style={{ display: 'flex', gap: 3, flexWrap: 'nowrap', justifyContent: 'flex-end', alignItems: 'center' }}>
         <button type="button" className="btn btn-secondary btn-sm" title="Voir" aria-label="Voir" onClick={() => handlePreview(d)}>
           <Eye size={13} />
-        </button>
-        <button type="button" className="btn btn-ghost btn-sm" title="Télécharger PDF" aria-label="Télécharger PDF"
-          disabled={pdfLoadingId === d.id} onClick={() => handlePdf(d)}>
-          <Download size={13} />
-        </button>
-        <button type="button" className="btn btn-ghost btn-sm" title="Liste de réception" aria-label="Liste de réception"
-          disabled={checklistLoadingId === d.id} onClick={() => handleReceptionChecklist(d)}>
-          <ClipboardCheck size={13} />
-        </button>
-        <button type="button" className="btn btn-ghost btn-sm"
-          title={convertDisabled ? 'Convertir en projet (déjà converti)' : 'Convertir en projet'}
-          aria-label="Convertir en projet" disabled={convertDisabled} onClick={() => handleConvert(d)}>
-          <FolderKanban size={13} />
-        </button>
-        <button type="button" className="btn btn-ghost btn-sm" title="Convertir en facture" aria-label="Convertir en facture"
-          disabled={factureLoadingId === d.id} onClick={() => handleConvertToFacture(d)}>
-          <Receipt size={13} />
-        </button>
-        <button type="button" className="btn btn-ghost btn-sm" title="Générer une proforma" aria-label="Générer une proforma"
-          disabled={proformaLoadingId === d.id} onClick={() => handleGenerateProforma(d)}>
-          <FileText size={13} />
-        </button>
-        <button type="button" className="btn btn-ghost btn-sm" title="Approuver" aria-label="Approuver"
-          style={{ color: '#2E7D32' }} onClick={() => handleApprove(d)}>
-          <CheckCircle size={13} />
-        </button>
-        <button type="button" className="btn btn-ghost btn-sm" title="Refuser" aria-label="Refuser"
-          style={{ color: 'var(--red)' }} onClick={() => handleRefuse(d)}>
-          <XCircle size={13} />
         </button>
         <button type="button" className="btn btn-ghost btn-sm" title="Modifier" aria-label="Modifier" onClick={() => openEdit(d)}>
           <Edit2 size={13} />
@@ -538,6 +511,19 @@ export default function Devis({ onNavigate }) {
           style={{ color: 'var(--red)' }} onClick={() => handleDelete(d.id)}>
           <Trash2 size={13} />
         </button>
+        <CrmOverflowMenu
+          title="Actions"
+          items={[
+            { icon: Download, label: 'Télécharger PDF', onClick: () => handlePdf(d), disabled: pdfLoadingId === d.id },
+            { icon: ClipboardCheck, label: 'Liste de réception', onClick: () => handleReceptionChecklist(d), disabled: checklistLoadingId === d.id },
+            { icon: FolderKanban, label: convertDisabled ? 'Convertir en projet (déjà converti)' : 'Convertir en projet', onClick: () => handleConvert(d), disabled: convertDisabled },
+            { icon: Receipt, label: 'Convertir en facture', onClick: () => handleConvertToFacture(d), disabled: factureLoadingId === d.id },
+            { icon: FileText, label: 'Générer une proforma', onClick: () => handleGenerateProforma(d), disabled: proformaLoadingId === d.id },
+            { divider: true },
+            { icon: CheckCircle, label: 'Approuver', onClick: () => handleApprove(d) },
+            { icon: XCircle, label: 'Refuser', onClick: () => handleRefuse(d), danger: true },
+          ]}
+        />
       </div>
     );
   }
