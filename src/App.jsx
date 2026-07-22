@@ -23,6 +23,7 @@ import HeuresSupp from './components/HeuresSupp';
 import PaiementHebdo from './components/PaiementHebdo';
 import SituationSousTraitants from './components/SituationSousTraitants';
 import SousTraitants from './components/SousTraitants';
+import CorpsMetierPage from './components/exploitation/corpsMetier/CorpsMetierPage';
 import Clients from './components/crm/Clients';
 import Articles from './components/crm/Articles';
 import Categories from './components/crm/Categories';
@@ -51,7 +52,7 @@ import { parseInventaireArticlePath } from './services/inventaire/barcodeUtils';
 import {
   LayoutDashboard, CheckSquare, CalendarDays, CalendarClock,
   Building2, Users, CalendarOff,
-  HardHat, ClockIcon, Banknote, BarChart3, Handshake,
+  HardHat, ClockIcon, Banknote, BarChart3, Handshake, BookUser,
   UserSquare, FileEdit, CalendarRange, Megaphone,
   NotebookPen, Receipt, Lightbulb,
   Contact, ShoppingBag, Tag, FileText, ScrollText, PackageCheck,
@@ -101,6 +102,7 @@ const NAV = [
     section: 'Sous-traitants',
     items: [
       { id: 'sous-traitants',     label: 'Sous-traitants',       icon: Handshake },
+      { id: 'annuaire-corps-metier', label: 'Annuaire Corps de métier', icon: BookUser },
       { id: 'situation-sous-traitants', label: 'Situation sous-traitants', icon: ClipboardList },
     ],
   },
@@ -210,6 +212,7 @@ const MODULE_LABELS = {
   'paiement-hebdo':    'Paiement hebdo. ouvriers',
   'situation-sous-traitants': 'Situation sous-traitants',
   'sous-traitants':    'Sous-traitants',
+  'annuaire-corps-metier': 'Annuaire Corps de métier',
   prospects:           'Prospects',
   'devis-attente':     'Devis en attente',
   'planning-commercial': 'Planning commercial',
@@ -277,6 +280,7 @@ function PageContent({ module, onNavigate, inventaireArticleCode, onInventaireAr
     case 'paiement-hebdo':      return <PaiementHebdo />;
     case 'situation-sous-traitants': return <SituationSousTraitants />;
     case 'sous-traitants':      return <SousTraitants />;
+    case 'annuaire-corps-metier': return <CorpsMetierPage />;
     /* Commercial / Marketing */
     case 'prospects':           return <Prospects />;
     case 'devis-attente':       return <DevisAttente />;

@@ -29,6 +29,7 @@ export const ROUTES = {
   PAIEMENT_HEBDO:     'paiement-hebdo',
   SITUATION_SOUS_TRAITANTS: 'situation-sous-traitants',
   SOUS_TRAITANTS:     'sous-traitants',
+  ANNUAIRE_CORPS_METIER: 'annuaire-corps-metier',
 
   // Commercial / Marketing
   PROSPECTS:          'prospects',
