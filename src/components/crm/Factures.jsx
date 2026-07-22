@@ -519,26 +519,25 @@ export default function Factures() {
           <>
           <div className="crm-table-desktop">
             <CrmFacturesHScroll depsKey={paged.length}>
-              <table className="crm-data-table crm-data-table--factures" style={{ borderCollapse: 'separate', borderSpacing: 0 }}>
+              <table className="crm-data-table crm-data-table--factures">
               <thead>
-                <tr style={{ borderBottom: '1.5px solid var(--border)', background: 'var(--bg)' }}>
+                <tr>
                   {[
                     { label: 'N° Facture',     field: 'numero' },
                     { label: 'Titre',           field: 'titre' },
-                    { label: 'Devis lie',       field: 'devis_id' },
+                    { label: 'Devis lié',       field: 'devis_id' },
                     { label: 'Client',          field: 'client_nom' },
                     { label: 'Commercial',      field: 'commercial' },
-                    { label: 'Total HT',        field: 'total_ht',        align: 'right' },
                     { label: 'Total TTC',       field: 'total_ttc',       align: 'right' },
                     { label: 'Payé',            field: 'total_paye',      align: 'right' },
                     { label: 'Reste',           field: 'reste_a_payer',   align: 'right' },
-                    { label: 'Emission',        field: 'date_emission' },
+                    { label: 'Émission',        field: 'date_emission' },
                     { label: 'Statut',          field: 'statut' },
                     { label: 'Actions',         field: null },
                   ].map(col => (
                     <th key={col.label || 'actions'} onClick={col.field ? () => toggleSort(col.field) : undefined}
                       className={col.field ? undefined : 'crm-col-actions'}
-                      style={{ padding: '12px 14px', textAlign: col.align || 'left', fontWeight: 700, fontSize: '0.72rem', textTransform: 'uppercase', color: 'var(--text-3)', letterSpacing: '0.06em', whiteSpace: 'nowrap', cursor: col.field ? 'pointer' : 'default', userSelect: 'none' }}>
+                      style={{ textAlign: col.align || 'left', cursor: col.field ? 'pointer' : 'default', userSelect: 'none' }}>
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
                         {col.label}
                         {col.field && <ArrowUpDown size={11} style={{ opacity: sortField === col.field ? 1 : 0.35 }} />}
@@ -554,13 +553,10 @@ export default function Factures() {
                   const titreAffiche = displayFactureTitre(f.titre);
                   const restePct  = f.total_ttc > 0 ? Math.round((Number(f.reste_a_payer || 0) / Number(f.total_ttc)) * 100) : 0;
                   return (
-                    <tr key={f.id ?? i}
-                      style={{ borderBottom: '1px solid var(--border)', transition: 'background 0.12s' }}
-                      onMouseEnter={e => e.currentTarget.style.background = 'var(--bg)'}
-                      onMouseLeave={e => e.currentTarget.style.background = ''}>
+                    <tr key={f.id ?? i}>
 
                       {/* N° Facture */}
-                      <td data-label="N° Facture" className="crm-col-ref" style={{ padding: '12px 14px', fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.9rem', color: 'var(--red)', whiteSpace: 'nowrap' }}>
+                      <td data-label="N° Facture" className="crm-col-ref" style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.9rem', color: 'var(--red)', whiteSpace: 'nowrap' }}>
                         <button
                           type="button"
                           title="Ouvrir le PDF"
@@ -572,8 +568,8 @@ export default function Factures() {
                         </button>
                       </td>
 
-                      {/* Titre (sans préfixe « Facture ») */}
-                      <td data-label="Titre" className="crm-col-title" style={{ padding: '12px 14px' }}>
+                      {/* Titre */}
+                      <td data-label="Titre" className="crm-col-title">
                         <button
                           type="button"
                           title={f.titre || 'Ouvrir le PDF'}
@@ -593,8 +589,8 @@ export default function Factures() {
                         </button>
                       </td>
 
-                      {/* Devis lie */}
-                      <td data-label="Devis" className="crm-col-devis-lie" style={{ padding: '12px 14px', whiteSpace: 'nowrap' }}>
+                      {/* Devis lié */}
+                      <td data-label="Devis" className="crm-col-devis-lie" style={{ whiteSpace: 'nowrap' }}>
                         {f.devis_reference || f.devis_id ? (
                           <span style={{ fontSize: '0.78rem', color: 'var(--text-3)', background: 'var(--bg)', border: '1px solid var(--border)', borderRadius: 4, padding: '2px 6px' }}>
                             {f.devis_reference || 'DV-' + String(f.devis_id).slice(0, 8)}
@@ -603,36 +599,31 @@ export default function Factures() {
                       </td>
 
                       {/* Client */}
-                      <td data-label="Client" className="crm-col-client" title={clientNom} style={{ padding: '12px 14px', fontWeight: 500 }}>
+                      <td data-label="Client" className="crm-col-client" title={clientNom} style={{ fontWeight: 500 }}>
                         {clientNom}
                       </td>
 
                       {/* Commercial */}
-                      <td data-label="Commercial" className="crm-col-commercial" title={fmtCommercial(f.commercial)} style={{ padding: '12px 14px', color: 'var(--text-2)' }}>
+                      <td data-label="Commercial" className="crm-col-commercial" title={fmtCommercial(f.commercial)} style={{ color: 'var(--text-2)' }}>
                         {fmtCommercial(f.commercial)}
                       </td>
 
-                      {/* Total HT */}
-                      <td data-label="Total HT" className="crm-col-money" style={{ padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap', fontWeight: 500 }}>
-                        {fmtMAD(f.total_ht)}
-                      </td>
-
                       {/* Total TTC */}
-                      <td data-label="Total TTC" className="crm-col-money" style={{ padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      <td data-label="Total TTC" className="crm-col-money" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                         <span style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '0.95rem', color: 'var(--red)' }}>
                           {fmtMAD(f.total_ttc)}
                         </span>
                       </td>
 
                       {/* Payé */}
-                      <td data-label="Payé" className="crm-col-money" style={{ padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      <td data-label="Payé" className="crm-col-money" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                         <span style={{ fontWeight: 600, color: '#388E3C' }}>
                           {fmtMAD(f.total_paye || 0)}
                         </span>
                       </td>
 
                       {/* Reste */}
-                      <td data-label="Reste" className="crm-col-money" style={{ padding: '12px 14px', textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      <td data-label="Reste" className="crm-col-money" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                         {Number(f.reste_a_payer || 0) <= 0 ? (
                           <span style={{ color: '#388E3C', fontWeight: 700, fontSize: '0.82rem' }}>Solde</span>
                         ) : (
@@ -647,41 +638,57 @@ export default function Factures() {
                         )}
                       </td>
 
-                      {/* Date emission */}
-                      <td data-label="Emission" className="crm-col-date" style={{ padding: '12px 14px', whiteSpace: 'nowrap', color: 'var(--text-2)', fontSize: '0.84rem' }}>
+                      {/* Date émission */}
+                      <td data-label="Émission" className="crm-col-date" style={{ whiteSpace: 'nowrap', color: 'var(--text-2)', fontSize: '0.84rem' }}>
                         {fmtDate(f.date_emission)}
                       </td>
 
                       {/* Statut */}
-                      <td data-label="Statut" className="crm-col-statut" style={{ padding: '12px 14px', whiteSpace: 'nowrap' }}>
+                      <td data-label="Statut" className="crm-col-statut" style={{ whiteSpace: 'nowrap' }}>
                         <StatutBadge statut={f.statut} />
                       </td>
 
-                      {/* Actions — desktop : menu ⋯ uniquement */}
-                      <td className="crm-col-actions" style={{ padding: '10px 8px', whiteSpace: 'nowrap', textAlign: 'center' }}>
+                      {/* Actions — même modèle Devis : icônes + ⋯ */}
+                      <td className="crm-col-actions" data-label="Actions">
                         {f.__isImportedArchive ? (
-                          <CrmOverflowMenu
-                            title="Actions"
-                            items={[
-                              { icon: Eye, label: 'Voir', onClick: () => openArchivePdf(f.__archive).catch((e) => showToast(e.message, 'error')) },
-                              { icon: Download, label: 'Télécharger PDF', onClick: () => downloadArchivePdf(f.__archive).catch((e) => showToast(e.message, 'error')) },
-                            ]}
-                          />
+                          <div style={{ display: 'flex', gap: 3, flexWrap: 'nowrap', justifyContent: 'flex-end', alignItems: 'center' }}>
+                            <button type="button" className="btn btn-secondary btn-sm" title="Voir" aria-label="Voir"
+                              onClick={() => openArchivePdf(f.__archive).catch((e) => showToast(e.message, 'error'))}>
+                              <Eye size={13} />
+                            </button>
+                            <CrmOverflowMenu
+                              title="Actions"
+                              items={[
+                                { icon: Download, label: 'Télécharger PDF', onClick: () => downloadArchivePdf(f.__archive).catch((e) => showToast(e.message, 'error')) },
+                              ]}
+                            />
+                          </div>
                         ) : (
-                          <CrmOverflowMenu
-                            title="Actions"
-                            items={[
-                              { icon: Eye, label: 'Voir', onClick: () => handlePdfInTab(f), disabled: pdfLoadingId === f.id },
-                              { icon: Download, label: 'Télécharger PDF', onClick: () => handlePdf(f), disabled: pdfLoadingId === f.id },
-                              ...(f.statut !== 'payee' && f.statut !== 'annulee'
-                                ? [{ icon: CheckCircle, label: 'Marquer comme payée', onClick: () => handleMarkPaid(f), disabled: saving }]
-                                : []),
-                              { icon: Edit2, label: 'Modifier', onClick: () => openEdit(f) },
-                              { icon: Copy, label: 'Dupliquer', onClick: () => handleDuplicate(f) },
-                              { divider: true },
-                              { icon: Trash2, label: 'Supprimer', danger: true, onClick: () => handleDelete(f.id) },
-                            ]}
-                          />
+                          <div style={{ display: 'flex', gap: 3, flexWrap: 'nowrap', justifyContent: 'flex-end', alignItems: 'center' }}>
+                            <button type="button" className="btn btn-secondary btn-sm" title="Voir" aria-label="Voir"
+                              disabled={pdfLoadingId === f.id} onClick={() => handlePdfInTab(f)}>
+                              <Eye size={13} />
+                            </button>
+                            <button type="button" className="btn btn-ghost btn-sm" title="Modifier" aria-label="Modifier" onClick={() => openEdit(f)}>
+                              <Edit2 size={13} />
+                            </button>
+                            <button type="button" className="btn btn-ghost btn-sm" title="Dupliquer" aria-label="Dupliquer" onClick={() => handleDuplicate(f)}>
+                              <Copy size={13} />
+                            </button>
+                            <button type="button" className="btn btn-ghost btn-sm" title="Supprimer" aria-label="Supprimer"
+                              style={{ color: 'var(--red)' }} onClick={() => handleDelete(f.id)}>
+                              <Trash2 size={13} />
+                            </button>
+                            <CrmOverflowMenu
+                              title="Actions"
+                              items={[
+                                { icon: Download, label: 'Télécharger PDF', onClick: () => handlePdf(f), disabled: pdfLoadingId === f.id },
+                                ...(f.statut !== 'payee' && f.statut !== 'annulee'
+                                  ? [{ icon: CheckCircle, label: 'Marquer comme payée', onClick: () => handleMarkPaid(f), disabled: saving }]
+                                  : []),
+                              ]}
+                            />
+                          </div>
                         )}
                       </td>
                     </tr>
