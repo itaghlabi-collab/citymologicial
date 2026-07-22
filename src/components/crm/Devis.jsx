@@ -20,7 +20,7 @@ import DevisForm from './DevisForm';
 import DevisPreviewModal from './DevisPreviewModal';
 import DevisActionsMenu from './DevisActionsMenu';
 import CrmOverflowMenu from './CrmOverflowMenu';
-import { listImportedCrmArchives, repairImportedArchivesInBackground } from '../../services/crm/crmArchives';
+import { listImportedCrmArchives, repairImportedArchivesInBackground, deleteCrmArchive } from '../../services/crm/crmArchives';
 import {
   archiveToDevisRow,
   archiveMatchesDevisFilters,
@@ -298,6 +298,18 @@ export default function Devis({ onNavigate }) {
     showToast(result.success ? 'Devis supprime.' : (result.error || 'Erreur suppression.'), result.success ? 'success' : 'error');
   }
 
+  async function handleDeleteArchive(archive) {
+    const label = archive?.reference || archive?.file_name || 'ce devis importé';
+    if (!window.confirm(`Supprimer le devis importé « ${label} » ? Cette action est irréversible.`)) return;
+    try {
+      await deleteCrmArchive(archive.id);
+      setImportedArchives((prev) => prev.filter((a) => String(a.id) !== String(archive.id)));
+      showToast('Devis importé supprimé.');
+    } catch (err) {
+      showToast(err?.message || 'Erreur suppression.', 'error');
+    }
+  }
+
   async function handlePdf(d) {
     setPdfLoadingId(d.id);
     try {
@@ -469,6 +481,8 @@ export default function Devis({ onNavigate }) {
           items={[
             { icon: Eye, label: 'Voir', onClick: () => openArchivePdf(archive).catch((e) => showToast(e.message, 'error')) },
             { icon: Download, label: 'Télécharger PDF', onClick: () => downloadArchivePdf(archive).catch((e) => showToast(e.message, 'error')) },
+            { divider: true },
+            { icon: Trash2, label: 'Supprimer', danger: true, onClick: () => handleDeleteArchive(archive) },
           ]}
         />
       );
@@ -777,6 +791,11 @@ export default function Devis({ onNavigate }) {
                           <button type="button" title="Télécharger PDF" aria-label="Télécharger PDF" className="btn btn-ghost btn-sm crm-icon-btn"
                             onClick={() => downloadArchivePdf(d.__archive).catch((e) => showToast(e.message, 'error'))}>
                             <Download size={14} />
+                          </button>
+                          <button type="button" title="Supprimer" aria-label="Supprimer" className="btn btn-ghost btn-sm crm-icon-btn"
+                            style={{ color: 'var(--red)' }}
+                            onClick={() => handleDeleteArchive(d.__archive)}>
+                            <Trash2 size={14} />
                           </button>
                         </>
                       ) : (
