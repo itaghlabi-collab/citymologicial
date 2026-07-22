@@ -710,13 +710,6 @@ const DASHBOARD_TABS = [
   { key: 'validee', label: 'Validée' },
 ];
 
-const ACTIVE_STATUS_PRIORITY = {
-  'En étude': 0,
-  Soumise: 1,
-  'Devis reçus': 2,
-  'En attente validation DG': 2,
-};
-
 function matchesStatusTab(item, tabKey) {
   if (!tabKey || tabKey === 'toutes') return true;
   const statuses = PURCHASE_DASHBOARD_TABS[tabKey];
@@ -725,16 +718,14 @@ function matchesStatusTab(item, tabKey) {
 }
 
 function comparePurchaseRequests(a, b) {
-  const sa = normalizePurchaseStatus(a.statut);
-  const sb = normalizePurchaseStatus(b.statut);
-  const pa = ACTIVE_STATUS_PRIORITY[sa] ?? 50;
-  const pb = ACTIVE_STATUS_PRIORITY[sb] ?? 50;
-  if (pa !== pb) return pa - pb;
-  if (a.priorite === 'Urgente' && b.priorite !== 'Urgente') return -1;
-  if (b.priorite === 'Urgente' && a.priorite !== 'Urgente') return 1;
-  const da = a.created_at ? new Date(a.created_at).getTime() : 0;
-  const db = b.created_at ? new Date(b.created_at).getTime() : 0;
-  return db - da;
+  const da = a.created_at
+    ? new Date(a.created_at).getTime()
+    : (a.date_creation ? new Date(a.date_creation).getTime() : 0);
+  const db = b.created_at
+    ? new Date(b.created_at).getTime()
+    : (b.date_creation ? new Date(b.date_creation).getTime() : 0);
+  if (db !== da) return db - da;
+  return String(b.ref || '').localeCompare(String(a.ref || ''), 'fr');
 }
 
 function DaRowActions({
