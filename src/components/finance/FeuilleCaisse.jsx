@@ -19,7 +19,7 @@ import {
 import { computeDailyCashTotals, formatDateShortFr } from '../../services/finance/cashDayTotals';
 import { consolidateCashSheetTransactions } from '../../services/finance/cashSheetDisplay';
 import { auditRhFinanceSync } from '../../services/finance/financeDiagnostics';
-import { notifyCashReviewPending, notifyCashReviewCompleted } from '../../services/notifications/notificationEvents';
+import { notifyCashReviewCompleted } from '../../services/notifications/notificationEvents';
 import { exportCashSheetPdf, CASH_SHEET_PDF_VERSION } from '../../services/finance/cashSheetPdf';
 import { exportCashSheetExcel } from '../../services/finance/cashSheetExport';
 import {
@@ -185,14 +185,6 @@ export default function FeuilleCaisse() {
         setDayValidation(null);
       });
   }, [viewMode, isDG, superAdmin, selectedDate, records.length]);
-
-  useEffect(() => {
-    if (viewMode !== 'day' || isDayValidated || (!isDG && !superAdmin) || !dailyTotals) return;
-    notifyCashReviewPending({
-      reviewDate: selectedDate,
-      opsCount: dailyTotals.dayCount,
-    }).catch(() => {});
-  }, [viewMode, isDayValidated, isDG, superAdmin, selectedDate, dailyTotals?.dayCount]);
 
   useEffect(() => {
     if (!isDG && !superAdmin) return;

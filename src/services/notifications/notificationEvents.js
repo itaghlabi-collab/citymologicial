@@ -8,7 +8,6 @@ import {
   notifyInventaireUsers,
   notifyUser,
   notifyTargeted,
-  hasNotificationForUserToday,
   NOTIFICATION_TYPES,
   NOTIFICATION_PRIORITIES,
   formatMad,
@@ -200,35 +199,9 @@ export async function notifyTaskCompleted(task) {
   return Promise.all([...recipients].map((id) => notifyUser(id, payload)));
 }
 
-/** Feuille de caisse à valider → Finance (une fois par jour). */
-export async function notifyCashReviewPending({ reviewDate, opsCount = 0 }) {
-  if (!reviewDate) return;
-  const entityType = `cash_review_pending_${reviewDate}`;
-  const { NOTIFICATION_DEPARTMENTS, NOTIFICATION_SUBMODULES, resolveNotificationRecipients } = await import('./notificationTargeting');
-  const userIds = await resolveNotificationRecipients({
-    departmentId: NOTIFICATION_DEPARTMENTS.COMPTABILITE,
-    submoduleCode: NOTIFICATION_SUBMODULES.FEUILLE_CAISSE,
-  });
-  const payload = {
-    title: 'Validation caisse requise',
-    message: opsCount > 0
-      ? `Veuillez valider la caisse du ${reviewDate} — ${opsCount} opération(s).`
-      : `Veuillez valider la caisse du ${reviewDate} (clôture).`,
-    type: NOTIFICATION_TYPES.CASH_REVIEW,
-    priority: NOTIFICATION_PRIORITIES.HIGH,
-    entityType,
-    entityId: null,
-    actionUrl: moduleActionUrl('feuille-caisse'),
-    submoduleCode: NOTIFICATION_SUBMODULES.FEUILLE_CAISSE,
-  };
-  const results = [];
-  for (const id of userIds) {
-    const exists = await hasNotificationForUserToday(id, payload.type, entityType);
-    if (exists) continue;
-    const n = await notifyUser(id, payload);
-    if (n) results.push(n);
-  }
-  return results;
+/** Feuille de caisse à valider — désactivé (plus de validation journalière). */
+export async function notifyCashReviewPending() {
+  return [];
 }
 
 /** Feuille de caisse validée → Finance. */
