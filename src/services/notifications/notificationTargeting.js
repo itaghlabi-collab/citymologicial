@@ -17,6 +17,7 @@ export const NOTIFICATION_DEPARTMENTS = {
 
 export const NOTIFICATION_SUBMODULES = {
   DEMANDES_ACHAT: 'demandes-achat',
+  BONS_COMMANDE: 'bons-commande',
   ORDRES_PAIEMENT: 'ordres-paiement',
   CONGES: 'conges',
   FEUILLE_CAISSE: 'feuille-caisse',

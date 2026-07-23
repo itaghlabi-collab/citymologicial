@@ -9,6 +9,7 @@ import {
   deletePurchaseOrder,
   duplicatePurchaseOrder,
   exportPurchaseOrdersCsv,
+  validatePurchaseOrderByDg,
 } from '../services/achats/purchaseOrders';
 
 export function usePurchaseOrders() {
@@ -108,6 +109,22 @@ export function usePurchaseOrders() {
     }
   }
 
+  async function validateDg(id) {
+    setSaving(true);
+    setError(null);
+    try {
+      await validatePurchaseOrderByDg(id);
+      await load();
+      return { success: true };
+    } catch (err) {
+      const msg = formatSupabaseError(err, 'Erreur validation DG du bon de commande.');
+      setError(msg);
+      return { success: false, error: msg };
+    } finally {
+      setSaving(false);
+    }
+  }
+
   function exportCsv(filtered) {
     exportPurchaseOrdersCsv(filtered || records);
   }
@@ -125,6 +142,7 @@ export function usePurchaseOrders() {
     save,
     remove,
     duplicate,
+    validateDg,
     exportCsv,
   };
 }

@@ -20,7 +20,7 @@ export const STATUTS_DEMANDE  = [
   'Devis validé', 'Ordre d\'achat créé', 'Ordre de paiement créé', 'Commande envoyée', 'En attente réception', 'Réceptionnée', 'Clôturée', 'Refusée',
 ];
 export const PRIORITES        = ['Faible', 'Normale', 'Haute', 'Urgente'];
-export const STATUTS_BC       = ['Brouillon', 'Envoyé', 'Validé', 'Partiellement reçu', 'Reçu', 'Annulé'];
+export const STATUTS_BC       = ['Brouillon', 'En attente validation DG', 'Envoyé', 'Validé', 'Partiellement reçu', 'Reçu', 'Annulé'];
 export const STATUTS_ORDRE    = ['Brouillon', 'Validé', 'Envoyé fournisseur', 'En attente réception', 'Réceptionné', 'Clôturé'];
 export const STATUTS_OP_ACHATS = ['À préparer', 'Initié', 'Payé', 'Annulé'];
 export const DEVISES          = ['MAD', 'EUR', 'USD'];
@@ -72,7 +72,7 @@ export const BADGE_DEMANDE = {
   'Commande en cours': 'badge-blue', 'Commande reçue': 'badge-purple',
 };
 export const BADGE_BC = {
-  'Brouillon': 'badge-grey', 'Envoyé': 'badge-blue', 'Validé': 'badge-green',
+  'Brouillon': 'badge-grey', 'En attente validation DG': 'badge-orange', 'Envoyé': 'badge-blue', 'Validé': 'badge-green',
   'Partiellement reçu': 'badge-orange', 'Reçu': 'badge-purple', 'Annulé': 'badge-red',
 };
 export const BADGE_ORDRE = {

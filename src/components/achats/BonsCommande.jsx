@@ -1,13 +1,20 @@
 /**
  * BonsCommande.jsx — Bons de commande ERP CITYMO (Supabase purchase_orders)
  */
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import {
   ShoppingCart, Plus, Eye, Edit2, Trash2, Copy, Download, Search,
-  Package, Loader2, RefreshCw, ChevronLeft,
+  Package, Loader2, RefreshCw, ChevronLeft, CheckCircle,
 } from 'lucide-react';
 import { usePurchaseOrders } from '../../hooks/usePurchaseOrders';
-import { computeLineTotals, sanitizeBCLignes } from '../../services/achats/purchaseOrders';
+import { useAuth } from '../../hooks/useAuth';
+import {
+  computeLineTotals,
+  sanitizeBCLignes,
+  isPurchaseOrderPendingDg,
+  BC_STATUS_PENDING_DG,
+} from '../../services/achats/purchaseOrders';
+import { resolveCurrentPurchaseRole, purchasePermissions } from '../../services/achats/purchaseWorkflowRoles';
 import { generatePurchaseOrderPdf } from '../../services/achats/purchaseOrderPdf';
 import { moneyLineHt, moneyFormatMAD } from '../../utils/decimalMoney';
 import {
@@ -153,7 +160,7 @@ function BCForm({ initial, onSave, onCancel, fournisseurs, suppliersLoading, sav
         <button type="button" className="btn btn-secondary" onClick={(e) => handleSubmit(e, 'Brouillon')} disabled={saving}>
           {saving ? <Loader2 size={14} className="spin" /> : null} Enregistrer brouillon
         </button>
-        <button type="button" className="btn btn-primary" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={(e) => handleSubmit(e, 'Envoyé')} disabled={saving}>
+        <button type="button" className="btn btn-primary" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={(e) => handleSubmit(e, BC_STATUS_PENDING_DG)} disabled={saving}>
           {saving ? <Loader2 size={14} className="spin" /> : <Plus size={14} />} Générer BC
         </button>
       </div>
@@ -161,7 +168,7 @@ function BCForm({ initial, onSave, onCancel, fournisseurs, suppliersLoading, sav
   );
 }
 
-function DetailBC({ item, onBack, onEdit, onDelete, onDupliquer, onPdf, pdfLoading }) {
+function DetailBC({ item, onBack, onEdit, onDelete, onDupliquer, onPdf, pdfLoading, canValidateDg, onValidateDg, validating }) {
   const lignes = sanitizeBCLignes(item.lignes || item.lines || []);
   let articleNum = 0;
   return (
@@ -175,6 +182,17 @@ function DetailBC({ item, onBack, onEdit, onDelete, onDupliquer, onPdf, pdfLoadi
           <p className="page-subtitle">{item.fournisseur || '—'}</p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {canValidateDg && isPurchaseOrderPendingDg(item.statut) && (
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              onClick={() => onValidateDg(item.id)}
+              disabled={validating}
+            >
+              {validating ? <Loader2 size={13} className="spin" /> : <CheckCircle size={13} />} Valider DG
+            </button>
+          )}
           <button
             type="button"
             className="btn btn-primary btn-sm"
@@ -259,6 +277,7 @@ function DetailBC({ item, onBack, onEdit, onDelete, onDupliquer, onPdf, pdfLoadi
 }
 
 export default function BonsCommande() {
+  const { user } = useAuth();
   const {
     records: bcs,
     suppliers,
@@ -271,6 +290,7 @@ export default function BonsCommande() {
     save,
     remove,
     duplicate,
+    validateDg,
     exportCsv,
   } = usePurchaseOrders();
 
@@ -282,6 +302,14 @@ export default function BonsCommande() {
   const [detailId, setDetailId] = useState(null);
   const [pdfLoadingId, setPdfLoadingId] = useState(null);
   const [prefillFromAnnuaire, setPrefillFromAnnuaire] = useState(null);
+  const [role, setRole] = useState(null);
+
+  useEffect(() => {
+    if (user) resolveCurrentPurchaseRole(user).then(setRole);
+  }, [user]);
+
+  const perms = useMemo(() => purchasePermissions(role), [role]);
+  const canValidateDg = !!perms.canValidateSupplier;
 
   // Prefill optionnel depuis Annuaire fournisseurs (sessionStorage) — n'altère pas le workflow BC
   useEffect(() => {
@@ -337,13 +365,19 @@ export default function BonsCommande() {
     if (result.success) setDetailId(null);
   }
 
+  async function handleValidateDg(id) {
+    if (!window.confirm('Valider ce bon de commande (DG) ?')) return;
+    const result = await validateDg(id);
+    if (!result.success && result.error) window.alert(result.error);
+  }
+
   const filtered = bcs.filter((x) => {
     const q = search.toLowerCase();
     return (!q || x.ref?.toLowerCase().includes(q) || (x.fournisseur || '').toLowerCase().includes(q))
       && (!filterStatut || x.statut === filterStatut);
   });
 
-  const ouverts = bcs.filter((x) => ['Brouillon', 'Envoyé'].includes(x.statut)).length;
+  const ouverts = bcs.filter((x) => ['Brouillon', 'Envoyé', BC_STATUS_PENDING_DG].includes(x.statut)).length;
   const valides = bcs.filter((x) => x.statut === 'Validé').length;
   const enAttente = bcs.filter((x) => x.statut === 'Brouillon').length;
   const montantTot = bcs.reduce((s, x) => s + (x.total_ttc || 0), 0);
@@ -362,6 +396,9 @@ export default function BonsCommande() {
         onDupliquer={handleDupliquer}
         onPdf={handlePdf}
         pdfLoading={pdfLoadingId === item.id}
+        canValidateDg={canValidateDg}
+        onValidateDg={handleValidateDg}
+        validating={saving}
       />
     );
   }
@@ -458,6 +495,18 @@ export default function BonsCommande() {
                             >
                               {pdfLoadingId === x.id ? <Loader2 size={13} className="spin" /> : <Download size={13} />}
                             </button>
+                            {canValidateDg && isPurchaseOrderPendingDg(x.statut) && (
+                              <button
+                                type="button"
+                                className="btn btn-ghost btn-sm"
+                                title="Valider DG"
+                                onClick={() => handleValidateDg(x.id)}
+                                disabled={saving}
+                                style={{ color: '#2E7D32' }}
+                              >
+                                <CheckCircle size={13} />
+                              </button>
+                            )}
                             <button className="btn btn-ghost btn-sm" title="Modifier" onClick={() => { setEditBc(x); setShowModal(true); }}><Edit2 size={13} /></button>
                             <button className="btn btn-ghost btn-sm" title="Dupliquer" onClick={() => handleDupliquer(x)} disabled={saving}><Copy size={13} /></button>
                             <button className="btn btn-ghost btn-sm" title="Supprimer" onClick={() => handleDelete(x.id)} style={{ color: 'var(--red)' }}><Trash2 size={13} /></button>

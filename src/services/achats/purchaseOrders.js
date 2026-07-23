@@ -3,8 +3,15 @@
  */
 import { getSupabase } from '../../lib/supabase';
 import { moneyLineHt, moneyComputeDocumentTotals, moneyToNumber } from '../../utils/decimalMoney';
+import { PURCHASE_ROLES, resolveCurrentPurchaseRole } from './purchaseWorkflowRoles';
 
 const TABLE = 'purchase_orders';
+export const BC_STATUS_PENDING_DG = 'En attente validation DG';
+export const BC_STATUS_VALIDATED = 'Validé';
+
+export function isPurchaseOrderPendingDg(statut) {
+  return statut === BC_STATUS_PENDING_DG || statut === 'Envoyé';
+}
 
 const EMPTY_LIGNE = {
   type: 'article', designation: '', description: '', categorie_id: '', article_id: '',
@@ -174,7 +181,16 @@ export async function createPurchaseOrder(form) {
     .select()
     .single();
   if (error) throw error;
-  return normalizePurchaseOrder(data);
+  const created = normalizePurchaseOrder(data);
+  if (created.statut === BC_STATUS_PENDING_DG) {
+    try {
+      const { notifyPurchaseOrderAwaitingDg } = await import('../notifications/purchaseWorkflowNotifications');
+      await notifyPurchaseOrderAwaitingDg(created);
+    } catch (err) {
+      console.warn('[CITYMO] notify BC DG', err);
+    }
+  }
+  return created;
 }
 
 export async function updatePurchaseOrder(id, form) {
@@ -187,7 +203,52 @@ export async function updatePurchaseOrder(id, form) {
     .select()
     .single();
   if (error) throw error;
-  return normalizePurchaseOrder(data);
+  const updated = normalizePurchaseOrder(data);
+  if (updated.statut === BC_STATUS_PENDING_DG) {
+    try {
+      const { notifyPurchaseOrderAwaitingDg } = await import('../notifications/purchaseWorkflowNotifications');
+      await notifyPurchaseOrderAwaitingDg(updated);
+    } catch (err) {
+      console.warn('[CITYMO] notify BC DG', err);
+    }
+  }
+  return updated;
+}
+
+export async function validatePurchaseOrderByDg(id) {
+  const { data: { user }, error: authErr } = await getSupabase().auth.getUser();
+  if (authErr || !user) throw new Error('Session requise.');
+  const role = await resolveCurrentPurchaseRole(user);
+  if (role !== PURCHASE_ROLES.DG) {
+    throw new Error('Seul le DG peut valider un bon de commande.');
+  }
+
+  const { data: existing, error: getErr } = await getSupabase()
+    .from(TABLE)
+    .select('*')
+    .eq('id', id)
+    .single();
+  if (getErr) throw getErr;
+  const current = normalizePurchaseOrder(existing);
+  if (!isPurchaseOrderPendingDg(current.statut)) {
+    throw new Error('Ce bon de commande n’est pas en attente de validation DG.');
+  }
+
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .update({ status: BC_STATUS_VALIDATED, updated_at: new Date().toISOString() })
+    .eq('id', id)
+    .select()
+    .single();
+  if (error) throw error;
+  const validated = normalizePurchaseOrder(data);
+  try {
+    const { notifyPurchaseOrderValidated } = await import('../notifications/purchaseWorkflowNotifications');
+    await notifyPurchaseOrderValidated(validated);
+  } catch (err) {
+    console.warn('[CITYMO] notify BC validated', err);
+  }
+  return validated;
 }
 
 export async function deletePurchaseOrder(id) {

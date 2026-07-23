@@ -124,6 +124,35 @@ export async function notifyPurchaseReadyForDg(request) {
   });
 }
 
+/** BC soumis → notification DG pour validation. */
+export async function notifyPurchaseOrderAwaitingDg(bc) {
+  if (!bc?.id) return;
+  await notifySuperAdmins({
+    title: 'Validation BC requise',
+    message: `Le bon de commande ${bc.ref || bc.ref_bc || ''} est en attente de validation DG.\nFournisseur : ${bc.fournisseur || bc.supplier_name || '—'}`,
+    type: NOTIFICATION_TYPES.PURCHASE_REQUEST,
+    priority: NOTIFICATION_PRIORITIES.URGENT,
+    entityType: 'purchase_order_dg_validation',
+    entityId: bc.id,
+    actionUrl: '/?module=achats&tab=bons-commande',
+    submoduleCode: NOTIFICATION_SUBMODULES.BONS_COMMANDE,
+  });
+}
+
+export async function notifyPurchaseOrderValidated(bc) {
+  if (!bc?.id) return;
+  await notifyAchatsUsers({
+    title: 'BC validé par le DG',
+    message: `Le bon de commande ${bc.ref || bc.ref_bc || ''} a été validé.\nFournisseur : ${bc.fournisseur || bc.supplier_name || '—'}`,
+    type: NOTIFICATION_TYPES.PURCHASE_REQUEST,
+    priority: NOTIFICATION_PRIORITIES.NORMAL,
+    entityType: 'purchase_order_validated',
+    entityId: bc.id,
+    actionUrl: '/?module=achats&tab=bons-commande',
+    submoduleCode: NOTIFICATION_SUBMODULES.BONS_COMMANDE,
+  });
+}
+
 export async function notifyPurchaseSupplierValidated(request, { quote, oa, op } = {}) {
   if (!request?.id) return;
   await notifyRequester(request, {
