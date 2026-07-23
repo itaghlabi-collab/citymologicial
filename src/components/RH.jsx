@@ -27,6 +27,10 @@ const EMPTY_EMP = {
   rib: '',
   banque: '',
   situation_familiale: '',
+  conges_jours_annuels: 0,
+  conges_reliquat: 0,
+  conges_annee_ref: new Date().getFullYear(),
+  conges_jours_travailles: '',
 };
 
 const CONTRACT_TYPES = ['CDI', 'CDD', 'Stage', 'Alternance', 'Freelance', 'Autre'];
@@ -697,6 +701,58 @@ export default function RH() {
                     className="rh-emp-field rh-emp-field-date"
                     value={form.date_embauche}
                     onChange={(e) => setForm((p) => ({ ...p, date_embauche: e.target.value }))}
+                    style={fieldStyle(false)}
+                  />
+                </div>
+              </div>
+
+              <div className="rh-emp-modal-row">
+                <div className="form-group">
+                  <label>Jours de congé annuels</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.5"
+                    className="rh-emp-field"
+                    value={form.conges_jours_annuels}
+                    onChange={(e) => setForm((p) => ({ ...p, conges_jours_annuels: e.target.value }))}
+                    style={fieldStyle(false)}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Reliquat ancien</label>
+                  <input
+                    type="number"
+                    step="0.5"
+                    className="rh-emp-field"
+                    value={form.conges_reliquat}
+                    onChange={(e) => setForm((p) => ({ ...p, conges_reliquat: e.target.value }))}
+                    style={fieldStyle(false)}
+                  />
+                </div>
+              </div>
+
+              <div className="rh-emp-modal-row">
+                <div className="form-group">
+                  <label>Année de référence congés</label>
+                  <input
+                    type="number"
+                    className="rh-emp-field"
+                    value={form.conges_annee_ref}
+                    onChange={(e) => setForm((p) => ({ ...p, conges_annee_ref: e.target.value }))}
+                    style={fieldStyle(false)}
+                  />
+                </div>
+                <div className="form-group">
+                  <label>Jours travaillés (optionnel)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="1"
+                    className="rh-emp-field"
+                    placeholder="Auto si vide"
+                    value={form.conges_jours_travailles}
+                    onChange={(e) => setForm((p) => ({ ...p, conges_jours_travailles: e.target.value }))}
                     style={fieldStyle(false)}
                   />
                 </div>

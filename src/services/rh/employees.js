@@ -60,6 +60,10 @@ export function employeeToForm(emp) {
     rib: e.rib || '',
     banque: e.banque || '',
     situation_familiale: e.situation_familiale || '',
+    conges_jours_annuels: e.conges_jours_annuels ?? 0,
+    conges_reliquat: e.conges_reliquat ?? 0,
+    conges_annee_ref: e.conges_annee_ref ?? new Date().getFullYear(),
+    conges_jours_travailles: e.conges_jours_travailles ?? '',
   };
 }
 
@@ -94,6 +98,18 @@ export function toEmployeeRow(form) {
     rib: trimOrNull(form.rib),
     banque: trimOrNull(form.banque),
     situation_familiale: trimOrNull(form.situation_familiale),
+    conges_jours_annuels: form.conges_jours_annuels === '' || form.conges_jours_annuels == null
+      ? 0
+      : Number(form.conges_jours_annuels) || 0,
+    conges_reliquat: form.conges_reliquat === '' || form.conges_reliquat == null
+      ? 0
+      : Number(form.conges_reliquat) || 0,
+    conges_annee_ref: form.conges_annee_ref === '' || form.conges_annee_ref == null
+      ? null
+      : Number(form.conges_annee_ref) || null,
+    conges_jours_travailles: form.conges_jours_travailles === '' || form.conges_jours_travailles == null
+      ? null
+      : Number(form.conges_jours_travailles),
   };
 
   if (!form.department && form.department_id) {
@@ -107,7 +123,10 @@ export function toEmployeeRow(form) {
   return row;
 }
 
-const OPTIONAL_PROFILE_COLUMNS = ['date_naissance', 'type_contrat', 'contact_urgence'];
+const OPTIONAL_PROFILE_COLUMNS = [
+  'date_naissance', 'type_contrat', 'contact_urgence',
+  'conges_jours_annuels', 'conges_reliquat', 'conges_annee_ref', 'conges_jours_travailles',
+];
 
 function stripOptionalProfileFields(row) {
   const next = { ...row };

@@ -294,6 +294,38 @@ export async function generateLeaveRequestPdf(leave, employee = null) {
     ['Date de demande', fmtDateTime(leave.created_at)],
   ], y);
 
+  const { leaveTypeLabelForPdf } = await import('./leaveBalance');
+  const typePhrase = leaveTypeLabelForPdf(leave.type);
+  const joursAccordes = leave.snap_jours_accordes != null ? leave.snap_jours_accordes : leave.jours;
+  const reliquatNouveau = leave.snap_reliquat_nouveau;
+
+  y = drawSectionTitle(doc, 'DROITS DE CONGÉ', y);
+  const civilite = 'M./Mme';
+  const nomComplet = [empInfo.prenom, empInfo.nom].filter(Boolean).join(' ') || leave.employe || '—';
+  y = drawTable(doc, [
+    ['Décision', `Vu à ses droits de congé, il est accordé à ${civilite} ${nomComplet}`],
+    ['Nature', `Au titre d'un ${typePhrase} de : ${joursAccordes != null ? joursAccordes : '—'} jours`],
+    ['Période', `Allant du ${fmtDate(leave.dateDebut || leave.date_debut)} au ${fmtDate(leave.dateFin || leave.date_fin)}`],
+    ['Date de retour', fmtDate(leave.dateRetour || leave.date_retour)],
+    ['Reliquat à nouveau', reliquatNouveau != null ? `${reliquatNouveau} jours` : '—'],
+  ], y);
+
+  if (leave.balance_snapshot_at || leave.snap_solde_disponible != null) {
+    y = drawSectionTitle(doc, 'CALCUL DES DROITS', y);
+    y = drawTable(doc, [
+      ['Jours travaillés', leave.snap_jours_travailles != null ? String(leave.snap_jours_travailles) : '—'],
+      ['Jours fériés', leave.snap_jours_feries != null ? String(leave.snap_jours_feries) : '—'],
+      ['Reliquat ancien', leave.snap_reliquat_ancien != null ? String(leave.snap_reliquat_ancien) : '—'],
+      ['Droit au congé', leave.snap_droit_acquis != null ? String(leave.snap_droit_acquis) : '—'],
+      ['Jours déjà consommés', leave.snap_jours_consommes != null ? String(leave.snap_jours_consommes) : '—'],
+      ['Solde avant demande', leave.snap_solde_disponible != null ? String(leave.snap_solde_disponible) : '—'],
+      ['Jours accordés', joursAccordes != null ? String(joursAccordes) : '—'],
+      ['Reliquat à nouveau', reliquatNouveau != null ? String(reliquatNouveau) : '—'],
+      ['Règle de calcul', leave.snap_regle_calcul || '—'],
+      ['Détail jours fériés', leave.snap_feries_detail || '—'],
+    ], y);
+  }
+
   drawValidationZone(doc, y);
 
   doc.setFont('helvetica', 'bold');

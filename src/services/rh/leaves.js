@@ -187,6 +187,185 @@ export async function updateLeaveStatut(id, statut) {
   return updated;
 }
 
+/**
+ * Approuve une demande avec snapshot des droits + débit solde si type consommateur.
+ * @param {{ override?: boolean, overrideReason?: string, employee?: object }} options
+ */
+export async function approveLeaveWithBalance(id, options = {}) {
+  const userId = await getAuthUserId();
+  const { data: existing, error: getErr } = await getSupabase()
+    .from(TABLE)
+    .select(LEAVE_SELECT)
+    .eq('id', id)
+    .single();
+  if (getErr) throw getErr;
+  const leave = normalizeLeave(existing);
+  if ((leave._statut || leave.statut) !== 'En attente') {
+    throw new Error('Seules les demandes en attente peuvent être approuvées.');
+  }
+  if (leave.balance_debited) {
+    throw new Error('Cette demande a déjà été débitée.');
+  }
+
+  const {
+    computeLeaveRightsPreview,
+    snapshotFieldsFromPreview,
+    recordBalanceMovement,
+  } = await import('./leaveBalance');
+
+  let employee = options.employee || leave.employees || null;
+  if (!employee && leave.employee_id) {
+    const { data: emp } = await getSupabase()
+      .from('employees')
+      .select('*')
+      .eq('id', leave.employee_id)
+      .maybeSingle();
+    employee = emp;
+  }
+
+  const preview = await computeLeaveRightsPreview({
+    employee,
+    type: leave.type,
+    dateDebut: leave.date_debut || leave.dateDebut,
+    dateFin: leave.date_fin || leave.dateFin,
+    joursOverride: leave.jours,
+    excludeLeaveId: leave.id,
+  });
+
+  if (preview.consumes && preview.depasseSolde && !options.override) {
+    const err = new Error(
+      `Solde insuffisant (${preview.soldeAvant} j. disponibles, ${preview.joursDemandes} j. demandés).`,
+    );
+    err.code = 'BALANCE_EXCEEDED';
+    err.preview = preview;
+    throw err;
+  }
+
+  const snap = snapshotFieldsFromPreview(preview, {
+    override: !!options.override,
+    overrideReason: options.overrideReason,
+    userId,
+  });
+
+  const patch = {
+    statut: 'Approuve',
+    ...snap,
+    balance_debited: preview.consumes,
+    balance_restored: false,
+  };
+
+  let { data, error } = await getSupabase()
+    .from(TABLE)
+    .update(patch)
+    .eq('id', id)
+    .select(LEAVE_SELECT)
+    .single();
+
+  // Fallback si colonnes snapshot absentes
+  if (error && (String(error.message || '').includes('snap_') || error.code === 'PGRST204')) {
+    console.warn('[CITYMO] snapshot columns missing — approve statut only. Run RUN_LEAVE_BALANCE.sql');
+    ({ data, error } = await getSupabase()
+      .from(TABLE)
+      .update({ statut: 'Approuve' })
+      .eq('id', id)
+      .select(LEAVE_SELECT)
+      .single());
+  }
+  if (error) throw error;
+
+  const updated = normalizeLeave(data);
+
+  if (preview.consumes && leave.employee_id) {
+    await recordBalanceMovement({
+      employeeId: leave.employee_id,
+      leaveId: id,
+      kind: 'debit_approve',
+      days: -Math.abs(preview.joursDemandes),
+      anneeRef: preview.anneeRef,
+      note: `Approbation ${leave.type}`,
+      userId,
+    });
+    // Reliquat salarié = report manuel ; le solde réel = reliquat + acquis − consommés (approuvés).
+  }
+
+  import('../notifications/notificationEvents').then(({ notifyLeaveStatusChanged }) => {
+    notifyLeaveStatusChanged(updated, 'Approuve').catch(() => {});
+  });
+  return updated;
+}
+
+/** Annule une demande approuvée et restitue les jours (sans double crédit). */
+export async function cancelApprovedLeave(id) {
+  const userId = await getAuthUserId();
+  const { data: existing, error: getErr } = await getSupabase()
+    .from(TABLE)
+    .select(LEAVE_SELECT)
+    .eq('id', id)
+    .single();
+  if (getErr) throw getErr;
+  const leave = normalizeLeave(existing);
+  if ((leave._statut || leave.statut) !== 'Approuve') {
+    throw new Error('Seules les demandes approuvées peuvent être annulées.');
+  }
+  if (leave.balance_restored) {
+    throw new Error('Les jours de cette demande ont déjà été restitués.');
+  }
+
+  const joursAccordes = Number(leave.snap_jours_accordes ?? leave.jours) || 0;
+  const consumes = leave.consumes_balance || (await import('./leaveBalance')).leaveTypeConsumesBalance(leave.type);
+
+  const patch = {
+    statut: 'Annule',
+    balance_restored: true,
+  };
+
+  let { data, error } = await getSupabase()
+    .from(TABLE)
+    .update(patch)
+    .eq('id', id)
+    .select(LEAVE_SELECT)
+    .single();
+
+  if (error && String(error.message || '').includes('Annule')) {
+    // CHECK statut sans Annule → Refuse + flag restored si possible
+    ({ data, error } = await getSupabase()
+      .from(TABLE)
+      .update({ statut: 'Refuse', balance_restored: true })
+      .eq('id', id)
+      .select(LEAVE_SELECT)
+      .single());
+  }
+  if (error && error.code === 'PGRST204') {
+    ({ data, error } = await getSupabase()
+      .from(TABLE)
+      .update({ statut: 'Refuse' })
+      .eq('id', id)
+      .select(LEAVE_SELECT)
+      .single());
+  }
+  if (error) throw error;
+
+  if (consumes && leave.balance_debited && leave.employee_id && joursAccordes > 0) {
+    const { recordBalanceMovement } = await import('./leaveBalance');
+    await recordBalanceMovement({
+      employeeId: leave.employee_id,
+      leaveId: id,
+      kind: 'credit_cancel',
+      days: Math.abs(joursAccordes),
+      anneeRef: null,
+      note: 'Annulation demande approuvée — restitution',
+      userId,
+    });
+    // Restitution via retrait du statut Approuve (sumConsumedApprovedDays).
+  }
+
+  const updated = normalizeLeave(data);
+  import('../notifications/notificationEvents').then(({ notifyLeaveStatusChanged }) => {
+    notifyLeaveStatusChanged(updated, updated.statut).catch(() => {});
+  });
+  return updated;
+}
+
 export async function deleteLeave(id) {
   await getAuthUserId();
 
@@ -201,7 +380,7 @@ export function computeLeaveStats(leaves) {
   const list = leaves || [];
   const isPending = (s) => s === 'En attente';
   const isApproved = (s) => s === 'Approuve';
-  const isRejected = (s) => s === 'Refuse';
+  const isRejected = (s) => s === 'Refuse' || s === 'Annule';
 
   return {
     all: list.length,
@@ -219,7 +398,7 @@ export function filterLeaves(leaves, filterKey) {
     const s = r._statut || r.statut;
     if (filterKey === 'pending') return s === 'En attente';
     if (filterKey === 'approved') return s === 'Approuve';
-    if (filterKey === 'rejected') return s === 'Refuse';
+    if (filterKey === 'rejected') return s === 'Refuse' || s === 'Annule';
     return true;
   });
 }

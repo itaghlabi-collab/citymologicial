@@ -16,3 +16,10 @@ export async function canManageLeaves(user) {
 
   return hasEmployes && hasConges;
 }
+
+/** Dérogation solde insuffisant : super admin ou RH gestionnaire. */
+export async function canOverrideLeaveBalance(user) {
+  if (!user?.id) return false;
+  if (isSuperAdmin(user)) return true;
+  return canManageLeaves(user);
+}

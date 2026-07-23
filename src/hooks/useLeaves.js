@@ -7,12 +7,17 @@ import { formatSupabaseError } from '../services/supabase/formatError';
 import { useAuth } from './useAuth';
 import { listEmployees } from '../services/rh/employees';
 import { isSuperAdmin } from '../services/rh/isSuperAdmin';
-import { canManageLeaves as checkCanManageLeaves } from '../services/auth/leaveAccess';
+import {
+  canManageLeaves as checkCanManageLeaves,
+  canOverrideLeaveBalance as checkCanOverride,
+} from '../services/auth/leaveAccess';
 import {
   listLeaves,
   createLeave,
   updateLeave,
   updateLeaveStatut,
+  approveLeaveWithBalance,
+  cancelApprovedLeave,
   deleteLeave,
   computeLeaveStats,
   filterLeaves,
@@ -34,12 +39,19 @@ export function useLeaves() {
   const configured = isSupabaseConfigured();
   const superAdmin = isSuperAdmin(user);
   const [canManageLeaves, setCanManageLeaves] = useState(false);
+  const [canOverrideBalance, setCanOverrideBalance] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const ok = await checkCanManageLeaves(user);
-      if (!cancelled) setCanManageLeaves(ok);
+      const [ok, override] = await Promise.all([
+        checkCanManageLeaves(user),
+        checkCanOverride(user),
+      ]);
+      if (!cancelled) {
+        setCanManageLeaves(ok);
+        setCanOverrideBalance(override);
+      }
     })();
     return () => { cancelled = true; };
   }, [user?.id]);
@@ -165,7 +177,7 @@ export function useLeaves() {
     }
   }, [load]);
 
-  const approve = useCallback(async (id) => {
+  const approve = useCallback(async (id, { override = false, overrideReason = null } = {}) => {
     if (!canManageLeaves) {
       const msg = 'Seuls les responsables RH peuvent approuver une demande.';
       setError(msg);
@@ -173,16 +185,21 @@ export function useLeaves() {
     }
     setError(null);
     try {
-      await updateLeaveStatut(id, 'Approuve');
+      const leave = leaves.find((l) => l.id === id);
+      const employee = employees.find((e) => e.id === leave?.employee_id) || leave?.employees;
+      await approveLeaveWithBalance(id, { override, overrideReason, employee });
       await load();
       return { success: true };
     } catch (err) {
       console.error('[CITYMO] useLeaves approve', err);
+      if (err?.code === 'BALANCE_EXCEEDED') {
+        return { success: false, error: err.message, code: 'BALANCE_EXCEEDED', preview: err.preview };
+      }
       const msg = formatSupabaseError(err, 'Erreur approbation.');
       setError(msg);
       return { success: false, error: msg };
     }
-  }, [load, canManageLeaves]);
+  }, [load, canManageLeaves, leaves, employees]);
 
   const refuse = useCallback(async (id) => {
     if (!canManageLeaves) {
@@ -203,13 +220,33 @@ export function useLeaves() {
     }
   }, [load, canManageLeaves]);
 
+  const cancelApproved = useCallback(async (id) => {
+    if (!canManageLeaves) {
+      const msg = 'Seuls les responsables RH peuvent annuler une demande approuvée.';
+      setError(msg);
+      return { success: false, error: msg };
+    }
+    setError(null);
+    try {
+      await cancelApprovedLeave(id);
+      await load();
+      return { success: true };
+    } catch (err) {
+      console.error('[CITYMO] useLeaves cancel', err);
+      const msg = formatSupabaseError(err, 'Erreur annulation.');
+      setError(msg);
+      return { success: false, error: msg };
+    }
+  }, [load, canManageLeaves]);
+
   const permissions = useMemo(() => ({
     superAdmin,
     canManageLeaves,
+    canOverrideBalance,
     canApproveRefuse: canManageLeaves,
     canEdit: (row) => canEditLeave(row, { userId: user?.id, canManageLeaves }),
     canDelete: (row) => canDeleteLeave(row, { userId: user?.id, canManageLeaves }),
-  }), [superAdmin, canManageLeaves, user?.id]);
+  }), [superAdmin, canManageLeaves, canOverrideBalance, user?.id]);
 
   return {
     leaves: visibleLeaves,
@@ -230,6 +267,7 @@ export function useLeaves() {
     remove,
     approve,
     refuse,
+    cancelApproved,
     permissions,
     user,
   };

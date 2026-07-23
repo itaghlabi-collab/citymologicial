@@ -1,28 +1,40 @@
 import { CalendarOff, Plus, CheckCircle, XCircle, Clock, X, Upload, User, Edit2, Trash2, FileDown } from 'lucide-react';
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect, useMemo } from 'react';
 import { useLeaves } from '../hooks/useLeaves';
 import { employeeFullName } from '../services/rh/leaves';
 import { generateLeaveRequestPdf } from '../services/rh/leaveRequestPdf';
+import {
+  countWorkingDays as countWorkingDaysAsync,
+  nextWorkingDay as nextWorkingDayAsync,
+} from '../services/rh/workingDays';
+import {
+  computeLeaveRightsPreview,
+  leaveTypeConsumesBalance,
+} from '../services/rh/leaveBalance';
 
 const CONGE_TYPES = [
   'Conge annuel',
-  'Conge maladie',
-  'Conge maternite / paternite',
-  'Conge sans solde',
+  'Conge de recuperation',
   'Conge exceptionnel',
+  'Conge maladie',
+  'Conge sans solde',
+  'Conge maternite / paternite',
   'RTT',
+  'Autre',
 ];
 
 const STATUS_BADGE = {
   'En attente': 'badge-orange',
   'Approuve': 'badge-green',
   'Refuse': 'badge-red',
+  'Annule': 'badge-grey',
 };
 
 const STATUS_LABEL = {
   'En attente': 'En attente',
   'Approuve': 'Approuve',
   'Refuse': 'Refuse',
+  'Annule': 'Annule',
 };
 
 const INPUT_S = (err) => ({
@@ -45,43 +57,6 @@ function Toast({ toast }) {
       {toast.msg}
     </div>
   );
-}
-
-function parseLocalDate(dateStr) {
-  const [y, m, d] = dateStr.split('-').map(Number);
-  return new Date(y, m - 1, d);
-}
-
-function formatLocalDate(d) {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-
-/** Count working days between two date strings (excluding Sundays only) */
-function countWorkingDays(startStr, endStr) {
-  if (!startStr || !endStr) return 0;
-  const start = parseLocalDate(startStr);
-  const end = parseLocalDate(endStr);
-  if (isNaN(start) || isNaN(end) || end < start) return 0;
-  let count = 0;
-  const cur = new Date(start);
-  while (cur <= end) {
-    if (cur.getDay() !== 0) count++;
-    cur.setDate(cur.getDate() + 1);
-  }
-  return count;
-}
-
-/** Return the next working day after a date string */
-function nextWorkingDay(dateStr) {
-  if (!dateStr) return '';
-  const d = parseLocalDate(dateStr);
-  if (isNaN(d)) return '';
-  d.setDate(d.getDate() + 1);
-  while (d.getDay() === 0) d.setDate(d.getDate() + 1);
-  return formatLocalDate(d);
 }
 
 const EMPTY_FORM = {
@@ -111,11 +86,12 @@ export default function Conges() {
     remove,
     approve,
     refuse,
+    cancelApproved,
     leaves,
     permissions,
   } = useLeaves();
 
-  const { canManageLeaves, canApproveRefuse, canEdit, canDelete } = permissions;
+  const { canManageLeaves, canApproveRefuse, canOverrideBalance, canEdit, canDelete } = permissions;
 
   const [showModal, setShowModal] = useState(false);
   const [editingId, setEditingId] = useState(null);
@@ -125,6 +101,9 @@ export default function Conges() {
   const [formError, setFormError] = useState(null);
   const [toast, setToast] = useState(null);
   const [pdfLoadingId, setPdfLoadingId] = useState(null);
+  const [jours, setJours] = useState(0);
+  const [dateRetour, setDateRetour] = useState('');
+  const [rights, setRights] = useState(null);
   const toastRef = useRef(null);
   const fileRef = useRef(null);
 
@@ -135,6 +114,44 @@ export default function Conges() {
   }
 
   function setF(k, v) { setForm(p => ({ ...p, [k]: v })); }
+
+  const selectedEmployee = useMemo(() => {
+    const id = form.employee_id || (!canManageLeaves ? myEmployee?.id : '');
+    return employees.find((e) => e.id === id) || myEmployee || null;
+  }, [form.employee_id, employees, myEmployee, canManageLeaves]);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!form.dateDebut || !form.dateFin || form.dateFin < form.dateDebut) {
+        if (!cancelled) {
+          setJours(0);
+          setDateRetour('');
+          setRights(null);
+        }
+        return;
+      }
+      const wd = await countWorkingDaysAsync(form.dateDebut, form.dateFin);
+      const retour = await nextWorkingDayAsync(form.dateFin);
+      if (cancelled) return;
+      setJours(wd.days);
+      setDateRetour(retour);
+      if (selectedEmployee) {
+        const preview = await computeLeaveRightsPreview({
+          employee: selectedEmployee,
+          type: form.type,
+          dateDebut: form.dateDebut,
+          dateFin: form.dateFin,
+          joursOverride: wd.days,
+          excludeLeaveId: editingId,
+        });
+        if (!cancelled) setRights(preview);
+      } else if (!cancelled) {
+        setRights(null);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [form.dateDebut, form.dateFin, form.type, selectedEmployee, editingId]);
 
   function openModal() {
     setEditingId(null);
@@ -204,13 +221,14 @@ export default function Conges() {
     }
 
     const submitForm = resolveSubmitForm();
-    const jours = countWorkingDays(submitForm.dateDebut, submitForm.dateFin);
-    const dateRetour = nextWorkingDay(submitForm.dateFin);
+    const wd = await countWorkingDaysAsync(submitForm.dateDebut, submitForm.dateFin);
+    const joursCalc = wd.days;
+    const dateRetourCalc = await nextWorkingDayAsync(submitForm.dateFin);
     const fichierUrl = submitForm.fichier
       ? submitForm.fichier.name
       : (editingId ? existingFichierUrl : null);
 
-    const payload = { jours, dateRetour, fichierUrl };
+    const payload = { jours: joursCalc, dateRetour: dateRetourCalc, fichierUrl };
 
     let result;
     try {
@@ -243,13 +261,30 @@ export default function Conges() {
   }
 
   async function handleApprove(id) {
-    const result = await approve(id);
+    let result = await approve(id);
+    if (!result.success && result.code === 'BALANCE_EXCEEDED') {
+      if (!canOverrideBalance) {
+        showToast('error', result.error);
+        return;
+      }
+      const ok = window.confirm(
+        `${result.error}\n\nDéroger et approuver quand même ? (permission RH / super admin)`,
+      );
+      if (!ok) return;
+      result = await approve(id, { override: true, overrideReason: 'Dérogation solde insuffisant' });
+    }
     showToast(result.success ? 'success' : 'error', result.success ? 'Demande approuvee.' : (result.error || 'Erreur.'));
   }
 
   async function handleRefuse(id) {
     const result = await refuse(id);
-    showToast(result.success ? 'error' : 'error', result.success ? 'Demande refusee.' : (result.error || 'Erreur.'));
+    showToast(result.success ? 'success' : 'error', result.success ? 'Demande refusee.' : (result.error || 'Erreur.'));
+  }
+
+  async function handleCancelApproved(id) {
+    if (!window.confirm('Annuler cette demande approuvée et restituer les jours au solde ?')) return;
+    const result = await cancelApproved(id);
+    showToast(result.success ? 'success' : 'error', result.success ? 'Demande annulee — jours restitues.' : (result.error || 'Erreur.'));
   }
 
   async function handleDelete(id) {
@@ -272,8 +307,6 @@ export default function Conges() {
     }
   }
 
-  const jours = countWorkingDays(form.dateDebut, form.dateFin);
-  const dateRetour = nextWorkingDay(form.dateFin);
   const canOpenModal = configured && (canManageLeaves || myEmployee);
 
   return (
@@ -433,6 +466,18 @@ export default function Conges() {
                           </button>
                         </>
                       )}
+                      {r._statut === 'Approuve' && canApproveRefuse && (
+                        <button
+                          type="button"
+                          className="btn btn-sm rh-m-btn-text"
+                          style={{ background: '#FFF3E0', color: '#E65100', border: 'none' }}
+                          onClick={() => handleCancelApproved(r.id)}
+                          disabled={saving}
+                          aria-label="Annuler et restituer"
+                        >
+                          Annuler
+                        </button>
+                      )}
                       <button
                         type="button"
                         className="btn btn-ghost btn-sm"
@@ -548,6 +593,18 @@ export default function Conges() {
                                   Refuser
                                 </button>
                               </>
+                            )}
+                            {r._statut === 'Approuve' && canApproveRefuse && (
+                              <button
+                                type="button"
+                                className="btn btn-sm"
+                                style={{ background: '#FFF3E0', color: '#E65100', border: 'none', cursor: 'pointer', borderRadius: 6, padding: '4px 10px', fontSize: '0.78rem', fontWeight: 600 }}
+                                onClick={() => handleCancelApproved(r.id)}
+                                disabled={saving}
+                                title="Annuler et restituer les jours"
+                              >
+                                Annuler
+                              </button>
                             )}
                             <button
                               type="button"
@@ -674,17 +731,41 @@ export default function Conges() {
                 </div>
               </div>
 
-              {/* Auto-calculated info */}
+              {/* Auto-calculated info + calcul des droits */}
               {form.dateDebut && form.dateFin && jours > 0 && (
-                <div style={{ background: '#F3F4F6', borderRadius: 8, padding: '10px 14px', display: 'flex', gap: 24, flexWrap: 'wrap' }}>
-                  <div>
-                    <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginBottom: 2 }}>Jours demandes (hors dimanches)</div>
-                    <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.2rem', color: 'var(--red)' }}>{jours} jour{jours > 1 ? 's' : ''}</div>
+                <div style={{ background: '#F3F4F6', borderRadius: 8, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 12 }}>
+                  <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+                    <div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginBottom: 2 }}>Jours demandes</div>
+                      <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.2rem', color: 'var(--red)' }}>{jours} jour{jours > 1 ? 's' : ''}</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginBottom: 2 }}>Date de retour au travail</div>
+                      <div style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '1rem', color: 'var(--text)' }}>{dateRetour}</div>
+                    </div>
                   </div>
-                  <div>
-                    <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginBottom: 2 }}>Date de retour au travail</div>
-                    <div style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '1rem', color: 'var(--text)' }}>{dateRetour}</div>
-                  </div>
+                  {rights && leaveTypeConsumesBalance(form.type) && (
+                    <div style={{ borderTop: '1px solid var(--border)', paddingTop: 10 }}>
+                      <div style={{ fontSize: '0.68rem', fontWeight: 800, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
+                        Calcul des droits
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 8, fontSize: '0.8rem' }}>
+                        <div><span style={{ color: 'var(--text-3)' }}>Jours travaillés</span><div style={{ fontWeight: 700 }}>{rights.joursTravailles}</div></div>
+                        <div><span style={{ color: 'var(--text-3)' }}>Jours fériés</span><div style={{ fontWeight: 700 }}>{rights.joursFeries}</div></div>
+                        <div><span style={{ color: 'var(--text-3)' }}>Reliquat ancien</span><div style={{ fontWeight: 700 }}>{rights.reliquatAncien}</div></div>
+                        <div><span style={{ color: 'var(--text-3)' }}>Droit au congé</span><div style={{ fontWeight: 700 }}>{rights.droitAcquis}</div></div>
+                        <div><span style={{ color: 'var(--text-3)' }}>Jours consommés</span><div style={{ fontWeight: 700 }}>{rights.joursConsommes}</div></div>
+                        <div><span style={{ color: 'var(--text-3)' }}>Solde disponible</span><div style={{ fontWeight: 700 }}>{rights.soldeAvant}</div></div>
+                        <div><span style={{ color: 'var(--text-3)' }}>Jours demandés</span><div style={{ fontWeight: 700 }}>{rights.joursDemandes}</div></div>
+                        <div><span style={{ color: 'var(--text-3)' }}>Reliquat estimé</span><div style={{ fontWeight: 700, color: rights.depasseSolde ? 'var(--red)' : 'var(--text)' }}>{rights.reliquatNouveau}</div></div>
+                      </div>
+                      {rights.depasseSolde && (
+                        <div style={{ marginTop: 8, color: '#C62828', fontSize: '0.8rem', fontWeight: 600 }}>
+                          Attention : la demande dépasse le solde disponible.
+                        </div>
+                      )}
+                    </div>
+                  )}
                 </div>
               )}
 
