@@ -150,8 +150,14 @@ export function formatSupabaseError(error, fallback = 'Une erreur est survenue.'
   if (code === '42P01' || message.includes('document_folders') || message.includes('documents')) {
     return 'Tables documents absentes — exécutez supabase/RUN_MES_DOCUMENTS.sql dans Supabase (SQL Editor).';
   }
-  if (code === '42P01' || message.includes('subcontractor')) {
+  if (code === '42P01' && message.includes('subcontractor')) {
     return 'Module sous-traitants absent — exécutez supabase/RUN_SUBCONTRACTORS.sql dans Supabase (SQL Editor).';
+  }
+  if (message.includes('situation_id') && message.includes('subcontractor_payments')) {
+    return 'Colonne situation_id absente — exécutez supabase/RUN_SUBCONTRACTOR_ACCOUNT_V2.sql (ou réessayez : le paiement rapide n’en a plus besoin).';
+  }
+  if (code === 'PGRST204' && message.includes('situation_id')) {
+    return 'Schéma non à jour (situation_id) — exécutez supabase/RUN_SUBCONTRACTOR_ACCOUNT_V2.sql puis rechargez le schéma API.';
   }
   if (code === 'VALIDATION') return message;
   if (message.includes('"type"') && message.includes('crm_factures')) {

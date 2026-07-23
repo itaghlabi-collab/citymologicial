@@ -233,7 +233,7 @@ function toPaymentRow(form, subcontractorId) {
   const avances = round2(Number(form.avances) || 0);
   const retenues = round2(Number(form.retenues) || 0);
   const net = round2(Math.max(0, grossAmount - avances - retenues));
-  return {
+  const row = {
     subcontractor_id: subcontractorId,
     project_id: emptyToNull(form.projectId) || null,
     assignment_id: emptyToNull(form.assignmentId) || null,
@@ -252,8 +252,12 @@ function toPaymentRow(form, subcontractorId) {
     description: emptyToNull(form.lineDescription?.trim()) || emptyToNull(form.description?.trim()),
     status: form.status || 'paid',
     notes: emptyToNull(form.notes?.trim()),
-    situation_id: emptyToNull(form.situationId) || null,
   };
+  // situation_id uniquement si fourni (colonne ajoutée par RUN_SUBCONTRACTOR_ACCOUNT_V2.sql)
+  if (form.situationId) {
+    row.situation_id = form.situationId;
+  }
+  return row;
 }
 
 async function getAuthUserId() {
