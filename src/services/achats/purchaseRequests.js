@@ -266,55 +266,91 @@ export async function findPurchaseRequestBySiteMaterialRequest(siteRequestId) {
 }
 
 /**
- * Crée une demande d'achat liée à une demande chantier en rupture / stock insuffisant.
+ * Crée une demande d'achat liée à une demande chantier (reste / rupture).
  * Idempotent : une seule DA par demande chantier.
+ * @param {{ refresh?: boolean }} options — si true, met à jour le récap manquants sur une DA encore modifiable
  */
-export async function createPurchaseRequestFromSiteRuptures(siteRequest) {
+export async function createPurchaseRequestFromSiteRuptures(siteRequest, { refresh = false } = {}) {
   if (!siteRequest?.id) return null;
-  const existing = await findPurchaseRequestBySiteMaterialRequest(siteRequest.id);
-  if (existing) return existing;
 
   const lines = (siteRequest.lines || []).filter((l) => Number(l.quantite_demandee) > 0);
   const deficitLines = lines.filter((l) => {
     const qty = Number(l.quantite_demandee) || 0;
     const prep = Number(l.quantite_preparee) || 0;
     return l.rupture || prep < qty;
-  });
-  if (!deficitLines.length) return null;
-
-  const itemsDesc = deficitLines.map((l) => {
+  }).map((l) => {
     const manque = Math.max(0, (Number(l.quantite_demandee) || 0) - (Number(l.quantite_preparee) || 0));
-    return `• ${l.article_name}: ${manque} ${l.unite || 'u'}${l.rupture ? ' (rupture stock)' : ''}`;
-  }).join('\n');
+    return { ...l, quantite_manquante: manque || (l.rupture ? Number(l.quantite_demandee) || 0 : 0) };
+  }).filter((l) => l.quantite_manquante > 0);
+
+  if (!deficitLines.length) {
+    const existingEmpty = await findPurchaseRequestBySiteMaterialRequest(siteRequest.id);
+    return existingEmpty;
+  }
+
+  const itemsDesc = deficitLines.map((l) => (
+    `• ${l.article_name}: ${l.quantite_manquante} ${l.unite || 'u'}${l.rupture ? ' (rupture stock)' : ''}`
+  )).join('\n');
+
+  const description = [
+    'Demande d\'achat — reste de commande / rupture stock (demande chantier).',
+    '',
+    `Demande chantier : ${siteRequest.ref}`,
+    `Projet : ${siteRequest.project_name || '—'}`,
+    '',
+    'Articles manquants :',
+    itemsDesc,
+  ].join('\n');
+
+  const payloadLines = deficitLines.map((l) => ({
+    article_name: l.article_name,
+    designation: l.article_name,
+    article_id: l.article_id || null,
+    quantite: l.quantite_manquante,
+    quantite_manquante: l.quantite_manquante,
+    unite: l.unite || 'u',
+    rupture: !!l.rupture,
+  }));
+
+  const existing = await findPurchaseRequestBySiteMaterialRequest(siteRequest.id);
+  if (existing) {
+    const editable = ['Brouillon', 'En étude', 'Soumise', 'brouillon', 'en_etude'].includes(existing.statut)
+      || normalizePurchaseStatus(existing.statut) === 'En étude';
+    if (refresh && editable) {
+      return updatePurchaseRequest(existing.id, {
+        titre: existing.titre || `Reste commande — ${siteRequest.ref}`,
+        priorite: siteRequest.priorite === 'Critique' ? 'Urgente' : (siteRequest.priorite || existing.priorite || 'Normale'),
+        description,
+        project_id: siteRequest.project_id || existing.project_id,
+        project_ref: siteRequest.project_ref || existing.project_ref,
+        project_name: siteRequest.project_name || existing.project_name,
+        date_limite: siteRequest.date_souhaitee || existing.date_limite,
+        payload: {
+          ...(existing.payload || {}),
+          site_material_request_id: siteRequest.id,
+          site_material_request_ref: siteRequest.ref,
+          source: 'site_material_rupture',
+          lines: payloadLines,
+        },
+      });
+    }
+    return existing;
+  }
 
   return createPurchaseRequest({
-    titre: `Rupture stock — ${siteRequest.ref}`,
+    titre: `Reste commande — ${siteRequest.ref}`,
     priorite: siteRequest.priorite === 'Critique' ? 'Urgente' : (siteRequest.priorite || 'Normale'),
     statut: 'En étude',
     project_id: siteRequest.project_id || null,
     project_ref: siteRequest.project_ref || null,
     project_name: siteRequest.project_name || null,
     date_limite: siteRequest.date_souhaitee || null,
-    description: [
-      'Demande d\'achat générée automatiquement (rupture / stock insuffisant).',
-      '',
-      `Demande chantier : ${siteRequest.ref}`,
-      `Projet : ${siteRequest.project_name || '—'}`,
-      '',
-      'Articles :',
-      itemsDesc,
-    ].join('\n'),
+    description,
     payload: {
       site_material_request_id: siteRequest.id,
       site_material_request_ref: siteRequest.ref,
       source: 'site_material_rupture',
-      lines: deficitLines.map((l) => ({
-        article_name: l.article_name,
-        article_id: l.article_id || null,
-        quantite_manquante: Math.max(0, (Number(l.quantite_demandee) || 0) - (Number(l.quantite_preparee) || 0)),
-        unite: l.unite || 'u',
-        rupture: !!l.rupture,
-      })),
+      lines: payloadLines,
     },
   });
 }

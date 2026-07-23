@@ -4,7 +4,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import {
   ClipboardList, Plus, Search, RefreshCw, Loader2, Eye, Edit2, Trash2,
-  Download, CheckCircle, Truck, Package, X,
+  Download, CheckCircle, Truck, Package, X, ShoppingCart,
 } from 'lucide-react';
 import { listProjects } from '../../services/projects/projects';
 import { listStockArticles } from '../../services/inventaire/stockArticles';
@@ -29,7 +29,16 @@ import {
   cancelSiteMaterialRequest,
   deleteSiteMaterialRequest,
   enrichLinesWithStock,
+  setSiteMaterialRequestStatut,
+  setSiteMaterialRequestLivraison,
+  siteRequestLivraisonValue,
+  getSiteRequestMissingLines,
+  qtyMissingOnLine,
 } from '../../services/inventaire/siteMaterialRequests';
+import {
+  createPurchaseRequestFromSiteRuptures,
+  findPurchaseRequestBySiteMaterialRequest,
+} from '../../services/achats/purchaseRequests';
 import { generateSiteRequestPdf } from '../../services/inventaire/siteRequestPdf';
 import { buildInitialLines } from './SiteRequestForm.jsx';
 import SiteRequestFormPage from './SiteRequestFormPage.jsx';
@@ -112,7 +121,7 @@ function projectFormFromProjet(projet) {
   };
 }
 
-export default function DemandesChantier({ projet, embedded = false }) {
+export default function DemandesChantier({ projet, embedded = false, onNavigate }) {
   const embeddedProjectId = embedded && projet?.id ? String(projet.id) : null;
   const [requests, setRequests] = useState([]);
   const [projects, setProjects] = useState([]);
@@ -128,6 +137,7 @@ export default function DemandesChantier({ projet, embedded = false }) {
   const [showCreateMode, setShowCreateMode] = useState(false);
   const [editId, setEditId] = useState(null);
   const [detail, setDetail] = useState(null);
+  const [linkedDa, setLinkedDa] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [lines, setLines] = useState(() => buildInitialLines());
 
@@ -245,12 +255,20 @@ export default function DemandesChantier({ projet, embedded = false }) {
   async function openDetail(id) {
     setSaving(true);
     try {
-      setDetail(await getSiteMaterialRequest(id));
+      const req = await getSiteMaterialRequest(id);
+      setDetail(req);
+      const da = await findPurchaseRequestBySiteMaterialRequest(id).catch(() => null);
+      setLinkedDa(da);
     } catch (err) {
       setError(err.message);
     } finally {
       setSaving(false);
     }
+  }
+
+  function closeDetail() {
+    setDetail(null);
+    setLinkedDa(null);
   }
 
   function closeForm() {
@@ -302,9 +320,69 @@ export default function DemandesChantier({ projet, embedded = false }) {
     try {
       const updated = await fn(detail.id);
       setDetail(updated);
+      const da = await findPurchaseRequestBySiteMaterialRequest(detail.id).catch(() => null);
+      setLinkedDa(da);
       await load();
     } catch (err) {
       setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handleStatutChange(nextStatut) {
+    if (!detail || nextStatut === detail.statut) return;
+    if (nextStatut === 'livree') {
+      const ok = window.confirm(
+        'Marquer comme livrée ? Un bon de sortie stock sera généré si des articles catalogue sont liés.',
+      );
+      if (!ok) return;
+    }
+    if (nextStatut === 'annulee') {
+      const reason = window.prompt('Motif d\'annulation :') || '';
+      if (!reason.trim()) return;
+      await runAction((id) => setSiteMaterialRequestStatut(id, nextStatut, { reason }));
+      return;
+    }
+    await runAction((id) => setSiteMaterialRequestStatut(id, nextStatut));
+  }
+
+  async function handleLivraisonChange(nextLiv) {
+    if (!detail) return;
+    const current = siteRequestLivraisonValue(detail.statut);
+    if (nextLiv === current) return;
+    if (nextLiv === 'livree') {
+      const ok = window.confirm(
+        'Confirmer la livraison ? Un bon de sortie stock sera généré si possible.',
+      );
+      if (!ok) return;
+    }
+    await runAction((id) => setSiteMaterialRequestLivraison(id, nextLiv));
+  }
+
+  async function handleCreateDaFromMissing() {
+    if (!detail) return;
+    const missing = getSiteRequestMissingLines(detail);
+    if (!missing.length) {
+      setError('Aucun article manquant — tout est préparé.');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      const da = await createPurchaseRequestFromSiteRuptures(detail, { refresh: true });
+      if (!da) {
+        setError('Impossible de créer la demande d\'achat.');
+        return;
+      }
+      setLinkedDa(da);
+      const ref = da.ref || da.ref_demande || '';
+      const go = window.confirm(
+        `Demande d'achat ${ref || ''} prête (reste de commande).\n\nOuvrir le module Achats ?`,
+      );
+      if (go && onNavigate) onNavigate('demandes-achat');
+    } catch (err) {
+      setError(err.message || 'Erreur création demande d\'achat.');
     } finally {
       setSaving(false);
     }
@@ -315,7 +393,7 @@ export default function DemandesChantier({ projet, embedded = false }) {
     setSaving(true);
     try {
       await deleteSiteMaterialRequest(id);
-      if (detail?.id === id) setDetail(null);
+      if (detail?.id === id) closeDetail();
       await load();
     } catch (err) {
       setError(err.message);
@@ -403,8 +481,17 @@ export default function DemandesChantier({ projet, embedded = false }) {
   }
 
   function qtyToBuy(line) {
-    return Math.max(0, (Number(line.quantite_demandee) || 0) - (Number(line.quantite_preparee) || 0));
+    return qtyMissingOnLine(line);
   }
+
+  const missingLines = useMemo(
+    () => (detail ? getSiteRequestMissingLines(detail) : []),
+    [detail],
+  );
+  const missingQtyTotal = useMemo(
+    () => missingLines.reduce((s, l) => s + (Number(l.quantite_manquante) || 0), 0),
+    [missingLines],
+  );
 
   const canScanPreparation = detail
     && !embedded
@@ -710,7 +797,7 @@ export default function DemandesChantier({ projet, embedded = false }) {
 
       {detail && (
         <>
-          <div className="rh-emp-docs-drawer-overlay" onClick={() => setDetail(null)} aria-hidden="true" />
+          <div className="rh-emp-docs-drawer-overlay" onClick={closeDetail} aria-hidden="true" />
           <aside className="rh-emp-docs-drawer inv-dc-drawer" style={{ maxWidth: 920, width: 'min(96vw, 920px)' }} role="dialog">
             <header className="rh-emp-docs-drawer-header inv-dc-drawer-header">
               <div className="inv-dc-drawer-head-top">
@@ -723,7 +810,7 @@ export default function DemandesChantier({ projet, embedded = false }) {
                   </div>
                   <h2 className="rh-emp-docs-drawer-title">DEMANDE — {detail.project_name}</h2>
                 </div>
-                <button type="button" className="rh-emp-modal-close inv-dc-drawer-close" onClick={() => setDetail(null)} aria-label="Fermer">
+                <button type="button" className="rh-emp-modal-close inv-dc-drawer-close" onClick={closeDetail} aria-label="Fermer">
                   <X size={20} />
                 </button>
               </div>
@@ -733,8 +820,113 @@ export default function DemandesChantier({ projet, embedded = false }) {
                 <div><div className="rh-emp-docs-info-label">Client</div><div className="rh-emp-docs-info-value">{detail.client_name || '—'}</div></div>
                 <div><div className="rh-emp-docs-info-label">Chef chantier</div><div className="rh-emp-docs-info-value">{detail.chef_chantier || '—'}</div></div>
                 <div><div className="rh-emp-docs-info-label">Priorité</div><div className="rh-emp-docs-info-value">{detail.priorite}</div></div>
-                <div><div className="rh-emp-docs-info-label">Statut</div><div className="rh-emp-docs-info-value">{detail.statutLabel}</div></div>
+                <div>
+                  <div className="rh-emp-docs-info-label">Statut</div>
+                  {!embedded ? (
+                    <select
+                      value={detail.statut || ''}
+                      onChange={(e) => handleStatutChange(e.target.value)}
+                      disabled={saving}
+                      style={{ ...SELECT_STYLE, marginTop: 4, fontWeight: 700, color: siteRequestStatutColor(detail.statut) }}
+                    >
+                      {SITE_REQUEST_STATUTS.map((s) => (
+                        <option key={s.value} value={s.value}>{s.label}</option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div className="rh-emp-docs-info-value">{detail.statutLabel}</div>
+                  )}
+                </div>
+                {!embedded && (
+                  <div>
+                    <div className="rh-emp-docs-info-label">Livraison</div>
+                    <select
+                      value={siteRequestLivraisonValue(detail.statut)}
+                      onChange={(e) => handleLivraisonChange(e.target.value)}
+                      disabled={saving || detail.statut === 'annulee'}
+                      style={{ ...SELECT_STYLE, marginTop: 4, fontWeight: 700 }}
+                    >
+                      <option value="none">—</option>
+                      <option value="a_livrer">À livrer</option>
+                      <option value="livree">Livrée</option>
+                    </select>
+                  </div>
+                )}
               </div>
+
+              {!embedded && missingLines.length > 0 && (
+                <div
+                  style={{
+                    marginBottom: 16,
+                    padding: '14px 16px',
+                    border: '1.5px solid #FFCC80',
+                    borderRadius: 10,
+                    background: '#FFF8E1',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap', alignItems: 'flex-start' }}>
+                    <div>
+                      <div style={{ fontWeight: 800, fontSize: '0.88rem', marginBottom: 4, color: '#E65100' }}>
+                        Reste de commande — à acheter
+                      </div>
+                      <div style={{ fontSize: '0.8rem', color: 'var(--text-2)' }}>
+                        {missingLines.length} article{missingLines.length > 1 ? 's' : ''} · {missingQtyTotal} unité(s) manquante(s)
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      disabled={saving}
+                      onClick={handleCreateDaFromMissing}
+                    >
+                      <ShoppingCart size={14} />
+                      {linkedDa ? 'Mettre à jour / ouvrir DA' : 'Passer en demande d\'achat'}
+                    </button>
+                  </div>
+                  {linkedDa && (
+                    <div style={{ marginTop: 8, fontSize: '0.8rem', color: '#1565C0' }}>
+                      DA liée : <strong>{linkedDa.ref || linkedDa.ref_demande || linkedDa.titre}</strong>
+                      {' · '}
+                      {linkedDa.statutLabel || linkedDa.statut}
+                    </div>
+                  )}
+                  <div className="table-wrap" style={{ marginTop: 12 }}>
+                    <table style={{ fontSize: '0.8rem', width: '100%' }}>
+                      <thead>
+                        <tr>
+                          <th>Article</th>
+                          <th>Demandé</th>
+                          <th>Préparé</th>
+                          <th>Manquant</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {missingLines.map((l) => (
+                          <tr key={l.id || `${l.category_id}-${l.article_name}`}>
+                            <td>
+                              {l.article_name}
+                              {l.rupture ? <span className="badge badge-red" style={{ marginLeft: 6, fontSize: '0.65rem' }}>Rupture</span> : null}
+                            </td>
+                            <td>{l.quantite_demandee} {l.unite || 'u'}</td>
+                            <td>{l.quantite_preparee || 0}</td>
+                            <td style={{ fontWeight: 800, color: 'var(--red)' }}>{l.quantite_manquante} {l.unite || 'u'}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {!embedded && missingLines.length === 0 && linkedDa && (
+                <div style={{ marginBottom: 16, fontSize: '0.84rem', color: '#1565C0' }}>
+                  Demande d&apos;achat liée : <strong>{linkedDa.ref || linkedDa.ref_demande || linkedDa.titre}</strong>
+                  {' '}
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => onNavigate?.('demandes-achat')}>
+                    Voir Achats
+                  </button>
+                </div>
+              )}
 
               {['soumise', 'en_preparation', 'preparation_partielle', 'en_attente_dg', 'validee_dg'].includes(detail.statut) && (
                 <>

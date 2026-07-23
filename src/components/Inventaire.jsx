@@ -16,7 +16,7 @@ import { listStockCategories } from '../services/inventaire/stockCategories';
 import { ensureStockWarehousesSeeded } from '../services/inventaire/stockWarehouses';
 import { EMPLACEMENTS_STOCK } from './inventaire/shared.jsx';
 
-export default function Inventaire({ activeTab, initialArticleCode, onArticleCodeConsumed }) {
+export default function Inventaire({ activeTab, initialArticleCode, onArticleCodeConsumed, onNavigate }) {
   const tab = activeTab || 'categories-stock';
 
   const [articles, setArticles] = useState([]);
@@ -66,7 +66,7 @@ export default function Inventaire({ activeTab, initialArticleCode, onArticleCod
           onArticlesChange={setArticles}
         />
       )}
-      {tab === 'demandes-chantier' && <DemandesChantier />}
+      {tab === 'demandes-chantier' && <DemandesChantier onNavigate={onNavigate} />}
       {tab === 'stocks' && (
         <Stocks
           articles={articles}

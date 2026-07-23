@@ -337,7 +337,7 @@ function PageContent({ module, onNavigate, inventaireArticleCode, onInventaireAr
     );
     case 'depots':              return <Inventaire activeTab="depots" />;
     case 'bons-mouvements':     return <Inventaire activeTab="bons-mouvements" />;
-    case 'demandes-chantier':   return <Inventaire activeTab="demandes-chantier" />;
+    case 'demandes-chantier':   return <Inventaire activeTab="demandes-chantier" onNavigate={onNavigate} />;
     case 'stocks':              return <Inventaire activeTab="stocks" />;
     case 'inventaire-physique': return <Inventaire activeTab="inventaire-physique" />;
     case 'affectation-materiel': return <Inventaire activeTab="affectation-materiel" />;

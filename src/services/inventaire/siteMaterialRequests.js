@@ -608,6 +608,89 @@ export async function cancelSiteMaterialRequest(id, reason = '', { ipAddress } =
   return normalizeRequest(data, enrichLinesWithStock(await loadLines(id)), await loadHistory(id));
 }
 
+/** Quantité manquante = demandé − préparé (à acheter / reste commande). */
+export function qtyMissingOnLine(line) {
+  return Math.max(0, (Number(line?.quantite_demandee) || 0) - (Number(line?.quantite_preparee) || 0));
+}
+
+/** Lignes restantes à couvrir (non préparées / rupture). */
+export function getSiteRequestMissingLines(siteRequest) {
+  return (siteRequest?.lines || [])
+    .filter((l) => Number(l.quantite_demandee) > 0)
+    .filter((l) => l.rupture || qtyMissingOnLine(l) > 0)
+    .map((l) => ({
+      ...l,
+      quantite_manquante: qtyMissingOnLine(l) || (l.rupture ? Number(l.quantite_demandee) || 0 : 0),
+    }))
+    .filter((l) => l.quantite_manquante > 0 || l.rupture);
+}
+
+/**
+ * Changement manuel de statut (magasinier / correction).
+ * `livree` déclenche la livraison complète (bon de sortie si articles liés).
+ */
+export async function setSiteMaterialRequestStatut(id, nextStatut, { reason = '', ipAddress } = {}) {
+  const allowed = [
+    'brouillon', 'soumise', 'en_preparation', 'preparation_partielle',
+    'en_attente_dg', 'validee_dg', 'prete', 'livree', 'annulee',
+  ];
+  if (!allowed.includes(nextStatut)) throw new Error('Statut invalide.');
+
+  if (nextStatut === 'livree') {
+    return deliverSiteMaterialRequest(id, { ipAddress });
+  }
+  if (nextStatut === 'annulee') {
+    return cancelSiteMaterialRequest(id, reason || 'Annulation manuelle', { ipAddress });
+  }
+  if (nextStatut === 'prete') {
+    return markSiteRequestReady(id, { ipAddress });
+  }
+
+  const user = await requireUser();
+  const actorName = await getProfileName(user.id);
+  const actorRole = await getProfileRole(user.id);
+  const { data, error } = await getSupabase().from(TABLE).update({
+    statut: nextStatut,
+    delivered_at: null,
+    updated_at: new Date().toISOString(),
+  }).eq('id', id).select().single();
+  if (error) throw error;
+  const label = siteRequestStatutLabel(nextStatut);
+  await logHistory(
+    id,
+    'statut_manuel',
+    reason ? `Statut → ${label} — ${reason}` : `Statut → ${label}`,
+    user.id,
+    actorName,
+    actorRole,
+    ipAddress,
+  );
+  return normalizeRequest(data, enrichLinesWithStock(await loadLines(id)), await loadHistory(id));
+}
+
+/**
+ * Contrôle livraison dérivé : none | a_livrer | livree
+ */
+export async function setSiteMaterialRequestLivraison(id, livraison, { ipAddress } = {}) {
+  if (livraison === 'livree') {
+    return deliverSiteMaterialRequest(id, { ipAddress });
+  }
+  if (livraison === 'a_livrer') {
+    return markSiteRequestReady(id, { ipAddress });
+  }
+  // Remettre en préparation (pas encore livrable)
+  return setSiteMaterialRequestStatut(id, 'en_preparation', {
+    reason: 'Livraison réinitialisée',
+    ipAddress,
+  });
+}
+
+export function siteRequestLivraisonValue(statut) {
+  if (statut === 'livree') return 'livree';
+  if (['prete', 'validee_dg'].includes(statut)) return 'a_livrer';
+  return 'none';
+}
+
 export async function deleteSiteMaterialRequest(id) {
   await requireUser();
   const req = await getSiteMaterialRequest(id);
