@@ -2,6 +2,7 @@
  * vehicleDailyReports.js — Comptes rendus journaliers / déplacements véhicule
  */
 import { getSupabase } from '../../lib/supabase';
+import { formatProfileDisplayName } from '../admin/users';
 import { updateVehicle } from './vehicles';
 
 const REPORTS = 'vehicle_daily_reports';
@@ -40,7 +41,7 @@ async function getProfileName(userId) {
     .eq('id', userId)
     .maybeSingle();
   if (!data) return '';
-  return [data.prenom, data.nom].filter(Boolean).join(' ').trim() || data.email || '';
+  return formatProfileDisplayName(data) || data.email || '';
 }
 
 export async function generateDailyReportRef() {

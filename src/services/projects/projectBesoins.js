@@ -2,6 +2,7 @@
  * projectBesoins.js — Demandes de ressources RH chantier (workflow complet)
  */
 import { getSupabase } from '../../lib/supabase';
+import { formatProfileDisplayName } from '../admin/users';
 import { listWorkersByProject } from '../rh/workerProjectAssignments';
 import { listAssignmentsByProject } from '../rh/subcontractors';
 import {
@@ -122,7 +123,7 @@ async function getProfileName(userId) {
     .eq('id', userId)
     .maybeSingle();
   if (!data) return '';
-  return [data.prenom, data.nom].filter(Boolean).join(' ').trim() || data.email || '';
+  return formatProfileDisplayName(data) || data.email || '';
 }
 
 async function loadHistory(needId) {

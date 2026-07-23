@@ -67,7 +67,10 @@ export function buildInitialLines(existingLines) {
   if (existingLines?.length) {
     const map = new Map(existingLines.map((l) => [`${l.category_id}|${l.article_name}`, l]));
     const base = buildDefaultCatalogLines().map((l) => map.get(`${l.category_id}|${l.article_name}`) || l);
-    const customs = existingLines.filter((l) => l.is_custom);
+    const baseKeys = new Set(base.map((l) => `${l.category_id}|${l.article_name}`));
+    const customs = existingLines.filter(
+      (l) => l.is_custom && !baseKeys.has(`${l.category_id}|${l.article_name}`),
+    );
     return [...base, ...customs];
   }
   return buildDefaultCatalogLines();
@@ -202,17 +205,31 @@ export default function SiteRequestForm({
   function addCustomLine() {
     const name = customName.trim();
     if (!name) return;
-    setLines((prev) => [...prev, {
-      category_id: 'autres',
-      article_name: name,
-      quantite_demandee: 1,
-      quantite_preparee: 0,
-      quantite_livree: 0,
-      unite: 'u',
-      remarque: '',
-      is_custom: true,
-      line_order: prev.length,
-    }]);
+    setLines((prev) => {
+      const key = `autres|${name}`;
+      const existingIdx = prev.findIndex(
+        (l) => `${l.category_id}|${l.article_name}` === key
+          || (l.is_custom && String(l.article_name || '').trim().toLowerCase() === name.toLowerCase()),
+      );
+      if (existingIdx >= 0) {
+        return prev.map((l, i) => (
+          i === existingIdx
+            ? { ...l, quantite_demandee: (Number(l.quantite_demandee) || 0) + 1 }
+            : l
+        ));
+      }
+      return [...prev, {
+        category_id: 'autres',
+        article_name: name,
+        quantite_demandee: 1,
+        quantite_preparee: 0,
+        quantite_livree: 0,
+        unite: 'u',
+        remarque: '',
+        is_custom: true,
+        line_order: prev.length,
+      }];
+    });
     setCustomName('');
     setOpenCats((prev) => new Set([...prev, 'autres']));
   }

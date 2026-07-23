@@ -2,6 +2,7 @@
  * resourceRequests.js — Demandes de ressources RH (workflow Chef projet ↔ RH)
  */
 import { getSupabase } from '../../lib/supabase';
+import { formatProfileDisplayName } from '../admin/users';
 import {
   syncProjectTeamFromRhRequests,
   listWorkersByProject,
@@ -91,7 +92,7 @@ async function getProfileName(userId) {
     .eq('id', userId)
     .maybeSingle();
   if (!data) return '';
-  return [data.prenom, data.nom].filter(Boolean).join(' ').trim() || data.email || '';
+  return formatProfileDisplayName(data) || data.email || '';
 }
 
 export async function generateResourceRequestRef() {

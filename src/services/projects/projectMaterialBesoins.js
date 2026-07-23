@@ -2,6 +2,7 @@
  * projectMaterialBesoins.js — Fiches besoins matériaux chantier (saisie libre)
  */
 import { getSupabase } from '../../lib/supabase';
+import { formatProfileDisplayName } from '../admin/users';
 import {
   materialBesoinStatutBadge,
   materialBesoinStatutLabel,
@@ -62,7 +63,7 @@ async function getProfileName(userId) {
     .eq('id', userId)
     .maybeSingle();
   if (!data) return '';
-  return [data.prenom, data.nom].filter(Boolean).join(' ').trim() || data.email || '';
+  return formatProfileDisplayName(data) || data.email || '';
 }
 
 async function loadLines(needId) {

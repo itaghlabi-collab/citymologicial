@@ -9,6 +9,7 @@ import {
 } from '../../constants/siteMaterialRequests';
 import { saveStockMovementBon } from './stockMovements';
 import { listStockArticles } from './stockArticles';
+import { formatProfileDisplayName, collapseDuplicatedFirstName } from '../admin/users';
 
 const TABLE = 'site_material_requests';
 const LINES = 'site_material_request_lines';
@@ -71,11 +72,60 @@ export function enrichLinesWithStock(lines, stockArticles = []) {
   });
 }
 
+/** Clé de dédoublonnage article (catégorie + désignation). */
+export function siteRequestLineKey(line) {
+  const cat = String(line?.category_id || '').trim().toLowerCase();
+  const name = String(line?.article_name || '').trim().toLowerCase();
+  return `${cat}|${name}`;
+}
+
+/**
+ * Fusionne les lignes en double (même article) — évite Colle x2 / Clips x2 à l'affichage et à l'enregistrement.
+ * Quantité demandée = max ; préparé / livré = somme plafonnée à la demande.
+ */
+export function mergeDuplicateSiteRequestLines(lines = []) {
+  const map = new Map();
+  (lines || []).forEach((line, idx) => {
+    const key = siteRequestLineKey(line);
+    if (!key || key === '|') return;
+    const existing = map.get(key);
+    if (!existing) {
+      map.set(key, { ...line, line_order: line.line_order ?? idx });
+      return;
+    }
+    const demandee = Math.max(Number(existing.quantite_demandee) || 0, Number(line.quantite_demandee) || 0);
+    const preparee = Math.min(
+      demandee,
+      (Number(existing.quantite_preparee) || 0) + (Number(line.quantite_preparee) || 0),
+    );
+    const livree = Math.min(
+      demandee,
+      (Number(existing.quantite_livree) || 0) + (Number(line.quantite_livree) || 0),
+    );
+    map.set(key, {
+      ...existing,
+      ...line,
+      id: existing.id || line.id,
+      quantite_demandee: demandee,
+      quantite_preparee: preparee,
+      quantite_livree: livree,
+      article_id: existing.article_id || line.article_id || null,
+      remarque: existing.remarque || line.remarque || null,
+      remarque_magasinier: existing.remarque_magasinier || line.remarque_magasinier || null,
+      is_custom: !!(existing.is_custom || line.is_custom),
+      line_order: Math.min(existing.line_order ?? idx, line.line_order ?? idx),
+    });
+  });
+  return [...map.values()];
+}
+
 function normalizeRequest(row, lines = [], history = []) {
   if (!row) return null;
-  const activeLines = (lines || []).filter((l) => Number(l.quantite_demandee) > 0 || l.is_custom);
+  const mergedLines = mergeDuplicateSiteRequestLines(lines);
+  const activeLines = mergedLines.filter((l) => Number(l.quantite_demandee) > 0 || l.is_custom);
   const totalArticles = activeLines.reduce((s, l) => s + (Number(l.quantite_demandee) || 0), 0);
   const distinctArticles = activeLines.length;
+  const fixName = (n) => collapseDuplicatedFirstName(n) || '';
   return {
     id: row.id,
     ref: row.ref_demande || '',
@@ -99,14 +149,17 @@ function normalizeRequest(row, lines = [], history = []) {
     movement_ref: row.movement_ref || '',
     montant_estime: Number(row.montant_estime) || 0,
     requested_by: row.requested_by,
-    requested_by_name: row.requested_by_name || '',
+    requested_by_name: fixName(row.requested_by_name),
     prepared_by: row.prepared_by,
-    prepared_by_name: row.prepared_by_name || '',
+    prepared_by_name: fixName(row.prepared_by_name),
     validated_dg_by: row.validated_dg_by,
-    validated_dg_name: row.validated_dg_name || '',
+    validated_dg_name: fixName(row.validated_dg_name),
     delivered_at: row.delivered_at,
-    lines,
-    history,
+    lines: mergedLines,
+    history: (history || []).map((h) => ({
+      ...h,
+      actor_name: fixName(h.actor_name),
+    })),
     total_articles: totalArticles,
     distinct_articles: distinctArticles,
     created_at: row.created_at,
@@ -128,7 +181,7 @@ async function getProfileName(userId) {
     .eq('id', userId)
     .maybeSingle();
   if (!data) return '';
-  return [data.prenom, data.nom].filter(Boolean).join(' ').trim() || data.email || '';
+  return formatProfileDisplayName(data) || data.email || '';
 }
 
 async function getProfileRole(userId) {
@@ -195,7 +248,7 @@ function needsDgValidation(priorite, montant) {
 }
 
 function toLineRows(requestId, lines, stockArticles) {
-  const enriched = enrichLinesWithStock(lines, stockArticles);
+  const enriched = enrichLinesWithStock(mergeDuplicateSiteRequestLines(lines), stockArticles);
   return enriched
     .filter((l) => Number(l.quantite_demandee) > 0 || l.is_custom)
     .map((l, idx) => ({

@@ -13,6 +13,34 @@ const TABLE = 'profiles';
 
 export const DISABLED_ACCOUNT_MSG = 'Compte désactivé, contactez l\'administrateur.';
 
+/**
+ * Affiche le nom d'un profil.
+ * `profiles.nom` est déjà le nom complet (voir profilePayloadFromForm) ;
+ * ne pas re-concaténer `prenom` + `nom` (sinon "ABDELKHALEK ABDELKHALEK JERRAR").
+ */
+export function formatProfileDisplayName(profile) {
+  if (!profile) return '';
+  const nom = String(profile.nom || '').trim();
+  const prenom = String(profile.prenom || '').trim();
+  if (nom && prenom) {
+    const n = nom.toLowerCase();
+    const p = prenom.toLowerCase();
+    if (n === p || n.startsWith(`${p} `) || n.includes(` ${p} `)) return nom;
+    return `${prenom} ${nom}`.trim();
+  }
+  return nom || prenom || profile.email || '';
+}
+
+/** Corrige un libellé déjà stocké du type "Prénom Prénom Nom". */
+export function collapseDuplicatedFirstName(fullName) {
+  const parts = String(fullName || '').trim().split(/\s+/).filter(Boolean);
+  if (parts.length < 2) return parts.join(' ');
+  if (parts[0].toLowerCase() === parts[1].toLowerCase()) {
+    return [parts[0], ...parts.slice(2)].join(' ');
+  }
+  return parts.join(' ');
+}
+
 export function isProfileActive(profile) {
   if (!profile) return true;
   return (profile.statut || 'actif') === 'actif';

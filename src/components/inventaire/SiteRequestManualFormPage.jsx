@@ -104,12 +104,27 @@ export default function SiteRequestManualFormPage({
       }))
       .filter((l) => l.article_name && l.quantite_demandee > 0);
 
-    if (!cleaned.length) {
+    // Fusionner les désignations en double (même nom)
+    const byName = new Map();
+    cleaned.forEach((l) => {
+      const key = l.article_name.toLowerCase();
+      const prev = byName.get(key);
+      if (!prev) {
+        byName.set(key, { ...l });
+        return;
+      }
+      prev.quantite_demandee = (Number(prev.quantite_demandee) || 0) + (Number(l.quantite_demandee) || 0);
+      prev.quantite_preparee = Math.max(Number(prev.quantite_preparee) || 0, Number(l.quantite_preparee) || 0);
+      prev.remarque = prev.remarque || l.remarque;
+    });
+    const merged = [...byName.values()].map((l, idx) => ({ ...l, line_order: idx }));
+
+    if (!merged.length) {
       setLocalError('Ajoutez au moins une ligne avec désignation et quantité.');
       return;
     }
-    setLines(cleaned);
-    onSave(submitAfter, cleaned);
+    setLines(merged);
+    onSave(submitAfter, merged);
   }
 
   const displayError = localError || error;
