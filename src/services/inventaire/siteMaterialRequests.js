@@ -412,6 +412,42 @@ export async function updateSiteMaterialRequest(id, form, lines = [], { ipAddres
   return normalizeRequest(data, enrichLinesWithStock(savedLines, stockArticles), await loadHistory(id));
 }
 
+/** Met à jour le récap (client, chefs, priorité…) sans toucher aux lignes — autorisé même si prête/livrée. */
+export async function updateSiteMaterialRequestHeader(id, fields = {}, { ipAddress } = {}) {
+  const user = await requireUser();
+  const actorName = await getProfileName(user.id);
+  const actorRole = await getProfileRole(user.id);
+  const existing = await getSiteMaterialRequest(id);
+  if (!existing) throw new Error('Demande introuvable.');
+  if (existing.statut === 'annulee') {
+    throw new Error('Demande annulée — modification impossible.');
+  }
+
+  const priorite = fields.priorite ?? existing.priorite;
+  const patch = {
+    client_name: fields.client_name != null ? String(fields.client_name).trim() : existing.client_name,
+    chef_projet: fields.chef_projet != null ? String(fields.chef_projet).trim() : existing.chef_projet,
+    chef_chantier: fields.chef_chantier != null ? String(fields.chef_chantier).trim() : existing.chef_chantier,
+    date_souhaitee: fields.date_souhaitee !== undefined ? (fields.date_souhaitee || null) : existing.date_souhaitee,
+    priorite: priorite || 'Normale',
+    observation: fields.observation !== undefined
+      ? (String(fields.observation || '').trim() || null)
+      : existing.observation,
+    requires_dg: needsDgValidation(priorite || existing.priorite, existing.montant_estime),
+    updated_at: new Date().toISOString(),
+  };
+
+  const { data, error } = await getSupabase().from(TABLE).update(patch).eq('id', id).select().single();
+  if (error) throw error;
+  await logHistory(id, 'modification', 'Récap demande modifié', user.id, actorName, actorRole, ipAddress);
+  const stockArticles = await listStockArticles().catch(() => []);
+  return normalizeRequest(
+    data,
+    enrichLinesWithStock(await loadLines(id), stockArticles),
+    await loadHistory(id),
+  );
+}
+
 export async function submitSiteMaterialRequest(id, { ipAddress } = {}) {
   const user = await requireUser();
   const req = await getSiteMaterialRequest(id);

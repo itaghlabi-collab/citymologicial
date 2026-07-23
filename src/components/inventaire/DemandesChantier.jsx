@@ -10,6 +10,7 @@ import { listProjects } from '../../services/projects/projects';
 import { listStockArticles } from '../../services/inventaire/stockArticles';
 import {
   SITE_REQUEST_STATUTS,
+  SITE_REQUEST_PRIORITES,
   siteRequestStatutColor,
   siteRequestPreparationStatut,
   siteRequestLivraisonStatut,
@@ -20,6 +21,7 @@ import {
   getSiteMaterialRequest,
   createSiteMaterialRequest,
   updateSiteMaterialRequest,
+  updateSiteMaterialRequestHeader,
   submitSiteMaterialRequest,
   prepareSiteMaterialRequest,
   requestDgValidation,
@@ -138,6 +140,7 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
   const [editId, setEditId] = useState(null);
   const [detail, setDetail] = useState(null);
   const [linkedDa, setLinkedDa] = useState(null);
+  const [detailRecap, setDetailRecap] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [lines, setLines] = useState(() => buildInitialLines());
 
@@ -252,11 +255,27 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
     }
   }
 
+  function syncDetailRecap(req) {
+    if (!req) {
+      setDetailRecap(null);
+      return;
+    }
+    setDetailRecap({
+      client_name: req.client_name || '',
+      chef_chantier: req.chef_chantier || '',
+      chef_projet: req.chef_projet || '',
+      priorite: req.priorite || 'Normale',
+      date_souhaitee: req.date_souhaitee || '',
+      observation: req.observation || '',
+    });
+  }
+
   async function openDetail(id) {
     setSaving(true);
     try {
       const req = await getSiteMaterialRequest(id);
       setDetail(req);
+      syncDetailRecap(req);
       const da = await findPurchaseRequestBySiteMaterialRequest(id).catch(() => null);
       setLinkedDa(da);
     } catch (err) {
@@ -269,6 +288,7 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
   function closeDetail() {
     setDetail(null);
     setLinkedDa(null);
+    setDetailRecap(null);
   }
 
   function closeForm() {
@@ -325,6 +345,7 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
       const updated = await fn(id);
       if (detail?.id === id) {
         setDetail(updated);
+        syncDetailRecap(updated);
         const da = await findPurchaseRequestBySiteMaterialRequest(id).catch(() => null);
         setLinkedDa(da);
       }
@@ -336,6 +357,30 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
     } finally {
       setSaving(false);
     }
+  }
+
+  async function handleSaveDetailRecap() {
+    if (!detail || !detailRecap) return;
+    if (detail.statut === 'annulee') {
+      setError('Demande annulée — modification impossible.');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      const updated = await updateSiteMaterialRequestHeader(detail.id, detailRecap);
+      setDetail(updated);
+      syncDetailRecap(updated);
+      await load();
+    } catch (err) {
+      setError(err.message || 'Erreur enregistrement récap.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  function setRecapField(key, value) {
+    setDetailRecap((prev) => (prev ? { ...prev, [key]: value } : prev));
   }
 
   async function handleStatutChange(id, nextStatut, currentStatut) {
@@ -927,40 +972,159 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
               </div>
             </header>
             <div className="rh-emp-docs-drawer-body">
-              <div className="rh-emp-docs-info-grid inv-dc-info-grid" style={{ marginBottom: 16 }}>
-                <div><div className="rh-emp-docs-info-label">Client</div><div className="rh-emp-docs-info-value">{detail.client_name || '—'}</div></div>
-                <div><div className="rh-emp-docs-info-label">Chef chantier</div><div className="rh-emp-docs-info-value">{detail.chef_chantier || '—'}</div></div>
-                <div><div className="rh-emp-docs-info-label">Priorité</div><div className="rh-emp-docs-info-value">{detail.priorite}</div></div>
-                <div>
-                  <div className="rh-emp-docs-info-label">Statut</div>
-                  {!embedded ? (
-                    <select
-                      value={detail.statut || ''}
-                      onChange={(e) => handleStatutChange(detail.id, e.target.value, detail.statut)}
-                      disabled={saving}
-                      style={{ ...SELECT_STYLE, marginTop: 4, fontWeight: 700, color: siteRequestStatutColor(detail.statut) }}
-                    >
-                      {SITE_REQUEST_STATUTS.map((s) => (
-                        <option key={s.value} value={s.value}>{s.label}</option>
-                      ))}
-                    </select>
-                  ) : (
-                    <div className="rh-emp-docs-info-value">{detail.statutLabel}</div>
+              {/* Récap demande — toujours visible, modifiable */}
+              <div
+                className="inv-dc-recap"
+                style={{
+                  marginBottom: 16,
+                  padding: '14px 16px',
+                  background: 'var(--surface-2, #F5F5F5)',
+                  border: '1px solid var(--border)',
+                  borderRadius: 10,
+                }}
+              >
+                <div style={{
+                  fontSize: '0.7rem', fontWeight: 800, color: 'var(--text-3)',
+                  textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 12,
+                }}
+                >
+                  Récapitulatif de la demande
+                </div>
+                <div className="rh-emp-docs-info-grid inv-dc-info-grid" style={{ marginBottom: 0 }}>
+                  <div>
+                    <div className="rh-emp-docs-info-label">Projet</div>
+                    <div className="rh-emp-docs-info-value">{detail.project_name || '—'}</div>
+                  </div>
+                  <div>
+                    <div className="rh-emp-docs-info-label">Client</div>
+                    {!embedded && detail.statut !== 'annulee' ? (
+                      <input
+                        value={detailRecap?.client_name || ''}
+                        onChange={(e) => setRecapField('client_name', e.target.value)}
+                        style={{ ...INPUT_STYLE, marginTop: 4 }}
+                        disabled={saving}
+                      />
+                    ) : (
+                      <div className="rh-emp-docs-info-value">{detail.client_name || '—'}</div>
+                    )}
+                  </div>
+                  <div>
+                    <div className="rh-emp-docs-info-label">Chef chantier</div>
+                    {!embedded && detail.statut !== 'annulee' ? (
+                      <input
+                        value={detailRecap?.chef_chantier || ''}
+                        onChange={(e) => setRecapField('chef_chantier', e.target.value)}
+                        style={{ ...INPUT_STYLE, marginTop: 4 }}
+                        disabled={saving}
+                      />
+                    ) : (
+                      <div className="rh-emp-docs-info-value">{detail.chef_chantier || '—'}</div>
+                    )}
+                  </div>
+                  <div>
+                    <div className="rh-emp-docs-info-label">Chef projet</div>
+                    {!embedded && detail.statut !== 'annulee' ? (
+                      <input
+                        value={detailRecap?.chef_projet || ''}
+                        onChange={(e) => setRecapField('chef_projet', e.target.value)}
+                        style={{ ...INPUT_STYLE, marginTop: 4 }}
+                        disabled={saving}
+                      />
+                    ) : (
+                      <div className="rh-emp-docs-info-value">{detail.chef_projet || '—'}</div>
+                    )}
+                  </div>
+                  <div>
+                    <div className="rh-emp-docs-info-label">Priorité</div>
+                    {!embedded && detail.statut !== 'annulee' ? (
+                      <select
+                        value={detailRecap?.priorite || 'Normale'}
+                        onChange={(e) => setRecapField('priorite', e.target.value)}
+                        style={{ ...SELECT_STYLE, marginTop: 4, fontWeight: 700 }}
+                        disabled={saving}
+                      >
+                        {SITE_REQUEST_PRIORITES.map((p) => (
+                          <option key={p} value={p}>{p}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div className="rh-emp-docs-info-value">{detail.priorite || '—'}</div>
+                    )}
+                  </div>
+                  <div>
+                    <div className="rh-emp-docs-info-label">Date souhaitée</div>
+                    {!embedded && detail.statut !== 'annulee' ? (
+                      <input
+                        type="date"
+                        value={detailRecap?.date_souhaitee || ''}
+                        onChange={(e) => setRecapField('date_souhaitee', e.target.value)}
+                        style={{ ...INPUT_STYLE, marginTop: 4 }}
+                        disabled={saving}
+                      />
+                    ) : (
+                      <div className="rh-emp-docs-info-value">{fmtDate(detail.date_souhaitee)}</div>
+                    )}
+                  </div>
+                  <div>
+                    <div className="rh-emp-docs-info-label">Statut</div>
+                    {!embedded ? (
+                      <select
+                        value={detail.statut || ''}
+                        onChange={(e) => handleStatutChange(detail.id, e.target.value, detail.statut)}
+                        disabled={saving}
+                        style={{ ...SELECT_STYLE, marginTop: 4, fontWeight: 700, color: siteRequestStatutColor(detail.statut) }}
+                      >
+                        {SITE_REQUEST_STATUTS.map((s) => (
+                          <option key={s.value} value={s.value}>{s.label}</option>
+                        ))}
+                      </select>
+                    ) : (
+                      <div className="rh-emp-docs-info-value">{detail.statutLabel}</div>
+                    )}
+                  </div>
+                  {!embedded && (
+                    <div>
+                      <div className="rh-emp-docs-info-label">Livraison</div>
+                      <select
+                        value={siteRequestLivraisonValue(detail.statut)}
+                        onChange={(e) => handleLivraisonChange(detail.id, e.target.value, detail.statut)}
+                        disabled={saving || detail.statut === 'annulee'}
+                        style={{ ...SELECT_STYLE, marginTop: 4, fontWeight: 700 }}
+                      >
+                        <option value="none">—</option>
+                        <option value="a_livrer">À livrer</option>
+                        <option value="livree">Livrée</option>
+                      </select>
+                    </div>
                   )}
                 </div>
-                {!embedded && (
-                  <div>
-                    <div className="rh-emp-docs-info-label">Livraison</div>
-                    <select
-                      value={siteRequestLivraisonValue(detail.statut)}
-                      onChange={(e) => handleLivraisonChange(detail.id, e.target.value, detail.statut)}
-                      disabled={saving || detail.statut === 'annulee'}
-                      style={{ ...SELECT_STYLE, marginTop: 4, fontWeight: 700 }}
+                <div style={{ marginTop: 12 }}>
+                  <div className="rh-emp-docs-info-label">Observation</div>
+                  {!embedded && detail.statut !== 'annulee' ? (
+                    <textarea
+                      rows={2}
+                      value={detailRecap?.observation || ''}
+                      onChange={(e) => setRecapField('observation', e.target.value)}
+                      style={{ ...INPUT_STYLE, marginTop: 4, resize: 'vertical', width: '100%' }}
+                      disabled={saving}
+                      placeholder="Notes / observation…"
+                    />
+                  ) : (
+                    <div className="rh-emp-docs-info-value" style={{ marginTop: 4 }}>
+                      {detail.observation || '—'}
+                    </div>
+                  )}
+                </div>
+                {!embedded && detail.statut !== 'annulee' && (
+                  <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm"
+                      disabled={saving}
+                      onClick={handleSaveDetailRecap}
                     >
-                      <option value="none">—</option>
-                      <option value="a_livrer">À livrer</option>
-                      <option value="livree">Livrée</option>
-                    </select>
+                      Enregistrer le récap
+                    </button>
                   </div>
                 )}
               </div>
@@ -1039,7 +1203,8 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                 </div>
               )}
 
-              {['soumise', 'en_preparation', 'preparation_partielle', 'en_attente_dg', 'validee_dg'].includes(detail.statut) && (
+              {/* Articles — toujours visibles (lecture seule si prête / livrée / annulée) */}
+              {(detail.lines || []).filter((l) => Number(l.quantite_demandee) > 0).length > 0 && (
                 <>
                   {canScanPreparation && (
                     <ArticleScanBar
@@ -1069,7 +1234,7 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                       {(detail.lines || []).filter((l) => Number(l.quantite_demandee) > 0).map((l) => {
                         const prepared = isLineFullyPrepared(l);
                         const avail = lineAvailabilityStatus(l);
-                        const locked = ['prete', 'livree', 'annulee'].includes(detail.statut);
+                        const locked = !['soumise', 'en_preparation', 'preparation_partielle', 'en_attente_dg', 'validee_dg'].includes(detail.statut);
                         return (
                         <tr key={l.id || `${l.category_id}-${l.article_name}`} style={prepared ? { background: '#F1F8E9' } : undefined}>
                           <td>
@@ -1156,7 +1321,7 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                   {(detail.lines || []).filter((l) => Number(l.quantite_demandee) > 0).map((l) => {
                     const prepared = isLineFullyPrepared(l);
                     const avail = lineAvailabilityStatus(l);
-                    const locked = ['prete', 'livree', 'annulee'].includes(detail.statut);
+                    const locked = !['soumise', 'en_preparation', 'preparation_partielle', 'en_attente_dg', 'validee_dg'].includes(detail.statut);
                     return (
                       <div
                         key={l.id || `m-${l.category_id}-${l.article_name}`}
@@ -1258,12 +1423,6 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                   })}
                 </div>
                 </>
-              )}
-
-              {detail.observation && (
-                <div style={{ marginBottom: 16, fontSize: '0.86rem' }}>
-                  <strong>Observation :</strong> {detail.observation}
-                </div>
               )}
 
               {detail.movement_ref && (
