@@ -79,6 +79,9 @@ function TxForm({ initial, onSave, onCancel, locked }) {
         <FField label="Date" required>
           <input type="date" value={form.date} onChange={(e) => set('date', e.target.value)} style={INPUT_STYLE} required disabled={locked} />
         </FField>
+        <FField label="Type">
+          <input value="Alimentation caisse" style={{ ...INPUT_STYLE, background: 'var(--surface-2)' }} readOnly disabled />
+        </FField>
         <FField label="Montant (MAD)" required>
           <input type="number" min="0" step="0.01" value={form.montant} onChange={(e) => set('montant', e.target.value)} style={INPUT_STYLE} required disabled={locked} />
         </FField>
@@ -412,7 +415,7 @@ export default function FeuilleCaisse() {
           </button>
           {canManage && canEditDay && (
             <button type="button" className="btn btn-primary" onClick={() => { setEditTx(null); setShowModal(true); }}>
-              <Plus size={15} /> Alimentation / Opération
+              <Plus size={15} /> Alimentation caisse
             </button>
           )}
         </div>
@@ -597,7 +600,7 @@ export default function FeuilleCaisse() {
         </div>
       )}
 
-      <Modal open={showModal} onClose={() => { setShowModal(false); setEditTx(null); }} title={editTx ? 'Modifier opération' : 'Nouvelle opération caisse'}>
+      <Modal open={showModal} onClose={() => { setShowModal(false); setEditTx(null); }} title={editTx ? 'Modifier alimentation caisse' : 'Nouvelle alimentation caisse'}>
         <TxForm
           initial={editTx || { ...EMPTY_TX, date: viewMode === 'day' ? selectedDate : todayStr }}
           onSave={handleSaveTx}
