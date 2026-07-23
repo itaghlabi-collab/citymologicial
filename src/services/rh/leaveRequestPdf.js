@@ -208,14 +208,58 @@ function drawValidationZone(doc, y) {
   return y + boxH + 16;
 }
 
+function drawRoundedBox(doc, x, y, w, h) {
+  doc.setDrawColor(...BORDER);
+  doc.setFillColor(255, 255, 255);
+  doc.setLineWidth(0.35);
+  if (typeof doc.roundedRect === 'function') {
+    doc.roundedRect(x, y, w, h, 3, 3, 'FD');
+  } else {
+    doc.rect(x, y, w, h, 'FD');
+  }
+}
+
+function drawLabeledLines(doc, x, y, w, rows, title) {
+  let cy = y + 7;
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(9);
+  doc.setTextColor(...RED);
+  doc.text(title, x + w / 2, cy, { align: 'center' });
+  cy += 8;
+
+  rows.forEach(([label, value]) => {
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(9);
+    doc.setTextColor(...TEXT);
+    doc.text(label, x + 5, cy);
+    const labelW = doc.getTextWidth(label) + 2;
+    const val = dash(value);
+    doc.setFont('helvetica', 'normal');
+    doc.setTextColor(...TEXT);
+    const maxValW = w - labelW - 12;
+    const lines = doc.splitTextToSize(val, maxValW);
+    doc.text(lines[0] || '—', x + 5 + labelW, cy);
+    // ligne de saisie sous la valeur
+    const lineY = cy + 1.5;
+    doc.setDrawColor(180, 180, 180);
+    doc.setLineWidth(0.2);
+    doc.line(x + 5 + labelW, lineY, x + w - 5, lineY);
+    cy += Math.max(8, lines.length * 4 + 4);
+  });
+
+  return cy + 4;
+}
+
 function resolveEmployee(leave, employee) {
   const emp = employee || leave?.employees || {};
   const prenom = emp.firstname || '';
   const nom = emp.lastname || '';
-  const full = [prenom, nom].filter(Boolean).join(' ').trim();
+  const full = [prenom, nom].filter(Boolean).join(' ').trim()
+    || (leave?.employe_label || leave?.employe || '');
+  const parts = full.trim().split(/\s+/).filter(Boolean);
   return {
-    prenom: dash(prenom || (full ? full.split(' ')[0] : '')),
-    nom: dash(nom || (full ? full.split(' ').slice(1).join(' ') : leave?.employe)),
+    prenom: dash(prenom || (parts[0] || '')),
+    nom: dash(nom || (parts.length > 1 ? parts.slice(1).join(' ') : '')),
     poste: dash(emp.poste),
     departement: dash(emp.department),
   };
@@ -273,14 +317,38 @@ export async function generateLeaveRequestPdf(leave, employee = null) {
 
   const empInfo = resolveEmployee(leave, employee);
   const statut = leave._statut || leave.statut || 'En attente';
+  const joursAccordes = leave.snap_jours_accordes != null ? leave.snap_jours_accordes : leave.jours;
+  const reliquatNouveau = leave.snap_reliquat_nouveau;
 
-  y = drawSectionTitle(doc, 'INFORMATIONS SALARIÉ', y);
-  y = drawTable(doc, [
-    ['Nom', empInfo.nom],
-    ['Prénom', empInfo.prenom],
-    ['Poste', empInfo.poste],
-    ['Département', empInfo.departement],
-  ], y);
+  // Deux blocs côte à côte (comme le formulaire)
+  const gap = 6;
+  const boxW = (CONTENT_W - gap) / 2;
+  const idRows = [
+    ['NOM :', empInfo.nom],
+    ['PRÉNOM :', empInfo.prenom],
+    ['FONCTION :', empInfo.poste],
+  ];
+  const rightsRows = [
+    ['JOURS TRAVAILLÉS :', leave.snap_jours_travailles],
+    ['JOURS FÉRIÉS :', leave.snap_jours_feries],
+    ['RELIQUAT ANCIEN :', leave.snap_reliquat_ancien],
+    ['DROIT AU CONGÉ :', leave.snap_droit_acquis],
+    ['JOURS CONSOMMÉS :', leave.snap_jours_consommes],
+    ['SOLDE DISPONIBLE :', leave.snap_solde_disponible],
+    ['JOURS ACCORDÉS :', joursAccordes],
+    ['RELIQUAT À NOUVEAU :', reliquatNouveau],
+  ];
+
+  const measureBoxH = (rows) => 7 + 8 + rows.length * 8 + 6;
+  const boxH = Math.max(measureBoxH(idRows), measureBoxH(rightsRows));
+
+  drawRoundedBox(doc, MARGIN, y, boxW, boxH);
+  drawLabeledLines(doc, MARGIN, y, boxW, idRows, "IDENTIFICATION DE L'EMPLOYÉ(E)");
+
+  drawRoundedBox(doc, MARGIN + boxW + gap, y, boxW, boxH);
+  drawLabeledLines(doc, MARGIN + boxW + gap, y, boxW, rightsRows, 'CALCUL DES DROITS');
+
+  y += boxH + 10;
 
   y = drawSectionTitle(doc, 'DÉTAILS DU CONGÉ', y);
   y = drawTable(doc, [
@@ -294,37 +362,22 @@ export async function generateLeaveRequestPdf(leave, employee = null) {
     ['Date de demande', fmtDateTime(leave.created_at)],
   ], y);
 
-  const { leaveTypeLabelForPdf } = await import('./leaveBalance');
-  const typePhrase = leaveTypeLabelForPdf(leave.type);
-  const joursAccordes = leave.snap_jours_accordes != null ? leave.snap_jours_accordes : leave.jours;
-  const reliquatNouveau = leave.snap_reliquat_nouveau;
-
-  y = drawSectionTitle(doc, 'DROITS DE CONGÉ', y);
-  const civilite = 'M./Mme';
-  const nomComplet = [empInfo.prenom, empInfo.nom].filter(Boolean).join(' ') || leave.employe || '—';
-  y = drawTable(doc, [
-    ['Décision', `Vu à ses droits de congé, il est accordé à ${civilite} ${nomComplet}`],
-    ['Nature', `Au titre d'un ${typePhrase} de : ${joursAccordes != null ? joursAccordes : '—'} jours`],
-    ['Période', `Allant du ${fmtDate(leave.dateDebut || leave.date_debut)} au ${fmtDate(leave.dateFin || leave.date_fin)}`],
-    ['Date de retour', fmtDate(leave.dateRetour || leave.date_retour)],
-    ['Reliquat à nouveau', reliquatNouveau != null ? `${reliquatNouveau} jours` : '—'],
-  ], y);
-
-  if (leave.balance_snapshot_at || leave.snap_solde_disponible != null) {
-    y = drawSectionTitle(doc, 'CALCUL DES DROITS', y);
+  try {
+    const { leaveTypeLabelForPdf } = await import('./leaveBalance');
+    const typePhrase = leaveTypeLabelForPdf(leave.type);
+    const civilite = 'M./Mme';
+    const nomComplet = [empInfo.prenom, empInfo.nom].filter((x) => x && x !== '—').join(' ')
+      || leave.employe
+      || '—';
+    y = drawSectionTitle(doc, 'DROITS DE CONGÉ', y);
     y = drawTable(doc, [
-      ['Jours travaillés', leave.snap_jours_travailles != null ? String(leave.snap_jours_travailles) : '—'],
-      ['Jours fériés', leave.snap_jours_feries != null ? String(leave.snap_jours_feries) : '—'],
-      ['Reliquat ancien', leave.snap_reliquat_ancien != null ? String(leave.snap_reliquat_ancien) : '—'],
-      ['Droit au congé', leave.snap_droit_acquis != null ? String(leave.snap_droit_acquis) : '—'],
-      ['Jours déjà consommés', leave.snap_jours_consommes != null ? String(leave.snap_jours_consommes) : '—'],
-      ['Solde avant demande', leave.snap_solde_disponible != null ? String(leave.snap_solde_disponible) : '—'],
-      ['Jours accordés', joursAccordes != null ? String(joursAccordes) : '—'],
-      ['Reliquat à nouveau', reliquatNouveau != null ? String(reliquatNouveau) : '—'],
-      ['Règle de calcul', leave.snap_regle_calcul || '—'],
-      ['Détail jours fériés', leave.snap_feries_detail || '—'],
+      ['Décision', `Vu à ses droits de congé, il est accordé à ${civilite} ${nomComplet}`],
+      ['Nature', `Au titre d'un ${typePhrase} de : ${joursAccordes != null ? joursAccordes : '—'} jours`],
+      ['Période', `Allant du ${fmtDate(leave.dateDebut || leave.date_debut)} au ${fmtDate(leave.dateFin || leave.date_fin)}`],
+      ['Date de retour', fmtDate(leave.dateRetour || leave.date_retour)],
+      ['Reliquat à nouveau', reliquatNouveau != null ? `${reliquatNouveau} jours` : '—'],
     ], y);
-  }
+  } catch { /* optionnel */ }
 
   drawValidationZone(doc, y);
 

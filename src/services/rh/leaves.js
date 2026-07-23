@@ -50,6 +50,12 @@ export function toLeaveRow(form, meta = {}) {
     statut = 'En attente',
   } = meta;
 
+  const numOrNull = (v) => {
+    if (v === '' || v == null) return null;
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  };
+
   return {
     employee_id: form.employee_id || null,
     employe_label: employeLabel || null,
@@ -61,6 +67,15 @@ export function toLeaveRow(form, meta = {}) {
     raison: form.raison?.trim() || null,
     statut,
     fichier_url: fichierUrl,
+    // Champs calcul des droits (saisie formulaire — lisibles détail / PDF)
+    snap_jours_travailles: numOrNull(form.jours_travailles),
+    snap_jours_feries: numOrNull(form.jours_feries),
+    snap_reliquat_ancien: numOrNull(form.reliquat_ancien),
+    snap_droit_acquis: numOrNull(form.droit_conge),
+    snap_jours_consommes: numOrNull(form.jours_consommes),
+    snap_solde_disponible: numOrNull(form.solde_avant),
+    snap_jours_accordes: numOrNull(form.jours_accordes) ?? (jours || null),
+    snap_reliquat_nouveau: numOrNull(form.reliquat_nouveau),
   };
 }
 
@@ -83,6 +98,21 @@ function isMissingCreatedByColumn(error) {
   return error?.code === '42703' || msg.includes('created_by');
 }
 
+function isMissingSnapColumn(error) {
+  const msg = String(error?.message || '');
+  return error?.code === 'PGRST204' || msg.includes('snap_') || msg.includes('schema cache');
+}
+
+function stripSnapFields(row) {
+  const next = { ...row };
+  Object.keys(next).forEach((k) => {
+    if (k.startsWith('snap_') || k === 'consumes_balance' || k === 'balance_snapshot_at') {
+      delete next[k];
+    }
+  });
+  return next;
+}
+
 async function insertLeaveRow(row) {
   const supabase = getSupabase();
   let attempt = await supabase.from(TABLE).insert([row]).select(LEAVE_SELECT).single();
@@ -91,6 +121,11 @@ async function insertLeaveRow(row) {
     console.warn('[CITYMO] leaves.created_by absent — exécutez migrations/20260525200000_leaves_rls_super_admin.sql');
     const { created_by: _drop, ...legacyRow } = row;
     attempt = await supabase.from(TABLE).insert([legacyRow]).select(LEAVE_SELECT).single();
+  }
+
+  if (attempt.error && isMissingSnapColumn(attempt.error)) {
+    console.warn('[CITYMO] leaves snap_* absent — exécutez supabase/RUN_LEAVE_BALANCE.sql');
+    attempt = await supabase.from(TABLE).insert([stripSnapFields(row)]).select(LEAVE_SELECT).single();
   }
 
   if (attempt.error) {
@@ -102,7 +137,7 @@ async function insertLeaveRow(row) {
 
 const LEAVE_SELECT = `
   *,
-  employees ( id, firstname, lastname, email )
+  employees ( id, firstname, lastname, email, poste, department, conges_reliquat, conges_jours_annuels, conges_annee_ref, conges_jours_travailles )
 `;
 
 export async function listLeaves() {
@@ -152,12 +187,23 @@ export async function createLeave(form, meta) {
 export async function updateLeave(id, form, meta) {
   await getAuthUserId();
 
-  const { data, error } = await getSupabase()
+  const row = toLeaveRow(form, meta);
+  let { data, error } = await getSupabase()
     .from(TABLE)
-    .update(toLeaveRow(form, meta))
+    .update(row)
     .eq('id', id)
     .select(LEAVE_SELECT)
     .single();
+
+  if (error && isMissingSnapColumn(error)) {
+    console.warn('[CITYMO] leaves snap_* absent — exécutez supabase/RUN_LEAVE_BALANCE.sql');
+    ({ data, error } = await getSupabase()
+      .from(TABLE)
+      .update(stripSnapFields(row))
+      .eq('id', id)
+      .select(LEAVE_SELECT)
+      .single());
+  }
 
   if (error) {
     console.error('[CITYMO] leaves update', error, { id, form, meta });

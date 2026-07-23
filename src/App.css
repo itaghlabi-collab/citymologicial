@@ -12304,7 +12304,7 @@ tbody tr:last-child td { border-bottom: none; }
     border-radius: 14px;
     padding: 32px;
     width: 100%;
-    max-width: 540px;
+    max-width: 780px;
     box-shadow: 0 8px 40px rgba(0, 0, 0, 0.2);
     max-height: 90vh;
     overflow-y: auto;
@@ -12357,6 +12357,79 @@ tbody tr:last-child td { border-bottom: none; }
 
   .rh-assign-modal-box footer .btn {
     min-height: 44px;
+  }
+}
+
+/* Congés — identification + calcul des droits (formulaire / détail) */
+.rh-leave-duo {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+}
+
+.rh-leave-box {
+  border: 1.5px solid var(--border, #d0d0d0);
+  border-radius: 12px;
+  padding: 14px 16px 12px;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.rh-leave-box-title {
+  text-align: center;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--red, #C62828);
+  margin-bottom: 4px;
+}
+
+.rh-leave-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 0.86rem;
+  margin: 0;
+}
+
+.rh-leave-line > span {
+  flex: 0 0 auto;
+  font-weight: 700;
+  color: var(--text, #222);
+  white-space: nowrap;
+}
+
+.rh-leave-line input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  border-bottom: 1px solid #bbb;
+  border-radius: 0;
+  background: transparent;
+  padding: 2px 4px;
+  font-size: 0.86rem;
+  font-family: var(--font-body);
+  outline: none;
+}
+
+.rh-leave-line input:focus {
+  border-bottom-color: var(--red, #C62828);
+}
+
+.rh-leave-box--readonly .rh-leave-line strong {
+  flex: 1;
+  font-weight: 600;
+  border-bottom: 1px solid #ddd;
+  padding: 2px 4px;
+  min-height: 1.2em;
+}
+
+@media (max-width: 768px) {
+  .rh-leave-duo {
+    grid-template-columns: 1fr;
   }
 }
 

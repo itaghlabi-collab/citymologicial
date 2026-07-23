@@ -106,18 +106,19 @@ export function useLeaves() {
     [visibleLeaves, filter],
   );
 
-  const buildMeta = useCallback((form, { jours, dateRetour, statut, fichierUrl }) => {
+  const buildMeta = useCallback((form, { jours, dateRetour, statut, fichierUrl, employeLabel }) => {
     const emp = employees.find((e) => e.id === form.employee_id);
+    const fromForm = [form.prenom, form.nom].filter(Boolean).join(' ').trim();
     return {
       jours,
       dateRetour,
-      employeLabel: employeeFullName(emp),
+      employeLabel: employeLabel || fromForm || employeeFullName(emp),
       statut,
       fichierUrl: fichierUrl ?? null,
     };
   }, [employees]);
 
-  const create = useCallback(async (form, { jours, dateRetour, fichierUrl }) => {
+  const create = useCallback(async (form, { jours, dateRetour, fichierUrl, employeLabel }) => {
     if (!user?.id) {
       const msg = 'Session expirée. Reconnectez-vous.';
       setError(msg);
@@ -127,7 +128,7 @@ export function useLeaves() {
     setSaving(true);
     setError(null);
     try {
-      await createLeave(form, buildMeta(form, { jours, dateRetour, fichierUrl }));
+      await createLeave(form, buildMeta(form, { jours, dateRetour, fichierUrl, employeLabel }));
       await load();
       return { success: true };
     } catch (err) {
@@ -140,7 +141,7 @@ export function useLeaves() {
     }
   }, [load, buildMeta, user?.id]);
 
-  const update = useCallback(async (id, form, { jours, dateRetour, statut, fichierUrl }) => {
+  const update = useCallback(async (id, form, { jours, dateRetour, statut, fichierUrl, employeLabel }) => {
     if (!user?.id) {
       const msg = 'Session expirée. Reconnectez-vous.';
       setError(msg);
@@ -150,7 +151,7 @@ export function useLeaves() {
     setSaving(true);
     setError(null);
     try {
-      await updateLeave(id, form, buildMeta(form, { jours, dateRetour, statut, fichierUrl }));
+      await updateLeave(id, form, buildMeta(form, { jours, dateRetour, statut, fichierUrl, employeLabel }));
       await load();
       return { success: true };
     } catch (err) {

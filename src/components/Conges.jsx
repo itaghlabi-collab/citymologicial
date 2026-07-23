@@ -1,4 +1,4 @@
-import { CalendarOff, Plus, CheckCircle, XCircle, Clock, X, Upload, User, Edit2, Trash2, FileDown } from 'lucide-react';
+import { CalendarOff, Plus, CheckCircle, XCircle, Clock, X, Upload, User, Edit2, Trash2, FileDown, Eye } from 'lucide-react';
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { useLeaves } from '../hooks/useLeaves';
 import { employeeFullName } from '../services/rh/leaves';
@@ -66,7 +66,26 @@ const EMPTY_FORM = {
   dateFin: '',
   raison: '',
   fichier: null,
+  // Identification (saisie / prérempli)
+  nom: '',
+  prenom: '',
+  fonction: '',
+  // Calcul des droits (saisie / prérempli)
+  jours_travailles: '',
+  jours_feries: '',
+  reliquat_ancien: '',
+  droit_conge: '',
+  jours_consommes: '',
+  solde_avant: '',
+  jours_accordes: '',
+  reliquat_nouveau: '',
 };
+
+function fmtNum(v) {
+  if (v == null || v === '') return '—';
+  const n = Number(v);
+  return Number.isFinite(n) ? String(n) : String(v);
+}
 
 export default function Conges() {
   const {
@@ -103,9 +122,10 @@ export default function Conges() {
   const [pdfLoadingId, setPdfLoadingId] = useState(null);
   const [jours, setJours] = useState(0);
   const [dateRetour, setDateRetour] = useState('');
-  const [rights, setRights] = useState(null);
+  const [detailLeave, setDetailLeave] = useState(null);
   const toastRef = useRef(null);
   const fileRef = useRef(null);
+  const skipRightsPrefill = useRef(false);
 
   function showToast(type, msg) {
     setToast({ type, msg });
@@ -120,6 +140,33 @@ export default function Conges() {
     return employees.find((e) => e.id === id) || myEmployee || null;
   }, [form.employee_id, employees, myEmployee, canManageLeaves]);
 
+  function fillIdentityFromEmployee(emp) {
+    if (!emp) return {};
+    return {
+      nom: emp.lastname || '',
+      prenom: emp.firstname || '',
+      fonction: emp.poste || '',
+    };
+  }
+
+  function rightsToFormPatch(preview, joursDemandes) {
+    if (!preview) {
+      return {
+        jours_accordes: joursDemandes != null ? String(joursDemandes) : '',
+      };
+    }
+    return {
+      jours_travailles: String(preview.joursTravailles ?? ''),
+      jours_feries: String(preview.joursFeries ?? ''),
+      reliquat_ancien: String(preview.reliquatAncien ?? ''),
+      droit_conge: String(preview.droitAcquis ?? ''),
+      jours_consommes: String(preview.joursConsommes ?? ''),
+      solde_avant: String(preview.soldeAvant ?? ''),
+      jours_accordes: String(preview.joursDemandes ?? joursDemandes ?? ''),
+      reliquat_nouveau: String(preview.reliquatNouveau ?? ''),
+    };
+  }
+
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -127,7 +174,6 @@ export default function Conges() {
         if (!cancelled) {
           setJours(0);
           setDateRetour('');
-          setRights(null);
         }
         return;
       }
@@ -136,8 +182,15 @@ export default function Conges() {
       if (cancelled) return;
       setJours(wd.days);
       setDateRetour(retour);
+
+      if (skipRightsPrefill.current) {
+        skipRightsPrefill.current = false;
+        return;
+      }
+
+      let preview = null;
       if (selectedEmployee) {
-        const preview = await computeLeaveRightsPreview({
+        preview = await computeLeaveRightsPreview({
           employee: selectedEmployee,
           type: form.type,
           dateDebut: form.dateDebut,
@@ -145,19 +198,30 @@ export default function Conges() {
           joursOverride: wd.days,
           excludeLeaveId: editingId,
         });
-        if (!cancelled) setRights(preview);
-      } else if (!cancelled) {
-        setRights(null);
       }
+      if (cancelled) return;
+      setForm((prev) => ({
+        ...prev,
+        ...rightsToFormPatch(preview, wd.days),
+      }));
     })();
     return () => { cancelled = true; };
   }, [form.dateDebut, form.dateFin, form.type, selectedEmployee, editingId]);
 
+  // Identité préremplie depuis le salarié (modifiable ensuite)
+  useEffect(() => {
+    if (!selectedEmployee) return;
+    setForm((prev) => ({ ...prev, ...fillIdentityFromEmployee(selectedEmployee) }));
+  }, [selectedEmployee?.id]);
+
   function openModal() {
     setEditingId(null);
+    skipRightsPrefill.current = false;
+    const emp = canManageLeaves ? null : myEmployee;
     setForm({
       ...EMPTY_FORM,
       employee_id: canManageLeaves ? '' : (myEmployee?.id || ''),
+      ...fillIdentityFromEmployee(emp),
     });
     setExistingFichierUrl(null);
     setErrors({});
@@ -168,6 +232,8 @@ export default function Conges() {
   function openEdit(r) {
     if (!canEdit(r)) return;
     setEditingId(r.id);
+    skipRightsPrefill.current = true;
+    const emp = employees.find((e) => e.id === r.employee_id) || r.employees;
     setForm({
       employee_id: r.employee_id || '',
       type: r.type || 'Conge annuel',
@@ -175,11 +241,26 @@ export default function Conges() {
       dateFin: r.date_fin || r.dateFin || '',
       raison: r.raison || '',
       fichier: null,
+      nom: emp?.lastname || '',
+      prenom: emp?.firstname || '',
+      fonction: emp?.poste || '',
+      jours_travailles: r.snap_jours_travailles != null ? String(r.snap_jours_travailles) : '',
+      jours_feries: r.snap_jours_feries != null ? String(r.snap_jours_feries) : '',
+      reliquat_ancien: r.snap_reliquat_ancien != null ? String(r.snap_reliquat_ancien) : '',
+      droit_conge: r.snap_droit_acquis != null ? String(r.snap_droit_acquis) : '',
+      jours_consommes: r.snap_jours_consommes != null ? String(r.snap_jours_consommes) : '',
+      solde_avant: r.snap_solde_disponible != null ? String(r.snap_solde_disponible) : '',
+      jours_accordes: r.snap_jours_accordes != null ? String(r.snap_jours_accordes) : String(r.jours ?? ''),
+      reliquat_nouveau: r.snap_reliquat_nouveau != null ? String(r.snap_reliquat_nouveau) : '',
     });
     setExistingFichierUrl(r.fichier_url || null);
     setErrors({});
     setFormError(null);
     setShowModal(true);
+  }
+
+  function openDetail(r) {
+    setDetailLeave(r);
   }
 
   function closeModal() {
@@ -222,13 +303,23 @@ export default function Conges() {
 
     const submitForm = resolveSubmitForm();
     const wd = await countWorkingDaysAsync(submitForm.dateDebut, submitForm.dateFin);
-    const joursCalc = wd.days;
+    const joursSaisis = Number(submitForm.jours_accordes);
+    const joursCalc = Number.isFinite(joursSaisis) && submitForm.jours_accordes !== ''
+      ? joursSaisis
+      : wd.days;
     const dateRetourCalc = await nextWorkingDayAsync(submitForm.dateFin);
     const fichierUrl = submitForm.fichier
       ? submitForm.fichier.name
       : (editingId ? existingFichierUrl : null);
+    const employeLabel = [submitForm.prenom, submitForm.nom].filter(Boolean).join(' ').trim()
+      || employeeFullName(selectedEmployee);
 
-    const payload = { jours: joursCalc, dateRetour: dateRetourCalc, fichierUrl };
+    const payload = {
+      jours: joursCalc,
+      dateRetour: dateRetourCalc,
+      fichierUrl,
+      employeLabel,
+    };
 
     let result;
     try {
@@ -481,6 +572,15 @@ export default function Conges() {
                       <button
                         type="button"
                         className="btn btn-ghost btn-sm"
+                        title="Voir détail"
+                        aria-label="Voir détail"
+                        onClick={() => openDetail(r)}
+                      >
+                        <Eye size={16} />
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-ghost btn-sm"
                         title="Telecharger PDF"
                         aria-label="Voir justificatif"
                         onClick={() => handleDownloadPdf(r)}
@@ -608,6 +708,14 @@ export default function Conges() {
                             )}
                             <button
                               type="button"
+                              title="Voir détail"
+                              onClick={() => openDetail(r)}
+                              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-2)', padding: 4 }}
+                            >
+                              <Eye size={15} />
+                            </button>
+                            <button
+                              type="button"
                               title="Telecharger PDF"
                               onClick={() => handleDownloadPdf(r)}
                               disabled={saving || pdfLoadingId === r.id}
@@ -731,43 +839,81 @@ export default function Conges() {
                 </div>
               </div>
 
-              {/* Auto-calculated info + calcul des droits */}
+              {/* Auto-calculated summary */}
               {form.dateDebut && form.dateFin && jours > 0 && (
-                <div style={{ background: '#F3F4F6', borderRadius: 8, padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
-                    <div>
-                      <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginBottom: 2 }}>Jours demandes</div>
-                      <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.2rem', color: 'var(--red)' }}>{jours} jour{jours > 1 ? 's' : ''}</div>
-                    </div>
-                    <div>
-                      <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginBottom: 2 }}>Date de retour au travail</div>
-                      <div style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '1rem', color: 'var(--text)' }}>{dateRetour}</div>
-                    </div>
+                <div style={{ background: '#F3F4F6', borderRadius: 8, padding: '12px 14px', display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+                  <div>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginBottom: 2 }}>Jours (calendrier)</div>
+                    <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.1rem', color: 'var(--red)' }}>{jours} jour{jours > 1 ? 's' : ''}</div>
                   </div>
-                  {rights && leaveTypeConsumesBalance(form.type) && (
-                    <div style={{ borderTop: '1px solid var(--border)', paddingTop: 10 }}>
-                      <div style={{ fontSize: '0.68rem', fontWeight: 800, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 8 }}>
-                        Calcul des droits
-                      </div>
-                      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', gap: 8, fontSize: '0.8rem' }}>
-                        <div><span style={{ color: 'var(--text-3)' }}>Jours travaillés</span><div style={{ fontWeight: 700 }}>{rights.joursTravailles}</div></div>
-                        <div><span style={{ color: 'var(--text-3)' }}>Jours fériés</span><div style={{ fontWeight: 700 }}>{rights.joursFeries}</div></div>
-                        <div><span style={{ color: 'var(--text-3)' }}>Reliquat ancien</span><div style={{ fontWeight: 700 }}>{rights.reliquatAncien}</div></div>
-                        <div><span style={{ color: 'var(--text-3)' }}>Droit au congé</span><div style={{ fontWeight: 700 }}>{rights.droitAcquis}</div></div>
-                        <div><span style={{ color: 'var(--text-3)' }}>Jours consommés</span><div style={{ fontWeight: 700 }}>{rights.joursConsommes}</div></div>
-                        <div><span style={{ color: 'var(--text-3)' }}>Solde disponible</span><div style={{ fontWeight: 700 }}>{rights.soldeAvant}</div></div>
-                        <div><span style={{ color: 'var(--text-3)' }}>Jours demandés</span><div style={{ fontWeight: 700 }}>{rights.joursDemandes}</div></div>
-                        <div><span style={{ color: 'var(--text-3)' }}>Reliquat estimé</span><div style={{ fontWeight: 700, color: rights.depasseSolde ? 'var(--red)' : 'var(--text)' }}>{rights.reliquatNouveau}</div></div>
-                      </div>
-                      {rights.depasseSolde && (
-                        <div style={{ marginTop: 8, color: '#C62828', fontSize: '0.8rem', fontWeight: 600 }}>
-                          Attention : la demande dépasse le solde disponible.
-                        </div>
-                      )}
+                  <div>
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginBottom: 2 }}>Date de retour au travail</div>
+                    <div style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '1rem', color: 'var(--text)' }}>{dateRetour}</div>
+                  </div>
+                </div>
+              )}
+
+              {/* Identification + Calcul des droits — saisie simple */}
+              <div className="rh-leave-duo">
+                <div className="rh-leave-box">
+                  <div className="rh-leave-box-title">Identification de l&apos;employé(e)</div>
+                  <label className="rh-leave-line">
+                    <span>Nom :</span>
+                    <input type="text" value={form.nom} onChange={(e) => setF('nom', e.target.value)} />
+                  </label>
+                  <label className="rh-leave-line">
+                    <span>Prénom :</span>
+                    <input type="text" value={form.prenom} onChange={(e) => setF('prenom', e.target.value)} />
+                  </label>
+                  <label className="rh-leave-line">
+                    <span>Fonction :</span>
+                    <input type="text" value={form.fonction} onChange={(e) => setF('fonction', e.target.value)} />
+                  </label>
+                </div>
+                <div className="rh-leave-box">
+                  <div className="rh-leave-box-title">Calcul des droits</div>
+                  <label className="rh-leave-line">
+                    <span>Jours travaillés :</span>
+                    <input type="number" step="0.5" value={form.jours_travailles} onChange={(e) => setF('jours_travailles', e.target.value)} />
+                  </label>
+                  <label className="rh-leave-line">
+                    <span>Jours fériés :</span>
+                    <input type="number" step="0.5" value={form.jours_feries} onChange={(e) => setF('jours_feries', e.target.value)} />
+                  </label>
+                  <label className="rh-leave-line">
+                    <span>Reliquat ancien :</span>
+                    <input type="number" step="0.5" value={form.reliquat_ancien} onChange={(e) => setF('reliquat_ancien', e.target.value)} />
+                  </label>
+                  <label className="rh-leave-line">
+                    <span>Droit au congé :</span>
+                    <input type="number" step="0.5" value={form.droit_conge} onChange={(e) => setF('droit_conge', e.target.value)} />
+                  </label>
+                  <label className="rh-leave-line">
+                    <span>Jours consommés :</span>
+                    <input type="number" step="0.5" value={form.jours_consommes} onChange={(e) => setF('jours_consommes', e.target.value)} />
+                  </label>
+                  <label className="rh-leave-line">
+                    <span>Solde disponible :</span>
+                    <input type="number" step="0.5" value={form.solde_avant} onChange={(e) => setF('solde_avant', e.target.value)} />
+                  </label>
+                  <label className="rh-leave-line">
+                    <span>Jours accordés :</span>
+                    <input type="number" step="0.5" value={form.jours_accordes} onChange={(e) => setF('jours_accordes', e.target.value)} />
+                  </label>
+                  <label className="rh-leave-line">
+                    <span>Reliquat à nouveau :</span>
+                    <input type="number" step="0.5" value={form.reliquat_nouveau} onChange={(e) => setF('reliquat_nouveau', e.target.value)} />
+                  </label>
+                  {leaveTypeConsumesBalance(form.type)
+                    && form.solde_avant !== ''
+                    && form.jours_accordes !== ''
+                    && Number(form.jours_accordes) > Number(form.solde_avant) + 1e-9 && (
+                    <div style={{ marginTop: 6, color: '#C62828', fontSize: '0.8rem', fontWeight: 600 }}>
+                      Attention : la demande dépasse le solde disponible.
                     </div>
                   )}
                 </div>
-              )}
+              </div>
 
               {/* Raison */}
               <div className="form-group">
@@ -812,6 +958,71 @@ export default function Conges() {
                 </button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {/* Détail — même lecture que le formulaire / PDF */}
+      {detailLeave && (
+        <div className="rh-leave-modal-overlay" onClick={() => setDetailLeave(null)}>
+          <div className="rh-leave-modal-box" onClick={(e) => e.stopPropagation()} style={{ maxWidth: 720 }}>
+            <div className="flex-between" style={{ marginBottom: 16 }}>
+              <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.15rem', textTransform: 'uppercase', letterSpacing: '0.03em', margin: 0 }}>
+                Détail demande de congé
+              </h2>
+              <button type="button" onClick={() => setDetailLeave(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)' }} aria-label="Fermer">
+                <X size={20} />
+              </button>
+            </div>
+
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, marginBottom: 14, fontSize: '0.85rem', color: 'var(--text-2)' }}>
+              <span className={`badge ${STATUS_BADGE[detailLeave._statut] || 'badge-grey'}`}>{STATUS_LABEL[detailLeave._statut] || detailLeave._statut}</span>
+              <span>{detailLeave.type || '—'}</span>
+              <span>Du {detailLeave.dateDebut || '—'} au {detailLeave.dateFin || '—'}</span>
+              <span>{detailLeave.jours != null ? `${detailLeave.jours} j` : ''}</span>
+            </div>
+
+            {(() => {
+              const emp = employees.find((e) => e.id === detailLeave.employee_id) || detailLeave.employees;
+              const nom = emp?.lastname || detailLeave.employe || '—';
+              const prenom = emp?.firstname || '—';
+              const fonction = emp?.poste || '—';
+              return (
+                <div className="rh-leave-duo">
+                  <div className="rh-leave-box rh-leave-box--readonly">
+                    <div className="rh-leave-box-title">Identification de l&apos;employé(e)</div>
+                    <div className="rh-leave-line"><span>Nom :</span><strong>{nom}</strong></div>
+                    <div className="rh-leave-line"><span>Prénom :</span><strong>{prenom}</strong></div>
+                    <div className="rh-leave-line"><span>Fonction :</span><strong>{fonction}</strong></div>
+                  </div>
+                  <div className="rh-leave-box rh-leave-box--readonly">
+                    <div className="rh-leave-box-title">Calcul des droits</div>
+                    <div className="rh-leave-line"><span>Jours travaillés :</span><strong>{fmtNum(detailLeave.snap_jours_travailles)}</strong></div>
+                    <div className="rh-leave-line"><span>Jours fériés :</span><strong>{fmtNum(detailLeave.snap_jours_feries)}</strong></div>
+                    <div className="rh-leave-line"><span>Reliquat ancien :</span><strong>{fmtNum(detailLeave.snap_reliquat_ancien)}</strong></div>
+                    <div className="rh-leave-line"><span>Droit au congé :</span><strong>{fmtNum(detailLeave.snap_droit_acquis)}</strong></div>
+                    <div className="rh-leave-line"><span>Jours consommés :</span><strong>{fmtNum(detailLeave.snap_jours_consommes)}</strong></div>
+                    <div className="rh-leave-line"><span>Solde disponible :</span><strong>{fmtNum(detailLeave.snap_solde_disponible)}</strong></div>
+                    <div className="rh-leave-line"><span>Jours accordés :</span><strong>{fmtNum(detailLeave.snap_jours_accordes ?? detailLeave.jours)}</strong></div>
+                    <div className="rh-leave-line"><span>Reliquat à nouveau :</span><strong>{fmtNum(detailLeave.snap_reliquat_nouveau)}</strong></div>
+                  </div>
+                </div>
+              );
+            })()}
+
+            {detailLeave.raison ? (
+              <div style={{ marginTop: 14, fontSize: '0.88rem' }}>
+                <div style={{ color: 'var(--text-3)', fontSize: '0.75rem', marginBottom: 4 }}>Motif</div>
+                <div>{detailLeave.raison}</div>
+              </div>
+            ) : null}
+
+            <div className="rh-leave-modal-footer" style={{ position: 'static' }}>
+              <button type="button" className="btn btn-secondary" onClick={() => setDetailLeave(null)}>Fermer</button>
+              <button type="button" className="btn btn-primary" onClick={() => handleDownloadPdf(detailLeave)} disabled={pdfLoadingId === detailLeave.id}>
+                <FileDown size={14} /> PDF
+              </button>
+            </div>
           </div>
         </div>
       )}
