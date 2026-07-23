@@ -4,7 +4,7 @@ import {
 } from 'lucide-react';
 import { getSubcontractorAccount } from '../services/rh/subcontractorAccount';
 import { updateSubcontractorPayment, deleteSubcontractorPayment } from '../services/rh/subcontractors';
-import { closeSituation, SITUATION_STATUS_LABEL } from '../services/rh/subcontractorSituations';
+import { closeSituation, updateSituation, SITUATION_STATUS_LABEL } from '../services/rh/subcontractorSituations';
 import { createGlobalAdvance, cancelGlobalAdvance } from '../services/rh/subcontractorAdvances';
 import { PAYMENT_METHODS } from '../services/rh/subcontractorConstants';
 import { exportSubcontractorPaymentPdf } from '../services/rh/subcontractorPaymentPdf';
@@ -70,6 +70,9 @@ export default function SituationSousTraitantCompte({
     observation: '',
   });
   const [advSaving, setAdvSaving] = useState(false);
+  const [projectPick, setProjectPick] = useState(null); // legacy: { projectName, payments[] }
+  const [sitEdit, setSitEdit] = useState(null); // V2 situation form
+  const [sitSaving, setSitSaving] = useState(false);
 
   const load = useCallback(async () => {
     if (accountOverride) {
@@ -154,6 +157,86 @@ export default function SituationSousTraitantCompte({
       onNotify?.('error', formatSupabaseError(err, 'Erreur modification.'));
     } finally {
       setEditSaving(false);
+    }
+  }
+
+  function openLegacyProjectEdit(legacyRow) {
+    const ids = new Set(legacyRow.paymentIds || []);
+    const list = (account?.payments || []).filter((p) => ids.has(p.id));
+    if (list.length === 1) {
+      openEdit(list[0]);
+      return;
+    }
+    if (list.length === 0) {
+      onNotify?.('error', 'Aucun paiement à modifier pour ce projet.');
+      return;
+    }
+    setProjectPick({ projectName: legacyRow.projectName, payments: list });
+  }
+
+  function openSituationEdit(s) {
+    if (s.status === 'closed') {
+      onNotify?.('error', 'Situation clôturée — non modifiable.');
+      return;
+    }
+    setSitEdit({
+      id: s.id,
+      reference: s.reference || '',
+      designation: s.designation || '',
+      grossAmount: String(s.grossAmount ?? ''),
+      avancesImputees: String(s.avancesImputees ?? ''),
+      retenues: String(s.retenues ?? ''),
+      amountPaid: String(s.amountPaid ?? ''),
+      status: s.status || 'in_progress',
+      notes: s.notes || '',
+      paymentType: s.paymentType || 'metre',
+      quantity: String(s.quantity ?? ''),
+      unit: s.unit || '',
+      unitPrice: String(s.unitPrice ?? ''),
+      projectId: s.projectId || '',
+      assignmentId: s.assignmentId || null,
+      situationDate: s.situationDate || '',
+    });
+  }
+
+  async function handleSituationSave(e) {
+    e.preventDefault();
+    if (!sitEdit?.id) return;
+    setSitSaving(true);
+    try {
+      const gross = Math.max(0, Number(sitEdit.grossAmount) || 0);
+      const av = Math.min(Math.max(0, Number(sitEdit.avancesImputees) || 0), gross);
+      const ret = Math.max(0, Number(sitEdit.retenues) || 0);
+      await updateSituation(sitEdit.id, subcontractorId, {
+        ...sitEdit,
+        grossAmount: gross,
+        avancesImputees: av,
+        retenues: ret,
+        amountPaid: Math.max(0, Number(sitEdit.amountPaid) || 0),
+        quantity: Number(sitEdit.quantity) || 0,
+        unitPrice: Number(sitEdit.unitPrice) || 0,
+      });
+      // Recaler le paiement lié si présent (même formule net)
+      const linked = (account?.payments || []).find((p) => p.situationId === sitEdit.id);
+      if (linked) {
+        const payload = buildSubcontractorPaymentUpdatePayload(
+          paymentToEditForm({
+            ...linked,
+            grossAmount: gross,
+            avances: av,
+            retenues: ret,
+          }),
+          { projectId: linked.projectId, assignmentId: linked.assignmentId },
+        );
+        await updateSubcontractorPayment(linked.id, payload, linked.subcontractorId);
+      }
+      onNotify?.('success', 'Situation mise à jour.');
+      setSitEdit(null);
+      await load();
+    } catch (err) {
+      onNotify?.('error', formatSupabaseError(err, 'Erreur modification situation.'));
+    } finally {
+      setSitSaving(false);
     }
   }
 
@@ -362,11 +445,18 @@ export default function SituationSousTraitantCompte({
                         <td data-label="Créée">{fmtDate(s.situationDate || s.created_at)}</td>
                         <td data-label="Clôture">{fmtDate(s.closedAt)}</td>
                         <td data-label="Actions">
-                          {s.status === 'settled' && (
-                            <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleCloseSituation(s)}>
-                              <Lock size={12} /> Clôturer
-                            </button>
-                          )}
+                          <div className="payment-row-actions">
+                            {s.status !== 'closed' && (
+                              <button type="button" className="btn btn-secondary btn-sm" onClick={() => openSituationEdit(s)}>
+                                <Pencil size={12} /> Modifier
+                              </button>
+                            )}
+                            {s.status === 'settled' && (
+                              <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleCloseSituation(s)}>
+                                <Lock size={12} /> Clôturer
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -387,6 +477,11 @@ export default function SituationSousTraitantCompte({
                       <div><dt>Payé</dt><dd>{fmtMAD(s.amountPaid)}</dd></div>
                       <div><dt>Reste</dt><dd>{fmtMAD(s.remaining)}</dd></div>
                     </dl>
+                    {s.status !== 'closed' && (
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => openSituationEdit(s)} style={{ marginRight: 6 }}>
+                        Modifier
+                      </button>
+                    )}
                     {s.status === 'settled' && (
                       <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleCloseSituation(s)}>Clôturer</button>
                     )}
@@ -399,7 +494,7 @@ export default function SituationSousTraitantCompte({
               <table>
                 <thead>
                   <tr>
-                    <th>Projet</th><th>Travaux</th><th>Avances</th><th>Retenues</th><th>Net payé</th><th>Solde</th><th>Statut</th>
+                    <th>Projet</th><th>Travaux</th><th>Avances</th><th>Retenues</th><th>Net payé</th><th>Solde</th><th>Statut</th><th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -412,12 +507,20 @@ export default function SituationSousTraitantCompte({
                       <td style={{ color: '#2E7D32' }}>{fmtMAD(s.totalPaye)}</td>
                       <td>{fmtMAD(s.soldeRestant)}</td>
                       <td>{s.statutLabel}</td>
+                      <td>
+                        {(s.paymentIds || []).length > 0 && (
+                          <button type="button" className="btn btn-secondary btn-sm" onClick={() => openLegacyProjectEdit(s)}>
+                            <Pencil size={12} /> Modifier
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
               <p style={{ fontSize: '0.8rem', color: 'var(--text-3)', marginTop: 10 }}>
-                Exécutez <code>RUN_SUBCONTRACTOR_ACCOUNT_V2.sql</code> pour activer les situations multi-projets détaillées.
+                Les avances affichées sont plafonnées au montant des travaux. Pour corriger une ligne, utilisez Modifier (ouvre le paiement).
+                Exécutez <code>RUN_SUBCONTRACTOR_ACCOUNT_V2.sql</code> pour les situations multi-projets détaillées.
               </p>
             </div>
           )}
@@ -607,6 +710,9 @@ export default function SituationSousTraitantCompte({
         <div className="rh-ext-modal-overlay">
           <div className="card rh-ext-modal-box rh-ext-modal-box--md">
             <form onSubmit={handleEditSave}>
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-3)', marginTop: 0 }}>
+                L’avance est plafonnée au montant brut à l’enregistrement (net = brut − avances − retenues).
+              </p>
               <SubcontractorPaymentEditForm form={editForm} setF={(f, v) => setEditForm((p) => ({ ...p, [f]: v }))} formErr={editFormErr} />
               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16, flexWrap: 'wrap' }}>
                 <button
@@ -619,6 +725,69 @@ export default function SituationSousTraitantCompte({
                 </button>
                 <button type="button" className="btn btn-secondary" onClick={() => { setEditRecord(null); setEditForm(null); }}>Annuler</button>
                 <button type="submit" className="btn btn-primary" disabled={editSaving}>Enregistrer</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {projectPick && (
+        <div className="rh-ext-modal-overlay">
+          <div className="card rh-ext-modal-box rh-ext-modal-box--md">
+            <div className="flex-between" style={{ marginBottom: 12 }}>
+              <h2 style={{ margin: 0, fontFamily: 'var(--font-head)', fontWeight: 800 }}>
+                Modifier — {projectPick.projectName}
+              </h2>
+              <button type="button" onClick={() => setProjectPick(null)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
+            </div>
+            <p style={{ fontSize: '0.85rem', color: 'var(--text-3)' }}>Choisissez le paiement à corriger (avances, retenues, brut…).</p>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {projectPick.payments.map((p) => (
+                <button
+                  key={p.id}
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ justifyContent: 'flex-start', textAlign: 'left' }}
+                  onClick={() => {
+                    setProjectPick(null);
+                    openEdit(p);
+                  }}
+                >
+                  {fmtDate(p.paymentDate)} · Brut {fmtMAD(p.grossAmount)} · Avance {fmtMAD(p.avances)} · Net {fmtMAD(p.amount)}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {sitEdit && (
+        <div className="rh-ext-modal-overlay">
+          <div className="card rh-ext-modal-box rh-ext-modal-box--md">
+            <div className="flex-between" style={{ marginBottom: 12 }}>
+              <h2 style={{ margin: 0, fontFamily: 'var(--font-head)', fontWeight: 800 }}>Modifier la situation</h2>
+              <button type="button" onClick={() => setSitEdit(null)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
+            </div>
+            <form onSubmit={handleSituationSave} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <label>Référence<input value={sitEdit.reference} onChange={(e) => setSitEdit((p) => ({ ...p, reference: e.target.value }))} /></label>
+              <label>Désignation<input value={sitEdit.designation} onChange={(e) => setSitEdit((p) => ({ ...p, designation: e.target.value }))} /></label>
+              <label>Montant brut (MAD)<input type="number" min="0" step="0.01" value={sitEdit.grossAmount} onChange={(e) => setSitEdit((p) => ({ ...p, grossAmount: e.target.value }))} /></label>
+              <label>Avance imputée (MAD)<input type="number" min="0" step="0.01" value={sitEdit.avancesImputees} onChange={(e) => setSitEdit((p) => ({ ...p, avancesImputees: e.target.value }))} /></label>
+              <label>Retenues (MAD)<input type="number" min="0" step="0.01" value={sitEdit.retenues} onChange={(e) => setSitEdit((p) => ({ ...p, retenues: e.target.value }))} /></label>
+              <label>Net déjà payé (MAD)<input type="number" min="0" step="0.01" value={sitEdit.amountPaid} onChange={(e) => setSitEdit((p) => ({ ...p, amountPaid: e.target.value }))} /></label>
+              <label>Statut
+                <select value={sitEdit.status} onChange={(e) => setSitEdit((p) => ({ ...p, status: e.target.value }))}>
+                  {Object.entries(SITUATION_STATUS_LABEL).filter(([k]) => k !== 'closed').map(([k, lab]) => (
+                    <option key={k} value={k}>{lab}</option>
+                  ))}
+                </select>
+              </label>
+              <p style={{ fontSize: '0.78rem', color: 'var(--text-3)', margin: 0 }}>
+                Avance plafonnée au brut. Net = max(0, brut − avance − retenues).
+              </p>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setSitEdit(null)}>Annuler</button>
+                <button type="submit" className="btn btn-primary" disabled={sitSaving}>{sitSaving ? '…' : 'Enregistrer'}</button>
               </div>
             </form>
           </div>

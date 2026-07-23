@@ -25,8 +25,9 @@ export function calcSubPaymentAmount(type, line) {
 /** Montant brut, avances, retenues, net pour une ligne sous-traitant */
 export function calcSubPaymentTotals(paymentType, line) {
   const gross = calcSubPaymentAmount(paymentType, line);
-  const avances = round2(Number(line.avances) || 0);
-  const retenues = round2(Number(line.retenues) || 0);
+  // Avance imputée plafonnée au brut (jamais de conso > travaux de la ligne)
+  const avances = round2(Math.min(Math.max(0, Number(line.avances) || 0), gross));
+  const retenues = round2(Math.max(0, Number(line.retenues) || 0));
   const net = round2(Math.max(0, gross - avances - retenues));
   return { gross, avances, retenues, net };
 }

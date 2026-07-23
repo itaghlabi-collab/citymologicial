@@ -22,6 +22,13 @@ function isPaid(p) {
   return (p.status || 'paid') === 'paid';
 }
 
+/** Avance imputée effective : ne peut pas dépasser le brut de la ligne. */
+export function effectivePaymentAdvance(p) {
+  const gross = Math.max(0, Number(p?.grossAmount) || 0);
+  const av = Math.max(0, Number(p?.avances) || 0);
+  return round2(Math.min(av, gross));
+}
+
 function safeList(promise, fallback = []) {
   return promise.catch(() => fallback);
 }
@@ -47,14 +54,38 @@ export function buildAccountKpis({
   );
   const montantsPayes = round2(paid.reduce((s, p) => s + (Number(p.amount) || 0), 0));
   const advSummary = summarizeAdvances(advances);
-  const avancesImputeesPaiements = round2(all.reduce((s, p) => s + (Number(p.avances) || 0), 0));
-  const avancesConsommees = advances.length
-    ? advSummary.avancesConsommees
-    : avancesImputeesPaiements;
-  const avancesVersees = advances.length
-    ? advSummary.avancesVersees
-    : avancesImputeesPaiements;
-  const reliquatAvance = advances.length ? advSummary.reliquatAvance : 0;
+  const activeAdvances = (advances || []).filter((a) => (a.status || 'unused') !== 'cancelled');
+  const hasGlobalAdvances = activeAdvances.length > 0;
+
+  // Imputations issues des paiements : plafonnées au brut (évite 5 000 sur 2 250)
+  const avancesImputeesEffectives = round2(
+    situations.length
+      ? situations.reduce((s, x) => {
+        const g = Math.max(0, Number(x.grossAmount) || 0);
+        const a = Math.max(0, Number(x.avancesImputees) || 0);
+        return s + Math.min(a, g);
+      }, 0)
+      : all.reduce((s, p) => s + effectivePaymentAdvance(p), 0),
+  );
+
+  let avancesVersees;
+  let avancesConsommees;
+  let reliquatAvance;
+
+  if (hasGlobalAdvances) {
+    avancesVersees = advSummary.avancesVersees;
+    // Conso = max(ledger, imputations paiements), plafonnée aux versées
+    avancesConsommees = round2(Math.min(
+      avancesVersees,
+      Math.max(advSummary.avancesConsommees, avancesImputeesEffectives),
+    ));
+    reliquatAvance = round2(Math.max(0, avancesVersees - avancesConsommees));
+  } else {
+    // Sans avances globales enregistrées : champs paiement = imputations plafonnées au brut
+    avancesConsommees = avancesImputeesEffectives;
+    avancesVersees = avancesImputeesEffectives;
+    reliquatAvance = 0;
+  }
 
   const resteFromSituations = round2(
     situations
@@ -112,6 +143,7 @@ export function buildProjectSituations({ payments = [], balances = [], assignmen
         paymentCount: 0,
         assignmentStatus: null,
         lastDate: null,
+        paymentIds: [],
       });
     }
     return map.get(key);
@@ -129,11 +161,14 @@ export function buildProjectSituations({ payments = [], balances = [], assignmen
   (payments || []).forEach((p) => {
     const row = ensure(p.projectId, p.projectName);
     if (p.projectName) row.projectName = p.projectName;
-    row.totalTravaux = round2(row.totalTravaux + (Number(p.grossAmount) || 0));
-    row.totalAvances = round2(row.totalAvances + (Number(p.avances) || 0));
+    const gross = Number(p.grossAmount) || 0;
+    const avEff = effectivePaymentAdvance(p);
+    row.totalTravaux = round2(row.totalTravaux + gross);
+    row.totalAvances = round2(row.totalAvances + avEff);
     row.totalRetenues = round2(row.totalRetenues + (Number(p.retenues) || 0));
     if (isPaid(p)) row.totalPaye = round2(row.totalPaye + (Number(p.amount) || 0));
     row.paymentCount += 1;
+    if (p.id) row.paymentIds.push(p.id);
     const d = p.paymentDate || p.created_at;
     if (d && (!row.lastDate || String(d) > String(row.lastDate))) row.lastDate = d;
   });

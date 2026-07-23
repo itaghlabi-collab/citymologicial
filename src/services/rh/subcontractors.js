@@ -234,8 +234,8 @@ function toPaymentRow(form, subcontractorId) {
   if (!grossAmount) {
     grossAmount = paymentType === 'metre' ? round2(quantity * unitPrice) : round2(Number(form.amount) || 0);
   }
-  const avances = round2(Number(form.avances) || 0);
-  const retenues = round2(Number(form.retenues) || 0);
+  const avances = round2(Math.min(Math.max(0, Number(form.avances) || 0), grossAmount));
+  const retenues = round2(Math.max(0, Number(form.retenues) || 0));
   const net = round2(Math.max(0, grossAmount - avances - retenues));
   const row = {
     subcontractor_id: subcontractorId,
