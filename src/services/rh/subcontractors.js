@@ -139,6 +139,7 @@ export function normalizePayment(row) {
     description: row.description || '',
     status: row.status || 'paid',
     notes: row.notes || '',
+    situationId: row.situation_id || null,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
@@ -251,6 +252,7 @@ function toPaymentRow(form, subcontractorId) {
     description: emptyToNull(form.lineDescription?.trim()) || emptyToNull(form.description?.trim()),
     status: form.status || 'paid',
     notes: emptyToNull(form.notes?.trim()),
+    situation_id: emptyToNull(form.situationId) || null,
   };
 }
 

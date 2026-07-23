@@ -11,6 +11,8 @@ export const FINANCE_SOURCE_TYPES = {
   /** @deprecated Lignes hebdo — supprimées au profit de worker_payment. */
   WORKER_WEEKLY_PAYMENT: 'worker_weekly_payment',
   SUBCONTRACTOR_PAYMENT: 'subcontractor_payment',
+  /** Avance globale sous-traitant — 1 avance = 1 écriture caisse (idempotente). */
+  SUBCONTRACTOR_ADVANCE: 'subcontractor_advance',
   CHARGE: 'charge',
   PAYMENT_ORDER: 'payment_order',
   CUSTOMER_INVOICE_PAYMENT: 'customer_invoice_payment',
@@ -21,6 +23,7 @@ export const SOURCE_TYPE_LABELS = {
   worker_payment: 'Paiement ouvrier',
   worker_weekly_payment: 'Paiement ouvrier',
   subcontractor_payment: 'Paiement sous-traitant',
+  subcontractor_advance: 'Avance sous-traitant',
   charge: 'Charge',
   payment_order: 'Ordre paiement',
   customer_invoice_payment: 'Facture client',
@@ -31,6 +34,7 @@ export const SOURCE_MODULE_LABELS = {
   worker_payment: 'Paiement hebdomadaire',
   worker_weekly_payment: 'Paiement hebdomadaire',
   subcontractor_payment: 'Paiement sous-traitants',
+  subcontractor_advance: 'Avances sous-traitants',
   charge: 'Charges',
   payment_order: 'Ordres de paiement',
   customer_invoice_payment: 'Factures clients',
@@ -70,7 +74,8 @@ export function isSubcontractorEntityPaid(entity) {
 function isRhPaymentSourceType(sourceType) {
   return sourceType === FINANCE_SOURCE_TYPES.WORKER_PAYMENT
     || sourceType === FINANCE_SOURCE_TYPES.WORKER_WEEKLY_PAYMENT
-    || sourceType === FINANCE_SOURCE_TYPES.SUBCONTRACTOR_PAYMENT;
+    || sourceType === FINANCE_SOURCE_TYPES.SUBCONTRACTOR_PAYMENT
+    || sourceType === FINANCE_SOURCE_TYPES.SUBCONTRACTOR_ADVANCE;
 }
 
 const CATEGORY_NAMES = {
@@ -189,6 +194,8 @@ function isSourceActive(sourceType, entity) {
       return isPayrollEntityPaid(entity);
     case FINANCE_SOURCE_TYPES.SUBCONTRACTOR_PAYMENT:
       return isSubcontractorEntityPaid(entity);
+    case FINANCE_SOURCE_TYPES.SUBCONTRACTOR_ADVANCE:
+      return isSubcontractorEntityPaid(entity);
     case FINANCE_SOURCE_TYPES.CUSTOMER_INVOICE_PAYMENT:
       return Number(entity.montant) > 0;
     default:
@@ -292,6 +299,20 @@ function buildTransactionRow(sourceType, entity) {
         montant: Number(entity.amount ?? entity.montant) || 0,
         mode_paiement: mapPaymentMode(entity.paymentMethod),
         project_id: asUuidOrNull(entity.projectId),
+        ref_operation: entity.reference || null,
+        source_module: 'rh',
+        category_id: entity.category_id || null,
+      };
+    case FINANCE_SOURCE_TYPES.SUBCONTRACTOR_ADVANCE:
+      return {
+        date_operation: entity.paymentDate || entity.advanceDate || new Date().toISOString().slice(0, 10),
+        sens: 'sortie',
+        type_operation: 'autre_sortie',
+        contrepartie: entity.subcontractorName || entity.contrepartie || 'Sous-traitant',
+        description: entity.description || entity.observation || 'Avance sous-traitant',
+        montant: Number(entity.amount ?? entity.montant) || 0,
+        mode_paiement: mapPaymentMode(entity.paymentMethod),
+        project_id: null,
         ref_operation: entity.reference || null,
         source_module: 'rh',
         category_id: entity.category_id || null,
@@ -455,6 +476,7 @@ const PAYMENT_NOTIFY_TYPES = new Set([
   FINANCE_SOURCE_TYPES.WORKER_PAYMENT,
   FINANCE_SOURCE_TYPES.WORKER_WEEKLY_PAYMENT,
   FINANCE_SOURCE_TYPES.SUBCONTRACTOR_PAYMENT,
+  FINANCE_SOURCE_TYPES.SUBCONTRACTOR_ADVANCE,
   FINANCE_SOURCE_TYPES.PAYMENT_ORDER,
   FINANCE_SOURCE_TYPES.CHARGE,
 ]);
@@ -539,6 +561,9 @@ export async function syncFinanceTransaction(sourceType, sourceId, options = {})
     built.category_id = rhCats.worker;
   }
   if (sourceType === FINANCE_SOURCE_TYPES.SUBCONTRACTOR_PAYMENT && !built.category_id) {
+    built.category_id = rhCats.subcontractor;
+  }
+  if (sourceType === FINANCE_SOURCE_TYPES.SUBCONTRACTOR_ADVANCE && !built.category_id) {
     built.category_id = rhCats.subcontractor;
   }
 

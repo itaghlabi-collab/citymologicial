@@ -12446,3 +12446,113 @@ tbody tr:last-child td { border-bottom: none; }
     display: flex !important;
   }
 }
+
+/* ═══ Situation sous-traitants — compte / calcul / responsive ═══ */
+.st-calcul-page .st-calcul-section { margin-bottom: 16px; padding: 18px 20px; }
+.st-calcul-section-title {
+  font-family: var(--font-head);
+  font-weight: 800;
+  font-size: 1rem;
+  margin: 0 0 14px;
+}
+.st-calcul-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 12px 14px;
+}
+.st-calcul-grid label,
+.st-calcul-section label {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 0.78rem;
+  color: var(--text-2);
+  font-weight: 600;
+}
+.st-calcul-grid input,
+.st-calcul-grid select,
+.st-calcul-section input,
+.st-calcul-section select {
+  font-weight: 500;
+  color: var(--text);
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--bg);
+}
+.st-calcul-span2 { grid-column: span 2; }
+.st-calcul-meta-label { font-size: 0.72rem; color: var(--text-3); text-transform: uppercase; }
+.st-calcul-meta-value { font-weight: 700; margin-top: 2px; }
+.st-calcul-kpi-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.st-calcul-kpi-row > div {
+  background: var(--surface-2, #f5f5f5);
+  border-radius: 10px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.st-calcul-kpi-row span { font-size: 0.72rem; color: var(--text-3); }
+.st-calcul-advance-modes { display: flex; flex-direction: column; gap: 8px; }
+.st-calcul-radio {
+  display: flex !important;
+  flex-direction: row !important;
+  align-items: center;
+  gap: 8px !important;
+  font-weight: 500 !important;
+}
+.st-calcul-result-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.st-calcul-result-grid > div {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.st-calcul-result-grid span { font-size: 0.75rem; color: var(--text-3); }
+.st-calcul-actions { display: flex; gap: 10px; justify-content: flex-end; flex-wrap: wrap; }
+
+.st-mobile-cards { display: none; }
+.st-desktop-only { display: block; }
+
+.st-situation-card {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 12px 14px;
+  margin-bottom: 10px;
+  background: var(--bg);
+}
+.st-situation-card header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.st-situation-card p { margin: 0 0 8px; font-size: 0.85rem; color: var(--text-2); }
+.st-situation-card dl {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 10px;
+  margin: 0 0 10px;
+}
+.st-situation-card dt { font-size: 0.7rem; color: var(--text-3); }
+.st-situation-card dd { margin: 0; font-weight: 700; font-size: 0.88rem; }
+
+.st-compte-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+
+@media (max-width: 900px) {
+  .st-calcul-span2 { grid-column: span 1; }
+  .st-calcul-kpi-row { grid-template-columns: 1fr; }
+  .st-desktop-only { display: none !important; }
+  .st-mobile-cards { display: flex; flex-direction: column; }
+  .st-compte-kpi .stat-card .stat-value { font-size: 0.85rem !important; }
+}
