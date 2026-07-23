@@ -6,6 +6,7 @@ import { employeeFullName } from '../rh/employees';
 import { PURCHASE_ASSIGNEE, normalizePurchaseStatus } from '../../constants/purchaseWorkflow';
 import { listProjectsForSelect } from '../projects/projects';
 import { isGroupedPurchaseRequest, groupedProjectLabel } from './purchaseGrouped';
+import { getSiteRequestMissingLines } from '../inventaire/siteMaterialRequests';
 
 const TABLE = 'purchase_requests';
 const ACHATS_DEPARTMENT_ID = 3;
@@ -273,15 +274,8 @@ export async function findPurchaseRequestBySiteMaterialRequest(siteRequestId) {
 export async function createPurchaseRequestFromSiteRuptures(siteRequest, { refresh = false } = {}) {
   if (!siteRequest?.id) return null;
 
-  const lines = (siteRequest.lines || []).filter((l) => Number(l.quantite_demandee) > 0);
-  const deficitLines = lines.filter((l) => {
-    const qty = Number(l.quantite_demandee) || 0;
-    const prep = Number(l.quantite_preparee) || 0;
-    return l.rupture || prep < qty;
-  }).map((l) => {
-    const manque = Math.max(0, (Number(l.quantite_demandee) || 0) - (Number(l.quantite_preparee) || 0));
-    return { ...l, quantite_manquante: manque || (l.rupture ? Number(l.quantite_demandee) || 0 : 0) };
-  }).filter((l) => l.quantite_manquante > 0);
+  // Uniquement demandé − préparé > 0 (pas le flag rupture seul)
+  const deficitLines = getSiteRequestMissingLines(siteRequest);
 
   if (!deficitLines.length) {
     const existingEmpty = await findPurchaseRequestBySiteMaterialRequest(siteRequest.id);
@@ -293,7 +287,7 @@ export async function createPurchaseRequestFromSiteRuptures(siteRequest, { refre
   )).join('\n');
 
   const description = [
-    'Demande d\'achat — reste de commande / rupture stock (demande chantier).',
+    'Demande d\'achat — reste de commande (articles non préparés / non disponibles).',
     '',
     `Demande chantier : ${siteRequest.ref}`,
     `Projet : ${siteRequest.project_name || '—'}`,

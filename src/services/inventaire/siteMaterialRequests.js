@@ -649,16 +649,18 @@ export function qtyMissingOnLine(line) {
   return Math.max(0, (Number(line?.quantite_demandee) || 0) - (Number(line?.quantite_preparee) || 0));
 }
 
-/** Lignes restantes à couvrir (non préparées / rupture). */
+/**
+ * Lignes vraiment à acheter : uniquement si demandé > préparé.
+ * Le flag `rupture` n'ajoute plus une ligne si le magasinier a déjà couvert le besoin (ex. clips 1/1).
+ */
 export function getSiteRequestMissingLines(siteRequest) {
   return (siteRequest?.lines || [])
     .filter((l) => Number(l.quantite_demandee) > 0)
-    .filter((l) => l.rupture || qtyMissingOnLine(l) > 0)
     .map((l) => ({
       ...l,
-      quantite_manquante: qtyMissingOnLine(l) || (l.rupture ? Number(l.quantite_demandee) || 0 : 0),
+      quantite_manquante: qtyMissingOnLine(l),
     }))
-    .filter((l) => l.quantite_manquante > 0 || l.rupture);
+    .filter((l) => l.quantite_manquante > 0);
 }
 
 /**
