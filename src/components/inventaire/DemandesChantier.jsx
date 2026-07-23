@@ -646,8 +646,8 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
         </div>
       ) : (
         <div className="card inv-dc-list-card" style={{ padding: 0 }}>
-          <div className="table-wrap inv-dc-desktop" style={{ overflowX: 'auto' }}>
-            <table style={{ minWidth: embedded ? 900 : 1100 }}>
+          <div className="table-wrap table-wrap--wide inv-dc-desktop">
+            <table>
               <thead>
                 <tr>
                   <th>Référence</th>
@@ -656,7 +656,6 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                   <th>Nb articles</th>
                   <th>Qté totale</th>
                   <th>Magasinier</th>
-                  <th>Validation DG</th>
                   <th>Date souhaitée</th>
                   <th>Préparation</th>
                   <th>Livraison</th>
@@ -668,17 +667,20 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                 {filtered.map((r) => (
                   <tr key={r.id}>
                     <td data-label="Référence">
-                      <strong>{r.ref}</strong>
-                      {isManualSiteRequest(r) && (
-                        <span className="badge badge-orange" style={{ marginLeft: 8, fontSize: '0.68rem' }}>Demande manuelle</span>
-                      )}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
+                        <span style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.82rem', color: 'var(--red)' }}>
+                          {r.ref}
+                        </span>
+                        {isManualSiteRequest(r) && (
+                          <span className="badge badge-orange" style={{ fontSize: '0.68rem' }}>Demande manuelle</span>
+                        )}
+                      </div>
                     </td>
                     {!embedded && <td data-label="Projet">{r.project_name || '—'}</td>}
                     <td data-label="Client">{r.client_name || '—'}</td>
                     <td data-label="Nb articles">{r.distinct_articles}</td>
                     <td data-label="Qté totale">{r.total_articles}</td>
                     <td data-label="Magasinier">{r.prepared_by_name || '—'}</td>
-                    <td data-label="Validation DG">{r.validated_dg_name || (r.requires_dg ? 'En attente' : '—')}</td>
                     <td data-label="Date souhaitée">{fmtDate(r.date_souhaitee)}</td>
                     <td data-label="Préparation">
                       <span className={`badge ${prepBadgeClass(r.statut)}`}>
@@ -691,7 +693,16 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                           value={siteRequestLivraisonValue(r.statut)}
                           onChange={(e) => handleLivraisonChange(r.id, e.target.value, r.statut)}
                           disabled={saving || r.statut === 'annulee'}
-                          style={{ ...SELECT_STYLE, minWidth: 110, fontSize: '0.78rem', fontWeight: 700, padding: '4px 8px' }}
+                          className={`badge ${livBadgeClass(r.statut)}`}
+                          style={{
+                            border: '1px solid var(--border)',
+                            borderRadius: 999,
+                            padding: '3px 8px',
+                            fontSize: '0.72rem',
+                            fontWeight: 700,
+                            background: 'transparent',
+                            cursor: saving ? 'wait' : 'pointer',
+                          }}
                           aria-label="Livraison"
                         >
                           <option value="none">—</option>
@@ -705,45 +716,49 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                       )}
                     </td>
                     <td data-label="Statut">
-                      {!embedded ? (
-                        <select
-                          value={r.statut || ''}
-                          onChange={(e) => handleStatutChange(r.id, e.target.value, r.statut)}
-                          disabled={saving}
-                          style={{
-                            ...SELECT_STYLE,
-                            minWidth: 140,
-                            fontSize: '0.78rem',
-                            fontWeight: 700,
-                            padding: '4px 8px',
-                            color: siteRequestStatutColor(r.statut),
-                          }}
-                          aria-label="Statut"
-                        >
-                          {SITE_REQUEST_STATUTS.map((s) => (
-                            <option key={s.value} value={s.value}>{s.label}</option>
-                          ))}
-                        </select>
-                      ) : (
-                        <span className="badge" style={{ background: `${siteRequestStatutColor(r.statut)}22`, color: siteRequestStatutColor(r.statut) }}>
-                          {r.statutLabel}
-                        </span>
-                      )}
-                      {!embedded && getSiteRequestMissingLines(r).length > 0 && (
-                        <button
-                          type="button"
-                          className="btn btn-ghost btn-sm"
-                          title="Reste commande → demande d'achat"
-                          onClick={() => handleCreateDaFromMissing(r)}
-                          disabled={saving}
-                          style={{ marginTop: 4, color: '#E65100', fontSize: '0.72rem', fontWeight: 700 }}
-                        >
-                          <ShoppingCart size={12} /> Reste → DA
-                        </button>
-                      )}
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-start' }}>
+                        {!embedded ? (
+                          <select
+                            value={r.statut || ''}
+                            onChange={(e) => handleStatutChange(r.id, e.target.value, r.statut)}
+                            disabled={saving}
+                            style={{
+                              border: '1px solid var(--border)',
+                              borderRadius: 999,
+                              padding: '3px 10px',
+                              fontSize: '0.72rem',
+                              fontWeight: 700,
+                              background: `${siteRequestStatutColor(r.statut)}18`,
+                              color: siteRequestStatutColor(r.statut),
+                              cursor: saving ? 'wait' : 'pointer',
+                            }}
+                            aria-label="Statut"
+                          >
+                            {SITE_REQUEST_STATUTS.map((s) => (
+                              <option key={s.value} value={s.value}>{s.label}</option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className="badge" style={{ background: `${siteRequestStatutColor(r.statut)}22`, color: siteRequestStatutColor(r.statut) }}>
+                            {r.statutLabel}
+                          </span>
+                        )}
+                        {!embedded && getSiteRequestMissingLines(r).length > 0 && (
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            title="Reste commande → demande d'achat"
+                            onClick={() => handleCreateDaFromMissing(r)}
+                            disabled={saving}
+                            style={{ color: '#E65100', fontSize: '0.72rem', fontWeight: 700, padding: '2px 4px' }}
+                          >
+                            <ShoppingCart size={12} /> Reste → DA
+                          </button>
+                        )}
+                      </div>
                     </td>
                     <td data-label="Actions">
-                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, minWidth: 120 }}>
+                      <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, minWidth: 88 }}>
                         {getRowActions(r, rowHandlers, { embedded }).map((action) => {
                           const Icon = action.icon;
                           return (
