@@ -2,7 +2,11 @@
  * subcontractors.js — Sous-traitants CRUD + affectations + prestations + paiements
  */
 import { getSupabase } from '../../lib/supabase';
-import { syncFinanceTransaction, FINANCE_SOURCE_TYPES } from '../finance/financeSync';
+import {
+  syncFinanceTransaction,
+  removeLinkedFinanceTransaction,
+  FINANCE_SOURCE_TYPES,
+} from '../finance/financeSync';
 
 const SUB_TABLE = 'subcontractors';
 const ASSIGN_TABLE = 'subcontractor_project_assignments';
@@ -769,6 +773,20 @@ export async function updateSubcontractorPayment(id, form, subcontractorId) {
   };
   await syncSubcontractorPaymentToCash(payment);
   return payment;
+}
+
+/** Supprime un paiement + la ligne caisse liée (idempotent source_type/source_id). */
+export async function deleteSubcontractorPayment(id) {
+  await getAuthUserId();
+  if (!id) {
+    const err = new Error('Paiement requis.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  await removeLinkedFinanceTransaction(FINANCE_SOURCE_TYPES.SUBCONTRACTOR_PAYMENT, id).catch(() => {});
+  const { error } = await getSupabase().from(PAYMENT_TABLE).delete().eq('id', id);
+  if (error) throw error;
+  return { id };
 }
 
 /** Réconciliation : chaque paiement sous-traitant → créer / mettre à jour / supprimer la ligne caisse. */

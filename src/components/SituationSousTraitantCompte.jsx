@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
-  ChevronLeft, FileDown, Loader2, Printer, X, Pencil, Plus, Lock,
+  ChevronLeft, FileDown, Loader2, Printer, X, Pencil, Plus, Lock, Trash2,
 } from 'lucide-react';
 import { getSubcontractorAccount } from '../services/rh/subcontractorAccount';
-import { updateSubcontractorPayment } from '../services/rh/subcontractors';
+import { updateSubcontractorPayment, deleteSubcontractorPayment } from '../services/rh/subcontractors';
 import { closeSituation, SITUATION_STATUS_LABEL } from '../services/rh/subcontractorSituations';
 import { createGlobalAdvance, cancelGlobalAdvance } from '../services/rh/subcontractorAdvances';
 import { PAYMENT_METHODS } from '../services/rh/subcontractorConstants';
@@ -113,6 +113,26 @@ export default function SituationSousTraitantCompte({
     setEditRecord(p);
     setEditForm(paymentToEditForm(p));
     setEditFormErr({});
+  }
+
+  async function handleDeletePayment(payment) {
+    if (!payment?.id) return;
+    const label = [
+      payment.projectName || 'Projet',
+      Number(payment.amount || 0).toLocaleString('fr-MA', { minimumFractionDigits: 2 }) + ' MAD',
+    ].join(' · ');
+    if (!window.confirm(`Supprimer ce paiement ?\n${label}\n\nLa ligne de caisse liée sera également retirée.`)) {
+      return;
+    }
+    try {
+      await deleteSubcontractorPayment(payment.id);
+      onNotify?.('success', 'Paiement supprimé.');
+      setEditRecord(null);
+      setEditForm(null);
+      await load();
+    } catch (err) {
+      onNotify?.('error', formatSupabaseError(err, 'Erreur suppression paiement.'));
+    }
   }
 
   async function handleEditSave(e) {
@@ -500,14 +520,23 @@ export default function SituationSousTraitantCompte({
                       <td>
                         {h.payment && (
                           <div className="payment-row-actions">
-                            <button type="button" className="btn btn-secondary btn-sm" onClick={() => openEdit(h.payment)}>
+                            <button type="button" className="btn btn-secondary btn-sm" title="Modifier" onClick={() => openEdit(h.payment)}>
                               <Pencil size={13} />
                             </button>
-                            <button type="button" className="btn btn-secondary btn-sm" onClick={() => handlePdf(h.payment, false)}>
+                            <button type="button" className="btn btn-secondary btn-sm" title="PDF" onClick={() => handlePdf(h.payment, false)}>
                               <FileDown size={13} />
                             </button>
-                            <button type="button" className="btn btn-secondary btn-sm" onClick={() => handlePdf(h.payment, true)}>
+                            <button type="button" className="btn btn-secondary btn-sm" title="Imprimer" onClick={() => handlePdf(h.payment, true)}>
                               <Printer size={13} />
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              title="Supprimer"
+                              onClick={() => handleDeletePayment(h.payment)}
+                              style={{ color: 'var(--red)' }}
+                            >
+                              <Trash2 size={13} />
                             </button>
                           </div>
                         )}
@@ -531,6 +560,15 @@ export default function SituationSousTraitantCompte({
             <div key={p.id} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
               <span>{fmtDate(p.paymentDate)} · {p.projectName || '—'} · {fmtMAD(p.amount)}</span>
               <button type="button" className="btn btn-secondary btn-sm" onClick={() => handlePdf(p, false)}>PDF</button>
+              <button
+                type="button"
+                className="btn btn-secondary btn-sm"
+                title="Supprimer"
+                onClick={() => handleDeletePayment(p)}
+                style={{ color: 'var(--red)' }}
+              >
+                <Trash2 size={13} /> Supprimer
+              </button>
             </div>
           ))}
         </div>
@@ -570,7 +608,15 @@ export default function SituationSousTraitantCompte({
           <div className="card rh-ext-modal-box rh-ext-modal-box--md">
             <form onSubmit={handleEditSave}>
               <SubcontractorPaymentEditForm form={editForm} setF={(f, v) => setEditForm((p) => ({ ...p, [f]: v }))} formErr={editFormErr} />
-              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16, flexWrap: 'wrap' }}>
+                <button
+                  type="button"
+                  className="btn btn-secondary"
+                  style={{ color: 'var(--red)', marginRight: 'auto' }}
+                  onClick={() => handleDeletePayment(editRecord)}
+                >
+                  <Trash2 size={14} /> Supprimer
+                </button>
                 <button type="button" className="btn btn-secondary" onClick={() => { setEditRecord(null); setEditForm(null); }}>Annuler</button>
                 <button type="submit" className="btn btn-primary" disabled={editSaving}>Enregistrer</button>
               </div>
