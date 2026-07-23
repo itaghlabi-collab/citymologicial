@@ -41,7 +41,7 @@ function Kpi({ label, value, hint, accent }) {
 
 const TABS = [
   { id: 'general', label: 'Vue générale' },
-  { id: 'situations', label: 'Situations par projet' },
+  { id: 'situations', label: 'Situations / Travaux' },
   { id: 'avances', label: 'Avances' },
   { id: 'historique', label: 'Historique' },
   { id: 'documents', label: 'Documents' },
@@ -341,7 +341,7 @@ export default function SituationSousTraitantCompte({
               <Plus size={14} /> Avance globale
             </button>
             <button type="button" className="btn btn-primary btn-sm" onClick={() => onNewSituation?.(subcontractorId)}>
-              <Plus size={14} /> Nouvelle situation
+              <Plus size={14} /> Situation / Travaux
             </button>
           </div>
         </div>
@@ -405,9 +405,9 @@ export default function SituationSousTraitantCompte({
       {tab === 'situations' && (
         <div className="card rh-ext-table-card">
           <div className="flex-between" style={{ marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
-            <div className="card-title" style={{ margin: 0 }}>Situations par projet</div>
+            <div className="card-title" style={{ margin: 0 }}>Situations / Travaux multi-projets</div>
             <button type="button" className="btn btn-primary btn-sm" onClick={() => onNewSituation?.(subcontractorId)}>
-              <Plus size={14} /> Nouvelle situation
+              <Plus size={14} /> Ajouter des travaux
             </button>
           </div>
           {sitRows ? (
@@ -416,7 +416,7 @@ export default function SituationSousTraitantCompte({
                 <table>
                   <thead>
                     <tr>
-                      <th>Réf.</th><th>Projet</th><th>Désignation</th><th>Type</th>
+                      <th>Réf.</th><th>Groupe</th><th>Projet</th><th>Désignation</th><th>Type</th>
                       <th>Qté</th><th>Unité</th><th>PU</th><th>Brut</th>
                       <th>Avance</th><th>Retenues</th><th>Payé</th><th>Net restant</th>
                       <th>Statut</th><th>Créée</th><th>Clôture</th><th>Actions</th>
@@ -426,6 +426,7 @@ export default function SituationSousTraitantCompte({
                     {sitRows.map((s) => (
                       <tr key={s.id} className="rh-ext-compact-row">
                         <td data-label="Réf.">{s.reference || '—'}{s.isHistorical ? ' · hist.' : ''}</td>
+                        <td data-label="Groupe">{s.groupId ? String(s.groupId).slice(0, 8) : '—'}</td>
                         <td data-label="Projet">{s.projectName || '—'}</td>
                         <td data-label="Désignation">{s.designation || '—'}</td>
                         <td data-label="Type">{paymentTypeLabel(s.paymentType)}</td>
@@ -520,7 +521,7 @@ export default function SituationSousTraitantCompte({
               </table>
               <p style={{ fontSize: '0.8rem', color: 'var(--text-3)', marginTop: 10 }}>
                 Les avances affichées sont plafonnées au montant des travaux. Pour corriger une ligne, utilisez Modifier (ouvre le paiement).
-                Exécutez <code>RUN_SUBCONTRACTOR_ACCOUNT_V2.sql</code> pour les situations multi-projets détaillées.
+                Exécutez <code>RUN_SUBCONTRACTOR_ACCOUNT_V2.sql</code> (et <code>RUN_SUBCONTRACTOR_SITUATION_GROUP.sql</code> si besoin) pour les situations multi-projets détaillées.
               </p>
             </div>
           )}

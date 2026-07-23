@@ -44,10 +44,18 @@ CREATE TABLE IF NOT EXISTS public.subcontractor_situations (
   closed_by          UUID,
   notes              TEXT,
   is_historical      BOOLEAN NOT NULL DEFAULT FALSE,
+  group_id           UUID,
   created_by         UUID,
   created_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   updated_at         TIMESTAMPTZ NOT NULL DEFAULT NOW()
 );
+
+-- Idempotent si la table existait déjà sans group_id
+ALTER TABLE public.subcontractor_situations
+  ADD COLUMN IF NOT EXISTS group_id UUID;
+CREATE INDEX IF NOT EXISTS idx_sub_sit_group
+  ON public.subcontractor_situations (group_id)
+  WHERE group_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_sub_sit_sub
   ON public.subcontractor_situations (subcontractor_id);

@@ -69,13 +69,14 @@ export function normalizeSituation(row) {
     closedAt: row.closed_at || null,
     notes: row.notes || '',
     isHistorical: !!row.is_historical,
+    groupId: row.group_id || null,
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
 }
 
 function toSituationRow(form, subcontractorId) {
-  return {
+  const row = {
     subcontractor_id: subcontractorId,
     project_id: emptyToNull(form.projectId) || null,
     assignment_id: emptyToNull(form.assignmentId) || null,
@@ -94,6 +95,8 @@ function toSituationRow(form, subcontractorId) {
     notes: emptyToNull(form.notes?.trim()),
     is_historical: !!form.isHistorical,
   };
+  if (form.groupId) row.group_id = form.groupId;
+  return row;
 }
 
 export async function listSituations(subcontractorId) {
@@ -131,11 +134,20 @@ export async function createSituation(subcontractorId, form) {
     err.code = 'VALIDATION';
     throw err;
   }
-  const { data, error } = await getSupabase()
+  let { data, error } = await getSupabase()
     .from(TABLE)
     .insert([row])
     .select('*, projects ( nom )')
     .single();
+  // Colonne group_id absente → retry sans (exécuter RUN_SUBCONTRACTOR_SITUATION_GROUP.sql)
+  if (error && row.group_id && /group_id/i.test(error.message || '')) {
+    const { group_id: _g, ...rest } = row;
+    ({ data, error } = await getSupabase()
+      .from(TABLE)
+      .insert([rest])
+      .select('*, projects ( nom )')
+      .single());
+  }
   if (error) throw error;
   const sit = normalizeSituation(data);
   await logSubcontractorAccountEvent({

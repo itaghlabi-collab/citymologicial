@@ -73,7 +73,7 @@ export default function SituationSousTraitants() {
         </div>
         <div className="finance-page-actions">
           <button type="button" className="btn btn-primary" onClick={() => setCalculForId('__new__')}>
-            Nouvelle situation
+            Situation / Travaux
           </button>
         </div>
       </div>
