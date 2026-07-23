@@ -315,23 +315,31 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
 
   async function runAction(fn) {
     if (!detail) return;
+    await runActionOn(detail.id, fn);
+  }
+
+  async function runActionOn(id, fn) {
     setSaving(true);
     setError('');
     try {
-      const updated = await fn(detail.id);
-      setDetail(updated);
-      const da = await findPurchaseRequestBySiteMaterialRequest(detail.id).catch(() => null);
-      setLinkedDa(da);
+      const updated = await fn(id);
+      if (detail?.id === id) {
+        setDetail(updated);
+        const da = await findPurchaseRequestBySiteMaterialRequest(id).catch(() => null);
+        setLinkedDa(da);
+      }
       await load();
+      return updated;
     } catch (err) {
       setError(err.message);
+      return null;
     } finally {
       setSaving(false);
     }
   }
 
-  async function handleStatutChange(nextStatut) {
-    if (!detail || nextStatut === detail.statut) return;
+  async function handleStatutChange(id, nextStatut, currentStatut) {
+    if (!id || nextStatut === currentStatut) return;
     if (nextStatut === 'livree') {
       const ok = window.confirm(
         'Marquer comme livrée ? Un bon de sortie stock sera généré si des articles catalogue sont liés.',
@@ -341,15 +349,15 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
     if (nextStatut === 'annulee') {
       const reason = window.prompt('Motif d\'annulation :') || '';
       if (!reason.trim()) return;
-      await runAction((id) => setSiteMaterialRequestStatut(id, nextStatut, { reason }));
+      await runActionOn(id, (rid) => setSiteMaterialRequestStatut(rid, nextStatut, { reason }));
       return;
     }
-    await runAction((id) => setSiteMaterialRequestStatut(id, nextStatut));
+    await runActionOn(id, (rid) => setSiteMaterialRequestStatut(rid, nextStatut));
   }
 
-  async function handleLivraisonChange(nextLiv) {
-    if (!detail) return;
-    const current = siteRequestLivraisonValue(detail.statut);
+  async function handleLivraisonChange(id, nextLiv, currentStatut) {
+    if (!id) return;
+    const current = siteRequestLivraisonValue(currentStatut);
     if (nextLiv === current) return;
     if (nextLiv === 'livree') {
       const ok = window.confirm(
@@ -357,12 +365,12 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
       );
       if (!ok) return;
     }
-    await runAction((id) => setSiteMaterialRequestLivraison(id, nextLiv));
+    await runActionOn(id, (rid) => setSiteMaterialRequestLivraison(rid, nextLiv));
   }
 
-  async function handleCreateDaFromMissing() {
-    if (!detail) return;
-    const missing = getSiteRequestMissingLines(detail);
+  async function handleCreateDaFromMissing(request = detail) {
+    if (!request) return;
+    const missing = getSiteRequestMissingLines(request);
     if (!missing.length) {
       setError('Aucun article manquant — tout est préparé.');
       return;
@@ -370,12 +378,12 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
     setSaving(true);
     setError('');
     try {
-      const da = await createPurchaseRequestFromSiteRuptures(detail, { refresh: true });
+      const da = await createPurchaseRequestFromSiteRuptures(request, { refresh: true });
       if (!da) {
         setError('Impossible de créer la demande d\'achat.');
         return;
       }
-      setLinkedDa(da);
+      if (detail?.id === request.id) setLinkedDa(da);
       const ref = da.ref || da.ref_demande || '';
       const go = window.confirm(
         `Demande d'achat ${ref || ''} prête (reste de commande).\n\nOuvrir le module Achats ?`,
@@ -678,14 +686,61 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                       </span>
                     </td>
                     <td data-label="Livraison">
-                      <span className={`badge ${livBadgeClass(r.statut)}`}>
-                        {siteRequestLivraisonStatut(r.statut)}
-                      </span>
+                      {!embedded ? (
+                        <select
+                          value={siteRequestLivraisonValue(r.statut)}
+                          onChange={(e) => handleLivraisonChange(r.id, e.target.value, r.statut)}
+                          disabled={saving || r.statut === 'annulee'}
+                          style={{ ...SELECT_STYLE, minWidth: 110, fontSize: '0.78rem', fontWeight: 700, padding: '4px 8px' }}
+                          aria-label="Livraison"
+                        >
+                          <option value="none">—</option>
+                          <option value="a_livrer">À livrer</option>
+                          <option value="livree">Livrée</option>
+                        </select>
+                      ) : (
+                        <span className={`badge ${livBadgeClass(r.statut)}`}>
+                          {siteRequestLivraisonStatut(r.statut)}
+                        </span>
+                      )}
                     </td>
                     <td data-label="Statut">
-                      <span className="badge" style={{ background: `${siteRequestStatutColor(r.statut)}22`, color: siteRequestStatutColor(r.statut) }}>
-                        {r.statutLabel}
-                      </span>
+                      {!embedded ? (
+                        <select
+                          value={r.statut || ''}
+                          onChange={(e) => handleStatutChange(r.id, e.target.value, r.statut)}
+                          disabled={saving}
+                          style={{
+                            ...SELECT_STYLE,
+                            minWidth: 140,
+                            fontSize: '0.78rem',
+                            fontWeight: 700,
+                            padding: '4px 8px',
+                            color: siteRequestStatutColor(r.statut),
+                          }}
+                          aria-label="Statut"
+                        >
+                          {SITE_REQUEST_STATUTS.map((s) => (
+                            <option key={s.value} value={s.value}>{s.label}</option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span className="badge" style={{ background: `${siteRequestStatutColor(r.statut)}22`, color: siteRequestStatutColor(r.statut) }}>
+                          {r.statutLabel}
+                        </span>
+                      )}
+                      {!embedded && getSiteRequestMissingLines(r).length > 0 && (
+                        <button
+                          type="button"
+                          className="btn btn-ghost btn-sm"
+                          title="Reste commande → demande d'achat"
+                          onClick={() => handleCreateDaFromMissing(r)}
+                          disabled={saving}
+                          style={{ marginTop: 4, color: '#E65100', fontSize: '0.72rem', fontWeight: 700 }}
+                        >
+                          <ShoppingCart size={12} /> Reste → DA
+                        </button>
+                      )}
                     </td>
                     <td data-label="Actions">
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, minWidth: 120 }}>
@@ -764,12 +819,53 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                     <div className="inv-dc-field">
                       <dt>Livraison</dt>
                       <dd>
-                        <span className={`badge ${livBadgeClass(r.statut)}`}>
-                          {siteRequestLivraisonStatut(r.statut)}
-                        </span>
+                        {!embedded ? (
+                          <select
+                            value={siteRequestLivraisonValue(r.statut)}
+                            onChange={(e) => handleLivraisonChange(r.id, e.target.value, r.statut)}
+                            disabled={saving || r.statut === 'annulee'}
+                            style={{ ...SELECT_STYLE, fontSize: '0.8rem', fontWeight: 700 }}
+                          >
+                            <option value="none">—</option>
+                            <option value="a_livrer">À livrer</option>
+                            <option value="livree">Livrée</option>
+                          </select>
+                        ) : (
+                          <span className={`badge ${livBadgeClass(r.statut)}`}>
+                            {siteRequestLivraisonStatut(r.statut)}
+                          </span>
+                        )}
                       </dd>
                     </div>
                   </div>
+                  {!embedded && (
+                    <div className="inv-dc-field">
+                      <dt>Statut</dt>
+                      <dd>
+                        <select
+                          value={r.statut || ''}
+                          onChange={(e) => handleStatutChange(r.id, e.target.value, r.statut)}
+                          disabled={saving}
+                          style={{ ...SELECT_STYLE, fontSize: '0.8rem', fontWeight: 700, color: siteRequestStatutColor(r.statut) }}
+                        >
+                          {SITE_REQUEST_STATUTS.map((s) => (
+                            <option key={s.value} value={s.value}>{s.label}</option>
+                          ))}
+                        </select>
+                      </dd>
+                    </div>
+                  )}
+                  {!embedded && getSiteRequestMissingLines(r).length > 0 && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      style={{ marginTop: 8, width: '100%', justifyContent: 'center' }}
+                      disabled={saving}
+                      onClick={() => handleCreateDaFromMissing(r)}
+                    >
+                      <ShoppingCart size={14} /> Reste commande → demande d&apos;achat
+                    </button>
+                  )}
                 </dl>
                 <footer className="inv-dc-card-actions">
                   {getRowActions(r, rowHandlers, { embedded }).map((action) => {
@@ -825,7 +921,7 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                   {!embedded ? (
                     <select
                       value={detail.statut || ''}
-                      onChange={(e) => handleStatutChange(e.target.value)}
+                      onChange={(e) => handleStatutChange(detail.id, e.target.value, detail.statut)}
                       disabled={saving}
                       style={{ ...SELECT_STYLE, marginTop: 4, fontWeight: 700, color: siteRequestStatutColor(detail.statut) }}
                     >
@@ -842,7 +938,7 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                     <div className="rh-emp-docs-info-label">Livraison</div>
                     <select
                       value={siteRequestLivraisonValue(detail.statut)}
-                      onChange={(e) => handleLivraisonChange(e.target.value)}
+                      onChange={(e) => handleLivraisonChange(detail.id, e.target.value, detail.statut)}
                       disabled={saving || detail.statut === 'annulee'}
                       style={{ ...SELECT_STYLE, marginTop: 4, fontWeight: 700 }}
                     >
@@ -877,7 +973,7 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                       type="button"
                       className="btn btn-primary btn-sm"
                       disabled={saving}
-                      onClick={handleCreateDaFromMissing}
+                      onClick={() => handleCreateDaFromMissing(detail)}
                     >
                       <ShoppingCart size={14} />
                       {linkedDa ? 'Mettre à jour / ouvrir DA' : 'Passer en demande d\'achat'}
