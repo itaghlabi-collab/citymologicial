@@ -14,6 +14,7 @@ import {
   canEditPurchaseRequest, canDeletePurchaseRequest, normalizePurchaseStatus,
   canSubmitPurchaseRequest, canAddQuoteToRequest, canValidateQuoteOnRequest,
   getPurchaseStatusBadge, getPurchaseStatusLabel, PURCHASE_DASHBOARD_TABS,
+  isPurchaseRequestHistorique,
 } from '../../constants/purchaseWorkflow';
 import { submitPurchaseRequest, getPurchaseRequestBundle, reconcileLegacySoumiseRequests, reconcileLegacyDgValidationRequests, reconcilePurchaseRequestSentStatus } from '../../services/achats/purchaseWorkflow';
 import { projectOptionLabel, purchaseRequestProjectLabel, updatePurchaseRequestTitle, reconcileMissingPurchaseRequestRefs, isGroupedPurchaseRequest } from '../../services/achats/purchaseRequests';
@@ -708,10 +709,13 @@ const DASHBOARD_TABS = [
   { key: 'en_cours', label: 'En cours de traitement' },
   { key: 'attente_dg', label: 'Devis à valider (DG)' },
   { key: 'validee', label: 'Validée' },
+  { key: 'historique', label: 'Historique demandes' },
 ];
 
 function matchesStatusTab(item, tabKey) {
-  if (!tabKey || tabKey === 'toutes') return true;
+  if (!tabKey || tabKey === 'toutes') {
+    return !isPurchaseRequestHistorique(item.statut);
+  }
   const statuses = PURCHASE_DASHBOARD_TABS[tabKey];
   if (!statuses?.length) return true;
   return statuses.includes(normalizePurchaseStatus(item.statut));

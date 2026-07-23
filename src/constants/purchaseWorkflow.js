@@ -102,16 +102,24 @@ export function getPurchaseStatusBadge(statut) {
 export const PURCHASE_DASHBOARD_TABS = {
   en_cours: ['Soumise', 'En étude'],
   attente_dg: ['Devis reçus', 'En attente validation DG'],
-  validee: [
+  /** Validées encore « actives » (réception en cours). */
+  validee: ['En attente réception'],
+  /** Traitées / OP créé / clôturées — hors onglet Toutes. */
+  historique: [
     'Devis validé',
     'Ordre d\'achat créé',
     'Ordre de paiement créé',
     'Commande envoyée',
-    'En attente réception',
     'Réceptionnée',
     'Clôturée',
+    'Refusée',
   ],
 };
+
+/** Statuts exclus de l’onglet « Toutes » (visibles dans Historique demandes). */
+export function isPurchaseRequestHistorique(statut) {
+  return PURCHASE_DASHBOARD_TABS.historique.includes(normalizePurchaseStatus(statut));
+}
 
 export function getPurchaseStatusLabel(statut) {
   const normalized = normalizePurchaseStatus(statut);
