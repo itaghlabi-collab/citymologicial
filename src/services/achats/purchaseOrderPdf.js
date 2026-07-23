@@ -244,7 +244,10 @@ function deliverPdf(doc, filename, options = {}) {
 }
 
 export async function generatePurchaseOrderPdf(bc, supplier = null, options = {}) {
-  const { logoMeta, iconMeta, qrMeta, signatureMeta } = await loadCrmPdfImages({ withSignature: true });
+  const isValidatedByDg = (bc?.statut || bc?.status) === 'Validé';
+  const { logoMeta, iconMeta, qrMeta, signatureMeta } = await loadCrmPdfImages({
+    withSignature: isValidatedByDg,
+  });
 
   const supplierNom = supplierDisplayName(bc, supplier);
   const devise = bc.devise || bc.currency || 'MAD';
