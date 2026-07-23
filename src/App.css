@@ -12367,6 +12367,10 @@ tbody tr:last-child td { border-bottom: none; }
   gap: 14px;
 }
 
+.rh-leave-duo--single {
+  grid-template-columns: 1fr;
+}
+
 .rh-leave-box {
   border: 1.5px solid var(--border, #d0d0d0);
   border-radius: 12px;

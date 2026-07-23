@@ -66,10 +66,6 @@ const EMPTY_FORM = {
   dateFin: '',
   raison: '',
   fichier: null,
-  // Identification (saisie / prérempli)
-  nom: '',
-  prenom: '',
-  fonction: '',
   // Calcul des droits (saisie / prérempli)
   jours_travailles: '',
   jours_feries: '',
@@ -140,15 +136,6 @@ export default function Conges() {
     return employees.find((e) => e.id === id) || myEmployee || null;
   }, [form.employee_id, employees, myEmployee, canManageLeaves]);
 
-  function fillIdentityFromEmployee(emp) {
-    if (!emp) return {};
-    return {
-      nom: emp.lastname || '',
-      prenom: emp.firstname || '',
-      fonction: emp.poste || '',
-    };
-  }
-
   function rightsToFormPatch(preview, joursDemandes) {
     if (!preview) {
       return {
@@ -208,20 +195,12 @@ export default function Conges() {
     return () => { cancelled = true; };
   }, [form.dateDebut, form.dateFin, form.type, selectedEmployee, editingId]);
 
-  // Identité préremplie depuis le salarié (modifiable ensuite)
-  useEffect(() => {
-    if (!selectedEmployee) return;
-    setForm((prev) => ({ ...prev, ...fillIdentityFromEmployee(selectedEmployee) }));
-  }, [selectedEmployee?.id]);
-
   function openModal() {
     setEditingId(null);
     skipRightsPrefill.current = false;
-    const emp = canManageLeaves ? null : myEmployee;
     setForm({
       ...EMPTY_FORM,
       employee_id: canManageLeaves ? '' : (myEmployee?.id || ''),
-      ...fillIdentityFromEmployee(emp),
     });
     setExistingFichierUrl(null);
     setErrors({});
@@ -233,7 +212,6 @@ export default function Conges() {
     if (!canEdit(r)) return;
     setEditingId(r.id);
     skipRightsPrefill.current = true;
-    const emp = employees.find((e) => e.id === r.employee_id) || r.employees;
     setForm({
       employee_id: r.employee_id || '',
       type: r.type || 'Conge annuel',
@@ -241,9 +219,6 @@ export default function Conges() {
       dateFin: r.date_fin || r.dateFin || '',
       raison: r.raison || '',
       fichier: null,
-      nom: emp?.lastname || '',
-      prenom: emp?.firstname || '',
-      fonction: emp?.poste || '',
       jours_travailles: r.snap_jours_travailles != null ? String(r.snap_jours_travailles) : '',
       jours_feries: r.snap_jours_feries != null ? String(r.snap_jours_feries) : '',
       reliquat_ancien: r.snap_reliquat_ancien != null ? String(r.snap_reliquat_ancien) : '',
@@ -311,8 +286,7 @@ export default function Conges() {
     const fichierUrl = submitForm.fichier
       ? submitForm.fichier.name
       : (editingId ? existingFichierUrl : null);
-    const employeLabel = [submitForm.prenom, submitForm.nom].filter(Boolean).join(' ').trim()
-      || employeeFullName(selectedEmployee);
+    const employeLabel = employeeFullName(selectedEmployee);
 
     const payload = {
       jours: joursCalc,
@@ -853,23 +827,8 @@ export default function Conges() {
                 </div>
               )}
 
-              {/* Identification + Calcul des droits — saisie simple */}
-              <div className="rh-leave-duo">
-                <div className="rh-leave-box">
-                  <div className="rh-leave-box-title">Identification de l&apos;employé(e)</div>
-                  <label className="rh-leave-line">
-                    <span>Nom :</span>
-                    <input type="text" value={form.nom} onChange={(e) => setF('nom', e.target.value)} />
-                  </label>
-                  <label className="rh-leave-line">
-                    <span>Prénom :</span>
-                    <input type="text" value={form.prenom} onChange={(e) => setF('prenom', e.target.value)} />
-                  </label>
-                  <label className="rh-leave-line">
-                    <span>Fonction :</span>
-                    <input type="text" value={form.fonction} onChange={(e) => setF('fonction', e.target.value)} />
-                  </label>
-                </div>
+              {/* Calcul des droits — saisie simple */}
+              <div className="rh-leave-duo rh-leave-duo--single">
                 <div className="rh-leave-box">
                   <div className="rh-leave-box-title">Calcul des droits</div>
                   <label className="rh-leave-line">

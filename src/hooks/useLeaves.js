@@ -108,11 +108,10 @@ export function useLeaves() {
 
   const buildMeta = useCallback((form, { jours, dateRetour, statut, fichierUrl, employeLabel }) => {
     const emp = employees.find((e) => e.id === form.employee_id);
-    const fromForm = [form.prenom, form.nom].filter(Boolean).join(' ').trim();
     return {
       jours,
       dateRetour,
-      employeLabel: employeLabel || fromForm || employeeFullName(emp),
+      employeLabel: employeLabel || employeeFullName(emp),
       statut,
       fichierUrl: fichierUrl ?? null,
     };
