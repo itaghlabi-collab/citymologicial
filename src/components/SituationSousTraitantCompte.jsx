@@ -5,20 +5,8 @@ import {
 } from 'lucide-react';
 import { getSubcontractorAccount, amountSettledDisplay } from '../services/rh/subcontractorAccount';
 import {
-  updateSubcontractorPayment,
-  deleteSubcontractorPayment,
-  updateSubcontractor,
-  archiveSubcontractor,
-  createSubcontractorDocument,
-  archiveSubcontractorDocument,
-  assignPaymentsToProject,
-  createAssignment,
-  archiveAssignment,
-  listAssignments,
-  removeSubcontractorFromProject,
-} from '../services/rh/subcontractors';
-import {
-  closeSituation, updateSituation, cancelSituation, SITUATION_STATUS_LABEL, situationStatusSimple,
+  closeSituation, updateSituation, purgeSituation, purgeSubcontractorProject,
+  SITUATION_STATUS_LABEL, situationStatusSimple,
 } from '../services/rh/subcontractorSituations';
 import {
   createGlobalAdvance,
@@ -46,6 +34,16 @@ import { formatSupabaseError } from '../services/supabase/formatError';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { listProjectsForSelect } from '../services/projects/projects';
 import { paymentTypeLabel } from '../utils/rh/subcontractorPaymentFormUtils';
+import {
+  updateSubcontractorPayment,
+  deleteSubcontractorPayment,
+  updateSubcontractor,
+  archiveSubcontractor,
+  createSubcontractorDocument,
+  archiveSubcontractorDocument,
+  assignPaymentsToProject,
+  createAssignment,
+} from '../services/rh/subcontractors';
 import SubcontractorPaymentEditForm, {
   paymentToEditForm,
   validateSubcontractorPaymentEdit,
@@ -479,14 +477,39 @@ export default function SituationSousTraitantCompte({
 
   async function handleCancelSituation(sit) {
     if (!window.confirm(
-      'Voulez-vous supprimer cette ligne de travaux ? Les montants de la situation et le reliquat d’avance seront recalculés automatiquement.',
+      'Supprimer définitivement cette ligne de travaux ?\n\nLes montants, l’avance utilisée et le reste à payer seront recalculés. Cette action est irréversible.',
     )) return;
     try {
-      await cancelSituation(sit.id, subcontractorId);
-      onNotify?.('success', 'Ligne de travaux annulée — montants recalculés.');
+      await purgeSituation(sit.id, subcontractorId);
+      onNotify?.('success', 'Ligne supprimée — calculs mis à jour.');
       await load();
     } catch (err) {
-      onNotify?.('error', formatSupabaseError(err, 'Annulation impossible.'));
+      onNotify?.('error', formatSupabaseError(err, 'Suppression impossible.'));
+    }
+  }
+
+  async function handleDeleteProject(group) {
+    const sits = group.situations || [];
+    const msg = [
+      `Supprimer définitivement le projet « ${group.projectName || 'Sans nom'} » ?`,
+      sits.length
+        ? `${sits.length} situation(s) / ligne(s) de travaux seront effacées.`
+        : 'Aucune situation enregistrée.',
+      'Rien ne sera conservé. Les totaux (réalisé, avance utilisée, payé, reste) seront recalculés.',
+      'Cette action est irréversible.',
+    ].join('\n\n');
+    if (!window.confirm(msg)) return;
+    try {
+      await purgeSubcontractorProject(subcontractorId, {
+        projectId: group.projectId || null,
+        assignmentId: group.assignmentId || null,
+        projectName: group.projectName || '',
+      });
+      onNotify?.('success', 'Projet supprimé — calculs mis à jour.');
+      if (selectedProjectId === group.key) setSelectedProjectId(null);
+      await load();
+    } catch (err) {
+      onNotify?.('error', formatSupabaseError(err, 'Suppression projet impossible.'));
     }
   }
 
@@ -544,43 +567,6 @@ export default function SituationSousTraitantCompte({
       onNotify?.('error', formatSupabaseError(err, 'Impossible d’ajouter le projet.'));
     } finally {
       setAddProjectSaving(false);
-    }
-  }
-
-  async function handleArchiveProject(group) {
-    const sits = (group.situations || []).filter((s) => s.status !== 'cancelled');
-    const msg = sits.length
-      ? `Ce projet contient ${sits.length} situation(s). Archiver le projet ? Les données restent conservées ; le projet disparaît de la liste active.`
-      : 'Archiver ce projet de la liste « Travaux par projet » ?';
-    if (!window.confirm(msg)) return;
-    try {
-      let assignmentId = group.assignmentId;
-      if (!assignmentId && group.projectId) {
-        const assigns = await listAssignments(subcontractorId);
-        const match = (assigns || []).find(
-          (a) => String(a.projectId) === String(group.projectId) && (a.status || 'active') !== 'annulée',
-        );
-        assignmentId = match?.id;
-      }
-      if (assignmentId) {
-        await archiveAssignment(assignmentId);
-      } else if (group.projectId) {
-        await removeSubcontractorFromProject(group.projectId, subcontractorId);
-      } else {
-        onNotify?.('error', 'Affectation introuvable pour ce projet.');
-        return;
-      }
-      await logSubcontractorAccountEvent({
-        subcontractorId,
-        eventType: 'assignment_archived',
-        projectId: group.projectId || null,
-        observation: `Projet archivé — ${group.projectName || ''}`,
-      }).catch(() => {});
-      onNotify?.('success', 'Projet archivé.');
-      if (selectedProjectId === group.key) setSelectedProjectId(null);
-      await load();
-    } catch (err) {
-      onNotify?.('error', formatSupabaseError(err, 'Archivage projet impossible.'));
     }
   }
 
@@ -1234,8 +1220,8 @@ export default function SituationSousTraitantCompte({
                         <button type="button" className="btn btn-secondary btn-sm" title="Exporter" onClick={handleAccountPdf}>
                           <FileDown size={12} />
                         </button>
-                        <button type="button" className="btn btn-secondary btn-sm" title="Supprimer ou archiver" style={{ color: 'var(--red)' }} onClick={() => handleArchiveProject(s)}>
-                          <Archive size={12} />
+                        <button type="button" className="btn btn-secondary btn-sm" title="Supprimer définitivement" style={{ color: 'var(--red)' }} onClick={() => handleDeleteProject(s)}>
+                          <Trash2 size={12} />
                         </button>
                       </div>
                     </td>
@@ -1325,10 +1311,12 @@ export default function SituationSousTraitantCompte({
                                   <button type="button" className="btn btn-secondary btn-sm" title="Clôturer" onClick={() => handleCloseSituation(s)}>
                                     <Lock size={12} /> Clôturer
                                   </button>
-                                  <button type="button" className="btn btn-secondary btn-sm" title="Supprimer" style={{ color: 'var(--red)' }} onClick={() => handleCancelSituation(s)}>
-                                    <Trash2 size={12} /> Supprimer
-                                  </button>
                                 </>
+                              )}
+                              {s.status !== 'cancelled' && (
+                                <button type="button" className="btn btn-secondary btn-sm" title="Supprimer définitivement" style={{ color: 'var(--red)' }} onClick={() => handleCancelSituation(s)}>
+                                  <Trash2 size={12} /> Supprimer
+                                </button>
                               )}
                               <button type="button" className="btn btn-secondary btn-sm" title="Exporter" onClick={handleAccountPdf}>
                                 <FileDown size={12} />

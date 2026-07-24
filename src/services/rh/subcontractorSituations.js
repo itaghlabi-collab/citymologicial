@@ -277,23 +277,46 @@ export async function cancelSituation(id, subcontractorId) {
   }
   if (sit.status === 'cancelled') return sit;
 
-  // Libérer l’avance imputée (analytique) avant annulation — pas d’écriture caisse
+  await releaseSituationAdvanceImputations(id, sit);
+
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .update({ status: 'cancelled' })
+    .eq('id', id)
+    .select('*, projects ( nom )')
+    .single();
+  if (error) throw error;
+  const cancelled = normalizeSituation(data);
+  await logSubcontractorAccountEvent({
+    subcontractorId: subcontractorId || cancelled.subcontractorId,
+    eventType: 'situation_cancelled',
+    projectId: cancelled.projectId || null,
+    situationId: cancelled.id,
+    reference: cancelled.reference,
+    observation: 'Ligne de travaux annulée — montants recalculés',
+  });
+  return cancelled;
+}
+
+/** Remet à 0 puis supprime les imputations d’avance liées à une situation. */
+async function releaseSituationAdvanceImputations(situationId, sit) {
   const { data: imps } = await getSupabase()
     .from('subcontractor_advance_imputations')
     .select('id, advance_id, amount')
-    .eq('situation_id', id);
+    .eq('situation_id', situationId);
   const advanceIds = [...new Set((imps || []).map((i) => i.advance_id).filter(Boolean))];
+
   for (const imp of imps || []) {
     await getSupabase()
       .from('subcontractor_advance_imputations')
-      .update({ amount: 0 })
+      .delete()
       .eq('id', imp.id);
   }
-  if ((Number(sit.avancesImputees) || 0) > 0.009 || (imps || []).length) {
+  if (sit && ((Number(sit.avancesImputees) || 0) > 0.009 || (imps || []).length)) {
     await getSupabase()
       .from(TABLE)
       .update({ avances_imputees: 0 })
-      .eq('id', id);
+      .eq('id', situationId);
   }
   for (const advanceId of advanceIds) {
     const { data: remImps } = await getSupabase()
@@ -319,22 +342,116 @@ export async function cancelSituation(id, subcontractorId) {
         .eq('id', advanceId);
     }
   }
+  return advanceIds;
+}
 
-  const { data, error } = await getSupabase()
-    .from(TABLE)
-    .update({ status: 'cancelled' })
-    .eq('id', id)
-    .select('*, projects ( nom )')
-    .single();
+/**
+ * Suppression définitive d’une situation (ligne de travaux) :
+ * libère l’avance, supprime les paiements liés, efface la ligne.
+ */
+export async function purgeSituation(id, subcontractorId) {
+  await getAuthUserId();
+  const sit = await getSituation(id);
+  const subId = subcontractorId || sit.subcontractorId;
+
+  await releaseSituationAdvanceImputations(id, sit);
+
+  // Paiements liés à la situation (colonne optionnelle)
+  try {
+    const { data: bySit } = await getSupabase()
+      .from('subcontractor_payments')
+      .select('id')
+      .eq('situation_id', id);
+    const { deleteSubcontractorPayment } = await import('./subcontractors');
+    for (const p of bySit || []) {
+      await deleteSubcontractorPayment(p.id);
+    }
+  } catch {
+    /* situation_id absent ou RLS — poursuite */
+  }
+
+  const { error } = await getSupabase().from(TABLE).delete().eq('id', id);
   if (error) throw error;
-  const cancelled = normalizeSituation(data);
+
   await logSubcontractorAccountEvent({
-    subcontractorId: subcontractorId || cancelled.subcontractorId,
-    eventType: 'situation_cancelled',
-    projectId: cancelled.projectId || null,
-    situationId: cancelled.id,
-    reference: cancelled.reference,
-    observation: 'Ligne de travaux annulée — montants recalculés',
+    subcontractorId: subId,
+    eventType: 'situation_deleted',
+    projectId: sit.projectId || null,
+    situationId: id,
+    reference: sit.reference,
+    observation: 'Situation / ligne de travaux supprimée définitivement',
+  }).catch(() => {});
+
+  return { id, projectId: sit.projectId };
+}
+
+/**
+ * Suppression définitive d’un projet travaillé pour un sous-traitant :
+ * toutes les situations, paiements projet, affectation — rien n’est conservé.
+ * L’avance globale versée reste ; seule la consommation est recalculée.
+ */
+export async function purgeSubcontractorProject(subcontractorId, {
+  projectId = null,
+  assignmentId = null,
+  projectName = '',
+} = {}) {
+  await getAuthUserId();
+  if (!subcontractorId) {
+    const err = new Error('Sous-traitant requis.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  if (!projectId && !assignmentId) {
+    const err = new Error('Projet requis.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+
+  const allSits = await listSituations(subcontractorId);
+  const sits = allSits.filter((s) => {
+    if (projectId && String(s.projectId) === String(projectId)) return true;
+    if (assignmentId && String(s.assignmentId) === String(assignmentId)) return true;
+    return false;
   });
-  return cancelled;
+
+  for (const s of sits) {
+    await purgeSituation(s.id, subcontractorId);
+  }
+
+  const { deleteSubcontractorPayment } = await import('./subcontractors');
+  if (projectId) {
+    const { data: pays } = await getSupabase()
+      .from('subcontractor_payments')
+      .select('id')
+      .eq('subcontractor_id', subcontractorId)
+      .eq('project_id', projectId);
+    for (const p of pays || []) {
+      await deleteSubcontractorPayment(p.id);
+    }
+
+    const { error: assignErr } = await getSupabase()
+      .from('subcontractor_project_assignments')
+      .delete()
+      .eq('subcontractor_id', subcontractorId)
+      .eq('project_id', projectId);
+    if (assignErr) throw assignErr;
+  } else if (assignmentId) {
+    const { error: assignErr } = await getSupabase()
+      .from('subcontractor_project_assignments')
+      .delete()
+      .eq('id', assignmentId);
+    if (assignErr) throw assignErr;
+  }
+
+  await logSubcontractorAccountEvent({
+    subcontractorId,
+    eventType: 'project_purged',
+    projectId: projectId || null,
+    observation: `Projet « ${projectName || projectId || assignmentId} » supprimé définitivement — calculs recalculés`,
+  }).catch(() => {});
+
+  return {
+    deletedSituations: sits.length,
+    projectId,
+  };
 }
