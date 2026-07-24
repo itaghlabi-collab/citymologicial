@@ -814,6 +814,24 @@ export async function updateSubcontractorPayment(id, form, subcontractorId) {
   return payment;
 }
 
+/** Affecte un ou plusieurs paiements « sans projet » à un projet (régularisation). */
+export async function assignPaymentsToProject(paymentIds, projectId) {
+  await getAuthUserId();
+  const ids = (paymentIds || []).filter(Boolean);
+  if (!ids.length || !projectId) {
+    const err = new Error('Paiements et projet requis.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  const { data, error } = await getSupabase()
+    .from(PAYMENT_TABLE)
+    .update({ project_id: projectId })
+    .in('id', ids)
+    .select(`*, projects ( nom )`);
+  if (error) throw error;
+  return (data || []).map(normalizePayment);
+}
+
 /** Supprime un paiement + la ligne caisse liée (idempotent source_type/source_id). */
 export async function deleteSubcontractorPayment(id) {
   await getAuthUserId();

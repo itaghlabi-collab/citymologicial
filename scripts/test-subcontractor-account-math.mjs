@@ -137,4 +137,67 @@ test('pas de conso au-delà du reliquat', () => {
   assertEqual(unallocated, 400);
 });
 
+/** Miroir de buildAccountKpis (reliquat) — profil type AHMED EL AAOUNI */
+function buildKpisMirror({ advances = [], payments = [], imputations = [] }) {
+  const active = advances.filter((a) => a.status !== 'cancelled');
+  const versées = round2(active.reduce((s, a) => s + (Number(a.amount) || 0), 0));
+  const cappedAnalytical = round2(payments.reduce((s, p) => {
+    const g = Math.max(0, Number(p.grossAmount) || 0);
+    const a = Math.max(0, Number(p.avances) || 0);
+    return s + Math.min(a, g);
+  }, 0));
+  const impSum = round2(imputations.reduce((s, i) => s + (Number(i.amount) || 0), 0));
+  let consommées;
+  if (active.length) {
+    consommées = round2(Math.min(versées, imputations.length ? impSum : cappedAnalytical));
+  } else {
+    consommées = cappedAnalytical;
+  }
+  const reliquat = active.length ? round2(Math.max(0, versées - consommées)) : 0;
+  return { versées, consommées, reliquat, cappedAnalytical };
+}
+
+test('AHMED : 2 avances 5k, paiements 5k/5k sur brut 2250+1350 → reliquat 6400', () => {
+  const k = buildKpisMirror({
+    advances: [
+      { id: 'a1', amount: 5000, consumed_amount: 5000, status: 'consumed' },
+      { id: 'a2', amount: 5000, consumed_amount: 5000, status: 'consumed' },
+    ],
+    payments: [
+      { grossAmount: 2250, avances: 5000 },
+      { grossAmount: 1350, avances: 5000 },
+    ],
+    imputations: [],
+  });
+  assertEqual(k.versées, 10000);
+  assertEqual(k.cappedAnalytical, 3600);
+  assertEqual(k.consommées, 3600);
+  assertEqual(k.reliquat, 6400);
+});
+
+test('AHMED : ne pas prendre consumed_amount gonflé (max ledger vs analytique)', () => {
+  // Ancien bug : max(10000 ledger, 3600) = 10000
+  const ledgerConsumed = 10000;
+  const analytical = 3600;
+  const versées = 10000;
+  const fixed = round2(Math.min(versées, analytical)); // nouvelle règle
+  const oldBug = round2(Math.min(versées, Math.max(ledgerConsumed, analytical)));
+  assertEqual(oldBug, 10000);
+  assertEqual(fixed, 3600);
+  assertEqual(round2(versées - fixed), 6400);
+});
+
+test('sans ledger avance : ne pas inventer 10000 versées depuis paiements', () => {
+  const k = buildKpisMirror({
+    advances: [],
+    payments: [
+      { grossAmount: 2250, avances: 5000 },
+      { grossAmount: 1350, avances: 5000 },
+    ],
+  });
+  assertEqual(k.versées, 0);
+  assertEqual(k.consommées, 3600);
+  assertEqual(k.reliquat, 0);
+});
+
 console.log('\nDone.');

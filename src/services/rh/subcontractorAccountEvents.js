@@ -23,6 +23,7 @@ export const ACCOUNT_EVENT_LABELS = {
   situation_reopened: 'Réouverture',
   advance_paid: 'Avance versée',
   advance_cancelled: 'Avance annulée',
+  advance_updated: 'Modification avance',
   advance_imputed: 'Imputation d’avance',
   retention: 'Retenue',
   retention_released: 'Libération de retenue',

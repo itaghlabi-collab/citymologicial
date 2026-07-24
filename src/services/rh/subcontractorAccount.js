@@ -14,11 +14,11 @@ import {
 } from './subcontractors';
 import { paymentStatusFromDb } from './subcontractorConstants';
 import { listSituations } from './subcontractorSituations';
-import { listGlobalAdvances, listAdvanceImputations, summarizeAdvances } from './subcontractorAdvances';
+import { listGlobalAdvances, listAdvanceImputations } from './subcontractorAdvances';
 import { listAccountEvents } from './subcontractorAccountEvents';
 import { buildSubcontractorLedger } from './subcontractorLedger';
 import { listEvaluations, summarizePerformance } from './subcontractorEvaluations';
-import { round2 } from './subcontractorAdvanceMath';
+import { round2, totalAdvancesPaid, totalAdvancesConsumed } from './subcontractorAdvanceMath';
 
 function isPaid(p) {
   return (p.status || 'paid') === 'paid';
@@ -35,12 +35,22 @@ function safeList(promise, fallback = []) {
   return promise.catch(() => fallback);
 }
 
+/**
+ * KPI compte sous-traitant — calcul centralisé.
+ *
+ * Avance versée  = somme des versements réels (subcontractor_global_advances), 1× par advance.id
+ * Avance consommée = somme des imputations réelles (table imputations si présente,
+ *                    sinon min(avances, brut) par situation/paiement — jamais la somme
+ *                    brute des colonnes « Avances » par projet qui peut doubler un versement)
+ * Reliquat = max(0, versées − consommées)
+ */
 export function buildAccountKpis({
   payments = [],
   balances = [],
   assignments = [],
   situations = [],
   advances = [],
+  imputations = [],
 } = {}) {
   const all = payments || [];
   const paid = all.filter(isPaid);
@@ -55,11 +65,11 @@ export function buildAccountKpis({
       : all.reduce((s, p) => s + (Number(p.retenues) || 0), 0),
   );
   const montantsPayes = round2(paid.reduce((s, p) => s + (Number(p.amount) || 0), 0));
-  const advSummary = summarizeAdvances(advances);
+
   const activeAdvances = (advances || []).filter((a) => (a.status || 'unused') !== 'cancelled');
   const hasGlobalAdvances = activeAdvances.length > 0;
 
-  // Imputations issues des paiements : plafonnées au brut (évite 5 000 sur 2 250)
+  // Imputations analytiques plafonnées au brut (évite 5 000 affiché sur 2 250)
   const avancesImputeesEffectives = round2(
     situations.length
       ? situations.reduce((s, x) => {
@@ -70,28 +80,37 @@ export function buildAccountKpis({
       : all.reduce((s, p) => s + effectivePaymentAdvance(p), 0),
   );
 
+  // Somme des lignes d’imputation (1× par imputation.id) — source de vérité préférée
+  const imputationsSum = round2(
+    (imputations || []).reduce((s, i) => s + Math.max(0, Number(i.amount) || 0), 0),
+  );
+  const hasImputationRows = (imputations || []).length > 0;
+
   let avancesVersees;
   let avancesConsommees;
   let reliquatAvance;
+  let kpiSource;
 
   if (hasGlobalAdvances) {
-    avancesVersees = advSummary.avancesVersees;
-    // Conso = max(ledger, imputations paiements), plafonnée aux versées
-    avancesConsommees = round2(Math.min(
-      avancesVersees,
-      Math.max(advSummary.avancesConsommees, avancesImputeesEffectives),
-    ));
+    avancesVersees = totalAdvancesPaid(activeAdvances);
+    // Consommées = imputations réelles ; fallback analytique plafonnée.
+    // Ne PAS prendre max(..., consumed_amount ledger) : le ledger peut être gonflé
+    // si des paiements ont stocké avances > brut sans imputation correcte.
+    const fromImputations = hasImputationRows ? imputationsSum : avancesImputeesEffectives;
+    avancesConsommees = round2(Math.min(avancesVersees, fromImputations));
     reliquatAvance = round2(Math.max(0, avancesVersees - avancesConsommees));
+    kpiSource = hasImputationRows ? 'imputations' : 'analytical_capped';
   } else {
-    // Sans avances globales enregistrées : champs paiement = imputations plafonnées au brut
+    // Pas de versement réel enregistré : ne pas inventer des « avances versées »
+    // à partir des colonnes paiement (sinon double comptage multi-projets).
+    avancesVersees = 0;
     avancesConsommees = avancesImputeesEffectives;
-    avancesVersees = avancesImputeesEffectives;
     reliquatAvance = 0;
+    kpiSource = 'legacy_no_advance_ledger';
   }
 
-  // Règles fiche : brut à payer = max(0, travaux − avances versées)
-  const montantBrutAPayer = round2(Math.max(0, travauxRealises - avancesVersees));
-  // Reste net = max(0, brut à payer − payé − retenues)
+  // Brut à payer = travaux non couverts par les avances CONSOMMÉES (pas versées)
+  const montantBrutAPayer = round2(Math.max(0, travauxRealises - avancesConsommees));
   const resteNetAPayer = round2(Math.max(0, montantBrutAPayer - montantsPayes - retenues));
 
   const projectIds = new Set();
@@ -119,11 +138,17 @@ export function buildAccountKpis({
       .reduce((s, x) => s + (Number(x.grossAmount) || 0), 0),
   );
 
+  // Diagnostic (ex. double comptage historique)
+  const rawPaymentAvancesUncapped = round2(
+    all.reduce((s, p) => s + Math.max(0, Number(p.avances) || 0), 0),
+  );
+  const ledgerConsumed = hasGlobalAdvances ? totalAdvancesConsumed(activeAdvances) : 0;
+
   return {
     avancesVersees,
     avancesConsommees,
     reliquatAvance,
-    avancesGlobalesDisponibles: advances.length > 0 || reliquatAvance > 0 || avancesVersees > 0,
+    avancesGlobalesDisponibles: hasGlobalAdvances || avancesConsommees > 0,
     travauxRealises,
     montantBrutAPayer,
     montantsPayes,
@@ -140,6 +165,16 @@ export function buildAccountKpis({
     montantEnAttente: situations.length ? montantEnAttente : 0,
     totalSituations: situations.length,
     derniereOperation: payments[0]?.paymentDate || situations[0]?.situationDate || null,
+    _debug: {
+      kpiSource,
+      hasGlobalAdvances,
+      hasImputationRows,
+      imputationsSum,
+      avancesImputeesEffectives,
+      rawPaymentAvancesUncapped,
+      ledgerConsumed,
+      advancesCount: activeAdvances.length,
+    },
   };
 }
 
@@ -194,14 +229,29 @@ export function buildProjectSituations({ payments = [], balances = [], assignmen
     const soldeRestant = row.remainingFromBalance != null
       ? round2(row.remainingFromBalance)
       : round2(Math.max(0, row.totalTravaux - row.totalAvances - row.totalRetenues - row.totalPaye));
+    const isSansProjet = !row.projectId;
     let statutCompte = 'ouverte';
-    if (row.paymentCount > 0 && soldeRestant <= 0.009) statutCompte = 'soldee';
-    if (row.assignmentStatus === 'annulée') statutCompte = 'annulee';
+    let statutLabel = 'Ouverte';
+    if (isSansProjet) {
+      // Ne pas traiter « Sans projet » comme un projet soldé automatique
+      statutCompte = 'a_regulariser';
+      statutLabel = 'À régulariser';
+    } else if (row.assignmentStatus === 'annulée') {
+      statutCompte = 'annulee';
+      statutLabel = 'Annulée';
+    } else if (row.paymentCount > 0 && soldeRestant <= 0.009 && row.totalPaye > 0.009) {
+      statutCompte = 'soldee';
+      statutLabel = 'Soldée';
+    } else if (row.paymentCount > 0 && soldeRestant <= 0.009 && row.totalAvances + 0.009 >= row.totalTravaux) {
+      statutCompte = 'couverte_avance';
+      statutLabel = 'Couverte par avance';
+    }
     return {
       ...row,
       soldeRestant,
       statutCompte,
-      statutLabel: statutCompte === 'soldee' ? 'Soldée' : statutCompte === 'annulee' ? 'Annulée' : 'Ouverte',
+      statutLabel,
+      canAssignProject: isSansProjet && (row.paymentIds || []).length > 0,
     };
   }).sort((a, b) => String(b.lastDate || '').localeCompare(String(a.lastDate || '')));
 }
@@ -286,17 +336,20 @@ export async function listSubcontractorAccounts() {
       || (Number(sub.totalPaid) || 0) > 0;
     if (!hasActivity && sub.statut !== 'actif') return null;
 
-    const [situations, advances] = await Promise.all([
-      safeList(listSituations(sub.id)),
-      safeList(listGlobalAdvances(sub.id)),
-    ]);
-    const kpis = buildAccountKpis({
-      payments: subPayments,
-      balances: [],
-      assignments: sub.activeAssignments || [],
-      situations,
-      advances,
-    });
+  // Also pass imputations when available for list KPIs
+  const [situations, advances, imputations] = await Promise.all([
+    safeList(listSituations(sub.id)),
+    safeList(listGlobalAdvances(sub.id)),
+    safeList(listAdvanceImputations(sub.id)),
+  ]);
+  const kpis = buildAccountKpis({
+    payments: subPayments,
+    balances: [],
+    assignments: sub.activeAssignments || [],
+    situations,
+    advances,
+    imputations,
+  });
     kpis.resteAPayer = round2(Number(sub.remaining) || kpis.resteAPayer);
     if (!kpis.nombreProjets && (sub.activeProjectsCount || 0) > 0) {
       kpis.nombreProjets = sub.activeProjectsCount;
@@ -350,7 +403,7 @@ export async function getSubcontractorAccount(subcontractorId) {
   }));
 
   const kpis = buildAccountKpis({
-    payments, balances, assignments, situations, advances,
+    payments, balances, assignments, situations, advances, imputations,
   });
   const legacySituations = situations.length
     ? []

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Archive, ChevronLeft, CreditCard, FileDown, FilePlus, Loader2, Lock,
+  Archive, ChevronLeft, CreditCard, Eye, FileDown, FilePlus, Link2, Loader2, Lock,
   Pencil, Plus, Printer, Trash2, X,
 } from 'lucide-react';
 import { getSubcontractorAccount } from '../services/rh/subcontractorAccount';
@@ -11,9 +11,17 @@ import {
   archiveSubcontractor,
   createSubcontractorDocument,
   archiveSubcontractorDocument,
+  assignPaymentsToProject,
 } from '../services/rh/subcontractors';
-import { closeSituation, updateSituation, SITUATION_STATUS_LABEL } from '../services/rh/subcontractorSituations';
-import { createGlobalAdvance, cancelGlobalAdvance } from '../services/rh/subcontractorAdvances';
+import { closeSituation, updateSituation, cancelSituation, SITUATION_STATUS_LABEL } from '../services/rh/subcontractorSituations';
+import {
+  createGlobalAdvance,
+  cancelGlobalAdvance,
+  updateGlobalAdvance,
+  updateImputationAmount,
+  imputeAdvanceOnSituation,
+  resyncAdvanceConsumedFromImputations,
+} from '../services/rh/subcontractorAdvances';
 import {
   PAYMENT_METHODS,
   SUBCONTRACTOR_DOC_TYPES,
@@ -118,6 +126,17 @@ export default function SituationSousTraitantCompte({
   });
   const [evalSaving, setEvalSaving] = useState(false);
   const [selectedProjectId, setSelectedProjectId] = useState(null);
+  const [advEdit, setAdvEdit] = useState(null);
+  const [advEditSaving, setAdvEditSaving] = useState(false);
+  const [impEdit, setImpEdit] = useState(null);
+  const [impEditSaving, setImpEditSaving] = useState(false);
+  const [imputeSit, setImputeSit] = useState(null);
+  const [imputeAmount, setImputeAmount] = useState('');
+  const [imputeSaving, setImputeSaving] = useState(false);
+  const [assignRow, setAssignRow] = useState(null);
+  const [assignProjectId, setAssignProjectId] = useState('');
+  const [assignSaving, setAssignSaving] = useState(false);
+  const [sitDetail, setSitDetail] = useState(null);
   const [ledgerFilters, setLedgerFilters] = useState({
     q: '', type: '', projectId: '', dateFrom: '', dateTo: '',
   });
@@ -262,7 +281,12 @@ export default function SituationSousTraitantCompte({
     if (!sitEdit?.id) return;
     setSitSaving(true);
     try {
-      const gross = Math.max(0, Number(sitEdit.grossAmount) || 0);
+      let gross = Math.max(0, Number(sitEdit.grossAmount) || 0);
+      const qty = Number(sitEdit.quantity) || 0;
+      const pu = Number(sitEdit.unitPrice) || 0;
+      if ((sitEdit.paymentType || 'metre') === 'metre' && qty > 0 && pu > 0) {
+        gross = Math.round(qty * pu * 100) / 100;
+      }
       const av = Math.min(Math.max(0, Number(sitEdit.avancesImputees) || 0), gross);
       const ret = Math.max(0, Number(sitEdit.retenues) || 0);
       await updateSituation(sitEdit.id, subcontractorId, {
@@ -271,8 +295,8 @@ export default function SituationSousTraitantCompte({
         avancesImputees: av,
         retenues: ret,
         amountPaid: Math.max(0, Number(sitEdit.amountPaid) || 0),
-        quantity: Number(sitEdit.quantity) || 0,
-        unitPrice: Number(sitEdit.unitPrice) || 0,
+        quantity: qty,
+        unitPrice: pu,
       });
       const linked = (account?.payments || []).find((p) => p.situationId === sitEdit.id);
       if (linked) {
@@ -332,6 +356,113 @@ export default function SituationSousTraitantCompte({
         subcontractorName: account?.subcontractor?.fullName,
       });
       onNotify?.('success', 'Avance annulée.');
+      await load();
+    } catch (err) {
+      onNotify?.('error', formatSupabaseError(err, 'Annulation impossible.'));
+    }
+  }
+
+  async function handleSaveAdvanceEdit(e) {
+    e.preventDefault();
+    if (!advEdit?.id) return;
+    const amountChanged = Number(advEdit.amount) !== Number(advEdit._prevAmount);
+    if (amountChanged) {
+      const ok = window.confirm(
+        `Modifier le montant de l’avance (${advEdit._prevAmount} → ${advEdit.amount} MAD) ?\n`
+        + 'La caisse ne sera mise à jour que si vous confirmez la sync.',
+      );
+      if (!ok) return;
+    }
+    let syncCash = false;
+    if (amountChanged) {
+      syncCash = window.confirm('Mettre à jour aussi l’écriture de caisse liée à cette avance ?');
+    }
+    setAdvEditSaving(true);
+    try {
+      await updateGlobalAdvance(advEdit.id, subcontractorId, advEdit, {
+        subcontractorName: account?.subcontractor?.fullName,
+        syncCash,
+      });
+      onNotify?.('success', 'Avance mise à jour.');
+      setAdvEdit(null);
+      await load();
+    } catch (err) {
+      onNotify?.('error', formatSupabaseError(err, 'Erreur modification avance.'));
+    } finally {
+      setAdvEditSaving(false);
+    }
+  }
+
+  async function handleResyncAdvance(adv) {
+    try {
+      await resyncAdvanceConsumedFromImputations(adv.id, subcontractorId);
+      onNotify?.('success', 'Consommation recalculée depuis les imputations.');
+      await load();
+    } catch (err) {
+      onNotify?.('error', formatSupabaseError(err, 'Resync impossible.'));
+    }
+  }
+
+  async function handleSaveImpEdit(e) {
+    e.preventDefault();
+    if (!impEdit?.id) return;
+    setImpEditSaving(true);
+    try {
+      await updateImputationAmount(impEdit.id, subcontractorId, impEdit.newAmount);
+      onNotify?.('success', 'Imputation corrigée.');
+      setImpEdit(null);
+      await load();
+    } catch (err) {
+      onNotify?.('error', formatSupabaseError(err, 'Erreur imputation.'));
+    } finally {
+      setImpEditSaving(false);
+    }
+  }
+
+  async function handleImpute(e) {
+    e.preventDefault();
+    if (!imputeSit?.id) return;
+    setImputeSaving(true);
+    try {
+      const res = await imputeAdvanceOnSituation({
+        subcontractorId,
+        situationId: imputeSit.id,
+        requestedAmount: imputeAmount === '' ? null : imputeAmount,
+        useMax: imputeAmount === '',
+      });
+      onNotify?.('success', `Imputation : ${fmtMAD(res.imputed)}`);
+      setImputeSit(null);
+      setImputeAmount('');
+      await load();
+    } catch (err) {
+      onNotify?.('error', formatSupabaseError(err, 'Imputation impossible.'));
+    } finally {
+      setImputeSaving(false);
+    }
+  }
+
+  async function handleAssignProject(e) {
+    e.preventDefault();
+    if (!assignRow || !assignProjectId) return;
+    setAssignSaving(true);
+    try {
+      await assignPaymentsToProject(assignRow.paymentIds || [], assignProjectId);
+      onNotify?.('success', 'Projet affecté.');
+      setAssignRow(null);
+      setAssignProjectId('');
+      await load();
+    } catch (err) {
+      onNotify?.('error', formatSupabaseError(err, 'Affectation impossible.'));
+    } finally {
+      setAssignSaving(false);
+    }
+  }
+
+  async function handleCancelSituation(sit) {
+    if (!window.confirm(`Annuler la situation ${sit.reference || ''} ?`)) return;
+    try {
+      await cancelSituation(sit.id, subcontractorId);
+      onNotify?.('success', 'Situation annulée.');
       await load();
     } catch (err) {
       onNotify?.('error', formatSupabaseError(err, 'Annulation impossible.'));
@@ -620,6 +751,13 @@ export default function SituationSousTraitantCompte({
         <Kpi label="Total déjà payé" value={fmtMAD(kpis.montantsPayes)} accent="#2E7D32" />
         <Kpi label="Reste net à payer" value={fmtMAD(resteNet)} accent={resteNet > 0 ? '#C62828' : undefined} />
       </div>
+      {kpis._debug?.rawPaymentAvancesUncapped > (kpis.avancesConsommees || 0) + 0.01 && (
+        <p style={{ fontSize: '0.78rem', color: 'var(--text-3)', margin: '-8px 0 16px' }}>
+          Note : la somme brute des champs « avances » sur paiements (
+          {fmtMAD(kpis._debug.rawPaymentAvancesUncapped)}) dépasse les imputations réelles (
+          {fmtMAD(kpis.avancesConsommees)}). Les KPI utilisent les imputations plafonnées au brut — pas la somme par projet.
+        </p>
+      )}
 
       <div className="rh-ext-detail-tabs" style={{ marginBottom: 16 }}>
         {ST_FICHE_TABS.map((t) => (
@@ -670,9 +808,25 @@ export default function SituationSousTraitantCompte({
                         <td>{a.reference || '—'}</td>
                         <td><span className="badge badge-orange">{a.statusLabel}</span></td>
                         <td>
-                          {a.status !== 'cancelled' && a.consumedAmount <= 0.009 && (
-                            <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleCancelAdvance(a)}>Annuler</button>
-                          )}
+                          <div className="payment-row-actions">
+                            <button type="button" className="btn btn-secondary btn-sm" title="Modifier" onClick={() => setAdvEdit({
+                              ...a,
+                              _prevAmount: a.amount,
+                              amount: String(a.amount),
+                              advanceDate: a.advanceDate,
+                              paymentMethod: a.paymentMethod || 'virement',
+                              reference: a.reference || '',
+                              observation: a.observation || '',
+                            })}>
+                              <Pencil size={12} />
+                            </button>
+                            <button type="button" className="btn btn-secondary btn-sm" title="Resync conso." onClick={() => handleResyncAdvance(a)}>
+                              Recalc.
+                            </button>
+                            {a.status !== 'cancelled' && a.consumedAmount <= 0.009 && (
+                              <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleCancelAdvance(a)}>Annuler</button>
+                            )}
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -686,15 +840,29 @@ export default function SituationSousTraitantCompte({
                 <div className="table-wrap" style={{ padding: 0 }}>
                   <table>
                     <thead>
-                      <tr><th>Date</th><th>Projet</th><th>Montant</th><th>Reliquat après</th></tr>
+                      <tr><th>Date</th><th>Projet</th><th>Situation</th><th>Montant</th><th>Reliquat après</th><th>Actions</th></tr>
                     </thead>
                     <tbody>
                       {imputations.map((i) => (
                         <tr key={i.id}>
                           <td>{fmtDate(i.imputationDate)}</td>
                           <td>{i.projectName || '—'}</td>
+                          <td>{i.situationId ? String(i.situationId).slice(0, 8) : '—'}</td>
                           <td style={{ color: '#E65100' }}>{fmtMAD(i.amount)}</td>
                           <td>{fmtMAD(i.reliquatAfter)}</td>
+                          <td>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              title="Corriger"
+                              onClick={() => setImpEdit({
+                                ...i,
+                                newAmount: String(i.amount),
+                              })}
+                            >
+                              <Pencil size={12} />
+                            </button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -841,7 +1009,7 @@ export default function SituationSousTraitantCompte({
             <table>
               <thead>
                 <tr>
-                  <th>Projet</th><th>Réalisé</th><th>Avance</th><th>Retenues</th><th>Payé</th><th>Reste</th><th>Statut</th><th>MAJ</th><th>Actions</th>
+                  <th>Projet</th><th>Réalisé</th><th>Avance imputée</th><th>Retenues</th><th>Payé</th><th>Reste</th><th>Statut</th><th>MAJ</th><th>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -857,12 +1025,28 @@ export default function SituationSousTraitantCompte({
                     <td>{fmtDate(s.lastDate)}</td>
                     <td onClick={(e) => e.stopPropagation()}>
                       <div className="payment-row-actions">
-                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => onNewSituation?.(subcontractorId)}>Situation</button>
+                        <button type="button" className="btn btn-secondary btn-sm" title="Voir" onClick={() => setSelectedProjectId(s.key)}>
+                          <Eye size={12} />
+                        </button>
+                        <button type="button" className="btn btn-secondary btn-sm" title="Situation" onClick={() => onNewSituation?.(subcontractorId)}>
+                          <Plus size={12} />
+                        </button>
                         {(s.paymentIds || []).length > 0 && (
-                          <button type="button" className="btn btn-secondary btn-sm" onClick={() => openLegacyProjectEdit(s)}>
+                          <button type="button" className="btn btn-secondary btn-sm" title="Modifier paiement" onClick={() => openLegacyProjectEdit(s)}>
                             <Pencil size={12} />
                           </button>
                         )}
+                        {s.canAssignProject && (
+                          <button type="button" className="btn btn-secondary btn-sm" title="Affecter à un projet" onClick={() => { setAssignRow(s); setAssignProjectId(''); }}>
+                            <Link2 size={12} /> Affecter
+                          </button>
+                        )}
+                        <button type="button" className="btn btn-secondary btn-sm" title="Paiement" onClick={() => (onNewPayment || onNewSituation)?.(subcontractorId)}>
+                          <CreditCard size={12} />
+                        </button>
+                        <button type="button" className="btn btn-secondary btn-sm" title="PDF" onClick={handleAccountPdf}>
+                          <FileDown size={12} />
+                        </button>
                       </div>
                     </td>
                   </tr>
@@ -898,16 +1082,37 @@ export default function SituationSousTraitantCompte({
                         <td>{fmtMAD(s.remaining)}</td>
                         <td><span className="badge badge-orange">{s.statusLabel}</span></td>
                         <td>
-                          {s.status !== 'closed' && (
-                            <button type="button" className="btn btn-secondary btn-sm" onClick={() => openSituationEdit(s)}>
-                              <Pencil size={12} />
+                          <div className="payment-row-actions">
+                            <button type="button" className="btn btn-secondary btn-sm" title="Détail" onClick={() => setSitDetail(s)}>
+                              <Eye size={12} />
                             </button>
-                          )}
-                          {s.status === 'settled' && (
-                            <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleCloseSituation(s)}>
-                              <Lock size={12} />
+                            {s.status !== 'closed' && s.status !== 'cancelled' && (
+                              <>
+                                <button type="button" className="btn btn-secondary btn-sm" title="Modifier" onClick={() => openSituationEdit(s)}>
+                                  <Pencil size={12} />
+                                </button>
+                                <button type="button" className="btn btn-secondary btn-sm" title="Imputer avance" onClick={() => { setImputeSit(s); setImputeAmount(''); }}>
+                                  Avance
+                                </button>
+                                <button type="button" className="btn btn-secondary btn-sm" title="Paiement" onClick={() => (onNewPayment || onNewSituation)?.(subcontractorId)}>
+                                  <CreditCard size={12} />
+                                </button>
+                              </>
+                            )}
+                            {s.status === 'settled' && (
+                              <button type="button" className="btn btn-secondary btn-sm" title="Clôturer" onClick={() => handleCloseSituation(s)}>
+                                <Lock size={12} />
+                              </button>
+                            )}
+                            {s.status !== 'closed' && s.status !== 'cancelled' && (
+                              <button type="button" className="btn btn-secondary btn-sm" title="Annuler" style={{ color: 'var(--red)' }} onClick={() => handleCancelSituation(s)}>
+                                <Trash2 size={12} />
+                              </button>
+                            )}
+                            <button type="button" className="btn btn-secondary btn-sm" title="PDF" onClick={handleAccountPdf}>
+                              <FileDown size={12} />
                             </button>
-                          )}
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -1280,10 +1485,14 @@ export default function SituationSousTraitantCompte({
             <form onSubmit={handleSituationSave} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <label>Référence<input value={sitEdit.reference} onChange={(e) => setSitEdit((p) => ({ ...p, reference: e.target.value }))} /></label>
               <label>Désignation<input value={sitEdit.designation} onChange={(e) => setSitEdit((p) => ({ ...p, designation: e.target.value }))} /></label>
+              <label>Quantité<input type="number" min="0" step="0.01" value={sitEdit.quantity} onChange={(e) => setSitEdit((p) => ({ ...p, quantity: e.target.value }))} /></label>
+              <label>Unité<input value={sitEdit.unit} onChange={(e) => setSitEdit((p) => ({ ...p, unit: e.target.value }))} /></label>
+              <label>Prix unitaire<input type="number" min="0" step="0.01" value={sitEdit.unitPrice} onChange={(e) => setSitEdit((p) => ({ ...p, unitPrice: e.target.value }))} /></label>
               <label>Montant brut (MAD)<input type="number" min="0" step="0.01" value={sitEdit.grossAmount} onChange={(e) => setSitEdit((p) => ({ ...p, grossAmount: e.target.value }))} /></label>
               <label>Avance imputée (MAD)<input type="number" min="0" step="0.01" value={sitEdit.avancesImputees} onChange={(e) => setSitEdit((p) => ({ ...p, avancesImputees: e.target.value }))} /></label>
               <label>Retenues (MAD)<input type="number" min="0" step="0.01" value={sitEdit.retenues} onChange={(e) => setSitEdit((p) => ({ ...p, retenues: e.target.value }))} /></label>
               <label>Net déjà payé (MAD)<input type="number" min="0" step="0.01" value={sitEdit.amountPaid} onChange={(e) => setSitEdit((p) => ({ ...p, amountPaid: e.target.value }))} /></label>
+              <label>Observation<input value={sitEdit.notes || ''} onChange={(e) => setSitEdit((p) => ({ ...p, notes: e.target.value }))} /></label>
               <label>Statut
                 <select value={sitEdit.status} onChange={(e) => setSitEdit((p) => ({ ...p, status: e.target.value }))}>
                   {Object.entries(SITUATION_STATUS_LABEL).filter(([k]) => k !== 'closed').map(([k, lab]) => (
@@ -1291,11 +1500,145 @@ export default function SituationSousTraitantCompte({
                   ))}
                 </select>
               </label>
+              <p style={{ fontSize: '0.78rem', color: 'var(--text-3)', margin: 0 }}>
+                Aucune nouvelle écriture de caisse. Avance plafonnée au brut. Net = max(0, brut − avance − retenues).
+              </p>
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                 <button type="button" className="btn btn-secondary" onClick={() => setSitEdit(null)}>Annuler</button>
                 <button type="submit" className="btn btn-primary" disabled={sitSaving}>{sitSaving ? '…' : 'Enregistrer'}</button>
               </div>
             </form>
+          </div>
+        </div>
+      )}
+
+      {advEdit && (
+        <div className="rh-ext-modal-overlay">
+          <div className="card rh-ext-modal-box rh-ext-modal-box--md">
+            <div className="flex-between" style={{ marginBottom: 12 }}>
+              <h2 style={{ margin: 0, fontFamily: 'var(--font-head)', fontWeight: 800 }}>Modifier l’avance</h2>
+              <button type="button" onClick={() => setAdvEdit(null)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
+            </div>
+            <form onSubmit={handleSaveAdvanceEdit} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <label>Date<input type="date" value={advEdit.advanceDate} onChange={(e) => setAdvEdit((p) => ({ ...p, advanceDate: e.target.value }))} /></label>
+              <label>Montant (MAD)<input type="number" min="0" step="0.01" value={advEdit.amount} onChange={(e) => setAdvEdit((p) => ({ ...p, amount: e.target.value }))} /></label>
+              <p style={{ fontSize: '0.78rem', color: 'var(--text-3)', margin: 0 }}>
+                Déjà consommé : {fmtMAD(advEdit.consumedAmount)} — le montant ne peut pas descendre en dessous.
+              </p>
+              <label>Mode
+                <select value={advEdit.paymentMethod} onChange={(e) => setAdvEdit((p) => ({ ...p, paymentMethod: e.target.value }))}>
+                  {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
+                </select>
+              </label>
+              <label>Référence<input value={advEdit.reference} onChange={(e) => setAdvEdit((p) => ({ ...p, reference: e.target.value }))} /></label>
+              <label>Observation<input value={advEdit.observation} onChange={(e) => setAdvEdit((p) => ({ ...p, observation: e.target.value }))} /></label>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setAdvEdit(null)}>Fermer</button>
+                <button type="submit" className="btn btn-primary" disabled={advEditSaving}>{advEditSaving ? '…' : 'Enregistrer'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {impEdit && (
+        <div className="rh-ext-modal-overlay">
+          <div className="card rh-ext-modal-box rh-ext-modal-box--md">
+            <div className="flex-between" style={{ marginBottom: 12 }}>
+              <h2 style={{ margin: 0, fontFamily: 'var(--font-head)', fontWeight: 800 }}>Corriger l’imputation</h2>
+              <button type="button" onClick={() => setImpEdit(null)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
+            </div>
+            <form onSubmit={handleSaveImpEdit} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div>Projet : <strong>{impEdit.projectName || '—'}</strong></div>
+              <div>Montant actuel : <strong>{fmtMAD(impEdit.amount)}</strong></div>
+              <label>Nouveau montant (MAD)
+                <input type="number" min="0" step="0.01" value={impEdit.newAmount} onChange={(e) => setImpEdit((p) => ({ ...p, newAmount: e.target.value }))} required />
+              </label>
+              <p style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>Analytique uniquement — aucune écriture de caisse.</p>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setImpEdit(null)}>Annuler</button>
+                <button type="submit" className="btn btn-primary" disabled={impEditSaving}>{impEditSaving ? '…' : 'Enregistrer'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {imputeSit && (
+        <div className="rh-ext-modal-overlay">
+          <div className="card rh-ext-modal-box rh-ext-modal-box--md">
+            <div className="flex-between" style={{ marginBottom: 12 }}>
+              <h2 style={{ margin: 0, fontFamily: 'var(--font-head)', fontWeight: 800 }}>Imputer une avance</h2>
+              <button type="button" onClick={() => setImputeSit(null)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
+            </div>
+            <form onSubmit={handleImpute} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div>{imputeSit.reference || 'Situation'} — {imputeSit.projectName || '—'}</div>
+              <div>Brut : {fmtMAD(imputeSit.grossAmount)} · Déjà imputé : {fmtMAD(imputeSit.avancesImputees)}</div>
+              <div>Reliquat dispo. : <strong style={{ color: '#E65100' }}>{fmtMAD(kpis.reliquatAvance)}</strong></div>
+              <label>Montant à imputer (vide = max)
+                <input type="number" min="0" step="0.01" value={imputeAmount} onChange={(e) => setImputeAmount(e.target.value)} placeholder="Maximum auto" />
+              </label>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setImputeSit(null)}>Annuler</button>
+                <button type="submit" className="btn btn-primary" disabled={imputeSaving}>{imputeSaving ? '…' : 'Imputer'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {assignRow && (
+        <div className="rh-ext-modal-overlay">
+          <div className="card rh-ext-modal-box rh-ext-modal-box--md">
+            <div className="flex-between" style={{ marginBottom: 12 }}>
+              <h2 style={{ margin: 0, fontFamily: 'var(--font-head)', fontWeight: 800 }}>Affecter à un projet</h2>
+              <button type="button" onClick={() => setAssignRow(null)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
+            </div>
+            <form onSubmit={handleAssignProject} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <p style={{ fontSize: '0.85rem', color: 'var(--text-3)' }}>
+                Régularisation de « {assignRow.projectName} » — {(assignRow.paymentIds || []).length} paiement(s).
+              </p>
+              <label>Projet *
+                <select value={assignProjectId} onChange={(e) => setAssignProjectId(e.target.value)} required>
+                  <option value="">Choisir…</option>
+                  {(assignments || []).filter((a) => a.projectId).map((a) => (
+                    <option key={a.id} value={a.projectId}>{a.projectName || a.projectRef}</option>
+                  ))}
+                </select>
+              </label>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setAssignRow(null)}>Annuler</button>
+                <button type="submit" className="btn btn-primary" disabled={assignSaving}>{assignSaving ? '…' : 'Affecter'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {sitDetail && (
+        <div className="rh-ext-modal-overlay">
+          <div className="card rh-ext-modal-box rh-ext-modal-box--md">
+            <div className="flex-between" style={{ marginBottom: 12 }}>
+              <h2 style={{ margin: 0, fontFamily: 'var(--font-head)', fontWeight: 800 }}>Détail situation</h2>
+              <button type="button" onClick={() => setSitDetail(null)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
+            </div>
+            <dl style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, margin: 0 }}>
+              <div><dt style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Réf.</dt><dd>{sitDetail.reference || '—'}</dd></div>
+              <div><dt style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Projet</dt><dd>{sitDetail.projectName || 'Sans projet'}</dd></div>
+              <div><dt style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Désignation</dt><dd>{sitDetail.designation || '—'}</dd></div>
+              <div><dt style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Statut</dt><dd>{sitDetail.statusLabel}</dd></div>
+              <div><dt style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Brut</dt><dd>{fmtMAD(sitDetail.grossAmount)}</dd></div>
+              <div><dt style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Avance imputée</dt><dd>{fmtMAD(sitDetail.avancesImputees)}</dd></div>
+              <div><dt style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Retenues</dt><dd>{fmtMAD(sitDetail.retenues)}</dd></div>
+              <div><dt style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Payé</dt><dd>{fmtMAD(sitDetail.amountPaid)}</dd></div>
+              <div><dt style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>Reste</dt><dd>{fmtMAD(sitDetail.remaining)}</dd></div>
+            </dl>
+            <div style={{ marginTop: 14, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              {sitDetail.status !== 'closed' && (
+                <button type="button" className="btn btn-secondary" onClick={() => { setSitDetail(null); openSituationEdit(sitDetail); }}>Modifier</button>
+              )}
+              <button type="button" className="btn btn-primary" onClick={() => setSitDetail(null)}>Fermer</button>
+            </div>
           </div>
         </div>
       )}
