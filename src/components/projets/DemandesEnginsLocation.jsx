@@ -59,8 +59,6 @@ function emptyForm(user) {
   return {
     projetId: '',
     projetNom: '',
-    projetLieId: '',
-    projetLieNom: '',
     demandeurId: user?.id || '',
     demandeurNom: name,
     demandeurFonction: user?.fonction || user?.role || '',
@@ -232,8 +230,6 @@ export default function DemandesEnginsLocation() {
     setForm({
       projetId: row.projetId,
       projetNom: row.projetNom,
-      projetLieId: row.projetLieId || row.projetId,
-      projetLieNom: row.projetLieNom || row.projetNom,
       demandeurId: row.demandeurId,
       demandeurNom: row.demandeurNom,
       demandeurFonction: row.demandeurFonction,
@@ -253,33 +249,19 @@ export default function DemandesEnginsLocation() {
     setFormOpen(true);
   }
 
-  function setProjectField(which, projectId) {
+  function setProjectField(projectId) {
     const p = projects.find((x) => String(x.id) === String(projectId));
-    const nom = p ? (p.ref ? `${p.ref} — ${p.nom}` : p.nom) : '';
-    if (which === 'main') {
-      setForm((prev) => ({
-        ...prev,
-        projetId: projectId,
-        projetNom: p?.nom || '',
-        // Si projet lié vide, aligner sur le chantier principal (même source)
-        projetLieId: prev.projetLieId || projectId,
-        projetLieNom: prev.projetLieNom || p?.nom || '',
-      }));
-    } else {
-      setForm((prev) => ({
-        ...prev,
-        projetLieId: projectId,
-        projetLieNom: p?.nom || '',
-      }));
-    }
-    return nom;
+    setForm((prev) => ({
+      ...prev,
+      projetId: projectId,
+      projetNom: p?.nom || '',
+    }));
   }
 
   async function handleSave(e) {
     e.preventDefault();
     const payload = {
       ...form,
-      projetLieId: form.projetLieId || form.projetId,
       avecChauffeur: !!form.avecChauffeur,
     };
     const errs = validateEquipmentRentalForm(payload);
@@ -536,7 +518,7 @@ export default function DemandesEnginsLocation() {
               <select
                 style={SELECT}
                 value={form.projetId}
-                onChange={(e) => setProjectField('main', e.target.value)}
+                onChange={(e) => setProjectField(e.target.value)}
                 required
               >
                 <option value="">— Sélectionner —</option>
@@ -544,25 +526,6 @@ export default function DemandesEnginsLocation() {
                   <option key={p.id} value={p.id}>{p.ref ? `${p.ref} — ${p.nom}` : p.nom}</option>
                 ))}
               </select>
-            </Field>
-            <Field
-              label="Projet lié"
-              required
-              error={formErr.projetLieId}
-            >
-              <select
-                style={SELECT}
-                value={form.projetLieId || form.projetId}
-                onChange={(e) => setProjectField('lie', e.target.value)}
-              >
-                <option value="">— Même que le chantier —</option>
-                {projects.map((p) => (
-                  <option key={p.id} value={p.id}>{p.ref ? `${p.ref} — ${p.nom}` : p.nom}</option>
-                ))}
-              </select>
-              <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 4 }}>
-                Même liste projets. Si identique, une seule relation est stockée.
-              </div>
             </Field>
             <Field label="Demandeur" required>
               <input style={{ ...INPUT, background: 'var(--surface-2)' }} value={form.demandeurNom} readOnly />
@@ -721,7 +684,6 @@ export default function DemandesEnginsLocation() {
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(200px,1fr))', gap: 12, fontSize: '0.88rem' }}>
               <div><strong>Projet / chantier</strong><div>{detail.projetNom || '—'}</div></div>
-              <div><strong>Projet lié</strong><div>{detail.projetLieNom || detail.projetNom || '—'}</div></div>
               <div><strong>Demandeur</strong><div>{detail.demandeurNom}{detail.demandeurFonction ? ` — ${detail.demandeurFonction}` : ''}</div></div>
               <div><strong>Type d’engin</strong><div>{detail.typeEnginLabel}</div></div>
               <div><strong>Quantité</strong><div>{detail.quantite}</div></div>

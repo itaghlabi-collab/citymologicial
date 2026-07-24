@@ -154,8 +154,6 @@ export function validateEquipmentRentalForm(form) {
   if (!form.uniteDuree) err.uniteDuree = 'Unité de durée requise.';
   const qty = Number(form.quantite);
   if (!Number.isInteger(qty) || qty < 1) err.quantite = 'Quantité entière positive requise.';
-  // Projet lié : même source ; obligatoire à l’UI, défaut = projet principal
-  if (!form.projetLieId && !form.projetId) err.projetLieId = 'Projet lié requis.';
   if (!String(form.motifTravaux || '').trim()) err.motifTravaux = 'Motif / travaux requis.';
   if (!form.niveauUrgence) err.niveauUrgence = 'Niveau d’urgence requis.';
   if (form.avecChauffeur !== true && form.avecChauffeur !== false
@@ -169,15 +167,15 @@ export function validateEquipmentRentalForm(form) {
 
 function toRow(form, { userId, profile, reference, statut } = {}) {
   const projetId = form.projetId || null;
-  // Même source projets : si projet lié vide ou identique, on stocke le même id (pas de 2e table)
-  const projetLieId = form.projetLieId || projetId;
+  // projet_lie_id = même projet (colonne conservée pour compatibilité schéma, non exposée à l’UI)
+  const projetLieId = projetId;
   const avec = form.avecChauffeur === true || form.avecChauffeur === 'true' || form.avecChauffeur === '1';
   return {
     reference: reference || form.reference || null,
     projet_id: projetId,
     projet_lie_id: projetLieId,
     projet_nom: form.projetNom || null,
-    projet_lie_nom: form.projetLieNom || form.projetNom || null,
+    projet_lie_nom: form.projetNom || null,
     demandeur_id: form.demandeurId || userId || null,
     demandeur_nom: form.demandeurNom || profile?.name || null,
     demandeur_fonction: form.demandeurFonction || profile?.fonction || null,
