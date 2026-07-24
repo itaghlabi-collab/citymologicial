@@ -1,0 +1,24 @@
+-- =============================================================================
+-- CITYMO — OPTIONNEL : annuler les écritures caisse liées aux ST (SÉPARÉ)
+-- NE PAS exécuter avec le reset principal.
+-- À n’utiliser QUE si vous voulez aussi nettoyer la feuille de caisse
+-- des avances / paiements sous-traitants de test.
+-- =============================================================================
+--
+-- BEGIN;
+--
+-- UPDATE public.finance_transactions
+-- SET statut = 'Annulé',
+--     validation_status = COALESCE(validation_status, 'cancelled')
+-- WHERE source_type IN ('subcontractor_payment', 'subcontractor_advance')
+--   AND statut IS DISTINCT FROM 'Annulé';
+--
+-- -- Vérification
+-- SELECT source_type, statut, COUNT(*)
+-- FROM public.finance_transactions
+-- WHERE source_type IN ('subcontractor_payment', 'subcontractor_advance')
+-- GROUP BY 1, 2;
+--
+-- ROLLBACK;
+-- -- COMMIT;
+-- =============================================================================
