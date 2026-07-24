@@ -266,11 +266,14 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
               label = `${p.bucket} : ${p.count} fichier(s) — total inventorié ${p.totalListed}`;
             } else if (p.phase === 'copied') {
               label = `Copie fichiers ${p.copied}/${p.total}`;
+            } else if (p.phase === 'copy_error') {
+              label = `Échec fichier ${p.copied}/${p.total} — ${p.bucket}/${p.path} (poursuite)`;
             }
             if (label) pipeline.touchProgress(label);
           },
         }),
-        { timeoutMs: Math.max(30_000, 30 * 60_000), progressMsg: 'Inventaire Storage…' },
+        // Lot fichiers : timeout large ; chaque fichier a BACKUP_FILE_COPY_TIMEOUT_MS + retries
+        { timeoutMs: Math.max(30_000, 6 * 60 * 60_000), progressMsg: 'Inventaire / copie Storage…' },
       );
       logger.storageExportOk({
         files: manifest.total_files || 0,
@@ -428,6 +431,62 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
 
     steps.integrity = true;
     steps.drive = driveSynced;
+
+    // Copie Storage partielle (timeouts fichiers) → Succès partiel, pas Erreur
+    const copySummary = manifest?.copy_summary || integrityReport?.copy_summary;
+    const filesPartial = Boolean(integrityReport?.partial)
+      || Boolean(copySummary?.failed > 0);
+    if (filesPartial && mainFilePath) {
+      const failed = copySummary?.failed ?? integrityReport?.files_failed ?? 0;
+      const copied = copySummary?.copied ?? integrityReport?.files_copied ?? 0;
+      const listed = copySummary?.total_listed ?? integrityReport?.files_listed ?? 0;
+      const failedList = (copySummary?.failed_files || [])
+        .slice(0, 10)
+        .map((f) => `${f.bucket}/${f.path}`)
+        .join(', ');
+      const throughput = copySummary?.throughput_bps
+        ? `${(copySummary.throughput_bps / 1024).toFixed(1)} Ko/s`
+        : '—';
+      const userMsg = [
+        `Copie Storage partielle : ${copied}/${listed} fichier(s) OK, ${failed} échoué(s).`,
+        failedList ? `Échoués : ${failedList}.` : null,
+        copySummary?.elapsed_ms != null
+          ? `Temps copie ~${Math.round(copySummary.elapsed_ms / 1000)}s, débit ${throughput}.`
+          : null,
+        'Les archives DB / manifeste sont valides ; relancer pour reprendre les fichiers manquants.',
+      ].filter(Boolean).join(' ');
+
+      const updated = await pipeline.run('finalizeBackupRow:succes_partiel:files', () => finalizeBackupRow(row.id, {
+        statut: 'succes_partiel',
+        file_path: mainFilePath,
+        taille_bytes: totalSize,
+        drive_synced: driveSynced,
+        drive_folder_id: driveFolderId,
+        drive_sync_error: driveSyncError || driveValidationError,
+        user_message: userMsg,
+        error_code: 'storage_copy_partial',
+        schedule_period_key: schedulePeriodKey || null,
+        steps_json: steps,
+        description: `Succès partiel — ${copied}/${listed} fichiers, ${failed} échec(s)`,
+        error_message: null,
+      }));
+      await notifyBackupPartialOrFail({
+        title: 'Sauvegarde partielle (fichiers)',
+        message: userMsg,
+        backupId: row.id,
+        dedupeKey: `partial-files-${algiersDateKey()}`,
+      });
+      logger.backupDone(backupPrefix, {
+        type: typeKey,
+        bytes: totalSize,
+        drive_synced: driveSynced,
+        partial: true,
+        copy_summary: copySummary,
+        integrity: integrityReport,
+      });
+      return updated;
+    }
+
     const updated = await pipeline.run('finalizeBackupRow:succes', () => finalizeBackupRow(row.id, {
       statut: 'succes',
       file_path: mainFilePath,
