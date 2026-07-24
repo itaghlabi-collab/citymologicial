@@ -1,53 +1,175 @@
 /**
  * État persistant Google Drive (reconnexion, tokens rotatifs).
+ * Table optionnelle : si absente → warning seul, jamais d’échec de sauvegarde.
  * Aucun secret n'est renvoyé aux clients.
  */
 const { getSupabaseAdmin } = require('../../lib/supabaseAdmin');
 const { classifyDriveError } = require('./googleDriveErrors');
 
 const ROW_ID = 1;
+const TABLE = 'erp_backup_drive_state';
+
+/** null = inconnu, true = absente, false = OK */
+let tableMissing = null;
+/** Fallback mémoire si table absente (durée de vie du process). */
+let memoryState = {
+  id: ROW_ID,
+  status: 'unknown',
+  auth_mode: null,
+  folder_id: null,
+  shared_drive_id: null,
+  last_check_at: null,
+  last_upload_at: null,
+  last_success_at: null,
+  error: null,
+  last_error_code: null,
+  last_error_user_message: null,
+  connected_account: null,
+  oauth_refresh_token: null,
+  notify_reconnect_sent_at: null,
+};
+
+function isMissingTableError(error) {
+  const msg = String(error?.message || error || '').toLowerCase();
+  const code = String(error?.code || '');
+  return code === 'PGRST205'
+    || msg.includes('schema cache')
+    || msg.includes('could not find the table')
+    || msg.includes('does not exist')
+    || (msg.includes(TABLE) && msg.includes('not find'));
+}
+
+function markTableMissing(reason) {
+  if (tableMissing !== true) {
+    console.warn(
+      `[drive:state] Table public.${TABLE} indisponible — état Drive en mémoire uniquement. `
+      + 'Exécutez supabase/RUN_BACKUP_DRIVE_STATE.sql (ou la migration). '
+      + `Détail: ${reason}`,
+    );
+  }
+  tableMissing = true;
+}
+
+function normalizeRow(row) {
+  if (!row) return null;
+  const lastSuccess = row.last_success_at || row.last_upload_at || null;
+  const errMsg = row.last_error_user_message || row.error || null;
+  return {
+    ...row,
+    last_success_at: lastSuccess,
+    last_upload_at: row.last_upload_at || lastSuccess,
+    last_error_user_message: errMsg,
+    error: row.error || errMsg,
+  };
+}
 
 async function readState() {
+  if (tableMissing === true) {
+    return normalizeRow({ ...memoryState });
+  }
+
   try {
     const sb = getSupabaseAdmin();
     const { data, error } = await sb
-      .from('erp_backup_drive_state')
+      .from(TABLE)
       .select('*')
       .eq('id', ROW_ID)
       .maybeSingle();
+
     if (error) {
-      if (String(error.message || '').includes('does not exist')) return null;
+      if (isMissingTableError(error)) {
+        markTableMissing(error.message);
+        return normalizeRow({ ...memoryState });
+      }
       console.warn('[drive:state] lecture:', error.message);
-      return null;
+      return normalizeRow({ ...memoryState });
     }
-    return data;
+
+    tableMissing = false;
+    if (data) {
+      memoryState = { ...memoryState, ...data };
+      return normalizeRow(data);
+    }
+    return normalizeRow({ ...memoryState });
   } catch (err) {
-    console.warn('[drive:state] lecture:', err.message);
-    return null;
+    if (isMissingTableError(err)) {
+      markTableMissing(err.message);
+    } else {
+      console.warn('[drive:state] lecture:', err.message);
+    }
+    return normalizeRow({ ...memoryState });
   }
 }
 
+/**
+ * Mappe le patch métier vers les colonnes DB (dont alias demandés).
+ */
+function buildDbPayload(patch) {
+  const now = new Date().toISOString();
+  const payload = {
+    id: ROW_ID,
+    updated_at: now,
+    ...patch,
+  };
+
+  // Alias : last_success_at ↔ last_upload_at
+  if (patch.last_success_at && !patch.last_upload_at) {
+    payload.last_upload_at = patch.last_success_at;
+  }
+  if (patch.last_upload_at && !patch.last_success_at) {
+    payload.last_success_at = patch.last_upload_at;
+  }
+
+  // Alias : last_error_user_message ↔ error
+  if (patch.last_error_user_message && !patch.error) {
+    payload.error = patch.last_error_user_message;
+  }
+  if (patch.error && !patch.last_error_user_message) {
+    payload.last_error_user_message = patch.error;
+  }
+
+  if (!payload.created_at) {
+    payload.created_at = memoryState.created_at || now;
+  }
+
+  return payload;
+}
+
 async function upsertState(patch) {
+  const payload = buildDbPayload(patch);
+  memoryState = { ...memoryState, ...payload };
+
+  if (tableMissing === true) {
+    return normalizeRow({ ...memoryState });
+  }
+
   try {
     const sb = getSupabaseAdmin();
-    const payload = {
-      id: ROW_ID,
-      updated_at: new Date().toISOString(),
-      ...patch,
-    };
     const { data, error } = await sb
-      .from('erp_backup_drive_state')
+      .from(TABLE)
       .upsert(payload, { onConflict: 'id' })
       .select('*')
       .single();
+
     if (error) {
-      console.warn('[drive:state] upsert:', error.message);
-      return null;
+      if (isMissingTableError(error)) {
+        markTableMissing(error.message);
+        return normalizeRow({ ...memoryState });
+      }
+      console.warn('[drive:state] upsert (non bloquant):', error.message);
+      return normalizeRow({ ...memoryState });
     }
-    return data;
+
+    tableMissing = false;
+    if (data) memoryState = { ...memoryState, ...data };
+    return normalizeRow(data || memoryState);
   } catch (err) {
-    console.warn('[drive:state] upsert:', err.message);
-    return null;
+    if (isMissingTableError(err)) {
+      markTableMissing(err.message);
+    } else {
+      console.warn('[drive:state] upsert (non bloquant):', err.message);
+    }
+    return normalizeRow({ ...memoryState });
   }
 }
 
@@ -69,6 +191,7 @@ async function markDriveReconnectRequired(err) {
     status: 'reconnect_required',
     last_error_code: classified.code,
     last_error_user_message: classified.userMessage,
+    error: classified.userMessage,
     last_check_at: new Date().toISOString(),
   });
   return {
@@ -78,15 +201,20 @@ async function markDriveReconnectRequired(err) {
   };
 }
 
-async function markDriveActive({ account, folderId } = {}) {
+async function markDriveActive({ account, folderId, sharedDriveId, authMode } = {}) {
+  const now = new Date().toISOString();
   return upsertState({
     status: 'active',
     last_error_code: null,
     last_error_user_message: null,
-    last_check_at: new Date().toISOString(),
-    last_success_at: new Date().toISOString(),
+    error: null,
+    last_check_at: now,
+    last_success_at: now,
+    last_upload_at: now,
     connected_account: account || null,
     folder_id: folderId || null,
+    shared_drive_id: sharedDriveId || null,
+    auth_mode: authMode || null,
     notify_reconnect_sent_at: null,
   });
 }
@@ -98,19 +226,25 @@ async function markDriveDisconnected() {
     last_check_at: new Date().toISOString(),
     last_error_code: null,
     last_error_user_message: 'Google Drive déconnecté',
+    error: 'Google Drive déconnecté',
   });
 }
 
 async function storeOAuthRefreshToken(refreshToken, meta = {}) {
+  const now = new Date().toISOString();
   return upsertState({
     status: 'active',
     oauth_refresh_token: refreshToken,
     last_error_code: null,
     last_error_user_message: null,
-    last_check_at: new Date().toISOString(),
-    last_success_at: new Date().toISOString(),
+    error: null,
+    last_check_at: now,
+    last_success_at: now,
+    last_upload_at: now,
     connected_account: meta.account || null,
     folder_id: meta.folderId || null,
+    shared_drive_id: meta.sharedDriveId || null,
+    auth_mode: meta.authMode || 'oauth',
     notify_reconnect_sent_at: null,
   });
 }
@@ -133,19 +267,23 @@ async function getDriveStatePublic() {
   return {
     status: state?.status || (oauthEnv ? 'unknown' : 'misconfigured'),
     reconnect_required: state?.status === 'reconnect_required',
+    table_available: tableMissing !== true,
+    auth_mode: state?.auth_mode || null,
     last_error_code: state?.last_error_code || null,
-    last_error_user_message: state?.last_error_user_message || null,
+    last_error_user_message: state?.last_error_user_message || state?.error || null,
     last_check_at: state?.last_check_at || null,
-    last_success_at: state?.last_success_at || null,
+    last_success_at: state?.last_success_at || state?.last_upload_at || null,
+    last_upload_at: state?.last_upload_at || state?.last_success_at || null,
     connected_account: state?.connected_account || null,
     folder_id: state?.folder_id || process.env.GOOGLE_DRIVE_FOLDER_ID?.trim() || null,
+    shared_drive_id: state?.shared_drive_id || null,
     oauth_client_configured: Boolean(process.env.GOOGLE_OAUTH_CLIENT_ID?.trim()),
     oauth_secret_configured: Boolean(process.env.GOOGLE_OAUTH_CLIENT_SECRET?.trim()),
     oauth_refresh_configured: Boolean(
       process.env.GOOGLE_OAUTH_REFRESH_TOKEN?.trim() || state?.oauth_refresh_token,
     ),
     oauth_refresh_source: state?.oauth_refresh_token
-      ? 'database'
+      ? (tableMissing === true ? 'memory' : 'database')
       : (process.env.GOOGLE_OAUTH_REFRESH_TOKEN?.trim() ? 'env' : 'none'),
   };
 }

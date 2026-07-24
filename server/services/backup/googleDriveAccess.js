@@ -44,7 +44,11 @@ async function validateGoogleDriveForBackup() {
       await assertSharedDriveRequired();
     }
     const probe = await probeDriveWriteAccess();
-    await markDriveActive({ folderId: probe.folderId || folderId });
+    await markDriveActive({
+      folderId: probe.folderId || folderId,
+      sharedDriveId: probe.sharedDriveId || null,
+      authMode: probe.authMode || authMode,
+    });
     return {
       enabled: true,
       uploadAllowed: true,

@@ -1,6 +1,7 @@
 -- =============================================================================
--- CITYMO — À coller dans Supabase SQL Editor si la migration n’est pas appliquée
--- Identique à migrations/20260724160000_erp_backup_drive_state.sql
+-- CITYMO — Table public.erp_backup_drive_state (+ colonnes schedule backup)
+-- Corrige : "Could not find the table public.erp_backup_drive_state in the schema cache"
+-- Idempotent. Ne touche pas aux sauvegardes réussies.
 -- =============================================================================
 
 CREATE TABLE IF NOT EXISTS public.erp_backup_drive_state (
@@ -11,9 +12,11 @@ CREATE TABLE IF NOT EXISTS public.erp_backup_drive_state (
   last_check_at     timestamptz,
   last_upload_at    timestamptz,
   status            text NOT NULL DEFAULT 'unknown',
+  -- active | reconnect_required | disconnected | misconfigured | unknown
   error             text,
   created_at        timestamptz NOT NULL DEFAULT now(),
   updated_at        timestamptz NOT NULL DEFAULT now(),
+  -- Champs opérationnels backend (OAuth / UI)
   last_error_code           text,
   last_error_user_message   text,
   last_success_at           timestamptz,
@@ -22,6 +25,7 @@ CREATE TABLE IF NOT EXISTS public.erp_backup_drive_state (
   notify_reconnect_sent_at  timestamptz
 );
 
+-- Si la table existait déjà (script RUN partiel), ajouter les colonnes manquantes
 ALTER TABLE public.erp_backup_drive_state
   ADD COLUMN IF NOT EXISTS auth_mode text,
   ADD COLUMN IF NOT EXISTS folder_id text,
@@ -47,6 +51,14 @@ INSERT INTO public.erp_backup_drive_state (id, status, created_at, updated_at)
 VALUES (1, 'unknown', now(), now())
 ON CONFLICT (id) DO NOTHING;
 
+COMMENT ON TABLE public.erp_backup_drive_state IS
+  'État OAuth / santé Google Drive pour les sauvegardes ERP (1 ligne).';
+COMMENT ON COLUMN public.erp_backup_drive_state.oauth_refresh_token IS
+  'Refresh token OAuth rotatif — jamais exposé au client.';
+COMMENT ON COLUMN public.erp_backup_drive_state.last_upload_at IS
+  'Dernier upload Drive réussi (alias last_success_at côté app).';
+
+-- Colonnes anti-doublon planification (utilisées par le cron)
 ALTER TABLE public.erp_backup_schedules
   ADD COLUMN IF NOT EXISTS last_period_key text,
   ADD COLUMN IF NOT EXISTS consecutive_failures integer NOT NULL DEFAULT 0,
