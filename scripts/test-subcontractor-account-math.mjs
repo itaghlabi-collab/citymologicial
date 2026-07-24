@@ -72,19 +72,47 @@ test('net = brut − avances − retenues', () => {
   assertEqual(r.net, 650);
 });
 
+test('scénario mission 100k / A30 / B50 / C45', () => {
+  let avances = 100000;
+  let travaux = 0;
+  function conso(g) {
+    travaux = round2(travaux + g);
+    const consommées = round2(Math.min(avances, travaux));
+    const reliquat = round2(Math.max(0, avances - consommées));
+    const brutAPayer = round2(Math.max(0, travaux - avances));
+    return { consommées, reliquat, brutAPayer };
+  }
+  let r = conso(30000);
+  assertEqual(r.reliquat, 70000);
+  r = conso(50000);
+  assertEqual(r.reliquat, 20000);
+  r = conso(45000);
+  assertEqual(r.consommées, 100000);
+  assertEqual(r.reliquat, 0);
+  assertEqual(r.brutAPayer, 25000);
+  const reste = round2(Math.max(0, r.brutAPayer - 10000 - 5000));
+  assertEqual(reste, 10000);
+});
+
 test('scénario A/B/C avance 5000', () => {
   let reliquat = 5000;
-  let imp = computeImputationAmount({ gross: 2000, retenues: 0, alreadyImputed: 0, reliquatDisponible: reliquat, useMax: true });
+  let imp = computeImputationAmount({
+    gross: 2000, retenues: 0, alreadyImputed: 0, reliquatDisponible: reliquat, useMax: true,
+  });
   assertEqual(imp, 2000);
   assertEqual(calcSubPaymentTotals('tache', { amount: 2000, avances: imp, retenues: 0 }).net, 0);
   reliquat = round2(reliquat - imp);
 
-  imp = computeImputationAmount({ gross: 2500, retenues: 0, alreadyImputed: 0, reliquatDisponible: reliquat, useMax: true });
+  imp = computeImputationAmount({
+    gross: 2500, retenues: 0, alreadyImputed: 0, reliquatDisponible: reliquat, useMax: true,
+  });
   assertEqual(imp, 2500);
   reliquat = round2(reliquat - imp);
   assertEqual(reliquat, 500);
 
-  imp = computeImputationAmount({ gross: 1800, retenues: 0, alreadyImputed: 0, reliquatDisponible: reliquat, useMax: true });
+  imp = computeImputationAmount({
+    gross: 1800, retenues: 0, alreadyImputed: 0, reliquatDisponible: reliquat, useMax: true,
+  });
   assertEqual(imp, 500);
   assertEqual(calcSubPaymentTotals('tache', { amount: 1800, avances: imp, retenues: 0 }).net, 1300);
   reliquat = round2(reliquat - imp);

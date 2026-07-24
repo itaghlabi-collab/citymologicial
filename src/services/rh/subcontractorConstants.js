@@ -106,12 +106,29 @@ export const SUBCONTRACTOR_METIERS = [
 
 /** Types de documents attendus sur la fiche sous-traitant. */
 export const SUBCONTRACTOR_DOC_TYPES = [
+  { id: 'contrat', label: 'Contrat' },
+  { id: 'bon_commande', label: 'Bon de commande' },
+  { id: 'situation', label: 'Situation de travaux' },
+  { id: 'attachement', label: 'Attachement' },
+  { id: 'facture', label: 'Facture' },
+  { id: 'bon_paiement', label: 'Bon de paiement' },
+  { id: 'pv', label: 'Procès-verbal' },
+  { id: 'attestation', label: 'Attestation' },
+  { id: 'attestation_fiscale', label: 'Attestation fiscale' },
+  { id: 'assurance', label: 'Assurance' },
   { id: 'cin', label: 'CIN' },
+  { id: 'rib', label: 'RIB' },
   { id: 'rc', label: 'RC' },
   { id: 'if', label: 'IF' },
   { id: 'ice', label: 'ICE' },
-  { id: 'attestation_fiscale', label: 'Attestation fiscale' },
-  { id: 'assurance', label: 'Assurance' },
-  { id: 'rib', label: 'RIB' },
-  { id: 'contrat', label: 'Contrat' },
+  { id: 'photos', label: 'Photos' },
+  { id: 'other', label: 'Autre' },
+];
+
+export const RETENTION_TYPES = [
+  { id: 'garantie', label: 'Retenue de garantie' },
+  { id: 'penalite', label: 'Pénalité' },
+  { id: 'avance_regulariser', label: 'Avance à régulariser' },
+  { id: 'administrative', label: 'Retenue administrative' },
+  { id: 'autre', label: 'Autre' },
 ];

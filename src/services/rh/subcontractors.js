@@ -61,6 +61,9 @@ export function normalizeSubcontractor(row, summary = {}) {
     rib: row.rib || '',
     statut: row.statut || 'actif',
     notes: row.notes || '',
+    responsableInterne: row.responsable_interne || '',
+    archivedAt: row.archived_at || null,
+    photoUrl: row.photo_url || row.logo_url || null,
     activeProjectsCount: summary.activeProjectsCount ?? 0,
     totalServices: summary.totalServices ?? 0,
     totalPaid: summary.totalPaid ?? 0,
@@ -166,7 +169,7 @@ export function normalizeBalance(row) {
 }
 
 function toSubcontractorRow(form) {
-  return {
+  const row = {
     prenom: emptyToNull(form.prenom?.trim()),
     nom: form.nom?.trim(),
     raison_sociale: emptyToNull(form.raison_sociale?.trim()),
@@ -185,6 +188,13 @@ function toSubcontractorRow(form) {
     statut: form.statut || 'actif',
     notes: emptyToNull(form.notes?.trim()),
   };
+  if (form.responsableInterne !== undefined) {
+    row.responsable_interne = emptyToNull(form.responsableInterne?.trim?.() ?? form.responsableInterne);
+  }
+  if (form.archivedAt !== undefined) {
+    row.archived_at = form.archivedAt || null;
+  }
+  return row;
 }
 
 function toAssignmentRow(form, subcontractorId) {
@@ -364,6 +374,35 @@ export async function updateSubcontractor(id, form) {
   const row = toSubcontractorRow(form);
   const { data, error } = await getSupabase().from(SUB_TABLE).update(row).eq('id', id).select('*').single();
   if (error) throw error;
+  return normalizeSubcontractor(data);
+}
+
+/** Soft archive — ne supprime pas physiquement. */
+export async function archiveSubcontractor(id) {
+  await getAuthUserId();
+  const { data, error } = await getSupabase()
+    .from(SUB_TABLE)
+    .update({
+      statut: 'archive',
+      archived_at: new Date().toISOString(),
+    })
+    .eq('id', id)
+    .select('*')
+    .single();
+  if (error) {
+    // Colonne archived_at absente → statut seul
+    if (/archived_at/i.test(error.message || '')) {
+      const { data: d2, error: e2 } = await getSupabase()
+        .from(SUB_TABLE)
+        .update({ statut: 'archive' })
+        .eq('id', id)
+        .select('*')
+        .single();
+      if (e2) throw e2;
+      return normalizeSubcontractor(d2);
+    }
+    throw error;
+  }
   return normalizeSubcontractor(data);
 }
 
@@ -821,16 +860,55 @@ export async function listDocuments(subcontractorId) {
 
 export async function createSubcontractorDocument(subcontractorId, form = {}) {
   await getAuthUserId();
+  const row = {
+    subcontractor_id: subcontractorId,
+    doc_type: emptyToNull(form.doc_type || form.category) || 'other',
+    file_name: emptyToNull(form.file_name?.trim() || form.nom?.trim()),
+    storage_path: emptyToNull(form.storage_path?.trim() || form.fichierUrl?.trim()),
+    mime_type: emptyToNull(form.mime_type?.trim()),
+    notes: emptyToNull(form.notes?.trim() || form.description?.trim()),
+  };
+  if (form.projectId) row.project_id = form.projectId;
+  if (form.reference) row.reference = form.reference.trim();
+  if (form.description) row.description = form.description.trim();
+  if (form.documentDate) row.document_date = form.documentDate;
+  if (form.version) row.version = Number(form.version) || 1;
+  if (form.parentId) row.parent_id = form.parentId;
+  if (form.status) row.status = form.status;
   const { data, error } = await getSupabase()
     .from(DOC_TABLE)
-    .insert([{
-      subcontractor_id: subcontractorId,
-      doc_type: emptyToNull(form.doc_type) || 'other',
-      file_name: emptyToNull(form.file_name?.trim()),
-      storage_path: emptyToNull(form.storage_path?.trim()),
-      mime_type: emptyToNull(form.mime_type?.trim()),
-      notes: emptyToNull(form.notes?.trim()),
-    }])
+    .insert([row])
+    .select('*')
+    .single();
+  if (error) {
+    // Colonnes V3 absentes → insert minimal
+    if (/project_id|reference|description|document_date|version|parent_id|status/i.test(error.message || '')) {
+      const { data: d2, error: e2 } = await getSupabase()
+        .from(DOC_TABLE)
+        .insert([{
+          subcontractor_id: subcontractorId,
+          doc_type: row.doc_type,
+          file_name: row.file_name,
+          storage_path: row.storage_path,
+          mime_type: row.mime_type,
+          notes: row.notes,
+        }])
+        .select('*')
+        .single();
+      if (e2) throw e2;
+      return d2;
+    }
+    throw error;
+  }
+  return data;
+}
+
+export async function archiveSubcontractorDocument(id) {
+  await getAuthUserId();
+  const { data, error } = await getSupabase()
+    .from(DOC_TABLE)
+    .update({ status: 'archived', archived_at: new Date().toISOString() })
+    .eq('id', id)
     .select('*')
     .single();
   if (error) throw error;

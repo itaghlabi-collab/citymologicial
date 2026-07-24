@@ -25,8 +25,12 @@ export const ACCOUNT_EVENT_LABELS = {
   advance_cancelled: 'Avance annulée',
   advance_imputed: 'Imputation d’avance',
   retention: 'Retenue',
+  retention_released: 'Libération de retenue',
   payment: 'Paiement',
   payment_updated: 'Modification paiement',
+  document_added: 'Document ajouté',
+  evaluation_added: 'Évaluation',
+  archived: 'Archivage',
   historical: 'Donnée historique',
 };
 

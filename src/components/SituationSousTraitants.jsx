@@ -1,7 +1,11 @@
-import { useState, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import PaiementSousTraitantsSection from './PaiementSousTraitantsSection';
 import SituationSousTraitantCompte from './SituationSousTraitantCompte';
 import SituationCalculPage from './SituationCalculPage';
+import {
+  parseSousTraitantPath,
+  syncSousTraitantRoute,
+} from '../services/rh/sousTraitantRoutes';
 
 function Toast({ toast }) {
   if (!toast) return null;
@@ -13,17 +17,76 @@ function Toast({ toast }) {
   );
 }
 
-/** Situation sous-traitants = compte courant + situations + avances + calcul. */
-export default function SituationSousTraitants() {
+/** Situation sous-traitants = compte courant + fiche 5 onglets + URL /sous-traitants/:id */
+export default function SituationSousTraitants({
+  initialCompteId = null,
+  initialTab = 'finance',
+}) {
   const [toast, setToast] = useState(null);
   const toastRef = useRef(null);
-  const [compteId, setCompteId] = useState(null);
+  const [compteId, setCompteId] = useState(initialCompteId);
+  const [ficheTab, setFicheTab] = useState(initialTab || 'finance');
   const [calculForId, setCalculForId] = useState(null);
 
   function notify(type, msg) {
     setToast({ type, msg });
     clearTimeout(toastRef.current);
     toastRef.current = setTimeout(() => setToast(null), 3000);
+  }
+
+  // Sync props → state (deep link App)
+  useEffect(() => {
+    if (initialCompteId) {
+      setCompteId(initialCompteId);
+      setFicheTab(initialTab || 'finance');
+    }
+  }, [initialCompteId, initialTab]);
+
+  // Bootstrap from URL if opened directly
+  useEffect(() => {
+    const parsed = parseSousTraitantPath();
+    if (parsed?.id) {
+      setCompteId(parsed.id);
+      setFicheTab(parsed.tab || 'finance');
+    }
+  }, []);
+
+  // Keep URL in sync with fiche
+  useEffect(() => {
+    if (calculForId) return;
+    if (compteId) {
+      syncSousTraitantRoute(compteId, ficheTab);
+    } else if (parseSousTraitantPath()) {
+      syncSousTraitantRoute(null);
+    }
+  }, [compteId, ficheTab, calculForId]);
+
+  // Browser back/forward
+  useEffect(() => {
+    function onPop() {
+      const parsed = parseSousTraitantPath();
+      if (parsed?.id) {
+        setCalculForId(null);
+        setCompteId(parsed.id);
+        setFicheTab(parsed.tab || 'finance');
+      } else {
+        setCalculForId(null);
+        setCompteId(null);
+      }
+    }
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+
+  function openCompte(id, tab = 'finance') {
+    setCalculForId(null);
+    setCompteId(id);
+    setFicheTab(tab);
+  }
+
+  function closeCompte() {
+    setCompteId(null);
+    syncSousTraitantRoute(null);
   }
 
   if (calculForId) {
@@ -35,11 +98,11 @@ export default function SituationSousTraitants() {
           onBack={() => {
             const backId = calculForId === '__new__' ? null : calculForId;
             setCalculForId(null);
-            if (backId) setCompteId(backId);
+            if (backId) openCompte(backId);
           }}
           onNotify={notify}
           onSaved={() => {
-            if (calculForId && calculForId !== '__new__') setCompteId(calculForId);
+            if (calculForId && calculForId !== '__new__') openCompte(calculForId);
           }}
         />
       </>
@@ -52,9 +115,12 @@ export default function SituationSousTraitants() {
         <Toast toast={toast} />
         <SituationSousTraitantCompte
           subcontractorId={compteId}
-          onBack={() => setCompteId(null)}
+          initialTab={ficheTab}
+          onTabChange={setFicheTab}
+          onBack={closeCompte}
           onNotify={notify}
           onNewSituation={(id) => setCalculForId(id || compteId)}
+          onNewPayment={(id) => setCalculForId(id || compteId)}
         />
       </>
     );
@@ -68,7 +134,7 @@ export default function SituationSousTraitants() {
         <div>
           <h1 className="page-title">Situation sous-traitants</h1>
           <p className="page-subtitle finance-sub-hide-mobile">
-            Compte courant — situations multi-projets, avances globales, reliquat et historique
+            Compte courant — situation financière, travaux, documents, historique et performance
           </p>
         </div>
         <div className="finance-page-actions">
@@ -82,7 +148,7 @@ export default function SituationSousTraitants() {
         onNotify={notify}
         standalone
         variant="accounts"
-        onOpenAccount={setCompteId}
+        onOpenAccount={(id) => openCompte(id)}
       />
     </div>
   );

@@ -1,14 +1,32 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ChevronLeft, FileDown, Loader2, Printer, X, Pencil, Plus, Lock, Trash2,
+  Archive, ChevronLeft, CreditCard, FileDown, FilePlus, Loader2, Lock,
+  Pencil, Plus, Printer, Trash2, X,
 } from 'lucide-react';
 import { getSubcontractorAccount } from '../services/rh/subcontractorAccount';
-import { updateSubcontractorPayment, deleteSubcontractorPayment } from '../services/rh/subcontractors';
+import {
+  updateSubcontractorPayment,
+  deleteSubcontractorPayment,
+  updateSubcontractor,
+  archiveSubcontractor,
+  createSubcontractorDocument,
+  archiveSubcontractorDocument,
+} from '../services/rh/subcontractors';
 import { closeSituation, updateSituation, SITUATION_STATUS_LABEL } from '../services/rh/subcontractorSituations';
 import { createGlobalAdvance, cancelGlobalAdvance } from '../services/rh/subcontractorAdvances';
-import { PAYMENT_METHODS } from '../services/rh/subcontractorConstants';
+import {
+  PAYMENT_METHODS,
+  SUBCONTRACTOR_DOC_TYPES,
+  RETENTION_TYPES,
+  SUB_STATUT_LABEL,
+} from '../services/rh/subcontractorConstants';
 import { exportSubcontractorPaymentPdf } from '../services/rh/subcontractorPaymentPdf';
 import { exportSubcontractorAccountPdf } from '../services/rh/subcontractorAccountPdf';
+import { ST_FICHE_TABS } from '../services/rh/sousTraitantRoutes';
+import { filterLedger, LEDGER_TYPE_LABEL } from '../services/rh/subcontractorLedger';
+import { createEvaluation } from '../services/rh/subcontractorEvaluations';
+import { listRetenues, createRetenue, releaseRetenue } from '../services/rh/subcontractorRetenues';
+import { logSubcontractorAccountEvent } from '../services/rh/subcontractorAccountEvents';
 import { formatSupabaseError } from '../services/supabase/formatError';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { paymentTypeLabel } from '../utils/rh/subcontractorPaymentFormUtils';
@@ -27,6 +45,11 @@ function fmtDate(iso) {
   try { return new Date(iso).toLocaleDateString('fr-MA'); } catch { return iso; }
 }
 
+function fmtDateTime(iso) {
+  if (!iso) return '—';
+  try { return new Date(iso).toLocaleString('fr-MA'); } catch { return iso; }
+}
+
 function Kpi({ label, value, hint, accent }) {
   return (
     <div className="stat-card">
@@ -39,24 +62,25 @@ function Kpi({ label, value, hint, accent }) {
   );
 }
 
-const TABS = [
-  { id: 'general', label: 'Vue générale' },
-  { id: 'situations', label: 'Situations / Travaux' },
-  { id: 'avances', label: 'Avances' },
-  { id: 'historique', label: 'Historique' },
-  { id: 'documents', label: 'Documents' },
-];
+const PAGE_SIZE = 20;
 
+/**
+ * Fiche compte sous-traitant — 5 onglets (finance, travaux, documents, historique, analyse).
+ */
 export default function SituationSousTraitantCompte({
   subcontractorId,
   onBack,
   onNotify,
   onNewSituation,
+  onNewPayment,
+  initialTab = 'finance',
+  onTabChange,
   accountOverride = null,
 }) {
   const [loading, setLoading] = useState(!accountOverride);
   const [account, setAccount] = useState(accountOverride);
-  const [tab, setTab] = useState('general');
+  const [tab, setTab] = useState(initialTab || 'finance');
+  const [retenues, setRetenues] = useState([]);
   const [editRecord, setEditRecord] = useState(null);
   const [editForm, setEditForm] = useState(null);
   const [editFormErr, setEditFormErr] = useState({});
@@ -70,9 +94,43 @@ export default function SituationSousTraitantCompte({
     observation: '',
   });
   const [advSaving, setAdvSaving] = useState(false);
-  const [projectPick, setProjectPick] = useState(null); // legacy: { projectName, payments[] }
-  const [sitEdit, setSitEdit] = useState(null); // V2 situation form
+  const [projectPick, setProjectPick] = useState(null);
+  const [sitEdit, setSitEdit] = useState(null);
   const [sitSaving, setSitSaving] = useState(false);
+  const [showEditFiche, setShowEditFiche] = useState(false);
+  const [ficheForm, setFicheForm] = useState({});
+  const [ficheSaving, setFicheSaving] = useState(false);
+  const [showDoc, setShowDoc] = useState(false);
+  const [docForm, setDocForm] = useState({
+    doc_type: 'contrat', file_name: '', reference: '', projectId: '', notes: '', documentDate: '',
+  });
+  const [docSaving, setDocSaving] = useState(false);
+  const [showRet, setShowRet] = useState(false);
+  const [retForm, setRetForm] = useState({
+    retentionType: 'garantie', amount: '', percentage: '', projectId: '', motif: '',
+    retentionDate: new Date().toISOString().slice(0, 10), releaseDatePlanned: '', observation: '',
+  });
+  const [retSaving, setRetSaving] = useState(false);
+  const [showEval, setShowEval] = useState(false);
+  const [evalForm, setEvalForm] = useState({
+    projectId: '', qualite: 3, respectDelais: 3, consignes: 3, securite: 3,
+    reactivite: 3, administratif: 3, communication: 3, rapportQualitePrix: 3, commentaire: '',
+  });
+  const [evalSaving, setEvalSaving] = useState(false);
+  const [selectedProjectId, setSelectedProjectId] = useState(null);
+  const [ledgerFilters, setLedgerFilters] = useState({
+    q: '', type: '', projectId: '', dateFrom: '', dateTo: '',
+  });
+  const [ledgerPage, setLedgerPage] = useState(0);
+
+  useEffect(() => {
+    if (initialTab) setTab(initialTab);
+  }, [initialTab]);
+
+  function changeTab(id) {
+    setTab(id);
+    onTabChange?.(id);
+  }
 
   const load = useCallback(async () => {
     if (accountOverride) {
@@ -86,7 +144,12 @@ export default function SituationSousTraitantCompte({
     }
     setLoading(true);
     try {
-      setAccount(await getSubcontractorAccount(subcontractorId));
+      const [acc, rets] = await Promise.all([
+        getSubcontractorAccount(subcontractorId),
+        listRetenues(subcontractorId).catch(() => []),
+      ]);
+      setAccount(acc);
+      setRetenues(rets || []);
     } catch (err) {
       onNotify?.('error', formatSupabaseError(err, 'Erreur chargement compte sous-traitant.'));
     } finally {
@@ -124,17 +187,15 @@ export default function SituationSousTraitantCompte({
       payment.projectName || 'Projet',
       Number(payment.amount || 0).toLocaleString('fr-MA', { minimumFractionDigits: 2 }) + ' MAD',
     ].join(' · ');
-    if (!window.confirm(`Supprimer ce paiement ?\n${label}\n\nLa ligne de caisse liée sera également retirée.`)) {
-      return;
-    }
+    if (!window.confirm(`Annuler ce paiement ?\n${label}\n\nLa ligne de caisse liée sera retirée.`)) return;
     try {
       await deleteSubcontractorPayment(payment.id);
-      onNotify?.('success', 'Paiement supprimé.');
+      onNotify?.('success', 'Paiement annulé.');
       setEditRecord(null);
       setEditForm(null);
       await load();
     } catch (err) {
-      onNotify?.('error', formatSupabaseError(err, 'Erreur suppression paiement.'));
+      onNotify?.('error', formatSupabaseError(err, 'Erreur annulation paiement.'));
     }
   }
 
@@ -163,10 +224,7 @@ export default function SituationSousTraitantCompte({
   function openLegacyProjectEdit(legacyRow) {
     const ids = new Set(legacyRow.paymentIds || []);
     const list = (account?.payments || []).filter((p) => ids.has(p.id));
-    if (list.length === 1) {
-      openEdit(list[0]);
-      return;
-    }
+    if (list.length === 1) { openEdit(list[0]); return; }
     if (list.length === 0) {
       onNotify?.('error', 'Aucun paiement à modifier pour ce projet.');
       return;
@@ -216,16 +274,10 @@ export default function SituationSousTraitantCompte({
         quantity: Number(sitEdit.quantity) || 0,
         unitPrice: Number(sitEdit.unitPrice) || 0,
       });
-      // Recaler le paiement lié si présent (même formule net)
       const linked = (account?.payments || []).find((p) => p.situationId === sitEdit.id);
       if (linked) {
         const payload = buildSubcontractorPaymentUpdatePayload(
-          paymentToEditForm({
-            ...linked,
-            grossAmount: gross,
-            avances: av,
-            retenues: ret,
-          }),
+          paymentToEditForm({ ...linked, grossAmount: gross, avances: av, retenues: ret }),
           { projectId: linked.projectId, assignmentId: linked.assignmentId },
         );
         await updateSubcontractorPayment(linked.id, payload, linked.subcontractorId);
@@ -286,6 +338,183 @@ export default function SituationSousTraitantCompte({
     }
   }
 
+  function openEditFiche() {
+    const s = account?.subcontractor;
+    setFicheForm({
+      prenom: s?.prenom || '',
+      nom: s?.nom || '',
+      raison_sociale: s?.raison_sociale || '',
+      telephone: s?.telephone || '',
+      email: s?.email || '',
+      fonction: s?.fonction || '',
+      responsableInterne: s?.responsableInterne || '',
+      notes: s?.notes || '',
+      statut: s?.statut || 'actif',
+    });
+    setShowEditFiche(true);
+  }
+
+  async function handleSaveFiche(e) {
+    e.preventDefault();
+    setFicheSaving(true);
+    try {
+      await updateSubcontractor(subcontractorId, ficheForm);
+      onNotify?.('success', 'Fiche mise à jour.');
+      setShowEditFiche(false);
+      await load();
+    } catch (err) {
+      onNotify?.('error', formatSupabaseError(err, 'Erreur modification fiche.'));
+    } finally {
+      setFicheSaving(false);
+    }
+  }
+
+  async function handleArchive() {
+    if (!window.confirm('Archiver ce sous-traitant ? Il ne sera pas supprimé.')) return;
+    try {
+      await archiveSubcontractor(subcontractorId);
+      await logSubcontractorAccountEvent({
+        subcontractorId,
+        eventType: 'archived',
+        observation: 'Archivage depuis la fiche situation',
+      }).catch(() => {});
+      onNotify?.('success', 'Sous-traitant archivé.');
+      onBack?.();
+    } catch (err) {
+      onNotify?.('error', formatSupabaseError(err, 'Archivage impossible.'));
+    }
+  }
+
+  async function handleCreateDoc(e) {
+    e.preventDefault();
+    setDocSaving(true);
+    try {
+      await createSubcontractorDocument(subcontractorId, docForm);
+      await logSubcontractorAccountEvent({
+        subcontractorId,
+        eventType: 'document_added',
+        projectId: docForm.projectId || null,
+        observation: docForm.file_name || docForm.doc_type,
+      }).catch(() => {});
+      onNotify?.('success', 'Document ajouté.');
+      setShowDoc(false);
+      setDocForm({
+        doc_type: 'contrat', file_name: '', reference: '', projectId: '', notes: '', documentDate: '',
+      });
+      await load();
+    } catch (err) {
+      onNotify?.('error', formatSupabaseError(err, 'Erreur document.'));
+    } finally {
+      setDocSaving(false);
+    }
+  }
+
+  async function handleArchiveDoc(doc) {
+    try {
+      await archiveSubcontractorDocument(doc.id);
+      onNotify?.('success', 'Document archivé.');
+      await load();
+    } catch (err) {
+      onNotify?.('error', formatSupabaseError(err, 'Archivage document impossible (exécutez RUN_SUBCONTRACTOR_FICHE_V3.sql).'));
+    }
+  }
+
+  async function handleCreateRetenue(e) {
+    e.preventDefault();
+    setRetSaving(true);
+    try {
+      await createRetenue(subcontractorId, retForm);
+      onNotify?.('success', 'Retenue enregistrée.');
+      setShowRet(false);
+      await load();
+    } catch (err) {
+      onNotify?.('error', formatSupabaseError(err, 'Erreur retenue (V3 SQL requis).'));
+    } finally {
+      setRetSaving(false);
+    }
+  }
+
+  async function handleReleaseRetenue(r) {
+    try {
+      await releaseRetenue(r.id, subcontractorId);
+      onNotify?.('success', 'Retenue libérée.');
+      await load();
+    } catch (err) {
+      onNotify?.('error', formatSupabaseError(err, 'Libération impossible.'));
+    }
+  }
+
+  async function handleCreateEval(e) {
+    e.preventDefault();
+    setEvalSaving(true);
+    try {
+      await createEvaluation(subcontractorId, evalForm);
+      await logSubcontractorAccountEvent({
+        subcontractorId,
+        eventType: 'evaluation_added',
+        projectId: evalForm.projectId || null,
+        observation: 'Nouvelle évaluation',
+      }).catch(() => {});
+      onNotify?.('success', 'Évaluation enregistrée.');
+      setShowEval(false);
+      await load();
+    } catch (err) {
+      onNotify?.('error', formatSupabaseError(err, 'Erreur évaluation (exécutez RUN_SUBCONTRACTOR_FICHE_V3.sql).'));
+    } finally {
+      setEvalSaving(false);
+    }
+  }
+
+  const ledgerFiltered = useMemo(() => {
+    const rows = account?.ledger || [];
+    return filterLedger(rows, ledgerFilters);
+  }, [account?.ledger, ledgerFilters]);
+
+  const ledgerPageRows = useMemo(() => {
+    const start = ledgerPage * PAGE_SIZE;
+    return ledgerFiltered.slice(start, start + PAGE_SIZE);
+  }, [ledgerFiltered, ledgerPage]);
+
+  const projectGroups = useMemo(() => {
+    const situations = account?.situations || [];
+    if (situations.length) {
+      const map = new Map();
+      situations.forEach((s) => {
+        const key = String(s.projectId || '') || '__none';
+        if (!map.has(key)) {
+          map.set(key, {
+            key,
+            projectId: s.projectId || '',
+            projectName: s.projectName || 'Sans projet',
+            totalTravaux: 0,
+            totalAvances: 0,
+            totalRetenues: 0,
+            totalPaye: 0,
+            lastDate: null,
+            situations: [],
+          });
+        }
+        const row = map.get(key);
+        row.totalTravaux += Number(s.grossAmount) || 0;
+        row.totalAvances += Math.min(Number(s.avancesImputees) || 0, Number(s.grossAmount) || 0);
+        row.totalRetenues += Number(s.retenues) || 0;
+        row.totalPaye += Number(s.amountPaid) || 0;
+        row.situations.push(s);
+        const d = s.situationDate || s.created_at;
+        if (d && (!row.lastDate || String(d) > String(row.lastDate))) row.lastDate = d;
+      });
+      return [...map.values()].map((r) => {
+        const soldeRestant = Math.max(0, r.totalTravaux - r.totalAvances - r.totalRetenues - r.totalPaye);
+        return {
+          ...r,
+          soldeRestant,
+          statutLabel: soldeRestant <= 0.009 ? 'Soldée' : 'Ouverte',
+        };
+      });
+    }
+    return account?.legacySituations || [];
+  }, [account]);
+
   if (loading) {
     return (
       <div className="animate-fade-in rh-ext-page" style={{ textAlign: 'center', padding: 48, color: 'var(--text-3)' }}>
@@ -304,9 +533,13 @@ export default function SituationSousTraitantCompte({
     );
   }
 
-  const { subcontractor: sub, kpis, situations, legacySituations, history, documents, payments, advances, imputations } = account;
-  const statutLabel = sub.statut === 'actif' ? 'Actif' : (sub.statut || '—');
+  const {
+    subcontractor: sub, kpis, situations, history, documents, payments,
+    advances, imputations, performance, evaluations, assignments,
+  } = account;
+  const statutLabel = SUB_STATUT_LABEL[sub.statut] || sub.statut || '—';
   const sitRows = situations?.length ? situations : null;
+  const resteNet = kpis.resteNetAPayer ?? kpis.resteAPayer;
 
   return (
     <div className="animate-fade-in rh-ext-page st-compte-page">
@@ -321,6 +554,17 @@ export default function SituationSousTraitantCompte({
 
       <div className="card rh-ext-profile-card" style={{ marginBottom: 16 }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', gap: 16, flexWrap: 'wrap' }}>
+          {sub.photoUrl ? (
+            <img src={sub.photoUrl} alt="" style={{ width: 64, height: 64, borderRadius: 12, objectFit: 'cover' }} />
+          ) : (
+            <div style={{
+              width: 64, height: 64, borderRadius: 12, background: 'var(--border)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              fontWeight: 800, fontFamily: 'var(--font-head)', color: 'var(--text-2)',
+            }}>
+              {(sub.fullName || '?').slice(0, 1).toUpperCase()}
+            </div>
+          )}
           <div style={{ flex: 1, minWidth: 220 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 4 }}>
               <h1 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.35rem', color: 'var(--text)', margin: 0 }}>
@@ -329,44 +573,60 @@ export default function SituationSousTraitantCompte({
               <span className={`badge ${sub.statut === 'actif' ? 'badge-green' : 'badge-grey'}`}>{statutLabel}</span>
             </div>
             <div style={{ fontSize: '0.88rem', color: 'var(--text-2)' }}>{sub.fonction || '—'}</div>
-            <div style={{ fontSize: '0.82rem', color: 'var(--text-3)', marginTop: 6 }}>
-              {sub.telephone || '—'} · CIN / ID : {sub.cinLabel || '—'}
+            <div style={{ fontSize: '0.82rem', color: 'var(--text-3)', marginTop: 6, display: 'flex', flexWrap: 'wrap', gap: '4px 14px' }}>
+              <span>{sub.telephone || '—'}</span>
+              <span>{sub.email || '—'}</span>
+              <span>CIN / ID : {sub.cinLabel || '—'}</span>
+              <span>{kpis.nombreProjets || 0} projet(s)</span>
+              <span>Créé : {fmtDate(sub.created_at)}</span>
+              {sub.responsableInterne ? <span>Resp. : {sub.responsableInterne}</span> : null}
             </div>
           </div>
-          <div className="rh-ext-detail-header-actions st-compte-actions">
-            <button type="button" className="btn btn-secondary btn-sm" onClick={handleAccountPdf}>
-              <FileDown size={14} /> État global PDF
+          <div className="rh-ext-detail-header-actions st-compte-actions" style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={openEditFiche}>
+              <Pencil size={14} /> Modifier
             </button>
             <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowAdvance(true)}>
-              <Plus size={14} /> Avance globale
+              <Plus size={14} /> Avance
             </button>
             <button type="button" className="btn btn-primary btn-sm" onClick={() => onNewSituation?.(subcontractorId)}>
               <Plus size={14} /> Situation / Travaux
             </button>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => (onNewPayment || onNewSituation)?.(subcontractorId)}>
+              <CreditCard size={14} /> Paiement
+            </button>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowDoc(true)}>
+              <FilePlus size={14} /> Document
+            </button>
+            <button type="button" className="btn btn-secondary btn-sm" onClick={handleAccountPdf}>
+              <FileDown size={14} /> PDF
+            </button>
+            {sub.statut !== 'archive' && (
+              <button type="button" className="btn btn-secondary btn-sm" onClick={handleArchive} style={{ color: 'var(--red)' }}>
+                <Archive size={14} /> Archiver
+              </button>
+            )}
           </div>
         </div>
       </div>
 
       <div className="stat-grid rh-ext-stat-grid finance-kpi-strip st-compte-kpi" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(140px,1fr))', marginBottom: 20 }}>
+        <Kpi label="Travaux réalisés" value={fmtMAD(kpis.travauxRealises)} />
         <Kpi label="Avances versées" value={fmtMAD(kpis.avancesVersees)} accent="#E65100" />
         <Kpi label="Avances consommées" value={fmtMAD(kpis.avancesConsommees)} accent="#E65100" />
-        <Kpi label="Reliquat disponible" value={fmtMAD(kpis.reliquatAvance)} accent="#E65100" />
-        <Kpi label="Travaux réalisés" value={fmtMAD(kpis.travauxRealises)} />
-        <Kpi label="Montants payés" value={fmtMAD(kpis.montantsPayes)} accent="#2E7D32" />
-        <Kpi label="Retenues" value={fmtMAD(kpis.retenues)} accent="#C62828" />
-        <Kpi label="Reste à payer" value={fmtMAD(kpis.resteAPayer)} accent={kpis.resteAPayer > 0 ? '#C62828' : undefined} />
-        <Kpi label="Nombre de projets" value={String(kpis.nombreProjets)} />
-        <Kpi label="Situations ouvertes" value={String(kpis.situationsOuvertes)} />
-        <Kpi label="Situations soldées" value={String(kpis.situationsSoldees)} />
-        <Kpi label="Situations clôturées" value={String(kpis.situationsCloturees)} />
+        <Kpi label="Reliquat d’avance" value={fmtMAD(kpis.reliquatAvance)} accent="#E65100" />
+        <Kpi label="Montant brut à payer" value={fmtMAD(kpis.montantBrutAPayer)} />
+        <Kpi label="Total retenues" value={fmtMAD(kpis.retenues)} accent="#C62828" />
+        <Kpi label="Total déjà payé" value={fmtMAD(kpis.montantsPayes)} accent="#2E7D32" />
+        <Kpi label="Reste net à payer" value={fmtMAD(resteNet)} accent={resteNet > 0 ? '#C62828' : undefined} />
       </div>
 
       <div className="rh-ext-detail-tabs" style={{ marginBottom: 16 }}>
-        {TABS.map((t) => (
+        {ST_FICHE_TABS.map((t) => (
           <button
             key={t.id}
             type="button"
-            onClick={() => setTab(t.id)}
+            onClick={() => changeTab(t.id)}
             className="rh-ext-detail-tab-btn"
             style={{
               fontWeight: tab === t.id ? 700 : 500,
@@ -379,139 +639,165 @@ export default function SituationSousTraitantCompte({
         ))}
       </div>
 
-      {tab === 'general' && (
-        <div className="card rh-ext-table-card">
-          <div className="card-title" style={{ marginBottom: 12 }}>Informations générales</div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill,minmax(180px,1fr))', gap: 14 }}>
-            {[
-              ['Nom', sub.fullName],
-              ['Métier', sub.fonction || '—'],
-              ['Téléphone', sub.telephone || '—'],
-              ['Email', sub.email || '—'],
-              ['CIN', sub.cinLabel || '—'],
-              ['RIB', sub.rib || '—'],
-              ['Solde global', fmtMAD(kpis.resteAPayer)],
-              ['Reliquat avance', fmtMAD(kpis.reliquatAvance)],
-            ].map(([label, val]) => (
-              <div key={label}>
-                <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', textTransform: 'uppercase' }}>{label}</div>
-                <div style={{ fontWeight: 600, marginTop: 2 }}>{val}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {tab === 'situations' && (
-        <div className="card rh-ext-table-card">
-          <div className="flex-between" style={{ marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
-            <div className="card-title" style={{ margin: 0 }}>Situations / Travaux multi-projets</div>
-            <button type="button" className="btn btn-primary btn-sm" onClick={() => onNewSituation?.(subcontractorId)}>
-              <Plus size={14} /> Ajouter des travaux
-            </button>
-          </div>
-          {sitRows ? (
-            <>
-              <div className="table-wrap st-desktop-only" style={{ padding: 0 }}>
+      {tab === 'finance' && (
+        <>
+          <div className="card rh-ext-table-card" style={{ marginBottom: 16 }}>
+            <div className="flex-between" style={{ marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+              <div className="card-title" style={{ margin: 0 }}>Avances globales</div>
+              <button type="button" className="btn btn-primary btn-sm" onClick={() => setShowAdvance(true)}>
+                <Plus size={14} /> Nouvelle avance
+              </button>
+            </div>
+            {(advances || []).length === 0 ? (
+              <p style={{ color: 'var(--text-3)' }}>Aucune avance. Le reliquat suit le sous-traitant entre projets.</p>
+            ) : (
+              <div className="table-wrap" style={{ padding: 0 }}>
                 <table>
                   <thead>
                     <tr>
-                      <th>Réf.</th><th>Groupe</th><th>Projet</th><th>Désignation</th><th>Type</th>
-                      <th>Qté</th><th>Unité</th><th>PU</th><th>Brut</th>
-                      <th>Avance</th><th>Retenues</th><th>Payé</th><th>Net restant</th>
-                      <th>Statut</th><th>Créée</th><th>Clôture</th><th>Actions</th>
+                      <th>Date</th><th>Montant</th><th>Consommé</th><th>Reliquat</th>
+                      <th>Mode</th><th>Réf.</th><th>Statut</th><th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {sitRows.map((s) => (
-                      <tr key={s.id} className="rh-ext-compact-row">
-                        <td data-label="Réf.">{s.reference || '—'}{s.isHistorical ? ' · hist.' : ''}</td>
-                        <td data-label="Groupe">{s.groupId ? String(s.groupId).slice(0, 8) : '—'}</td>
-                        <td data-label="Projet">{s.projectName || '—'}</td>
-                        <td data-label="Désignation">{s.designation || '—'}</td>
-                        <td data-label="Type">{paymentTypeLabel(s.paymentType)}</td>
-                        <td data-label="Qté">{s.quantity || '—'}</td>
-                        <td data-label="Unité">{s.unit || '—'}</td>
-                        <td data-label="PU">{fmtMAD(s.unitPrice)}</td>
-                        <td data-label="Brut">{fmtMAD(s.grossAmount)}</td>
-                        <td data-label="Avance" style={{ color: '#E65100' }}>{fmtMAD(s.avancesImputees)}</td>
-                        <td data-label="Retenues" style={{ color: '#C62828' }}>{fmtMAD(s.retenues)}</td>
-                        <td data-label="Payé" style={{ color: '#2E7D32' }}>{fmtMAD(s.amountPaid)}</td>
-                        <td data-label="Restant">{fmtMAD(s.remaining)}</td>
-                        <td data-label="Statut">
-                          <span className={`badge ${s.status === 'closed' || s.status === 'settled' ? 'badge-green' : s.status === 'cancelled' ? 'badge-grey' : 'badge-orange'}`}>
-                            {s.statusLabel || SITUATION_STATUS_LABEL[s.status]}
-                          </span>
-                        </td>
-                        <td data-label="Créée">{fmtDate(s.situationDate || s.created_at)}</td>
-                        <td data-label="Clôture">{fmtDate(s.closedAt)}</td>
-                        <td data-label="Actions">
-                          <div className="payment-row-actions">
-                            {s.status !== 'closed' && (
-                              <button type="button" className="btn btn-secondary btn-sm" onClick={() => openSituationEdit(s)}>
-                                <Pencil size={12} /> Modifier
-                              </button>
-                            )}
-                            {s.status === 'settled' && (
-                              <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleCloseSituation(s)}>
-                                <Lock size={12} /> Clôturer
-                              </button>
-                            )}
-                          </div>
+                    {advances.map((a) => (
+                      <tr key={a.id}>
+                        <td>{fmtDate(a.advanceDate)}</td>
+                        <td>{fmtMAD(a.amount)}</td>
+                        <td>{fmtMAD(a.consumedAmount)}</td>
+                        <td style={{ color: '#E65100', fontWeight: 700 }}>{fmtMAD(a.reliquat)}</td>
+                        <td>{a.paymentMethod || '—'}</td>
+                        <td>{a.reference || '—'}</td>
+                        <td><span className="badge badge-orange">{a.statusLabel}</span></td>
+                        <td>
+                          {a.status !== 'cancelled' && a.consumedAmount <= 0.009 && (
+                            <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleCancelAdvance(a)}>Annuler</button>
+                          )}
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-              <div className="st-mobile-cards">
-                {sitRows.map((s) => (
-                  <article key={s.id} className="st-situation-card">
-                    <header>
-                      <strong>{s.reference || 'Situation'}</strong>
-                      <span className="badge badge-orange">{s.statusLabel}</span>
-                    </header>
-                    <p>{s.projectName} · {s.designation || '—'}</p>
-                    <dl>
-                      <div><dt>Brut</dt><dd>{fmtMAD(s.grossAmount)}</dd></div>
-                      <div><dt>Avance</dt><dd>{fmtMAD(s.avancesImputees)}</dd></div>
-                      <div><dt>Payé</dt><dd>{fmtMAD(s.amountPaid)}</dd></div>
-                      <div><dt>Reste</dt><dd>{fmtMAD(s.remaining)}</dd></div>
-                    </dl>
-                    {s.status !== 'closed' && (
-                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => openSituationEdit(s)} style={{ marginRight: 6 }}>
-                        Modifier
-                      </button>
-                    )}
-                    {s.status === 'settled' && (
-                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleCloseSituation(s)}>Clôturer</button>
-                    )}
-                  </article>
-                ))}
+            )}
+            {(imputations || []).length > 0 && (
+              <>
+                <div className="card-title" style={{ margin: '20px 0 10px' }}>Imputations d’avance</div>
+                <div className="table-wrap" style={{ padding: 0 }}>
+                  <table>
+                    <thead>
+                      <tr><th>Date</th><th>Projet</th><th>Montant</th><th>Reliquat après</th></tr>
+                    </thead>
+                    <tbody>
+                      {imputations.map((i) => (
+                        <tr key={i.id}>
+                          <td>{fmtDate(i.imputationDate)}</td>
+                          <td>{i.projectName || '—'}</td>
+                          <td style={{ color: '#E65100' }}>{fmtMAD(i.amount)}</td>
+                          <td>{fmtMAD(i.reliquatAfter)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="card rh-ext-table-card" style={{ marginBottom: 16 }}>
+            <div className="flex-between" style={{ marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+              <div className="card-title" style={{ margin: 0 }}>Retenues</div>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowRet(true)}>
+                <Plus size={14} /> Ajouter une retenue
+              </button>
+            </div>
+            {retenues.length === 0 ? (
+              <p style={{ color: 'var(--text-3)', fontSize: '0.85rem' }}>
+                Aucune retenue dédiée. Les retenues sur situations/paiements restent dans les KPIs.
+              </p>
+            ) : (
+              <div className="table-wrap" style={{ padding: 0 }}>
+                <table>
+                  <thead>
+                    <tr><th>Date</th><th>Type</th><th>Projet</th><th>Montant</th><th>Statut</th><th>Actions</th></tr>
+                  </thead>
+                  <tbody>
+                    {retenues.map((r) => (
+                      <tr key={r.id}>
+                        <td>{fmtDate(r.retentionDate)}</td>
+                        <td>{r.retentionTypeLabel}</td>
+                        <td>{r.projectName || '—'}</td>
+                        <td style={{ color: '#C62828' }}>{fmtMAD(r.amount)}</td>
+                        <td>{r.statusLabel}</td>
+                        <td>
+                          {r.status === 'active' && (
+                            <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleReleaseRetenue(r)}>Libérer</button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
-            </>
-          ) : (
+            )}
+          </div>
+
+          <div className="card rh-ext-table-card">
+            <div className="card-title" style={{ marginBottom: 12 }}>Grand livre</div>
+            <div className="st-calcul-grid" style={{ marginBottom: 12 }}>
+              <label>Recherche
+                <input value={ledgerFilters.q} onChange={(e) => { setLedgerFilters((p) => ({ ...p, q: e.target.value })); setLedgerPage(0); }} placeholder="Libellé, réf…" />
+              </label>
+              <label>Type
+                <select value={ledgerFilters.type} onChange={(e) => { setLedgerFilters((p) => ({ ...p, type: e.target.value })); setLedgerPage(0); }}>
+                  <option value="">Tous</option>
+                  {Object.entries(LEDGER_TYPE_LABEL).map(([id, lab]) => (
+                    <option key={id} value={id}>{lab}</option>
+                  ))}
+                </select>
+              </label>
+              <label>Projet
+                <select value={ledgerFilters.projectId} onChange={(e) => { setLedgerFilters((p) => ({ ...p, projectId: e.target.value })); setLedgerPage(0); }}>
+                  <option value="">Tous</option>
+                  {(assignments || []).map((a) => (
+                    <option key={a.id} value={a.projectId}>{a.projectName || a.projectRef}</option>
+                  ))}
+                </select>
+              </label>
+              <label>Du
+                <input type="date" value={ledgerFilters.dateFrom} onChange={(e) => { setLedgerFilters((p) => ({ ...p, dateFrom: e.target.value })); setLedgerPage(0); }} />
+              </label>
+              <label>Au
+                <input type="date" value={ledgerFilters.dateTo} onChange={(e) => { setLedgerFilters((p) => ({ ...p, dateTo: e.target.value })); setLedgerPage(0); }} />
+              </label>
+            </div>
             <div className="table-wrap" style={{ padding: 0 }}>
               <table>
                 <thead>
                   <tr>
-                    <th>Projet</th><th>Travaux</th><th>Avances</th><th>Retenues</th><th>Net payé</th><th>Solde</th><th>Statut</th><th>Actions</th>
+                    <th>Date</th><th>Type</th><th>Projet</th><th>Réf.</th><th>Libellé</th>
+                    <th>Montant</th><th>Débit</th><th>Crédit</th><th>Solde</th><th>Statut</th><th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {(legacySituations || []).map((s) => (
-                    <tr key={s.key}>
-                      <td>{s.projectName}</td>
-                      <td>{fmtMAD(s.totalTravaux)}</td>
-                      <td style={{ color: '#E65100' }}>{fmtMAD(s.totalAvances)}</td>
-                      <td style={{ color: '#C62828' }}>{fmtMAD(s.totalRetenues)}</td>
-                      <td style={{ color: '#2E7D32' }}>{fmtMAD(s.totalPaye)}</td>
-                      <td>{fmtMAD(s.soldeRestant)}</td>
-                      <td>{s.statutLabel}</td>
+                  {ledgerPageRows.length === 0 ? (
+                    <tr><td colSpan={11} style={{ color: 'var(--text-3)' }}>Aucune opération.</td></tr>
+                  ) : ledgerPageRows.map((r) => (
+                    <tr key={r.id}>
+                      <td>{fmtDate(r.date)}</td>
+                      <td>{r.typeLabel}</td>
+                      <td>{r.projectName || '—'}</td>
+                      <td>{r.reference || '—'}</td>
+                      <td>{r.label || '—'}</td>
+                      <td>{fmtMAD(r.amount)}</td>
+                      <td>{r.debit ? fmtMAD(r.debit) : '—'}</td>
+                      <td>{r.credit ? fmtMAD(r.credit) : '—'}</td>
+                      <td style={{ fontWeight: 700 }}>{fmtMAD(r.balanceAfter)}</td>
+                      <td>{r.status || '—'}</td>
                       <td>
-                        {(s.paymentIds || []).length > 0 && (
-                          <button type="button" className="btn btn-secondary btn-sm" onClick={() => openLegacyProjectEdit(s)}>
-                            <Pencil size={12} /> Modifier
+                        {r.payment && (
+                          <button type="button" className="btn btn-secondary btn-sm" onClick={() => openEdit(r.payment)}>
+                            <Pencil size={12} />
                           </button>
                         )}
                       </td>
@@ -519,48 +805,154 @@ export default function SituationSousTraitantCompte({
                   ))}
                 </tbody>
               </table>
-              <p style={{ fontSize: '0.8rem', color: 'var(--text-3)', marginTop: 10 }}>
-                Les avances affichées sont plafonnées au montant des travaux. Pour corriger une ligne, utilisez Modifier (ouvre le paiement).
-                Exécutez <code>RUN_SUBCONTRACTOR_ACCOUNT_V2.sql</code> (et <code>RUN_SUBCONTRACTOR_SITUATION_GROUP.sql</code> si besoin) pour les situations multi-projets détaillées.
-              </p>
             </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 10, alignItems: 'center' }}>
+              <span style={{ fontSize: '0.8rem', color: 'var(--text-3)' }}>
+                {ledgerFiltered.length} ligne(s) · page {ledgerPage + 1}/{Math.max(1, Math.ceil(ledgerFiltered.length / PAGE_SIZE))}
+              </span>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button type="button" className="btn btn-secondary btn-sm" disabled={ledgerPage <= 0} onClick={() => setLedgerPage((p) => p - 1)}>Préc.</button>
+                <button type="button" className="btn btn-secondary btn-sm" disabled={(ledgerPage + 1) * PAGE_SIZE >= ledgerFiltered.length} onClick={() => setLedgerPage((p) => p + 1)}>Suiv.</button>
+                <button type="button" className="btn btn-secondary btn-sm" onClick={handleAccountPdf}><FileDown size={13} /> Export PDF</button>
+              </div>
+            </div>
+          </div>
+        </>
+      )}
+
+      {tab === 'travaux' && (
+        <div className="card rh-ext-table-card">
+          <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(130px,1fr))', marginBottom: 16 }}>
+            <Kpi label="Projets" value={String(kpis.nombreProjets)} />
+            <Kpi label="Situations" value={String(kpis.totalSituations || sitRows?.length || 0)} />
+            <Kpi label="Réalisé" value={fmtMAD(kpis.travauxRealises)} />
+            <Kpi label="Validé" value={fmtMAD(kpis.montantValide)} />
+            <Kpi label="En attente" value={fmtMAD(kpis.montantEnAttente)} />
+            <Kpi label="Payé" value={fmtMAD(kpis.montantsPayes)} accent="#2E7D32" />
+            <Kpi label="Restant" value={fmtMAD(resteNet)} />
+          </div>
+          <div className="flex-between" style={{ marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+            <div className="card-title" style={{ margin: 0 }}>Travaux par projet</div>
+            <button type="button" className="btn btn-primary btn-sm" onClick={() => onNewSituation?.(subcontractorId)}>
+              <Plus size={14} /> Ajouter une situation
+            </button>
+          </div>
+          <div className="table-wrap" style={{ padding: 0 }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Projet</th><th>Réalisé</th><th>Avance</th><th>Retenues</th><th>Payé</th><th>Reste</th><th>Statut</th><th>MAJ</th><th>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {projectGroups.map((s) => (
+                  <tr key={s.key} style={{ cursor: 'pointer', background: selectedProjectId === s.key ? 'color-mix(in srgb, var(--red) 6%, transparent)' : undefined }} onClick={() => setSelectedProjectId(selectedProjectId === s.key ? null : s.key)}>
+                    <td>{s.projectName}</td>
+                    <td>{fmtMAD(s.totalTravaux)}</td>
+                    <td style={{ color: '#E65100' }}>{fmtMAD(s.totalAvances)}</td>
+                    <td style={{ color: '#C62828' }}>{fmtMAD(s.totalRetenues)}</td>
+                    <td style={{ color: '#2E7D32' }}>{fmtMAD(s.totalPaye)}</td>
+                    <td>{fmtMAD(s.soldeRestant)}</td>
+                    <td>{s.statutLabel}</td>
+                    <td>{fmtDate(s.lastDate)}</td>
+                    <td onClick={(e) => e.stopPropagation()}>
+                      <div className="payment-row-actions">
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => onNewSituation?.(subcontractorId)}>Situation</button>
+                        {(s.paymentIds || []).length > 0 && (
+                          <button type="button" className="btn btn-secondary btn-sm" onClick={() => openLegacyProjectEdit(s)}>
+                            <Pencil size={12} />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          {selectedProjectId && sitRows && (
+            <div style={{ marginTop: 16 }}>
+              <div className="card-title" style={{ marginBottom: 8 }}>
+                Situations — {projectGroups.find((p) => p.key === selectedProjectId)?.projectName || ''}
+              </div>
+              <div className="table-wrap" style={{ padding: 0 }}>
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Réf.</th><th>Date</th><th>Désignation</th><th>Qté</th><th>PU</th><th>Brut</th>
+                      <th>Avance</th><th>Retenue</th><th>Payé</th><th>Reste</th><th>Statut</th><th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(projectGroups.find((p) => p.key === selectedProjectId)?.situations || []).map((s) => (
+                      <tr key={s.id}>
+                        <td>{s.reference || '—'}</td>
+                        <td>{fmtDate(s.situationDate)}</td>
+                        <td>{s.designation || '—'}</td>
+                        <td>{s.quantity || '—'}</td>
+                        <td>{fmtMAD(s.unitPrice)}</td>
+                        <td>{fmtMAD(s.grossAmount)}</td>
+                        <td style={{ color: '#E65100' }}>{fmtMAD(s.avancesImputees)}</td>
+                        <td style={{ color: '#C62828' }}>{fmtMAD(s.retenues)}</td>
+                        <td style={{ color: '#2E7D32' }}>{fmtMAD(s.amountPaid)}</td>
+                        <td>{fmtMAD(s.remaining)}</td>
+                        <td><span className="badge badge-orange">{s.statusLabel}</span></td>
+                        <td>
+                          {s.status !== 'closed' && (
+                            <button type="button" className="btn btn-secondary btn-sm" onClick={() => openSituationEdit(s)}>
+                              <Pencil size={12} />
+                            </button>
+                          )}
+                          {s.status === 'settled' && (
+                            <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleCloseSituation(s)}>
+                              <Lock size={12} />
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+          {!sitRows && (
+            <p style={{ fontSize: '0.8rem', color: 'var(--text-3)', marginTop: 10 }}>
+              Exécutez <code>RUN_SUBCONTRACTOR_ACCOUNT_V2.sql</code> pour le détail des situations.
+            </p>
           )}
         </div>
       )}
 
-      {tab === 'avances' && (
+      {tab === 'documents' && (
         <div className="card rh-ext-table-card">
-          <div className="flex-between" style={{ marginBottom: 12 }}>
-            <div className="card-title" style={{ margin: 0 }}>Avances globales</div>
-            <button type="button" className="btn btn-primary btn-sm" onClick={() => setShowAdvance(true)}>
-              <Plus size={14} /> Nouvelle avance
+          <div className="flex-between" style={{ marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+            <div className="card-title" style={{ margin: 0 }}>Documents</div>
+            <button type="button" className="btn btn-primary btn-sm" onClick={() => setShowDoc(true)}>
+              <Plus size={14} /> Ajouter
             </button>
           </div>
-          {(advances || []).length === 0 ? (
-            <p style={{ color: 'var(--text-3)' }}>Aucune avance globale. Le reliquat suivra le sous-traitant entre projets.</p>
+          {(documents || []).length === 0 ? (
+            <p style={{ color: 'var(--text-3)' }}>Aucun document enregistré.</p>
           ) : (
             <div className="table-wrap" style={{ padding: 0 }}>
               <table>
                 <thead>
-                  <tr>
-                    <th>Date</th><th>Montant</th><th>Consommé</th><th>Reliquat</th>
-                    <th>Mode</th><th>Réf.</th><th>Statut</th><th>Actions</th>
-                  </tr>
+                  <tr><th>Nom</th><th>Catégorie</th><th>Réf.</th><th>Date</th><th>Statut</th><th>Actions</th></tr>
                 </thead>
                 <tbody>
-                  {advances.map((a) => (
-                    <tr key={a.id}>
-                      <td>{fmtDate(a.advanceDate)}</td>
-                      <td>{fmtMAD(a.amount)}</td>
-                      <td>{fmtMAD(a.consumedAmount)}</td>
-                      <td style={{ color: '#E65100', fontWeight: 700 }}>{fmtMAD(a.reliquat)}</td>
-                      <td>{a.paymentMethod || '—'}</td>
-                      <td>{a.reference || '—'}</td>
-                      <td><span className="badge badge-orange">{a.statusLabel}</span></td>
+                  {(documents || []).filter((d) => d.status !== 'archived').map((d) => (
+                    <tr key={d.id}>
+                      <td>{d.file_name || d.nom || '—'}</td>
+                      <td>{SUBCONTRACTOR_DOC_TYPES.find((t) => t.id === d.doc_type)?.label || d.doc_type}</td>
+                      <td>{d.reference || '—'}</td>
+                      <td>{fmtDate(d.document_date || d.created_at)}</td>
+                      <td>{d.status || 'active'}</td>
                       <td>
-                        {a.status !== 'cancelled' && a.consumedAmount <= 0.009 && (
-                          <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleCancelAdvance(a)}>Annuler</button>
+                        {d.storage_path && (
+                          <a className="btn btn-secondary btn-sm" href={d.storage_path} target="_blank" rel="noreferrer">Ouvrir</a>
                         )}
+                        <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleArchiveDoc(d)}>Archiver</button>
                       </td>
                     </tr>
                   ))}
@@ -568,80 +960,47 @@ export default function SituationSousTraitantCompte({
               </table>
             </div>
           )}
-          <div className="card-title" style={{ margin: '20px 0 10px' }}>Historique des imputations</div>
-          {(imputations || []).length === 0 ? (
-            <p style={{ color: 'var(--text-3)', fontSize: '0.85rem' }}>Aucune imputation.</p>
-          ) : (
-            <div className="table-wrap" style={{ padding: 0 }}>
-              <table>
-                <thead>
-                  <tr>
-                    <th>Date</th><th>Projet</th><th>Situation</th><th>Avance utilisée</th><th>Reliquat après</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {imputations.map((i) => (
-                    <tr key={i.id}>
-                      <td>{fmtDate(i.imputationDate)}</td>
-                      <td>{i.projectName || '—'}</td>
-                      <td>{i.situationId ? String(i.situationId).slice(0, 8) : '—'}</td>
-                      <td style={{ color: '#E65100' }}>{fmtMAD(i.amount)}</td>
-                      <td>{fmtMAD(i.reliquatAfter)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          <div className="card-title" style={{ margin: '20px 0 10px' }}>Bons de paiement (PDF)</div>
+          {(payments || []).map((p) => (
+            <div key={p.id} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
+              <span>{fmtDate(p.paymentDate)} · {p.projectName || '—'} · {fmtMAD(p.amount)}</span>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => handlePdf(p, false)}>PDF</button>
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => handlePdf(p, true)}><Printer size={13} /></button>
             </div>
-          )}
+          ))}
         </div>
       )}
 
       {tab === 'historique' && (
         <div className="card rh-ext-table-card">
-          <div className="card-title" style={{ marginBottom: 12 }}>Historique complet</div>
-          {history.length === 0 ? (
+          <div className="card-title" style={{ marginBottom: 12 }}>Historique des actions (lecture seule)</div>
+          {(history || []).length === 0 ? (
             <p style={{ color: 'var(--text-3)' }}>Aucun mouvement.</p>
           ) : (
             <div className="table-wrap" style={{ padding: 0 }}>
               <table>
                 <thead>
                   <tr>
-                    <th>Date</th><th>Type</th><th>Projet</th><th>Brut</th><th>Avances</th>
-                    <th>Retenues</th><th>Net</th><th>Obs.</th><th>Actions</th>
+                    <th>Date</th><th>Action</th><th>Projet</th><th>Réf.</th><th>Montant</th>
+                    <th>Observation</th><th>Utilisateur</th><th>Opérations liées</th>
                   </tr>
                 </thead>
                 <tbody>
                   {history.map((h) => (
                     <tr key={h.id}>
-                      <td>{fmtDate(h.date)}</td>
+                      <td>{fmtDateTime(h.date)}</td>
                       <td>{h.typeLabel}</td>
-                      <td>{h.projectLabel}</td>
-                      <td>{fmtMAD(h.montantBrut)}</td>
-                      <td style={{ color: '#E65100' }}>{fmtMAD(h.avances)}</td>
-                      <td style={{ color: '#C62828' }}>{fmtMAD(h.retenues)}</td>
-                      <td style={{ color: '#2E7D32', fontWeight: 700 }}>{fmtMAD(h.montant)}</td>
+                      <td>{h.projectLabel || '—'}</td>
+                      <td>{h.reference || '—'}</td>
+                      <td>{fmtMAD(h.montant || h.montantBrut)}</td>
                       <td>{h.observation || '—'}</td>
+                      <td>{h.userLabel || '—'}</td>
                       <td>
                         {h.payment && (
                           <div className="payment-row-actions">
-                            <button type="button" className="btn btn-secondary btn-sm" title="Modifier" onClick={() => openEdit(h.payment)}>
-                              <Pencil size={13} />
-                            </button>
-                            <button type="button" className="btn btn-secondary btn-sm" title="PDF" onClick={() => handlePdf(h.payment, false)}>
-                              <FileDown size={13} />
-                            </button>
-                            <button type="button" className="btn btn-secondary btn-sm" title="Imprimer" onClick={() => handlePdf(h.payment, true)}>
-                              <Printer size={13} />
-                            </button>
-                            <button
-                              type="button"
-                              className="btn btn-secondary btn-sm"
-                              title="Supprimer"
-                              onClick={() => handleDeletePayment(h.payment)}
-                              style={{ color: 'var(--red)' }}
-                            >
-                              <Trash2 size={13} />
-                            </button>
+                            <button type="button" className="btn btn-secondary btn-sm" onClick={() => openEdit(h.payment)}><Pencil size={13} /></button>
+                            <button type="button" className="btn btn-secondary btn-sm" onClick={() => handlePdf(h.payment, false)}><FileDown size={13} /></button>
+                            <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleDeletePayment(h.payment)} style={{ color: 'var(--red)' }}><Trash2 size={13} /></button>
                           </div>
                         )}
                       </td>
@@ -654,30 +1013,58 @@ export default function SituationSousTraitantCompte({
         </div>
       )}
 
-      {tab === 'documents' && (
+      {tab === 'analyse' && (
         <div className="card rh-ext-table-card">
-          <div className="card-title" style={{ marginBottom: 12 }}>Documents & bons de paiement</div>
-          <p style={{ fontSize: '0.85rem', color: 'var(--text-3)' }}>
-            Pièces : {(documents || []).length} · Bons : {(payments || []).length}
-          </p>
-          {(payments || []).map((p) => (
-            <div key={p.id} style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8, flexWrap: 'wrap' }}>
-              <span>{fmtDate(p.paymentDate)} · {p.projectName || '—'} · {fmtMAD(p.amount)}</span>
-              <button type="button" className="btn btn-secondary btn-sm" onClick={() => handlePdf(p, false)}>PDF</button>
-              <button
-                type="button"
-                className="btn btn-secondary btn-sm"
-                title="Supprimer"
-                onClick={() => handleDeletePayment(p)}
-                style={{ color: 'var(--red)' }}
-              >
-                <Trash2 size={13} /> Supprimer
-              </button>
+          <div className="flex-between" style={{ marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+            <div className="card-title" style={{ margin: 0 }}>Analyse et performance</div>
+            <button type="button" className="btn btn-primary btn-sm" onClick={() => setShowEval(true)}>
+              <Plus size={14} /> Évaluer
+            </button>
+          </div>
+          <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(140px,1fr))', marginBottom: 16 }}>
+            <Kpi label="Projets réalisés" value={String(performance?.projetsRealises ?? 0)} />
+            <Kpi label="Projets en cours" value={String(performance?.projetsEnCours ?? 0)} />
+            <Kpi label="Montant confié" value={fmtMAD(performance?.montantTotalConfie)} />
+            <Kpi label="Montant réalisé" value={fmtMAD(performance?.montantTotalRealise)} />
+            <Kpi label="Montant payé" value={fmtMAD(performance?.montantTotalPaye)} />
+            <Kpi label="Note globale" value={performance?.noteGlobale ? `${performance.noteGlobale} / 5` : '—'} accent="#1565C0" />
+            <Kpi label="Taux conformité" value={performance?.tauxConformite != null ? `${performance.tauxConformite} %` : '—'} />
+            <Kpi label="Évaluations" value={String(performance?.evaluationsCount ?? 0)} />
+          </div>
+          {(evaluations || []).length === 0 ? (
+            <p style={{ color: 'var(--text-3)' }}>
+              Aucune évaluation. Exécutez <code>RUN_SUBCONTRACTOR_FICHE_V3.sql</code> pour activer la table.
+            </p>
+          ) : (
+            <div className="table-wrap" style={{ padding: 0 }}>
+              <table>
+                <thead>
+                  <tr>
+                    <th>Date</th><th>Projet</th><th>Note</th><th>Qualité</th><th>Délais</th>
+                    <th>Sécurité</th><th>Réactivité</th><th>Commentaire</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {evaluations.map((ev) => (
+                    <tr key={ev.id}>
+                      <td>{fmtDate(ev.createdAt)}</td>
+                      <td>{ev.projectName || '—'}</td>
+                      <td style={{ fontWeight: 700 }}>{ev.note}</td>
+                      <td>{ev.qualite || '—'}</td>
+                      <td>{ev.respectDelais || '—'}</td>
+                      <td>{ev.securite || '—'}</td>
+                      <td>{ev.reactivite || '—'}</td>
+                      <td>{ev.commentaire || '—'}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
-          ))}
+          )}
         </div>
       )}
 
+      {/* ─── Modales existantes + nouvelles ─── */}
       {showAdvance && (
         <div className="rh-ext-modal-overlay">
           <div className="card rh-ext-modal-box rh-ext-modal-box--md">
@@ -686,7 +1073,7 @@ export default function SituationSousTraitantCompte({
               <button type="button" onClick={() => setShowAdvance(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
             </div>
             <p style={{ fontSize: '0.82rem', color: 'var(--text-3)' }}>
-              Une seule opération financière sera créée. L’imputation sur les projets est analytique.
+              Une seule opération financière. L’imputation sur les projets est analytique.
             </p>
             <form onSubmit={handleCreateAdvance} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <label>Date<input type="date" value={advForm.advanceDate} onChange={(e) => setAdvForm((p) => ({ ...p, advanceDate: e.target.value }))} required /></label>
@@ -707,24 +1094,151 @@ export default function SituationSousTraitantCompte({
         </div>
       )}
 
+      {showEditFiche && (
+        <div className="rh-ext-modal-overlay">
+          <div className="card rh-ext-modal-box rh-ext-modal-box--md">
+            <div className="flex-between" style={{ marginBottom: 12 }}>
+              <h2 style={{ margin: 0, fontFamily: 'var(--font-head)', fontWeight: 800 }}>Modifier la fiche</h2>
+              <button type="button" onClick={() => setShowEditFiche(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
+            </div>
+            <form onSubmit={handleSaveFiche} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <label>Téléphone<input value={ficheForm.telephone} onChange={(e) => setFicheForm((p) => ({ ...p, telephone: e.target.value }))} /></label>
+              <label>Email<input type="email" value={ficheForm.email} onChange={(e) => setFicheForm((p) => ({ ...p, email: e.target.value }))} /></label>
+              <label>Spécialité<input value={ficheForm.fonction} onChange={(e) => setFicheForm((p) => ({ ...p, fonction: e.target.value }))} /></label>
+              <label>Responsable interne<input value={ficheForm.responsableInterne} onChange={(e) => setFicheForm((p) => ({ ...p, responsableInterne: e.target.value }))} /></label>
+              <label>Notes<input value={ficheForm.notes} onChange={(e) => setFicheForm((p) => ({ ...p, notes: e.target.value }))} /></label>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setShowEditFiche(false)}>Annuler</button>
+                <button type="submit" className="btn btn-primary" disabled={ficheSaving}>{ficheSaving ? '…' : 'Enregistrer'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showDoc && (
+        <div className="rh-ext-modal-overlay">
+          <div className="card rh-ext-modal-box rh-ext-modal-box--md">
+            <div className="flex-between" style={{ marginBottom: 12 }}>
+              <h2 style={{ margin: 0, fontFamily: 'var(--font-head)', fontWeight: 800 }}>Ajouter un document</h2>
+              <button type="button" onClick={() => setShowDoc(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
+            </div>
+            <form onSubmit={handleCreateDoc} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <label>Catégorie
+                <select value={docForm.doc_type} onChange={(e) => setDocForm((p) => ({ ...p, doc_type: e.target.value }))}>
+                  {SUBCONTRACTOR_DOC_TYPES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+                </select>
+              </label>
+              <label>Nom *<input value={docForm.file_name} onChange={(e) => setDocForm((p) => ({ ...p, file_name: e.target.value }))} required /></label>
+              <label>Référence<input value={docForm.reference} onChange={(e) => setDocForm((p) => ({ ...p, reference: e.target.value }))} /></label>
+              <label>Projet
+                <select value={docForm.projectId} onChange={(e) => setDocForm((p) => ({ ...p, projectId: e.target.value }))}>
+                  <option value="">—</option>
+                  {(assignments || []).map((a) => (
+                    <option key={a.id} value={a.projectId}>{a.projectName || a.projectRef}</option>
+                  ))}
+                </select>
+              </label>
+              <label>Date document<input type="date" value={docForm.documentDate} onChange={(e) => setDocForm((p) => ({ ...p, documentDate: e.target.value }))} /></label>
+              <label>Description / chemin fichier<input value={docForm.notes} onChange={(e) => setDocForm((p) => ({ ...p, notes: e.target.value }))} /></label>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setShowDoc(false)}>Annuler</button>
+                <button type="submit" className="btn btn-primary" disabled={docSaving}>{docSaving ? '…' : 'Enregistrer'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showRet && (
+        <div className="rh-ext-modal-overlay">
+          <div className="card rh-ext-modal-box rh-ext-modal-box--md">
+            <div className="flex-between" style={{ marginBottom: 12 }}>
+              <h2 style={{ margin: 0, fontFamily: 'var(--font-head)', fontWeight: 800 }}>Ajouter une retenue</h2>
+              <button type="button" onClick={() => setShowRet(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
+            </div>
+            <form onSubmit={handleCreateRetenue} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <label>Type
+                <select value={retForm.retentionType} onChange={(e) => setRetForm((p) => ({ ...p, retentionType: e.target.value }))}>
+                  {RETENTION_TYPES.map((t) => <option key={t.id} value={t.id}>{t.label}</option>)}
+                </select>
+              </label>
+              <label>Montant (MAD)<input type="number" min="0" step="0.01" value={retForm.amount} onChange={(e) => setRetForm((p) => ({ ...p, amount: e.target.value }))} /></label>
+              <label>Projet
+                <select value={retForm.projectId} onChange={(e) => setRetForm((p) => ({ ...p, projectId: e.target.value }))}>
+                  <option value="">—</option>
+                  {(assignments || []).map((a) => (
+                    <option key={a.id} value={a.projectId}>{a.projectName || a.projectRef}</option>
+                  ))}
+                </select>
+              </label>
+              <label>Date<input type="date" value={retForm.retentionDate} onChange={(e) => setRetForm((p) => ({ ...p, retentionDate: e.target.value }))} /></label>
+              <label>Libération prévue<input type="date" value={retForm.releaseDatePlanned} onChange={(e) => setRetForm((p) => ({ ...p, releaseDatePlanned: e.target.value }))} /></label>
+              <label>Motif<input value={retForm.motif} onChange={(e) => setRetForm((p) => ({ ...p, motif: e.target.value }))} /></label>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setShowRet(false)}>Annuler</button>
+                <button type="submit" className="btn btn-primary" disabled={retSaving}>{retSaving ? '…' : 'Enregistrer'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showEval && (
+        <div className="rh-ext-modal-overlay">
+          <div className="card rh-ext-modal-box rh-ext-modal-box--md">
+            <div className="flex-between" style={{ marginBottom: 12 }}>
+              <h2 style={{ margin: 0, fontFamily: 'var(--font-head)', fontWeight: 800 }}>Évaluation (1–5)</h2>
+              <button type="button" onClick={() => setShowEval(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
+            </div>
+            <form onSubmit={handleCreateEval} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <label>Projet
+                <select value={evalForm.projectId} onChange={(e) => setEvalForm((p) => ({ ...p, projectId: e.target.value }))}>
+                  <option value="">—</option>
+                  {(assignments || []).map((a) => (
+                    <option key={a.id} value={a.projectId}>{a.projectName || a.projectRef}</option>
+                  ))}
+                </select>
+              </label>
+              {[
+                ['qualite', 'Qualité des travaux'],
+                ['respectDelais', 'Respect des délais'],
+                ['consignes', 'Respect des consignes'],
+                ['securite', 'Sécurité'],
+                ['reactivite', 'Réactivité'],
+                ['administratif', 'Qualité administrative'],
+                ['communication', 'Communication'],
+                ['rapportQualitePrix', 'Rapport qualité-prix'],
+              ].map(([k, lab]) => (
+                <label key={k}>{lab}
+                  <select value={evalForm[k]} onChange={(e) => setEvalForm((p) => ({ ...p, [k]: Number(e.target.value) }))}>
+                    {[1, 2, 3, 4, 5].map((n) => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                </label>
+              ))}
+              <label>Commentaire<input value={evalForm.commentaire} onChange={(e) => setEvalForm((p) => ({ ...p, commentaire: e.target.value }))} /></label>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setShowEval(false)}>Annuler</button>
+                <button type="submit" className="btn btn-primary" disabled={evalSaving}>{evalSaving ? '…' : 'Enregistrer'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {editRecord && editForm && (
         <div className="rh-ext-modal-overlay">
           <div className="card rh-ext-modal-box rh-ext-modal-box--md">
             <form onSubmit={handleEditSave}>
               <p style={{ fontSize: '0.8rem', color: 'var(--text-3)', marginTop: 0 }}>
-                L’avance est plafonnée au montant brut à l’enregistrement (net = brut − avances − retenues).
+                L’avance est plafonnée au montant brut (net = brut − avances − retenues).
               </p>
               <SubcontractorPaymentEditForm form={editForm} setF={(f, v) => setEditForm((p) => ({ ...p, [f]: v }))} formErr={editFormErr} />
               <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16, flexWrap: 'wrap' }}>
-                <button
-                  type="button"
-                  className="btn btn-secondary"
-                  style={{ color: 'var(--red)', marginRight: 'auto' }}
-                  onClick={() => handleDeletePayment(editRecord)}
-                >
-                  <Trash2 size={14} /> Supprimer
+                <button type="button" className="btn btn-secondary" style={{ color: 'var(--red)', marginRight: 'auto' }} onClick={() => handleDeletePayment(editRecord)}>
+                  <Trash2 size={14} /> Annuler l’opération
                 </button>
-                <button type="button" className="btn btn-secondary" onClick={() => { setEditRecord(null); setEditForm(null); }}>Annuler</button>
+                <button type="button" className="btn btn-secondary" onClick={() => { setEditRecord(null); setEditForm(null); }}>Fermer</button>
                 <button type="submit" className="btn btn-primary" disabled={editSaving}>Enregistrer</button>
               </div>
             </form>
@@ -736,12 +1250,9 @@ export default function SituationSousTraitantCompte({
         <div className="rh-ext-modal-overlay">
           <div className="card rh-ext-modal-box rh-ext-modal-box--md">
             <div className="flex-between" style={{ marginBottom: 12 }}>
-              <h2 style={{ margin: 0, fontFamily: 'var(--font-head)', fontWeight: 800 }}>
-                Modifier — {projectPick.projectName}
-              </h2>
+              <h2 style={{ margin: 0, fontFamily: 'var(--font-head)', fontWeight: 800 }}>Modifier — {projectPick.projectName}</h2>
               <button type="button" onClick={() => setProjectPick(null)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
             </div>
-            <p style={{ fontSize: '0.85rem', color: 'var(--text-3)' }}>Choisissez le paiement à corriger (avances, retenues, brut…).</p>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {projectPick.payments.map((p) => (
                 <button
@@ -749,12 +1260,9 @@ export default function SituationSousTraitantCompte({
                   type="button"
                   className="btn btn-secondary"
                   style={{ justifyContent: 'flex-start', textAlign: 'left' }}
-                  onClick={() => {
-                    setProjectPick(null);
-                    openEdit(p);
-                  }}
+                  onClick={() => { setProjectPick(null); openEdit(p); }}
                 >
-                  {fmtDate(p.paymentDate)} · Brut {fmtMAD(p.grossAmount)} · Avance {fmtMAD(p.avances)} · Net {fmtMAD(p.amount)}
+                  {fmtDate(p.paymentDate)} · Brut {fmtMAD(p.grossAmount)} · Net {fmtMAD(p.amount)}
                 </button>
               ))}
             </div>
@@ -783,9 +1291,6 @@ export default function SituationSousTraitantCompte({
                   ))}
                 </select>
               </label>
-              <p style={{ fontSize: '0.78rem', color: 'var(--text-3)', margin: 0 }}>
-                Avance plafonnée au brut. Net = max(0, brut − avance − retenues).
-              </p>
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                 <button type="button" className="btn btn-secondary" onClick={() => setSitEdit(null)}>Annuler</button>
                 <button type="submit" className="btn btn-primary" disabled={sitSaving}>{sitSaving ? '…' : 'Enregistrer'}</button>

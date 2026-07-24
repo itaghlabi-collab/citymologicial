@@ -16,6 +16,8 @@ import { paymentStatusFromDb } from './subcontractorConstants';
 import { listSituations } from './subcontractorSituations';
 import { listGlobalAdvances, listAdvanceImputations, summarizeAdvances } from './subcontractorAdvances';
 import { listAccountEvents } from './subcontractorAccountEvents';
+import { buildSubcontractorLedger } from './subcontractorLedger';
+import { listEvaluations, summarizePerformance } from './subcontractorEvaluations';
 import { round2 } from './subcontractorAdvanceMath';
 
 function isPaid(p) {
@@ -87,14 +89,10 @@ export function buildAccountKpis({
     reliquatAvance = 0;
   }
 
-  const resteFromSituations = round2(
-    situations
-      .filter((s) => !['closed', 'cancelled'].includes(s.status))
-      .reduce((s, x) => s + Math.max(0, Number(x.remaining) || 0), 0),
-  );
-  const resteAPayer = situations.length
-    ? resteFromSituations
-    : round2(balances.reduce((s, b) => s + Math.max(0, Number(b.remainingAmount) || 0), 0));
+  // Règles fiche : brut à payer = max(0, travaux − avances versées)
+  const montantBrutAPayer = round2(Math.max(0, travauxRealises - avancesVersees));
+  // Reste net = max(0, brut à payer − payé − retenues)
+  const resteNetAPayer = round2(Math.max(0, montantBrutAPayer - montantsPayes - retenues));
 
   const projectIds = new Set();
   payments.forEach((p) => { if (p.projectId) projectIds.add(String(p.projectId)); });
@@ -106,6 +104,20 @@ export function buildAccountKpis({
     ['draft', 'in_progress', 'partially_paid'].includes(s.status)).length;
   const situationsSoldees = situations.filter((s) => s.status === 'settled').length;
   const situationsCloturees = situations.filter((s) => s.status === 'closed').length;
+  const situationsValidees = situations.filter((s) =>
+    ['settled', 'closed', 'partially_paid'].includes(s.status)).length;
+  const situationsEnAttente = situations.filter((s) =>
+    ['draft', 'in_progress'].includes(s.status)).length;
+  const montantValide = round2(
+    situations
+      .filter((s) => ['settled', 'closed', 'partially_paid'].includes(s.status))
+      .reduce((s, x) => s + (Number(x.grossAmount) || 0), 0),
+  );
+  const montantEnAttente = round2(
+    situations
+      .filter((s) => ['draft', 'in_progress'].includes(s.status))
+      .reduce((s, x) => s + (Number(x.grossAmount) || 0), 0),
+  );
 
   return {
     avancesVersees,
@@ -113,13 +125,19 @@ export function buildAccountKpis({
     reliquatAvance,
     avancesGlobalesDisponibles: advances.length > 0 || reliquatAvance > 0 || avancesVersees > 0,
     travauxRealises,
+    montantBrutAPayer,
     montantsPayes,
     retenues,
-    resteAPayer,
+    resteNetAPayer,
+    resteAPayer: resteNetAPayer,
     nombreProjets: projectIds.size,
     situationsOuvertes: situations.length ? situationsOuvertes : 0,
     situationsSoldees: situations.length ? situationsSoldees : 0,
     situationsCloturees,
+    situationsValidees,
+    situationsEnAttente,
+    montantValide: situations.length ? montantValide : travauxRealises,
+    montantEnAttente: situations.length ? montantEnAttente : 0,
     totalSituations: situations.length,
     derniereOperation: payments[0]?.paymentDate || situations[0]?.situationDate || null,
   };
@@ -304,7 +322,7 @@ export async function listSubcontractorAccounts() {
 export async function getSubcontractorAccount(subcontractorId) {
   if (!subcontractorId) throw new Error('Sous-traitant requis.');
 
-  const [sub, paymentsRaw, assignments, documents, balances, situations, advances, imputations, events] = await Promise.all([
+  const [sub, paymentsRaw, assignments, documents, balances, situations, advances, imputations, events, evaluations] = await Promise.all([
     getSubcontractor(subcontractorId),
     listPayments(subcontractorId),
     listAssignments(subcontractorId),
@@ -314,6 +332,7 @@ export async function getSubcontractorAccount(subcontractorId) {
     safeList(listGlobalAdvances(subcontractorId)),
     safeList(listAdvanceImputations(subcontractorId)),
     safeList(listAccountEvents(subcontractorId)),
+    safeList(listEvaluations(subcontractorId)),
   ]);
 
   const projectNameById = new Map();
@@ -337,6 +356,10 @@ export async function getSubcontractorAccount(subcontractorId) {
     ? []
     : buildProjectSituations({ payments, balances, assignments });
   const history = buildAccountHistory(payments, events, imputations);
+  const ledger = buildSubcontractorLedger({
+    advances, payments, situations, imputations, events,
+  });
+  const performance = summarizePerformance({ evaluations, assignments, kpis });
 
   return {
     subcontractor: sub,
@@ -344,6 +367,7 @@ export async function getSubcontractorAccount(subcontractorId) {
     situations,
     legacySituations,
     history,
+    ledger,
     payments,
     assignments,
     documents: documents || [],
@@ -351,5 +375,7 @@ export async function getSubcontractorAccount(subcontractorId) {
     advances,
     imputations,
     events,
+    evaluations,
+    performance,
   };
 }

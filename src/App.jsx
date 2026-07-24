@@ -48,6 +48,7 @@ import Administration from './components/Administration';
 import { usePermissions } from './hooks/usePermissions';
 import { canAccessExecutiveCalendar } from './services/auth/executiveCalendarAccess';
 import { parseInventaireArticlePath } from './services/inventaire/barcodeUtils';
+import { parseSousTraitantPath } from './services/rh/sousTraitantRoutes';
 
 import {
   LayoutDashboard, CheckSquare, CalendarDays, CalendarClock,
@@ -261,7 +262,14 @@ const MODULE_LABELS = {
 /* =============================================
    PAGE RENDERER  (map new IDs to existing components)
    ============================================= */
-function PageContent({ module, onNavigate, inventaireArticleCode, onInventaireArticleCodeConsumed }) {
+function PageContent({
+  module,
+  onNavigate,
+  inventaireArticleCode,
+  onInventaireArticleCodeConsumed,
+  sousTraitantId,
+  sousTraitantTab,
+}) {
   switch (module) {
     case 'dashboard':           return <Dashboard onNavigate={onNavigate} />;
     /* Organisation interne */
@@ -278,7 +286,12 @@ function PageContent({ module, onNavigate, inventaireArticleCode, onInventaireAr
     case 'presence':            return <Presence />;
     case 'heures-sup':          return <HeuresSupp />;
     case 'paiement-hebdo':      return <PaiementHebdo />;
-    case 'situation-sous-traitants': return <SituationSousTraitants />;
+    case 'situation-sous-traitants': return (
+      <SituationSousTraitants
+        initialCompteId={sousTraitantId}
+        initialTab={sousTraitantTab}
+      />
+    );
     case 'sous-traitants':      return <SousTraitants />;
     case 'annuaire-corps-metier': return <CorpsMetierPage />;
     /* Commercial / Marketing */
@@ -562,9 +575,11 @@ export default function App() {
   const { user, loading, logout, refreshUser } = useAuth();
   const [module, setModule] = useState(() => {
     if (parseInventaireArticlePath()) return 'articles-stock';
+    if (parseSousTraitantPath()) return 'situation-sous-traitants';
     return parseModuleFromSearch() || 'dashboard';
   });
   const [inventaireArticleCode, setInventaireArticleCode] = useState(() => parseInventaireArticlePath());
+  const [sousTraitantRoute, setSousTraitantRoute] = useState(() => parseSousTraitantPath());
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
@@ -591,11 +606,18 @@ export default function App() {
   useEffect(() => {
     function onPopState() {
       const code = parseInventaireArticlePath();
+      const st = parseSousTraitantPath();
       if (code) {
         setModule('articles-stock');
         setInventaireArticleCode(code);
+        setSousTraitantRoute(null);
+      } else if (st) {
+        setModule('situation-sous-traitants');
+        setSousTraitantRoute(st);
+        setInventaireArticleCode(null);
       } else {
         setInventaireArticleCode(null);
+        setSousTraitantRoute(null);
       }
     }
     window.addEventListener('popstate', onPopState);
@@ -678,6 +700,8 @@ export default function App() {
             onNavigate={setModule}
             inventaireArticleCode={inventaireArticleCode}
             onInventaireArticleCodeConsumed={() => setInventaireArticleCode(null)}
+            sousTraitantId={sousTraitantRoute?.id || null}
+            sousTraitantTab={sousTraitantRoute?.tab || 'finance'}
           />
         </main>
       </div>
