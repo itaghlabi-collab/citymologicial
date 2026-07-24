@@ -9,6 +9,7 @@ const {
 } = require('./googleDriveConfig');
 const {
   getDrive,
+  getDriveAsync,
   getAuthMode,
   getSharedDriveApiFlags,
   isOAuthMode,
@@ -82,6 +83,12 @@ function formatDriveApiError(err, context = {}) {
   const raw = String(err?.message || err || 'erreur inconnue');
   const mode = context.authMode || getAuthMode();
 
+  const { classifyDriveError } = require('./googleDriveErrors');
+  const classified = classifyDriveError(err);
+  if (classified.reconnectRequired) {
+    return `${classified.userMessage} (${classified.detailSafe})`;
+  }
+
   if (isServiceAccountQuotaError(raw)) {
     if (mode === AUTH_MODES.SERVICE_ACCOUNT) {
       const email = getServiceAccountEmail() || 'le compte de service';
@@ -99,8 +106,7 @@ function formatDriveApiError(err, context = {}) {
       return (
         `Dossier Drive inaccessible (ID ${context.rootFolderId}). `
         + 'Cause fréquente : refresh token OAuth avec scope drive.file au lieu de drive. '
-        + 'Régénérez le token avec https://www.googleapis.com/auth/drive dans OAuth Playground, '
-        + 'ou laissez l\'app créer le dossier automatiquement. '
+        + 'Régénérez le token via Reconnecter Google Drive. '
         + `Détail : ${raw}`
       );
     }
@@ -117,7 +123,9 @@ async function loadDriveContext() {
   const authMode = getAuthMode();
   const configuredFolderId = getDriveRootFolderId();
   const configuredDriveId = process.env.GOOGLE_DRIVE_SHARED_DRIVE_ID?.trim() || null;
-  const drive = getDrive();
+  const { getDriveAsync, warmOAuthTokenCache } = require('./googleDriveAuth');
+  await warmOAuthTokenCache();
+  const drive = await getDriveAsync();
   const apiFlags = getSharedDriveApiFlags();
 
   let data;
@@ -232,7 +240,7 @@ async function probeDriveWriteAccess() {
     ? await assertSharedDriveRequired()
     : await loadDriveContext();
 
-  const drive = getDrive();
+  const drive = await getDriveAsync();
   const apiFlags = getSharedDriveApiFlags();
   const probeName = `.citymo-probe-${Date.now()}.txt`;
   const body = Buffer.from('citymo-drive-probe-ok', 'utf8');

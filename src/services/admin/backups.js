@@ -10,16 +10,20 @@ const BACKUP_TIMEOUT_MS = 300000;
 
 const STATUT_DB = {
   succes: 'Succès',
+  succes_partiel: 'Succès partiel',
   en_cours: 'En cours',
   erreur: 'Erreur',
   planifie: 'Planifié',
+  reconnexion_requise: 'Reconnexion requise',
 };
 
 const STATUT_UI = {
   Succès: 'succes',
+  'Succès partiel': 'succes_partiel',
   'En cours': 'en_cours',
   Erreur: 'erreur',
   Planifié: 'planifie',
+  'Reconnexion requise': 'reconnexion_requise',
 };
 
 const TYPE_UI = {
@@ -41,6 +45,12 @@ function formatTaille(bytes) {
 }
 
 function mapBackup(row) {
+  const userMsg = row.user_message || '';
+  const techMsg = row.error_message || row.drive_sync_error || '';
+  const listMessage = userMsg
+    || (techMsg && /invalid_grant/i.test(techMsg)
+      ? 'Google Drive déconnecté — reconnexion nécessaire'
+      : '');
   return {
     id: row.id,
     ref: row.ref,
@@ -56,12 +66,16 @@ function mapBackup(row) {
     statut: STATUT_DB[row.statut] || 'En cours',
     cree_par: row.cree_par_nom || '—',
     description: row.description || '',
-    error_message: row.error_message || '',
+    error_message: listMessage || (techMsg.length > 100 ? `${techMsg.slice(0, 97)}…` : techMsg),
+    error_message_detail: techMsg,
+    user_message: userMsg,
+    error_code: row.error_code || '',
     file_path: row.file_path || null,
     storage_provider: row.storage_provider || 'supabase_storage',
     drive_synced: Boolean(row.drive_synced),
     drive_folder_id: row.drive_folder_id || null,
     drive_sync_error: row.drive_sync_error || '',
+    steps_json: row.steps_json || null,
     created_at: row.created_at,
   };
 }
@@ -248,6 +262,31 @@ export async function restoreBackup(id, confirmation) {
 
 export async function deleteBackup(id) {
   await backupApiFetch(`/backups/${id}`, { method: 'DELETE' });
+}
+
+export async function getDriveStatus() {
+  return backupApiFetch('/backups/status/drive');
+}
+
+/** Tableau de bord santé sauvegardes (Supabase, Drive, scheduler, dernière / prochaine). */
+export async function getBackupHealth() {
+  return backupApiFetch('/backups/status/health');
+}
+
+export async function testDriveConnection() {
+  return backupApiFetch('/backups/drive/test', { method: 'POST', body: '{}' });
+}
+
+export async function startDriveReconnect() {
+  return backupApiFetch('/backups/drive/oauth/start');
+}
+
+export async function disconnectDrive() {
+  return backupApiFetch('/backups/drive/disconnect', { method: 'POST', body: '{}' });
+}
+
+export async function cleanupFailedBackups() {
+  return backupApiFetch('/backups/cleanup-failed', { method: 'POST', body: '{}' });
 }
 
 /** @deprecated Utiliser runBackup */

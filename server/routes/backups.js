@@ -12,15 +12,54 @@ const {
 const { restoreBackup } = require('../services/backup/restoreService');
 const { isGoogleDriveEnabled } = require('../services/backup/googleDriveConfig');
 const { getBackupEnvironmentStatus } = require('../services/backup/backupEnvCheck');
+const { getDriveStatePublic } = require('../services/backup/googleDriveAuthState');
+const { testGoogleDriveConnection } = require('../services/backup/googleDriveAccess');
+const {
+  buildOAuthConsentUrl,
+  handleOAuthCallback,
+  disconnectDrive,
+  getRedirectUri,
+} = require('../services/backup/googleDriveOAuth');
+const { cleanupFailedBackupAttempts } = require('../services/backup/backupCleanup');
+const { scheduleHour, scheduleMinute } = require('../services/backup/backupSchedule');
+const { getBackupHealthDashboard } = require('../services/backup/backupHealth');
 
 const router = express.Router();
 
+/** Callback OAuth Google — sans auth session (redirect navigateur Google). */
+router.get('/drive/oauth/callback', async (req, res) => {
+  const frontend = (process.env.APP_PUBLIC_URL || process.env.VITE_APP_URL || 'https://citymologicial.vercel.app')
+    .replace(/\/$/, '');
+  try {
+    const code = req.query.code;
+    if (!code) {
+      return res.redirect(`${frontend}/?backup_drive=error&reason=missing_code`);
+    }
+    await handleOAuthCallback(code);
+    return res.redirect(`${frontend}/?backup_drive=connected`);
+  } catch (err) {
+    const reason = encodeURIComponent(String(err.message || 'oauth_failed').slice(0, 120));
+    return res.redirect(`${frontend}/?backup_drive=error&reason=${reason}`);
+  }
+});
+
 router.use(requireSupabaseSuperAdmin);
+
+/** GET /api/backups/status/health — tableau de bord santé (sans secrets) */
+router.get('/status/health', async (_req, res, next) => {
+  try {
+    const health = await getBackupHealthDashboard();
+    res.json(health);
+  } catch (err) {
+    next(err);
+  }
+});
 
 /** GET /api/backups/status/config — état complet (sans secrets) */
 router.get('/status/config', async (_req, res, next) => {
   try {
     const status = getBackupEnvironmentStatus();
+    const driveState = await getDriveStatePublic();
     let supabase_ok = false;
     try {
       const { testSupabaseConnection } = require('../services/backup/backupEnvCheck');
@@ -29,25 +68,85 @@ router.get('/status/config', async (_req, res, next) => {
     } catch (err) {
       status.supabase.connection_error = err.message;
     }
-    res.json({ ...status, supabase: { ...status.supabase, connection_ok: supabase_ok } });
+    res.json({
+      ...status,
+      supabase: { ...status.supabase, connection_ok: supabase_ok },
+      drive_runtime: driveState,
+      schedule: {
+        poll_cron: '15 * * * *',
+        run_hour: scheduleHour(),
+        run_minute: scheduleMinute(),
+        timezone: 'Africa/Algiers',
+        max_network_retries: Number(process.env.BACKUP_SCHEDULE_MAX_RETRIES) || 3,
+      },
+    });
   } catch (err) {
     next(err);
   }
 });
 
-/** GET /api/backups/status/drive — état config Google Drive */
-router.get('/status/drive', (_req, res) => {
-  const status = getBackupEnvironmentStatus();
-  res.json({
-    enabled: isGoogleDriveEnabled(),
-    project_id: 'citymo-erp-sauvegardes',
-    folder_configured: status.google_drive.folder_id_configured,
-    folder_id: status.google_drive.folder_id,
-    service_account_configured: status.google_drive.json_configured,
-    json_valid: status.google_drive.json_valid,
-    service_account_email: status.google_drive.service_account_email,
-    active: status.google_drive.active,
-  });
+/** GET /api/backups/status/drive — état Google Drive (sans secrets) */
+router.get('/status/drive', async (_req, res, next) => {
+  try {
+    const status = getBackupEnvironmentStatus();
+    const driveState = await getDriveStatePublic();
+    res.json({
+      enabled: isGoogleDriveEnabled(),
+      project_id: 'citymo-erp-sauvegardes',
+      folder_configured: status.google_drive.folder_id_configured,
+      folder_id: status.google_drive.folder_id,
+      service_account_configured: status.google_drive.json_configured,
+      json_valid: status.google_drive.json_valid,
+      service_account_email: status.google_drive.service_account_email,
+      active: status.google_drive.active,
+      ...driveState,
+      oauth_redirect_configured: Boolean(getRedirectUri()),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** POST /api/backups/drive/test — test connexion (pas de sauvegarde) */
+router.post('/drive/test', async (_req, res, next) => {
+  try {
+    const result = await testGoogleDriveConnection();
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** GET /api/backups/drive/oauth/start — URL consentement Google */
+router.get('/drive/oauth/start', (req, res, next) => {
+  try {
+    const url = buildOAuthConsentUrl(req.query.state || 'citymo-backup-drive');
+    res.json({ url, redirect_uri_configured: Boolean(getRedirectUri()) });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** GET /api/backups/drive/oauth/callback — déplacé avant auth */
+
+/** POST /api/backups/drive/disconnect */
+router.post('/drive/disconnect', async (_req, res, next) => {
+  try {
+    const state = await disconnectDrive();
+    res.json({ ok: true, ...state });
+  } catch (err) {
+    next(err);
+  }
+});
+
+/** POST /api/backups/cleanup-failed — supprimer tentatives erreur sans fichier */
+router.post('/cleanup-failed', async (req, res, next) => {
+  try {
+    const result = await cleanupFailedBackupAttempts(req.user);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
 });
 
 /** GET /api/backups/:id/drive — lien dossier Google Drive */
@@ -83,7 +182,7 @@ router.post('/', async (req, res, next) => {
       return res.status(201).json({
         scheduled: true,
         schedule,
-        message: `Sauvegarde ${type || 'Complète'} planifiée (${plan}).`,
+        message: `Sauvegarde ${type || 'Complète'} planifiée (${plan}) — une exécution / période à ${scheduleHour()}:${String(scheduleMinute()).padStart(2, '0')} (Africa/Algiers).`,
       });
     }
 

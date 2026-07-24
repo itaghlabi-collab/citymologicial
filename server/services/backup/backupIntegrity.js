@@ -135,7 +135,7 @@ async function assertBackupIntegrity(ctx) {
         issues.push(`[${DOMAINS.DRIVE}] Inventaire Drive échoué — ${err.message}`);
       }
     }
-  } else if (driveEnabled && typeKey === 'complete') {
+  } else if (driveEnabled && typeKey === 'complete' && !ctx.driveSkipped) {
     issues.push(`[${DOMAINS.DRIVE}] Google Drive activé mais non validé — copie Drive obligatoire pour une sauvegarde complète`);
   }
 

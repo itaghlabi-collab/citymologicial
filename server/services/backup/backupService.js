@@ -23,6 +23,14 @@ const { isDriveRequired } = require('./googleDriveConfig');
 const { logBackupAction } = require('./auditLog');
 const logger = require('./backupLogger');
 const { testSupabaseConnection } = require('./backupEnvCheck');
+const { classifyDriveError } = require('./googleDriveErrors');
+const { sanitizeErrorForUser } = require('./backupUserMessages');
+const {
+  isDriveReconnectRequired,
+  markDriveReconnectRequired,
+} = require('./googleDriveAuthState');
+const { notifyDriveReconnectRequired, notifyBackupPartialOrFail } = require('./backupNotify');
+const { computeNextRun, algiersDateKey } = require('./backupSchedule');
 const {
   withTimeout,
   JOB_TIMEOUT_MS,
@@ -54,7 +62,7 @@ function timestamp() {
   return new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
 }
 
-async function createBackupRow({ type, planification, description, actor, scheduleType }) {
+async function createBackupRow({ type, planification, description, actor, scheduleType, schedulePeriodKey }) {
   const sb = getSupabaseAdmin();
   const ref = genBackupRef();
   const typeKey = TYPE_MAP[type] || type || 'complete';
@@ -74,6 +82,7 @@ async function createBackupRow({ type, planification, description, actor, schedu
       : (process.env.BACKUP_STORAGE_PROVIDER || 'supabase_storage'),
     cree_par: actor?.id || null,
     cree_par_nom: actor?.nom || actor?.email || 'Super Admin',
+    schedule_period_key: schedulePeriodKey || null,
   });
 
   const { data, error } = await sb
@@ -105,11 +114,19 @@ async function compressJson(payload) {
   return gzip(Buffer.from(json, 'utf8'));
 }
 
-async function executeBackupJob(row, { typeKey, planification, description, actor }) {
+async function executeBackupJob(row, { typeKey, planification, description, actor, schedulePeriodKey }) {
   const storage = getBackupStorageProvider();
   const backupPrefix = row.ref;
   const pipeline = createPipeline(row.ref, (msg) => updateBackupProgress(row.id, msg));
   let driveUploadAllowed = false;
+  const steps = {
+    archive: false,
+    database: false,
+    files: false,
+    storage: false,
+    drive: false,
+    integrity: false,
+  };
 
   logger.backupStart(backupPrefix, typeKey, actor);
 
@@ -117,7 +134,7 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
     backupId: row.id,
     action: 'create',
     actor,
-    details: { type: typeKey, planification, ref: row.ref },
+    details: { type: typeKey, planification, ref: row.ref, schedulePeriodKey },
   });
 
   let manifest = null;
@@ -129,17 +146,38 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
     await pipeline.run('testSupabaseConnection', () => testSupabaseConnection());
 
     let driveValidationError = null;
-    try {
-      const driveCheck = await pipeline.run(
-        'googleDrive.validate',
-        () => validateGoogleDriveForBackup(),
-      );
-      driveUploadAllowed = Boolean(driveCheck.uploadAllowed);
-    } catch (err) {
-      if (isDriveRequired()) throw err;
-      driveValidationError = err.message?.replace(/^\[Google Drive\]\s*/, '') || String(err.message || err);
+    const reconnectPending = await isDriveReconnectRequired();
+
+    if (reconnectPending) {
       driveUploadAllowed = false;
-      console.warn('[backup] Google Drive ignoré (BACKUP_GOOGLE_DRIVE_REQUIRED=false):', driveValidationError);
+      driveValidationError = 'Google Drive déconnecté — reconnexion nécessaire';
+      console.warn('[backup] Drive sauté (reconnexion requise)');
+    } else {
+      try {
+        const driveCheck = await pipeline.run(
+          'googleDrive.validate',
+          () => validateGoogleDriveForBackup(),
+        );
+        driveUploadAllowed = Boolean(driveCheck.uploadAllowed);
+      } catch (err) {
+        const classified = classifyDriveError(err);
+        if (classified.reconnectRequired) {
+          const marked = await markDriveReconnectRequired(err);
+          if (!marked.alreadyNotified) {
+            await notifyDriveReconnectRequired({ classified, backupRef: row.ref });
+          }
+          driveValidationError = classified.userMessage;
+          driveUploadAllowed = false;
+          // Continuer la sauvegarde Storage même si Drive était « required »
+          console.warn('[backup] invalid_grant — poursuite Storage sans Drive');
+        } else if (isDriveRequired()) {
+          throw err;
+        } else {
+          driveValidationError = err.message?.replace(/^\[Google Drive\]\s*/, '') || String(err.message || err);
+          driveUploadAllowed = false;
+          console.warn('[backup] Google Drive ignoré:', driveValidationError);
+        }
+      }
     }
 
     if (driveUploadAllowed) {
@@ -188,6 +226,9 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
       else if (driveUploadAllowed) driveUploadedPaths.push(mainFilePath);
       await verifyBackupArtifact(mainFilePath, pipeline);
       totalSize += compressed.length;
+      steps.database = true;
+      steps.archive = true;
+      steps.storage = true;
       await pipeline.run('updateBackupProgress:db-done', async () => {
         await updateBackupProgress(row.id, 'Base de données exportée — inventaire fichiers…');
       });
@@ -248,6 +289,8 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
       else if (driveUploadAllowed) driveUploadedPaths.push(manifestPath);
       await verifyBackupArtifact(manifestPath, pipeline);
       totalSize += manifestBuf.length;
+      steps.files = true;
+      steps.storage = true;
       if (typeKey === 'documents') mainFilePath = manifestPath;
     }
 
@@ -310,6 +353,7 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
         pipeline,
         storageFileCount,
         totalSize,
+        driveSkipped: Boolean(driveValidationError) && !driveUploadAllowed,
       }),
       { timeoutMs: 30 * 60_000, progressMsg: 'Contrôle intégrité final…' },
     );
@@ -327,18 +371,63 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
         );
         driveFolderId = driveVerify.folderId;
         driveSynced = true;
+        steps.drive = true;
       } catch (err) {
-        driveSyncError = err.message;
-        if (isDriveRequired()) {
+        const classified = classifyDriveError(err);
+        driveSyncError = classified.reconnectRequired
+          ? classified.userMessage
+          : err.message;
+        if (classified.reconnectRequired) {
+          const marked = await markDriveReconnectRequired(err);
+          if (!marked.alreadyNotified) {
+            await notifyDriveReconnectRequired({ classified, backupRef: row.ref });
+          }
+        } else if (isDriveRequired()) {
           throw new Error(`[Google Drive] ${err.message}`);
         }
       }
+    }
+
+    // Drive required mais sync KO (ex. reconnexion) → succès partiel si Storage OK
+    if (isDriveRequired() && driveEnabled && !driveSynced && mainFilePath) {
+      steps.integrity = Boolean(integrityReport);
+      const userMsg = driveSyncError || driveValidationError
+        || 'Sauvegarde créée dans Storage, mais copie Google Drive impossible : reconnexion requise.';
+      const updated = await pipeline.run('finalizeBackupRow:succes_partiel', () => finalizeBackupRow(row.id, {
+        statut: 'succes_partiel',
+        file_path: mainFilePath,
+        taille_bytes: totalSize,
+        drive_synced: false,
+        drive_folder_id: driveFolderId,
+        drive_sync_error: driveSyncError || driveValidationError,
+        user_message: userMsg,
+        error_code: 'invalid_grant',
+        schedule_period_key: schedulePeriodKey || null,
+        steps_json: steps,
+        description: `Succès partiel — ${userMsg}`,
+        error_message: null,
+      }));
+      await notifyBackupPartialOrFail({
+        title: 'Sauvegarde partielle',
+        message: userMsg,
+        backupId: row.id,
+        dedupeKey: `partial-${algiersDateKey()}`,
+      });
+      logger.backupDone(backupPrefix, {
+        type: typeKey,
+        bytes: totalSize,
+        drive_synced: false,
+        partial: true,
+      });
+      return updated;
     }
 
     if (isDriveRequired() && driveEnabled && !driveSynced) {
       throw new Error(`[Google Drive] ${driveSyncError || 'Dossier Drive vide — archives absentes'}`);
     }
 
+    steps.integrity = true;
+    steps.drive = driveSynced;
     const updated = await pipeline.run('finalizeBackupRow:succes', () => finalizeBackupRow(row.id, {
       statut: 'succes',
       file_path: mainFilePath,
@@ -346,6 +435,10 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
       drive_synced: driveSynced,
       drive_folder_id: driveFolderId,
       drive_sync_error: driveSyncError || driveValidationError,
+      user_message: null,
+      error_code: null,
+      schedule_period_key: schedulePeriodKey || null,
+      steps_json: steps,
       description: driveSynced
         ? `Intégrité OK — ${integrityReport.tables_exported} tables, ${integrityReport.files_copied} fichiers copiés, Drive sync OK`
         : driveValidationError
@@ -370,19 +463,35 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
       : formatFailMessage(err, pipeline.lastLocation);
     logger.backupError(backupPrefix, err);
 
-    const driveOnlyFailure = !isDriveRequired()
-      && (failMsg.includes('[Google Drive]') || failMsg.includes('DRIVE]'));
+    const classified = classifyDriveError(err);
+    const sanitized = sanitizeErrorForUser(err);
+
+    if (classified.reconnectRequired) {
+      const marked = await markDriveReconnectRequired(err);
+      if (!marked.alreadyNotified) {
+        await notifyDriveReconnectRequired({ classified, backupRef: row.ref });
+      }
+    }
+
+    const driveOnlyFailure = mainFilePath && (
+      classified.reconnectRequired
+      || (!isDriveRequired() && (failMsg.includes('[Google Drive]') || failMsg.includes('DRIVE]')))
+    );
 
     if (driveOnlyFailure) {
+      const userMsg = sanitized.userMessage;
       await safeFinalizeBackupRow(row.id, {
-        statut: 'succes',
+        statut: 'succes_partiel',
         file_path: mainFilePath || null,
         taille_bytes: totalSize || null,
         error_message: null,
+        user_message: userMsg,
+        error_code: sanitized.code,
         drive_synced: false,
-        drive_sync_error: failMsg.replace(/^\[Google Drive\]\s*/, ''),
+        drive_sync_error: userMsg,
         drive_folder_id: getCachedBackupFolderId(backupPrefix),
-        description: `Succès partiel — Supabase OK, Drive en échec`,
+        schedule_period_key: schedulePeriodKey || null,
+        description: `Succès partiel — ${userMsg}`,
       }, failMsg);
       return null;
     }
@@ -392,15 +501,18 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
       : null;
     await safeFinalizeBackupRow(row.id, {
       statut: 'erreur',
-      error_message: failMsg,
+      error_message: sanitized.technical || failMsg,
+      user_message: sanitized.userMessage,
+      error_code: sanitized.code,
       drive_synced: false,
       drive_sync_error: driveOnlyMsg || (err?.domain === DOMAINS.DRIVE ? failMsg : null),
+      schedule_period_key: schedulePeriodKey || null,
     }, failMsg);
     await logBackupAction({
       backupId: row.id,
       action: 'error',
       actor,
-      details: { message: failMsg, step: pipeline.lastStep, location: pipeline.lastLocation },
+      details: { message: sanitized.userMessage, code: sanitized.code, step: pipeline.lastStep },
     });
     throw err;
   } finally {
@@ -409,12 +521,12 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
 }
 
 /** Lance la sauvegarde en arrière-plan (réponse HTTP immédiate — évite timeout Vercel/Railway proxy). */
-async function startBackupAsync({ type, planification, description, actor }) {
+async function startBackupAsync({ type, planification, description, actor, schedulePeriodKey }) {
   await assertNoConcurrentBackup();
 
   const typeKey = 'complete';
-  const row = await createBackupRow({ type: typeKey, planification, description, actor });
-  const jobParams = { typeKey, planification, description, actor };
+  const row = await createBackupRow({ type: typeKey, planification, description, actor, schedulePeriodKey });
+  const jobParams = { typeKey, planification, description, actor, schedulePeriodKey };
 
   markJobStarted(row.ref);
   setImmediate(() => {
@@ -429,9 +541,12 @@ async function startBackupAsync({ type, planification, description, actor }) {
           const sb = getSupabaseAdmin();
           const { data } = await sb.from('erp_backups').select('statut').eq('id', row.id).maybeSingle();
           if (data?.statut === 'en_cours') {
+            const sanitized = sanitizeErrorForUser(err);
             await safeFinalizeBackupRow(row.id, {
               statut: 'erreur',
-              error_message: formatFailMessage(err, 'async'),
+              error_message: sanitized.technical || formatFailMessage(err, 'async'),
+              user_message: sanitized.userMessage,
+              error_code: sanitized.code,
               drive_synced: false,
             }, err.message);
           }
@@ -447,10 +562,16 @@ async function startBackupAsync({ type, planification, description, actor }) {
   return row;
 }
 
-async function runBackup({ type, planification, description, actor }) {
+async function runBackup({ type, planification, description, actor, schedulePeriodKey }) {
   const typeKey = 'complete';
-  const row = await createBackupRow({ type: typeKey, planification, description, actor });
-  return executeBackupJob(row, { typeKey, planification, description, actor });
+  const row = await createBackupRow({
+    type: typeKey,
+    planification,
+    description,
+    actor,
+    schedulePeriodKey,
+  });
+  return executeBackupJob(row, { typeKey, planification, description, actor, schedulePeriodKey });
 }
 
 async function registerSchedule({ type, planification, notes, actor }) {
@@ -460,6 +581,30 @@ async function registerSchedule({ type, planification, notes, actor }) {
 
   if (!['quotidienne', 'hebdomadaire', 'mensuelle'].includes(planKey)) {
     throw new Error('Planification invalide.');
+  }
+
+  // Une seule planification active par type (évite doublons horaires)
+  const { data: existing } = await sb
+    .from('erp_backup_schedules')
+    .select('id')
+    .eq('planification', planKey)
+    .eq('enabled', true)
+    .limit(1);
+
+  if (existing?.length) {
+    const nextRun = computeNextRun(planKey);
+    const { data, error } = await sb
+      .from('erp_backup_schedules')
+      .update({
+        notes: notes?.trim() || null,
+        next_run_at: nextRun.toISOString(),
+        backup_type: typeKey,
+      })
+      .eq('id', existing[0].id)
+      .select('*')
+      .single();
+    if (error) throw new Error(`Planification sauvegarde : ${error.message}`);
+    return data;
   }
 
   const nextRun = computeNextRun(planKey);
@@ -487,26 +632,6 @@ async function registerSchedule({ type, planification, notes, actor }) {
   return data;
 }
 
-function computeNextRun(planification) {
-  const now = new Date();
-  const next = new Date(now);
-  next.setHours(2, 0, 0, 0);
-
-  if (planification === 'quotidienne') {
-    if (next <= now) next.setDate(next.getDate() + 1);
-  } else if (planification === 'hebdomadaire') {
-    const day = next.getDay();
-    const daysUntilSunday = (7 - day) % 7 || 7;
-    next.setDate(next.getDate() + daysUntilSunday);
-    if (next <= now) next.setDate(next.getDate() + 7);
-  } else if (planification === 'mensuelle') {
-    next.setDate(1);
-    if (next <= now) next.setMonth(next.getMonth() + 1);
-  }
-
-  return next;
-}
-
 async function getBackupById(id) {
   const sb = getSupabaseAdmin();
   const { data, error } = await sb.from('erp_backups').select('*').eq('id', id).single();
@@ -516,7 +641,8 @@ async function getBackupById(id) {
 
 async function getDownloadUrl(backupId, actor) {
   const backup = await getBackupById(backupId);
-  if (backup.statut !== 'succes' || !backup.file_path) {
+  const okStatuts = ['succes', 'succes_partiel'];
+  if (!okStatuts.includes(backup.statut) || !backup.file_path) {
     throw new Error('Sauvegarde non disponible au téléchargement.');
   }
 

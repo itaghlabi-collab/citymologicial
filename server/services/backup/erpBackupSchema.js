@@ -9,6 +9,10 @@ const OPTIONAL_COLUMNS = [
   'drive_synced',
   'drive_folder_id',
   'drive_sync_error',
+  'user_message',
+  'error_code',
+  'schedule_period_key',
+  'steps_json',
 ];
 
 let schemaCache = null;
@@ -61,6 +65,11 @@ function buildFinalizePayload(fields, schema) {
     drive_synced,
     drive_folder_id,
     drive_sync_error,
+    user_message,
+    error_code,
+    schedule_period_key,
+    description,
+    steps_json,
   } = fields;
 
   let errMsg = error_message ?? null;
@@ -84,11 +93,18 @@ function buildFinalizePayload(fields, schema) {
     error_message: errMsg,
   };
 
+  if (description !== undefined) payload.description = description;
   if (schema.drive_synced && drive_synced !== undefined) payload.drive_synced = drive_synced;
   if (schema.drive_folder_id && drive_folder_id !== undefined) payload.drive_folder_id = drive_folder_id;
   if (schema.drive_sync_error && drive_sync_error !== undefined) {
     payload.drive_sync_error = drive_sync_error;
   }
+  if (schema.user_message && user_message !== undefined) payload.user_message = user_message;
+  if (schema.error_code && error_code !== undefined) payload.error_code = error_code;
+  if (schema.schedule_period_key && schedule_period_key !== undefined) {
+    payload.schedule_period_key = schedule_period_key;
+  }
+  if (schema.steps_json && steps_json !== undefined) payload.steps_json = steps_json;
 
   return {
     payload,
@@ -121,6 +137,10 @@ async function buildInsertPayload(base) {
   if (schema.progress_at) {
     payload.progress_at = new Date().toISOString();
   }
+  if (!schema.schedule_period_key) delete payload.schedule_period_key;
+  if (!schema.user_message) delete payload.user_message;
+  if (!schema.error_code) delete payload.error_code;
+  if (!schema.steps_json) delete payload.steps_json;
   return payload;
 }
 

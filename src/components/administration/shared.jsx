@@ -17,7 +17,7 @@ export const DEPARTEMENTS  = ['Direction', 'RH', 'Commercial', 'Finance', 'Techn
 export const MODULES_ERP   = ERP_RUBRIQUES.map((m) => m.label);
 export const ACTIONS_PERMS = ERP_ACTIONS.map((a) => a.label);
 export const TYPES_BACKUP  = ['Complète', 'Base données', 'Documents', 'Système', 'Manuelle', 'Automatique'];
-export const STATUTS_BACKUP = ['Succès', 'En cours', 'Erreur', 'Planifié'];
+export const STATUTS_BACKUP = ['Succès', 'Succès partiel', 'En cours', 'Erreur', 'Planifié'];
 
 export const BADGE_STATUT_USER = {
   'Actif':       'badge-green',
@@ -27,9 +27,11 @@ export const BADGE_STATUT_USER = {
 };
 export const BADGE_BACKUP = {
   'Succès':   'badge-green',
+  'Succès partiel': 'badge-orange',
   'En cours': 'badge-orange',
   'Erreur':   'badge-red',
   'Planifié': 'badge-blue',
+  'Reconnexion requise': 'badge-orange',
 };
 export const BADGE_TYPE_BACKUP = {
   'Complète':      'badge-purple',

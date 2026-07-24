@@ -26,6 +26,9 @@ function resetDriveClient() {
 }
 
 async function assertRootFolderAccessible() {
+  const { warmOAuthTokenCache, getDriveAsync } = require('./googleDriveAuth');
+  await warmOAuthTokenCache();
+  await getDriveAsync();
   if (rootFolderVerified) return;
 
   try {
