@@ -1,6 +1,6 @@
 /**
  * Projets.jsx — Routeur principal du module Projets ERP CITYMO
- * Expose : Projets / Demande d'engin de location / SAV / Comptes rendus SAV
+ * Expose : Projets / Location d'engins / SAV / Comptes rendus SAV
  */
 
 import { useState, useEffect } from 'react';

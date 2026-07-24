@@ -376,7 +376,7 @@ export default function DemandesEnginsLocation() {
       <div className="page-header flex-between" style={{ marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
         <div>
           <h1 className="page-title" style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-            <Truck size={22} /> Demande d’engin de location
+            <Truck size={22} /> Location d’engins
           </h1>
           <p className="page-subtitle" style={{ margin: 0 }}>
             Demander un engin pour un chantier — suivi simple (magasin, achats, direction)
