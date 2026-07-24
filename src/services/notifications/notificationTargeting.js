@@ -27,6 +27,7 @@ export const NOTIFICATION_SUBMODULES = {
   RENDEZ_VOUS: 'rendez-vous',
   DEMANDES_RESSOURCES: 'demandes-ressources',
   DEMANDES_CHANTIER: 'demandes-chantier',
+  DEMANDES_ENGINS: 'demandes-engins',
   PAIEMENT_HEBDO: 'paiement-hebdo',
 };
 

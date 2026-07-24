@@ -23,6 +23,7 @@ export const NOTIFICATION_TYPES = {
   PURCHASE_REQUEST: 'purchase_request',
   RESOURCE_REQUEST: 'resource_request',
   SITE_MATERIAL_REQUEST: 'site_material_request',
+  EQUIPMENT_RENTAL_REQUEST: 'equipment_rental_request',
   DOCUMENT: 'document',
   SYSTEM: 'system',
 };

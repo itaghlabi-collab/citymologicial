@@ -1,26 +1,25 @@
 /**
  * Projets.jsx — Routeur principal du module Projets ERP CITYMO
- * Expose 3 sous-modules : Projets / SAV / Comptes rendus SAV
+ * Expose : Projets / Demande d'engin de location / SAV / Comptes rendus SAV
  */
 
 import { useState, useEffect } from 'react';
 import ProjetsList from './projets/ProjetsList';
 import SAVModule from './projets/SAVModule';
 import ComptesRendusSAV from './projets/ComptesRendusSAV';
+import DemandesEnginsLocation from './projets/DemandesEnginsLocation';
 
 /**
  * Ce composant reçoit la prop `activeTab` transmise par App.jsx
- * selon l'ID de navigation actif : 'projets' | 'sav-projets' | 'cr-sav'
+ * selon l'ID de navigation actif : 'projets' | 'demandes-engins' | 'sav-projets' | 'cr-sav'
  */
 export default function Projets({ activeTab }) {
   const resolvedTab = activeTab || 'projets';
 
-  // Navigation interne (ex. bouton SAV depuis un projet) — ne doit pas bloquer la sidebar
   const [internalTab, setInternalTab] = useState(null);
   const [prefillSAVProjet, setPrefillSAVProjet] = useState(null);
   const [prefillCRSAV, setPrefillCRSAV] = useState(null);
 
-  // Sidebar = source de vérité : réinitialiser l'override interne au changement d'onglet
   useEffect(() => {
     setInternalTab(null);
     setPrefillSAVProjet(null);
@@ -43,6 +42,9 @@ export default function Projets({ activeTab }) {
     <div>
       {tab === 'projets' && (
         <ProjetsList key="projets-list" onCreateSAV={handleGoSAV} />
+      )}
+      {tab === 'demandes-engins' && (
+        <DemandesEnginsLocation key="demandes-engins" />
       )}
       {tab === 'sav-projets' && (
         <SAVModule

@@ -464,3 +464,53 @@ export async function notifySiteRequestPurchaseCreated(siteRequest, purchaseRequ
   }));
   return results.filter(Boolean);
 }
+
+/** Demande d'engin de location envoyée → magasin / achats / direction (via droits sous-rubrique). */
+export async function notifyEquipmentRentalSubmitted(request) {
+  if (!request?.id) return;
+  return notifyTargeted(
+    { submoduleCode: NOTIFICATION_SUBMODULES.DEMANDES_ENGINS },
+    {
+      title: "Nouvelle demande d'engin de location",
+      message: `${request.reference} — ${request.projetNom || 'Projet'} · ${request.typeEnginLabel} ×${request.quantite} (${request.niveauUrgence}).`,
+      type: NOTIFICATION_TYPES.EQUIPMENT_RENTAL_REQUEST,
+      priority: request.niveauUrgence === 'tres_urgent'
+        ? NOTIFICATION_PRIORITIES.URGENT
+        : request.niveauUrgence === 'urgent'
+          ? NOTIFICATION_PRIORITIES.HIGH
+          : NOTIFICATION_PRIORITIES.NORMAL,
+      entityType: 'equipment_rental_request',
+      entityId: request.id,
+      actionUrl: moduleActionUrl('demandes-engins'),
+      submoduleCode: NOTIFICATION_SUBMODULES.DEMANDES_ENGINS,
+    },
+  );
+}
+
+/** Changement de statut → demandeur + acteurs du sous-module. */
+export async function notifyEquipmentRentalStatusChange(request, previousStatut) {
+  if (!request?.id) return;
+  const title = `Demande engin — ${request.statutLabel}`;
+  const message = `${request.reference} : ${previousStatut || '?'} → ${request.statut}. ${request.projetNom || ''}`.trim();
+  const payload = {
+    title,
+    message,
+    type: NOTIFICATION_TYPES.EQUIPMENT_RENTAL_REQUEST,
+    priority: request.statut === 'refusee' || request.niveauUrgence === 'tres_urgent'
+      ? NOTIFICATION_PRIORITIES.HIGH
+      : NOTIFICATION_PRIORITIES.NORMAL,
+    entityType: 'equipment_rental_request',
+    entityId: request.id,
+    actionUrl: moduleActionUrl('demandes-engins'),
+    submoduleCode: NOTIFICATION_SUBMODULES.DEMANDES_ENGINS,
+  };
+  const results = [];
+  if (request.demandeurId) {
+    results.push(await notifyUser(request.demandeurId, payload));
+  }
+  results.push(await notifyTargeted(
+    { submoduleCode: NOTIFICATION_SUBMODULES.DEMANDES_ENGINS },
+    payload,
+  ));
+  return results.filter(Boolean);
+}

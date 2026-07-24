@@ -108,6 +108,7 @@ export const ERP_RUBRIQUES = Object.freeze([
     departmentIds: [5, 8],
     submodules: [
       { code: 'projets', label: 'Projets' },
+      { code: 'demandes-engins', label: "Demande d'engin de location" },
       { code: 'sav-projets', label: 'SAV' },
       { code: 'cr-sav', label: 'Comptes rendus SAV' },
     ],
