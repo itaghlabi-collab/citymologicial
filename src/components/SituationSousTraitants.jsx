@@ -150,11 +150,6 @@ export default function SituationSousTraitants({
             Compte courant — situation financière, travaux, documents, historique et performance
           </p>
         </div>
-        <div className="finance-page-actions">
-          <button type="button" className="btn btn-primary" onClick={() => setCalculForId('__new__')}>
-            Situation / Travaux
-          </button>
-        </div>
       </div>
 
       <PaiementSousTraitantsSection
