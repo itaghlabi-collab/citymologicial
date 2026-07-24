@@ -445,6 +445,20 @@ export async function updateAssignment(id, subcontractorId, form) {
   return normalizeAssignment(data);
 }
 
+/** Soft-archive une affectation (status = annulée) sans écraser les autres champs. */
+export async function archiveAssignment(assignmentId) {
+  await getAuthUserId();
+  if (!assignmentId) return null;
+  const { data, error } = await getSupabase()
+    .from(ASSIGN_TABLE)
+    .update({ status: 'annulée' })
+    .eq('id', assignmentId)
+    .select('*, projects ( id, nom, ref )')
+    .single();
+  if (error) throw error;
+  return normalizeAssignment(data);
+}
+
 export async function listServices(subcontractorId) {
   await getAuthUserId();
   const { data, error } = await getSupabase()

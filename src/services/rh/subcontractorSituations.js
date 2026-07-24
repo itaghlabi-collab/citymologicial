@@ -19,13 +19,20 @@ async function getAuthUserId() {
 }
 
 export const SITUATION_STATUS_LABEL = {
-  draft: 'Brouillon',
+  draft: 'En cours',
   in_progress: 'En cours',
-  partially_paid: 'Partiellement réglée',
-  settled: 'Soldée',
+  partially_paid: 'En cours',
+  settled: 'En cours',
   closed: 'Clôturée',
   cancelled: 'Annulée',
 };
+
+/** Libellé simple demandé UI : En cours / Clôturée / Annulée */
+export function situationStatusSimple(status) {
+  if (status === 'cancelled') return 'Annulée';
+  if (status === 'closed') return 'Clôturée';
+  return 'En cours';
+}
 
 export const SITUATION_UNITS = [
   'm²', 'ml', 'm³', 'kg', 'tonne', 'point', 'unité',
@@ -64,7 +71,7 @@ export function normalizeSituation(row) {
     amountPaid,
     remaining,
     status: row.status || 'in_progress',
-    statusLabel: SITUATION_STATUS_LABEL[row.status] || row.status || '—',
+    statusLabel: situationStatusSimple(row.status) || row.status || '—',
     situationDate: row.situation_date || '',
     closedAt: row.closed_at || null,
     notes: row.notes || '',
@@ -222,18 +229,15 @@ export async function deriveAndSetSituationStatus(id) {
   return patchSituationTotals(id, { status });
 }
 
-/** Clôture uniquement si soldée (reste ≈ 0). */
+/** Clôture d’une période de travaux (ne clôture pas le projet).
+ * Autorisée même si un reste existe — la suite passe sur une nouvelle situation.
+ */
 export async function closeSituation(id, subcontractorId) {
   const userId = await getAuthUserId();
   const sit = await getSituation(id);
   if (sit.status === 'closed') return sit;
   if (sit.status === 'cancelled') {
     const err = new Error('Situation annulée — clôture impossible.');
-    err.code = 'VALIDATION';
-    throw err;
-  }
-  if (sit.remaining > 0.009) {
-    const err = new Error('La situation doit être soldée avant clôture.');
     err.code = 'VALIDATION';
     throw err;
   }
@@ -256,6 +260,9 @@ export async function closeSituation(id, subcontractorId) {
     situationId: closed.id,
     amount: 0,
     reference: closed.reference,
+    observation: sit.remaining > 0.009
+      ? `Clôturée avec reste ${sit.remaining} MAD — suite sur nouvelle situation`
+      : null,
   });
   return closed;
 }
@@ -268,6 +275,51 @@ export async function cancelSituation(id, subcontractorId) {
     err.code = 'VALIDATION';
     throw err;
   }
+  if (sit.status === 'cancelled') return sit;
+
+  // Libérer l’avance imputée (analytique) avant annulation — pas d’écriture caisse
+  const { data: imps } = await getSupabase()
+    .from('subcontractor_advance_imputations')
+    .select('id, advance_id, amount')
+    .eq('situation_id', id);
+  const advanceIds = [...new Set((imps || []).map((i) => i.advance_id).filter(Boolean))];
+  for (const imp of imps || []) {
+    await getSupabase()
+      .from('subcontractor_advance_imputations')
+      .update({ amount: 0 })
+      .eq('id', imp.id);
+  }
+  if ((Number(sit.avancesImputees) || 0) > 0.009 || (imps || []).length) {
+    await getSupabase()
+      .from(TABLE)
+      .update({ avances_imputees: 0 })
+      .eq('id', id);
+  }
+  for (const advanceId of advanceIds) {
+    const { data: remImps } = await getSupabase()
+      .from('subcontractor_advance_imputations')
+      .select('amount')
+      .eq('advance_id', advanceId);
+    const consumed = round2((remImps || []).reduce((s, i) => s + (Number(i.amount) || 0), 0));
+    const { data: adv } = await getSupabase()
+      .from('subcontractor_global_advances')
+      .select('amount, cancelled_at')
+      .eq('id', advanceId)
+      .maybeSingle();
+    if (adv) {
+      const amount = Number(adv.amount) || 0;
+      let status = 'unused';
+      if (adv.cancelled_at) status = 'cancelled';
+      else if (consumed <= 0.009) status = 'unused';
+      else if (consumed + 0.009 >= amount) status = 'consumed';
+      else status = 'partial';
+      await getSupabase()
+        .from('subcontractor_global_advances')
+        .update({ consumed_amount: consumed, status })
+        .eq('id', advanceId);
+    }
+  }
+
   const { data, error } = await getSupabase()
     .from(TABLE)
     .update({ status: 'cancelled' })
@@ -282,6 +334,7 @@ export async function cancelSituation(id, subcontractorId) {
     projectId: cancelled.projectId || null,
     situationId: cancelled.id,
     reference: cancelled.reference,
+    observation: 'Ligne de travaux annulée — montants recalculés',
   });
   return cancelled;
 }

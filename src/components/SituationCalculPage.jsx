@@ -50,6 +50,7 @@ const emptyForm = {
  */
 export default function SituationCalculPage({
   initialSubcontractorId = '',
+  initialProjectId = '',
   onBack,
   onNotify,
   onSaved,
@@ -57,7 +58,10 @@ export default function SituationCalculPage({
   const [form, setForm] = useState({
     ...emptyForm,
     subcontractorId: initialSubcontractorId || '',
-    lines: [emptyLine()],
+    lines: [{
+      ...emptyLine(),
+      projectId: initialProjectId ? String(initialProjectId) : '',
+    }],
   });
   const [subs, setSubs] = useState([]);
   const [projects, setProjects] = useState([]);
@@ -104,9 +108,26 @@ export default function SituationCalculPage({
   useEffect(() => {
     if (!form.subcontractorId) { setAssignments([]); return; }
     listAssignments(form.subcontractorId)
-      .then(setAssignments)
+      .then((list) => {
+        setAssignments(list || []);
+        if (initialProjectId) {
+          const a = (list || []).find(
+            (x) => String(x.projectId) === String(initialProjectId) && (x.status || 'active') !== 'annulée',
+          );
+          if (a) {
+            setForm((p) => ({
+              ...p,
+              lines: p.lines.map((l, i) => (i === 0 ? {
+                ...l,
+                projectId: String(initialProjectId),
+                assignmentId: a.id,
+              } : l)),
+            }));
+          }
+        }
+      })
       .catch(() => setAssignments([]));
-  }, [form.subcontractorId]);
+  }, [form.subcontractorId, initialProjectId]);
 
   const selectedSub = useMemo(
     () => subs.find((s) => s.id === form.subcontractorId) || null,
@@ -373,16 +394,19 @@ export default function SituationCalculPage({
         </section>
 
         <section className="card st-calcul-section">
-          <h2 className="st-calcul-section-title">3 — Avance disponible (partagée)</h2>
+          <h2 className="st-calcul-section-title">Avance disponible</h2>
           <div className="st-calcul-kpi-row">
-            <div><span>Avances versées</span><strong>{fmtMAD(preview?.avancesVersees)}</strong></div>
-            <div><span>Déjà consommées</span><strong>{fmtMAD(preview?.avancesConsommees)}</strong></div>
-            <div><span>Reliquat</span><strong style={{ color: '#E65100' }}>{fmtMAD(preview?.reliquatAvance)}</strong></div>
+            <div><span>Avance versée</span><strong>{fmtMAD(preview?.avancesVersees)}</strong></div>
+            <div><span>Avance utilisée</span><strong>{fmtMAD(preview?.avancesConsommees)}</strong></div>
+            <div><span>Avance restante</span><strong style={{ color: '#E65100' }}>{fmtMAD(preview?.reliquatAvance)}</strong></div>
           </div>
+          <p style={{ fontSize: '0.8rem', color: 'var(--text-3)', margin: '0 0 10px' }}>
+            Cette avance peut être utilisée sur tous les projets de ce sous-traitant.
+          </p>
           <div className="st-calcul-advance-modes">
             {[
-              { id: 'auto', label: 'Utiliser automatiquement le maximum disponible (FIFO sur les lignes)' },
-              { id: 'manual', label: 'Saisir manuellement le montant total à imputer' },
+              { id: 'auto', label: 'Utiliser automatiquement le maximum disponible' },
+              { id: 'manual', label: 'Saisir manuellement le montant à utiliser' },
               { id: 'none', label: 'Ne pas utiliser l’avance sur cette situation' },
             ].map((m) => (
               <label key={m.id} className="st-calcul-radio">
@@ -398,7 +422,7 @@ export default function SituationCalculPage({
           </div>
           {form.advanceMode === 'manual' && (
             <label style={{ maxWidth: 240, display: 'block', marginTop: 10 }}>
-              Montant total à imputer
+              Montant à utiliser
               <input
                 type="number"
                 min="0"
@@ -409,7 +433,7 @@ export default function SituationCalculPage({
             </label>
           )}
           <p style={{ fontSize: '0.8rem', color: 'var(--text-3)', marginTop: 8 }}>
-            L’imputation est analytique uniquement — aucune écriture de caisse supplémentaire.
+            L’avance a déjà été versée — aucune écriture de caisse supplémentaire.
           </p>
         </section>
 
@@ -450,11 +474,11 @@ export default function SituationCalculPage({
         <section className="card st-calcul-section st-calcul-result">
           <h2 className="st-calcul-section-title">5 — Résultat (toutes les lignes)</h2>
           <div className="st-calcul-result-grid">
-            <div><span>Montant brut</span><strong>{fmtMAD(preview?.gross)}</strong></div>
-            <div><span>Avance imputée</span><strong style={{ color: '#E65100' }}>{fmtMAD(preview?.avances)}</strong></div>
+            <div><span>Travaux réalisés</span><strong>{fmtMAD(preview?.gross)}</strong></div>
+            <div><span>Avance utilisée</span><strong style={{ color: '#E65100' }}>{fmtMAD(preview?.avances)}</strong></div>
             <div><span>Retenues</span><strong style={{ color: '#C62828' }}>{fmtMAD(preview?.retenues)}</strong></div>
-            <div><span>Net à payer</span><strong style={{ color: '#2E7D32', fontSize: '1.15rem' }}>{fmtMAD(preview?.net)}</strong></div>
-            <div><span>Reliquat après calcul</span><strong>{fmtMAD(preview?.reliquatApres)}</strong></div>
+            <div><span>Reste à payer</span><strong style={{ color: '#2E7D32', fontSize: '1.15rem' }}>{fmtMAD(preview?.net)}</strong></div>
+            <div><span>Avance restante après</span><strong>{fmtMAD(preview?.reliquatApres)}</strong></div>
             <div><span>Projets dans la situation</span><strong>{form.lines.length}</strong></div>
           </div>
           <div className="st-calcul-actions">

@@ -27,6 +27,7 @@ export default function SituationSousTraitants({
   const [compteId, setCompteId] = useState(initialCompteId);
   const [ficheTab, setFicheTab] = useState(initialTab || 'finance');
   const [calculForId, setCalculForId] = useState(null);
+  const [calculProjectId, setCalculProjectId] = useState('');
 
   function notify(type, msg) {
     setToast({ type, msg });
@@ -67,6 +68,7 @@ export default function SituationSousTraitants({
       const parsed = parseSousTraitantPath();
       if (parsed?.id) {
         setCalculForId(null);
+        setCalculProjectId('');
         setCompteId(parsed.id);
         setFicheTab(parsed.tab || 'finance');
       } else {
@@ -95,14 +97,19 @@ export default function SituationSousTraitants({
         <Toast toast={toast} />
         <SituationCalculPage
           initialSubcontractorId={calculForId === '__new__' ? '' : calculForId}
+          initialProjectId={calculProjectId || ''}
           onBack={() => {
             const backId = calculForId === '__new__' ? null : calculForId;
             setCalculForId(null);
+            setCalculProjectId('');
             if (backId) openCompte(backId);
           }}
           onNotify={notify}
           onSaved={() => {
-            if (calculForId && calculForId !== '__new__') openCompte(calculForId);
+            const backId = calculForId && calculForId !== '__new__' ? calculForId : null;
+            setCalculForId(null);
+            setCalculProjectId('');
+            if (backId) openCompte(backId, 'travaux');
           }}
         />
       </>
@@ -119,8 +126,14 @@ export default function SituationSousTraitants({
           onTabChange={setFicheTab}
           onBack={closeCompte}
           onNotify={notify}
-          onNewSituation={(id) => setCalculForId(id || compteId)}
-          onNewPayment={(id) => setCalculForId(id || compteId)}
+          onNewSituation={(id, opts) => {
+            setCalculProjectId(opts?.projectId || '');
+            setCalculForId(id || compteId);
+          }}
+          onNewPayment={(id) => {
+            setCalculProjectId('');
+            setCalculForId(id || compteId);
+          }}
         />
       </>
     );

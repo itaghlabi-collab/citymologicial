@@ -3,7 +3,7 @@ import {
   Archive, ChevronLeft, CreditCard, Eye, FileDown, FilePlus, Link2, Loader2, Lock,
   Pencil, Plus, Printer, Trash2, X,
 } from 'lucide-react';
-import { getSubcontractorAccount } from '../services/rh/subcontractorAccount';
+import { getSubcontractorAccount, amountSettledDisplay } from '../services/rh/subcontractorAccount';
 import {
   updateSubcontractorPayment,
   deleteSubcontractorPayment,
@@ -12,8 +12,14 @@ import {
   createSubcontractorDocument,
   archiveSubcontractorDocument,
   assignPaymentsToProject,
+  createAssignment,
+  archiveAssignment,
+  listAssignments,
+  removeSubcontractorFromProject,
 } from '../services/rh/subcontractors';
-import { closeSituation, updateSituation, cancelSituation, SITUATION_STATUS_LABEL } from '../services/rh/subcontractorSituations';
+import {
+  closeSituation, updateSituation, cancelSituation, SITUATION_STATUS_LABEL, situationStatusSimple,
+} from '../services/rh/subcontractorSituations';
 import {
   createGlobalAdvance,
   cancelGlobalAdvance,
@@ -27,6 +33,7 @@ import {
   SUBCONTRACTOR_DOC_TYPES,
   RETENTION_TYPES,
   SUB_STATUT_LABEL,
+  REMUNERATION_TYPES,
 } from '../services/rh/subcontractorConstants';
 import { exportSubcontractorPaymentPdf } from '../services/rh/subcontractorPaymentPdf';
 import { exportSubcontractorAccountPdf } from '../services/rh/subcontractorAccountPdf';
@@ -37,6 +44,7 @@ import { listRetenues, createRetenue, releaseRetenue } from '../services/rh/subc
 import { logSubcontractorAccountEvent } from '../services/rh/subcontractorAccountEvents';
 import { formatSupabaseError } from '../services/supabase/formatError';
 import { isSupabaseConfigured } from '../lib/supabase';
+import { listProjectsForSelect } from '../services/projects/projects';
 import { paymentTypeLabel } from '../utils/rh/subcontractorPaymentFormUtils';
 import SubcontractorPaymentEditForm, {
   paymentToEditForm,
@@ -137,6 +145,17 @@ export default function SituationSousTraitantCompte({
   const [assignProjectId, setAssignProjectId] = useState('');
   const [assignSaving, setAssignSaving] = useState(false);
   const [sitDetail, setSitDetail] = useState(null);
+  const [showAddProject, setShowAddProject] = useState(false);
+  const [projectOptions, setProjectOptions] = useState([]);
+  const [addProjectForm, setAddProjectForm] = useState({
+    projectId: '',
+    remunerationType: REMUNERATION_TYPES[0],
+    startDate: new Date().toISOString().slice(0, 10),
+    estimatedTotal: '',
+    role: '',
+    notes: '',
+  });
+  const [addProjectSaving, setAddProjectSaving] = useState(false);
   const [ledgerFilters, setLedgerFilters] = useState({
     q: '', type: '', projectId: '', dateFrom: '', dateTo: '',
   });
@@ -459,14 +478,128 @@ export default function SituationSousTraitantCompte({
   }
 
   async function handleCancelSituation(sit) {
-    if (!window.confirm(`Annuler la situation ${sit.reference || ''} ?`)) return;
+    if (!window.confirm(
+      'Voulez-vous supprimer cette ligne de travaux ? Les montants de la situation et le reliquat d’avance seront recalculés automatiquement.',
+    )) return;
     try {
       await cancelSituation(sit.id, subcontractorId);
-      onNotify?.('success', 'Situation annulée.');
+      onNotify?.('success', 'Ligne de travaux annulée — montants recalculés.');
       await load();
     } catch (err) {
       onNotify?.('error', formatSupabaseError(err, 'Annulation impossible.'));
     }
+  }
+
+  async function openAddProjectModal() {
+    setAddProjectForm({
+      projectId: '',
+      remunerationType: REMUNERATION_TYPES[0],
+      startDate: new Date().toISOString().slice(0, 10),
+      estimatedTotal: '',
+      role: account?.subcontractor?.responsableInterne || '',
+      notes: '',
+    });
+    setShowAddProject(true);
+    try {
+      const list = await listProjectsForSelect();
+      setProjectOptions(list || []);
+    } catch {
+      setProjectOptions([]);
+    }
+  }
+
+  async function handleAddProject(e) {
+    e.preventDefault();
+    if (!addProjectForm.projectId) {
+      onNotify?.('error', 'Sélectionnez un projet ou chantier.');
+      return;
+    }
+    setAddProjectSaving(true);
+    try {
+      const pr = projectOptions.find((p) => String(p.id) === String(addProjectForm.projectId));
+      const estimated = Number(addProjectForm.estimatedTotal) || 0;
+      await createAssignment(subcontractorId, {
+        projectId: addProjectForm.projectId,
+        projectName: pr?.nom || '',
+        projectRef: pr?.ref || '',
+        remunerationType: addProjectForm.remunerationType,
+        startDate: addProjectForm.startDate || null,
+        role: addProjectForm.role || '',
+        notes: addProjectForm.notes || '',
+        estimatedQuantity: estimated > 0 ? 1 : 0,
+        unitPrice: estimated,
+        status: 'active',
+      });
+      await logSubcontractorAccountEvent({
+        subcontractorId,
+        eventType: 'assignment_added',
+        projectId: addProjectForm.projectId,
+        observation: 'Projet ajouté (sans situation)',
+      }).catch(() => {});
+      onNotify?.('success', 'Projet ajouté.');
+      setShowAddProject(false);
+      setSelectedProjectId(String(addProjectForm.projectId));
+      await load();
+    } catch (err) {
+      onNotify?.('error', formatSupabaseError(err, 'Impossible d’ajouter le projet.'));
+    } finally {
+      setAddProjectSaving(false);
+    }
+  }
+
+  async function handleArchiveProject(group) {
+    const sits = (group.situations || []).filter((s) => s.status !== 'cancelled');
+    const msg = sits.length
+      ? `Ce projet contient ${sits.length} situation(s). Archiver le projet ? Les données restent conservées ; le projet disparaît de la liste active.`
+      : 'Archiver ce projet de la liste « Travaux par projet » ?';
+    if (!window.confirm(msg)) return;
+    try {
+      let assignmentId = group.assignmentId;
+      if (!assignmentId && group.projectId) {
+        const assigns = await listAssignments(subcontractorId);
+        const match = (assigns || []).find(
+          (a) => String(a.projectId) === String(group.projectId) && (a.status || 'active') !== 'annulée',
+        );
+        assignmentId = match?.id;
+      }
+      if (assignmentId) {
+        await archiveAssignment(assignmentId);
+      } else if (group.projectId) {
+        await removeSubcontractorFromProject(group.projectId, subcontractorId);
+      } else {
+        onNotify?.('error', 'Affectation introuvable pour ce projet.');
+        return;
+      }
+      await logSubcontractorAccountEvent({
+        subcontractorId,
+        eventType: 'assignment_archived',
+        projectId: group.projectId || null,
+        observation: `Projet archivé — ${group.projectName || ''}`,
+      }).catch(() => {});
+      onNotify?.('success', 'Projet archivé.');
+      if (selectedProjectId === group.key) setSelectedProjectId(null);
+      await load();
+    } catch (err) {
+      onNotify?.('error', formatSupabaseError(err, 'Archivage projet impossible.'));
+    }
+  }
+
+  function openNewSituationForProject(projectId) {
+    onNewSituation?.(subcontractorId, { projectId: projectId || null });
+  }
+
+  async function handleCloseOpenSituationForProject(group) {
+    const openSit = (group.situations || []).find(
+      (s) => !['closed', 'cancelled'].includes(s.status),
+    );
+    if (!openSit) {
+      onNotify?.('error', 'Aucune situation en cours à clôturer.');
+      return;
+    }
+    if (!window.confirm(`Clôturer la situation en cours « ${openSit.reference || openSit.designation || openSit.id.slice(0, 8)} » ?\nLe projet reste ouvert — vous pourrez créer une nouvelle situation.`)) {
+      return;
+    }
+    await handleCloseSituation(openSit);
   }
 
   function openEditFiche() {
@@ -607,43 +740,87 @@ export default function SituationSousTraitantCompte({
   }, [ledgerFiltered, ledgerPage]);
 
   const projectGroups = useMemo(() => {
-    const situations = account?.situations || [];
-    if (situations.length) {
-      const map = new Map();
-      situations.forEach((s) => {
-        const key = String(s.projectId || '') || '__none';
-        if (!map.has(key)) {
-          map.set(key, {
-            key,
-            projectId: s.projectId || '',
-            projectName: s.projectName || 'Sans projet',
-            totalTravaux: 0,
-            totalAvances: 0,
-            totalRetenues: 0,
-            totalPaye: 0,
-            lastDate: null,
-            situations: [],
-          });
-        }
-        const row = map.get(key);
+    const allSituations = account?.situations || [];
+    const activeSituations = allSituations.filter((s) => s.status !== 'cancelled');
+    const assignments = (account?.assignments || []).filter((a) => (a.status || 'active') !== 'annulée');
+    const map = new Map();
+
+    const ensure = (projectId, name, extra = {}) => {
+      const key = String(projectId || '') || '__none';
+      if (!map.has(key)) {
+        map.set(key, {
+          key,
+          projectId: projectId || '',
+          projectName: name || 'Sans projet',
+          assignmentId: extra.assignmentId || null,
+          totalTravaux: 0,
+          totalAvances: 0,
+          totalRetenues: 0,
+          totalPayeComplementaire: 0,
+          totalPaye: 0,
+          lastDate: null,
+          situations: [],
+        });
+      }
+      const row = map.get(key);
+      if (extra.assignmentId) row.assignmentId = extra.assignmentId;
+      if (name && (!row.projectName || row.projectName === 'Sans projet')) row.projectName = name;
+      return row;
+    };
+
+    assignments.forEach((a) => {
+      ensure(a.projectId, a.projectName || a.projectRef, { assignmentId: a.id });
+    });
+
+    // Afficher aussi les situations annulées (hors totaux)
+    allSituations.forEach((s) => {
+      const row = ensure(s.projectId, s.projectName || 'Sans projet');
+      row.situations.push(s);
+      const d = s.situationDate || s.created_at;
+      if (d && (!row.lastDate || String(d) > String(row.lastDate))) row.lastDate = d;
+    });
+
+    if (activeSituations.length || assignments.length) {
+      activeSituations.forEach((s) => {
+        const row = ensure(s.projectId, s.projectName || 'Sans projet');
+        const av = Math.min(Number(s.avancesImputees) || 0, Number(s.grossAmount) || 0);
+        const paidComp = Number(s.amountPaid) || 0;
         row.totalTravaux += Number(s.grossAmount) || 0;
-        row.totalAvances += Math.min(Number(s.avancesImputees) || 0, Number(s.grossAmount) || 0);
+        row.totalAvances += av;
         row.totalRetenues += Number(s.retenues) || 0;
-        row.totalPaye += Number(s.amountPaid) || 0;
-        row.situations.push(s);
-        const d = s.situationDate || s.created_at;
-        if (d && (!row.lastDate || String(d) > String(row.lastDate))) row.lastDate = d;
+        row.totalPayeComplementaire += paidComp;
       });
       return [...map.values()].map((r) => {
-        const soldeRestant = Math.max(0, r.totalTravaux - r.totalAvances - r.totalRetenues - r.totalPaye);
+        const totalPaye = amountSettledDisplay({
+          grossAmount: r.totalTravaux,
+          avancesImputees: r.totalAvances,
+          amountPaid: r.totalPayeComplementaire,
+        });
+        const soldeRestant = Math.max(
+          0,
+          r.totalTravaux - r.totalAvances - r.totalRetenues - r.totalPayeComplementaire,
+        );
+        const hasActiveSit = (r.situations || []).some((s) => s.status !== 'cancelled');
         return {
           ...r,
+          totalPaye,
           soldeRestant,
-          statutLabel: soldeRestant <= 0.009 ? 'Soldée' : 'Ouverte',
+          statutLabel: soldeRestant <= 0.009 && r.totalTravaux > 0.009
+            ? 'Soldée'
+            : (hasActiveSit ? 'Ouverte' : 'Sans situation'),
         };
-      });
+      }).sort((a, b) => String(b.lastDate || '').localeCompare(String(a.lastDate || ''))
+        || String(a.projectName || '').localeCompare(String(b.projectName || ''), 'fr'));
     }
-    return account?.legacySituations || [];
+
+    return (account?.legacySituations || []).map((r) => ({
+      ...r,
+      totalPaye: amountSettledDisplay({
+        grossAmount: r.totalTravaux,
+        avancesImputees: r.totalAvances,
+        amountPaid: r.totalPayeComplementaire ?? r.totalPaye,
+      }),
+    }));
   }, [account]);
 
   if (loading) {
@@ -671,6 +848,12 @@ export default function SituationSousTraitantCompte({
   const statutLabel = SUB_STATUT_LABEL[sub.statut] || sub.statut || '—';
   const sitRows = situations?.length ? situations : null;
   const resteNet = kpis.resteNetAPayer ?? kpis.resteAPayer;
+  const totalDejaPaye = kpis.totalDejaPaye ?? kpis.montantRegle
+    ?? ((Number(kpis.avancesConsommees) || 0) + (Number(kpis.montantsPayes) || 0));
+  const selectedGroup = projectGroups.find((p) => p.key === selectedProjectId) || null;
+  const openSituationInProject = selectedGroup?.situations?.find(
+    (s) => !['closed', 'cancelled'].includes(s.status),
+  ) || null;
 
   return (
     <div className="animate-fade-in rh-ext-page st-compte-page">
@@ -748,7 +931,7 @@ export default function SituationSousTraitantCompte({
         <Kpi label="Reliquat d’avance" value={fmtMAD(kpis.reliquatAvance)} accent="#E65100" />
         <Kpi label="Montant brut à payer" value={fmtMAD(kpis.montantBrutAPayer)} />
         <Kpi label="Total retenues" value={fmtMAD(kpis.retenues)} accent="#C62828" />
-        <Kpi label="Total déjà payé" value={fmtMAD(kpis.montantsPayes)} accent="#2E7D32" />
+        <Kpi label="Total déjà payé" value={fmtMAD(totalDejaPaye)} accent="#2E7D32" hint="Avance utilisée + paiements complémentaires" />
         <Kpi label="Reste net à payer" value={fmtMAD(resteNet)} accent={resteNet > 0 ? '#C62828' : undefined} />
       </div>
       {kpis._debug?.rawPaymentAvancesUncapped > (kpis.avancesConsommees || 0) + 0.01 && (
@@ -993,27 +1176,28 @@ export default function SituationSousTraitantCompte({
           <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(130px,1fr))', marginBottom: 16 }}>
             <Kpi label="Projets" value={String(kpis.nombreProjets)} />
             <Kpi label="Situations" value={String(kpis.totalSituations || sitRows?.length || 0)} />
-            <Kpi label="Réalisé" value={fmtMAD(kpis.travauxRealises)} />
-            <Kpi label="Validé" value={fmtMAD(kpis.montantValide)} />
-            <Kpi label="En attente" value={fmtMAD(kpis.montantEnAttente)} />
-            <Kpi label="Payé" value={fmtMAD(kpis.montantsPayes)} accent="#2E7D32" />
-            <Kpi label="Restant" value={fmtMAD(resteNet)} />
+            <Kpi label="Travaux réalisés" value={fmtMAD(kpis.travauxRealises)} />
+            <Kpi label="Avance utilisée" value={fmtMAD(kpis.avancesConsommees)} accent="#E65100" />
+            <Kpi label="Montant réglé" value={fmtMAD(totalDejaPaye)} accent="#2E7D32" />
+            <Kpi label="Reste à payer" value={fmtMAD(resteNet)} />
           </div>
           <div className="flex-between" style={{ marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
             <div className="card-title" style={{ margin: 0 }}>Travaux par projet</div>
-            <button type="button" className="btn btn-primary btn-sm" onClick={() => onNewSituation?.(subcontractorId)}>
-              <Plus size={14} /> Ajouter une situation
+            <button type="button" className="btn btn-primary btn-sm" onClick={openAddProjectModal} title="Ajouter un projet ou chantier">
+              <Plus size={14} /> Ajouter un projet
             </button>
           </div>
           <div className="table-wrap" style={{ padding: 0 }}>
             <table>
               <thead>
                 <tr>
-                  <th>Projet</th><th>Réalisé</th><th>Avance imputée</th><th>Retenues</th><th>Payé</th><th>Reste</th><th>Statut</th><th>MAJ</th><th>Actions</th>
+                  <th>Projet</th><th>Réalisé</th><th>Avance utilisée</th><th>Retenues</th><th>Payé / réglé</th><th>Reste</th><th>Statut</th><th>MAJ</th><th>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {projectGroups.map((s) => (
+                {projectGroups.length === 0 ? (
+                  <tr><td colSpan={9} style={{ color: 'var(--text-3)' }}>Aucun projet. Cliquez sur « Ajouter un projet ».</td></tr>
+                ) : projectGroups.map((s) => (
                   <tr key={s.key} style={{ cursor: 'pointer', background: selectedProjectId === s.key ? 'color-mix(in srgb, var(--red) 6%, transparent)' : undefined }} onClick={() => setSelectedProjectId(selectedProjectId === s.key ? null : s.key)}>
                     <td>{s.projectName}</td>
                     <td>{fmtMAD(s.totalTravaux)}</td>
@@ -1025,14 +1209,14 @@ export default function SituationSousTraitantCompte({
                     <td>{fmtDate(s.lastDate)}</td>
                     <td onClick={(e) => e.stopPropagation()}>
                       <div className="payment-row-actions">
-                        <button type="button" className="btn btn-secondary btn-sm" title="Voir" onClick={() => setSelectedProjectId(s.key)}>
+                        <button type="button" className="btn btn-secondary btn-sm" title="Voir le projet" onClick={() => setSelectedProjectId(s.key)}>
                           <Eye size={12} />
                         </button>
-                        <button type="button" className="btn btn-secondary btn-sm" title="Situation" onClick={() => onNewSituation?.(subcontractorId)}>
+                        <button type="button" className="btn btn-secondary btn-sm" title="Ajouter une situation" onClick={() => openNewSituationForProject(s.projectId)}>
                           <Plus size={12} />
                         </button>
                         {(s.paymentIds || []).length > 0 && (
-                          <button type="button" className="btn btn-secondary btn-sm" title="Modifier paiement" onClick={() => openLegacyProjectEdit(s)}>
+                          <button type="button" className="btn btn-secondary btn-sm" title="Modifier" onClick={() => openLegacyProjectEdit(s)}>
                             <Pencil size={12} />
                           </button>
                         )}
@@ -1041,11 +1225,17 @@ export default function SituationSousTraitantCompte({
                             <Link2 size={12} /> Affecter
                           </button>
                         )}
-                        <button type="button" className="btn btn-secondary btn-sm" title="Paiement" onClick={() => (onNewPayment || onNewSituation)?.(subcontractorId)}>
+                        <button type="button" className="btn btn-secondary btn-sm" title="Enregistrer un paiement" onClick={() => (onNewPayment || onNewSituation)?.(subcontractorId)}>
                           <CreditCard size={12} />
                         </button>
-                        <button type="button" className="btn btn-secondary btn-sm" title="PDF" onClick={handleAccountPdf}>
+                        <button type="button" className="btn btn-secondary btn-sm" title="Ajouter un document" onClick={() => setShowDoc(true)}>
+                          <FilePlus size={12} />
+                        </button>
+                        <button type="button" className="btn btn-secondary btn-sm" title="Exporter" onClick={handleAccountPdf}>
                           <FileDown size={12} />
+                        </button>
+                        <button type="button" className="btn btn-secondary btn-sm" title="Supprimer ou archiver" style={{ color: 'var(--red)' }} onClick={() => handleArchiveProject(s)}>
+                          <Archive size={12} />
                         </button>
                       </div>
                     </td>
@@ -1054,76 +1244,108 @@ export default function SituationSousTraitantCompte({
               </tbody>
             </table>
           </div>
-          {selectedProjectId && sitRows && (
+          {selectedGroup && (
             <div style={{ marginTop: 16 }}>
-              <div className="card-title" style={{ marginBottom: 8 }}>
-                Situations — {projectGroups.find((p) => p.key === selectedProjectId)?.projectName || ''}
+              <div className="flex-between" style={{ marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+                <div className="card-title" style={{ margin: 0 }}>
+                  Situations — {selectedGroup.projectName || ''}
+                </div>
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    title="Créer une nouvelle situation sur ce projet"
+                    onClick={() => openNewSituationForProject(selectedGroup.projectId)}
+                  >
+                    <Plus size={14} /> Ajouter une nouvelle situation
+                  </button>
+                  {openSituationInProject && (
+                    <button
+                      type="button"
+                      className="btn btn-secondary btn-sm"
+                      title="Clôturer la situation en cours (le projet reste ouvert)"
+                      onClick={() => handleCloseOpenSituationForProject(selectedGroup)}
+                    >
+                      <Lock size={14} /> Clôturer la situation en cours
+                    </button>
+                  )}
+                </div>
               </div>
               <div className="table-wrap" style={{ padding: 0 }}>
                 <table>
                   <thead>
                     <tr>
                       <th>Réf.</th><th>Date</th><th>Désignation</th><th>Qté</th><th>PU</th><th>Brut</th>
-                      <th>Avance</th><th>Retenue</th><th>Payé</th><th>Reste</th><th>Statut</th><th>Actions</th>
+                      <th>Avance utilisée</th><th>Retenue</th><th>Payé / réglé</th><th>Reste</th><th>Statut</th><th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {(projectGroups.find((p) => p.key === selectedProjectId)?.situations || []).map((s) => (
-                      <tr key={s.id}>
-                        <td>{s.reference || '—'}</td>
-                        <td>{fmtDate(s.situationDate)}</td>
-                        <td>{s.designation || '—'}</td>
-                        <td>{s.quantity || '—'}</td>
-                        <td>{fmtMAD(s.unitPrice)}</td>
-                        <td>{fmtMAD(s.grossAmount)}</td>
-                        <td style={{ color: '#E65100' }}>{fmtMAD(s.avancesImputees)}</td>
-                        <td style={{ color: '#C62828' }}>{fmtMAD(s.retenues)}</td>
-                        <td style={{ color: '#2E7D32' }}>{fmtMAD(s.amountPaid)}</td>
-                        <td>{fmtMAD(s.remaining)}</td>
-                        <td><span className="badge badge-orange">{s.statusLabel}</span></td>
-                        <td>
-                          <div className="payment-row-actions">
-                            <button type="button" className="btn btn-secondary btn-sm" title="Détail" onClick={() => setSitDetail(s)}>
-                              <Eye size={12} />
-                            </button>
-                            {s.status !== 'closed' && s.status !== 'cancelled' && (
-                              <>
-                                <button type="button" className="btn btn-secondary btn-sm" title="Modifier" onClick={() => openSituationEdit(s)}>
-                                  <Pencil size={12} />
-                                </button>
-                                <button type="button" className="btn btn-secondary btn-sm" title="Imputer avance" onClick={() => { setImputeSit(s); setImputeAmount(''); }}>
-                                  Avance
-                                </button>
-                                <button type="button" className="btn btn-secondary btn-sm" title="Paiement" onClick={() => (onNewPayment || onNewSituation)?.(subcontractorId)}>
-                                  <CreditCard size={12} />
-                                </button>
-                              </>
-                            )}
-                            {s.status === 'settled' && (
-                              <button type="button" className="btn btn-secondary btn-sm" title="Clôturer" onClick={() => handleCloseSituation(s)}>
-                                <Lock size={12} />
-                              </button>
-                            )}
-                            {s.status !== 'closed' && s.status !== 'cancelled' && (
-                              <button type="button" className="btn btn-secondary btn-sm" title="Annuler" style={{ color: 'var(--red)' }} onClick={() => handleCancelSituation(s)}>
-                                <Trash2 size={12} />
-                              </button>
-                            )}
-                            <button type="button" className="btn btn-secondary btn-sm" title="PDF" onClick={handleAccountPdf}>
-                              <FileDown size={12} />
-                            </button>
-                          </div>
+                    {(selectedGroup.situations || []).length === 0 ? (
+                      <tr>
+                        <td colSpan={12} style={{ color: 'var(--text-3)' }}>
+                          Aucune situation. Ajoutez une situation pour enregistrer des travaux.
                         </td>
                       </tr>
-                    ))}
+                    ) : (selectedGroup.situations || []).map((s) => {
+                      const payeRegle = amountSettledDisplay({
+                        grossAmount: s.grossAmount,
+                        avancesImputees: s.avancesImputees,
+                        amountPaid: s.amountPaid,
+                      });
+                      const isOpen = !['closed', 'cancelled'].includes(s.status);
+                      return (
+                        <tr key={s.id}>
+                          <td>{s.reference || '—'}</td>
+                          <td>{fmtDate(s.situationDate)}</td>
+                          <td>{s.designation || '—'}</td>
+                          <td>{s.quantity || '—'}</td>
+                          <td>{fmtMAD(s.unitPrice)}</td>
+                          <td>{fmtMAD(s.grossAmount)}</td>
+                          <td style={{ color: '#E65100' }}>{fmtMAD(s.avancesImputees)}</td>
+                          <td style={{ color: '#C62828' }}>{fmtMAD(s.retenues)}</td>
+                          <td style={{ color: '#2E7D32' }}>{fmtMAD(payeRegle)}</td>
+                          <td>{fmtMAD(s.remaining)}</td>
+                          <td><span className="badge badge-orange">{situationStatusSimple(s.status)}</span></td>
+                          <td>
+                            <div className="payment-row-actions">
+                              <button type="button" className="btn btn-secondary btn-sm" title="Voir" onClick={() => setSitDetail(s)}>
+                                <Eye size={12} />
+                              </button>
+                              {isOpen && (
+                                <>
+                                  <button type="button" className="btn btn-secondary btn-sm" title="Modifier" onClick={() => openSituationEdit(s)}>
+                                    <Pencil size={12} />
+                                  </button>
+                                  <button type="button" className="btn btn-secondary btn-sm" title="Utiliser l’avance disponible" onClick={() => { setImputeSit(s); setImputeAmount(''); }}>
+                                    Imputer une avance
+                                  </button>
+                                  <button type="button" className="btn btn-secondary btn-sm" title="Enregistrer un paiement" onClick={() => (onNewPayment || onNewSituation)?.(subcontractorId)}>
+                                    <CreditCard size={12} />
+                                  </button>
+                                  <button type="button" className="btn btn-secondary btn-sm" title="Clôturer" onClick={() => handleCloseSituation(s)}>
+                                    <Lock size={12} /> Clôturer
+                                  </button>
+                                  <button type="button" className="btn btn-secondary btn-sm" title="Supprimer" style={{ color: 'var(--red)' }} onClick={() => handleCancelSituation(s)}>
+                                    <Trash2 size={12} /> Supprimer
+                                  </button>
+                                </>
+                              )}
+                              <button type="button" className="btn btn-secondary btn-sm" title="Exporter" onClick={handleAccountPdf}>
+                                <FileDown size={12} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
                   </tbody>
                 </table>
               </div>
             </div>
           )}
-          {!sitRows && (
+          {!sitRows && projectGroups.every((g) => !(g.situations || []).length) && (
             <p style={{ fontSize: '0.8rem', color: 'var(--text-3)', marginTop: 10 }}>
-              Exécutez <code>RUN_SUBCONTRACTOR_ACCOUNT_V2.sql</code> pour le détail des situations.
+              Les projets sans situation n’ont pas encore de montants. Ajoutez une situation pour saisir des travaux.
             </p>
           )}
         </div>
@@ -1270,11 +1492,82 @@ export default function SituationSousTraitantCompte({
       )}
 
       {/* ─── Modales existantes + nouvelles ─── */}
+      {showAddProject && (
+        <div className="rh-ext-modal-overlay">
+          <div className="card rh-ext-modal-box rh-ext-modal-box--md">
+            <div className="flex-between" style={{ marginBottom: 12 }}>
+              <h2 style={{ margin: 0, fontFamily: 'var(--font-head)', fontWeight: 800 }}>Ajouter un projet</h2>
+              <button type="button" onClick={() => setShowAddProject(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
+            </div>
+            <form onSubmit={handleAddProject} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <label>Projet ou chantier *
+                <select
+                  value={addProjectForm.projectId}
+                  onChange={(e) => setAddProjectForm((p) => ({ ...p, projectId: e.target.value }))}
+                  required
+                >
+                  <option value="">— Sélectionner —</option>
+                  {projectOptions.map((p) => (
+                    <option key={p.id} value={p.id}>{p.ref ? `${p.ref} — ${p.nom}` : p.nom}</option>
+                  ))}
+                </select>
+              </label>
+              <label>Type de prestation
+                <select
+                  value={addProjectForm.remunerationType}
+                  onChange={(e) => setAddProjectForm((p) => ({ ...p, remunerationType: e.target.value }))}
+                >
+                  {REMUNERATION_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                </select>
+              </label>
+              <label>Date de début
+                <input
+                  type="date"
+                  value={addProjectForm.startDate}
+                  onChange={(e) => setAddProjectForm((p) => ({ ...p, startDate: e.target.value }))}
+                />
+              </label>
+              <label>Montant prévu (optionnel)
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={addProjectForm.estimatedTotal}
+                  onChange={(e) => setAddProjectForm((p) => ({ ...p, estimatedTotal: e.target.value }))}
+                  placeholder="0"
+                />
+              </label>
+              <label>Responsable ou chef de projet
+                <input
+                  value={addProjectForm.role}
+                  onChange={(e) => setAddProjectForm((p) => ({ ...p, role: e.target.value }))}
+                />
+              </label>
+              <label>Observation
+                <input
+                  value={addProjectForm.notes}
+                  onChange={(e) => setAddProjectForm((p) => ({ ...p, notes: e.target.value }))}
+                />
+              </label>
+              <p style={{ fontSize: '0.8rem', color: 'var(--text-3)', margin: 0 }}>
+                Aucune situation n’est créée automatiquement. Ajoutez ensuite une situation pour saisir des travaux.
+              </p>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setShowAddProject(false)}>Annuler</button>
+                <button type="submit" className="btn btn-primary" disabled={addProjectSaving}>
+                  {addProjectSaving ? '…' : 'Ajouter le projet'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {showAdvance && (
         <div className="rh-ext-modal-overlay">
           <div className="card rh-ext-modal-box rh-ext-modal-box--md">
             <div className="flex-between" style={{ marginBottom: 12 }}>
-              <h2 style={{ margin: 0, fontFamily: 'var(--font-head)', fontWeight: 800 }}>Avance globale</h2>
+              <h2 style={{ margin: 0, fontFamily: 'var(--font-head)', fontWeight: 800 }}>Avance versée</h2>
               <button type="button" onClick={() => setShowAdvance(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
             </div>
             <p style={{ fontSize: '0.82rem', color: 'var(--text-3)' }}>
@@ -1573,9 +1866,12 @@ export default function SituationSousTraitantCompte({
             </div>
             <form onSubmit={handleImpute} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <div>{imputeSit.reference || 'Situation'} — {imputeSit.projectName || '—'}</div>
-              <div>Brut : {fmtMAD(imputeSit.grossAmount)} · Déjà imputé : {fmtMAD(imputeSit.avancesImputees)}</div>
-              <div>Reliquat dispo. : <strong style={{ color: '#E65100' }}>{fmtMAD(kpis.reliquatAvance)}</strong></div>
-              <label>Montant à imputer (vide = max)
+              <div>Travaux : {fmtMAD(imputeSit.grossAmount)} · Avance déjà utilisée : {fmtMAD(imputeSit.avancesImputees)}</div>
+              <div>Avance disponible : <strong style={{ color: '#E65100' }}>{fmtMAD(kpis.reliquatAvance)}</strong></div>
+              <p style={{ fontSize: '0.78rem', color: 'var(--text-3)', margin: '4px 0 8px' }}>
+                Cette avance peut être utilisée sur tous les projets de ce sous-traitant.
+              </p>
+              <label>Montant à utiliser (vide = maximum)
                 <input type="number" min="0" step="0.01" value={imputeAmount} onChange={(e) => setImputeAmount(e.target.value)} placeholder="Maximum auto" />
               </label>
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>

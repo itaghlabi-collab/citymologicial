@@ -58,7 +58,10 @@ export async function exportSubcontractorAccountPdf(account, { print = false } =
     ['Avances consommées', formatPdfMAD(k.avancesConsommees)],
     ['Reliquat', formatPdfMAD(k.reliquatAvance)],
     ['Travaux réalisés', formatPdfMAD(k.travauxRealises)],
-    ['Montants payés', formatPdfMAD(k.montantsPayes)],
+    ['Total déjà payé', formatPdfMAD(k.totalDejaPaye ?? k.montantRegle ?? (
+      (Number(k.avancesConsommees) || 0) + (Number(k.montantsPayes) || 0)
+    ))],
+    ['Paiements complémentaires', formatPdfMAD(k.montantsPayes)],
     ['Retenues', formatPdfMAD(k.retenues)],
     ['Reste à payer', formatPdfMAD(k.resteAPayer)],
     ['Projets', String(k.nombreProjets || 0)],

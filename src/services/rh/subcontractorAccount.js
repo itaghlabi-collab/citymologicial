@@ -31,6 +31,25 @@ export function effectivePaymentAdvance(p) {
   return round2(Math.min(av, gross));
 }
 
+/**
+ * Montant réglé (affichage) = avance imputée plafonnée + paiements complémentaires.
+ * Ne crée pas d’écriture bancaire : purement dérivé pour l’UI.
+ */
+export function amountSettledDisplay({
+  grossAmount = 0,
+  avancesImputees = 0,
+  amountPaid = 0,
+} = {}) {
+  const gross = Math.max(0, Number(grossAmount) || 0);
+  const av = Math.min(Math.max(0, Number(avancesImputees) || 0), gross);
+  const paid = Math.max(0, Number(amountPaid) || 0);
+  return round2(av + paid);
+}
+
+function isActiveSituation(s) {
+  return (s?.status || '') !== 'cancelled';
+}
+
 function safeList(promise, fallback = []) {
   return promise.catch(() => fallback);
 }
@@ -54,16 +73,29 @@ export function buildAccountKpis({
 } = {}) {
   const all = payments || [];
   const paid = all.filter(isPaid);
+  const activeSituations = (situations || []).filter(isActiveSituation);
+  const cancelledSitIds = new Set(
+    (situations || []).filter((s) => !isActiveSituation(s)).map((s) => s.id).filter(Boolean),
+  );
+  const activeImputations = (imputations || []).filter(
+    (i) => !i.situationId || !cancelledSitIds.has(i.situationId),
+  );
+
   const travauxRealises = round2(
-    situations.length
-      ? situations.reduce((s, x) => s + (Number(x.grossAmount) || 0), 0)
-      : all.reduce((s, p) => s + (Number(p.grossAmount) || 0), 0),
+    activeSituations.length
+      ? activeSituations.reduce((s, x) => s + (Number(x.grossAmount) || 0), 0)
+      : situations.length
+        ? 0
+        : all.reduce((s, p) => s + (Number(p.grossAmount) || 0), 0),
   );
   const retenues = round2(
-    situations.length
-      ? situations.reduce((s, x) => s + (Number(x.retenues) || 0), 0)
-      : all.reduce((s, p) => s + (Number(p.retenues) || 0), 0),
+    activeSituations.length
+      ? activeSituations.reduce((s, x) => s + (Number(x.retenues) || 0), 0)
+      : situations.length
+        ? 0
+        : all.reduce((s, p) => s + (Number(p.retenues) || 0), 0),
   );
+  /** Paiements complémentaires uniquement (pas l’avance consommée). */
   const montantsPayes = round2(paid.reduce((s, p) => s + (Number(p.amount) || 0), 0));
 
   const activeAdvances = (advances || []).filter((a) => (a.status || 'unused') !== 'cancelled');
@@ -71,20 +103,22 @@ export function buildAccountKpis({
 
   // Imputations analytiques plafonnées au brut (évite 5 000 affiché sur 2 250)
   const avancesImputeesEffectives = round2(
-    situations.length
-      ? situations.reduce((s, x) => {
+    activeSituations.length
+      ? activeSituations.reduce((s, x) => {
         const g = Math.max(0, Number(x.grossAmount) || 0);
         const a = Math.max(0, Number(x.avancesImputees) || 0);
         return s + Math.min(a, g);
       }, 0)
-      : all.reduce((s, p) => s + effectivePaymentAdvance(p), 0),
+      : situations.length
+        ? 0
+        : all.reduce((s, p) => s + effectivePaymentAdvance(p), 0),
   );
 
-  // Somme des lignes d’imputation (1× par imputation.id) — source de vérité préférée
+  // Somme des lignes d’imputation actives (1× par imputation.id) — source de vérité préférée
   const imputationsSum = round2(
-    (imputations || []).reduce((s, i) => s + Math.max(0, Number(i.amount) || 0), 0),
+    activeImputations.reduce((s, i) => s + Math.max(0, Number(i.amount) || 0), 0),
   );
-  const hasImputationRows = (imputations || []).length > 0;
+  const hasImputationRows = activeImputations.length > 0;
 
   let avancesVersees;
   let avancesConsommees;
@@ -112,28 +146,32 @@ export function buildAccountKpis({
   // Brut à payer = travaux non couverts par les avances CONSOMMÉES (pas versées)
   const montantBrutAPayer = round2(Math.max(0, travauxRealises - avancesConsommees));
   const resteNetAPayer = round2(Math.max(0, montantBrutAPayer - montantsPayes - retenues));
+  /** Affichage « Total déjà payé » = avance consommée + paiements complémentaires. */
+  const totalDejaPaye = round2(avancesConsommees + montantsPayes);
 
   const projectIds = new Set();
   payments.forEach((p) => { if (p.projectId) projectIds.add(String(p.projectId)); });
-  assignments.forEach((a) => { if (a.projectId) projectIds.add(String(a.projectId)); });
-  situations.forEach((s) => { if (s.projectId) projectIds.add(String(s.projectId)); });
+  (assignments || [])
+    .filter((a) => (a.status || 'active') !== 'annulée')
+    .forEach((a) => { if (a.projectId) projectIds.add(String(a.projectId)); });
+  activeSituations.forEach((s) => { if (s.projectId) projectIds.add(String(s.projectId)); });
   balances.forEach((b) => { if (b.projectId) projectIds.add(String(b.projectId)); });
 
-  const situationsOuvertes = situations.filter((s) =>
+  const situationsOuvertes = activeSituations.filter((s) =>
     ['draft', 'in_progress', 'partially_paid'].includes(s.status)).length;
-  const situationsSoldees = situations.filter((s) => s.status === 'settled').length;
-  const situationsCloturees = situations.filter((s) => s.status === 'closed').length;
-  const situationsValidees = situations.filter((s) =>
+  const situationsSoldees = activeSituations.filter((s) => s.status === 'settled').length;
+  const situationsCloturees = activeSituations.filter((s) => s.status === 'closed').length;
+  const situationsValidees = activeSituations.filter((s) =>
     ['settled', 'closed', 'partially_paid'].includes(s.status)).length;
-  const situationsEnAttente = situations.filter((s) =>
+  const situationsEnAttente = activeSituations.filter((s) =>
     ['draft', 'in_progress'].includes(s.status)).length;
   const montantValide = round2(
-    situations
+    activeSituations
       .filter((s) => ['settled', 'closed', 'partially_paid'].includes(s.status))
       .reduce((s, x) => s + (Number(x.grossAmount) || 0), 0),
   );
   const montantEnAttente = round2(
-    situations
+    activeSituations
       .filter((s) => ['draft', 'in_progress'].includes(s.status))
       .reduce((s, x) => s + (Number(x.grossAmount) || 0), 0),
   );
@@ -152,19 +190,22 @@ export function buildAccountKpis({
     travauxRealises,
     montantBrutAPayer,
     montantsPayes,
+    /** Affichage réglé (avance consommée + paiements complémentaires). */
+    totalDejaPaye,
+    montantRegle: totalDejaPaye,
     retenues,
     resteNetAPayer,
     resteAPayer: resteNetAPayer,
     nombreProjets: projectIds.size,
-    situationsOuvertes: situations.length ? situationsOuvertes : 0,
-    situationsSoldees: situations.length ? situationsSoldees : 0,
+    situationsOuvertes: activeSituations.length ? situationsOuvertes : 0,
+    situationsSoldees: activeSituations.length ? situationsSoldees : 0,
     situationsCloturees,
     situationsValidees,
     situationsEnAttente,
-    montantValide: situations.length ? montantValide : travauxRealises,
-    montantEnAttente: situations.length ? montantEnAttente : 0,
-    totalSituations: situations.length,
-    derniereOperation: payments[0]?.paymentDate || situations[0]?.situationDate || null,
+    montantValide: activeSituations.length ? montantValide : (situations.length ? 0 : travauxRealises),
+    montantEnAttente: activeSituations.length ? montantEnAttente : 0,
+    totalSituations: activeSituations.length,
+    derniereOperation: payments[0]?.paymentDate || activeSituations[0]?.situationDate || null,
     _debug: {
       kpiSource,
       hasGlobalAdvances,
@@ -192,6 +233,7 @@ export function buildProjectSituations({ payments = [], balances = [], assignmen
         totalAvances: 0,
         totalRetenues: 0,
         totalPaye: 0,
+        totalPayeComplementaire: 0,
         remainingFromBalance: null,
         paymentCount: 0,
         assignmentStatus: null,
@@ -219,16 +261,18 @@ export function buildProjectSituations({ payments = [], balances = [], assignmen
     row.totalTravaux = round2(row.totalTravaux + gross);
     row.totalAvances = round2(row.totalAvances + avEff);
     row.totalRetenues = round2(row.totalRetenues + (Number(p.retenues) || 0));
-    if (isPaid(p)) row.totalPaye = round2(row.totalPaye + (Number(p.amount) || 0));
+    if (isPaid(p)) row.totalPayeComplementaire = round2(row.totalPayeComplementaire + (Number(p.amount) || 0));
     row.paymentCount += 1;
     if (p.id) row.paymentIds.push(p.id);
     const d = p.paymentDate || p.created_at;
     if (d && (!row.lastDate || String(d) > String(row.lastDate))) row.lastDate = d;
   });
   return [...map.values()].map((row) => {
+    const totalPayeComplementaire = Number(row.totalPayeComplementaire) || 0;
+    const totalPaye = round2(row.totalAvances + totalPayeComplementaire);
     const soldeRestant = row.remainingFromBalance != null
       ? round2(row.remainingFromBalance)
-      : round2(Math.max(0, row.totalTravaux - row.totalAvances - row.totalRetenues - row.totalPaye));
+      : round2(Math.max(0, row.totalTravaux - row.totalAvances - row.totalRetenues - totalPayeComplementaire));
     const isSansProjet = !row.projectId;
     let statutCompte = 'ouverte';
     let statutLabel = 'Ouverte';
@@ -239,21 +283,24 @@ export function buildProjectSituations({ payments = [], balances = [], assignmen
     } else if (row.assignmentStatus === 'annulée') {
       statutCompte = 'annulee';
       statutLabel = 'Annulée';
-    } else if (row.paymentCount > 0 && soldeRestant <= 0.009 && row.totalPaye > 0.009) {
+    } else if (row.paymentCount > 0 && soldeRestant <= 0.009 && totalPaye > 0.009) {
       statutCompte = 'soldee';
       statutLabel = 'Soldée';
-    } else if (row.paymentCount > 0 && soldeRestant <= 0.009 && row.totalAvances + 0.009 >= row.totalTravaux) {
-      statutCompte = 'couverte_avance';
-      statutLabel = 'Couverte par avance';
+    } else if (row.totalTravaux > 0.009 && soldeRestant <= 0.009) {
+      statutCompte = 'soldee';
+      statutLabel = 'Soldée';
     }
     return {
       ...row,
+      totalPayeComplementaire,
+      totalPaye,
       soldeRestant,
       statutCompte,
       statutLabel,
       canAssignProject: isSansProjet && (row.paymentIds || []).length > 0,
     };
-  }).sort((a, b) => String(b.lastDate || '').localeCompare(String(a.lastDate || '')));
+  }).filter((row) => row.assignmentStatus !== 'annulée' || row.totalTravaux > 0.009)
+    .sort((a, b) => String(b.lastDate || '').localeCompare(String(a.lastDate || '')));
 }
 
 export function buildAccountHistory(payments = [], events = [], imputations = []) {
