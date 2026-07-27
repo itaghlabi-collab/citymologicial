@@ -15,6 +15,7 @@ import {
   submitProjectStaffNeed,
   getProjectStaffNeed,
   computeBesoinStats,
+  repairOrphanStaffNeedsToRh,
 } from '../../services/projects/projectBesoins';
 import { generateBesoinPdf } from '../../services/projects/projectBesoinPdf';
 import { getBesoinActions } from './besoins/besoinActions';
@@ -73,6 +74,11 @@ export default function ProjectBesoinsModule({ projet }) {
     setLoading(true);
     setError('');
     try {
+      try {
+        await repairOrphanStaffNeedsToRh({ projectId });
+      } catch (err) {
+        console.warn('[CITYMO] repair orphan staff needs (projet)', err);
+      }
       setNeeds(await listProjectStaffNeeds(projectId, projectMeta));
     } catch (err) {
       setError(err.message || 'Erreur de chargement.');

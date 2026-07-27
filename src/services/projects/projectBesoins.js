@@ -215,10 +215,40 @@ function toDbPayload(projectId, form, userId) {
   };
 }
 
+async function findOpenDuplicateNeed(projectId, form) {
+  const type = form.type_besoin || form.fonction || 'Ouvriers';
+  const corps = (form.corps_metier || '').trim();
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .select('id, ref_besoin, type_besoin, corps_metier, statut, resource_request_id, date_debut_souhaitee')
+    .eq('project_id', projectId)
+    .not('statut', 'in', '("clos","annule","refuse","couvert")');
+  if (error) throw error;
+  const date = form.date_debut_souhaitee || null;
+  return (data || []).find((row) => {
+    if ((row.type_besoin || '') !== type) return false;
+    if (type === 'Ouvriers' && normBesoinFonction(row.corps_metier) !== normBesoinFonction(corps)) return false;
+    if (type !== 'Ouvriers' && corps && normBesoinFonction(row.corps_metier) !== normBesoinFonction(corps)) return false;
+    if (date && row.date_debut_souhaitee && String(row.date_debut_souhaitee).slice(0, 10) !== String(date).slice(0, 10)) {
+      return false;
+    }
+    return true;
+  }) || null;
+}
+
 export async function createProjectStaffNeed(projectId, form, { submit = false, projet = null } = {}) {
   if (!projectId) throw new Error('Projet requis.');
   const user = await requireUser();
   const actorName = await getProfileName(user.id);
+
+  const dup = await findOpenDuplicateNeed(projectId, form);
+  if (dup) {
+    throw new Error(
+      `Un besoin ouvert existe déjà (${dup.ref_besoin || 'sans réf'}) pour cette fonction. `
+      + 'Modifiez-le ou soumettez-le à la RH au lieu d’en créer un second.',
+    );
+  }
+
   const ref = await generateBesoinRef();
   const payload = {
     ...toDbPayload(projectId, form, user.id),
@@ -236,7 +266,19 @@ export async function createProjectStaffNeed(projectId, form, { submit = false, 
   );
   let need = await getProjectStaffNeed(data.id);
   if (submit && projet) {
-    need = await submitNeedToRh(need, projet, user.id, actorName);
+    try {
+      need = await submitNeedToRh(need, projet, user.id, actorName);
+    } catch (err) {
+      // Évite les orphelins / doublons : rollback si la transmission RH échoue
+      await getSupabase().from(TABLE).delete().eq('id', data.id);
+      throw new Error(
+        `Transmission RH impossible (${err.message || 'erreur'}). `
+        + 'Le besoin n’a pas été enregistré — vérifiez les droits « Demandes ressources ».',
+      );
+    }
+  } else if (submit && !projet) {
+    await getSupabase().from(TABLE).delete().eq('id', data.id);
+    throw new Error('Projet manquant — impossible de transmettre le besoin à la RH.');
   }
   return need;
 }
@@ -262,7 +304,20 @@ export async function updateProjectStaffNeed(id, form, { submit = false, projet 
   await logHistory(id, submit ? 'soumis' : 'updated', submit ? 'Besoin soumis au service RH' : 'Besoin modifié', user.id, actorName);
   let need = await getProjectStaffNeed(id);
   if (submit && projet) {
-    need = await submitNeedToRh(need, projet, user.id, actorName);
+    try {
+      need = await submitNeedToRh(need, projet, user.id, actorName);
+    } catch (err) {
+      await getSupabase()
+        .from(TABLE)
+        .update({ statut: existing.statut === 'brouillon' ? 'brouillon' : existing.statut, updated_at: new Date().toISOString() })
+        .eq('id', id);
+      throw new Error(
+        `Transmission RH impossible (${err.message || 'erreur'}). `
+        + 'Le besoin n’a pas été transmis — réessayez ou contactez un admin.',
+      );
+    }
+  } else if (submit && !projet) {
+    throw new Error('Projet manquant — impossible de transmettre le besoin à la RH.');
   } else {
     await syncProjectStaffNeedsCoverage(existing.project_id);
   }
@@ -272,7 +327,7 @@ export async function updateProjectStaffNeed(id, form, { submit = false, projet 
 async function submitNeedToRh(need, projet, userId, actorName) {
   if (need.resource_request_id) return need;
   const req = await createRhRequestFromNeed(need, projet);
-  await logHistory(need.id, 'rh_request', `Demande RH ${req.ref} générée automatiquement`, userId, actorName);
+  await logHistory(need.id, 'rh_request', `Demande RH ${req.ref || req.ref_demande || ''} générée automatiquement`, userId, actorName);
   return getProjectStaffNeed(need.id);
 }
 
@@ -346,8 +401,24 @@ export async function syncProjectStaffNeedsCoverage(projectId, projectMeta = nul
 }
 
 export async function createRhRequestFromNeed(need, projet) {
-  const user = await requireUser();
-  const actorName = await getProfileName(user.id);
+  // Préférer la RPC SECURITY DEFINER (contourne le blocage RLS demandes-ressources)
+  try {
+    const { data: rpcData, error: rpcError } = await getSupabase()
+      .rpc('submit_staff_need_to_rh', { p_need_id: need.id });
+    if (!rpcError && rpcData?.id) {
+      return {
+        id: rpcData.id,
+        ref: rpcData.ref_demande || '',
+        ref_demande: rpcData.ref_demande || '',
+      };
+    }
+    if (rpcError && !/function|does not exist|404/i.test(rpcError.message || '')) {
+      throw rpcError;
+    }
+  } catch (err) {
+    if (!/function|does not exist|404/i.test(err.message || '')) throw err;
+  }
+
   const { createResourceRequest } = await import('../rh/resourceRequests');
   const commentaire = [
     need.description_travaux,
@@ -357,7 +428,7 @@ export async function createRhRequestFromNeed(need, projet) {
   ].filter(Boolean).join('\n');
 
   const req = await createResourceRequest({
-    project: projet,
+    project: projet || { id: need.project_id },
     fonction: need.type_besoin === 'Ouvriers' ? (need.corps_metier || 'Ouvrier') : need.type_besoin,
     quantite: need.quantite_necessaire,
     date_souhaitee: need.date_debut_souhaitee,
@@ -376,6 +447,44 @@ export async function createRhRequestFromNeed(need, projet) {
     .eq('id', need.id);
 
   return req;
+}
+
+/**
+ * Relie les besoins "soumis" sans resource_request_id vers Demandes ressources.
+ * À appeler au chargement RH / projets pour réparer les orphelins.
+ */
+export async function repairOrphanStaffNeedsToRh({ projectId = null } = {}) {
+  await requireUser();
+  let q = getSupabase()
+    .from(TABLE)
+    .select('id, project_id, ref_besoin, type_besoin, corps_metier, quantite_necessaire, date_debut_souhaitee, priorite, description_travaux, competences, epi_obligatoires, observation, statut, resource_request_id')
+    .is('resource_request_id', null)
+    .in('statut', ['soumis', 'en_recherche_rh']);
+  if (projectId) q = q.eq('project_id', projectId);
+  const { data, error } = await q.order('created_at', { ascending: true });
+  if (error) throw error;
+
+  const repaired = [];
+  const failures = [];
+  for (const row of data || []) {
+    try {
+      let projet = { id: row.project_id };
+      const { data: proj } = await getSupabase()
+        .from('projects')
+        .select('id, nom, ref')
+        .eq('id', row.project_id)
+        .maybeSingle();
+      if (proj) projet = proj;
+      const req = await createRhRequestFromNeed(
+        enrichNeedRow(row, { assignments: [], subAssignments: [], projectMeta: {} }),
+        projet,
+      );
+      repaired.push({ needId: row.id, ref: row.ref_besoin, requestId: req.id, requestRef: req.ref || req.ref_demande });
+    } catch (err) {
+      failures.push({ needId: row.id, ref: row.ref_besoin, error: err.message || String(err) });
+    }
+  }
+  return { repaired, failures, scanned: (data || []).length };
 }
 
 export async function syncNeedFromRhRequest(request, { statut, details, actorId, actorName } = {}) {

@@ -20,6 +20,7 @@ import {
   closeRecruitmentRequest,
   deleteResourceRequest,
 } from '../services/rh/resourceRequests';
+import { repairOrphanStaffNeedsToRh } from '../services/projects/projectBesoins';
 import { listWorkers } from '../services/rh/workers';
 import { KpiCard, INPUT_STYLE } from './inventaire/shared';
 import RhAssignWorkersModal from './rh/RhAssignWorkersModal';
@@ -69,6 +70,17 @@ export default function DemandesRessources() {
     setLoading(true);
     setError('');
     try {
+      try {
+        const repair = await repairOrphanStaffNeedsToRh();
+        if (repair.repaired?.length) {
+          console.info('[CITYMO] besoins RH orphelins reliés:', repair.repaired.length);
+        }
+        if (repair.failures?.length) {
+          console.warn('[CITYMO] repair orphan staff needs failures', repair.failures);
+        }
+      } catch (err) {
+        console.warn('[CITYMO] repair orphan staff needs', err);
+      }
       setRequests(await listResourceRequests());
     } catch (err) {
       setError(err.message || 'Erreur de chargement.');
