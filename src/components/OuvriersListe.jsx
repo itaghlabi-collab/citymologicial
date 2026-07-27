@@ -9,10 +9,19 @@ import {
 import { useState, useEffect, useRef, useCallback, useId } from 'react';
 import { createPortal } from 'react-dom';
 import { useWorkers } from '../hooks/useWorkers';
-import { scanCIN, canUseCamera, getCameraBlockedReason, getCameraErrorMessage, getCINCameraStream, preloadOcrEngine } from '../services/ocr';
+import {
+  scanCIN,
+  assessClientQuality,
+  canUseCamera,
+  getCameraBlockedReason,
+  getCameraErrorMessage,
+  getCINCameraStream,
+  preloadOcrEngine,
+} from '../services/ocr';
 import { captureCINFromVideo, prepareImportedCINImage } from '../services/cinCapture';
 import { generateWorkerPdf } from '../services/rh/workerPdf';
 import { workerTarifJournalier } from '../services/rh/workers';
+import CinVerifyModal from './ouvriers/CinVerifyModal';
 
 /* Exported for compatibility — starts empty, populated from API */
 export const SEED_WORKERS = [];
@@ -168,18 +177,19 @@ function PhotoUpload({ value, onChange, label }) {
   );
 }
 
-/* ── Zone Documents CIN — scan principal, galerie secondaire ── */
-function CINDocZone({ side, value, onChange, onScan }) {
+/* ── Zone Documents CIN — import image (pas d'ouverture caméra auto) ── */
+function CINDocZone({ side, value, onChange, quality }) {
   const inputRef = useRef(null);
+  const [dragOver, setDragOver] = useState(false);
   const isRecto = side === 'recto';
-  const title = isRecto ? 'Scanner CIN recto' : 'Scanner CIN verso';
+  const title = isRecto ? 'CIN recto' : 'CIN verso';
 
   function isImageFile(file) {
     if (!file) return false;
     const type = (file.type || '').toLowerCase();
     const name = (file.name || '').toLowerCase();
     if (type === 'application/pdf') return false;
-    return type.startsWith('image/') || /\.(jpe?g|png|webp|heic|heif|gif)$/i.test(name);
+    return type.startsWith('image/') || /\.(jpe?g|png|webp)$/i.test(name);
   }
 
   function handleFile(file) {
@@ -195,26 +205,22 @@ function CINDocZone({ side, value, onChange, onScan }) {
     inputRef.current?.click();
   }
 
-  function openScanner(e) {
-    e?.stopPropagation();
-    onScan(side);
-  }
-
-  const hiddenInputStyle = {
-    position: 'absolute', width: 1, height: 1, padding: 0, margin: -1,
-    overflow: 'hidden', clip: 'rect(0,0,0,0)', whiteSpace: 'nowrap', border: 0,
-  };
+  const qLabel = quality?.label;
+  const qMsg = quality?.messages?.[0];
 
   return (
     <div className="cin-doc-zone-wrap">
       <div
-        className={'cin-doc-zone' + (value ? ' has-img' : '')}
-        role="button"
-        tabIndex={0}
-        onClick={openScanner}
-        onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openScanner(); } }}
+        className={'cin-doc-zone' + (value ? ' has-img' : '') + (dragOver ? ' cin-doc-zone--drag' : '')}
+        onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+        onDragLeave={() => setDragOver(false)}
+        onDrop={(e) => {
+          e.preventDefault();
+          setDragOver(false);
+          handleFile(e.dataTransfer?.files?.[0]);
+        }}
       >
-        <CINFrame hasImage={Boolean(value)} hint={value ? '' : CIN_HINT} className="cin-doc-zone-frame">
+        <CINFrame hasImage={Boolean(value)} hint={value ? '' : 'Importer JPG, PNG ou WEBP'} className="cin-doc-zone-frame">
           {value ? (
             <>
               {(value.startsWith('data:image') || value.startsWith('http')) ? (
@@ -222,9 +228,6 @@ function CINDocZone({ side, value, onChange, onScan }) {
               ) : (
                 <div className="cin-id-frame-empty"><span>Photo chargée</span></div>
               )}
-              <div className="cin-doc-zone-rescan">
-                <ScanLine size={14} /> Rescanner
-              </div>
               <button type="button" className="cin-doc-zone-clear"
                 onClick={e => { e.stopPropagation(); onChange('', null); }}
                 aria-label="Supprimer">
@@ -232,28 +235,40 @@ function CINDocZone({ side, value, onChange, onScan }) {
               </button>
             </>
           ) : (
-            <div className="cin-doc-zone-empty">
+            <div className="cin-doc-zone-empty" onClick={openGallery} role="button" tabIndex={0}
+              onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openGallery(); } }}>
               <div className="cin-doc-zone-icon">
-                <ScanLine size={28} strokeWidth={1.75} />
+                <Upload size={28} strokeWidth={1.75} />
               </div>
               <span className="cin-doc-zone-title">{title}</span>
-              <span className="cin-doc-zone-sub">ou importer depuis la galerie</span>
-              <span className="cin-doc-zone-hint">{CIN_HINT}</span>
+              <span className="cin-doc-zone-sub">Glisser-déposer ou importer</span>
             </div>
           )}
         </CINFrame>
       </div>
 
-      <button type="button" className="cin-doc-zone-gallery" onClick={openGallery}>
-        <Upload size={12} /> Galerie
-      </button>
+      <div className="cin-doc-zone-actions">
+        <button type="button" className="cin-doc-zone-gallery" onClick={openGallery}>
+          <Upload size={12} /> {value ? 'Remplacer' : 'Importer une image'}
+        </button>
+        {value && (
+          <button type="button" className="cin-doc-zone-gallery" onClick={() => onChange('', null)}>
+            <X size={12} /> Supprimer
+          </button>
+        )}
+      </div>
+      {qLabel && (
+        <div className={'cin-quality-badge cin-quality-badge--' + qLabel}>
+          {qMsg || (qLabel === 'bonne' ? 'Bonne qualité.' : qLabel === 'acceptable' ? 'Qualité acceptable.' : qLabel)}
+        </div>
+      )}
 
       <input
         ref={inputRef}
         type="file"
-        accept="image/jpeg,image/png,image/webp,image/heic,image/heif"
+        accept="image/jpeg,image/png,image/webp"
         onChange={e => { handleFile(e.target.files?.[0]); e.target.value = ''; }}
-        style={hiddenInputStyle}
+        style={{ display: 'none' }}
         tabIndex={-1}
         aria-hidden="true"
       />
@@ -753,7 +768,7 @@ function CINScanner({
         <div className="cin-upload-box">
           <Loader size={32} className="cin-spin" style={{ color: 'var(--red)' }} />
           <div className="cin-upload-title">Analyse en cours...</div>
-          <div className="cin-upload-sub">{uploadStatus || 'Extraction des données CIN (Mindee ou Tesseract)'}</div>
+          <div className="cin-upload-sub">{uploadStatus || 'Extraction des données CIN (CITYMO OCR)'}</div>
           <div className="cin-upload-previews">
             {rectoImg && <img src={rectoImg} alt="Recto" className="cin-upload-thumb" />}
             {versoImg && <img src={versoImg} alt="Verso" className="cin-upload-thumb" />}
@@ -1144,7 +1159,7 @@ function OuvrierDetail({ worker, onBack, onEdit, onDownloadPdf, pdfLoading }) {
 /* ══════════════════════════════════════════════════════
    OUVRIER FORM MODAL
    ══════════════════════════════════════════════════════ */
-function OuvrierModal({ worker, onClose, onSave, saving }) {
+function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExisting }) {
   const isEdit = !!worker;
   const [form, setForm] = useState(() => formFromWorker(worker));
   const [errors, setErrors] = useState({});
@@ -1156,8 +1171,17 @@ function OuvrierModal({ worker, onClose, onSave, saving }) {
   const [ocrFilled, setOcrFilled]   = useState(false);
   const [ocrToast,  setOcrToast]    = useState('');
   const [ocrAnalyzing, setOcrAnalyzing] = useState(false);
+  const [ocrProgress, setOcrProgress] = useState('');
+  const [ocrResult, setOcrResult] = useState(null);
+  const [showVerify, setShowVerify] = useState(false);
+  const [forceOcr, setForceOcr] = useState(false);
+  const [qualityRecto, setQualityRecto] = useState(null);
+  const [qualityVerso, setQualityVerso] = useState(null);
+  const [fieldConflicts, setFieldConflicts] = useState(null);
+  const [duplicateHit, setDuplicateHit] = useState(null);
   const ocrFilesRef = useRef({ recto: null, verso: null });
   const ocrFullDataUrlRef = useRef({ recto: null, verso: null });
+  const lastOcrMetaRef = useRef(null);
 
   const formTabs = [
     { id: 'identite',    label: 'Identite' },
@@ -1174,42 +1198,44 @@ function OuvrierModal({ worker, onClose, onSave, saving }) {
       set(side === 'recto' ? 'cin_recto' : 'cin_verso', '');
       ocrFilesRef.current[side] = null;
       ocrFullDataUrlRef.current[side] = null;
+      if (side === 'recto') setQualityRecto(null);
+      else setQualityVerso(null);
       return;
     }
     if (!file) {
       set(side === 'recto' ? 'cin_recto' : 'cin_verso', preview);
+      const q = await assessClientQuality(preview);
+      if (side === 'recto') setQualityRecto(q);
+      else setQualityVerso(q);
       return;
     }
     try {
       const prepared = await prepareImportedCINImage(preview, file, side);
-      console.info('[OCR CIN] using original/cropped file', {
-        side,
-        ocrBytes: prepared.ocrFile.size,
-        display: 'cropped-doc-zone',
-      });
       set(side === 'recto' ? 'cin_recto' : 'cin_verso', prepared.previewDataUrl);
       ocrFilesRef.current[side] = prepared.ocrFile;
       ocrFullDataUrlRef.current[side] = prepared.fullDataUrl || null;
+      const q = await assessClientQuality(prepared.fullDataUrl || prepared.previewDataUrl);
+      if (side === 'recto') setQualityRecto(q);
+      else setQualityVerso(q);
     } catch (err) {
       console.error('[SCAN CIN] doc zone crop failed', err);
       set(side === 'recto' ? 'cin_recto' : 'cin_verso', preview);
       ocrFilesRef.current[side] = file;
       ocrFullDataUrlRef.current[side] = preview;
+      const q = await assessClientQuality(preview);
+      if (side === 'recto') setQualityRecto(q);
+      else setQualityVerso(q);
     }
   }
 
   function openCINScanner() {
-    setScannerMode('full');
-    setCaptureSide(null);
-    setScannerStream(null);
-    setShowScanner(true);
+    setFormTab('documents');
+    setOcrToast('Importez le recto et le verso, puis cliquez sur « Analyser la CIN ».');
+    setTimeout(() => setOcrToast(''), 5000);
   }
 
-  function openCINScannerForSide(side) {
-    setScannerMode('capture');
-    setCaptureSide(side);
-    setScannerStream(null);
-    setShowScanner(true);
+  function openCINScannerForSide(_side) {
+    /* Caméra optionnelle désactivée en entrée auto — import prioritaire */
   }
 
   function closeCINScanner() {
@@ -1227,78 +1253,120 @@ function OuvrierModal({ worker, onClose, onSave, saving }) {
       set('cin_recto', preview);
       ocrFilesRef.current.recto = file || null;
       ocrFullDataUrlRef.current.recto = fullDataUrl || null;
+      assessClientQuality(fullDataUrl || preview).then(setQualityRecto);
     } else {
       set('cin_verso', preview);
       ocrFilesRef.current.verso = file || null;
       ocrFullDataUrlRef.current.verso = fullDataUrl || null;
+      assessClientQuality(fullDataUrl || preview).then(setQualityVerso);
     }
     setFormTab('documents');
   }
 
-  const WORKER_OCR_FIELDS = ['cin', 'prenom', 'nom', 'date_expiration', 'sexe', 'nationalite'];
-
-  function applyOcrResult(result) {
-    const {
-      _ocr_warning, _ocr_partial, _ocr_source, _ocr_provider_used, _ocr_backend_error,
-      _ocr_audit, _ocr_debug, provider, confidence, lieu_naissance,
-    } = result;
-    const fields = {};
-    WORKER_OCR_FIELDS.forEach((k) => {
-      if (result[k] != null && String(result[k]).trim() !== '') fields[k] = result[k];
+  function applyConfirmedOcr(payload) {
+    const conflicts = {};
+    Object.keys(payload).forEach((k) => {
+      const cur = String(form[k] || '').trim();
+      const next = String(payload[k] || '').trim();
+      if (cur && next && cur !== next) conflicts[k] = { current: cur, detected: next };
     });
-    if (_ocr_provider_used) {
-      console.info('[OCR CIN] OCR provider utilisé = ' + _ocr_provider_used);
+    if (Object.keys(conflicts).length) {
+      setFieldConflicts({ conflicts, payload });
+      return;
     }
-    if (_ocr_backend_error) {
-      console.error('[OCR CIN] Mindee échec (erreur exacte):', _ocr_backend_error);
-    }
-    let warning = _ocr_warning || '';
-    if (_ocr_audit?.verdict && !_ocr_audit.verdict.mindee_really_used) {
-      const root = _ocr_audit.verdict.root_cause || 'Mindee non utilisé — vérifiez MINDEE_API_KEY et MINDEE_MODEL_ID sur Vercel.';
-      warning = root + (warning ? ' — ' + warning : '');
-    }
-    handleScanExtracted(fields, warning || undefined);
-  }
-
-  function handleScanExtracted(data, warning) {
-    setForm(p => ({ ...p, ...data }));
+    setForm((p) => ({ ...p, ...payload }));
+    setShowVerify(false);
+    setOcrResult(null);
     setFormTab('identite');
-    const filled = ['cin', 'prenom', 'nom', 'date_expiration', 'sexe', 'nationalite']
-      .filter(k => data[k] && String(data[k]).trim() !== '');
     setOcrFilled(true);
-    if (warning) {
-      setOcrToast(warning);
-    } else if (filled.length > 0) {
-      setOcrToast(`${filled.length} champ${filled.length > 1 ? 's' : ''} rempli${filled.length > 1 ? 's' : ''} automatiquement`);
-    } else {
-      setOcrToast('OCR termine — verifiez et corrigez les champs manuellement');
-    }
+    setOcrToast('Informations CIN confirmées — vérifiez la fiche.');
     setTimeout(() => setOcrFilled(false), 3000);
-    setTimeout(() => setOcrToast(''), 6000);
+    setTimeout(() => setOcrToast(''), 5000);
+    lastOcrMetaRef.current = {
+      confirmed_at: new Date().toISOString(),
+      engine: ocrResult?.engine_used,
+      confidence: ocrResult?.confidence_globale,
+    };
   }
 
-  async function handleAnalyzeDocuments() {
+  function resolveConflicts(choices) {
+    // choices: { [key]: 'keep' | 'use' }
+    if (!fieldConflicts) return;
+    const merged = { ...fieldConflicts.payload };
+    Object.entries(fieldConflicts.conflicts).forEach(([k, v]) => {
+      if (choices[k] === 'keep') merged[k] = v.current;
+      else merged[k] = v.detected;
+    });
+    setFieldConflicts(null);
+    setForm((p) => ({ ...p, ...merged }));
+    setShowVerify(false);
+    setOcrResult(null);
+    setFormTab('identite');
+    setOcrToast('Fiche mise à jour.');
+    setTimeout(() => setOcrToast(''), 4000);
+  }
+
+  async function handleAnalyzeDocuments(force = forceOcr) {
     if (!form.cin_recto) {
-      setOcrToast('Importez au moins le recto CIN avant d\'analyser.');
+      setOcrToast('Recto manquant — importez le recto CIN.');
       setTimeout(() => setOcrToast(''), 4000);
+      return;
+    }
+    if (qualityRecto?.block_ocr && !force) {
+      setOcrToast(qualityRecto.messages?.[0] || 'Image non lisible');
+      setForceOcr(true);
+      setTimeout(() => setOcrToast(''), 6000);
       return;
     }
     setOcrAnalyzing(true);
     setOcrToast('');
+    setOcrProgress('Préparation de l\'image');
     try {
-      const result = await scanCIN(form.cin_recto, form.cin_verso || null, {
-        rectoFile: ocrFilesRef.current.recto,
-        versoFile: ocrFilesRef.current.verso,
-        rectoFullDataUrl: ocrFullDataUrlRef.current.recto,
-        versoFullDataUrl: ocrFullDataUrlRef.current.verso,
-      });
-      applyOcrResult(result);
+      const result = await scanCIN(
+        ocrFullDataUrlRef.current.recto || form.cin_recto,
+        ocrFullDataUrlRef.current.verso || form.cin_verso || null,
+        {
+          force,
+          onProgress: setOcrProgress,
+        },
+      );
+      setOcrResult(result);
+      setShowVerify(true);
+      setForceOcr(false);
     } catch (err) {
-      setOcrToast(err?.message || 'Erreur lecture image — saisissez les champs manuellement.');
-      setTimeout(() => setOcrToast(''), 6000);
+      if (err?.code === 'IMAGE_UNREADABLE' && err?.allow_force) {
+        setForceOcr(true);
+        setOcrToast((err.message || 'Image non lisible') + ' — vous pouvez analyser quand même.');
+      } else {
+        setOcrToast(err?.message || 'Service OCR indisponible — saisissez les champs manuellement.');
+      }
+      setTimeout(() => setOcrToast(''), 8000);
     } finally {
       setOcrAnalyzing(false);
+      setOcrProgress('');
     }
+  }
+
+  function findDuplicateWorker() {
+    const cin = String(form.cin || '').replace(/\s/g, '').toUpperCase();
+    const tel = String(form.telephone || '').replace(/\D/g, '');
+    const nom = String(form.nom || '').trim().toLowerCase();
+    const prenom = String(form.prenom || '').trim().toLowerCase();
+    const dn = String(form.date_naissance || '');
+    return (workers || []).find((w) => {
+      if (isEdit && w.id === worker?.id) return false;
+      const wCin = String(w.cin || '').replace(/\s/g, '').toUpperCase();
+      if (cin && wCin && cin === wCin) return true;
+      const wTel = String(w.telephone || '').replace(/\D/g, '');
+      if (tel && wTel && tel.length >= 9 && tel === wTel) return true;
+      if (
+        nom && prenom && dn
+        && String(w.nom || '').trim().toLowerCase() === nom
+        && String(w.prenom || '').trim().toLowerCase() === prenom
+        && String(w.date_naissance || '') === dn
+      ) return true;
+      return false;
+    }) || null;
   }
 
   function validate() {
@@ -1314,23 +1382,102 @@ function OuvrierModal({ worker, onClose, onSave, saving }) {
     ev.preventDefault();
     const errs = validate();
     if (Object.keys(errs).length) { setErrors(errs); setFormTab('identite'); return; }
+    const dup = findDuplicateWorker();
+    if (dup) {
+      setDuplicateHit(dup);
+      return;
+    }
     const result = await onSave({
       ...form,
       tarif: Number(form.tarif),
       tarif_unite: 'jour',
       experience: String(experienceToStars(form.experience)),
+      _ocr_meta: lastOcrMetaRef.current,
     }, isEdit);
     if (result?.success) onClose();
   }
 
   return (
     <>
+      {showVerify && ocrResult && (
+        <CinVerifyModal
+          result={ocrResult}
+          rectoPreview={form.cin_recto}
+          versoPreview={form.cin_verso}
+          currentForm={form}
+          onConfirm={applyConfirmedOcr}
+          onRetry={() => { setShowVerify(false); handleAnalyzeDocuments(true); }}
+          onCancel={() => { setShowVerify(false); setOcrResult(null); }}
+        />
+      )}
+
+      {fieldConflicts && (
+        <div className="cin-verify-overlay" role="dialog" aria-modal="true">
+          <div className="cin-verify-box" style={{ maxWidth: 480 }}>
+            <h2>Valeurs déjà renseignées</h2>
+            <p className="cin-verify-sub">Cette valeur est déjà renseignée. Voulez-vous la remplacer ?</p>
+            {Object.entries(fieldConflicts.conflicts).map(([k, v]) => (
+              <div key={k} className="cin-conflict-row">
+                <strong>{k}</strong>
+                <div>Actuelle : {v.current}</div>
+                <div>Détectée : {v.detected}</div>
+                <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
+                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => resolveConflicts({ [k]: 'keep', ...Object.fromEntries(Object.keys(fieldConflicts.conflicts).filter((x) => x !== k).map((x) => [x, 'use'])) })}>
+                    Conserver actuelle
+                  </button>
+                  <button type="button" className="btn btn-primary btn-sm" onClick={() => resolveConflicts({ [k]: 'use', ...Object.fromEntries(Object.keys(fieldConflicts.conflicts).filter((x) => x !== k).map((x) => [x, 'keep'])) })}>
+                    Utiliser détectée
+                  </button>
+                </div>
+              </div>
+            ))}
+            <div className="cin-verify-footer">
+              <button type="button" className="btn btn-ghost" onClick={() => setFieldConflicts(null)}>Annuler</button>
+              <button type="button" className="btn btn-primary" onClick={() => {
+                const all = {};
+                Object.keys(fieldConflicts.conflicts).forEach((k) => { all[k] = 'use'; });
+                resolveConflicts(all);
+              }}>
+                Remplacer toutes
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {duplicateHit && (
+        <div className="cin-verify-overlay" role="dialog" aria-modal="true">
+          <div className="cin-verify-box" style={{ maxWidth: 420 }}>
+            <h2>Ouvrier déjà existant</h2>
+            <p>
+              Un ouvrier avec ce numéro de CIN existe déjà
+              {duplicateHit.prenom ? ` (${duplicateHit.prenom} ${duplicateHit.nom})` : ''}.
+            </p>
+            <div className="cin-verify-footer">
+              <button type="button" className="btn btn-ghost" onClick={() => setDuplicateHit(null)}>Annuler</button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => {
+                  const w = duplicateHit;
+                  setDuplicateHit(null);
+                  onClose();
+                  onOpenExisting?.(w);
+                }}
+              >
+                Ouvrir la fiche existante
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showScanner && (
         <CINScanner
           mode={scannerMode}
           captureSide={captureSide}
           onCaptureOnly={handleSideCaptured}
-          onExtracted={applyOcrResult}
+          onExtracted={(result) => { setOcrResult(result); setShowVerify(true); }}
           onClose={closeCINScanner}
           initialStream={scannerStream}
           initialRecto={form.cin_recto}
@@ -1368,7 +1515,7 @@ function OuvrierModal({ worker, onClose, onSave, saving }) {
             </div>
             <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
               <button type="button" className="btn btn-ghost btn-sm" onClick={openCINScanner} style={{ display: 'flex', alignItems: 'center', gap: 5, color: 'var(--red)' }}>
-                <ScanLine size={13} /> <span className="ouv-scanner-label">Scanner CIN</span>
+                <ScanLine size={13} /> <span className="ouv-scanner-label">Scan CIN</span>
               </button>
               <button type="button" onClick={onClose} aria-label="Fermer" style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)', padding: 4, minWidth: 44, minHeight: 44 }}><X size={20} /></button>
             </div>
@@ -1493,13 +1640,19 @@ function OuvrierModal({ worker, onClose, onSave, saving }) {
               {/* ── TAB: DOCUMENTS ── */}
               {formTab === 'documents' && (
                 <div className="ouv-fields-grid">
+                  <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                    <Label>Scan CIN marocaine</Label>
+                    <p style={{ margin: '0 0 10px', fontSize: '0.78rem', color: 'var(--text-3)' }}>
+                      Importez le recto et le verso (JPG, PNG, WEBP). Aucune caméra n&apos;est ouverte automatiquement.
+                    </p>
+                  </div>
                   <div className="form-group">
                     <Label>CIN Recto</Label>
                     <CINDocZone
                       side="recto"
                       value={form.cin_recto}
+                      quality={qualityRecto}
                       onChange={(preview, file) => handleCINDocImport('recto', preview, file)}
-                      onScan={openCINScannerForSide}
                     />
                   </div>
                   <div className="form-group">
@@ -1507,24 +1660,34 @@ function OuvrierModal({ worker, onClose, onSave, saving }) {
                     <CINDocZone
                       side="verso"
                       value={form.cin_verso}
+                      quality={qualityVerso}
                       onChange={(preview, file) => handleCINDocImport('verso', preview, file)}
-                      onScan={openCINScannerForSide}
                     />
                   </div>
-                  <div className="form-group" style={{ gridColumn: '1 / -1', fontSize: '0.72rem', color: 'var(--text-3)', marginTop: -4 }}>
-                    {CIN_HINT} — format carte 85,60 × 53,98 mm
-                  </div>
                   <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                    {ocrAnalyzing && ocrProgress && (
+                      <div className="cin-ocr-progress">{ocrProgress}</div>
+                    )}
                     <button
                       type="button"
                       className="btn btn-primary cin-doc-analyze-btn"
                       disabled={ocrAnalyzing || !form.cin_recto}
-                      onClick={handleAnalyzeDocuments}
+                      onClick={() => handleAnalyzeDocuments(forceOcr)}
                     >
                       {ocrAnalyzing
-                        ? <><Loader size={15} className="cin-spin" /> Analyse en cours...</>
-                        : <><ScanLine size={15} /> Analyser les photos</>}
+                        ? <><Loader size={15} className="cin-spin" /> {ocrProgress || 'Analyse…'}</>
+                        : <><ScanLine size={15} /> Analyser la CIN</>}
                     </button>
+                    {forceOcr && !ocrAnalyzing && (
+                      <button
+                        type="button"
+                        className="btn btn-ghost"
+                        style={{ marginTop: 8 }}
+                        onClick={() => handleAnalyzeDocuments(true)}
+                      >
+                        Analyser quand même
+                      </button>
+                    )}
                   </div>
                 </div>
               )}
@@ -1710,6 +1873,8 @@ export default function OuvriersListe({ onWorkersChange }) {
             onClose={() => setShowModal(false)}
             onSave={handleSave}
             saving={saving}
+            workers={workers}
+            onOpenExisting={(w) => { setDetail(w); setView('detail'); setShowModal(false); }}
           />
         )}
       </>
@@ -1726,6 +1891,8 @@ export default function OuvriersListe({ onWorkersChange }) {
           onClose={() => setShowModal(false)}
           onSave={handleSave}
           saving={saving}
+          workers={workers}
+          onOpenExisting={(w) => { setDetail(w); setView('detail'); setShowModal(false); }}
         />
       )}
 

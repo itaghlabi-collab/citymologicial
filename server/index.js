@@ -118,7 +118,7 @@ app.use('/api/backups', backupsRouter);
 // ── Admin utilisateurs (mot de passe manuel) ──────────────────────────────────
 app.use('/api/admin/users', adminUsersRouter);
 
-// ── OCR module (CORS — clé Mindee côté serveur uniquement) ───────────────────
+// ── OCR module (proxy → service Python CITYMO) ───────────────────────────────
 app.use('/api/ocr', ocrRouter);
 
 // ── Legacy / existing module endpoints (HR, Finance, Stock, etc.) ─────────────

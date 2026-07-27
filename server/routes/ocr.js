@@ -1,376 +1,192 @@
 /**
- * CITYMO ERP – OCR Route
+ * CITYMO ERP – OCR Route (proxy vers service Python OpenCV/PaddleOCR)
  * POST /api/ocr/moroccan-cin
  *
- * Clé md_* → Mindee API v2 (extraction/enqueue + model_id UUID)
- * Clé re_* → Mindee API v1 (international_id/v2/predict, sans model_id)
+ * OCR_SERVICE_URL=http://localhost:8000  (service ocr-service/)
+ * Aucune dépendance Mindee.
  */
 'use strict';
 
 const express = require('express');
 const multer = require('multer');
-const path = require('path');
-const { pathToFileURL } = require('url');
 
 const router = express.Router();
 
 const upload = multer({
   storage: multer.memoryStorage(),
-  limits: { fileSize: 15 * 1024 * 1024 },
+  limits: { fileSize: 12 * 1024 * 1024 },
   fileFilter: (_req, file, cb) => {
     const mime = (file.mimetype || '').toLowerCase();
     const name = (file.originalname || '').toLowerCase();
-    if (mime.startsWith('image/') || /\.(jpe?g|png|webp|heic|heif)$/i.test(name)) {
+    if (mime.startsWith('image/') || /\.(jpe?g|png|webp)$/i.test(name)) {
       return cb(null, true);
     }
-    cb(new Error('Seules les images sont acceptees (jpeg, png, webp, heic).'));
+    cb(new Error('Seules les images sont acceptées (jpeg, png, webp).'));
   },
 });
 
-const MINDEE_V1_INTERNATIONAL_ID = process.env.MINDEE_ENDPOINT
-  || 'https://api.mindee.net/v1/products/mindee/international_id/v2/predict';
-const MINDEE_V2_EXTRACTION_ENQUEUE = 'https://api-v2.mindee.net/v2/products/extraction/enqueue';
-const MINDEE_V2_JOBS_BASE = 'https://api-v2.mindee.net/v2/jobs';
+const OCR_SERVICE_URL = (process.env.OCR_SERVICE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
+const OCR_TIMEOUT_MS = Number(process.env.OCR_TIMEOUT_MS || 90000);
 
-const MOCK_RECTO = {
-  fields: {
-    sex: { value: 'F', confidence: 0.98 },
-    address: { fields: { city: { value: 'CASABLANCA' }, country: { value: 'MAROC' } } },
-    surnames: [{ value: 'ELOUADOUD', confidence: 0.99 }],
-    given_names: [{ value: 'JIHANE', confidence: 0.99 }],
-    nationality: { value: 'MAROC' },
-    date_of_birth: { value: '2003-03-26' },
-    place_of_birth: { value: 'SIDI OTHMANE CASABLANCA' },
-    date_of_expiry: { value: '2029-11-25' },
-    document_number: { value: 'BA21889', confidence: 0.99 },
-  },
-};
-
-const MOCK_VERSO = {
-  fields: {
-    address: {
-      fields: {
-        street: { value: '14 BLOC 28 SID OTHMANE' },
-        city: { value: 'CASABLANCA' },
-      },
-    },
-  },
-};
-
-let _cinOcrModule = null;
-
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
-function isMindeeV2Key(key) {
-  return typeof key === 'string' && key.startsWith('md_');
-}
-
-function mindeeAuthHeader(apiKey) {
-  if (isMindeeV2Key(apiKey)) return { Authorization: apiKey };
-  return { Authorization: `Token ${apiKey}` };
-}
-
-/**
- * Model ID v2 = UUID généré quand vous créez le modèle "International ID" dans le dashboard.
- * Ce n'est PAS l'Organization ID.
- *
- * Sources acceptées :
- * 1. MINDEE_MODEL_ID=uuid
- * 2. MINDEE_MODEL_URL ou MINDEE_LIVE_TEST_URL contenant /models/{uuid}/...
- */
-const CITYMO_DEFAULT_MINDEE_MODEL_ID = 'a74f083a-cbad-406c-a13e-a8446fa74eb7';
-
-function resolveMindeeModelId() {
-  const direct = (process.env.MINDEE_MODEL_ID || '').trim();
-  if (/^[0-9a-f-]{36}$/i.test(direct)) return direct;
-
-  const fromUrl = (process.env.MINDEE_MODEL_URL || process.env.MINDEE_LIVE_TEST_URL || '').trim();
-  const match = fromUrl.match(/\/models\/([0-9a-f-]{36})/i);
-  if (match) return match[1];
-
-  return CITYMO_DEFAULT_MINDEE_MODEL_ID;
-}
-
-function resolveMindeeRouting(apiKey) {
-  if (isMindeeV2Key(apiKey)) {
+function mapToLegacyClientShape(result) {
+  if (!result || result.ok === false) {
     return {
-      version: 'v2',
-      endpoint: MINDEE_V2_EXTRACTION_ENQUEUE,
-      label: 'Mindee v2 Extraction (International ID)',
+      ok: false,
+      error: result?.error || 'Service OCR indisponible',
+      error_code: result?.error_code || 'OCR_UNAVAILABLE',
+      _ocr_warning: result?.error || 'Service OCR indisponible',
+      allow_force: result?.allow_force !== false,
+      quality_recto: result?.quality_recto,
+      quality_verso: result?.quality_verso,
+      progress: result?.progress || [],
+      provider: 'citymo',
     };
   }
+
+  const wf = result.worker_form || {};
   return {
-    version: 'v1',
-    endpoint: MINDEE_V1_INTERNATIONAL_ID,
-    label: 'Mindee v1 International ID',
+    ok: true,
+    partial: !!result.partial,
+    cin: wf.cin || '',
+    prenom: wf.prenom || '',
+    nom: wf.nom || '',
+    date_naissance: wf.date_naissance || '',
+    ville_naissance: wf.ville_naissance || '',
+    nationalite: wf.nationalite || 'Marocaine',
+    sexe: wf.sexe || '',
+    date_expiration: wf.date_expiration || '',
+    nom_arabe: wf.nom_arabe || '',
+    prenom_arabe: wf.prenom_arabe || '',
+    fields: result.fields || {},
+    confidence_globale: result.confidence_globale,
+    recto: result.recto,
+    verso: result.verso,
+    identical_faces: result.identical_faces,
+    warnings: result.warnings || [],
+    progress: result.progress || [],
+    engine_name: result.engine_name,
+    engine_version: result.engine_version,
+    engine_used: result.engine_used,
+    duration_ms: result.duration_ms,
+    provider: 'citymo',
+    _ocr_provider_used: result.engine_used || 'citymo',
+    _ocr_warning: (result.warnings || []).join(' — '),
+    _ocr_partial: !!result.partial,
   };
 }
 
-function modelIdHelpMessage() {
-  return [
-    'Model ID requis pour la clé md_* (API v2).',
-    'Ce n\'est pas l\'Organization ID.',
-    'Mindee Dashboard → Models → votre modèle "International ID" →',
-    'Settings (⚙) → copier "Model ID",',
-    'OU coller l\'URL Live Test dans MINDEE_MODEL_URL (ex: .../models/{uuid}/live-test).',
-  ].join(' ');
-}
-
-async function getCinOcrModule() {
-  if (!_cinOcrModule) {
-    _cinOcrModule = await import(pathToFileURL(path.join(__dirname, '../../src/services/cinOcr.js')));
-  }
-  return _cinOcrModule;
-}
-
-async function logMappedSide(fields, side) {
-  if (!fields || !Object.keys(fields).length) return null;
+async function forwardJson(payload) {
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), OCR_TIMEOUT_MS);
   try {
-    const { mapMindeeFields } = await getCinOcrModule();
-    const mapped = mapMindeeFields(fields, side);
-    console.info('[OCR CIN] mapped result', { side, mapped });
-    return mapped;
-  } catch (err) {
-    console.warn('[OCR CIN] mapped result skipped', err.message);
-    return null;
-  }
-}
-
-function assertRectoExtracted(mapped, label) {
-  if (label !== 'recto' || !mapped) return;
-  if (!mapped.numero_cin && !mapped.prenom && !mapped.nom) {
-    const err = new Error('Mindee: extraction recto vide — fallback Tesseract.');
-    err.code = 'MINDEE_EMPTY_EXTRACTION';
-    throw err;
-  }
-}
-
-/** Extrait fields depuis réponse Mindee v1 ou v2. */
-function extractFieldsFromInference(json) {
-  if (!json || typeof json !== 'object') return null;
-
-  const candidates = [
-    json?.inference?.result?.fields,
-    json?.document?.inference?.result?.fields,
-    json?.document?.inference?.prediction,
-    json?.inference?.prediction,
-    json?.inference?.result?.prediction,
-    json?.prediction,
-    json?.result?.fields,
-    json?.fields,
-  ];
-
-  for (const candidate of candidates) {
-    if (candidate && typeof candidate === 'object' && !Array.isArray(candidate) && Object.keys(candidate).length > 0) {
-      return candidate;
-    }
-  }
-
-  return null;
-}
-
-async function mindeeV1Predict(buffer, mime, label, endpoint) {
-  const apiKey = process.env.MINDEE_API_KEY;
-  const https = require('https');
-  const { URL } = require('url');
-
-  console.info('[OCR CIN] provider=mindee');
-  console.info('[OCR CIN] endpoint used=' + endpoint);
-
-  const boundary = `----CitymoBoundary${Date.now()}`;
-  const ext = mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg';
-  const partHead = Buffer.from(
-    `--${boundary}\r\n` +
-    `Content-Disposition: form-data; name="document"; filename="${label}.${ext}"\r\n` +
-    `Content-Type: ${mime}\r\n\r\n`,
-  );
-  const partTail = Buffer.from(`\r\n--${boundary}--\r\n`);
-  const body = Buffer.concat([partHead, buffer, partTail]);
-
-  const parsed = new URL(endpoint);
-  const rawResponse = await new Promise((resolve, reject) => {
-    const chunks = [];
-    const req = https.request({
+    const res = await fetch(`${OCR_SERVICE_URL}/analyze`, {
       method: 'POST',
-      hostname: parsed.hostname,
-      path: parsed.pathname + (parsed.search || ''),
-      headers: {
-        ...mindeeAuthHeader(apiKey),
-        'Content-Type': `multipart/form-data; boundary=${boundary}`,
-        'Content-Length': body.length,
-      },
-    }, (res) => {
-      res.on('data', (d) => chunks.push(d));
-      res.on('end', () => resolve({ status: res.statusCode, text: Buffer.concat(chunks).toString('utf8') }));
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(payload),
+      signal: ctrl.signal,
     });
-    req.on('error', reject);
-    req.write(body);
-    req.end();
-  });
-
-  let json;
-  try { json = JSON.parse(rawResponse.text); } catch {
-    throw new Error(`Mindee v1: reponse non-JSON (HTTP ${rawResponse.status})`);
-  }
-  if (rawResponse.status !== 201 && rawResponse.status !== 200) {
-    const detail = json?.api_request?.error?.message || json?.message || rawResponse.text;
-    throw new Error(`Mindee v1 erreur ${rawResponse.status}: ${detail}`);
-  }
-
-  const fields = extractFieldsFromInference(json);
-  if (!fields || !Object.keys(fields).length) {
-    throw new Error('Mindee v1: aucun champ extrait.');
-  }
-
-  console.info('[OCR CIN] Mindee response OK', { side: label, fieldKeys: Object.keys(fields) });
-  const mapped = await logMappedSide(fields, label === 'verso' ? 'verso' : 'recto');
-  assertRectoExtracted(mapped, label);
-  return { raw: json, fields };
-}
-
-async function mindeeV2Predict(buffer, mime, label, endpoint) {
-  const apiKey = process.env.MINDEE_API_KEY;
-  const modelId = resolveMindeeModelId();
-  if (!modelId) {
-    console.warn(`[OCR CIN] ${label} — clé md_* sans MINDEE_MODEL_ID, fallback International ID v1`);
-    return mindeeV1Predict(buffer, mime, label, MINDEE_V1_INTERNATIONAL_ID);
-  }
-
-  console.info('[OCR CIN] provider=mindee');
-  console.info('[OCR CIN] endpoint used=' + endpoint);
-  console.info('[OCR CIN] model_id=' + modelId.slice(0, 8) + '...');
-
-  const ext = mime === 'image/png' ? 'png' : mime === 'image/webp' ? 'webp' : 'jpg';
-  const form = new FormData();
-  form.append('model_id', modelId);
-  form.append('file', new Blob([buffer], { type: mime }), `${label}.${ext}`);
-  form.append('filename', `${label}.${ext}`);
-
-  const enqueueRes = await fetch(endpoint, {
-    method: 'POST',
-    headers: mindeeAuthHeader(apiKey),
-    body: form,
-  });
-  const enqueueJson = await enqueueRes.json().catch(() => ({}));
-  if (!enqueueRes.ok) {
-    const detail = enqueueJson?.detail || enqueueJson?.title || JSON.stringify(enqueueJson);
-    throw new Error(`Mindee v2 enqueue ${enqueueRes.status}: ${detail}`);
-  }
-
-  const jobId = enqueueJson?.job?.id;
-  if (!jobId) throw new Error('Mindee v2: job.id absent dans la reponse.');
-
-  for (let attempt = 0; attempt < 30; attempt += 1) {
-    await sleep(attempt < 5 ? 600 : 900);
-    const pollRes = await fetch(`${MINDEE_V2_JOBS_BASE}/${jobId}?redirect=false`, {
-      headers: mindeeAuthHeader(apiKey),
-    });
-    const pollJson = await pollRes.json().catch(() => ({}));
-    const status = pollJson?.job?.status;
-
-    if (status === 'Failed') {
-      throw new Error(`Mindee v2 job failed (${label})`);
-    }
-
-    if (status === 'Processed') {
-      const resultUrl = pollJson?.job?.result_url;
-      if (!resultUrl) throw new Error('Mindee v2: result_url absent.');
-
-      const resultRes = await fetch(resultUrl, { headers: mindeeAuthHeader(apiKey) });
-      const resultJson = await resultRes.json().catch(() => ({}));
-      if (!resultRes.ok) {
-        throw new Error(`Mindee v2 result ${resultRes.status}: ${resultJson?.detail || 'erreur'}`);
-      }
-
-      const fields = extractFieldsFromInference(resultJson);
-      if (!fields || !Object.keys(fields).length) {
-        throw new Error('Mindee v2: aucun champ extrait.');
-      }
-
-      console.info('[OCR CIN] Mindee response OK', { side: label, fieldKeys: Object.keys(fields) });
-      const mapped = await logMappedSide(fields, label === 'verso' ? 'verso' : 'recto');
-      assertRectoExtracted(mapped, label);
-      return { raw: resultJson, fields };
-    }
-  }
-
-  throw new Error(`Mindee v2 timeout (${label})`);
-}
-
-async function mindeePredictRaw(buffer, mime, label) {
-  const apiKey = process.env.MINDEE_API_KEY;
-  if (!apiKey) {
-    const err = new Error('MINDEE_API_KEY manquant');
-    err.code = 'OCR_NOT_CONFIGURED';
-    throw err;
-  }
-
-  const routing = resolveMindeeRouting(apiKey);
-  if (routing.version === 'v2') {
-    const modelId = resolveMindeeModelId();
-    if (!modelId) {
-      console.warn(`[OCR CIN] ${label} — clé md_* sans MINDEE_MODEL_ID, fallback International ID v1`);
-      return mindeeV1Predict(buffer, mime, label, MINDEE_V1_INTERNATIONAL_ID);
-    }
-    return mindeeV2Predict(buffer, mime, label, routing.endpoint);
-  }
-  return mindeeV1Predict(buffer, mime, label, MINDEE_V1_INTERNATIONAL_ID);
-}
-
-router.post(
-  '/moroccan-cin',
-  (req, res, next) => {
-    if (req.is('application/json')) return next();
-    return upload.fields([
-      { name: 'recto', maxCount: 1 },
-      { name: 'verso', maxCount: 1 },
-    ])(req, res, next);
-  },
-  async (req, res) => {
+    const text = await res.text();
+    let data;
     try {
-      const { processMoroccanCinBuffers, dataUrlToBuffer } = await import(
-        pathToFileURL(path.join(__dirname, '../../lib/mindeeMoroccanCin.mjs'))
-      );
+      data = JSON.parse(text);
+    } catch {
+      data = { ok: false, error: 'Service OCR indisponible', error_code: 'OCR_UNAVAILABLE' };
+    }
+    if (!res.ok && !data.error) {
+      data = {
+        ok: false,
+        error: data.detail || `OCR HTTP ${res.status}`,
+        error_code: res.status === 413 ? 'PAYLOAD_TOO_LARGE' : 'OCR_UNAVAILABLE',
+      };
+    }
+    return data;
+  } catch (err) {
+    const timedOut = err?.name === 'AbortError';
+    return {
+      ok: false,
+      error: timedOut ? 'Temps d\'analyse dépassé' : 'Service OCR indisponible',
+      error_code: timedOut ? 'OCR_TIMEOUT' : 'OCR_UNAVAILABLE',
+    };
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
-      let rectoBuf = null;
-      let versoBuf = null;
+function bufferToDataUrl(buf, mime) {
+  const b64 = Buffer.from(buf).toString('base64');
+  return `data:${mime || 'image/jpeg'};base64,${b64}`;
+}
 
-      if (req.is('application/json')) {
-        if (req.body?.recto) rectoBuf = dataUrlToBuffer(req.body.recto);
-        if (req.body?.verso) versoBuf = dataUrlToBuffer(req.body.verso);
-      } else {
-        const rectoFile = req.files?.recto?.[0];
-        const versoFile = req.files?.verso?.[0];
-        if (rectoFile?.buffer?.length) rectoBuf = rectoFile.buffer;
-        if (versoFile?.buffer?.length) versoBuf = versoFile.buffer;
-      }
+router.get('/health', async (_req, res) => {
+  try {
+    const r = await fetch(`${OCR_SERVICE_URL}/health`, { signal: AbortSignal.timeout(5000) });
+    const data = await r.json();
+    return res.json({ ok: true, proxy: true, ocr_service: data, ocr_service_url: OCR_SERVICE_URL });
+  } catch (err) {
+    return res.status(503).json({
+      ok: false,
+      proxy: true,
+      error: 'Service OCR indisponible',
+      ocr_service_url: OCR_SERVICE_URL,
+    });
+  }
+});
 
-      if (!rectoBuf?.length && !versoBuf?.length) {
-        return res.status(400).json({ success: false, error: 'Au moins recto ou verso requis.' });
-      }
+router.post('/moroccan-cin', upload.fields([
+  { name: 'recto', maxCount: 1 },
+  { name: 'verso', maxCount: 1 },
+]), async (req, res) => {
+  try {
+    let recto = null;
+    let verso = null;
+    const force = req.body?.force === true || req.body?.force === 'true' || req.query?.force === '1';
 
-      const result = await processMoroccanCinBuffers({ rectoBuf, versoBuf });
-      return res.status(200).json(result);
-    } catch (err) {
-      console.error('[OCR CIN] Erreur Mindee:', err.message);
-      const code = err.code || 'OCR_ERROR';
-      return res.status(200).json({
-        success: false,
-        code,
-        allowFallback: true,
-        error: err.message,
+    if (req.files?.recto?.[0]) {
+      recto = bufferToDataUrl(req.files.recto[0].buffer, req.files.recto[0].mimetype);
+    }
+    if (req.files?.verso?.[0]) {
+      verso = bufferToDataUrl(req.files.verso[0].buffer, req.files.verso[0].mimetype);
+    }
+
+    if (!recto && typeof req.body?.recto === 'string') recto = req.body.recto;
+    if (!verso && typeof req.body?.verso === 'string') verso = req.body.verso;
+
+    // JSON body (Vite / fetch)
+    if (!recto && req.is('application/json') && req.body) {
+      recto = req.body.recto || null;
+      verso = req.body.verso || null;
+    }
+
+    if (!recto) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Recto manquant',
+        error_code: 'RECTO_MISSING',
+        _ocr_warning: 'Recto manquant',
       });
     }
-  },
-);
 
-router.use((err, _req, res, _next) => {
-  const msg = err instanceof multer.MulterError
-    ? err.message
-    : (err.message || 'Erreur serveur inattendue.');
-  return res.status(400).json({ success: false, error: msg });
+    const raw = await forwardJson({ recto, verso, force });
+    const mapped = mapToLegacyClientShape(raw);
+    const status = mapped.ok ? 200 : (mapped.error_code === 'IMAGE_UNREADABLE' ? 422 : 503);
+    // 422 pour qualité — client peut forcer ; 200 même si partiel
+    if (mapped.ok) return res.json(mapped);
+    if (mapped.error_code === 'IMAGE_UNREADABLE' || mapped.error_code === 'RECTO_MISSING') {
+      return res.status(422).json(mapped);
+    }
+    if (mapped.error_code === 'OCR_TIMEOUT') {
+      return res.status(504).json(mapped);
+    }
+    return res.status(status).json(mapped);
+  } catch (err) {
+    console.error('[OCR proxy]', err?.message || err);
+    return res.status(503).json({
+      ok: false,
+      error: 'Service OCR indisponible',
+      error_code: 'OCR_UNAVAILABLE',
+      _ocr_warning: 'Service OCR indisponible — saisissez les champs manuellement.',
+    });
+  }
 });
 
 module.exports = router;
