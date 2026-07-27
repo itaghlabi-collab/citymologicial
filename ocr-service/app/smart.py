@@ -181,9 +181,24 @@ def score_person_name(value: str, learning_prior: float = 0.0) -> float:
     v = normalize_person_token(value)
     if len(v) < 2:
         return 0.0
-    if re.search(r"\d", v):
-        return 0.1
-    banned = {"NOM", "PRENOM", "NAME", "GIVEN", "SURNAMES", "ROYAUME", "MAROC", "CARTE", "NATIONALE"}
+    # Rejet fort : chiffres, MRZ, codes OCR type ROPI9VXW7 / 5BE884115
+    if re.search(r"\d", value or "") or re.search(r"\d", v):
+        return 0.0
+    compact = re.sub(r"[^A-ZÀÂÄÉÈÊËÎÏÔÖÙÛÜÇ]", "", v)
+    if "<" in (value or "") or re.search(r"(?:[A-Z0-9]<){2,}", (value or "").upper()):
+        return 0.0
+    if len(compact) >= 8:
+        vowels = len(re.findall(r"[AEIOUYÀÂÄÉÈÊËÎÏÔÖÙÛÜ]", compact))
+        if vowels / max(1, len(compact)) < 0.18:
+            return 0.0
+    # Faux positifs CIN : seulement si forme lettres+chiffres déjà présente
+    compact_alnum = re.sub(r"[^A-Z0-9]", "", v)
+    if re.match(r"^[A-Z]{1,2}\d{4,7}$", compact_alnum):
+        return 0.0
+    banned = {
+        "NOM", "PRENOM", "NAME", "GIVEN", "SURNAMES", "ROYAUME", "MAROC",
+        "CARTE", "NATIONALE", "IDENTITE", "IDENTITÉ", "SEXE", "NATIONALITE",
+    }
     if v in banned:
         return 0.0
     score = 0.45

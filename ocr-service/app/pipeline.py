@@ -7,15 +7,15 @@ import time
 from typing import Any, Optional
 
 from . import ENGINE_NAME, __version__
-from .engines import run_best_ocr, paddle_available, tesseract_available, engine_manifest
+from .engines import paddle_available, tesseract_available, engine_manifest
 from .parser import (
     fields_to_api,
     global_confidence,
     merge_side_fields,
-    parse_ocr_text,
 )
 from .preprocess import encode_jpeg, preprocess_pipeline
 from .quality import assess_image_quality, images_probably_identical
+from .zone_ocr import ocr_card_zones, zone_results_to_fields
 
 logger = logging.getLogger("citymo.ocr.pipeline")
 
@@ -45,10 +45,12 @@ def analyze_side(image_bytes: bytes, side: str, force: bool = False) -> dict[str
             "error_code": "IMAGE_UNREADABLE",
         }
 
+    # Moteur spécialisé : OCR par zones (jamais la carte entière d'un coup)
     try:
-        ocr = run_best_ocr(pre["variants"])
+        zone_payload = ocr_card_zones(pre["corrected_bgr"], side=side)
+        fields = zone_results_to_fields(zone_payload)
     except Exception as exc:
-        logger.exception("OCR side %s", side)
+        logger.exception("OCR zones side %s", side)
         return {
             "side": side,
             "ok": False,
@@ -64,25 +66,36 @@ def analyze_side(image_bytes: bytes, side: str, force: bool = False) -> dict[str
             "preprocess_meta": pre["meta"],
         }
 
-    fields = parse_ocr_text(ocr.get("text") or "", side=side, avg_confidence=float(ocr.get("avg_confidence") or 0.5))
+    zone_map = zone_payload.get("zones") or {}
+    confs = [float(v.get("confidence") or 0) for v in zone_map.values() if v.get("text")]
+    avg_conf = sum(confs) / len(confs) if confs else 0.0
+    engines = zone_payload.get("engines") or []
+    engine_label = "+".join(engines) if engines else "zone"
+    raw_synth = zone_payload.get("synthetic_text") or ""
+
     return {
         "side": side,
         "ok": True,
         "blocked": False,
         "quality": quality.to_dict(),
         "fields": fields_to_api(fields),
-        "raw_text_len": len(ocr.get("text") or ""),
-        # Pas de dump complet du texte OCR dans la réponse publique (audit séparé)
-        "engine": ocr.get("engine"),
-        "engine_version": ocr.get("engine_version"),
-        "models": ocr.get("models") or [],
-        "engine_variant": ocr.get("variant"),
-        "ocr_confidence": round(float(ocr.get("avg_confidence") or 0), 3),
+        "raw_text_len": len(raw_synth),
+        "engine": f"zone:{engine_label}",
+        "engine_version": "zone-v1",
+        "models": engines,
+        "engine_variant": "zones",
+        "ocr_mode": "zone",
+        "ocr_confidence": round(avg_conf, 3),
+        "zones_read": {
+            k: {"text": v.get("text"), "confidence": v.get("confidence"), "engine": v.get("engine")}
+            for k, v in zone_map.items()
+            if v.get("text") or v.get("raw")
+        },
         "corrected_preview": _b64_jpeg(pre["corrected_bgr"], 70),
         "duration_ms": int((time.time() - t0) * 1000),
         "preprocess_meta": pre["meta"],
         "_fields_obj": fields,
-        "_raw_text": ocr.get("text") or "",
+        "_raw_text": raw_synth,
     }
 
 
@@ -123,12 +136,13 @@ def analyze_cin(
         va = decode_image_bytes(fix_exif_orientation_pil(verso_bytes))
         identical = images_probably_identical(ra, va)
 
-    progress.append("Lecture du recto")
+    progress.append("Localisation des zones CIN")
+    progress.append("Lecture OCR par zones (recto)")
     recto = analyze_side(recto_bytes, "recto", force=force)
 
     verso = None
     if verso_bytes:
-        progress.append("Lecture du verso")
+        progress.append("Lecture OCR par zones (verso)")
         verso = analyze_side(verso_bytes, "verso", force=force)
     else:
         progress.append("Verso manquant — analyse partielle")

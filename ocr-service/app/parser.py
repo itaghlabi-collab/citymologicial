@@ -152,14 +152,16 @@ def collect_from_labels(text: str) -> dict[str, list[str]]:
         m = LABEL_NOM.match(line)
         if m:
             val = m.group(1) or (lines[i + 1] if i + 1 < len(lines) else "")
-            if val:
-                bag["nom"].append(val.upper())
+            tok = normalize_person_token(val)
+            if tok and score_person_name(tok) >= 0.35:
+                bag["nom"].append(tok)
             continue
         m = LABEL_PRENOM.match(line)
         if m:
             val = m.group(1) or (lines[i + 1] if i + 1 < len(lines) else "")
-            if val:
-                bag["prenom"].append(val.upper())
+            tok = normalize_person_token(val)
+            if tok and score_person_name(tok) >= 0.35:
+                bag["prenom"].append(tok)
             continue
         m = LABEL_NE.match(line)
         if m:
@@ -170,7 +172,7 @@ def collect_from_labels(text: str) -> dict[str, list[str]]:
         m = LABEL_LIEU.match(line)
         if m:
             val = m.group(1) or (lines[i + 1] if i + 1 < len(lines) else "")
-            if val and len(val) > 2:
+            if val and len(val) > 2 and not re.search(r"\d", val):
                 bag["lieu"].append(val.upper())
             continue
         m = LABEL_SEXE.match(line)
