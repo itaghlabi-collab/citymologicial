@@ -36,10 +36,15 @@ const STATUT_LABELS = {
 };
 
 const EXPERIENCE_LABELS = {
-  debutant: 'Débutant',
-  intermediaire: 'Intermédiaire',
-  confirme: 'Confirmé',
-  expert: 'Expert',
+  debutant: '★☆☆☆☆ (1/5)',
+  intermediaire: '★★☆☆☆ (2/5)',
+  confirme: '★★★☆☆ (3/5)',
+  expert: '★★★★☆ (4/5)',
+  '1': '★☆☆☆☆ (1/5)',
+  '2': '★★☆☆☆ (2/5)',
+  '3': '★★★☆☆ (3/5)',
+  '4': '★★★★☆ (4/5)',
+  '5': '★★★★★ (5/5)',
 };
 
 const CIN_PDF_RATIO = CIN_RATIO;
@@ -433,9 +438,6 @@ export async function generateWorkerPdf(worker) {
     ['Nom', w.nom],
     ['N° CIN', w.cin],
     ['Téléphone', w.telephone],
-    ['Date naissance', fmtDate(w.date_naissance)],
-    ['Lieu naissance', w.ville_naissance],
-    ['Adresse', w.adresse],
     ['Nationalité', w.nationalite],
     ['Sexe', w.sexe === 'M' ? 'Masculin' : w.sexe === 'F' ? 'Féminin' : w.sexe],
     ['État civil', w.etat_civil],
@@ -443,18 +445,26 @@ export async function generateWorkerPdf(worker) {
     ['Expiration CIN', fmtDate(w.date_expiration)],
   ];
 
+  const dailyTarif = (() => {
+    const tarif = Number(w.tarif) || 0;
+    const unite = w.tarif_unite || 'heure';
+    if (unite === 'jour') return tarif;
+    if (unite === 'heure') return Math.round(tarif * 8 * 100) / 100;
+    if (unite === 'semaine') return Math.round((tarif / 5) * 100) / 100;
+    if (unite === 'mois') return Math.round((tarif / 26) * 100) / 100;
+    return tarif;
+  })();
+
   const proRows = [
     ['Poste / Fonction', w.fonction],
     ['Chantier', w.chantier],
-    ['Tarif horaire', fmtMAD(w.tarif) + '/h'],
+    ['Tarif journalier', fmtMAD(dailyTarif) + '/j'],
     ['Statut', STATUT_LABELS[w.statut] || w.statut],
-    ['Disponibilité', w.disponibilite === 'oui' ? 'Disponible' : 'Non disponible'],
     ['Date recrutement', fmtDate(w.date_recrutement)],
-    ['Expérience', EXPERIENCE_LABELS[w.experience] || w.experience],
+    ['Expérience', EXPERIENCE_LABELS[w.experience] || EXPERIENCE_LABELS[String(w.experience)] || `${w.experience}/5`],
     ['Badge', w.badge],
     ['Pointure', w.pointure],
     ['Taille vêtement', w.taille_vetement],
-    ['Casque', w.casque],
   ];
 
   const tablesTitleY = y;

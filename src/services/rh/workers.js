@@ -95,7 +95,13 @@ export function normalizeWorker(row) {
     groupe_sanguin: row.groupe_sanguin || '',
     sexe: row.sexe || '',
     date_expiration: row.date_expiration || '',
-    experience: row.experience || 'intermediaire',
+    experience: (() => {
+      const exp = row.experience || '3';
+      const n = Number(exp);
+      if (n >= 1 && n <= 5) return String(n);
+      const map = { debutant: '1', intermediaire: '2', confirme: '3', expert: '4' };
+      return map[exp] || '3';
+    })(),
     date_recrutement: row.date_recrutement || '',
     statut: row.statut || 'actif',
     disponibilite: row.disponibilite || 'oui',
@@ -140,8 +146,8 @@ export function toWorkerRow(form, meta = {}) {
     telephone: emptyToNull(form.telephone?.trim()),
     fonction: emptyToNull(form.fonction),
     tarif: Number(form.tarif) || 0,
-    tarif_unite: 'heure',
-    experience: form.experience || 'intermediaire',
+    tarif_unite: form.tarif_unite || 'jour',
+    experience: form.experience || '3',
     date_naissance: emptyToNull(form.date_naissance),
     lieu_naissance: emptyToNull(form.ville_naissance?.trim()),
     adresse: emptyToNull(form.adresse?.trim()),

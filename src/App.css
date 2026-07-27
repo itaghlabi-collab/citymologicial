@@ -2480,6 +2480,41 @@ tbody tr:last-child td { border-bottom: none; }
   gap: 12px;
 }
 
+.ouv-star-rating {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex-wrap: wrap;
+  min-height: 40px;
+}
+
+.ouv-star-btn {
+  background: none;
+  border: none;
+  padding: 4px;
+  cursor: pointer;
+  color: var(--border);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: color 0.12s, transform 0.12s;
+}
+
+.ouv-star-btn.active {
+  color: var(--red);
+}
+
+.ouv-star-btn:hover {
+  transform: scale(1.08);
+}
+
+.ouv-star-label {
+  margin-left: 6px;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-3);
+}
+
 /* ── Ouvriers filter bar ── */
 .ouv-filter-card {
   padding: 14px 16px;
@@ -4517,15 +4552,39 @@ tbody tr:last-child td { border-bottom: none; }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 18px;
+  gap: 8px;
+  padding: calc(12px + env(safe-area-inset-top, 0px)) 14px 16px;
   background: linear-gradient(to bottom, rgba(0,0,0,0.78) 0%, transparent 100%);
-  z-index: 20;
+  z-index: 50;
+  pointer-events: auto;
 }
+
+.cin-back-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-height: 44px;
+  min-width: 44px;
+  padding: 8px 12px 8px 6px;
+  border-radius: 10px;
+  border: 1px solid rgba(255,255,255,0.22);
+  background: rgba(255,255,255,0.14);
+  color: #fff;
+  font-size: 0.88rem;
+  font-weight: 700;
+  cursor: pointer;
+  backdrop-filter: blur(6px);
+  flex-shrink: 0;
+}
+.cin-back-btn:active { background: rgba(255,255,255,0.28); }
 
 .cin-side-badge-wrap {
   display: flex;
   align-items: center;
   gap: 8px;
+  justify-content: center;
+  flex: 1;
+  min-width: 0;
 }
 
 .cin-side-badge {
@@ -4552,6 +4611,8 @@ tbody tr:last-child td { border-bottom: none; }
   border: 1px solid rgba(255,255,255,0.2);
   border-radius: 8px;
   padding: 7px;
+  min-width: 44px;
+  min-height: 44px;
   cursor: pointer;
   color: #fff;
   display: flex;
@@ -4559,6 +4620,8 @@ tbody tr:last-child td { border-bottom: none; }
   justify-content: center;
   transition: background 0.15s;
   backdrop-filter: blur(6px);
+  flex-shrink: 0;
+  z-index: 51;
 }
 .cin-close-btn:hover { background: rgba(255,255,255,0.24); }
 
@@ -4886,9 +4949,11 @@ tbody tr:last-child td { border-bottom: none; }
   justify-content: center;
   gap: 14px;
   padding: 24px;
+  padding-top: calc(72px + env(safe-area-inset-top, 0px));
   text-align: center;
   color: #fff;
   background: rgba(0, 0, 0, 0.88);
+  pointer-events: auto;
 }
 
 .cin-camera-blocked p {

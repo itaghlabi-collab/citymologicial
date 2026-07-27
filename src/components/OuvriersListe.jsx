@@ -3,7 +3,7 @@ import {
   Upload, Camera, ScanLine, User, FileText, Shield,
   Phone, MapPin, CheckCircle, Clock, AlertCircle,
   ChevronLeft, RefreshCw, ArrowUpDown, Package,
-  Loader
+  Loader, Star
 } from 'lucide-react';
 
 import { useState, useEffect, useRef, useCallback, useId } from 'react';
@@ -12,15 +12,13 @@ import { useWorkers } from '../hooks/useWorkers';
 import { scanCIN, canUseCamera, getCameraBlockedReason, getCameraErrorMessage, getCINCameraStream, preloadOcrEngine } from '../services/ocr';
 import { captureCINFromVideo, prepareImportedCINImage } from '../services/cinCapture';
 import { generateWorkerPdf } from '../services/rh/workerPdf';
-import { WORKER_HOURS_PER_DAY } from '../services/rh/workers';
+import { workerTarifJournalier } from '../services/rh/workers';
 
 /* Exported for compatibility — starts empty, populated from API */
 export const SEED_WORKERS = [];
 
 /* ── Constants ── */
 const FONCTIONS   = ['Macon', 'Coffreur', 'Ferrailleur', 'Electricien', 'Peintre', 'Plombier', 'Carreleur', 'Menuisier', 'Soudeur', 'Chauffeur', 'Manoeuvre', 'Chef equipe', 'Conducteur engins', 'Topographe', 'Gardien'];
-const EXPERIENCES = ['debutant', 'intermediaire', 'confirme', 'expert'];
-const EXP_LABEL   = { debutant: 'Debutant', intermediaire: 'Intermediaire', confirme: 'Confirme', expert: 'Expert' };
 const GROUPES     = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
 const TAILLES_VET = ['XS', 'S', 'M', 'L', 'XL', 'XXL', 'XXXL'];
 const POINTURES   = ['38', '39', '40', '41', '42', '43', '44', '45', '46'];
@@ -37,12 +35,12 @@ const STATUT_CFG = {
 const CIN_HINT = 'Cadrez la CIN dans le rectangle';
 const SCANNER_PLACE_HINT = 'Placez la CIN dans le cadre';
 /** Identifiant build — vérifier dans la console Safari mobile que cette version est chargée */
-const CIN_SCANNER_VERSION = '2026-06-04-cin-capture-btn';
+const CIN_SCANNER_VERSION = '2026-07-27-cin-back-btn';
 
 const EMPTY_FORM = {
-  prenom: '', nom: '', telephone: '', cin: '', fonction: '', tarif: '', tarif_unite: 'heure',
+  prenom: '', nom: '', telephone: '', cin: '', fonction: '', tarif: '', tarif_unite: 'jour',
   date_naissance: '', ville_naissance: '', adresse: '', nationalite: 'Marocaine', etat_civil: '', groupe_sanguin: '', date_expiration: '',
-  experience: 'intermediaire', date_recrutement: '', statut: 'actif', disponibilite: 'oui',
+  experience: '3', date_recrutement: '', statut: 'actif', disponibilite: 'oui',
   project_id: '', projet_nom: '', chantier: '', chantier_legacy: '',
   contact_urgence: '', tel_urgence: '', relation_urgence: '',
   pointure: '', taille_vetement: '', taille_gants: '', casque: '', badge: '',
@@ -50,12 +48,34 @@ const EMPTY_FORM = {
 };
 
 /* ── Helpers ── */
-function fmtMAD(n) { return Number(n).toLocaleString('fr-MA') + ' MAD'; }
-function fmtTarifHeure(n) { return Number(n).toLocaleString('fr-MA', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + ' MAD/h'; }
 function fmtTarifJour(n) { return Number(n).toLocaleString('fr-MA', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + ' MAD/j'; }
-function tarifJourFromHeure(h) { return Math.round(Number(h || 0) * WORKER_HOURS_PER_DAY * 100) / 100; }
 function fmtDate(d) { if (!d) return '—'; try { return new Date(d).toLocaleDateString('fr-MA', { day: '2-digit', month: '2-digit', year: 'numeric' }); } catch { return d; } }
 function initials(w) { return ((w.prenom?.[0] || '') + (w.nom?.[0] || '')).toUpperCase() || '?'; }
+
+/** Niveau d'expérience : 1–5 (rétrocompat debutant…expert) */
+function experienceToStars(exp) {
+  const n = Number(exp);
+  if (n >= 1 && n <= 5) return n;
+  const map = { debutant: 1, intermediaire: 2, confirme: 3, expert: 4 };
+  return map[exp] || 3;
+}
+
+function formatExperienceStars(exp) {
+  const n = experienceToStars(exp);
+  return `${'★'.repeat(n)}${'☆'.repeat(5 - n)} (${n}/5)`;
+}
+
+function formFromWorker(worker) {
+  if (!worker) return { ...EMPTY_FORM };
+  const daily = workerTarifJournalier(worker);
+  return {
+    ...EMPTY_FORM,
+    ...worker,
+    tarif: daily ? String(daily) : '',
+    tarif_unite: 'jour',
+    experience: String(experienceToStars(worker.experience)),
+  };
+}
 /* ── Input style ── */
 function IS(err, extra = {}) {
   return {
@@ -296,6 +316,9 @@ function CINScanner({
   const rectoFullDataUrlRef = useRef(null);
   const versoFullDataUrlRef = useRef(null);
   const analyzeLoopRef = useRef(null);
+  const dismissRef = useRef(null);
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     console.info('[CIN Scanner] mounted', CIN_SCANNER_VERSION, {
@@ -315,6 +338,50 @@ function CINScanner({
       document.documentElement.style.overflow = prevHtml;
     };
   }, []);
+
+  /* Retour téléphone (gesture / bouton système) + fermeture UI */
+  useEffect(() => {
+    let alive = true;
+    let ignorePop = false;
+    window.history.pushState({ cinScanner: true, t: Date.now() }, '');
+
+    const finish = () => {
+      if (!alive) return;
+      alive = false;
+      teardown();
+      onCloseRef.current();
+    };
+
+    const onPop = () => {
+      if (ignorePop) return;
+      finish();
+    };
+    window.addEventListener('popstate', onPop);
+
+    dismissRef.current = () => {
+      if (!alive) return;
+      alive = false;
+      teardown();
+      ignorePop = true;
+      onCloseRef.current();
+      window.history.back();
+    };
+
+    return () => {
+      window.removeEventListener('popstate', onPop);
+      alive = false;
+      dismissRef.current = null;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- mount once; onClose via ref
+  }, []);
+
+  function dismissScanner() {
+    if (dismissRef.current) dismissRef.current();
+    else {
+      teardown();
+      onClose();
+    }
+  }
 
   useEffect(() => { sideRef.current = side; }, [side]);
 
@@ -468,7 +535,7 @@ function CINScanner({
         onProgress: setUploadStatus,
       });
       onExtracted(result);
-      onClose();
+      dismissScanner();
     } catch (err) {
       const msg = (err?.message && err.message.length < 160)
         ? err.message
@@ -634,8 +701,8 @@ function CINScanner({
     setSide(targetSide);
     setError('');
     if (isCaptureMode && onCaptureOnly) {
-      teardown();
       onCaptureOnly(targetSide, dataUrl, file, fullDataUrl);
+      dismissScanner();
       return;
     }
   }
@@ -649,8 +716,8 @@ function CINScanner({
       setError('Capturez ou importez une photo avant de valider.');
       return;
     }
-    teardown();
     if (onCaptureOnly) onCaptureOnly(s, preview, file, fullDataUrl);
+    dismissScanner();
   }
 
   const currentSideHasImage = isCaptureMode
@@ -680,6 +747,9 @@ function CINScanner({
   if (phase === 'uploading') {
     return createPortal(
       <div className="cin-scanner-overlay cin-scanner-overlay--dark" data-cin-scanner={CIN_SCANNER_VERSION}>
+        <button type="button" className="cin-back-btn" style={{ position: 'absolute', top: 'calc(12px + env(safe-area-inset-top, 0px))', left: 14, zIndex: 60 }} onClick={dismissScanner} aria-label="Retour">
+          <ChevronLeft size={20} /> Retour
+        </button>
         <div className="cin-upload-box">
           <Loader size={32} className="cin-spin" style={{ color: 'var(--red)' }} />
           <div className="cin-upload-title">Analyse en cours...</div>
@@ -731,6 +801,9 @@ function CINScanner({
           <button type="button" className="cin-action-btn cin-action-btn--ghost" onClick={openGalleryPicker}>
             <Upload size={14} /> Importer depuis galerie
           </button>
+          <button type="button" className="cin-action-btn cin-action-btn--ghost" onClick={dismissScanner}>
+            <ChevronLeft size={14} /> Retour au formulaire
+          </button>
         </div>
       )}
 
@@ -780,13 +853,16 @@ function CINScanner({
       </div>
 
       <div className="cin-top-bar">
+        <button type="button" className="cin-back-btn" onClick={dismissScanner} aria-label="Retour">
+          <ChevronLeft size={20} /> Retour
+        </button>
         <div className="cin-side-badge-wrap">
           <span className={'cin-side-badge ' + (isRecto ? 'cin-side-badge--recto' : 'cin-side-badge--verso')}>
             {isRecto ? 'RECTO' : 'VERSO'}
           </span>
           <span className="cin-step-label">{rectoImg ? (versoImg ? '2/2' : '1/2') : '0/2'}</span>
         </div>
-        <button type="button" className="cin-close-btn" onClick={onClose} aria-label="Fermer"><X size={18} /></button>
+        <button type="button" className="cin-close-btn" onClick={dismissScanner} aria-label="Fermer"><X size={18} /></button>
       </div>
 
       <div className="cin-indicators">
@@ -979,9 +1055,6 @@ function OuvrierDetail({ worker, onBack, onEdit, onDownloadPdf, pdfLoading }) {
               ['Nom complet', worker.prenom + ' ' + worker.nom],
               ['Telephone', worker.telephone],
               ['CIN', worker.cin],
-              ['Date naissance', fmtDate(worker.date_naissance)],
-              ['Ville naissance', worker.ville_naissance],
-              ['Adresse', worker.adresse],
             ].map(([k, v]) => v ? (
               <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.83rem', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
                 <span style={{ color: 'var(--text-3)' }}>{k}</span>
@@ -993,12 +1066,10 @@ function OuvrierDetail({ worker, onBack, onEdit, onDownloadPdf, pdfLoading }) {
             <STitle><HardHat size={14} /> Infos métier</STitle>
             {[
               ['Fonction', worker.fonction],
-              ['Experience', EXP_LABEL[worker.experience] || worker.experience],
+              ['Experience', formatExperienceStars(worker.experience)],
               ['Date de première intervention', fmtDate(worker.date_recrutement)],
               ['Statut', STATUT_CFG[worker.statut]?.label || worker.statut],
-              ['Disponibilite', worker.disponibilite === 'oui' ? 'Disponible' : 'Non disponible'],
-              ['Tarif horaire', fmtTarifHeure(worker.tarif)],
-              ['Équivalent journalier (8 h)', fmtTarifJour(tarifJourFromHeure(worker.tarif))],
+              ['Tarif journalier', fmtTarifJour(workerTarifJournalier(worker))],
             ].map(([k, v]) => v ? (
               <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.83rem', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
                 <span style={{ color: 'var(--text-3)' }}>{k}</span>
@@ -1057,7 +1128,6 @@ function OuvrierDetail({ worker, onBack, onEdit, onDownloadPdf, pdfLoading }) {
             ['Pointure', worker.pointure],
             ['Taille vetement', worker.taille_vetement],
             ['Taille gants', worker.taille_gants],
-            ['Casque attribue', worker.casque],
           ].map(([k, v]) => (
             <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.83rem', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
               <span style={{ color: 'var(--text-3)' }}>{k}</span>
@@ -1076,7 +1146,7 @@ function OuvrierDetail({ worker, onBack, onEdit, onDownloadPdf, pdfLoading }) {
    ══════════════════════════════════════════════════════ */
 function OuvrierModal({ worker, onClose, onSave, saving }) {
   const isEdit = !!worker;
-  const [form, setForm] = useState(() => worker ? { ...EMPTY_FORM, ...worker } : { ...EMPTY_FORM });
+  const [form, setForm] = useState(() => formFromWorker(worker));
   const [errors, setErrors] = useState({});
   const [showScanner, setShowScanner] = useState(false);
   const [scannerStream, setScannerStream] = useState(null);
@@ -1163,10 +1233,9 @@ function OuvrierModal({ worker, onClose, onSave, saving }) {
       ocrFullDataUrlRef.current.verso = fullDataUrl || null;
     }
     setFormTab('documents');
-    closeCINScanner();
   }
 
-  const WORKER_OCR_FIELDS = ['cin', 'prenom', 'nom', 'date_naissance', 'ville_naissance', 'adresse', 'date_expiration', 'sexe', 'nationalite'];
+  const WORKER_OCR_FIELDS = ['cin', 'prenom', 'nom', 'date_expiration', 'sexe', 'nationalite'];
 
   function applyOcrResult(result) {
     const {
@@ -1194,7 +1263,7 @@ function OuvrierModal({ worker, onClose, onSave, saving }) {
   function handleScanExtracted(data, warning) {
     setForm(p => ({ ...p, ...data }));
     setFormTab('identite');
-    const filled = ['cin','prenom','nom','date_naissance','ville_naissance','adresse','date_expiration','sexe','nationalite']
+    const filled = ['cin', 'prenom', 'nom', 'date_expiration', 'sexe', 'nationalite']
       .filter(k => data[k] && String(data[k]).trim() !== '');
     setOcrFilled(true);
     if (warning) {
@@ -1245,7 +1314,12 @@ function OuvrierModal({ worker, onClose, onSave, saving }) {
     ev.preventDefault();
     const errs = validate();
     if (Object.keys(errs).length) { setErrors(errs); setFormTab('identite'); return; }
-    const result = await onSave({ ...form, tarif: Number(form.tarif), tarif_unite: 'heure' }, isEdit);
+    const result = await onSave({
+      ...form,
+      tarif: Number(form.tarif),
+      tarif_unite: 'jour',
+      experience: String(experienceToStars(form.experience)),
+    }, isEdit);
     if (result?.success) onClose();
   }
 
@@ -1338,18 +1412,6 @@ function OuvrierModal({ worker, onClose, onSave, saving }) {
                       <Label>Telephone</Label>
                       <input value={form.telephone} onChange={e => set('telephone', e.target.value)} placeholder="+212 600 000 000" style={IS(false)} />
                     </div>
-                    <div className="form-group">
-                      <Label>Date de naissance</Label>
-                      <input type="date" value={form.date_naissance} onChange={e => set('date_naissance', e.target.value)} style={IS(false, ocrFilled && form.date_naissance ? { borderColor: '#43A047', background: '#F1F8E9' } : {})} />
-                    </div>
-                    <div className="form-group">
-                      <Label>Ville de naissance</Label>
-                      <input value={form.ville_naissance} onChange={e => set('ville_naissance', e.target.value)} style={IS(false, ocrFilled && form.ville_naissance ? { borderColor: '#43A047', background: '#F1F8E9' } : {})} />
-                    </div>
-                    <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-                      <Label>Adresse</Label>
-                      <input value={form.adresse} onChange={e => set('adresse', e.target.value)} style={IS(false)} />
-                    </div>
                   </div>
                 </div>
               )}
@@ -1365,20 +1427,30 @@ function OuvrierModal({ worker, onClose, onSave, saving }) {
                     </select>
                   </div>
                   <div className="form-group">
-                    <Label required>Tarif horaire (MAD/h)</Label>
-                    <input type="number" min="0" step="0.01" value={form.tarif} onChange={e => set('tarif', e.target.value)} placeholder="15.00" style={IS(errors.tarif)} />
-                    {form.tarif && !errors.tarif && (
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-3)', marginTop: 4 }}>
-                        Équivalent journalier : {fmtTarifJour(tarifJourFromHeure(form.tarif))} (× {WORKER_HOURS_PER_DAY} h)
-                      </div>
-                    )}
+                    <Label required>Tarif journalier (MAD/j)</Label>
+                    <input type="number" min="0" step="0.01" value={form.tarif} onChange={e => set('tarif', e.target.value)} placeholder="120.00" style={IS(errors.tarif)} />
                     {errors.tarif && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.tarif}</span>}
                   </div>
                   <div className="form-group">
                     <Label>Niveau d'experience</Label>
-                    <select value={form.experience} onChange={e => set('experience', e.target.value)} style={IS(false)}>
-                      {EXPERIENCES.map(x => <option key={x} value={x}>{EXP_LABEL[x]}</option>)}
-                    </select>
+                    <div className="ouv-star-rating" role="group" aria-label="Niveau d'experience de 1 a 5">
+                      {[1, 2, 3, 4, 5].map((n) => {
+                        const active = experienceToStars(form.experience) >= n;
+                        return (
+                          <button
+                            key={n}
+                            type="button"
+                            className={'ouv-star-btn' + (active ? ' active' : '')}
+                            onClick={() => set('experience', String(n))}
+                            aria-label={`${n} etoile${n > 1 ? 's' : ''}`}
+                            aria-pressed={active}
+                          >
+                            <Star size={22} fill={active ? 'currentColor' : 'none'} />
+                          </button>
+                        );
+                      })}
+                      <span className="ouv-star-label">{experienceToStars(form.experience)}/5</span>
+                    </div>
                   </div>
                   <div className="form-group">
                     <Label>Date de première intervention</Label>
@@ -1388,13 +1460,6 @@ function OuvrierModal({ worker, onClose, onSave, saving }) {
                     <Label>Statut</Label>
                     <select value={form.statut} onChange={e => set('statut', e.target.value)} style={IS(false)}>
                       {Object.entries(STATUT_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
-                    </select>
-                  </div>
-                  <div className="form-group">
-                    <Label>Disponibilite</Label>
-                    <select value={form.disponibilite} onChange={e => set('disponibilite', e.target.value)} style={IS(false)}>
-                      <option value="oui">Disponible</option>
-                      <option value="non">Non disponible</option>
                     </select>
                   </div>
                 </div>
@@ -1487,10 +1552,6 @@ function OuvrierModal({ worker, onClose, onSave, saving }) {
                       <option value="">Choisir...</option>
                       {['S', 'M', 'L', 'XL', 'XXL'].map(t => <option key={t} value={t}>{t}</option>)}
                     </select>
-                  </div>
-                  <div className="form-group">
-                    <Label>Casque attribue</Label>
-                    <input value={form.casque} onChange={e => set('casque', e.target.value)} placeholder="N° casque..." style={IS(false)} />
                   </div>
                 </div>
               )}
@@ -1627,7 +1688,9 @@ export default function OuvriersListe({ onWorkersChange }) {
   const nTotal        = workers.length;
   const nEnChantier   = workers.filter(w => w.statut === 'en_chantier').length;
   const nDisponibles  = workers.filter(w => w.statut === 'disponible' || (w.statut === 'actif' && w.disponibilite === 'oui')).length;
-  const tarifMoyen    = workers.length > 0 ? Math.round(workers.reduce((s, w) => s + Number(w.tarif || 0), 0) / workers.length) : 0;
+  const tarifMoyen    = workers.length > 0
+    ? Math.round(workers.reduce((s, w) => s + workerTarifJournalier(w), 0) / workers.length)
+    : 0;
 
   /* Detail view */
   if (view === 'detail' && detailWorker) {
@@ -1698,7 +1761,7 @@ export default function OuvriersListe({ onWorkersChange }) {
         </div>
         <div className="stat-card">
           <div className="stat-icon" style={{ background: '#FFF3E0', color: '#E65100' }}><Clock size={20} /></div>
-          <div className="stat-body"><div className="stat-value">{fmtTarifHeure(tarifMoyen)}</div><div className="stat-label">Tarif moyen/h</div></div>
+          <div className="stat-body"><div className="stat-value">{fmtTarifJour(tarifMoyen)}</div><div className="stat-label">Tarif moyen/j</div></div>
         </div>
       </div>
 
@@ -1751,7 +1814,7 @@ export default function OuvriersListe({ onWorkersChange }) {
                     { label: 'CIN',         field: 'cin' },
                     { label: 'Telephone',   field: 'telephone' },
                     { label: 'Fonction',    field: 'fonction' },
-                    { label: 'Tarif/h',  field: 'tarif', align: 'right' },
+                    { label: 'Tarif/j',  field: 'tarif', align: 'right' },
                     { label: 'Statut',      field: 'statut' },
                     { label: 'Actions',     field: null },
                   ].map(col => (
@@ -1797,9 +1860,8 @@ export default function OuvriersListe({ onWorkersChange }) {
                       <td data-label="Fonction" style={{ padding: '10px 12px' }}><span className="badge badge-blue">{w.fonction || '—'}</span></td>
 
                       {/* Tarif */}
-                      <td data-label="Tarif/h" style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'var(--font-head)', fontWeight: 800, color: 'var(--red)', whiteSpace: 'nowrap' }}>
-                        {fmtTarifHeure(w.tarif)}
-                        <div style={{ fontSize: '0.68rem', color: 'var(--text-3)', fontWeight: 500 }}>{fmtTarifJour(tarifJourFromHeure(w.tarif))} / j</div>
+                      <td data-label="Tarif/j" style={{ padding: '10px 12px', textAlign: 'right', fontFamily: 'var(--font-head)', fontWeight: 800, color: 'var(--red)', whiteSpace: 'nowrap' }}>
+                        {fmtTarifJour(workerTarifJournalier(w))}
                       </td>
 
                       {/* Statut */}

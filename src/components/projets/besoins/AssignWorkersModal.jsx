@@ -67,7 +67,11 @@ export default function AssignWorkersModal({
       if (filters.dispo === 'dispo' && !disp.ok) return false;
       if (filters.dispo === 'occupe' && disp.ok && !(w.assigned_project_ids || []).includes(String(projet.id))) return false;
       if (filters.ville && !workerVille(w).toLowerCase().includes(filters.ville.toLowerCase())) return false;
-      if (filters.qualification && (w.experience || '') !== filters.qualification) return false;
+      if (filters.qualification) {
+        const n = Number(w.experience);
+        const stars = (n >= 1 && n <= 5) ? n : ({ debutant: 1, intermediaire: 2, confirme: 3, expert: 4 }[w.experience] || 0);
+        if (String(stars) !== filters.qualification) return false;
+      }
       if (filters.permis && !(w.badge || '').toLowerCase().includes(filters.permis.toLowerCase())) return false;
       return true;
     });
@@ -137,9 +141,11 @@ export default function AssignWorkersModal({
           <input value={filters.ville} onChange={(e) => setFilters((p) => ({ ...p, ville: e.target.value }))} placeholder="Ville" style={IS} />
           <select value={filters.qualification} onChange={(e) => setFilters((p) => ({ ...p, qualification: e.target.value }))} style={IS}>
             <option value="">Qualification</option>
-            <option value="debutant">Débutant</option>
-            <option value="intermediaire">Intermédiaire</option>
-            <option value="expert">Expert</option>
+            <option value="1">★☆☆☆☆ 1/5</option>
+            <option value="2">★★☆☆☆ 2/5</option>
+            <option value="3">★★★☆☆ 3/5</option>
+            <option value="4">★★★★☆ 4/5</option>
+            <option value="5">★★★★★ 5/5</option>
           </select>
           <input value={filters.permis} onChange={(e) => setFilters((p) => ({ ...p, permis: e.target.value }))} placeholder="Permis / badge" style={IS} />
         </div>
