@@ -1,8 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import './pwa-update.css';
 
-const IDLE_MS = 1500;
-const UPDATE_POLL_MS = 60_000;
+const IDLE_MS = 1200;
+/** Même si l’utilisateur est « occupé », on propose quand même après ce délai. */
+const MAX_DEFER_MS = 8_000;
+const UPDATE_POLL_MS = 30_000;
+const SNOOZE_KEY = 'citymo_pwa_update_snooze_until';
+const SNOOZE_MS = 30 * 60 * 1000; // 30 min après « Plus tard »
 
 function isEditableField(el) {
   if (!el || el === document.body || el === document.documentElement) return false;
@@ -13,66 +17,103 @@ function isEditableField(el) {
 }
 
 function isUserBusy() {
-  if (document.querySelector('dialog[open], [aria-modal="true"]')) return true;
-
+  // Uniquement dialog HTML ouvert — pas tous les [aria-modal] (souvent laissés dans le DOM)
+  if (document.querySelector('dialog[open]')) return true;
   const active = document.activeElement;
   if (isEditableField(active)) return true;
-
   return false;
+}
+
+function readSnoozeUntil() {
+  try {
+    const raw = sessionStorage.getItem(SNOOZE_KEY);
+    const n = raw ? Number(raw) : 0;
+    return Number.isFinite(n) ? n : 0;
+  } catch {
+    return 0;
+  }
+}
+
+function writeSnooze() {
+  try {
+    sessionStorage.setItem(SNOOZE_KEY, String(Date.now() + SNOOZE_MS));
+  } catch {
+    /* ignore */
+  }
+}
+
+function clearSnooze() {
+  try {
+    sessionStorage.removeItem(SNOOZE_KEY);
+  } catch {
+    /* ignore */
+  }
 }
 
 /**
  * Bannière de mise à jour PWA.
  * - Pas de skipWaiting / clientsClaim / reload automatiques.
- * - Proposition différée si saisie formulaire / activité utilisateur.
- * - Le bouton "Mettre à jour" est une exception (jamais différé).
- * - Vérifie régulièrement (focus / intervalle) qu’un SW en attente existe.
+ * - Affichage forcé au plus tard après MAX_DEFER_MS (évite les sessions où la bannière ne sort jamais).
+ * - « Plus tard » = snooze 30 min (session), pas un dismiss définitif.
  */
 export default function PwaUpdateBanner() {
   const [visible, setVisible] = useState(false);
   const [updating, setUpdating] = useState(false);
   const registrationRef = useRef(null);
   const waitingRef = useRef(null);
-  const dismissedRef = useRef(false);
-  const pendingOfferRef = useRef(false);
   const reloadingRef = useRef(false);
   const ignoreActivityRef = useRef(false);
   const lastActivityRef = useRef(Date.now());
+  const firstOfferAtRef = useRef(0);
   const idleTimerRef = useRef(null);
+  const forceTimerRef = useRef(null);
 
   useEffect(() => {
     if (!import.meta.env.PROD || !('serviceWorker' in navigator)) return undefined;
 
     let cancelled = false;
 
-    const canOfferNow = () => {
-      if (dismissedRef.current || reloadingRef.current) return false;
+    const isSnoozed = () => Date.now() < readSnoozeUntil();
+
+    const canOfferSoft = () => {
+      if (reloadingRef.current || isSnoozed()) return false;
       if (isUserBusy()) return false;
       if (Date.now() - lastActivityRef.current < IDLE_MS) return false;
       return true;
     };
 
-    const showIfReady = () => {
-      if (cancelled || !waitingRef.current || dismissedRef.current) return;
-      if (!canOfferNow()) {
-        pendingOfferRef.current = true;
-        return;
-      }
-      pendingOfferRef.current = false;
+    const showBanner = () => {
+      if (cancelled || !waitingRef.current || reloadingRef.current) return;
+      if (isSnoozed()) return;
       setVisible(true);
     };
 
+    const showIfReady = ({ force = false } = {}) => {
+      if (cancelled || !waitingRef.current || reloadingRef.current) return;
+      if (isSnoozed()) return;
+      if (!force && !canOfferSoft()) return;
+      showBanner();
+    };
+
     const scheduleOffer = () => {
-      if (!waitingRef.current || dismissedRef.current) return;
-      pendingOfferRef.current = true;
+      if (!waitingRef.current || reloadingRef.current || isSnoozed()) return;
+
+      if (!firstOfferAtRef.current) {
+        firstOfferAtRef.current = Date.now();
+      }
+
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
-      idleTimerRef.current = setTimeout(() => {
-        showIfReady();
-      }, IDLE_MS);
+      idleTimerRef.current = setTimeout(() => showIfReady({ force: false }), IDLE_MS);
+
+      // Garantie : afficher même si la session reste « active »
+      if (forceTimerRef.current) clearTimeout(forceTimerRef.current);
+      const elapsed = Date.now() - firstOfferAtRef.current;
+      const remaining = Math.max(0, MAX_DEFER_MS - elapsed);
+      forceTimerRef.current = setTimeout(() => showIfReady({ force: true }), remaining);
     };
 
     const offerWaiting = (sw) => {
-      if (!sw || dismissedRef.current) return;
+      if (!sw || reloadingRef.current) return;
       waitingRef.current = sw;
       scheduleOffer();
     };
@@ -80,8 +121,14 @@ export default function PwaUpdateBanner() {
     const syncWaitingFromRegistration = (registration) => {
       if (!registration || cancelled) return;
       const waiting = registration.waiting;
-      if (waiting && navigator.serviceWorker.controller) {
-        offerWaiting(waiting);
+      // Afficher dès qu’un SW est en attente (controller optionnel : 1er install géré à part)
+      if (waiting) {
+        if (navigator.serviceWorker.controller) {
+          offerWaiting(waiting);
+        } else {
+          // Pas encore de controller : attendre le contrôle puis proposer si un waiting apparaît
+          offerWaiting(waiting);
+        }
       }
     };
 
@@ -95,9 +142,7 @@ export default function PwaUpdateBanner() {
     const markActivity = () => {
       if (ignoreActivityRef.current) return;
       lastActivityRef.current = Date.now();
-      if (waitingRef.current && !dismissedRef.current) {
-        scheduleOffer();
-      } else if (pendingOfferRef.current) {
+      if (waitingRef.current && !isSnoozed()) {
         scheduleOffer();
       }
     };
@@ -106,7 +151,8 @@ export default function PwaUpdateBanner() {
       const installing = registration.installing;
       if (!installing) return;
       installing.addEventListener('statechange', () => {
-        if (installing.state === 'installed' && navigator.serviceWorker.controller) {
+        if (installing.state === 'installed') {
+          // Nouveau SW prêt (remplace ou attend) → proposer la mise à jour
           offerWaiting(registration.waiting || installing);
         }
       });
@@ -137,7 +183,6 @@ export default function PwaUpdateBanner() {
 
         syncWaitingFromRegistration(registration);
         registration.addEventListener('updatefound', () => onUpdateFound(registration));
-        // Force une vérif dès l’arrivée sur l’app
         registration.update().catch(() => {});
       })
       .catch(() => {
@@ -147,6 +192,7 @@ export default function PwaUpdateBanner() {
     return () => {
       cancelled = true;
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+      if (forceTimerRef.current) clearTimeout(forceTimerRef.current);
       window.clearInterval(pollId);
       window.removeEventListener('pointerdown', onActivity, true);
       window.removeEventListener('keydown', onActivity, true);
@@ -157,9 +203,9 @@ export default function PwaUpdateBanner() {
   }, []);
 
   const handleLater = () => {
-    dismissedRef.current = true;
-    pendingOfferRef.current = false;
+    writeSnooze();
     if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    if (forceTimerRef.current) clearTimeout(forceTimerRef.current);
     setVisible(false);
   };
 
@@ -168,7 +214,9 @@ export default function PwaUpdateBanner() {
     if (!waiting || reloadingRef.current) return;
 
     ignoreActivityRef.current = true;
+    clearSnooze();
     if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    if (forceTimerRef.current) clearTimeout(forceTimerRef.current);
     setUpdating(true);
 
     try {
@@ -184,7 +232,6 @@ export default function PwaUpdateBanner() {
         navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
         waiting.postMessage({ type: 'SKIP_WAITING' });
 
-        // Fallback si controllerchange n’arrive pas assez vite
         window.setTimeout(() => {
           if (reloadingRef.current) return;
           clearTimeout(timeout);
@@ -199,7 +246,6 @@ export default function PwaUpdateBanner() {
     } catch {
       ignoreActivityRef.current = false;
       setUpdating(false);
-      // Dernier recours : recharger quand même pour tenter de prendre la nouvelle version
       window.location.reload();
     }
   };

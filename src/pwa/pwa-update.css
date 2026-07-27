@@ -18,6 +18,14 @@
   line-height: 1.35;
 }
 
+/* Au-dessus des modales / overlays finance & mobile */
+@supports (padding: max(0px)) {
+  .pwa-update-banner {
+    bottom: max(20px, env(safe-area-inset-bottom, 0px));
+    z-index: 2147483000;
+  }
+}
+
 .pwa-update-banner__message {
   margin: 0;
   flex: 1 1 auto;
