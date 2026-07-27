@@ -1,39 +1,47 @@
 /**
- * OCR local de secours (Tesseract.js CDN) — utilisé seulement si le service Python
- * CITYMO est indisponible / non configuré.
+ * OCR local de secours — tesseract.js (npm + assets Vite), pas de script CDN.
  */
+import { createWorker } from 'tesseract.js';
+import workerPath from 'tesseract.js/dist/worker.min.js?url';
+import corePath from 'tesseract.js-core/tesseract-core-simd-lstm.wasm.js?url';
 import { parseMoroccanCinTexts } from './cinLocalParser';
 
-const TESS_CDN = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+const LOG = (...args) => console.info('[OCR CHAIN]', ...args);
 
-let _tessPromise = null;
+let _workerPromise = null;
 
-async function loadTesseract() {
-  if (typeof window === 'undefined') throw new Error('OCR local navigateur uniquement');
-  if (window.Tesseract) return window.Tesseract;
-  if (_tessPromise) return _tessPromise;
-  _tessPromise = new Promise((resolve, reject) => {
-    const s = document.createElement('script');
-    s.src = TESS_CDN;
-    s.async = true;
-    s.onload = () => {
-      if (window.Tesseract) resolve(window.Tesseract);
-      else reject(new Error('Tesseract non chargé'));
-    };
-    s.onerror = () => reject(new Error('Impossible de charger le moteur OCR local'));
-    document.head.appendChild(s);
-  });
-  return _tessPromise;
+async function getWorker() {
+  if (_workerPromise) return _workerPromise;
+  _workerPromise = (async () => {
+    LOG('Tesseract createWorker(fra)…', { workerPath, corePath });
+    const worker = await createWorker('fra', 1, {
+      workerPath,
+      corePath,
+      logger: () => {},
+    });
+    LOG('Tesseract worker prêt');
+    return worker;
+  })();
+  try {
+    return await _workerPromise;
+  } catch (err) {
+    _workerPromise = null;
+    LOG('Tesseract createWorker FAIL', err?.message || err);
+    throw err;
+  }
 }
 
-async function ocrSide(Tesseract, dataUrl, onProgress) {
+async function ocrSide(worker, dataUrl, label) {
   if (!dataUrl) return { text: '', confidence: 0 };
-  onProgress?.();
-  const result = await Tesseract.recognize(dataUrl, 'fra', {
-    logger: () => {},
-  });
+  LOG(`recognize ${label} start`, { dataUrlLen: String(dataUrl).length });
+  const result = await worker.recognize(dataUrl);
   const text = result?.data?.text || '';
   const confidence = (result?.data?.confidence || 0) / 100;
+  LOG(`recognize ${label} done`, {
+    textLen: text.length,
+    confidence,
+    preview: text.slice(0, 160).replace(/\s+/g, ' '),
+  });
   return { text, confidence };
 }
 
@@ -42,37 +50,40 @@ async function ocrSide(Tesseract, dataUrl, onProgress) {
  */
 export async function scanCINLocal(rectoDataUrl, versoDataUrl, { onProgress } = {}) {
   const progress = (s) => { try { onProgress?.(s); } catch (_) { /* */ } };
+  LOG('scanCINLocal START');
   progress('Lecture locale du recto');
-  const Tesseract = await loadTesseract();
-  const recto = await ocrSide(Tesseract, rectoDataUrl, () => progress('Lecture locale du recto'));
+  const worker = await getWorker();
+  const recto = await ocrSide(worker, rectoDataUrl, 'recto');
   let verso = { text: '', confidence: 0 };
   if (versoDataUrl) {
     progress('Lecture locale du verso');
-    verso = await ocrSide(Tesseract, versoDataUrl);
+    verso = await ocrSide(worker, versoDataUrl, 'verso');
   }
   progress('Extraction des champs');
   const parsed = parseMoroccanCinTexts(recto.text, verso.text);
   const wf = parsed.worker_form;
   const partial = !(wf.cin && wf.nom && wf.prenom);
+  LOG('scanCINLocal PARSED', wf);
   progress('Vérification terminée');
 
   return {
     ok: true,
     partial,
-    cin: wf.cin,
-    prenom: wf.prenom,
-    nom: wf.nom,
-    date_naissance: wf.date_naissance,
-    ville_naissance: wf.ville_naissance,
+    success: true,
+    cin: wf.cin || '',
+    prenom: wf.prenom || '',
+    nom: wf.nom || '',
+    date_naissance: wf.date_naissance || '',
+    ville_naissance: wf.ville_naissance || '',
     nationalite: wf.nationalite || 'Marocaine',
-    sexe: wf.sexe,
-    date_expiration: wf.date_expiration,
+    sexe: wf.sexe || '',
+    date_expiration: wf.date_expiration || '',
     nom_arabe: '',
     prenom_arabe: '',
     fields: parsed.fields,
     confidence_globale: partial ? 'faible' : 'moyenne',
     warnings: [
-      'Extraction locale (secours) — déployez le service OCR CITYMO pour une meilleure précision.',
+      'Extraction locale (secours).',
       ...(partial ? ['Analyse partielle — vérifiez et complétez les champs.'] : []),
     ],
     progress: ['Préparation', 'Lecture locale', 'Extraction des champs', 'Vérification terminée'],
@@ -84,11 +95,17 @@ export async function scanCINLocal(rectoDataUrl, versoDataUrl, { onProgress } = 
     _ocr_warning: partial ? 'Analyse partielle' : '',
     _ocr_partial: partial,
     _ocr_fallback: true,
+    _ocr_raw_text_preview: {
+      recto: (recto.text || '').slice(0, 200),
+      verso: (verso.text || '').slice(0, 200),
+    },
   };
 }
 
 export async function preloadLocalOcr() {
   try {
-    await loadTesseract();
-  } catch (_) { /* ignore */ }
+    await getWorker();
+  } catch (err) {
+    LOG('preloadLocalOcr failed', err?.message || err);
+  }
 }

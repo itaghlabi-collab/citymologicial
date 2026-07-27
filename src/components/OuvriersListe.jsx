@@ -1277,12 +1277,12 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
   function buildOcrPayload(result) {
     const fields = result?.fields || {};
     const map = {
-      cin: fields.numero_cin?.value || result.cin || '',
-      prenom: fields.prenom?.value || result.prenom || '',
-      nom: fields.nom?.value || result.nom || '',
-      date_expiration: fields.date_expiration?.value || result.date_expiration || '',
-      sexe: fields.sexe?.value || result.sexe || '',
-      nationalite: fields.nationalite?.value || result.nationalite || '',
+      cin: String(fields.numero_cin?.value || result?.cin || '').trim(),
+      prenom: String(fields.prenom?.value || result?.prenom || '').trim(),
+      nom: String(fields.nom?.value || result?.nom || '').trim(),
+      date_expiration: String(fields.date_expiration?.value || result?.date_expiration || '').trim(),
+      sexe: String(fields.sexe?.value || result?.sexe || '').trim(),
+      nationalite: String(fields.nationalite?.value || result?.nationalite || '').trim(),
     };
     const meta = {};
     const keyMap = {
@@ -1293,25 +1293,49 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
       const f = fields[fieldKey];
       if (f) meta[formKey] = { confidence: f.confidence, confidence_pct: f.confidence_pct };
     });
+    console.info('[OCR CHAIN]', 'Résultat extrait → payload formulaire', map, {
+      engine: result?.engine_used,
+      fallback: !!result?._ocr_fallback,
+      hasAny: !!(map.cin || map.prenom || map.nom),
+    });
     return { map, meta, cinCandidates: fields.numero_cin?.candidates || [] };
   }
 
   function fillFormFromOcr(payload, meta) {
-    const conflicts = {};
-    Object.keys(payload).forEach((k) => {
-      const cur = String(form[k] || '').trim();
-      const next = String(payload[k] || '').trim();
-      if (cur && next && cur !== next) conflicts[k] = { current: cur, detected: next };
+    console.info('[OCR CHAIN]', 'Avant remplissage du formulaire', payload);
+    const cleaned = {};
+    Object.entries(payload || {}).forEach(([k, v]) => {
+      if (v != null && String(v).trim() !== '') cleaned[k] = String(v).trim();
     });
-    if (Object.keys(conflicts).length) {
-      setFieldConflicts({ conflicts, payload, meta });
+
+    if (Object.keys(cleaned).length === 0) {
+      console.warn('[OCR CHAIN]', 'Après remplissage — AUCUNE donnée à injecter');
+      setOcrToast('Aucune donnée extraite — saisissez les champs manuellement.');
+      setTimeout(() => setOcrToast(''), 7000);
       return;
     }
-    const cleaned = {};
-    Object.entries(payload).forEach(([k, v]) => {
-      if (v != null && String(v).trim() !== '') cleaned[k] = v;
+
+    // Toujours injecter les valeurs OCR dans les inputs React contrôlés.
+    // Les conflits éventuels sont signalés APRÈS injection (ne bloquent plus le fill).
+    setForm((prev) => {
+      const conflicts = {};
+      Object.entries(cleaned).forEach(([k, next]) => {
+        const cur = String(prev[k] || '').trim();
+        if (cur && next && cur !== next) conflicts[k] = { current: cur, detected: next };
+      });
+      const merged = { ...prev, ...cleaned };
+      console.info('[OCR CHAIN]', 'Après remplissage du formulaire', {
+        injected: cleaned,
+        formCin: merged.cin,
+        formPrenom: merged.prenom,
+        formNom: merged.nom,
+        conflicts,
+      });
+      if (Object.keys(conflicts).length) {
+        queueMicrotask(() => setFieldConflicts({ conflicts, payload: cleaned, meta }));
+      }
+      return merged;
     });
-    setForm((p) => ({ ...p, ...cleaned }));
     setOcrFieldMeta(meta || null);
     setFormTab('identite');
     setOcrFilled(true);
@@ -1340,12 +1364,20 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
   }
 
   async function handleAnalyzeDocuments(force = forceOcr) {
+    console.info('[OCR CHAIN]', 'Bouton « Analyser la CIN » → handleAnalyzeDocuments', {
+      force,
+      hasRecto: !!form.cin_recto,
+      hasFullRecto: !!ocrFullDataUrlRef.current.recto,
+      hasVerso: !!(ocrFullDataUrlRef.current.verso || form.cin_verso),
+      qualityBlock: !!qualityRecto?.block_ocr,
+    });
     if (!form.cin_recto) {
       setOcrToast('Recto manquant — importez le recto CIN.');
       setTimeout(() => setOcrToast(''), 4000);
       return;
     }
     if (qualityRecto?.block_ocr && !force) {
+      console.warn('[OCR CHAIN]', 'Bloqué qualité client (pas encore OCR)', qualityRecto);
       setOcrToast(qualityRecto.messages?.[0] || 'Image non lisible');
       setForceOcr(true);
       setTimeout(() => setOcrToast(''), 6000);
@@ -1356,11 +1388,21 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
     setOcrProgress('Analyse…');
     setCinAmbiguous(null);
     try {
+      console.info('[OCR CHAIN]', 'Appel scanCIN…');
       const result = await scanCIN(
         ocrFullDataUrlRef.current.recto || form.cin_recto,
         ocrFullDataUrlRef.current.verso || form.cin_verso || null,
         { force, onProgress: setOcrProgress },
       );
+      console.info('[OCR CHAIN]', 'Retour scanCIN', {
+        cin: result?.cin,
+        prenom: result?.prenom,
+        nom: result?.nom,
+        engine: result?.engine_used,
+        fallback: !!result?._ocr_fallback,
+        ok: result?.ok,
+        success: result?.success,
+      });
       lastOcrMetaRef.current = {
         confirmed_at: new Date().toISOString(),
         engine: result?.engine_used,
@@ -1376,18 +1418,19 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
       if (workers?.length) syncOcrLearning(workers);
       if (result?._ocr_fallback) {
         setOcrToast(
-          (map.cin || map.nom)
+          (map.cin || map.nom || map.prenom)
             ? '✔ CIN reconnue (secours local) — vérifiez les champs.'
             : 'Extraction partielle — vérifiez / complétez manuellement.',
         );
         setTimeout(() => setOcrToast(''), 7000);
       }
     } catch (err) {
+      console.error('[OCR CHAIN]', 'handleAnalyzeDocuments CATCH', err?.code, err?.message, err);
       if (err?.code === 'IMAGE_UNREADABLE' && err?.allow_force) {
         setForceOcr(true);
         setOcrToast((err.message || 'Image non lisible') + ' — vous pouvez analyser quand même.');
       } else {
-        setOcrToast(err?.message || 'Service OCR indisponible — saisissez les champs manuellement.');
+        setOcrToast(err?.message || 'Extraction impossible — saisissez les champs manuellement.');
       }
       setTimeout(() => setOcrToast(''), 8000);
     } finally {
