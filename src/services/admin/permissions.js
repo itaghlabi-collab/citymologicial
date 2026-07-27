@@ -6,6 +6,18 @@ import { isSuperAdmin } from '../rh/isSuperAdmin';
 import { canAccessExecutiveCalendar } from '../auth/executiveCalendarAccess';
 import { ERP_ACTIONS, allSubmoduleCodes, ERP_RUBRIQUES, findSubmodule } from '../../config/menuRegistry';
 
+/** Accès dépenses / catégories forcé pour comptes métier explicitement listés. */
+const DEPENSES_FULL_ACCESS_EMAILS = new Set([
+  'h.barkaoui@citymo.ma',
+]);
+
+function hasDepensesFullAccess(user, submoduleCode, actionCode) {
+  const email = String(user?.email || '').trim().toLowerCase();
+  if (!DEPENSES_FULL_ACCESS_EMAILS.has(email)) return false;
+  if (submoduleCode !== 'charges' && submoduleCode !== 'categories-charge') return false;
+  return ['voir', 'creer', 'modifier', 'supprimer', 'valider', 'exporter'].includes(actionCode);
+}
+
 let cache = {
   userId: null,
   at: 0,
@@ -93,6 +105,8 @@ export async function canAccessRoute(user, routeId) {
     return canAccessExecutiveCalendar(user);
   }
 
+  if (hasDepensesFullAccess(user, routeId, 'voir')) return true;
+
   const access = await loadUserAccess(user.id);
   if (access.estAdmin) return true;
   if (access.legacy) return true;
@@ -103,6 +117,7 @@ export async function canAccessRoute(user, routeId) {
 export async function can(user, submoduleCode, actionCode) {
   if (!user) return false;
   if (isSuperAdmin(user)) return true;
+  if (hasDepensesFullAccess(user, submoduleCode, actionCode)) return true;
 
   const access = await loadUserAccess(user.id);
   if (access.estAdmin) return true;
@@ -121,6 +136,11 @@ export async function getAccessibleRouteIds(user) {
 
   const codes = allSubmoduleCodes();
   const allowed = codes.filter((code) => hasAccess(access, code, 'voir'));
+
+  if (hasDepensesFullAccess(user, 'charges', 'voir')) {
+    if (!allowed.includes('charges')) allowed.push('charges');
+    if (!allowed.includes('categories-charge')) allowed.push('categories-charge');
+  }
 
   if (canAccessExecutiveCalendar(user) && !allowed.includes('agenda-direction')) {
     allowed.push('agenda-direction');
@@ -206,10 +226,15 @@ export async function saveUserSubmoduleAccess(userId, submoduleCodes) {
 
   const codes = new Set(Array.isArray(submoduleCodes) ? submoduleCodes : []);
   const rows = [];
+  /** Dépenses / catégories : inclure supprimer + valider (sinon bouton poubelle bloqué en RLS). */
+  const FULL_ACTIONS = new Set(['charges', 'categories-charge']);
 
   codes.forEach((subCode) => {
     if (!subCode) return;
-    ['voir', 'creer', 'modifier', 'exporter'].forEach((action) => {
+    const actions = FULL_ACTIONS.has(subCode)
+      ? ['voir', 'creer', 'modifier', 'supprimer', 'valider', 'exporter']
+      : ['voir', 'creer', 'modifier', 'exporter'];
+    actions.forEach((action) => {
       rows.push({
         user_id: userId,
         submodule_code: subCode,

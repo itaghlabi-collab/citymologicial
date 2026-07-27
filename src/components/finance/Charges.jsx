@@ -5,12 +5,21 @@
 import { useState, useCallback, useEffect } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useFinanceCharges } from '../../hooks/useFinanceCharges';
+import { useAuth } from '../../hooks/useAuth';
+import { can } from '../../services/admin/permissions';
 import { chargeDisplayRef, listProjectsForCharges } from '../../services/finance/charges';
+import {
+  uploadChargeFile,
+  resolveChargeAttachments,
+  stripChargeAttachmentUrls,
+  formatChargeAttachmentLabel,
+} from '../../services/finance/chargeStorage';
+import { formatFileSize } from '../../services/uploadService';
 import { projectOptionLabel } from '../../services/achats/purchaseRequests';
 import {
   TrendingDown, Plus, Eye, Edit2, Trash2, Archive, Download,
   CheckCircle, XCircle, Search, Filter, FileText, Paperclip,
-  BookOpen, AlertTriangle
+  BookOpen, AlertTriangle, ExternalLink
 } from 'lucide-react';
 import {
   INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE,
@@ -26,10 +35,70 @@ const EMPTY_FORM = {
   statut: 'Brouillon', commentaire: '', validateur: '', justificatifs: [],
 };
 
+function ChargeAttachmentsList({ items, onRemove, removing }) {
+  if (!items?.length) return null;
+  return (
+    <ul style={{ listStyle: 'none', margin: '10px 0 0', padding: 0, display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {items.map((f, idx) => (
+        <li
+          key={f.storage_path || f.url || `${f.name}-${idx}`}
+          style={{
+            display: 'flex', alignItems: 'center', gap: 8, padding: '8px 10px',
+            background: 'var(--surface-2)', borderRadius: 6, fontSize: '0.82rem',
+          }}
+        >
+          <Paperclip size={13} style={{ flexShrink: 0, color: 'var(--text-3)' }} />
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {f.name || 'Fichier'}
+            </div>
+            <div style={{ fontSize: '0.7rem', color: 'var(--text-3)' }}>
+              {formatChargeAttachmentLabel(f.type || f.name)}
+              {f.size ? ` · ${formatFileSize(f.size)}` : ''}
+            </div>
+          </div>
+          {f.url && (
+            <a href={f.url} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm" title="Ouvrir">
+              <ExternalLink size={13} />
+            </a>
+          )}
+          {onRemove && (
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              title="Retirer"
+              disabled={removing}
+              onClick={() => onRemove(idx)}
+              style={{ color: 'var(--red)' }}
+            >
+              <Trash2 size={13} />
+            </button>
+          )}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
 function ChargeForm({ initial, categories, projects = [], onSave, onCancel }) {
-  const [form, setForm] = useState(initial || EMPTY_FORM);
+  const [form, setForm] = useState(() => ({
+    ...EMPTY_FORM,
+    ...(initial || {}),
+    justificatifs: Array.isArray(initial?.justificatifs) ? [...initial.justificatifs] : [],
+  }));
   const [errors, setErrors] = useState({});
+  const [files, setFiles] = useState([]);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState('');
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
+
+  useEffect(() => {
+    let cancelled = false;
+    resolveChargeAttachments(initial?.justificatifs || []).then((resolved) => {
+      if (!cancelled) setFiles(resolved);
+    });
+    return () => { cancelled = true; };
+  }, [initial?.id]);
 
   useEffect(() => {
     if (!initial?.project_id && initial?.projet_lie && projects.length) {
@@ -51,6 +120,29 @@ function ChargeForm({ initial, categories, projects = [], onSave, onCancel }) {
     }));
   }
 
+  async function handleFiles(fileList) {
+    setUploadError('');
+    if (!fileList?.length) return;
+    setUploading(true);
+    try {
+      const uploaded = [];
+      for (const file of fileList) {
+        const meta = await uploadChargeFile(file, { chargeId: initial?.id || 'draft' });
+        uploaded.push(meta);
+      }
+      const resolved = await resolveChargeAttachments(uploaded);
+      setFiles((prev) => [...prev, ...resolved]);
+    } catch (err) {
+      setUploadError(err?.message || 'Upload impossible');
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  function removeFile(idx) {
+    setFiles((prev) => prev.filter((_, i) => i !== idx));
+  }
+
   function validate() {
     const e = {};
     if (!form.libelle.trim()) e.libelle = 'Requis';
@@ -63,7 +155,11 @@ function ChargeForm({ initial, categories, projects = [], onSave, onCancel }) {
     ev.preventDefault();
     const e = validate();
     if (Object.keys(e).length) { setErrors(e); return; }
-    onSave({ ...form, montant: parseFloat(form.montant) || 0 });
+    onSave({
+      ...form,
+      montant: parseFloat(form.montant) || 0,
+      justificatifs: stripChargeAttachmentUrls(files),
+    });
   }
 
   const inp = (k) => ({ ...INPUT_STYLE, borderColor: errors[k] ? 'var(--red)' : 'var(--border)' });
@@ -93,6 +189,11 @@ function ChargeForm({ initial, categories, projects = [], onSave, onCancel }) {
             <option value="">Sélectionner...</option>
             {categories.map((c) => <option key={c.id} value={c.id}>{c.nom}</option>)}
           </select>
+          {!categories.length && (
+            <div style={{ color: 'var(--text-3)', fontSize: '0.7rem', marginTop: 4 }}>
+              Aucune catégorie disponible — vérifiez l’accès « Catégories charge ».
+            </div>
+          )}
         </FField>
         <FField label="Montant (MAD)" required>
           <input type="number" min="0" step="0.01" value={form.montant} onChange={e => set('montant', e.target.value)} placeholder="0.00" style={inp('montant')} />
@@ -135,7 +236,14 @@ function ChargeForm({ initial, categories, projects = [], onSave, onCancel }) {
 
       <SectionTitle icon={<Paperclip size={12} />}>Documents justificatifs</SectionTitle>
       <div style={{ marginBottom: 14 }}>
-        <UploadField label="Justificatif PDF / Image facture / Pièces jointes" />
+        <UploadField label="Justificatif PDF / Image facture / Pièces jointes" onFiles={handleFiles} />
+        {uploading && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginTop: 8, fontSize: '0.8rem', color: 'var(--text-3)' }}>
+            <Loader2 size={14} className="cin-spin" /> Upload en cours…
+          </div>
+        )}
+        {uploadError && <div style={{ color: 'var(--red)', fontSize: '0.75rem', marginTop: 6 }}>{uploadError}</div>}
+        <ChargeAttachmentsList items={files} onRemove={removeFile} removing={uploading} />
       </div>
 
       <SectionTitle icon={<CheckCircle size={12} />}>Suivi & Validation</SectionTitle>
@@ -147,7 +255,7 @@ function ChargeForm({ initial, categories, projects = [], onSave, onCancel }) {
 
       <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
         <button type="button" className="btn btn-secondary" onClick={onCancel}>Annuler</button>
-        <button type="submit" className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <button type="submit" className="btn btn-primary" disabled={uploading} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
           <Plus size={14} /> {initial ? 'Enregistrer' : 'Ajouter dépense'}
         </button>
       </div>
@@ -155,7 +263,17 @@ function ChargeForm({ initial, categories, projects = [], onSave, onCancel }) {
   );
 }
 
-function DetailCharge({ charge, onBack, onEdit, onDelete, onValider, onComptabiliser }) {
+function DetailCharge({ charge, onBack, onEdit, onDelete, onValider, onComptabiliser, canDelete }) {
+  const [attachments, setAttachments] = useState([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    resolveChargeAttachments(charge?.justificatifs || []).then((list) => {
+      if (!cancelled) setAttachments(list);
+    });
+    return () => { cancelled = true; };
+  }, [charge?.id, charge?.justificatifs]);
+
   return (
     <div className="animate-fade-in">
       <button className="btn btn-ghost btn-sm" style={{ marginBottom: 14, display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={onBack}>
@@ -178,9 +296,11 @@ function DetailCharge({ charge, onBack, onEdit, onDelete, onValider, onComptabil
               <BookOpen size={13} /> Comptabiliser
             </button>
           )}
-          <button className="btn btn-ghost btn-sm" style={{ color: 'var(--red)', display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => onDelete(charge.id)}>
-            <Trash2 size={13} />
-          </button>
+          {canDelete && (
+            <button className="btn btn-ghost btn-sm" style={{ color: 'var(--red)', display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => onDelete(charge.id)}>
+              <Trash2 size={13} />
+            </button>
+          )}
         </div>
       </div>
 
@@ -209,7 +329,11 @@ function DetailCharge({ charge, onBack, onEdit, onDelete, onValider, onComptabil
 
           <div className="card" style={{ marginBottom: 16 }}>
             <SectionTitle icon={<Paperclip size={13} />}>Justificatifs</SectionTitle>
-            <EmptyState icon={<Paperclip size={20} />} title="Aucun justificatif" sub="Les documents joints apparaîtront ici" />
+            {attachments.length ? (
+              <ChargeAttachmentsList items={attachments} />
+            ) : (
+              <EmptyState icon={<Paperclip size={20} />} title="Aucun justificatif" sub="Les documents joints apparaîtront ici" />
+            )}
           </div>
 
           <div className="card">
@@ -246,6 +370,7 @@ function DetailCharge({ charge, onBack, onEdit, onDelete, onValider, onComptabil
 }
 
 export default function Charges({ categories }) {
+  const { user } = useAuth();
   const { records: charges, loading, error, save, remove } = useFinanceCharges();
   const [search, setSearch] = useState('');
   const [filterStatut, setFilterStatut] = useState('');
@@ -256,6 +381,20 @@ export default function Charges({ categories }) {
   const [editCharge, setEditCharge] = useState(null);
   const [detailId, setDetailId] = useState(null);
   const [projects, setProjects] = useState([]);
+  const [canDelete, setCanDelete] = useState(true);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const ok = await can(user, 'charges', 'supprimer');
+        if (!cancelled) setCanDelete(ok);
+      } catch {
+        if (!cancelled) setCanDelete(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user?.id, user?.email]);
 
   const loadProjects = useCallback(() => (
     listProjectsForCharges()
@@ -287,6 +426,7 @@ export default function Charges({ categories }) {
   }, [editCharge, save, cats]);
 
   async function handleDelete(id) {
+    if (!canDelete) return;
     if (window.confirm('Supprimer cette dépense ?')) {
       await remove(id);
       setDetailId(null);
@@ -340,6 +480,7 @@ export default function Charges({ categories }) {
         onDelete={handleDelete}
         onValider={handleValider}
         onComptabiliser={handleComptabiliser}
+        canDelete={canDelete}
       />
     );
   }
@@ -473,7 +614,9 @@ export default function Charges({ categories }) {
                         {c.statut === 'En attente validation' && (
                           <button className="btn btn-ghost btn-sm" title="Refuser" onClick={() => handleRefuser(c)} style={{ color: 'var(--red)' }}><XCircle size={13} /></button>
                         )}
-                        <button className="btn btn-ghost btn-sm" title="Supprimer" onClick={() => handleDelete(c.id)} style={{ color: 'var(--red)' }}><Trash2 size={13} /></button>
+                        {canDelete && (
+                          <button className="btn btn-ghost btn-sm" title="Supprimer" onClick={() => handleDelete(c.id)} style={{ color: 'var(--red)' }}><Trash2 size={13} /></button>
+                        )}
                       </div>
                     </td>
                   </tr>
