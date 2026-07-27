@@ -1374,6 +1374,14 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
       fillFormFromOcr(map, meta);
       setForceOcr(false);
       if (workers?.length) syncOcrLearning(workers);
+      if (result?._ocr_fallback) {
+        setOcrToast(
+          (map.cin || map.nom)
+            ? '✔ CIN reconnue (secours local) — vérifiez les champs.'
+            : 'Extraction partielle — vérifiez / complétez manuellement.',
+        );
+        setTimeout(() => setOcrToast(''), 7000);
+      }
     } catch (err) {
       if (err?.code === 'IMAGE_UNREADABLE' && err?.allow_force) {
         setForceOcr(true);

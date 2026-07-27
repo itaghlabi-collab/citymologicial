@@ -1,9 +1,10 @@
 /**
  * ocr.js — Client OCR CIN marocaine.
- * Appelle uniquement l'API CITYMO (proxy) → service Python indépendant.
- * Aucun OCR lourd dans le navigateur.
+ * 1) Service Python CITYMO (via API / proxy)
+ * 2) Secours Tesseract local si service indisponible / non configuré
  */
 import { resolveApiBaseUrl } from '../config/env';
+import { scanCINLocal, preloadLocalOcr } from './cinLocalOcr';
 
 export function getOcrApiUrl() {
   return resolveApiBaseUrl();
@@ -56,9 +57,9 @@ export async function getCINCameraStream() {
   });
 }
 
-/** No-op — modèles OCR côté serveur uniquement. */
+/** Précharge le secours Tesseract (non bloquant). */
 export function preloadOcrEngine() {
-  return Promise.resolve();
+  return preloadLocalOcr();
 }
 
 export async function compressImage(dataUrl, maxWidth = 1800, quality = 0.85) {
@@ -105,9 +106,7 @@ async function compressForApi(dataUrl) {
   return out;
 }
 
-/**
- * Analyse qualité locale rapide (avant envoi).
- */
+/** Analyse qualité locale rapide (avant envoi). */
 export async function assessClientQuality(dataUrl) {
   if (!dataUrl) {
     return { score: 0, label: 'inexploitable', messages: ['Image manquante'], block_ocr: true };
@@ -147,7 +146,6 @@ export async function assessClientQuality(dataUrl) {
       bright /= n;
       over /= n;
       under /= n;
-      // variance proxy (blur)
       for (let y = 1; y < ch - 1; y += 2) {
         for (let x = 1; x < cw - 1; x += 2) {
           const i = (y * cw + x) * 4;
@@ -224,6 +222,47 @@ function friendlyError(code, fallback) {
   return map[code] || fallback || 'Analyse impossible';
 }
 
+function shouldUseLocalFallback(code, status) {
+  return (
+    code === 'OCR_UNAVAILABLE'
+    || code === 'OCR_NOT_CONFIGURED'
+    || code === 'OCR_TIMEOUT'
+    || status === 503
+    || status === 504
+    || status === 502
+  );
+}
+
+function normalizeBackendResult(json) {
+  const wf = json.worker_form || {};
+  return {
+    cin: json.cin || wf.cin || '',
+    prenom: json.prenom || wf.prenom || '',
+    nom: json.nom || wf.nom || '',
+    date_naissance: json.date_naissance || wf.date_naissance || '',
+    ville_naissance: json.ville_naissance || wf.ville_naissance || '',
+    nationalite: json.nationalite || wf.nationalite || 'Marocaine',
+    sexe: json.sexe || wf.sexe || '',
+    date_expiration: json.date_expiration || wf.date_expiration || '',
+    nom_arabe: json.nom_arabe || wf.nom_arabe || '',
+    prenom_arabe: json.prenom_arabe || wf.prenom_arabe || '',
+    fields: json.fields || {},
+    confidence_globale: json.confidence_globale || 'moyenne',
+    recto: json.recto || null,
+    verso: json.verso || null,
+    warnings: json.warnings || [],
+    progress: json.progress || [],
+    engine_used: json.engine_used,
+    engine_version: json.engine_version,
+    models_used: json.models_used || json.engine_manifest?.models || null,
+    provider: 'citymo',
+    _ocr_provider_used: json.engine_used || 'citymo',
+    _ocr_warning: (json.warnings || []).join(' — '),
+    _ocr_partial: !!json.partial,
+    _ocr_raw: json,
+  };
+}
+
 /**
  * @param {string} rectoSource data URL
  * @param {string|null} versoSource
@@ -263,6 +302,7 @@ export async function scanCIN(rectoSource, versoSource, options = {}) {
   const timer = setTimeout(() => ctrl.abort(), 90000);
 
   let res;
+  let networkFail = false;
   try {
     progress('Extraction des champs');
     res = await fetch(url, {
@@ -272,69 +312,56 @@ export async function scanCIN(rectoSource, versoSource, options = {}) {
       signal: ctrl.signal,
     });
   } catch (e) {
-    clearTimeout(timer);
-    const timedOut = e?.name === 'AbortError';
-    const err = new Error(timedOut ? "Temps d'analyse dépassé" : 'Service OCR indisponible');
-    err.code = timedOut ? 'OCR_TIMEOUT' : 'OCR_UNAVAILABLE';
-    throw err;
+    networkFail = true;
+    if (isOcrDebugEnabled()) console.warn('[OCR CIN] backend unreachable, local fallback', e);
   } finally {
     clearTimeout(timer);
   }
 
-  let json = {};
+  if (!networkFail && res) {
+    let json = {};
+    try {
+      json = await res.json();
+    } catch {
+      json = {};
+    }
+
+    if (isOcrDebugEnabled()) {
+      console.info('[OCR CIN] response', {
+        status: res.status,
+        ok: json.ok,
+        engine: json.engine_used,
+        partial: json.partial,
+      });
+    }
+
+    const code = json.error_code || (res.status === 504 ? 'OCR_TIMEOUT' : (!res.ok ? 'OCR_UNAVAILABLE' : ''));
+    if (res.ok && json.ok !== false) {
+      progress('Vérification terminée');
+      return normalizeBackendResult(json);
+    }
+
+    if (!shouldUseLocalFallback(code, res.status)) {
+      const err = new Error(friendlyError(code, json.error || json._ocr_warning));
+      err.code = code || 'OCR_UNAVAILABLE';
+      err.quality = { recto: json.quality_recto, verso: json.quality_verso };
+      err.allow_force = json.allow_force !== false;
+      err.payload = json;
+      throw err;
+    }
+    if (isOcrDebugEnabled()) console.warn('[OCR CIN] backend failed, local fallback', code || res.status);
+  }
+
   try {
-    json = await res.json();
-  } catch {
-    json = {};
-  }
-
-  if (isOcrDebugEnabled()) {
-    console.info('[OCR CIN] response', {
-      status: res.status,
-      ok: json.ok,
-      engine: json.engine_used,
-      partial: json.partial,
-    });
-  }
-
-  if (!res.ok || json.ok === false) {
-    const code = json.error_code || (res.status === 504 ? 'OCR_TIMEOUT' : 'OCR_UNAVAILABLE');
-    const err = new Error(friendlyError(code, json.error || json._ocr_warning));
-    err.code = code;
-    err.quality = { recto: json.quality_recto, verso: json.quality_verso };
-    err.allow_force = json.allow_force !== false;
-    err.payload = json;
+    progress('Secours : lecture locale…');
+    return await scanCINLocal(recto, verso, { onProgress });
+  } catch (localErr) {
+    const err = new Error(
+      localErr?.message || 'Service OCR indisponible — saisissez les champs manuellement.',
+    );
+    err.code = 'OCR_UNAVAILABLE';
     throw err;
   }
-
-  progress('Vérification terminée');
-
-  return {
-    cin: json.cin || '',
-    prenom: json.prenom || '',
-    nom: json.nom || '',
-    date_naissance: json.date_naissance || '',
-    ville_naissance: json.ville_naissance || '',
-    nationalite: json.nationalite || 'Marocaine',
-    sexe: json.sexe || '',
-    date_expiration: json.date_expiration || '',
-    nom_arabe: json.nom_arabe || '',
-    prenom_arabe: json.prenom_arabe || '',
-    fields: json.fields || {},
-    confidence_globale: json.confidence_globale || 'moyenne',
-    recto: json.recto || null,
-    verso: json.verso || null,
-    warnings: json.warnings || [],
-    progress: json.progress || [],
-    engine_used: json.engine_used,
-    engine_version: json.engine_version,
-    models_used: json.models_used || json.engine_manifest?.models || null,
-    provider: 'citymo',
-    _ocr_provider_used: json.engine_used || 'citymo',
-    _ocr_warning: (json.warnings || []).join(' — '),
-    _ocr_partial: !!json.partial,
-    _ocr_raw: json,
-  };
 }
 
 /** Enrichit le dictionnaire noms/villes du service OCR (best-effort). */
