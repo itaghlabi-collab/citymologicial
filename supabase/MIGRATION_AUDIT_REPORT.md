@@ -14,10 +14,10 @@
 | **Persistance métier** | Supabase Postgres + Storage | Même Supabase si `VITE_*` corrects | Migrations SQL non appliquées en prod |
 | **Données « localhost »** | **Pas de localStorage métier** — tout est Supabase | Identique | Confusion avec ancien build Vercel (mock) |
 | **Modules UI-only** | Finance, Achats, Inventaire, Documents, Admin (partiel) | Identique — **non persistés** | Fonctionnalités visibles mais vides |
-| **OCR CIN** | `/api` → Express local ou Vercel serverless | Mindee si `MINDEE_*` sur Vercel | Tesseract seul = extraction fragile |
+| **OCR CIN** | `/api` → Express local ou Vercel serverless | Proxy → service OCR Python (PaddleOCR 3.x) | Service OCR non joignable |
 | **Dashboard** | Mix Express `safeGet` → `[]` + Supabase partiel | Express absent → KPIs vides | Tableau de bord incomplet |
 
-**Conclusion :** Pour reproduire localhost sur Vercel, il faut **(1)** déployer le **dernier frontend**, **(2)** exécuter **toutes les migrations** (ou `RUN_FULL_RESTORE_CITYMO.sql`) sur Supabase Production, **(3)** configurer **Vercel env** (Supabase + Mindee), **(4)** accepter que les modules **non branchés Supabase** restent locaux à la session navigateur.
+**Conclusion :** Pour reproduire localhost sur Vercel, il faut **(1)** déployer le **dernier frontend**, **(2)** exécuter **toutes les migrations** (ou `RUN_FULL_RESTORE_CITYMO.sql`) sur Supabase Production, **(3)** configurer **Vercel env** (Supabase + OCR_SERVICE_URL), **(4)** accepter que les modules **non branchés Supabase** restent locaux à la session navigateur.
 
 ---
 
@@ -122,7 +122,7 @@ Légende statut **Prod = Localhost** :
 
 | Composant | Infra prod |
 |-----------|------------|
-| Scan CIN | 🔧 `MINDEE_API_KEY`, `MINDEE_MODEL_ID` (Vercel) ; sinon Tesseract navigateur |
+| Scan CIN | 🔧 `OCR_SERVICE_URL` → service Python indépendant |
 
 **Ancien nom incorrect :** `leave_requests` → **`leaves`** ; `presence_workers` → **`attendance`** ; `weekly_payments` → **`payroll`**
 
@@ -239,11 +239,11 @@ Auth réelle : `profiles` via `src/services/supabase/auth.js`.
 | Élément | Localhost | Vercel |
 |---------|-----------|--------|
 | UI | `OuvriersListe.jsx` | Identique |
-| API Mindee | `localhost:3000/api` (proxy Vite) ou serverless | `/api/ocr/moroccan-cin` |
+| API OCR CITYMO | Express proxy → Python `ocr-service` | `/api/ocr/moroccan-cin` |
 | Persistance | `workers` + `citymo-workers` | Identique si Supabase OK |
 | Fallback | Tesseract.js client | Identique |
 
-**Variables Vercel requises :** `MINDEE_API_KEY`, `MINDEE_MODEL_ID` (si clé `md_*`), `OCR_PROVIDER=mindee`
+**Variables Vercel requises :** `OCR_SERVICE_URL` (ou `RAILWAY_API_URL`)
 
 ---
 
@@ -285,7 +285,7 @@ Tout enregistrement créé via l'app **après** connexion Supabase est déjà da
 | Fonctionnalité | Localhost (code actuel) | Production Vercel | Action |
 |----------------|-------------------------|-----------------|--------|
 | Liste employés RH | Supabase | Idem si migrations | Appliquer SQL |
-| CRUD ouvriers + CIN | Supabase + Storage + OCR | + Mindee env | Config Vercel |
+| CRUD ouvriers + CIN | Supabase + Storage + OCR CITYMO | + OCR_SERVICE_URL | Config Vercel / Railway |
 | CRM complet | Supabase | Idem | SQL + seeds |
 | Détail client (onglets liés) | **Toujours vide** (SEED) | Idem | Développer requêtes join |
 | Dashboard KPIs Express | Partiel si Express up | **Vide** | Migrer vers Supabase |
@@ -302,7 +302,7 @@ Tout enregistrement créé via l'app **après** connexion Supabase est déjà da
 | Route frontend | Composant | Backend |
 |----------------|-----------|---------|
 | Tous IDs `NAV` dans `App.jsx` | Voir `PageContent` | Supabase sauf modules ❌ |
-| `/api/ocr/moroccan-cin` | OCR | Vercel serverless + `lib/mindeeMoroccanCin.mjs` |
+| `/api/ocr/moroccan-cin` | OCR | Proxy → `ocr-service` (PaddleOCR 3.x) |
 | Express `/api/*` (legacy) | Dashboard, Planning (partiel) | **Non déployé sur Vercel** |
 
 **Vercel :** sans `VITE_API_URL` externe, `resolveApiBaseUrl()` utilise `https://citymologicial.vercel.app/api` → OCR OK si function déployée.
@@ -343,7 +343,7 @@ Politique dominante : **`authenticated`** — accès lecture/écriture pour util
 
 - [ ] `VITE_SUPABASE_URL=https://npddbwsskaojcawaxygh.supabase.co`
 - [ ] `VITE_SUPABASE_ANON_KEY=` (clé anon ~208 caractères)
-- [ ] `MINDEE_API_KEY`, `MINDEE_MODEL_ID`, `OCR_PROVIDER=mindee`
+- [ ] `OCR_SERVICE_URL` (service Python) ou `RAILWAY_API_URL`
 - [ ] Ne pas pointer vers un autre projet Supabase par erreur
 - [ ] Redéployer après changement env
 

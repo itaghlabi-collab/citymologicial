@@ -35,9 +35,8 @@ Dans **Supabase → SQL Editor**, exécuter dans l’ordre :
 |----------|-------------|---------------|
 | `VITE_SUPABASE_URL` | Oui | `https://npddbwsskaojcawaxygh.supabase.co` |
 | `VITE_SUPABASE_ANON_KEY` | Oui | Clé **anon** complète (~208 car.) depuis Dashboard → API |
-| `MINDEE_API_KEY` | OCR CIN | `md_...` ou `re_...` |
-| `MINDEE_MODEL_ID` | Si clé `md_*` | UUID modèle International ID |
-| `OCR_PROVIDER` | OCR | `mindee` |
+| `OCR_SERVICE_URL` | OCR CIN | URL du service Python (`ocr-service`) |
+| `RAILWAY_API_URL` | Alt. | API Express qui proxy vers OCR |
 | `VITE_API_URL` | Non | Laisser vide → l’app utilise `https://<domaine>/api` |
 
 Après modification : **Redeploy** le projet Vercel.
@@ -98,7 +97,7 @@ Vérifie : migrations présentes, fichiers services/hooks, variables `.env` loca
 | Listes vides partout | Migrations SQL non appliquées en prod |
 | Seulement quelques modules vides | Tables ciblées manquantes |
 | Données local mais pas Vercel | `.env` pointe vers un autre projet Supabase en local |
-| OCR mauvais sur Vercel | `MINDEE_*` absent → Tesseract seul |
+| OCR mauvais sur Vercel | `OCR_SERVICE_URL` absent / service down |
 | Documents perdus au refresh | Normal avant branchement GED Supabase |
 
 Rapport complet : `supabase/MIGRATION_AUDIT_REPORT.md`

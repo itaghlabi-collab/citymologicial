@@ -1,4 +1,3 @@
-# CITYMO CIN OCR — dépendances de base (toujours)
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
 python-multipart==0.0.20
@@ -9,6 +8,5 @@ pytesseract==0.3.13
 httpx==0.28.1
 pytest==8.3.4
 
-# Optionnel (prod) — décommenter ou installer séparément :
-# paddlepaddle==2.6.2
-# paddleocr==2.9.1
+# Prod Railway — PaddleOCR 3.x (fr_PP-OCRv5 + arabic_PP-OCRv5) :
+# pip install paddlepaddle==3.0.0 "paddleocr>=3.0.0,<4"

@@ -12838,3 +12838,4 @@ tbody tr:last-child td { border-bottom: none; }
     cursor: pointer;
   }
 }
+.cin-conf-inline { display: inline-block; margin-top: 4px; font-size: 0.68rem; font-weight: 700; }

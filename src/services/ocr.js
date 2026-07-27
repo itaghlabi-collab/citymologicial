@@ -1,6 +1,7 @@
 /**
- * ocr.js — Client OCR CIN marocaine (backend CITYMO : OpenCV + PaddleOCR / Tesseract).
- * Aucun Mindee. OCR exécuté côté serveur uniquement.
+ * ocr.js — Client OCR CIN marocaine.
+ * Appelle uniquement l'API CITYMO (proxy) → service Python indépendant.
+ * Aucun OCR lourd dans le navigateur.
  */
 import { resolveApiBaseUrl } from '../config/env';
 
@@ -327,10 +328,30 @@ export async function scanCIN(rectoSource, versoSource, options = {}) {
     progress: json.progress || [],
     engine_used: json.engine_used,
     engine_version: json.engine_version,
+    models_used: json.models_used || json.engine_manifest?.models || null,
     provider: 'citymo',
     _ocr_provider_used: json.engine_used || 'citymo',
     _ocr_warning: (json.warnings || []).join(' — '),
     _ocr_partial: !!json.partial,
     _ocr_raw: json,
   };
+}
+
+/** Enrichit le dictionnaire noms/villes du service OCR (best-effort). */
+export async function syncOcrLearning(workers) {
+  if (!Array.isArray(workers) || workers.length === 0) return;
+  try {
+    const base = getOcrApiUrl().replace(/\/$/, '');
+    await fetch(`${base}/ocr/learning/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        workers: workers.slice(0, 500).map((w) => ({
+          nom: w.nom,
+          prenom: w.prenom,
+          ville_naissance: w.ville_naissance,
+        })),
+      }),
+    });
+  } catch (_) { /* non bloquant */ }
 }

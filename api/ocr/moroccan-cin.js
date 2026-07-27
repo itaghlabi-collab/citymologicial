@@ -1,6 +1,7 @@
 /**
- * Vercel serverless — proxy OCR vers Railway (OCR_SERVICE_URL ou RAILWAY_API_URL).
- * Mindee retiré. Les modèles PaddleOCR ne tournent pas sur Vercel.
+ * Vercel serverless — proxy HTTP vers le service OCR Python (OCR_SERVICE_URL)
+ * ou vers l'API Express Railway (RAILWAY_API_URL).
+ * Les modèles PP-OCRv5 ne tournent pas sur Vercel.
  */
 const OCR_TIMEOUT_MS = Number(process.env.OCR_TIMEOUT_MS || 90000);
 

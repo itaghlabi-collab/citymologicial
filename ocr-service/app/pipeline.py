@@ -7,7 +7,7 @@ import time
 from typing import Any, Optional
 
 from . import ENGINE_NAME, __version__
-from .engines import run_best_ocr, paddle_available, tesseract_available
+from .engines import run_best_ocr, paddle_available, tesseract_available, engine_manifest
 from .parser import (
     fields_to_api,
     global_confidence,
@@ -74,6 +74,8 @@ def analyze_side(image_bytes: bytes, side: str, force: bool = False) -> dict[str
         "raw_text_len": len(ocr.get("text") or ""),
         # Pas de dump complet du texte OCR dans la réponse publique (audit séparé)
         "engine": ocr.get("engine"),
+        "engine_version": ocr.get("engine_version"),
+        "models": ocr.get("models") or [],
         "engine_variant": ocr.get("variant"),
         "ocr_confidence": round(float(ocr.get("avg_confidence") or 0), 3),
         "corrected_preview": _b64_jpeg(pre["corrected_bgr"], 70),
@@ -209,10 +211,13 @@ def analyze_cin(
         "engine_name": ENGINE_NAME,
         "engine_version": __version__,
         "engine_used": recto.get("engine") or (verso or {}).get("engine"),
+        "models_used": recto.get("models") or (verso or {}).get("models") or [],
+        "ocr_engine_version": recto.get("engine_version") or (verso or {}).get("engine_version"),
         "engines_available": {
             "paddleocr": paddle_available(),
             "tesseract": tesseract_available(),
         },
+        "engine_manifest": engine_manifest(),
         "duration_ms": int((time.time() - t0) * 1000),
         "provider": "citymo",
     }

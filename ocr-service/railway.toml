@@ -4,5 +4,7 @@ dockerfilePath = "Dockerfile"
 
 [deploy]
 healthcheckPath = "/health"
-healthcheckTimeout = 30
+healthcheckTimeout = 45
 restartPolicyType = "ON_FAILURE"
+
+# Dimensionner manuellement sur Railway : 2 vCPU · 4 Go RAM

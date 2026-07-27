@@ -1,9 +1,9 @@
 /**
- * CITYMO ERP – OCR Route (proxy vers service Python OpenCV/PaddleOCR)
- * POST /api/ocr/moroccan-cin
+ * CITYMO ERP – OCR Route
+ * Proxy HTTP léger vers le service Python indépendant (OCR_SERVICE_URL).
+ * Aucun moteur OCR dans Express — OpenCV / Paddle restent hors process.
  *
- * OCR_SERVICE_URL=http://localhost:8000  (service ocr-service/)
- * Aucune dépendance Mindee.
+ * POST /api/ocr/moroccan-cin
  */
 'use strict';
 
@@ -186,6 +186,24 @@ router.post('/moroccan-cin', upload.fields([
       error_code: 'OCR_UNAVAILABLE',
       _ocr_warning: 'Service OCR indisponible — saisissez les champs manuellement.',
     });
+  }
+});
+
+router.post('/learning/sync', async (req, res) => {
+  try {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 15000);
+    const upstream = await fetch(`${OCR_SERVICE_URL}/learning/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify({ workers: req.body?.workers || [] }),
+      signal: ctrl.signal,
+    });
+    clearTimeout(timer);
+    const data = await upstream.json().catch(() => ({ ok: false }));
+    return res.status(upstream.ok ? 200 : 503).json(data);
+  } catch (err) {
+    return res.status(503).json({ ok: false, error: 'Service OCR indisponible' });
   }
 });
 

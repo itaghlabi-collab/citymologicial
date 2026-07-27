@@ -85,3 +85,21 @@ def test_identical_images():
     b = np.random.randint(0, 255, (400, 600, 3), dtype=np.uint8)
     # très peu probable d'être identiques
     assert not images_probably_identical(a, b, threshold=0.99)
+
+
+def test_smart_cin_prefers_digits():
+    from app.smart import pick_best_cin
+    best, score, ranked = pick_best_cin(["BK35442B", "BK354428", "BK354A28"])
+    assert best == "BK354428"
+    assert score >= 0.7
+    assert "BK354428" in ranked
+
+
+def test_learning_city_match():
+    from app.learning import LearningBase
+    from app.smart import pick_best_city
+    lb = LearningBase(path="/tmp/citymo_learning_test.json")
+    lb.villes["CASABLANCA"] += 20
+    best, score, _ = pick_best_city(["CASABLANCA", "CASABLANCAX"], lb)
+    assert best == "CASABLANCA"
+    assert score > 0.5

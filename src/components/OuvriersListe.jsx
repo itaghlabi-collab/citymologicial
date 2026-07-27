@@ -12,6 +12,7 @@ import { useWorkers } from '../hooks/useWorkers';
 import {
   scanCIN,
   assessClientQuality,
+  syncOcrLearning,
   canUseCamera,
   getCameraBlockedReason,
   getCameraErrorMessage,
@@ -21,7 +22,6 @@ import {
 import { captureCINFromVideo, prepareImportedCINImage } from '../services/cinCapture';
 import { generateWorkerPdf } from '../services/rh/workerPdf';
 import { workerTarifJournalier } from '../services/rh/workers';
-import CinVerifyModal from './ouvriers/CinVerifyModal';
 
 /* Exported for compatibility — starts empty, populated from API */
 export const SEED_WORKERS = [];
@@ -99,6 +99,17 @@ function Label({ children, required }) {
     <label style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.08em', display: 'block', marginBottom: 5 }}>
       {children}{required && <span style={{ color: 'var(--red)', marginLeft: 2 }}>*</span>}
     </label>
+  );
+}
+
+function OcrConfBadge({ meta }) {
+  if (!meta?.confidence || meta.confidence === 'non_detecte') return null;
+  const pct = meta.confidence_pct ? ` ${meta.confidence_pct}%` : '';
+  const label = meta.confidence === 'elevee' ? 'Confiance élevée' : meta.confidence === 'moyenne' ? 'À vérifier' : 'Faible';
+  return (
+    <span className={'cin-conf-inline cin-conf--' + meta.confidence}>
+      {label}{pct}
+    </span>
   );
 }
 
@@ -1172,13 +1183,13 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
   const [ocrToast,  setOcrToast]    = useState('');
   const [ocrAnalyzing, setOcrAnalyzing] = useState(false);
   const [ocrProgress, setOcrProgress] = useState('');
-  const [ocrResult, setOcrResult] = useState(null);
-  const [showVerify, setShowVerify] = useState(false);
+  const [ocrFieldMeta, setOcrFieldMeta] = useState(null); // { cin: {confidence, confidence_pct}, ... }
   const [forceOcr, setForceOcr] = useState(false);
   const [qualityRecto, setQualityRecto] = useState(null);
   const [qualityVerso, setQualityVerso] = useState(null);
   const [fieldConflicts, setFieldConflicts] = useState(null);
   const [duplicateHit, setDuplicateHit] = useState(null);
+  const [cinAmbiguous, setCinAmbiguous] = useState(null); // candidates[]
   const ocrFilesRef = useRef({ recto: null, verso: null });
   const ocrFullDataUrlRef = useRef({ recto: null, verso: null });
   const lastOcrMetaRef = useRef(null);
@@ -1263,7 +1274,29 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
     setFormTab('documents');
   }
 
-  function applyConfirmedOcr(payload) {
+  function buildOcrPayload(result) {
+    const fields = result?.fields || {};
+    const map = {
+      cin: fields.numero_cin?.value || result.cin || '',
+      prenom: fields.prenom?.value || result.prenom || '',
+      nom: fields.nom?.value || result.nom || '',
+      date_expiration: fields.date_expiration?.value || result.date_expiration || '',
+      sexe: fields.sexe?.value || result.sexe || '',
+      nationalite: fields.nationalite?.value || result.nationalite || '',
+    };
+    const meta = {};
+    const keyMap = {
+      cin: 'numero_cin', prenom: 'prenom', nom: 'nom',
+      date_expiration: 'date_expiration', sexe: 'sexe', nationalite: 'nationalite',
+    };
+    Object.entries(keyMap).forEach(([formKey, fieldKey]) => {
+      const f = fields[fieldKey];
+      if (f) meta[formKey] = { confidence: f.confidence, confidence_pct: f.confidence_pct };
+    });
+    return { map, meta, cinCandidates: fields.numero_cin?.candidates || [] };
+  }
+
+  function fillFormFromOcr(payload, meta) {
     const conflicts = {};
     Object.keys(payload).forEach((k) => {
       const cur = String(form[k] || '').trim();
@@ -1271,26 +1304,23 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
       if (cur && next && cur !== next) conflicts[k] = { current: cur, detected: next };
     });
     if (Object.keys(conflicts).length) {
-      setFieldConflicts({ conflicts, payload });
+      setFieldConflicts({ conflicts, payload, meta });
       return;
     }
-    setForm((p) => ({ ...p, ...payload }));
-    setShowVerify(false);
-    setOcrResult(null);
+    const cleaned = {};
+    Object.entries(payload).forEach(([k, v]) => {
+      if (v != null && String(v).trim() !== '') cleaned[k] = v;
+    });
+    setForm((p) => ({ ...p, ...cleaned }));
+    setOcrFieldMeta(meta || null);
     setFormTab('identite');
     setOcrFilled(true);
-    setOcrToast('Informations CIN confirmées — vérifiez la fiche.');
-    setTimeout(() => setOcrFilled(false), 3000);
-    setTimeout(() => setOcrToast(''), 5000);
-    lastOcrMetaRef.current = {
-      confirmed_at: new Date().toISOString(),
-      engine: ocrResult?.engine_used,
-      confidence: ocrResult?.confidence_globale,
-    };
+    setOcrToast('✔ CIN reconnue — vérifiez les champs puis enregistrez.');
+    setTimeout(() => setOcrFilled(false), 4000);
+    setTimeout(() => setOcrToast(''), 6000);
   }
 
   function resolveConflicts(choices) {
-    // choices: { [key]: 'keep' | 'use' }
     if (!fieldConflicts) return;
     const merged = { ...fieldConflicts.payload };
     Object.entries(fieldConflicts.conflicts).forEach(([k, v]) => {
@@ -1298,11 +1328,14 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
       else merged[k] = v.detected;
     });
     setFieldConflicts(null);
-    setForm((p) => ({ ...p, ...merged }));
-    setShowVerify(false);
-    setOcrResult(null);
+    const cleaned = {};
+    Object.entries(merged).forEach(([k, v]) => {
+      if (v != null && String(v).trim() !== '') cleaned[k] = v;
+    });
+    setForm((p) => ({ ...p, ...cleaned }));
+    setOcrFieldMeta(fieldConflicts.meta || null);
     setFormTab('identite');
-    setOcrToast('Fiche mise à jour.');
+    setOcrToast('✔ CIN reconnue — fiche mise à jour.');
     setTimeout(() => setOcrToast(''), 4000);
   }
 
@@ -1320,19 +1353,27 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
     }
     setOcrAnalyzing(true);
     setOcrToast('');
-    setOcrProgress('Préparation de l\'image');
+    setOcrProgress('Analyse…');
+    setCinAmbiguous(null);
     try {
       const result = await scanCIN(
         ocrFullDataUrlRef.current.recto || form.cin_recto,
         ocrFullDataUrlRef.current.verso || form.cin_verso || null,
-        {
-          force,
-          onProgress: setOcrProgress,
-        },
+        { force, onProgress: setOcrProgress },
       );
-      setOcrResult(result);
-      setShowVerify(true);
+      lastOcrMetaRef.current = {
+        confirmed_at: new Date().toISOString(),
+        engine: result?.engine_used,
+        models: result?.models_used,
+        confidence: result?.confidence_globale,
+      };
+      const { map, meta, cinCandidates } = buildOcrPayload(result);
+      if (!map.cin && cinCandidates.length > 1) {
+        setCinAmbiguous(cinCandidates);
+      }
+      fillFormFromOcr(map, meta);
       setForceOcr(false);
+      if (workers?.length) syncOcrLearning(workers);
     } catch (err) {
       if (err?.code === 'IMAGE_UNREADABLE' && err?.allow_force) {
         setForceOcr(true);
@@ -1399,18 +1440,6 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
 
   return (
     <>
-      {showVerify && ocrResult && (
-        <CinVerifyModal
-          result={ocrResult}
-          rectoPreview={form.cin_recto}
-          versoPreview={form.cin_verso}
-          currentForm={form}
-          onConfirm={applyConfirmedOcr}
-          onRetry={() => { setShowVerify(false); handleAnalyzeDocuments(true); }}
-          onCancel={() => { setShowVerify(false); setOcrResult(null); }}
-        />
-      )}
-
       {fieldConflicts && (
         <div className="cin-verify-overlay" role="dialog" aria-modal="true">
           <div className="cin-verify-box" style={{ maxWidth: 480 }}>
@@ -1477,7 +1506,11 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
           mode={scannerMode}
           captureSide={captureSide}
           onCaptureOnly={handleSideCaptured}
-          onExtracted={(result) => { setOcrResult(result); setShowVerify(true); }}
+          onExtracted={(result) => {
+            const { map, meta, cinCandidates } = buildOcrPayload(result);
+            if (!map.cin && cinCandidates.length > 1) setCinAmbiguous(cinCandidates);
+            fillFormFromOcr(map, meta);
+          }}
           onClose={closeCINScanner}
           initialStream={scannerStream}
           initialRecto={form.cin_recto}
@@ -1543,16 +1576,28 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
                     <div className="form-group">
                       <Label required>Prenom</Label>
                       <input value={form.prenom} onChange={e => set('prenom', e.target.value)} style={IS(errors.prenom, ocrFilled && form.prenom ? { borderColor: '#43A047', background: '#F1F8E9' } : {})} />
+                      <OcrConfBadge meta={ocrFieldMeta?.prenom} />
                       {errors.prenom && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.prenom}</span>}
                     </div>
                     <div className="form-group">
                       <Label required>Nom</Label>
                       <input value={form.nom} onChange={e => set('nom', e.target.value)} style={IS(errors.nom, ocrFilled && form.nom ? { borderColor: '#43A047', background: '#F1F8E9' } : {})} />
+                      <OcrConfBadge meta={ocrFieldMeta?.nom} />
                       {errors.nom && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.nom}</span>}
                     </div>
                     <div className="form-group">
                       <Label required>CIN</Label>
                       <input value={form.cin} onChange={e => set('cin', e.target.value.toUpperCase())} placeholder="AB123456" style={IS(errors.cin, ocrFilled && form.cin ? { borderColor: '#43A047', background: '#F1F8E9' } : {})} />
+                      <OcrConfBadge meta={ocrFieldMeta?.cin} />
+                      {cinAmbiguous?.length > 0 && (
+                        <div className="cin-verify-cands" style={{ marginTop: 6 }}>
+                          {cinAmbiguous.map((c) => (
+                            <button key={c} type="button" className="btn btn-ghost btn-sm" onClick={() => { set('cin', c); setCinAmbiguous(null); }}>
+                              {c}
+                            </button>
+                          ))}
+                        </div>
+                      )}
                       {errors.cin && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.cin}</span>}
                     </div>
                     <div className="form-group">
@@ -1767,6 +1812,10 @@ export default function OuvriersListe({ onWorkersChange }) {
   const [toast, setToast]           = useState(null);
   const [pdfLoadingId, setPdfLoadingId] = useState(null);
   const toastRef                    = useRef(null);
+
+  useEffect(() => {
+    if (workers?.length) syncOcrLearning(workers);
+  }, [workers]);
 
   function notify(type, msg) {
     clearTimeout(toastRef.current);

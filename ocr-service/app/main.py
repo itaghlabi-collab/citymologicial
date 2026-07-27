@@ -1,21 +1,22 @@
 """
-CITYMO OCR Service — FastAPI
-POST /analyze  — analyse CIN recto/verso
-GET  /health
+CITYMO OCR Service — FastAPI (processus Python indépendant).
+
+Ne tourne PAS dans Express. Express ne fait que proxy HTTP.
 """
 from __future__ import annotations
 
 import base64
 import logging
 import os
-from typing import Optional
+from typing import Any, List, Optional
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
 from . import ENGINE_NAME, __version__
-from .engines import paddle_available, tesseract_available
+from .engines import engine_manifest, paddle_available, tesseract_available
+from .learning import get_learning_base
 from .pipeline import analyze_cin
 
 logging.basicConfig(level=logging.INFO)
@@ -40,6 +41,10 @@ class AnalyzeJsonBody(BaseModel):
     force: bool = False
 
 
+class LearningSyncBody(BaseModel):
+    workers: List[dict[str, Any]] = Field(default_factory=list)
+
+
 def _strip_data_url(data: str) -> bytes:
     s = (data or "").strip()
     if not s:
@@ -58,9 +63,13 @@ def health():
         "ok": True,
         "service": ENGINE_NAME,
         "version": __version__,
+        "independent": True,
         "paddleocr": paddle_available(),
         "tesseract": tesseract_available(),
+        "engine": engine_manifest(),
+        "learning": get_learning_base().stats(),
         "timeout_sec": TIMEOUT_NOTE,
+        "recommended_resources": {"vcpu": 2, "ram_gb": 4},
     }
 
 
@@ -96,3 +105,16 @@ async def analyze_multipart(
         logger.exception("analyze-multipart")
         raise HTTPException(status_code=503, detail="Service OCR indisponible") from exc
     return result
+
+
+@app.post("/learning/sync")
+async def learning_sync(body: LearningSyncBody):
+    """Enrichit la base noms/villes depuis les ouvriers CITYMO (pas d'IA)."""
+    base = get_learning_base()
+    added = base.ingest_workers(body.workers or [])
+    return {"ok": True, "added": added, "stats": base.stats()}
+
+
+@app.get("/learning/stats")
+def learning_stats():
+    return {"ok": True, **get_learning_base().stats()}

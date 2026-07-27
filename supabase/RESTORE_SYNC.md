@@ -93,4 +93,4 @@ Scripts optionnels (si besoin ciblé, après le full restore) :
 
 ## OCR / Scan CIN
 
-Le scan CIN côté front reste dans le repo ; l’OCR Mindee passe par le **serveur Express** (`server/`), pas par Vercel. En production Vercel, configurer `VITE_API_URL` vers l’API OCR hébergée si besoin.
+Le scan CIN côté front appelle l’API Express (proxy) → **service OCR Python indépendant** (`ocr-service/`). En production, configurer `OCR_SERVICE_URL` (service OCR) et éventuellement `VITE_API_URL` vers l’API Express.
