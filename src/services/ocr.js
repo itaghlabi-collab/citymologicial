@@ -10,6 +10,208 @@ const LOG = (...args) => console.info('[OCR CHAIN]', ...args);
 
 const FILL_MIN_CONFIDENCE = 0.70;
 
+/**
+ * Garantit un message toast lisible — jamais [object Object].
+ * @param {unknown} value
+ * @param {string} [fallback]
+ */
+export function getReadableMessage(value, fallback = 'Une erreur est survenue. Saisie manuelle disponible.') {
+  if (value == null || value === '') return fallback;
+  if (typeof value === 'string') {
+    const s = value.trim();
+    if (!s || s === '[object Object]') return fallback;
+    return s;
+  }
+  if (value instanceof Error) {
+    return getReadableMessage(value.message, fallback);
+  }
+  if (typeof value === 'object') {
+    if (typeof value.message === 'string' && value.message.trim()) {
+      return getReadableMessage(value.message, fallback);
+    }
+    if (typeof value.error === 'string' && value.error.trim()) {
+      return getReadableMessage(value.error, fallback);
+    }
+    if (value.error && typeof value.error === 'object') {
+      return getReadableMessage(value.error, fallback);
+    }
+    if (typeof value.msg === 'string' && value.msg.trim()) return value.msg.trim();
+  }
+  return fallback;
+}
+
+/** JJ/MM/AAAA, JJ.MM.AAAA, JJ-MM-AAAA → YYYY-MM-DD (ou chaîne déjà ISO). */
+export function normalizeDateToIso(raw) {
+  const s = String(raw || '').trim();
+  if (!s) return '';
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) {
+    const [y, m, d] = s.split('-').map(Number);
+    if (m >= 1 && m <= 12 && d >= 1 && d <= 31) return s;
+    return '';
+  }
+  const m = s.match(/^(\d{1,2})[./\-](\d{1,2})[./\-](\d{2,4})$/);
+  if (!m) return '';
+  let dd = Number(m[1]);
+  let mm = Number(m[2]);
+  let yy = Number(m[3]);
+  if (yy < 100) yy += yy >= 50 ? 1900 : 2000;
+  if (mm < 1 || mm > 12 || dd < 1 || dd > 31 || yy < 1900 || yy > 2100) return '';
+  return `${String(yy).padStart(4, '0')}-${String(mm).padStart(2, '0')}-${String(dd).padStart(2, '0')}`;
+}
+
+export function normalizeSexeValue(raw) {
+  const s = String(raw || '').trim().toLowerCase();
+  if (!s) return '';
+  if (/^(m|male|masculin|homme|ذكر)$/i.test(s) || s === 'm') return 'M';
+  if (/^(f|female|feminin|féminin|femme|أنثى)$/i.test(s) || s === 'f') return 'F';
+  if (/\bm\b/.test(s) && !/\bf\b/.test(s)) return 'M';
+  if (/\bf\b/.test(s)) return 'F';
+  return '';
+}
+
+function unwrapOcrPayload(response) {
+  if (!response || typeof response !== 'object') return {};
+  if (response.data && typeof response.data === 'object' && (response.data.fields || response.data.worker_form || response.data.cin)) {
+    return response.data;
+  }
+  if (response.extracted && typeof response.extracted === 'object' && !response.fields) {
+    return { fields: response.extracted, ...response };
+  }
+  return response;
+}
+
+function extractFieldValue(raw) {
+  if (raw == null) return { value: '', confidence: null, level: null, valid: null };
+  if (typeof raw === 'string' || typeof raw === 'number') {
+    return { value: String(raw).trim(), confidence: null, level: null, valid: true };
+  }
+  if (typeof raw === 'object') {
+    const value = raw.value != null ? String(raw.value).trim()
+      : (raw.text != null ? String(raw.text).trim() : '');
+    return {
+      value,
+      confidence: typeof raw.confidence === 'number' ? raw.confidence : null,
+      level: raw.confidence_level || raw.confidence || null,
+      valid: raw.valid,
+      requires_manual_review: raw.requires_manual_review,
+      confidence_from_vision: raw.confidence_from_vision,
+    };
+  }
+  return { value: '', confidence: null, level: null, valid: null };
+}
+
+/**
+ * Normalise toute variante de réponse API OCR → contrat formulaire stable.
+ * Jamais undefined : chaînes vides.
+ */
+export function normalizeCnieOcrResponse(response) {
+  const root = unwrapOcrPayload(response);
+  const fields = root.fields || root.extracted || {};
+  const wf = root.worker_form || {};
+
+  const pick = (...candidates) => {
+    for (const c of candidates) {
+      const ex = extractFieldValue(c);
+      if (ex.value) return ex;
+    }
+    return { value: '', confidence: null, level: null, valid: null };
+  };
+
+  const cin = pick(fields.cin, fields.numero_cin, wf.cin, root.cin);
+  const nom = pick(fields.nom, wf.nom, root.nom);
+  const prenom = pick(fields.prenom, wf.prenom, root.prenom);
+  const date_naissance = pick(fields.date_naissance, wf.date_naissance, root.date_naissance);
+  const date_expiration = pick(fields.date_expiration, wf.date_expiration, root.date_expiration);
+  const sexe = pick(fields.sexe, wf.sexe, root.sexe);
+  const lieu = pick(
+    fields.lieu_naissance,
+    fields.ville_naissance,
+    wf.ville_naissance,
+    wf.lieu_naissance,
+    root.ville_naissance,
+    root.lieu_naissance,
+  );
+  const nationalite = pick(fields.nationalite, wf.nationalite, root.nationalite);
+  const autorite = pick(fields.autorite, wf.autorite, root.autorite);
+  const adresse = pick(fields.adresse, wf.adresse, root.adresse);
+
+  const confidence = {};
+  const setConf = (key, ex) => {
+    const level = normalizeConfidenceLevel(ex.level, ex.confidence);
+    confidence[key] = {
+      confidence: level,
+      confidence_level: level,
+      requires_manual_review: ex.requires_manual_review === true || level === 'faible' || level === 'moyenne',
+      confidence_from_vision: !!ex.confidence_from_vision,
+    };
+    if (ex.confidence_from_vision && Number.isFinite(ex.confidence) && ex.confidence > 0) {
+      confidence[key].confidence_pct = Math.round(ex.confidence * 100);
+    }
+  };
+
+  const out = {
+    cin: String(cin.value || '').replace(/\s+/g, '').toUpperCase(),
+    nom: String(nom.value || '').trim(),
+    prenom: String(prenom.value || '').trim(),
+    date_naissance: normalizeDateToIso(date_naissance.value),
+    date_expiration: normalizeDateToIso(date_expiration.value),
+    sexe: normalizeSexeValue(sexe.value),
+    lieu_naissance: String(lieu.value || '').trim(),
+    nationalite: String(nationalite.value || '').trim(),
+    autorite: String(autorite.value || '').trim(),
+    adresse: String(adresse.value || '').trim(),
+    confidence: {},
+    warnings: Array.isArray(root.warnings) ? root.warnings.map((w) => getReadableMessage(w, '')).filter(Boolean) : [],
+    partial: !!root.partial,
+    ok: root.ok !== false && root.success !== false,
+    engine_used: root.engine_used || null,
+    faces_swapped: !!root.faces_swapped,
+    _raw_root_keys: Object.keys(root || {}),
+  };
+
+  // Nationalité parasite
+  if (out.nationalite.length <= 2 || /^[àâäaá]$/i.test(out.nationalite)) {
+    out.nationalite = '';
+  }
+
+  setConf('cin', cin);
+  setConf('nom', nom);
+  setConf('prenom', prenom);
+  setConf('date_naissance', date_naissance);
+  setConf('date_expiration', date_expiration);
+  setConf('sexe', sexe);
+  setConf('lieu_naissance', lieu);
+  setConf('ville_naissance', lieu);
+  setConf('nationalite', nationalite);
+  setConf('autorite', autorite);
+  setConf('adresse', adresse);
+  out.confidence = confidence;
+
+  return out;
+}
+
+function logResponseShapeDev(json) {
+  try {
+    if (!isOcrDebugEnabled() && !import.meta.env.DEV) return;
+    const root = unwrapOcrPayload(json);
+    const fields = root.fields || {};
+    const fieldTypes = {};
+    Object.keys(fields).forEach((k) => {
+      const v = fields[k];
+      fieldTypes[k] = v == null ? 'null' : Array.isArray(v) ? 'array' : typeof v;
+    });
+    LOG('response shape', {
+      rootKeys: Object.keys(root),
+      fieldKeys: Object.keys(fields),
+      fieldTypes,
+      hasWorkerForm: Boolean(root.worker_form),
+      ok: root.ok,
+      success: root.success,
+      error_code: root.error_code || null,
+    });
+  } catch (_) { /* ignore */ }
+}
+
 /** Labels UI : haute | moyenne | faible (alias elevee → haute). */
 export function normalizeConfidenceLevel(raw, numericFallback) {
   const s = String(raw || '').toLowerCase().trim();
@@ -204,104 +406,81 @@ function fieldUsable(field) {
 }
 
 /**
- * Ne remplit que valid=true et confidence >= 0.70.
+ * Ne remplit que les champs avec valeur exploitable (confiance ≥ 0.70 si numérique).
  * Nationalité invalide / « À » → jamais injectée.
- * Confiance UI : haute | moyenne | faible — pas de % artificiel.
  */
 export function pickFillableFields(json) {
-  const fields = json?.fields || {};
-  const wf = json?.worker_form || {};
+  const normalized = normalizeCnieOcrResponse(json);
   const out = {};
   const meta = {};
 
-  const mapping = [
-    ['cin', 'cin', 'numero_cin'],
-    ['prenom', 'prenom', 'prenom'],
-    ['nom', 'nom', 'nom'],
-    ['date_naissance', 'date_naissance', 'date_naissance'],
-    ['ville_naissance', 'ville_naissance', 'lieu_naissance'],
-    ['nationalite', 'nationalite', 'nationalite'],
-    ['sexe', 'sexe', 'sexe'],
-    ['date_expiration', 'date_expiration', 'date_expiration'],
-    ['nom_arabe', 'nom_arabe', 'nom_arabe'],
-    ['prenom_arabe', 'prenom_arabe', 'prenom_arabe'],
-    ['adresse', 'adresse', 'adresse'],
-    // Autorité : suggestion UI si présente (pas de colonne DB)
-    ['autorite', 'autorite', 'autorite'],
+  const formMap = [
+    ['cin', 'cin'],
+    ['prenom', 'prenom'],
+    ['nom', 'nom'],
+    ['date_naissance', 'date_naissance'],
+    ['ville_naissance', 'lieu_naissance'],
+    ['nationalite', 'nationalite'],
+    ['sexe', 'sexe'],
+    ['date_expiration', 'date_expiration'],
+    ['adresse', 'adresse'],
+    ['autorite', 'autorite'],
   ];
 
-  for (const [formKey, wfKey, fieldKey] of mapping) {
-    const f = fields[fieldKey] || fields[wfKey];
-    let value = null;
-    let numericConf = 0;
-    let fromVision = false;
-    let level = 'non_detecte';
-
-    if (fieldUsable(f)) {
-      value = String(f.value).trim();
-      numericConf = Number(f.confidence) || 0;
-      fromVision = f.confidence_from_vision === true;
-      level = normalizeConfidenceLevel(f.confidence_level, numericConf);
-    } else if (wf[wfKey] != null && String(wf[wfKey]).trim() !== '') {
-      // worker_form déjà filtré côté serveur (suggestion)
-      value = String(wf[wfKey]).trim();
-      numericConf = 0.75;
-      fromVision = false;
-      level = 'moyenne';
+  for (const [formKey, normKey] of formMap) {
+    const value = String(normalized[normKey] || '').trim();
+    if (!value) continue;
+    const confMeta = normalized.confidence?.[normKey] || normalized.confidence?.[formKey] || {};
+    const level = normalizeConfidenceLevel(confMeta.confidence_level || confMeta.confidence, null);
+    if (level === 'faible') {
+      // suggestion faible : on propose quand même mais marqué à vérifier
     }
-
-    if (formKey === 'nationalite') {
-      if (!value || value.length <= 2 || /^[àâäaá]$/i.test(value)) {
-        value = null;
-      }
-    }
-
-    // Champs incertains : ne pas inventer — laisser vide
-    if (f && f.requires_manual_review && Number(f.confidence) > 0 && Number(f.confidence) < FILL_MIN_CONFIDENCE) {
-      value = null;
-    }
-
-    if (value) {
-      out[formKey] = value;
-      const entry = {
-        confidence: level,
-        confidence_level: level,
-        requires_manual_review: level !== 'haute',
-      };
-      // % uniquement si Vision a fourni une confiance mot/bloc exploitable
-      if (fromVision && Number.isFinite(numericConf) && numericConf > 0) {
-        entry.confidence_pct = Math.round(numericConf * 100);
-        entry.confidence_from_vision = true;
-      }
-      meta[formKey] = entry;
-    }
+    out[formKey] = value;
+    meta[formKey] = {
+      confidence: level === 'non_detecte' ? 'moyenne' : level,
+      confidence_level: level === 'non_detecte' ? 'moyenne' : level,
+      requires_manual_review: level !== 'haute',
+      ...(confMeta.confidence_from_vision ? {
+        confidence_from_vision: true,
+        confidence_pct: confMeta.confidence_pct,
+      } : {}),
+    };
   }
-  return { map: out, meta, fields };
+
+  return {
+    map: out,
+    meta,
+    fields: json?.fields || {},
+    normalized,
+  };
 }
 
 export function normalizeBackendResult(json) {
-  const { map, meta, fields } = pickFillableFields(json);
+  const { map, meta, fields, normalized } = pickFillableFields(json);
   const globale = normalizeConfidenceLevel(json.confidence_globale, null);
+  const filledCount = Object.keys(map).filter((k) => map[k]).length;
   return {
     ok: true,
     success: true,
     ...map,
+    ville_naissance: map.ville_naissance || '',
     nationalite: map.nationalite || null,
     fields,
     field_meta: meta,
     confidence_globale: globale === 'non_detecte' ? 'moyenne' : globale,
     progress: json.progress || [],
-    warnings: json.warnings || [],
+    warnings: normalized.warnings || json.warnings || [],
     engine_used: json.engine_used,
     engine_version: json.engine_version,
     duration_ms: json.duration_ms,
     faces_swapped: !!json.faces_swapped,
     provider: 'citymo',
     _ocr_provider_used: json.engine_used || 'citymo',
-    _ocr_warning: (json.warnings || []).join(' — '),
-    _ocr_partial: !!json.partial,
+    _ocr_warning: (normalized.warnings || json.warnings || []).join(' — '),
+    _ocr_partial: !!json.partial || filledCount < 4,
     _ocr_fallback: false,
     _ocr_raw: json,
+    _normalized: normalized,
   };
 }
 
@@ -380,24 +559,28 @@ export async function scanCIN(rectoSource, versoSource, options = {}) {
       json = { ok: false, error: 'Réponse OCR invalide', error_code: 'OCR_FAILED' };
     }
 
+    logResponseShapeDev(json);
+
     LOG('3. response', {
       status: res.status,
       ok: json.ok,
       code: json.error_code,
       engine: json.engine_used,
       ms: json.duration_ms,
-      // pas de valeurs PII
       filled_keys: Object.keys(json.worker_form || {}).filter((k) => json.worker_form[k]),
     });
 
     if (res.status === 401) {
-      const err = new Error(json.error || 'Authentification requise');
+      const err = new Error(getReadableMessage(json.error || json.message, 'Authentification requise'));
       err.code = 'UNAUTHORIZED';
       throw err;
     }
 
     if (json.ok === false || json.success === false || res.status >= 400) {
-      const err = new Error(json.error || 'Analyse CIN impossible — saisissez les champs manuellement.');
+      const err = new Error(getReadableMessage(
+        json.error || json.message,
+        'Analyse CIN impossible — saisissez les champs manuellement.',
+      ));
       err.code = json.error_code || 'OCR_FAILED';
       err.allow_force = json.allow_force !== false;
       err.quality = json.faces || null;
@@ -407,14 +590,17 @@ export async function scanCIN(rectoSource, versoSource, options = {}) {
     progress('Vérification terminée');
     return normalizeBackendResult(json);
   } catch (e) {
-    if (e?.code) throw e;
+    if (e?.code) {
+      e.message = getReadableMessage(e.message, e.message || 'Erreur OCR');
+      throw e;
+    }
     if (e?.name === 'AbortError') {
       const err = new Error("Temps d'analyse dépassé — saisie manuelle disponible.");
       err.code = 'OCR_TIMEOUT';
       err.allow_force = true;
       throw err;
     }
-    const err = new Error(e?.message || 'Service OCR indisponible — saisissez les champs manuellement.');
+    const err = new Error(getReadableMessage(e, 'Service OCR indisponible — saisissez les champs manuellement.'));
     err.code = 'OCR_UNAVAILABLE';
     throw err;
   } finally {

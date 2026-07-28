@@ -52,6 +52,8 @@ assert.equal(isRealFieldConflict('nationalite', 'Marocaine', 'Française', { nat
 const ouv = fs.readFileSync(path.join(root, 'src/components/OuvriersListe.jsx'), 'utf8');
 assert.match(ouv, /isRealFieldConflict/);
 assert.match(ouv, /Object\.keys\(fieldConflicts\.conflicts\)\.length >= 2/);
-assert.match(ouv, /Verso manquant/);
+assert.match(ouv, /getReadableMessage/);
+assert.match(ouv, /fillFormFromOcr/);
+assert.match(ouv, /CIN analysée avec succès/);
 
 console.log('PASS: test-cin-ocr-frontend.mjs');

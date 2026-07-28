@@ -194,27 +194,29 @@ export async function captureCINFromVideo(video, frameEl, side, options = {}) {
   };
 }
 
-/** Galerie : aperçu recadré (par côté) + image pleine résolution pour OCR. */
+/**
+ * Galerie / import : recadrage auto de la CNIE.
+ * L’image recadrée est utilisée pour la preview ET pour Google Vision.
+ */
 export async function prepareImportedCINImage(dataUrl, file, side) {
-  const mask = getCinFrameMaskForSide(side);
-  const { croppedDataUrl, crop } = await cropImageDataUrlByMask(dataUrl, mask);
-  console.info('[SCAN CIN] crop coordinates (import)', { side, ...crop });
+  const { autoCropCnieImage } = await import('./cnieAutoCrop');
+  const cropped = await autoCropCnieImage(dataUrl);
+  const useUrl = cropped.dataUrl || dataUrl;
 
-  const fullDataUrl = dataUrl;
-  const ocrFile = (file instanceof File && file.size > 0)
-    ? file
-    : dataUrlToCaptureFile(fullDataUrl, side, 'ocr-full');
-
-  console.info('[SCAN CIN] OCR uses full image', {
+  console.info('[SCAN CIN] import crop', {
     side,
-    ocrBytes: ocrFile.size,
-    previewCrop: mask === CIN_VERSO_MASK ? 'verso-full' : 'recto-frame',
+    cropped: cropped.cropped,
+    // pas de PII / pas de data URL
   });
 
+  const ocrFile = dataUrlToCaptureFile(useUrl, side, cropped.cropped ? 'ocr-cropped' : 'ocr-full');
+
   return {
-    previewDataUrl: croppedDataUrl,
-    fullDataUrl,
+    previewDataUrl: useUrl,
+    fullDataUrl: useUrl,
     ocrFile,
-    displayFile: dataUrlToCaptureFile(croppedDataUrl, side),
+    displayFile: dataUrlToCaptureFile(useUrl, side),
+    cropFailed: !cropped.cropped,
+    cropMessage: cropped.message || null,
   };
 }
