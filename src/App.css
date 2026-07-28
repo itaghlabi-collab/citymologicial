@@ -12766,6 +12766,7 @@ tbody tr:last-child td { border-bottom: none; }
   text-transform: none;
   font-weight: 600;
 }
+.cin-conf--haute,
 .cin-conf--elevee { color: #2E7D32; }
 .cin-conf--moyenne { color: #EF6C00; }
 .cin-conf--faible { color: #C62828; }

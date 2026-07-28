@@ -1,51 +1,26 @@
 /**
  * Vercel — POST /api/workers/cin/analyze
- * Auth Supabase + proxy vers OCR_SERVICE_URL (jamais exposé au client).
+ * Auth Supabase + Google Cloud Vision (même contrat frontend).
  */
+import { createRequire } from 'module';
 import { verifySupabaseAccessTokenVercel } from '../../../lib/verifySupabaseTokenVercel.mjs';
+
+const require = createRequire(import.meta.url);
+const { analyzeCnieGoogle } = require('../../../server/services/cnieGoogleAnalyze');
+const googleVision = require('../../../server/services/googleVision');
 
 export const config = {
   api: { bodyParser: { sizeLimit: '12mb' } },
   maxDuration: 60,
 };
 
-const OCR_SERVICE_URL = (process.env.OCR_SERVICE_URL || '').replace(/\/$/, '');
-const OCR_SERVICE_API_KEY = process.env.OCR_SERVICE_API_KEY || '';
-const OCR_TIMEOUT_MS = Number(process.env.OCR_TIMEOUT_MS || 90000);
+const OCR_ENGINE = (process.env.OCR_ENGINE || 'google_vision').trim().toLowerCase();
 
 function extractToken(req) {
   const auth = req.headers.authorization || '';
   if (auth.startsWith('Bearer ')) return auth.slice(7).trim();
   const alt = req.headers['x-supabase-token'];
   return typeof alt === 'string' ? alt.trim() : '';
-}
-
-async function callOcr(payload) {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), OCR_TIMEOUT_MS);
-  try {
-    const headers = { 'Content-Type': 'application/json', Accept: 'application/json' };
-    if (OCR_SERVICE_API_KEY) headers['X-API-Key'] = OCR_SERVICE_API_KEY;
-    const res = await fetch(`${OCR_SERVICE_URL}/v1/cin/analyze-json`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(payload),
-      signal: ctrl.signal,
-    });
-    const text = await res.text();
-    try {
-      return JSON.parse(text);
-    } catch {
-      return { ok: false, error: 'Service OCR indisponible', error_code: 'OCR_UNAVAILABLE' };
-    }
-  } catch (err) {
-    if (err?.name === 'AbortError') {
-      return { ok: false, error: "Temps d'analyse dépassé", error_code: 'OCR_TIMEOUT', allow_force: true };
-    }
-    return { ok: false, error: 'Service OCR indisponible', error_code: 'OCR_UNAVAILABLE', allow_force: true };
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 function mapResponse(data) {
@@ -57,7 +32,11 @@ function mapResponse(data) {
       error_code: data?.error_code || 'OCR_UNAVAILABLE',
       allow_force: data?.allow_force !== false,
       progress: data?.progress || [],
-      provider: 'citymo',
+      warnings: data?.warnings || [],
+      provider: 'google_vision',
+      engine_used: data?.engine_used || 'google_vision',
+      mode: 'suggestion',
+      requires_manual_review: true,
     };
   }
   const fields = data.fields || {};
@@ -67,6 +46,15 @@ function mapResponse(data) {
     fields.nationalite = { value: null, confidence: 0, valid: false, source: null };
     wf.nationalite = null;
   }
+  Object.keys(fields).forEach((k) => {
+    const f = fields[k];
+    if (!f || typeof f !== 'object') return;
+    if (!f.confidence_level && typeof f.confidence === 'number') {
+      const c = f.confidence;
+      f.confidence_level = c >= 0.85 ? 'haute' : c >= 0.70 ? 'moyenne' : 'faible';
+    }
+  });
+
   return {
     ok: true,
     success: true,
@@ -77,17 +65,25 @@ function mapResponse(data) {
     nom: wf.nom || null,
     date_naissance: wf.date_naissance || null,
     ville_naissance: wf.ville_naissance || null,
+    lieu_naissance: wf.ville_naissance || null,
     nationalite: wf.nationalite || null,
     sexe: wf.sexe || null,
     date_expiration: wf.date_expiration || null,
+    autorite: wf.autorite || null,
+    adresse: wf.adresse || null,
     nom_arabe: wf.nom_arabe || null,
     prenom_arabe: wf.prenom_arabe || null,
-    confidence_globale: data.confidence_globale,
+    confidence_globale: data.confidence_globale === 'elevee' ? 'haute' : (data.confidence_globale || 'moyenne'),
     progress: data.progress || [],
     warnings: data.warnings || [],
-    engine_used: data.engine_used,
+    faces: data.faces || {},
+    faces_swapped: !!data.faces_swapped,
+    engine_used: data.engine_used || 'google_vision',
+    duration_ms: data.duration_ms,
     partial: !!data.partial,
-    provider: 'citymo',
+    provider: 'google_vision',
+    mode: 'suggestion',
+    requires_manual_review: true,
   };
 }
 
@@ -105,25 +101,51 @@ export default async function handler(req, res) {
     }
     await verifySupabaseAccessTokenVercel(token, clientApiKey);
 
-    if (!OCR_SERVICE_URL) {
-      return res.status(503).json({ ok: false, error: 'OCR non configuré', error_code: 'OCR_NOT_CONFIGURED' });
+    if (OCR_ENGINE === 'disabled') {
+      return res.status(503).json({
+        ok: false,
+        error: 'Scan CNIE désactivé — saisie manuelle disponible',
+        error_code: 'OCR_DISABLED',
+        mode: 'suggestion',
+        requires_manual_review: true,
+      });
+    }
+
+    if (!googleVision.visionAvailable()) {
+      return res.status(503).json({
+        ok: false,
+        error: 'OCR non configuré — saisie manuelle disponible',
+        error_code: 'OCR_NOT_CONFIGURED',
+        mode: 'suggestion',
+        requires_manual_review: true,
+      });
     }
 
     const body = typeof req.body === 'string' ? JSON.parse(req.body || '{}') : (req.body || {});
-    const front = body.front || body.recto;
-    const back = body.back || body.verso;
-    if (!front || !back) {
-      return res.status(400).json({ ok: false, error: 'Recto et verso obligatoires', error_code: 'INVALID_FILE' });
+    const front = body.front || body.recto || null;
+    const back = body.back || body.verso || null;
+    if (!front && !back) {
+      return res.status(400).json({
+        ok: false,
+        error: 'Importez au moins une face (recto et/ou verso)',
+        error_code: 'INVALID_FILE',
+        mode: 'suggestion',
+        requires_manual_review: true,
+      });
     }
 
-    const raw = await callOcr({ front, back, force: !!body.force });
+    const raw = await analyzeCnieGoogle({ front, back, force: !!body.force });
     return res.status(200).json(mapResponse(raw));
   } catch (err) {
-    const status = err.status || 500;
-    return res.status(status).json({
+    const status = err.status || 200;
+    return res.status(status === 401 ? 401 : 200).json({
       ok: false,
-      error: err.message || 'OCR_FAILED',
+      success: false,
+      error: status === 401 ? (err.message || 'UNAUTHORIZED') : 'Analyse impossible — saisie manuelle disponible',
       error_code: status === 401 ? 'UNAUTHORIZED' : 'OCR_FAILED',
+      allow_force: true,
+      mode: 'suggestion',
+      requires_manual_review: true,
     });
   }
 }

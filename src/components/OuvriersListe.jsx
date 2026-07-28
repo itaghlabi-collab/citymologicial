@@ -50,7 +50,8 @@ const CIN_SCANNER_VERSION = '2026-07-27-cin-back-btn';
 
 const EMPTY_FORM = {
   prenom: '', nom: '', telephone: '', cin: '', fonction: '', tarif: '', tarif_unite: 'jour',
-  date_naissance: '', ville_naissance: '', adresse: '', nationalite: 'Marocaine', etat_civil: '', groupe_sanguin: '', date_expiration: '',
+  date_naissance: '', ville_naissance: '', adresse: '', nationalite: 'Marocaine', etat_civil: '', groupe_sanguin: '',
+  sexe: '', date_expiration: '', autorite: '',
   experience: '3', date_recrutement: '', statut: 'actif', disponibilite: 'oui',
   project_id: '', projet_nom: '', chantier: '', chantier_legacy: '',
   contact_urgence: '', tel_urgence: '', relation_urgence: '',
@@ -105,11 +106,21 @@ function Label({ children, required }) {
 }
 
 function OcrConfBadge({ meta }) {
-  if (!meta?.confidence || meta.confidence === 'non_detecte') return null;
-  const pct = meta.confidence_pct ? ` ${meta.confidence_pct}%` : '';
-  const label = meta.confidence === 'elevee' ? 'Confiance élevée' : meta.confidence === 'moyenne' ? 'À vérifier' : 'Faible';
+  if (!meta) return null;
+  const level = meta.confidence_level || meta.confidence;
+  if (!level || level === 'non_detecte') return null;
+  const norm = level === 'elevee' || level === 'élevée' ? 'haute' : level;
+  const label = norm === 'haute'
+    ? 'Confiance haute'
+    : norm === 'moyenne'
+      ? 'Confiance moyenne'
+      : 'Confiance faible';
+  // % uniquement si fourni par Vision (pas artificiel)
+  const pct = meta.confidence_from_vision && meta.confidence_pct
+    ? ` ${meta.confidence_pct}%`
+    : '';
   return (
-    <span className={'cin-conf-inline cin-conf--' + meta.confidence}>
+    <span className={'cin-conf-inline cin-conf--' + norm}>
       {label}{pct}
     </span>
   );
@@ -1293,6 +1304,7 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
       sexe: map.sexe || String(result?.sexe || '').trim() || undefined,
       nationalite: map.nationalite || String(result?.nationalite || '').trim() || undefined,
       adresse: map.adresse || String(result?.adresse || '').trim() || undefined,
+      autorite: map.autorite || String(result?.autorite || '').trim() || undefined,
     };
     Object.keys(merged).forEach((k) => {
       if (merged[k] == null || merged[k] === '') delete merged[k];
@@ -1302,9 +1314,11 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
       delete merged.nationalite;
     }
     const finalMeta = { ...(result?.field_meta || {}), ...meta };
-    console.info('[OCR CHAIN]', 'Résultat extrait → payload formulaire', merged, {
+    console.info('[OCR CHAIN]', 'Résultat extrait → payload formulaire', {
+      keys: Object.keys(merged),
       engine: result?.engine_used,
       hasAny: Object.keys(merged).length > 0,
+      confidence_globale: result?.confidence_globale,
     });
     return { map: merged, meta: finalMeta, cinCandidates: [] };
   }
@@ -1333,8 +1347,8 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
       });
       const merged = { ...prev, ...cleaned };
       console.info('[OCR CHAIN]', 'Après remplissage du formulaire', {
-        injected: cleaned,
-        conflicts,
+        injected_keys: Object.keys(cleaned),
+        conflict_keys: Object.keys(conflicts),
       });
       if (Object.keys(conflicts).length) {
         queueMicrotask(() => setFieldConflicts({ conflicts, payload: cleaned, meta }));
@@ -1344,7 +1358,7 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
     setOcrFieldMeta(meta || null);
     setFormTab('identite');
     setOcrFilled(true);
-    setOcrToast('✔ CIN reconnue — vérifiez les champs puis enregistrez.');
+    setOcrToast('✔ CIN reconnue — vérifiez les champs puis enregistrez manuellement.');
     setTimeout(() => setOcrFilled(false), 4000);
     setTimeout(() => setOcrToast(''), 6000);
   }
@@ -1376,22 +1390,23 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
       hasVerso: !!(ocrFullDataUrlRef.current.verso || form.cin_verso),
       qualityBlock: !!qualityRecto?.block_ocr,
     });
-    if (!form.cin_recto) {
-      setOcrToast('Recto manquant — importez le recto CIN.');
+    if (!form.cin_recto && !(ocrFullDataUrlRef.current.verso || form.cin_verso)) {
+      setOcrToast('Importez au moins le recto ou le verso CIN.');
       setTimeout(() => setOcrToast(''), 4000);
       return;
     }
-    if (!(ocrFullDataUrlRef.current.verso || form.cin_verso)) {
-      setOcrToast('Verso manquant — importez aussi le verso CIN.');
-      setTimeout(() => setOcrToast(''), 4000);
-      return;
+    if (!(ocrFullDataUrlRef.current.verso || form.cin_verso) && form.cin_recto && !force) {
+      // une seule face : on continue, warning après analyse
     }
-    if (qualityRecto?.block_ocr && !force) {
-      console.warn('[OCR CHAIN]', 'Bloqué qualité client (pas encore OCR)', qualityRecto);
-      setOcrToast(qualityRecto.messages?.[0] || 'Image non lisible');
-      setForceOcr(true);
-      setTimeout(() => setOcrToast(''), 6000);
-      return;
+    if (qualityRecto?.block_ocr && !force && form.cin_recto) {
+      const versoOk = !(qualityVerso?.block_ocr) && (ocrFullDataUrlRef.current.verso || form.cin_verso);
+      if (!versoOk) {
+        console.warn('[OCR CHAIN]', 'Bloqué qualité client (pas encore OCR)', qualityRecto);
+        setOcrToast(qualityRecto.messages?.[0] || 'Image non lisible');
+        setForceOcr(true);
+        setTimeout(() => setOcrToast(''), 6000);
+        return;
+      }
     }
     setOcrAnalyzing(true);
     setOcrToast('');
@@ -1400,18 +1415,19 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
     try {
       console.info('[OCR CHAIN]', 'Appel scanCIN…');
       const result = await scanCIN(
-        ocrFullDataUrlRef.current.recto || form.cin_recto,
+        ocrFullDataUrlRef.current.recto || form.cin_recto || null,
         ocrFullDataUrlRef.current.verso || form.cin_verso || null,
         { force, onProgress: setOcrProgress },
       );
       console.info('[OCR CHAIN]', 'Retour scanCIN', {
-        cin: result?.cin,
-        prenom: result?.prenom,
-        nom: result?.nom,
         engine: result?.engine_used,
-        fallback: !!result?._ocr_fallback,
         ok: result?.ok,
         success: result?.success,
+        confidence: result?.confidence_globale,
+        filled_keys: ['cin', 'prenom', 'nom', 'date_naissance', 'ville_naissance', 'sexe', 'nationalite', 'date_expiration']
+          .filter((k) => result?.[k]),
+        ms: result?.duration_ms,
+        // pas de valeurs PII
       });
       lastOcrMetaRef.current = {
         confirmed_at: new Date().toISOString(),
@@ -1426,21 +1442,20 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
       fillFormFromOcr(map, meta);
       setForceOcr(false);
       if (workers?.length) syncOcrLearning(workers);
-      if (result?._ocr_fallback) {
-        setOcrToast(
-          (map.cin || map.nom || map.prenom)
-            ? '✔ CIN reconnue (secours local) — vérifiez les champs.'
-            : 'Extraction partielle — vérifiez / complétez manuellement.',
-        );
+      if (result?._ocr_partial || result?.faces_swapped) {
+        const bits = [];
+        if (result?.faces_swapped) bits.push('faces inversées corrigées');
+        if (result?._ocr_partial) bits.push('extraction partielle — vérifiez');
+        setOcrToast(`✔ CIN analysée (${bits.join(' ; ')}) — enregistrez manuellement après contrôle.`);
         setTimeout(() => setOcrToast(''), 7000);
       }
     } catch (err) {
-      console.error('[OCR CHAIN]', 'handleAnalyzeDocuments CATCH', err?.code, err?.message, err);
+      console.error('[OCR CHAIN]', 'handleAnalyzeDocuments CATCH', err?.code, err?.message);
       if (err?.code === 'IMAGE_UNREADABLE' && err?.allow_force) {
         setForceOcr(true);
-        setOcrToast((err.message || 'Image non lisible') + ' — vous pouvez analyser quand même.');
+        setOcrToast((err.message || 'Image non lisible') + ' — vous pouvez analyser quand même. Le formulaire reste éditable.');
       } else {
-        setOcrToast(err?.message || 'Extraction impossible — saisissez les champs manuellement.');
+        setOcrToast(err?.message || 'Extraction impossible — saisissez les champs manuellement. Les images restent sélectionnées.');
       }
       setTimeout(() => setOcrToast(''), 8000);
     } finally {
@@ -1667,6 +1682,45 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
                       <Label>Telephone</Label>
                       <input value={form.telephone} onChange={e => set('telephone', e.target.value)} placeholder="+212 600 000 000" style={IS(false)} />
                     </div>
+                    <div className="form-group">
+                      <Label>Date de naissance</Label>
+                      <input type="date" value={form.date_naissance} onChange={e => set('date_naissance', e.target.value)} style={IS(false, ocrFilled && form.date_naissance ? { borderColor: '#43A047', background: '#F1F8E9' } : {})} />
+                      <OcrConfBadge meta={ocrFieldMeta?.date_naissance} />
+                    </div>
+                    <div className="form-group">
+                      <Label>Lieu de naissance</Label>
+                      <input value={form.ville_naissance} onChange={e => set('ville_naissance', e.target.value)} placeholder="Ville" style={IS(false, ocrFilled && form.ville_naissance ? { borderColor: '#43A047', background: '#F1F8E9' } : {})} />
+                      <OcrConfBadge meta={ocrFieldMeta?.ville_naissance} />
+                    </div>
+                    <div className="form-group">
+                      <Label>Sexe</Label>
+                      <select value={form.sexe} onChange={e => set('sexe', e.target.value)} style={IS(false, ocrFilled && form.sexe ? { borderColor: '#43A047', background: '#F1F8E9' } : {})}>
+                        <option value="">—</option>
+                        <option value="M">Masculin</option>
+                        <option value="F">Féminin</option>
+                      </select>
+                      <OcrConfBadge meta={ocrFieldMeta?.sexe} />
+                    </div>
+                    <div className="form-group">
+                      <Label>Nationalité</Label>
+                      <input value={form.nationalite} onChange={e => set('nationalite', e.target.value)} style={IS(false, ocrFilled && form.nationalite ? { borderColor: '#43A047', background: '#F1F8E9' } : {})} />
+                      <OcrConfBadge meta={ocrFieldMeta?.nationalite} />
+                    </div>
+                    <div className="form-group">
+                      <Label>Expiration CIN</Label>
+                      <input type="date" value={form.date_expiration} onChange={e => set('date_expiration', e.target.value)} style={IS(false, ocrFilled && form.date_expiration ? { borderColor: '#43A047', background: '#F1F8E9' } : {})} />
+                      <OcrConfBadge meta={ocrFieldMeta?.date_expiration} />
+                    </div>
+                    <div className="form-group">
+                      <Label>Autorité</Label>
+                      <input value={form.autorite || ''} onChange={e => set('autorite', e.target.value)} placeholder="Si présente sur la CIN" style={IS(false, ocrFilled && form.autorite ? { borderColor: '#43A047', background: '#F1F8E9' } : {})} />
+                      <OcrConfBadge meta={ocrFieldMeta?.autorite} />
+                    </div>
+                    <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                      <Label>Adresse</Label>
+                      <input value={form.adresse} onChange={e => set('adresse', e.target.value)} style={IS(false, ocrFilled && form.adresse ? { borderColor: '#43A047', background: '#F1F8E9' } : {})} />
+                      <OcrConfBadge meta={ocrFieldMeta?.adresse} />
+                    </div>
                   </div>
                 </div>
               )}
@@ -1751,7 +1805,7 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
                   <div className="form-group" style={{ gridColumn: '1 / -1' }}>
                     <Label>Scan CIN marocaine</Label>
                     <p style={{ margin: '0 0 10px', fontSize: '0.78rem', color: 'var(--text-3)' }}>
-                      Importez le recto et le verso (JPG, PNG, WEBP). Aucune caméra n&apos;est ouverte automatiquement.
+                      Importez le recto et le verso (JPG, PNG, WEBP). Le scan propose des suggestions — aucune sauvegarde automatique : vérifiez puis enregistrez.
                     </p>
                   </div>
                   <div className="form-group">
@@ -1779,7 +1833,7 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
                     <button
                       type="button"
                       className="btn btn-primary cin-doc-analyze-btn"
-                      disabled={ocrAnalyzing || !form.cin_recto}
+                      disabled={ocrAnalyzing || (!form.cin_recto && !form.cin_verso)}
                       onClick={() => handleAnalyzeDocuments(forceOcr)}
                     >
                       {ocrAnalyzing

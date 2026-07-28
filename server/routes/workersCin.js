@@ -1,13 +1,15 @@
 /**
  * POST /api/workers/cin/analyze
- * Proxy authentifié vers le microservice OCR (OCR_SERVICE_URL).
- * N'expose jamais OCR_SERVICE_URL ni OCR_SERVICE_API_KEY au navigateur.
+ * Scan CNIE ouvriers via Google Cloud Vision (DOCUMENT_TEXT_DETECTION).
+ * Même contrat JSON pour le frontend. Aucune clé Google exposée au navigateur.
  */
 'use strict';
 
 const express = require('express');
 const multer = require('multer');
-const { requireSupabaseAuth } = require('../middleware/supabaseAuth');
+const { verifySupabaseAccessToken } = require('../lib/verifySupabaseToken');
+const { analyzeCnieGoogle } = require('../services/cnieGoogleAnalyze');
+const googleVision = require('../services/googleVision');
 
 const router = express.Router();
 
@@ -24,9 +26,67 @@ const upload = multer({
   },
 });
 
-const OCR_SERVICE_URL = (process.env.OCR_SERVICE_URL || 'http://127.0.0.1:8000').replace(/\/$/, '');
-const OCR_SERVICE_API_KEY = process.env.OCR_SERVICE_API_KEY || '';
-const OCR_TIMEOUT_MS = Number(process.env.OCR_TIMEOUT_MS || 90000);
+const OCR_ENGINE = (process.env.OCR_ENGINE || 'google_vision').trim().toLowerCase();
+
+/**
+ * Auth JWT locale à la route OCR uniquement (n’altère pas supabaseAuth.js global).
+ * Vérifie le Bearer token via anon/publishable key — sans service_role.
+ */
+async function requireOcrUser(req, res, next) {
+  try {
+    const auth = req.headers.authorization || req.headers.Authorization || '';
+    const token = auth.startsWith('Bearer ')
+      ? auth.slice(7).trim()
+      : (typeof req.headers['x-supabase-token'] === 'string' ? req.headers['x-supabase-token'].trim() : '');
+    const clientApiKey = req.headers.apikey || req.headers.Apikey || '';
+
+    if (!token) {
+      return res.status(401).json({
+        ok: false,
+        error: 'Authentification Supabase requise.',
+        error_code: 'UNAUTHORIZED',
+      });
+    }
+
+    let user;
+    try {
+      user = await verifySupabaseAccessToken(token, { clientApiKey });
+    } catch (_) {
+      return res.status(401).json({
+        ok: false,
+        error: 'Session Supabase invalide ou expirée.',
+        error_code: 'UNAUTHORIZED',
+      });
+    }
+
+    if (!user?.id) {
+      return res.status(401).json({
+        ok: false,
+        error: 'Session Supabase invalide ou expirée.',
+        error_code: 'UNAUTHORIZED',
+      });
+    }
+
+    req.user = {
+      id: user.id,
+      email: (user.email || '').toLowerCase(),
+      role: 'user',
+      nom: user.email || '',
+    };
+    return next();
+  } catch (err) {
+    console.error('[workers/cin/analyze] auth', String(err.message || '').slice(0, 120));
+    return res.status(200).json({
+      ok: false,
+      success: false,
+      error: 'Authentification indisponible — saisie manuelle disponible',
+      error_code: 'OCR_FAILED',
+      allow_force: true,
+      mode: 'suggestion',
+      requires_manual_review: true,
+    });
+  }
+}
 
 function mapResponse(data) {
   if (!data || data.ok === false || data.success === false) {
@@ -38,18 +98,29 @@ function mapResponse(data) {
       allow_force: data?.allow_force !== false,
       progress: data?.progress || [],
       warnings: data?.warnings || [],
-      provider: 'citymo',
+      provider: data?.engine_used || 'google_vision',
+      engine_used: data?.engine_used || 'google_vision',
+      mode: 'suggestion',
+      requires_manual_review: true,
     };
   }
 
   const fields = data.fields || {};
   const wf = data.worker_form || {};
-  // Ne jamais injecter nationalité parasite côté proxy
   const nat = fields.nationalite;
   if (nat && (nat.valid === false || !nat.value || String(nat.value).trim().length <= 2)) {
     fields.nationalite = { value: null, confidence: 0, valid: false, source: null };
     wf.nationalite = null;
   }
+
+  Object.keys(fields).forEach((k) => {
+    const f = fields[k];
+    if (!f || typeof f !== 'object') return;
+    if (!f.confidence_level && typeof f.confidence === 'number') {
+      const c = f.confidence;
+      f.confidence_level = c >= 0.85 ? 'haute' : c >= 0.70 ? 'moyenne' : 'faible';
+    }
+  });
 
   return {
     ok: true,
@@ -61,65 +132,27 @@ function mapResponse(data) {
     nom: wf.nom || null,
     date_naissance: wf.date_naissance || null,
     ville_naissance: wf.ville_naissance || null,
+    lieu_naissance: wf.ville_naissance || null,
     nationalite: wf.nationalite || null,
     sexe: wf.sexe || null,
     date_expiration: wf.date_expiration || null,
+    autorite: wf.autorite || null,
+    adresse: wf.adresse || null,
     nom_arabe: wf.nom_arabe || null,
     prenom_arabe: wf.prenom_arabe || null,
-    confidence_globale: data.confidence_globale,
+    confidence_globale: data.confidence_globale === 'elevee' ? 'haute' : (data.confidence_globale || 'moyenne'),
     progress: data.progress || [],
     warnings: data.warnings || [],
     faces: data.faces || {},
-    engine_used: data.engine_used,
+    faces_swapped: !!data.faces_swapped,
+    engine_used: data.engine_used || 'google_vision',
     engine_version: data.engine_version,
     duration_ms: data.duration_ms,
     partial: !!data.partial,
-    provider: 'citymo',
+    provider: 'google_vision',
+    mode: 'suggestion',
+    requires_manual_review: true,
   };
-}
-
-async function callOcrJson(payload) {
-  const ctrl = new AbortController();
-  const timer = setTimeout(() => ctrl.abort(), OCR_TIMEOUT_MS);
-  try {
-    const headers = {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    };
-    if (OCR_SERVICE_API_KEY) headers['X-API-Key'] = OCR_SERVICE_API_KEY;
-
-    const res = await fetch(`${OCR_SERVICE_URL}/v1/cin/analyze-json`, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(payload),
-      signal: ctrl.signal,
-    });
-    const text = await res.text();
-    let data;
-    try {
-      data = JSON.parse(text);
-    } catch {
-      data = { ok: false, error: 'Service OCR indisponible', error_code: 'OCR_UNAVAILABLE' };
-    }
-    if (res.status === 401) {
-      return { ok: false, error: 'Clé OCR refusée', error_code: 'OCR_UNAUTHORIZED' };
-    }
-    if (!res.ok && !data.error_code) {
-      data = {
-        ok: false,
-        error: data.detail?.error || data.error || `OCR HTTP ${res.status}`,
-        error_code: data.detail?.error_code || 'OCR_FAILED',
-      };
-    }
-    return data;
-  } catch (err) {
-    if (err?.name === 'AbortError') {
-      return { ok: false, error: "Temps d'analyse dépassé", error_code: 'OCR_TIMEOUT', allow_force: true };
-    }
-    return { ok: false, error: 'Service OCR indisponible', error_code: 'OCR_UNAVAILABLE', allow_force: true };
-  } finally {
-    clearTimeout(timer);
-  }
 }
 
 function bufferToDataUrl(file) {
@@ -128,13 +161,9 @@ function bufferToDataUrl(file) {
   return `data:${mime};base64,${file.buffer.toString('base64')}`;
 }
 
-/**
- * Auth: session Supabase (même middleware que backups / admin).
- * Permissions: utilisateur authentifié avec accès ERP (module ouvriers géré côté UI/RLS).
- */
 router.post(
   '/cin/analyze',
-  requireSupabaseAuth,
+  requireOcrUser,
   upload.fields([
     { name: 'front', maxCount: 1 },
     { name: 'back', maxCount: 1 },
@@ -143,11 +172,29 @@ router.post(
   ]),
   async (req, res) => {
     try {
-      if (!process.env.OCR_SERVICE_URL && process.env.NODE_ENV === 'production') {
+      if (OCR_ENGINE === 'disabled') {
         return res.status(503).json({
           ok: false,
-          error: 'OCR non configuré',
+          success: false,
+          error: 'Scan CNIE désactivé — saisie manuelle disponible',
+          error_code: 'OCR_DISABLED',
+          allow_force: false,
+          mode: 'suggestion',
+          requires_manual_review: true,
+        });
+      }
+
+      if (!googleVision.visionAvailable()) {
+        console.warn('[workers/cin/analyze] Google Vision non configuré');
+        return res.status(503).json({
+          ok: false,
+          success: false,
+          error: 'OCR non configuré — saisie manuelle disponible',
           error_code: 'OCR_NOT_CONFIGURED',
+          allow_force: true,
+          mode: 'suggestion',
+          requires_manual_review: true,
+          warnings: ['Le formulaire ouvrier reste utilisable sans scan'],
         });
       }
 
@@ -155,26 +202,52 @@ router.post(
       const frontFile = (files.front && files.front[0]) || (files.recto && files.recto[0]);
       const backFile = (files.back && files.back[0]) || (files.verso && files.verso[0]);
 
-      let front = frontFile ? bufferToDataUrl(frontFile) : (req.body?.front || req.body?.recto || null);
-      let back = backFile ? bufferToDataUrl(backFile) : (req.body?.back || req.body?.verso || null);
+      const front = frontFile ? bufferToDataUrl(frontFile) : (req.body?.front || req.body?.recto || null);
+      const back = backFile ? bufferToDataUrl(backFile) : (req.body?.back || req.body?.verso || null);
       const force = String(req.body?.force || '').toLowerCase() === 'true' || req.body?.force === true;
 
-      if (!front || !back) {
+      if (!front && !back) {
         return res.status(400).json({
           ok: false,
-          error: 'Recto et verso obligatoires',
+          error: 'Importez au moins une face (recto et/ou verso)',
           error_code: 'INVALID_FILE',
+          mode: 'suggestion',
+          requires_manual_review: true,
+          allow_force: false,
         });
       }
 
-      const raw = await callOcrJson({ front, back, force });
-      return res.json(mapResponse(raw));
+      console.info('[workers/cin/analyze] start', {
+        engine: 'google_vision',
+        hasFront: Boolean(front),
+        hasBack: Boolean(back),
+        frontBytes: front ? (frontFile?.size || String(front).length) : 0,
+        backBytes: back ? (backFile?.size || String(back).length) : 0,
+        force: !!force,
+      });
+
+      const raw = await analyzeCnieGoogle({ front, back, force });
+      const mapped = mapResponse(raw);
+      const status = raw.ok === false && raw.error_code === 'OCR_NOT_CONFIGURED' ? 503 : 200;
+      return res.status(status).json(mapped);
     } catch (err) {
       if (String(err.message) === 'UNSUPPORTED_FORMAT') {
         return res.status(400).json({ ok: false, error: 'Format non supporté', error_code: 'UNSUPPORTED_FORMAT' });
       }
-      console.error('[workers/cin/analyze]', err);
-      return res.status(500).json({ ok: false, error: 'OCR_FAILED', error_code: 'OCR_FAILED' });
+      console.error('[workers/cin/analyze] unexpected', {
+        error_code: err.code || 'OCR_FAILED',
+        message: String(err.message || '').slice(0, 120),
+      });
+      return res.status(200).json({
+        ok: false,
+        success: false,
+        error: 'Analyse impossible — saisie manuelle disponible',
+        error_code: 'OCR_FAILED',
+        allow_force: true,
+        mode: 'suggestion',
+        requires_manual_review: true,
+        warnings: ['Les images restent sélectionnées ; vous pouvez remplir le formulaire manuellement'],
+      });
     }
   },
 );

@@ -10,6 +10,21 @@ const LOG = (...args) => console.info('[OCR CHAIN]', ...args);
 
 const FILL_MIN_CONFIDENCE = 0.70;
 
+/** Labels UI : haute | moyenne | faible (alias elevee → haute). */
+export function normalizeConfidenceLevel(raw, numericFallback) {
+  const s = String(raw || '').toLowerCase().trim();
+  if (s === 'haute' || s === 'elevee' || s === 'élevée' || s === 'eleve') return 'haute';
+  if (s === 'moyenne') return 'moyenne';
+  if (s === 'faible' || s === 'non_detecte') return s === 'non_detecte' ? 'non_detecte' : 'faible';
+  const n = Number(numericFallback);
+  if (Number.isFinite(n)) {
+    if (n >= 0.85) return 'haute';
+    if (n >= 0.70) return 'moyenne';
+    if (n > 0) return 'faible';
+  }
+  return 'non_detecte';
+}
+
 export function getOcrApiUrl() {
   return resolveApiBaseUrl();
 }
@@ -191,6 +206,7 @@ function fieldUsable(field) {
 /**
  * Ne remplit que valid=true et confidence >= 0.70.
  * Nationalité invalide / « À » → jamais injectée.
+ * Confiance UI : haute | moyenne | faible — pas de % artificiel.
  */
 export function pickFillableFields(json) {
   const fields = json?.fields || {};
@@ -210,28 +226,54 @@ export function pickFillableFields(json) {
     ['nom_arabe', 'nom_arabe', 'nom_arabe'],
     ['prenom_arabe', 'prenom_arabe', 'prenom_arabe'],
     ['adresse', 'adresse', 'adresse'],
+    // Autorité : suggestion UI si présente (pas de colonne DB)
+    ['autorite', 'autorite', 'autorite'],
   ];
 
   for (const [formKey, wfKey, fieldKey] of mapping) {
     const f = fields[fieldKey] || fields[wfKey];
     let value = null;
-    let confidence = 0;
+    let numericConf = 0;
+    let fromVision = false;
+    let level = 'non_detecte';
+
     if (fieldUsable(f)) {
       value = String(f.value).trim();
-      confidence = Number(f.confidence) || 0;
+      numericConf = Number(f.confidence) || 0;
+      fromVision = f.confidence_from_vision === true;
+      level = normalizeConfidenceLevel(f.confidence_level, numericConf);
     } else if (wf[wfKey] != null && String(wf[wfKey]).trim() !== '') {
-      // worker_form déjà filtré côté serveur
+      // worker_form déjà filtré côté serveur (suggestion)
       value = String(wf[wfKey]).trim();
-      confidence = 0.75;
+      numericConf = 0.75;
+      fromVision = false;
+      level = 'moyenne';
     }
+
     if (formKey === 'nationalite') {
       if (!value || value.length <= 2 || /^[àâäaá]$/i.test(value)) {
         value = null;
       }
     }
+
+    // Champs incertains : ne pas inventer — laisser vide
+    if (f && f.requires_manual_review && Number(f.confidence) > 0 && Number(f.confidence) < FILL_MIN_CONFIDENCE) {
+      value = null;
+    }
+
     if (value) {
       out[formKey] = value;
-      meta[formKey] = { confidence, confidence_pct: Math.round(confidence * 100) };
+      const entry = {
+        confidence: level,
+        confidence_level: level,
+        requires_manual_review: level !== 'haute',
+      };
+      // % uniquement si Vision a fourni une confiance mot/bloc exploitable
+      if (fromVision && Number.isFinite(numericConf) && numericConf > 0) {
+        entry.confidence_pct = Math.round(numericConf * 100);
+        entry.confidence_from_vision = true;
+      }
+      meta[formKey] = entry;
     }
   }
   return { map: out, meta, fields };
@@ -239,6 +281,7 @@ export function pickFillableFields(json) {
 
 export function normalizeBackendResult(json) {
   const { map, meta, fields } = pickFillableFields(json);
+  const globale = normalizeConfidenceLevel(json.confidence_globale, null);
   return {
     ok: true,
     success: true,
@@ -246,11 +289,13 @@ export function normalizeBackendResult(json) {
     nationalite: map.nationalite || null,
     fields,
     field_meta: meta,
-    confidence_globale: json.confidence_globale || 'moyenne',
+    confidence_globale: globale === 'non_detecte' ? 'moyenne' : globale,
     progress: json.progress || [],
     warnings: json.warnings || [],
     engine_used: json.engine_used,
     engine_version: json.engine_version,
+    duration_ms: json.duration_ms,
+    faces_swapped: !!json.faces_swapped,
     provider: 'citymo',
     _ocr_provider_used: json.engine_used || 'citymo',
     _ocr_warning: (json.warnings || []).join(' — '),
@@ -277,25 +322,22 @@ export async function scanCIN(rectoSource, versoSource, options = {}) {
 
   LOG('1. scanCIN START (Node proxy only)', { hasRecto: !!rectoSource, hasVerso: !!versoSource, force });
 
-  if (!rectoSource) {
-    const err = new Error('Recto manquant');
+  if (!rectoSource && !versoSource) {
+    const err = new Error('Importez au moins une face CIN (recto et/ou verso).');
     err.code = 'RECTO_MISSING';
-    throw err;
-  }
-  if (!versoSource) {
-    const err = new Error('Verso obligatoire');
-    err.code = 'VERSO_MISSING';
     throw err;
   }
 
   progress('Préparation des images');
-  const front = await compressForApi(rectoSource);
-  const back = await compressForApi(versoSource);
+  const front = rectoSource ? await compressForApi(rectoSource) : null;
+  const back = versoSource ? await compressForApi(versoSource) : null;
 
-  if (!force) {
-    const qR = await assessClientQuality(front);
-    const qV = await assessClientQuality(back);
-    if (qR.block_ocr || qV.block_ocr) {
+  if (!force && (front || back)) {
+    const qR = front ? await assessClientQuality(front) : { block_ocr: false, messages: [] };
+    const qV = back ? await assessClientQuality(back) : { block_ocr: false, messages: [] };
+    // bloquer seulement si toutes les faces fournies sont inexploitables
+    const faces = [front && qR, back && qV].filter(Boolean);
+    if (faces.length && faces.every((q) => q.block_ocr)) {
       const err = new Error(qR.messages[0] || qV.messages[0] || 'Image non lisible');
       err.code = 'IMAGE_UNREADABLE';
       err.quality = { recto: qR, verso: qV };
@@ -338,7 +380,15 @@ export async function scanCIN(rectoSource, versoSource, options = {}) {
       json = { ok: false, error: 'Réponse OCR invalide', error_code: 'OCR_FAILED' };
     }
 
-    LOG('3. response', { status: res.status, ok: json.ok, code: json.error_code });
+    LOG('3. response', {
+      status: res.status,
+      ok: json.ok,
+      code: json.error_code,
+      engine: json.engine_used,
+      ms: json.duration_ms,
+      // pas de valeurs PII
+      filled_keys: Object.keys(json.worker_form || {}).filter((k) => json.worker_form[k]),
+    });
 
     if (res.status === 401) {
       const err = new Error(json.error || 'Authentification requise');
@@ -347,11 +397,10 @@ export async function scanCIN(rectoSource, versoSource, options = {}) {
     }
 
     if (json.ok === false || json.success === false || res.status >= 400) {
-      const err = new Error(json.error || 'Analyse CIN impossible');
+      const err = new Error(json.error || 'Analyse CIN impossible — saisissez les champs manuellement.');
       err.code = json.error_code || 'OCR_FAILED';
       err.allow_force = json.allow_force !== false;
       err.quality = json.faces || null;
-      // Pas de fallback Tesseract — saisie manuelle disponible.
       throw err;
     }
 
@@ -360,7 +409,7 @@ export async function scanCIN(rectoSource, versoSource, options = {}) {
   } catch (e) {
     if (e?.code) throw e;
     if (e?.name === 'AbortError') {
-      const err = new Error("Temps d'analyse dépassé");
+      const err = new Error("Temps d'analyse dépassé — saisie manuelle disponible.");
       err.code = 'OCR_TIMEOUT';
       err.allow_force = true;
       throw err;
@@ -400,8 +449,10 @@ export function isRealFieldConflict(formKey, current, detected, fieldMeta) {
   const det = String(detected || '').trim();
   if (!cur || !det) return false;
   if (det.length <= 1) return false;
+  const level = fieldMeta?.[formKey]?.confidence_level || fieldMeta?.[formKey]?.confidence;
+  if (level === 'faible' || level === 'non_detecte') return false;
   const conf = Number(fieldMeta?.[formKey]?.confidence);
-  if (Number.isFinite(conf) && conf < FILL_MIN_CONFIDENCE) return false;
+  if (Number.isFinite(conf) && conf > 0 && conf < 1 && conf < FILL_MIN_CONFIDENCE) return false;
   if (normalizeConflictValue(cur) === normalizeConflictValue(det)) return false;
   const def = DEFAULT_FORM_VALUES[formKey];
   if (def && normalizeConflictValue(cur) === def) return false;

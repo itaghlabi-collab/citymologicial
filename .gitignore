@@ -9,6 +9,13 @@ server/node_modules/
 server/.env
 supabase/.secrets.notify-leave-request.env
 
+# Google Cloud Vision / service accounts (jamais committer)
+**/google-vision*.json
+**/citymo-ocr-vision*.json
+**/*service-account*.json
+**/credentials/*.json
+server/secrets/
+
 # Build
 dist/
 dist-ssr/
@@ -16,6 +23,9 @@ dist-ssr/
 # Database (local API)
 server/*.db
 server/data/
+server/db/*.sqlite
+server/db/*.sqlite-*
+server/db/citymo.sqlite*
 
 # Editor / OS
 .DS_Store
@@ -31,3 +41,4 @@ npm-debug.log*
 # Vite
 .vite/
 .vercel
+ocr-service/test-data/cnie-real/
