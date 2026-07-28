@@ -2,10 +2,9 @@
  * Google Cloud Vision — moteur isolé (DOCUMENT_TEXT_DETECTION).
  * Aucune logique métier ouvrier / CNIE ici.
  *
- * Auth serveur uniquement via :
- *   GOOGLE_APPLICATION_CREDENTIALS=/chemin/vers/service-account.json
- * ou
- *   GOOGLE_VISION_KEY_FILE=/chemin/vers/service-account.json
+ * Auth (priorité) :
+ *   1. GOOGLE_VISION_CREDENTIALS_JSON — JSON service account (Vercel / serverless)
+ *   2. GOOGLE_VISION_KEY_FILE ou GOOGLE_APPLICATION_CREDENTIALS — chemin fichier (local)
  *
  * Ne jamais logger le contenu des credentials ni le texte OCR complet (PII).
  */
@@ -18,6 +17,10 @@ const vision = require('@google-cloud/vision');
 let _client = null;
 let _initError = null;
 
+function credentialsJsonRaw() {
+  return String(process.env.GOOGLE_VISION_CREDENTIALS_JSON || '').trim();
+}
+
 function credentialsPath() {
   const p = (
     process.env.GOOGLE_VISION_KEY_FILE
@@ -27,7 +30,27 @@ function credentialsPath() {
   return p || null;
 }
 
+/** Parse env JSON sans jamais logger le contenu. */
+function parseCredentialsJson() {
+  const raw = credentialsJsonRaw();
+  if (!raw) return null;
+  try {
+    const creds = JSON.parse(raw);
+    if (!creds || typeof creds !== 'object') {
+      _initError = 'GOOGLE_CREDENTIALS_JSON_INVALID';
+      return null;
+    }
+    return creds;
+  } catch {
+    _initError = 'GOOGLE_CREDENTIALS_JSON_INVALID';
+    return null;
+  }
+}
+
 function visionAvailable() {
+  if (credentialsJsonRaw()) {
+    return Boolean(parseCredentialsJson());
+  }
   const p = credentialsPath();
   if (!p) return false;
   try {
@@ -39,6 +62,22 @@ function visionAvailable() {
 
 function getClient() {
   if (_client) return _client;
+
+  // Mode Vercel / serverless : JSON en variable d'environnement
+  if (credentialsJsonRaw()) {
+    const credentials = parseCredentialsJson();
+    if (!credentials) {
+      const err = new Error('GOOGLE_VISION_CREDENTIALS_JSON invalide');
+      err.code = _initError || 'GOOGLE_CREDENTIALS_JSON_INVALID';
+      throw err;
+    }
+    console.info('[googleVision] init', { mode: 'json_env' });
+    _client = new vision.ImageAnnotatorClient({ credentials });
+    _initError = null;
+    return _client;
+  }
+
+  // Mode local : fichier service account
   const keyFile = credentialsPath();
   if (!keyFile) {
     _initError = 'GOOGLE_CREDENTIALS_MISSING';
@@ -52,8 +91,8 @@ function getClient() {
     err.code = 'GOOGLE_CREDENTIALS_NOT_FOUND';
     throw err;
   }
-  // Log non sensible uniquement
   console.info('[googleVision] init', {
+    mode: 'key_file',
     keyFileName: path.basename(keyFile),
     keyDir: path.dirname(keyFile),
   });
