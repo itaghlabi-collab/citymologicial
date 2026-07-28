@@ -121,6 +121,10 @@ app.use('/api/admin/users', adminUsersRouter);
 // ── OCR module (proxy → service Python CITYMO) ───────────────────────────────
 app.use('/api/ocr', ocrRouter);
 
+// ── CIN analyse ouvriers (Supabase auth → microservice OCR) ──────────────────
+const workersCinRouter = require('./routes/workersCin');
+app.use('/api/workers', workersCinRouter);
+
 // ── Legacy / existing module endpoints (HR, Finance, Stock, etc.) ─────────────
 // Must be mounted AFTER specific routes to avoid prefix conflicts
 app.use('/api', requireAuth, existingRouter);

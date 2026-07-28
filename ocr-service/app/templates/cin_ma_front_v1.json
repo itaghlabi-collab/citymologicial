@@ -1,0 +1,16 @@
+{
+  "id": "cin_ma_front_v1",
+  "face": "front",
+  "version": 1,
+  "fields": {
+    "cin": { "bbox": [0.58, 0.18, 0.92, 0.30], "mode": "cin" },
+    "nom": { "bbox": [0.28, 0.30, 0.78, 0.40], "mode": "latin" },
+    "prenom": { "bbox": [0.28, 0.40, 0.78, 0.50], "mode": "latin" },
+    "nom_arabe": { "bbox": [0.28, 0.22, 0.78, 0.32], "mode": "ar" },
+    "prenom_arabe": { "bbox": [0.28, 0.32, 0.78, 0.42], "mode": "ar" },
+    "date_naissance": { "bbox": [0.28, 0.50, 0.62, 0.60], "mode": "date" },
+    "lieu_naissance": { "bbox": [0.28, 0.58, 0.78, 0.68], "mode": "latin" },
+    "sexe": { "bbox": [0.70, 0.50, 0.92, 0.60], "mode": "latin" },
+    "nationalite": { "bbox": [0.28, 0.66, 0.78, 0.76], "mode": "latin" }
+  }
+}

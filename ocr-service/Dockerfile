@@ -1,29 +1,25 @@
-# CITYMO CIN OCR — service Python INDÉPENDANT (Railway dédié)
-# Ne pas fusionner avec l'API Express.
 FROM python:3.11-slim-bookworm
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    OCR_REQUIRE_API_KEY=true \
+    OCR_TIMEOUT_SEC=90
 
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    tesseract-ocr \
-    tesseract-ocr-fra \
-    tesseract-ocr-ara \
-    libgl1 \
-    libglib2.0-0 \
+    libglib2.0-0 libsm6 libxext6 libxrender1 libgl1 \
     && rm -rf /var/lib/apt/lists/*
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt \
-    && pip install --no-cache-dir "paddlepaddle==3.0.0" "paddleocr>=3.0.0,<4" || \
-       pip install --no-cache-dir "paddleocr>=2.7,<3" || true
+    && pip install --no-cache-dir paddlepaddle==2.6.2 paddleocr==2.7.3 || \
+    pip install --no-cache-dir paddleocr || true
 
 COPY app ./app
-RUN mkdir -p /app/data
 
-ENV OCR_MAX_UPLOAD_BYTES=12582912
-ENV OCR_TIMEOUT_SEC=90
-ENV CITYMO_LEARNING_PATH=/app/data/learning.json
 EXPOSE 8000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health')" || exit 1
 
-# Ressources recommandées Railway : 2 vCPU · 4 Go RAM
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--timeout-keep-alive", "120"]
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

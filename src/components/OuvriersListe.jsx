@@ -18,6 +18,8 @@ import {
   getCameraErrorMessage,
   getCINCameraStream,
   preloadOcrEngine,
+  pickFillableFields,
+  isRealFieldConflict,
 } from '../services/ocr';
 import { captureCINFromVideo, prepareImportedCINImage } from '../services/cinCapture';
 import { generateWorkerPdf } from '../services/rh/workerPdf';
@@ -548,12 +550,16 @@ function CINScanner({
       setError('Capturez ou importez au moins le recto de la CIN.');
       return;
     }
+    if (!verso) {
+      setError('Le verso est obligatoire pour l’analyse CIN.');
+      return;
+    }
     teardown();
     setPhase('uploading');
     setUploadStatus('Préparation…');
     setError('');
     try {
-      const result = await scanCIN(recto, verso || null, {
+      const result = await scanCIN(recto, verso, {
         rectoFile: rectoFileRef.current,
         versoFile: versoFileRef.current,
         rectoFullDataUrl: rectoFullDataUrlRef.current,
@@ -1275,30 +1281,32 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
   }
 
   function buildOcrPayload(result) {
-    const fields = result?.fields || {};
-    const map = {
-      cin: String(fields.numero_cin?.value || result?.cin || '').trim(),
-      prenom: String(fields.prenom?.value || result?.prenom || '').trim(),
-      nom: String(fields.nom?.value || result?.nom || '').trim(),
-      date_expiration: String(fields.date_expiration?.value || result?.date_expiration || '').trim(),
-      sexe: String(fields.sexe?.value || result?.sexe || '').trim(),
-      nationalite: String(fields.nationalite?.value || result?.nationalite || '').trim(),
+    const { map, meta } = pickFillableFields(result?._ocr_raw || result || {});
+    // fallback sur résultat déjà normalisé (scanCIN)
+    const merged = {
+      cin: map.cin || String(result?.cin || '').trim() || undefined,
+      prenom: map.prenom || String(result?.prenom || '').trim() || undefined,
+      nom: map.nom || String(result?.nom || '').trim() || undefined,
+      date_naissance: map.date_naissance || String(result?.date_naissance || '').trim() || undefined,
+      ville_naissance: map.ville_naissance || String(result?.ville_naissance || '').trim() || undefined,
+      date_expiration: map.date_expiration || String(result?.date_expiration || '').trim() || undefined,
+      sexe: map.sexe || String(result?.sexe || '').trim() || undefined,
+      nationalite: map.nationalite || String(result?.nationalite || '').trim() || undefined,
+      adresse: map.adresse || String(result?.adresse || '').trim() || undefined,
     };
-    const meta = {};
-    const keyMap = {
-      cin: 'numero_cin', prenom: 'prenom', nom: 'nom',
-      date_expiration: 'date_expiration', sexe: 'sexe', nationalite: 'nationalite',
-    };
-    Object.entries(keyMap).forEach(([formKey, fieldKey]) => {
-      const f = fields[fieldKey];
-      if (f) meta[formKey] = { confidence: f.confidence, confidence_pct: f.confidence_pct };
+    Object.keys(merged).forEach((k) => {
+      if (merged[k] == null || merged[k] === '') delete merged[k];
     });
-    console.info('[OCR CHAIN]', 'Résultat extrait → payload formulaire', map, {
+    // jamais injecter nationalité parasite
+    if (merged.nationalite && (merged.nationalite.length <= 2 || /^[àâäa]$/i.test(merged.nationalite))) {
+      delete merged.nationalite;
+    }
+    const finalMeta = { ...(result?.field_meta || {}), ...meta };
+    console.info('[OCR CHAIN]', 'Résultat extrait → payload formulaire', merged, {
       engine: result?.engine_used,
-      fallback: !!result?._ocr_fallback,
-      hasAny: !!(map.cin || map.prenom || map.nom),
+      hasAny: Object.keys(merged).length > 0,
     });
-    return { map, meta, cinCandidates: fields.numero_cin?.candidates || [] };
+    return { map: merged, meta: finalMeta, cinCandidates: [] };
   }
 
   function fillFormFromOcr(payload, meta) {
@@ -1310,25 +1318,22 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
 
     if (Object.keys(cleaned).length === 0) {
       console.warn('[OCR CHAIN]', 'Après remplissage — AUCUNE donnée à injecter');
-      setOcrToast('Aucune donnée extraite — saisissez les champs manuellement.');
+      setOcrToast('Aucune donnée fiable extraite — saisissez les champs manuellement.');
       setTimeout(() => setOcrToast(''), 7000);
       return;
     }
 
-    // Toujours injecter les valeurs OCR dans les inputs React contrôlés.
-    // Les conflits éventuels sont signalés APRÈS injection (ne bloquent plus le fill).
     setForm((prev) => {
       const conflicts = {};
       Object.entries(cleaned).forEach(([k, next]) => {
         const cur = String(prev[k] || '').trim();
-        if (cur && next && cur !== next) conflicts[k] = { current: cur, detected: next };
+        if (isRealFieldConflict(k, cur, next, meta)) {
+          conflicts[k] = { current: cur, detected: next };
+        }
       });
       const merged = { ...prev, ...cleaned };
       console.info('[OCR CHAIN]', 'Après remplissage du formulaire', {
         injected: cleaned,
-        formCin: merged.cin,
-        formPrenom: merged.prenom,
-        formNom: merged.nom,
         conflicts,
       });
       if (Object.keys(conflicts).length) {
@@ -1373,6 +1378,11 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
     });
     if (!form.cin_recto) {
       setOcrToast('Recto manquant — importez le recto CIN.');
+      setTimeout(() => setOcrToast(''), 4000);
+      return;
+    }
+    if (!(ocrFullDataUrlRef.current.verso || form.cin_verso)) {
+      setOcrToast('Verso manquant — importez aussi le verso CIN.');
       setTimeout(() => setOcrToast(''), 4000);
       return;
     }
@@ -1513,13 +1523,15 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
             ))}
             <div className="cin-verify-footer">
               <button type="button" className="btn btn-ghost" onClick={() => setFieldConflicts(null)}>Annuler</button>
-              <button type="button" className="btn btn-primary" onClick={() => {
-                const all = {};
-                Object.keys(fieldConflicts.conflicts).forEach((k) => { all[k] = 'use'; });
-                resolveConflicts(all);
-              }}>
-                Remplacer toutes
-              </button>
+              {Object.keys(fieldConflicts.conflicts).length >= 2 && (
+                <button type="button" className="btn btn-primary" onClick={() => {
+                  const all = {};
+                  Object.keys(fieldConflicts.conflicts).forEach((k) => { all[k] = 'use'; });
+                  resolveConflicts(all);
+                }}>
+                  Remplacer toutes
+                </button>
+              )}
             </div>
           </div>
         </div>

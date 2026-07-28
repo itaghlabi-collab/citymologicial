@@ -68,8 +68,8 @@ async function fetchProfile(admin, userId) {
   return profile;
 }
 
-function buildVerifiedUser(user, profile) {
-  if (!isSuperAdminUser(user, profile)) {
+function buildVerifiedUser(user, profile, { requireSuperAdmin = true } = {}) {
+  if (requireSuperAdmin && !isSuperAdminUser(user, profile)) {
     throw Object.assign(new Error('Accès réservé aux Super Admin.'), { status: 403 });
   }
   if (profile?.statut && profile.statut !== 'actif') {
@@ -78,17 +78,17 @@ function buildVerifiedUser(user, profile) {
   return {
     id: user.id,
     email: (user.email || profile?.email || '').toLowerCase(),
-    role: profile?.role || profile?.erp_roles?.code || 'super_admin',
+    role: profile?.role || profile?.erp_roles?.code || 'user',
     nom: profile?.nom || user.email || '',
   };
 }
 
-async function loadVerifiedUser(admin, user) {
+async function loadVerifiedUser(admin, user, opts) {
   const profile = await fetchProfile(admin, user.id);
-  return buildVerifiedUser(user, profile);
+  return buildVerifiedUser(user, profile, opts);
 }
 
-async function requireSupabaseSuperAdmin(req, res, next) {
+async function requireSupabaseUserBase(req, res, next, { requireSuperAdmin }) {
   const headerDebug = authHeaderDebug(req);
   console.info('[supabaseAuth:debug] headers', headerDebug);
 
@@ -106,24 +106,22 @@ async function requireSupabaseSuperAdmin(req, res, next) {
   } catch (configErr) {
     console.error('[supabaseAuth] config:', configErr.message);
     return res.status(503).json({
-      error: 'API sauvegardes non configurée sur Railway.',
+      error: 'API non configurée (Supabase admin).',
       detail: configErr.message,
     });
   }
 
   try {
     if (proxyUserId) {
-      console.info('[backup:auth:railway] proxy Vercel signé — confiance directe', { userId: proxyUserId });
       const profile = await fetchProfile(admin, proxyUserId);
       const user = { id: proxyUserId, email: profile?.email || '' };
-      req.user = buildVerifiedUser(user, profile);
+      req.user = buildVerifiedUser(user, profile, { requireSuperAdmin });
       return next();
     }
 
     const token = extractBearerToken(req);
     const clientApiKey = req.headers.apikey || req.headers.Apikey || '';
     if (!token) {
-      console.error('[supabaseAuth:debug] rejet — aucun token');
       return res.status(401).json({ error: 'Authentification Supabase requise.' });
     }
 
@@ -131,7 +129,6 @@ async function requireSupabaseSuperAdmin(req, res, next) {
     try {
       user = await verifySupabaseAccessToken(token, { ...headerDebug, clientApiKey });
     } catch (authErr) {
-      console.error('[supabaseAuth:debug] rejet final JWT:', authErr.message);
       return res.status(401).json({ error: 'Session Supabase invalide ou expirée.' });
     }
 
@@ -139,7 +136,7 @@ async function requireSupabaseSuperAdmin(req, res, next) {
       return res.status(401).json({ error: 'Session Supabase invalide ou expirée.' });
     }
 
-    req.user = await loadVerifiedUser(admin, user);
+    req.user = await loadVerifiedUser(admin, user, { requireSuperAdmin });
     next();
   } catch (err) {
     if (err.status) {
@@ -150,4 +147,13 @@ async function requireSupabaseSuperAdmin(req, res, next) {
   }
 }
 
-module.exports = { requireSupabaseSuperAdmin };
+async function requireSupabaseSuperAdmin(req, res, next) {
+  return requireSupabaseUserBase(req, res, next, { requireSuperAdmin: true });
+}
+
+/** Utilisateur ERP authentifié (module ouvriers / CIN OCR). */
+async function requireSupabaseAuth(req, res, next) {
+  return requireSupabaseUserBase(req, res, next, { requireSuperAdmin: false });
+}
+
+module.exports = { requireSupabaseSuperAdmin, requireSupabaseAuth };

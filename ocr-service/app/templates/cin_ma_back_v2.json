@@ -1,0 +1,11 @@
+{
+  "id": "cin_ma_back_v2",
+  "face": "back",
+  "version": 2,
+  "fields": {
+    "adresse": { "bbox": [0.08, 0.14, 0.92, 0.38], "mode": "latin" },
+    "date_delivrance": { "bbox": [0.08, 0.40, 0.45, 0.52], "mode": "date" },
+    "date_expiration": { "bbox": [0.48, 0.40, 0.92, 0.52], "mode": "date" },
+    "autorite": { "bbox": [0.08, 0.54, 0.92, 0.70], "mode": "latin" }
+  }
+}

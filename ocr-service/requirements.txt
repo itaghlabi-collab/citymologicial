@@ -1,12 +1,12 @@
-fastapi==0.115.6
-uvicorn[standard]==0.34.0
-python-multipart==0.0.20
-numpy==1.26.4
-opencv-python-headless==4.10.0.84
-Pillow==11.1.0
-pytesseract==0.3.13
-httpx==0.28.1
-pytest==8.3.4
-
-# Prod Railway — PaddleOCR 3.x (fr_PP-OCRv5 + arabic_PP-OCRv5) :
-# pip install paddlepaddle==3.0.0 "paddleocr>=3.0.0,<4"
+fastapi>=0.110.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.0.0
+python-multipart>=0.0.9
+numpy>=1.24.0
+opencv-python-headless>=4.8.0
+Pillow>=10.0.0
+# PaddleOCR installé dans l'image Docker (poids élevé) — optionnel en local/tests
+# paddlepaddle==2.6.2
+# paddleocr>=2.7.0
+httpx>=0.27.0
+pytest>=7.4.0
