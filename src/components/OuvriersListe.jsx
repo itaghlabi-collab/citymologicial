@@ -1202,6 +1202,7 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
   const [formTab, setFormTab] = useState('identite');
   const [ocrFilled, setOcrFilled]   = useState(false);
   const [ocrToast,  setOcrToast]    = useState('');
+  const [ocrToastType, setOcrToastType] = useState('success');
   const [ocrAnalyzing, setOcrAnalyzing] = useState(false);
   const [ocrProgress, setOcrProgress] = useState('');
   const [ocrFieldMeta, setOcrFieldMeta] = useState(null); // { cin: {confidence, confidence_pct}, ... }
@@ -1226,6 +1227,15 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
   ];
 
   function set(k, v) { setForm(p => ({ ...p, [k]: v })); }
+
+  function flashOcrToast(message, type = 'success', ms = 7000) {
+    const msg = getReadableMessage(message, type === 'error'
+      ? 'Analyse impossible — saisie manuelle disponible.'
+      : 'Notification OCR');
+    setOcrToastType(type === 'error' ? 'error' : 'success');
+    setOcrToast(msg);
+    setTimeout(() => setOcrToast(''), ms);
+  }
 
   async function handleCINDocImport(side, preview, file) {
     if (!preview) {
@@ -1275,8 +1285,7 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
 
   function openCINScanner() {
     setFormTab('documents');
-    setOcrToast('Importez le recto et le verso, puis cliquez sur « Analyser la CIN ».');
-    setTimeout(() => setOcrToast(''), 5000);
+    flashOcrToast('Importez le recto et le verso, puis cliquez sur « Analyser la CIN ».');
   }
 
   function openCINScannerForSide(_side) {
@@ -1348,8 +1357,7 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
 
     if (Object.keys(cleaned).length === 0) {
       console.warn('[OCR CHAIN]', 'Après remplissage — AUCUNE donnée à injecter');
-      setOcrToast('Analyse terminée. Certains champs doivent être vérifiés.');
-      setTimeout(() => setOcrToast(''), 7000);
+      flashOcrToast('Analyse terminée. Certains champs doivent être vérifiés.');
       return;
     }
 
@@ -1380,11 +1388,10 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
     setOcrFieldMeta(meta || null);
     setFormTab('identite');
     setOcrFilled(true);
-    setOcrToast(partial
+    flashOcrToast(partial
       ? 'Analyse terminée. Certains champs doivent être vérifiés.'
       : 'CIN analysée avec succès. Vérifiez les informations proposées.');
     setTimeout(() => setOcrFilled(false), 4000);
-    setTimeout(() => setOcrToast(''), 7000);
     queueMicrotask(() => {
       try {
         const prefer = ['prenom', 'nom', 'cin', 'date_naissance', 'ville_naissance', 'sexe', 'nationalite', 'date_expiration'];
@@ -1413,8 +1420,7 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
     setForm((p) => ({ ...p, ...cleaned }));
     setOcrFieldMeta(fieldConflicts.meta || null);
     setFormTab('identite');
-    setOcrToast('CIN analysée avec succès. Vérifiez les informations proposées.');
-    setTimeout(() => setOcrToast(''), 4000);
+    flashOcrToast('CIN analysée avec succès. Vérifiez les informations proposées.', 'success', 4000);
   }
 
   async function handleAnalyzeDocuments(force = forceOcr) {
@@ -1426,22 +1432,21 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
       qualityBlock: !!qualityRecto?.block_ocr,
     });
     if (!form.cin_recto && !(ocrFullDataUrlRef.current.verso || form.cin_verso)) {
-      setOcrToast('Importez au moins le recto ou le verso CIN.');
-      setTimeout(() => setOcrToast(''), 4000);
+      flashOcrToast('Importez au moins le recto ou le verso CIN.', 'error', 4000);
       return;
     }
     if (qualityRecto?.block_ocr && !force && form.cin_recto) {
       const versoOk = !(qualityVerso?.block_ocr) && (ocrFullDataUrlRef.current.verso || form.cin_verso);
       if (!versoOk) {
         console.warn('[OCR CHAIN]', 'Bloqué qualité client (pas encore OCR)');
-        setOcrToast(getReadableMessage(qualityRecto.messages?.[0], 'Image non lisible'));
+        flashOcrToast(getReadableMessage(qualityRecto.messages?.[0], 'Image non lisible'), 'error', 6000);
         setForceOcr(true);
-        setTimeout(() => setOcrToast(''), 6000);
         return;
       }
     }
     setOcrAnalyzing(true);
     setOcrToast('');
+    setOcrToastType('success');
     setOcrProgress('Analyse…');
     setCinAmbiguous(null);
     try {
@@ -1478,11 +1483,10 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
       console.error('[OCR CHAIN]', 'handleAnalyzeDocuments CATCH', err?.code, getReadableMessage(err));
       if (err?.code === 'IMAGE_UNREADABLE' && err?.allow_force) {
         setForceOcr(true);
-        setOcrToast(getReadableMessage(err, 'Image non lisible') + ' — vous pouvez analyser quand même. Le formulaire reste éditable.');
+        flashOcrToast(getReadableMessage(err, 'Image non lisible') + ' — vous pouvez analyser quand même. Le formulaire reste éditable.', 'error', 8000);
       } else {
-        setOcrToast(getReadableMessage(err, 'Extraction impossible — saisissez les champs manuellement. Les images restent sélectionnées.'));
+        flashOcrToast(getReadableMessage(err, 'Extraction impossible — saisissez les champs manuellement. Les images restent sélectionnées.'), 'error', 8000);
       }
-      setTimeout(() => setOcrToast(''), 8000);
     } finally {
       setOcrAnalyzing(false);
       setOcrProgress('');
@@ -1623,8 +1627,10 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
 
       {/* OCR success toast */}
       {ocrToast && (
-        <div className="ocr-toast">
-          <CheckCircle size={14} style={{ flexShrink: 0 }} />
+        <div className={'ocr-toast' + (ocrToastType === 'error' ? ' ocr-toast--error' : '')}>
+          {ocrToastType === 'error'
+            ? <AlertCircle size={14} style={{ flexShrink: 0 }} />
+            : <CheckCircle size={14} style={{ flexShrink: 0 }} />}
           {getReadableMessage(ocrToast, 'Notification OCR')}
         </div>
       )}

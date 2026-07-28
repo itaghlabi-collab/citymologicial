@@ -20,6 +20,13 @@ export function getReadableMessage(value, fallback = 'Une erreur est survenue. S
   if (typeof value === 'string') {
     const s = value.trim();
     if (!s || s === '[object Object]') return fallback;
+    // Erreurs plateforme Vercel / edge (anglais) → message FR exploitable
+    if (/server error has occurred/i.test(s) || /^internal server error$/i.test(s)) {
+      return 'Analyse CIN indisponible temporairement — saisissez les champs manuellement.';
+    }
+    if (/request entity too large|payload too large|413/i.test(s)) {
+      return 'Images trop lourdes — recadrez ou compressez, puis réessayez.';
+    }
     return s;
   }
   if (value instanceof Error) {
@@ -314,18 +321,19 @@ export async function compressImage(dataUrl, maxWidth = 1800, quality = 0.85) {
   });
 }
 
-const API_MAX_BASE64 = 1_800_000;
+/** Limite stricte : Vercel hobby ~4.5 Mo body — 2 faces + JSON. */
+const API_MAX_BASE64 = 900_000;
 
 async function compressForApi(dataUrl) {
   if (!dataUrl) return null;
   let out = dataUrl;
   try {
-    out = await compressImage(dataUrl, isMobileDevice() ? 1600 : 1800, 0.86);
+    out = await compressImage(dataUrl, isMobileDevice() ? 1280 : 1400, 0.78);
   } catch (_) { /* keep */ }
   let pass = 0;
-  while (String(out).length > API_MAX_BASE64 && pass < 4) {
-    const w = Math.max(1000, 1600 - 200 * (pass + 1));
-    const q = Math.max(0.6, 0.86 - pass * 0.07);
+  while (String(out).length > API_MAX_BASE64 && pass < 6) {
+    const w = Math.max(720, 1280 - 120 * (pass + 1));
+    const q = Math.max(0.52, 0.78 - pass * 0.05);
     try {
       out = await compressImage(out, w, q);
     } catch (_) {
@@ -556,7 +564,10 @@ export async function scanCIN(rectoSource, versoSource, options = {}) {
     try {
       json = JSON.parse(text);
     } catch {
-      json = { ok: false, error: 'Réponse OCR invalide', error_code: 'OCR_FAILED' };
+      const platformHint = /server error has occurred|Internal Server Error|FUNCTION_INVOCATION_FAILED/i.test(text)
+        ? 'Analyse CIN indisponible temporairement — saisissez les champs manuellement.'
+        : 'Réponse OCR invalide — saisie manuelle disponible.';
+      json = { ok: false, error: platformHint, error_code: res.status >= 500 ? 'OCR_SERVER_ERROR' : 'OCR_FAILED' };
     }
 
     logResponseShapeDev(json);
@@ -581,7 +592,7 @@ export async function scanCIN(rectoSource, versoSource, options = {}) {
         json.error || json.message,
         'Analyse CIN impossible — saisissez les champs manuellement.',
       ));
-      err.code = json.error_code || 'OCR_FAILED';
+      err.code = json.error_code || (res.status >= 500 ? 'OCR_SERVER_ERROR' : 'OCR_FAILED');
       err.allow_force = json.allow_force !== false;
       err.quality = json.faces || null;
       throw err;

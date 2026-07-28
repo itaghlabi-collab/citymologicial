@@ -5235,7 +5235,14 @@ tbody tr:last-child td { border-bottom: none; }
   box-shadow: 0 4px 20px rgba(0,0,0,0.22);
   pointer-events: none;
   animation: ocr-toast-in 0.25s ease;
-  white-space: nowrap;
+  max-width: min(92vw, 420px);
+  white-space: normal;
+  text-align: center;
+  line-height: 1.35;
+}
+
+.ocr-toast.ocr-toast--error {
+  background: #C62828;
 }
 
 @keyframes ocr-toast-in {
