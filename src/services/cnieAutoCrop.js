@@ -1,8 +1,12 @@
 /**
  * Recadrage automatique CNIE (client) — détection carte vs fond + normalisation ID-1.
- * Aucune donnée personnelle loggée.
+ *
+ * Principe fondamental : NE JAMAIS couper la carte.
+ *   → marge de sécurité systématique (5 %)
+ *   → en cas de doute, garder l'image originale
  */
 const ID1_RATIO = 85.6 / 53.98; // ≈ 1.586
+const SAFETY_MARGIN = 0.05;
 const LOG = (...args) => console.info('[CIN CROP]', ...args);
 
 function loadImage(dataUrl) {
@@ -46,72 +50,62 @@ function lum(r, g, b) {
   return 0.299 * r + 0.587 * g + 0.114 * b;
 }
 
-/** Fond type table / bureau sombre ou brun. */
 function isBackgroundPixel(r, g, b) {
   const L = lum(r, g, b);
   if (L < 48) return true;
-  // brun / bois
   if (r > 45 && r >= g && g >= b - 8 && (r - b) > 18 && L < 155) return true;
-  // gris très sombre
   if (L < 70 && Math.abs(r - g) < 12 && Math.abs(g - b) < 12) return true;
   return false;
 }
 
-/** Pixel plausible carte (papier beige, cyan, blanc cassé, photo). */
 function isCardPixel(r, g, b) {
   if (isBackgroundPixel(r, g, b)) return false;
   const L = lum(r, g, b);
   if (L < 55) return false;
-  // cyan / bleu CNIE verso
   if (b > r + 15 && b > 80 && L > 60) return true;
-  // beige / crème recto
   if (L > 90 && r > 100 && g > 90 && b > 70) return true;
-  // zones claires / texte / hologramme
   if (L > 120) return true;
-  // photo portrait (tons chair) — garder
   if (r > g && g > b && L > 70 && L < 210) return true;
   return L > 85;
 }
 
-function refineRect(rect, W, H, marginRatio = 0.02) {
+/**
+ * Expand rect with safety margin — never shrink.
+ * Ensures we never cut into the card.
+ */
+function expandWithSafety(rect, W, H, margin = SAFETY_MARGIN) {
   if (!rect) return null;
-  const mx = Math.max(0, Math.floor(rect.x - W * marginRatio));
-  const my = Math.max(0, Math.floor(rect.y - H * marginRatio));
-  const Mw = Math.min(W - mx, Math.ceil(rect.w + W * marginRatio * 2));
-  const Mh = Math.min(H - my, Math.ceil(rect.h + H * marginRatio * 2));
-  if (Mw < 100 || Mh < 60) return null;
-  return { x: mx, y: my, w: Mw, h: Mh };
+  const mx = Math.round(W * margin);
+  const my = Math.round(H * margin);
+  const x = Math.max(0, rect.x - mx);
+  const y = Math.max(0, rect.y - my);
+  const x2 = Math.min(W, rect.x + rect.w + mx);
+  const y2 = Math.min(H, rect.y + rect.h + my);
+  const w = x2 - x;
+  const h = y2 - y;
+  if (w < 100 || h < 60) return null;
+  return { x, y, w, h };
 }
 
 function scoreRect(rect, W, H) {
   if (!rect) return -1;
   const area = rect.w * rect.h;
-  const imgArea = W * H;
-  const cover = area / imgArea;
-  if (cover < 0.08 || cover > 0.92) return -1;
+  const cover = area / (W * H);
+  if (cover < 0.08 || cover > 0.95) return -1;
   const ratio = rect.w / Math.max(1, rect.h);
-  const landscape = ratio >= 1;
-  const r = landscape ? ratio : 1 / ratio;
+  const r = ratio >= 1 ? ratio : 1 / ratio;
   const ratioScore = 1 - Math.min(1, Math.abs(r - ID1_RATIO) / 0.9);
-  // préférer cartes occupant 15–70 % de l’image
-  const coverScore = cover >= 0.15 && cover <= 0.7 ? 1 : cover < 0.15 ? cover / 0.15 : Math.max(0, 1 - (cover - 0.7) / 0.25);
+  const coverScore = cover >= 0.15 && cover <= 0.75 ? 1 : cover < 0.15 ? cover / 0.15 : Math.max(0, 1 - (cover - 0.75) / 0.2);
   return ratioScore * 0.55 + coverScore * 0.45;
 }
 
-/**
- * Bbox des pixels « carte » (hors fond table).
- */
 function detectByForeground(canvas) {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   const { width: W, height: H } = canvas;
   const { data } = ctx.getImageData(0, 0, W, H);
   const step = Math.max(2, Math.floor(Math.min(W, H) / 240));
 
-  let minX = W;
-  let minY = H;
-  let maxX = 0;
-  let maxY = 0;
-  let count = 0;
+  let minX = W, minY = H, maxX = 0, maxY = 0, count = 0;
 
   for (let y = 0; y < H; y += step) {
     for (let x = 0; x < W; x += step) {
@@ -126,14 +120,9 @@ function detectByForeground(canvas) {
   }
 
   if (count < 40) return null;
-  const rect = refineRect({ x: minX, y: minY, w: maxX - minX, h: maxY - minY }, W, H, 0.025);
-  if (!rect || scoreRect(rect, W, H) < 0.25) return null;
-  return rect;
+  return expandWithSafety({ x: minX, y: minY, w: maxX - minX, h: maxY - minY }, W, H);
 }
 
-/**
- * Recherche fenêtre ratio ID-1 maximisant contraste intérieur / extérieur.
- */
 function detectById1Window(canvas) {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   const { width: W, height: H } = canvas;
@@ -159,25 +148,17 @@ function detectById1Window(canvas) {
     const stepY = Math.max(4, Math.floor(hh / 10));
     for (let y = 0; y <= sh - hh; y += stepY) {
       for (let x = 0; x <= sw - ww; x += stepX) {
-        let inSum = 0;
-        let inN = 0;
-        let outSum = 0;
-        let outN = 0;
-        let cardN = 0;
+        let inSum = 0, inN = 0, outSum = 0, outN = 0, cardN = 0;
         const sample = 3;
         for (let yy = y; yy < y + hh; yy += sample) {
           for (let xx = x; xx < x + ww; xx += sample) {
             const i = (yy * sw + xx) * 4;
-            const r = data[i];
-            const g = data[i + 1];
-            const b = data[i + 2];
-            const L = lum(r, g, b);
+            const L = lum(data[i], data[i + 1], data[i + 2]);
             inSum += L;
             inN += 1;
-            if (isCardPixel(r, g, b)) cardN += 1;
+            if (isCardPixel(data[i], data[i + 1], data[i + 2])) cardN += 1;
           }
         }
-        // bande autour
         const pad = Math.max(4, Math.floor(Math.min(ww, hh) * 0.08));
         const x0 = Math.max(0, x - pad);
         const y0 = Math.max(0, y - pad);
@@ -212,12 +193,9 @@ function detectById1Window(canvas) {
   }
 
   if (!best || bestScore < 25) return null;
-  return refineRect(best, W, H, 0.015);
+  return expandWithSafety(best, W, H, SAFETY_MARGIN * 0.8);
 }
 
-/**
- * Fallback luminosité (ancien algo, seuil adaptatif).
- */
 function detectByBrightness(canvas) {
   const ctx = canvas.getContext('2d', { willReadFrequently: true });
   const { width: W, height: H } = canvas;
@@ -232,20 +210,12 @@ function detectByBrightness(canvas) {
       n += 1;
     }
   }
-  let acc = 0;
-  let thr = 110;
+  let acc = 0, thr = 110;
   for (let g = 255; g >= 40; g -= 1) {
     acc += hist[g];
-    if (acc / n > 0.28) {
-      thr = Math.max(60, g - 10);
-      break;
-    }
+    if (acc / n > 0.28) { thr = Math.max(60, g - 10); break; }
   }
-  let minX = W;
-  let minY = H;
-  let maxX = 0;
-  let maxY = 0;
-  let count = 0;
+  let minX = W, minY = H, maxX = 0, maxY = 0, count = 0;
   for (let y = Math.floor(H * 0.05); y < H * 0.95; y += step) {
     for (let x = Math.floor(W * 0.05); x < W * 0.95; x += step) {
       const i = (y * W + x) * 4;
@@ -260,9 +230,7 @@ function detectByBrightness(canvas) {
     }
   }
   if (count < 50) return null;
-  const rect = refineRect({ x: minX, y: minY, w: maxX - minX, h: maxY - minY }, W, H, 0.02);
-  if (!rect || scoreRect(rect, W, H) < 0.2) return null;
-  return rect;
+  return expandWithSafety({ x: minX, y: minY, w: maxX - minX, h: maxY - minY }, W, H);
 }
 
 function detectCardRect(canvas) {
@@ -288,8 +256,8 @@ function detectCardRect(canvas) {
 }
 
 /**
- * Crop serré + canvas ID-1 (contain, sans étirement).
- * Si le crop est déjà proche ID-1, on évite un grand padding blanc.
+ * Crop + fit into ID-1 canvas (contain mode, no stretching).
+ * The crop already has safety margins so the entire card is preserved.
  */
 function cropAndNormalize(src, rect) {
   const crop = document.createElement('canvas');
@@ -298,13 +266,10 @@ function cropAndNormalize(src, rect) {
   crop.getContext('2d').drawImage(src, rect.x, rect.y, rect.w, rect.h, 0, 0, rect.w, rect.h);
 
   const ratio = rect.w / Math.max(1, rect.h);
-  const nearId1 = Math.abs(ratio - ID1_RATIO) < 0.22 || Math.abs(1 / ratio - ID1_RATIO) < 0.22;
 
-  // Sortie : largeur cible adaptée, hauteur ID-1
   let targetW = Math.min(1400, Math.max(720, rect.w));
   let targetH = Math.round(targetW / ID1_RATIO);
 
-  // Si carte portrait (rare), pivoter logique via ratio
   if (ratio < 1) {
     targetH = Math.min(1400, Math.max(720, rect.h));
     targetW = Math.round(targetH * ID1_RATIO);
@@ -314,7 +279,7 @@ function cropAndNormalize(src, rect) {
   out.width = targetW;
   out.height = targetH;
   const ctx = out.getContext('2d');
-  ctx.fillStyle = nearId1 ? '#f7f7f7' : '#ffffff';
+  ctx.fillStyle = '#f7f7f7';
   ctx.fillRect(0, 0, targetW, targetH);
 
   const scale = Math.min(targetW / rect.w, targetH / rect.h);
@@ -340,25 +305,16 @@ export async function autoCropCnieImage(dataUrl) {
     const rect = detectCardRect(base);
     if (!rect) {
       LOG('detect miss — keep original', { w: base.width, h: base.height });
-      return {
-        dataUrl,
-        cropped: false,
-        message: 'Recadrage automatique impossible, vérifiez la photo',
-      };
+      return { dataUrl, cropped: false, message: 'Recadrage automatique impossible, vérifiez la photo' };
     }
     const cover = (rect.w * rect.h) / (base.width * base.height);
-    // Recadrage trop large = quasi image entière → inutile
-    if (cover > 0.88) {
-      LOG('detect too loose — keep original', { cover: Number(cover.toFixed(2)) });
-      return {
-        dataUrl,
-        cropped: false,
-        message: 'Recadrage automatique impossible, vérifiez la photo',
-      };
+    if (cover > 0.92) {
+      LOG('crop ≈ full image — keep original', { cover: Number(cover.toFixed(2)) });
+      return { dataUrl, cropped: false, message: null };
     }
     const out = cropAndNormalize(base, rect);
-    const croppedUrl = out.toDataURL('image/jpeg', 0.9);
-    LOG('detect ok', {
+    const croppedUrl = out.toDataURL('image/jpeg', 0.92);
+    LOG('crop ok', {
       src: `${base.width}x${base.height}`,
       crop: `${rect.w}x${rect.h}`,
       cover: Number(cover.toFixed(2)),
@@ -366,11 +322,7 @@ export async function autoCropCnieImage(dataUrl) {
     });
     return { dataUrl: croppedUrl, cropped: true, message: null };
   } catch (_) {
-    return {
-      dataUrl,
-      cropped: false,
-      message: 'Recadrage automatique impossible, vérifiez la photo',
-    };
+    return { dataUrl, cropped: false, message: 'Recadrage automatique impossible, vérifiez la photo' };
   }
 }
 

@@ -1,23 +1,17 @@
 /**
- * Parser CNIE marocaine léger — à partir du texte / blocs Google Vision.
- * Pas d'IA complexe : regex, libellés, positions, validations.
- * Ne jamais inventer une valeur.
+ * Parser CNIE marocaine — Google Vision → champs structurés.
+ *
+ * Stratégie (par priorité) :
+ *   1. MRZ du verso (nom, prénom, dates, sexe, nationalité) — très fiable
+ *   2. Labels français du recto (NOM, PRENOM, Née le, à …) avec bounding boxes
+ *   3. Labels arabes (مزدادة بتاريخ, ب …, الجنس, …)
+ *   4. Regex fallback sur fullText (dernière option)
+ *
+ * Ne jamais logger de données personnelles.
  */
 'use strict';
 
-const CIN_RE = /\b([A-Z]{1,2}\s*\d{4,7})\b/gi;
-const DATE_RE = /\b(\d{1,2})[./\-](\d{1,2})[./\-](\d{2,4})\b/g;
-const MRZ_HINT = /IDMAR|<{2,}|(?:[A-Z0-9]<){3,}/i;
-
-const LABEL_NOM = /\b(NOM|NAME|اللقب)\b/i;
-const LABEL_PRENOM = /\b(PR[EÉ]NOM|GIVEN|الاسم\s*الشخصي)\b/i;
-const LABEL_BIRTH = /\b(N[EÉ]E?\s*LE|NAISSANCE|BORN|مزداد|تاريخ)/i;
-const LABEL_EXP = /\b(VALABLE|EXPIR|JUSQU|صالحة)/i;
-const LABEL_LIEU = /\b(LIEU|PLACE|À|A\s|مكان)/i;
-const LABEL_SEXE = /\b(SEXE|SEX|الجنس)\b/i;
-const LABEL_NAT = /\b(NATIONALIT[EÉ]|الجنسية)\b/i;
-const FILIATION = /\b(FILLE\s+DE|FILS\s+DE|بنت|ابن)\b/i;
-const HEADER = /\b(ROYAUME|MAROC|CARTE\s+NATIONALE|IDENTIT[EÉ]|المملكة|البطاقة)\b/i;
+/* ── Helpers ────────────────────────────────────────── */
 
 const OCR_DIGIT = { O: '0', Q: '0', D: '0', I: '1', L: '1', Z: '2', S: '5', B: '8', G: '6' };
 
@@ -29,59 +23,36 @@ function confidenceLevelFromScore(conf) {
 
 function emptyField(source = 'google_vision') {
   return {
-    value: null,
-    confidence: 0,
-    confidence_level: 'faible',
-    confidence_from_vision: false,
-    valid: false,
-    source,
+    value: null, confidence: 0, confidence_level: 'faible',
+    confidence_from_vision: false, valid: false, source,
     requires_manual_review: true,
   };
 }
 
-/**
- * @param {string|null} value
- * @param {number} confidence
- * @param {string} source
- * @param {boolean} review
- * @param {{ fromVision?: boolean }} opts
- */
 function makeField(value, confidence, source = 'google_vision', review = false, opts = {}) {
   if (value == null || String(value).trim() === '') return emptyField(source);
   const conf = Math.max(0, Math.min(1, Number(confidence) || 0));
-  const fromVision = opts.fromVision === true;
   return {
     value: String(value).trim(),
     confidence: conf,
     confidence_level: confidenceLevelFromScore(conf),
-    // % UI uniquement si confiance mot/bloc Vision réelle
-    confidence_from_vision: fromVision,
+    confidence_from_vision: opts.fromVision === true,
     valid: conf >= 0.45,
     source,
     requires_manual_review: review || conf < 0.85,
   };
 }
 
-function stripAccents(s) {
-  return String(s || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '');
-}
-
 function normText(s) {
-  return stripAccents(s).replace(/\s+/g, ' ').trim().toUpperCase();
+  return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim().toUpperCase();
 }
 
 function normalizeCin(raw) {
   let s = String(raw || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-  const m = s.match(/^([A-Z]{1,2})([A-Z0-9]+)$/);
+  const m = s.match(/^([A-Z]{1,2})(.+)$/);
   if (!m) return s;
   const head = m[1];
-  const rest = m[2]
-    .split('')
-    .map((c) => OCR_DIGIT[c] || c)
-    .join('')
-    .replace(/\D/g, '');
+  const rest = m[2].split('').map((c) => OCR_DIGIT[c] || c).join('').replace(/\D/g, '');
   return head + rest;
 }
 
@@ -105,354 +76,387 @@ function parseDateToken(raw) {
 }
 
 function isMrzLike(text) {
-  const t = String(text || '');
-  if (MRZ_HINT.test(t)) return true;
-  const compact = t.replace(/\s+/g, '');
-  return compact.length >= 20 && /^[A-Z0-9<]+$/.test(compact);
+  const compact = String(text || '').replace(/\s+/g, '');
+  return compact.length >= 20 && /^[A-Z0-9<]+$/.test(compact) && /[<]{2,}/.test(compact);
 }
 
-function collectBlocks(frontResult, backResult) {
-  const out = [];
-  for (const b of frontResult?.blocks || []) {
-    out.push({ ...b, side: 'front', text: b.text || '', normalized: normText(b.text) });
-  }
-  for (const b of backResult?.blocks || []) {
-    out.push({ ...b, side: 'back', text: b.text || '', normalized: normText(b.text) });
-  }
-  // lignes du fullText
-  for (const [side, res] of [['front', frontResult], ['back', backResult]]) {
-    const lines = String(res?.fullText || '').split(/\n+/);
-    for (const line of lines) {
-      const t = line.trim();
-      if (!t) continue;
-      out.push({
-        text: t,
-        normalized: normText(t),
-        confidence: 0.75,
-        bbox: null,
-        side,
-        fromFullText: true,
-      });
+function isHeader(t) {
+  return /ROYAUME|MAROC|CARTE\s*NATIONALE|IDENTITE|IDENTITÉ|المملكة|المغربية|البطاقة|الوطنية|للتعريف/i.test(t);
+}
+
+function isArabic(t) {
+  return /[\u0600-\u06FF]/.test(t);
+}
+
+function isLatinName(s) {
+  const t = String(s || '').trim();
+  if (t.length < 2 || t.length > 40) return false;
+  if (isHeader(t) || isMrzLike(t)) return false;
+  if (/\d/.test(t)) return false;
+  return /^[A-Za-zÀ-ÿ' -]+$/.test(t);
+}
+
+/* ── MRZ Parser (Moroccan CNIE — 3×30) ─────────────── */
+
+function extractMRZ(fullText) {
+  const lines = String(fullText || '').split(/\n+/);
+  const mrzCandidates = [];
+  for (const line of lines) {
+    const compact = line.replace(/\s/g, '');
+    if (compact.length >= 28 && compact.length <= 36 && /^[A-Z0-9<]+$/.test(compact)) {
+      mrzCandidates.push(compact.padEnd(30, '<').slice(0, 30));
     }
+  }
+
+  if (mrzCandidates.length < 3) return null;
+  const mrz = mrzCandidates.slice(-3);
+
+  const l1 = mrz[0]; // IDMAR + CIN/doc number + check + filler
+  const l2 = mrz[1]; // birth(6) + check + sex(1) + expiry(6) + check + nationality(3) + filler + check
+  const l3 = mrz[2]; // LASTNAME<<FIRSTNAME<<<...
+
+  const result = {};
+
+  // L3: names
+  const namesPart = l3.replace(/<+$/, '');
+  const nameParts = namesPart.split('<<');
+  if (nameParts.length >= 2) {
+    result.nom = nameParts[0].replace(/</g, ' ').trim();
+    result.prenom = nameParts[1].replace(/</g, ' ').trim();
+  } else if (nameParts.length === 1 && nameParts[0].length >= 2) {
+    result.nom = nameParts[0].replace(/</g, ' ').trim();
+  }
+
+  // L2: birth YYMMDD (pos 0-5), check (pos 6), sex (pos 7), expiry YYMMDD (pos 8-13)
+  const birthYY = parseInt(l2.slice(0, 2), 10);
+  const birthMM = parseInt(l2.slice(2, 4), 10);
+  const birthDD = parseInt(l2.slice(4, 6), 10);
+  const birthIso = toIso(birthDD, birthMM, birthYY);
+  if (birthIso) result.date_naissance = birthIso;
+
+  const sexChar = l2.charAt(7);
+  if (sexChar === 'M' || sexChar === 'F') result.sexe = sexChar;
+
+  const expYY = parseInt(l2.slice(8, 10), 10);
+  const expMM = parseInt(l2.slice(10, 12), 10);
+  const expDD = parseInt(l2.slice(12, 14), 10);
+  const expIso = toIso(expDD, expMM, expYY);
+  if (expIso) result.date_expiration = expIso;
+
+  const natSlice = l2.slice(15, 18);
+  if (natSlice === 'MAR') result.nationalite = 'Marocaine';
+
+  // L1: CIN after IDMAR
+  const l1m = l1.match(/^IDMAR(.+?)(<|$)/);
+  if (l1m) {
+    const docNum = l1m[1].replace(/</g, '');
+    if (docNum.length >= 5) result.cin_mrz = docNum;
+  }
+
+  return result;
+}
+
+/* ── Recto text analysis (labels + bboxes) ─────────── */
+
+function collectLines(visionResult, side) {
+  const out = [];
+  for (const b of visionResult?.blocks || []) {
+    out.push({
+      text: (b.text || '').trim(),
+      confidence: b.confidence || 0.7,
+      bbox: b.bbox || [0, 0, 0, 0],
+      side,
+    });
   }
   return out;
 }
 
-function extractCin(blocks, fullText) {
-  const candidates = [];
-  const push = (raw, conf, src) => {
-    if (isMrzLike(raw)) return;
-    const v = normalizeCin(raw);
-    if (!isValidCin(v)) return;
-    candidates.push({ value: v, confidence: conf, source: src });
-  };
+function extractRectoFields(blocks) {
+  const result = {};
+  const sorted = [...blocks].sort((a, b) => a.bbox[1] - b.bbox[1]);
+  const imgW = Math.max(...blocks.map((b) => b.bbox[2]), 1);
+  const imgH = Math.max(...blocks.map((b) => b.bbox[3]), 1);
 
-  for (const b of blocks) {
+  // Identify left-side Latin blocks (names, labels) vs right-side Arabic blocks
+  // On CNIE recto: left half = French text, right half = Arabic text
+  // Names are in the center-left area, below the header
+
+  const isLeftHalf = (b) => ((b.bbox[0] + b.bbox[2]) / 2) < imgW * 0.65;
+  const isRightHalf = (b) => ((b.bbox[0] + b.bbox[2]) / 2) > imgW * 0.55;
+
+  const latinBlocks = sorted.filter(
+    (b) => isLeftHalf(b) && !isHeader(b.text) && !isMrzLike(b.text) && !isArabic(b.text)
+  );
+
+  // Find CIN: block matching pattern, usually near bottom-left of recto or top-right
+  for (const b of sorted) {
     if (isMrzLike(b.text)) continue;
-    const cleaned = String(b.text || '').replace(/^(N[°O.]?|NO|NUM)\s*/i, '');
-    let m;
-    const re = new RegExp(CIN_RE.source, 'gi');
-    while ((m = re.exec(cleaned))) {
-      push(m[1], Math.max(0.7, b.confidence || 0.7), `${b.side}_vision`);
-    }
-  }
-  // full text sweep (hors MRZ lines)
-  for (const line of String(fullText || '').split(/\n+/)) {
-    if (isMrzLike(line)) continue;
-    let m;
-    const re = new RegExp(CIN_RE.source, 'gi');
-    while ((m = re.exec(line))) {
-      push(m[1], 0.72, 'fulltext_vision');
+    const cleaned = b.text.replace(/^(N[°O.]?|NO|NUM)\s*/i, '').replace(/\s/g, '');
+    const cin = normalizeCin(cleaned);
+    if (isValidCin(cin)) {
+      result.cin = { value: cin, confidence: b.confidence || 0.85 };
+      break;
     }
   }
 
-  if (!candidates.length) return emptyField();
-  candidates.sort((a, b) => b.confidence - a.confidence || b.value.length - a.value.length);
-  const top = candidates[0];
-  const multi = candidates.filter((c) => c.value === top.value).length >= 2;
-  return makeField(top.value, multi ? Math.min(0.98, top.confidence + 0.1) : top.confidence, top.source, !multi);
-}
+  // Find names from Latin labels in left half
+  // Strategy: look for blocks that are purely Latin names (no labels, no dates)
+  const nameBlocks = latinBlocks.filter((b) => {
+    const t = b.text.trim();
+    if (!isLatinName(t)) return false;
+    if (/^(No|Née?\s+le|Valable|CIN|Sexe|N°)$/i.test(t)) return false;
+    if (/^[A-Z]{1}$/i.test(t)) return false;
+    return true;
+  });
 
-function extractDates(blocks, fullText) {
-  const found = [];
-  const consider = (text, conf, side) => {
-    let m;
-    const re = new RegExp(DATE_RE.source, 'g');
-    while ((m = re.exec(text))) {
-      const iso = parseDateToken(m[0]);
-      if (!iso) continue;
-      found.push({
-        iso,
-        confidence: conf,
-        side,
-        ctx: normText(text),
-      });
-    }
-  };
-  for (const b of blocks) {
-    if (isMrzLike(b.text)) continue;
-    consider(b.text, Math.max(0.65, b.confidence || 0.7), b.side);
-  }
-  consider(fullText || '', 0.6, 'both');
-
-  let birth = null;
-  let exp = null;
-  for (const f of found) {
-    const birthHint = LABEL_BIRTH.test(f.ctx);
-    const expHint = LABEL_EXP.test(f.ctx);
-    if (birthHint && !birth) birth = f;
-    else if (expHint && !exp) exp = f;
-  }
-  // chronologie : naissance = plus ancienne, expiration = plus récente
-  const unique = [...new Map(found.map((f) => [f.iso, f])).values()].sort((a, b) => a.iso.localeCompare(b.iso));
-  if (!birth && unique[0]) birth = unique[0];
-  if (!exp && unique.length >= 2) exp = unique[unique.length - 1];
-  if (birth && exp && birth.iso === exp.iso) {
-    exp = unique.find((u) => u.iso !== birth.iso) || null;
-  }
-  if (birth && exp && exp.iso <= birth.iso) {
-    exp = null;
+  // Names appear in order: first = prénom, second = nom (top to bottom)
+  if (nameBlocks.length >= 2) {
+    result.prenom = { value: nameBlocks[0].text.trim().toUpperCase(), confidence: nameBlocks[0].confidence || 0.8 };
+    result.nom = { value: nameBlocks[1].text.trim().toUpperCase(), confidence: nameBlocks[1].confidence || 0.8 };
+  } else if (nameBlocks.length === 1) {
+    result.prenom = { value: nameBlocks[0].text.trim().toUpperCase(), confidence: (nameBlocks[0].confidence || 0.7) * 0.8 };
   }
 
-  return {
-    date_naissance: birth
-      ? makeField(birth.iso, birth.confidence + (LABEL_BIRTH.test(birth.ctx) ? 0.1 : 0), `${birth.side}_vision`, true)
-      : emptyField(),
-    date_expiration: exp
-      ? makeField(exp.iso, exp.confidence + (LABEL_EXP.test(exp.ctx) ? 0.1 : 0), `${exp.side}_vision`, true)
-      : emptyField(),
-  };
-}
-
-function valueAfterLabel(blocks, labelRe, side = 'front') {
-  const list = blocks.filter((b) => b.side === side && !b.fromFullText);
-  for (let i = 0; i < list.length; i += 1) {
-    const t = list[i].text || '';
-    if (!labelRe.test(t)) continue;
-    const rest = t.replace(labelRe, '').replace(/[:：]/g, '').trim();
-    if (rest && !HEADER.test(rest) && !FILIATION.test(rest) && rest.length >= 2) {
-      return { value: rest, confidence: Math.max(0.75, list[i].confidence || 0.75) };
+  // Find "Née le" or date blocks near it
+  for (const b of latinBlocks) {
+    if (/N[ée]{1,2}e?\s+le/i.test(b.text)) {
+      const dateMatch = b.text.match(/(\d{1,2})[./\-](\d{1,2})[./\-](\d{2,4})/);
+      if (dateMatch) {
+        const iso = parseDateToken(dateMatch[0]);
+        if (iso) result.date_naissance = { value: iso, confidence: b.confidence || 0.85 };
+      }
     }
-    for (let j = i + 1; j < Math.min(i + 3, list.length); j += 1) {
-      const n = (list[j].text || '').trim();
-      if (!n || HEADER.test(n) || labelRe.test(n) || FILIATION.test(n)) continue;
-      if (/^\d/.test(n) && !/[A-Za-zÀ-ÿ]/.test(n)) continue;
-      return { value: n, confidence: Math.max(0.72, list[j].confidence || 0.72) };
-    }
-  }
-  return null;
-}
-
-function isPlausibleName(s) {
-  const t = String(s || '').trim();
-  if (t.length < 2 || t.length > 45) return false;
-  if (HEADER.test(t) || FILIATION.test(t) || isMrzLike(t)) return false;
-  if (/\d/.test(t)) return false;
-  // latin et/ou arabe
-  return /[A-Za-zÀ-ÿ\u0600-\u06FF]/.test(t);
-}
-
-function extractNames(blocks) {
-  const nomHit = valueAfterLabel(blocks, LABEL_NOM, 'front');
-  const preHit = valueAfterLabel(blocks, LABEL_PRENOM, 'front');
-  let nom = nomHit && isPlausibleName(nomHit.value)
-    ? makeField(nomHit.value.toUpperCase(), nomHit.confidence, 'label_nom', true)
-    : emptyField();
-  let prenom = preHit && isPlausibleName(preHit.value)
-    ? makeField(preHit.value.toUpperCase(), preHit.confidence, 'label_prenom', true)
-    : emptyField();
-
-  if (!nom.value || !prenom.value) {
-    const front = blocks
-      .filter((b) => b.side === 'front' && !b.fromFullText && isPlausibleName(b.text))
-      .filter((b) => !LABEL_NOM.test(b.text) && !LABEL_PRENOM.test(b.text) && !LABEL_BIRTH.test(b.text))
-      .map((b) => ({
-        value: String(b.text).trim().toUpperCase(),
-        confidence: b.confidence || 0.7,
-        y: Array.isArray(b.bbox) ? b.bbox[1] : 0,
-        len: String(b.text).trim().length,
-      }))
-      .filter((x) => x.len >= 3 && x.len <= 18);
-
-    front.sort((a, b) => b.confidence - a.confidence || b.len - a.len);
-    const picked = [];
-    const seen = new Set();
-    for (const f of front) {
-      if (seen.has(f.value)) continue;
-      seen.add(f.value);
-      picked.push(f);
-      if (picked.length >= 2) break;
-    }
-    picked.sort((a, b) => a.y - b.y);
-    if (!prenom.value && picked[0]) {
-      prenom = makeField(picked[0].value, picked[0].confidence * 0.85, 'front_vision', true);
-    }
-    if (!nom.value && picked[1]) {
-      nom = makeField(picked[1].value, picked[1].confidence * 0.85, 'front_vision', true);
+    // "à CITY" → lieu de naissance
+    const lieuMatch = b.text.match(/^[àa]\s+(.+)$/i);
+    if (lieuMatch) {
+      const lieu = lieuMatch[1].trim();
+      if (lieu.length >= 3 && !isMrzLike(lieu)) {
+        result.lieu_naissance = { value: lieu.toUpperCase(), confidence: b.confidence || 0.78 };
+      }
     }
   }
 
-  if (nom.value && prenom.value && nom.value === prenom.value) {
-    nom.requires_manual_review = true;
-    prenom.requires_manual_review = true;
-    nom.confidence = Math.min(nom.confidence, 0.4);
-    prenom.confidence = Math.min(prenom.confidence, 0.4);
-  }
-  return { nom, prenom };
-}
-
-function extractSexe(blocks, fullText) {
-  const blob = `${blocks.map((b) => b.text).join('\n')}\n${fullText || ''}`;
-  if (/\b(F|FEM|FEMME|أنثى)\b/i.test(blob) || /أنث/.test(blob)) {
-    return makeField('F', 0.8, 'google_vision', true);
-  }
-  if (/\b(M|MASC|HOMME|ذكر)\b/i.test(blob)) {
-    return makeField('M', 0.8, 'google_vision', true);
-  }
-  // libellé Sexe suivi d'une lettre
-  for (const b of blocks) {
-    if (!LABEL_SEXE.test(b.text || '')) continue;
-    const m = String(b.text).match(/\b([MF])\b/i);
-    if (m) return makeField(m[1].toUpperCase(), 0.85, 'label_sexe', false);
-  }
-  return emptyField();
-}
-
-function extractNationalite(blocks, fullText) {
-  const blob = `${blocks.map((b) => b.text).join('\n')}\n${fullText || ''}`;
-  if (/مغرب|MAROCAINE|MAROCCAN|NATIONALITE\s*MAROCAINE|\bMAR\b/i.test(blob)) {
-    return makeField('Marocaine', 0.82, 'google_vision', true);
-  }
-  const hit = valueAfterLabel(blocks, LABEL_NAT, 'front') || valueAfterLabel(blocks, LABEL_NAT, 'back');
-  if (hit && hit.value.length > 2 && !/^A$/i.test(hit.value)) {
-    return makeField(hit.value, hit.confidence, 'label_nationalite', true);
-  }
-  return emptyField();
-}
-
-function extractLieu(blocks) {
-  const front = blocks.filter((b) => b.side === 'front');
-  // sous libellé naissance / lieu
-  for (let i = 0; i < front.length; i += 1) {
-    const t = front[i].text || '';
-    if (!(LABEL_LIEU.test(t) || LABEL_BIRTH.test(t))) continue;
-    const rest = t
-      .replace(LABEL_BIRTH, ' ')
-      .replace(LABEL_LIEU, ' ')
-      .replace(/\d{1,2}[./\-]\d{1,2}[./\-]\d{2,4}/g, ' ')
-      .replace(/[:：]/g, ' ')
-      .trim();
-    if (rest.length >= 3 && /[A-Za-zÀ-ÿ\u0600-\u06FF]/.test(rest) && !isMrzLike(rest)) {
-      return makeField(normText(rest), 0.78, 'label_lieu', true);
-    }
-    for (let j = i + 1; j < Math.min(i + 3, front.length); j += 1) {
-      const n = (front[j].text || '').trim();
-      if (n.length < 3 || HEADER.test(n) || FILIATION.test(n) || isMrzLike(n)) continue;
-      if (/^\d/.test(n) && !/[A-Za-zÀ-ÿ]/.test(n)) continue;
-      if (DATE_RE.test(n)) continue;
-      return makeField(normText(n), 0.76, 'below_lieu', true);
-    }
-  }
-  // ligne contenant une ville connue
-  const cities = ['CASABLANCA', 'RABAT', 'FES', 'MARRAKECH', 'TANGER', 'AGADIR', 'MEKNES', 'OUJDA', 'KENITRA', 'TETOUAN', 'SALE', 'TEMARA', 'MOHAMMEDIA'];
-  for (const b of front) {
-    const n = b.normalized || normText(b.text);
-    if (cities.some((c) => n.includes(c)) && n.length >= 5 && !isMrzLike(n)) {
-      return makeField(n, 0.7, 'front_vision', true);
-    }
-  }
-  return emptyField();
-}
-
-function extractAdresse(blocks) {
-  const back = blocks.filter((x) => x.side === 'back');
-  for (let i = 0; i < back.length; i += 1) {
-    const t = back[i].text || '';
-    if (!/ADRESSE|العنوان/i.test(t)) continue;
-    let rest = t.replace(/^.*(?:ADRESSE|العنوان)\s*[:：]?\s*/i, '').trim();
-    if (rest.length < 5) {
-      for (let j = i + 1; j < Math.min(i + 3, back.length); j += 1) {
-        const n = (back[j].text || '').trim();
-        if (n.length < 5 || isMrzLike(n) || HEADER.test(n) || /SEXE|NATIONALIT|VALABLE|FILLE|FILS|ÉTAT|ETAT/i.test(n)) continue;
-        rest = n;
+  // Find date from standalone date blocks near the names zone
+  if (!result.date_naissance) {
+    for (const b of latinBlocks) {
+      const iso = parseDateToken(b.text);
+      if (iso) {
+        result.date_naissance = { value: iso, confidence: b.confidence || 0.75 };
         break;
       }
     }
-    if (rest.length >= 5 && !isMrzLike(rest)) {
-      // retirer préfixe arabe collé si latin présent
-      const latin = rest.match(/[A-Za-zÀ-ÿ].*$/);
-      const value = latin && latin[0].length >= 5 ? latin[0].trim() : rest;
-      const conf = Math.max(0.72, Number(back[i].confidence) || 0.72);
-      return makeField(value, conf, 'back_adresse', true, {
-        fromVision: typeof back[i].confidence === 'number' && back[i].confidence > 0,
-      });
+  }
+
+  // "Valable jusqu'au DD.MM.YYYY"
+  for (const b of sorted) {
+    const m = b.text.match(/(?:Valable|jusqu|صالحة)[^0-9]*(\d{1,2}[./\-]\d{1,2}[./\-]\d{2,4})/i);
+    if (m) {
+      const iso = parseDateToken(m[1]);
+      if (iso) result.date_expiration = { value: iso, confidence: b.confidence || 0.85 };
     }
   }
-  return emptyField();
+
+  return result;
 }
 
-function extractAutorite(blocks) {
-  const back = blocks.filter((x) => x.side === 'back');
-  for (let i = 0; i < back.length; i += 1) {
-    const t = back[i].text || '';
-    if (!/AUTORIT|ولاية|PREFECTURE|الولاية|WILAYA|PACHA/i.test(t)) continue;
-    const rest = t.replace(/.*(?:AUTORIT\w*|الولاية|PREFECTURE|WILAYA|PACHA)\s*[:：]?\s*/i, '').trim();
-    if (rest.length >= 3 && !isMrzLike(rest) && !HEADER.test(rest)) {
-      const conf = Math.max(0.7, Number(back[i].confidence) || 0.7);
-      return makeField(rest, conf, 'back_vision', true, {
-        fromVision: typeof back[i].confidence === 'number' && back[i].confidence > 0,
-      });
+/* ── Verso text analysis ────────────────────────────── */
+
+function extractVersoFields(blocks) {
+  const result = {};
+
+  for (const b of blocks) {
+    const t = b.text || '';
+
+    // Sexe: "Sexe F" or "Sexe M"
+    const sexeM = t.match(/\bSexe\s+([MF])\b/i);
+    if (sexeM) {
+      result.sexe = { value: sexeM[1].toUpperCase(), confidence: b.confidence || 0.9 };
     }
-    for (let j = i + 1; j < Math.min(i + 3, back.length); j += 1) {
-      const n = (back[j].text || '').trim();
-      if (n.length < 3 || HEADER.test(n) || isMrzLike(n) || /^\d{1,2}[./\-]/.test(n)) continue;
-      if (/NATIONALIT|SEXE|VALABLE|ADRESSE/i.test(n)) continue;
-      const conf = Math.max(0.68, Number(back[j].confidence) || 0.68);
-      return makeField(n, conf, 'below_autorite', true, {
-        fromVision: typeof back[j].confidence === 'number' && back[j].confidence > 0,
-      });
+    // Standalone sexe block
+    if (/^\s*[MF]\s*$/.test(t) && !result.sexe) {
+      // Check if previous block was "Sexe"
+      result._maybeSexe = t.trim().toUpperCase();
+    }
+    if (/\bSexe\b/i.test(t) && !sexeM && result._maybeSexe) {
+      result.sexe = { value: result._maybeSexe, confidence: 0.85 };
+    }
+
+    // Adresse: "Adresse ..." 
+    const addrM = t.match(/\bAdresse\s+(.+)/i);
+    if (addrM) {
+      const addr = addrM[1].trim();
+      if (addr.length >= 5) {
+        result.adresse = { value: addr, confidence: b.confidence || 0.82 };
+      }
+    }
+
+    // CIN from verso (often at top)
+    if (!result.cin) {
+      const cinText = t.replace(/^(N[°O.]?|رقم|NUM|NO)\s*/i, '').replace(/\s/g, '');
+      const cin = normalizeCin(cinText);
+      if (isValidCin(cin)) {
+        result.cin = { value: cin, confidence: b.confidence || 0.8 };
+      }
+    }
+
+    // "Valable jusqu'au DD.MM.YYYY"
+    const expM = t.match(/(?:Valable|jusqu|صالحة)[^0-9]*(\d{1,2}[./\-]\d{1,2}[./\-]\d{2,4})/i);
+    if (expM && !result.date_expiration) {
+      const iso = parseDateToken(expM[1]);
+      if (iso) result.date_expiration = { value: iso, confidence: b.confidence || 0.85 };
+    }
+
+    // N° état civil line — date extraction
+    const dateLine = t.match(/(\d{1,2}[./\-]\d{1,2}[./\-]\d{2,4})/);
+    if (dateLine && !result.date_expiration && /valable|jusqu|صالحة/i.test(t)) {
+      const iso = parseDateToken(dateLine[1]);
+      if (iso) result.date_expiration = { value: iso, confidence: b.confidence || 0.78 };
     }
   }
-  return emptyField();
+
+  // Handle sexe from separate blocks: look for block "Sexe" followed by block "F" or "M"
+  if (!result.sexe) {
+    for (let i = 0; i < blocks.length; i++) {
+      if (/^\s*Sexe\s*$/i.test(blocks[i].text)) {
+        for (let j = i + 1; j < Math.min(i + 3, blocks.length); j++) {
+          const t = blocks[j].text.trim();
+          if (/^[MF]$/i.test(t)) {
+            result.sexe = { value: t.toUpperCase(), confidence: 0.85 };
+            break;
+          }
+        }
+        break;
+      }
+    }
+  }
+
+  // Nationality from fullText patterns
+  const blob = blocks.map((b) => b.text).join('\n');
+  if (/مغرب|MAROCAINE|MAR/i.test(blob)) {
+    result.nationalite = { value: 'Marocaine', confidence: 0.82 };
+  }
+
+  delete result._maybeSexe;
+  return result;
 }
 
-/** Score heuristique pour comparer recto/verso (éventuellement inversés). */
-function scoreParsedFields(fields) {
-  const keys = ['cin', 'nom', 'prenom', 'date_naissance', 'date_expiration', 'sexe', 'lieu_naissance', 'nationalite'];
-  return keys.reduce((sum, k) => {
-    const f = fields?.[k];
-    if (!f?.valid || !f?.value) return sum;
-    return sum + (Number(f.confidence) || 0.5);
-  }, 0);
+/* ── CIN from fullText sweep (fallback) ────────────── */
+
+function extractCinFromText(fullText) {
+  const candidates = [];
+  for (const line of String(fullText || '').split(/\n+/)) {
+    if (isMrzLike(line)) continue;
+    const cleaned = line.replace(/^(N[°O.]?|NO|NUM|رقم)\s*/i, '');
+    const re = /\b([A-Z]{1,2}\s*\d{4,7})\b/gi;
+    let m;
+    while ((m = re.exec(cleaned))) {
+      const cin = normalizeCin(m[1]);
+      if (isValidCin(cin)) candidates.push(cin);
+    }
+  }
+  if (!candidates.length) return null;
+  // Most frequent
+  const counts = {};
+  for (const c of candidates) counts[c] = (counts[c] || 0) + 1;
+  const best = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
+  return { value: best[0], confidence: best[1] >= 2 ? 0.95 : 0.8 };
 }
 
-/**
- * @param {{ fullText: string, blocks: Array }} frontResult
- * @param {{ fullText: string, blocks: Array }} backResult
- */
+/* ── Main parse function ───────────────────────────── */
+
 function parseCnieFromVision(frontResult, backResult) {
-  const blocks = collectBlocks(frontResult, backResult);
+  const frontBlocks = collectLines(frontResult, 'front');
+  const backBlocks = collectLines(backResult, 'back');
   const fullText = `${frontResult?.fullText || ''}\n${backResult?.fullText || ''}`;
 
-  const cin = extractCin(blocks, fullText);
-  const { nom, prenom } = extractNames(blocks);
-  const dates = extractDates(blocks, fullText);
-  const sexe = extractSexe(blocks, fullText);
-  const nationalite = extractNationalite(blocks, fullText);
-  const lieu_naissance = extractLieu(blocks);
-  const autorite = extractAutorite(blocks);
-  const adresse = extractAdresse(blocks);
+  // 1. MRZ (highest priority for names, dates, sex)
+  const mrz = extractMRZ(backResult?.fullText || '');
+
+  // 2. Recto labels + bboxes
+  const recto = frontBlocks.length > 0 ? extractRectoFields(frontBlocks) : {};
+
+  // 3. Verso labels
+  const verso = backBlocks.length > 0 ? extractVersoFields(backBlocks) : {};
+
+  // 4. CIN from text sweep
+  const cinText = extractCinFromText(fullText);
+
+  // ── Merge with priority: MRZ > recto labels > verso labels > text sweep ──
+
+  const cinValue = mrz?.cin_mrz || recto.cin?.value || verso.cin?.value || cinText?.value || null;
+  const cinConf = cinValue
+    ? (cinValue === mrz?.cin_mrz ? 0.75 : (recto.cin?.confidence || verso.cin?.confidence || cinText?.confidence || 0.7))
+    : 0;
+  // MRZ CIN is the document number, not always the CIN printed on card — prefer recto/verso CIN
+  const finalCin = recto.cin?.value || verso.cin?.value || cinText?.value || null;
+  const finalCinConf = finalCin ? (recto.cin?.confidence || verso.cin?.confidence || cinText?.confidence || 0.75) : 0;
+
+  // Names: MRZ > recto labels
+  const nom = mrz?.nom
+    ? makeField(mrz.nom, 0.92, 'mrz', false, { fromVision: true })
+    : recto.nom
+      ? makeField(recto.nom.value, recto.nom.confidence, 'recto_vision', true, { fromVision: true })
+      : emptyField();
+
+  const prenom = mrz?.prenom
+    ? makeField(mrz.prenom, 0.92, 'mrz', false, { fromVision: true })
+    : recto.prenom
+      ? makeField(recto.prenom.value, recto.prenom.confidence, 'recto_vision', true, { fromVision: true })
+      : emptyField();
+
+  // Dates: MRZ > recto > verso
+  const dateNaissance = mrz?.date_naissance
+    ? makeField(mrz.date_naissance, 0.90, 'mrz', false, { fromVision: true })
+    : recto.date_naissance
+      ? makeField(recto.date_naissance.value, recto.date_naissance.confidence, 'recto_vision', true, { fromVision: true })
+      : emptyField();
+
+  const dateExpiration = mrz?.date_expiration
+    ? makeField(mrz.date_expiration, 0.90, 'mrz', false, { fromVision: true })
+    : (recto.date_expiration || verso.date_expiration)
+      ? makeField(
+          (recto.date_expiration || verso.date_expiration).value,
+          (recto.date_expiration || verso.date_expiration).confidence,
+          'vision', true, { fromVision: true },
+        )
+      : emptyField();
+
+  // Sexe: MRZ > verso label > recto
+  const sexe = mrz?.sexe
+    ? makeField(mrz.sexe, 0.92, 'mrz', false, { fromVision: true })
+    : verso.sexe
+      ? makeField(verso.sexe.value, verso.sexe.confidence, 'verso_vision', true, { fromVision: true })
+      : emptyField();
+
+  // Nationalité: MRZ > verso > generic
+  const nationalite = mrz?.nationalite
+    ? makeField(mrz.nationalite, 0.88, 'mrz', false)
+    : verso.nationalite
+      ? makeField(verso.nationalite.value, verso.nationalite.confidence, 'verso_vision', true)
+      : /مغرب|MAROCAINE/i.test(fullText)
+        ? makeField('Marocaine', 0.80, 'google_vision', true)
+        : emptyField();
+
+  // Lieu de naissance: recto "à CITY" label
+  const lieuNaissance = recto.lieu_naissance
+    ? makeField(recto.lieu_naissance.value, recto.lieu_naissance.confidence, 'recto_vision', true, { fromVision: true })
+    : extractLieuFromText(fullText);
+
+  // Adresse: verso
+  const adresse = verso.adresse
+    ? makeField(verso.adresse.value, verso.adresse.confidence, 'verso_vision', true, { fromVision: true })
+    : emptyField();
 
   const fields = {
-    cin,
+    cin: finalCin ? makeField(finalCin, finalCinConf, 'vision', finalCinConf < 0.90, { fromVision: true }) : emptyField(),
     nom,
     prenom,
-    date_naissance: dates.date_naissance,
-    date_expiration: dates.date_expiration,
+    date_naissance: dateNaissance,
+    date_expiration: dateExpiration,
     sexe,
     nationalite,
-    lieu_naissance,
-    autorite,
+    lieu_naissance: lieuNaissance,
+    autorite: emptyField(),
     adresse,
     date_delivrance: emptyField(),
     nom_arabe: emptyField(),
@@ -462,13 +466,27 @@ function parseCnieFromVision(frontResult, backResult) {
   return fields;
 }
 
-function toWorkerForm(fields, minConf = 0.7) {
-  const pick = (key, alias) => {
+function extractLieuFromText(fullText) {
+  // "à CITY_NAME" pattern
+  const m = String(fullText || '').match(/[àa]\s+([A-Z][A-Za-zÀ-ÿ ]+)/m);
+  if (m && m[1].trim().length >= 3 && !isHeader(m[1])) {
+    return makeField(m[1].trim().toUpperCase(), 0.75, 'fulltext_vision', true);
+  }
+  // Known cities
+  const cities = ['CASABLANCA', 'RABAT', 'FES', 'MARRAKECH', 'TANGER', 'AGADIR', 'MEKNES', 'OUJDA', 'KENITRA', 'TETOUAN', 'SALE', 'TEMARA', 'MOHAMMEDIA', 'NADOR', 'SETTAT', 'EL JADIDA', 'SAFI', 'KHOURIBGA', 'BENI MELLAL'];
+  const upper = String(fullText || '').toUpperCase();
+  for (const city of cities) {
+    if (upper.includes(city)) {
+      return makeField(city, 0.68, 'city_match', true);
+    }
+  }
+  return emptyField();
+}
+
+function toWorkerForm(fields, minConf = 0.55) {
+  const pick = (key) => {
     const f = fields[key];
     if (!f || !f.valid || !f.value) return null;
-    if (f.requires_manual_review && f.confidence < 0.85) {
-      // toujours proposer si confidence >= minConf (suggestion)
-    }
     if (Number(f.confidence) < minConf) return null;
     return f.value;
   };
@@ -494,6 +512,15 @@ function globalConfidenceLabel(fields) {
   if (ok >= 4) return 'haute';
   if (ok >= 2) return 'moyenne';
   return 'faible';
+}
+
+function scoreParsedFields(fields) {
+  const keys = ['cin', 'nom', 'prenom', 'date_naissance', 'date_expiration', 'sexe', 'lieu_naissance', 'nationalite'];
+  return keys.reduce((sum, k) => {
+    const f = fields?.[k];
+    if (!f?.valid || !f?.value) return sum;
+    return sum + (Number(f.confidence) || 0.5);
+  }, 0);
 }
 
 module.exports = {
