@@ -147,6 +147,29 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
 
   const needsSource = type === 'Sortie' || type === 'Transfert';
   const needsDest = type === 'Entrée' || type === 'Transfert';
+  // Entrée : on affiche aussi la source (provenance) pour la renseigner dans l'historique
+  const showSource = needsSource || type === 'Entrée';
+  const showDest = needsDest || type === 'Sortie';
+
+  const emplacementOptions = useMemo(() => {
+    const fromProps = (emplacements || []).map((e) => String(e || '').trim()).filter(Boolean);
+    const fromLevels = (articleStock?.levels || [])
+      .map((l) => String(l.emplacement || '').trim())
+      .filter(Boolean);
+    const current = [form.emplacement_source, form.emplacement_destination]
+      .map((e) => String(e || '').trim())
+      .filter(Boolean);
+    return [...new Set([...fromLevels, ...fromProps, ...current, ...EMPLACEMENTS_STOCK])];
+  }, [emplacements, articleStock, form.emplacement_source, form.emplacement_destination]);
+
+  const sourceOptionsWithStock = useMemo(() => {
+    const levels = articleStock?.levels || [];
+    const byEmp = new Map(levels.map((l) => [String(l.emplacement || '').trim(), Number(l.quantite) || 0]));
+    return emplacementOptions.map((emp) => ({
+      value: emp,
+      qty: byEmp.has(emp) ? byEmp.get(emp) : null,
+    }));
+  }, [emplacementOptions, articleStock]);
 
   const stockAvant = articleStock?.totalStock ?? 0;
   const qty = Number(form.quantite) || 0;
@@ -155,11 +178,39 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
     : stockAvant; // Transfert: global unchanged
 
   const sourceLevel = useMemo(() => {
-    if (!needsSource || !form.emplacement_source || !articleStock?.levels) return null;
+    if (!form.emplacement_source || !articleStock?.levels) return null;
     return articleStock.levels.find((l) => l.emplacement === form.emplacement_source);
-  }, [needsSource, form.emplacement_source, articleStock]);
+  }, [form.emplacement_source, articleStock]);
 
   const sourceQty = sourceLevel?.quantite ?? stockAvant;
+
+  // Préremplir source / destination dès qu'article + type sont connus
+  useEffect(() => {
+    if (!type || !selectedArticle) return;
+    const levels = articleStock?.levels || [];
+    const withStock = levels
+      .filter((l) => Number(l.quantite) > 0)
+      .sort((a, b) => Number(b.quantite) - Number(a.quantite));
+    const preferredSource = withStock[0]?.emplacement
+      || selectedArticle.emplacement
+      || emplacements[0]
+      || '';
+    const preferredDest = selectedArticle.emplacement
+      || emplacements[0]
+      || EMPLACEMENTS_STOCK[0]
+      || '';
+
+    setForm((f) => {
+      const next = { ...f };
+      if (showSource && !f.emplacement_source && preferredSource) {
+        next.emplacement_source = preferredSource;
+      }
+      if (showDest && !f.emplacement_destination && preferredDest) {
+        next.emplacement_destination = preferredDest;
+      }
+      return next;
+    });
+  }, [type, selectedArticle, articleStock, emplacements, showSource, showDest]);
 
   function validate() {
     if (!type) return 'Sélectionnez un type de mouvement.';
@@ -636,19 +687,38 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
             </FRow>
 
             <FRow>
-              {needsSource && (
-                <FField label="Emplacement source" required>
-                  <select value={form.emplacement_source} onChange={(e) => setForm((f) => ({ ...f, emplacement_source: e.target.value }))} style={SELECT_STYLE}>
-                    <option value="">— Sélectionner —</option>
-                    {emplacements.map((e) => <option key={e} value={e}>{e}</option>)}
+              {showSource && (
+                <FField label={type === 'Entrée' ? 'Emplacement provenance' : 'Emplacement source'} required={needsSource}>
+                  <select
+                    value={form.emplacement_source}
+                    onChange={(e) => setForm((f) => ({ ...f, emplacement_source: e.target.value }))}
+                    style={SELECT_STYLE}
+                  >
+                    <option value="">— Sélectionner un emplacement —</option>
+                    {sourceOptionsWithStock.map(({ value, qty: q }) => (
+                      <option key={`src-${value}`} value={value}>
+                        {q != null ? `${value} (${q} dispo.)` : value}
+                      </option>
+                    ))}
                   </select>
+                  {needsSource && form.emplacement_source && (
+                    <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 4 }}>
+                      Stock à cet emplacement : <strong>{sourceQty}</strong> {selectedArticle?.unite || 'U'}
+                    </div>
+                  )}
                 </FField>
               )}
-              {needsDest && (
-                <FField label="Emplacement destination" required>
-                  <select value={form.emplacement_destination} onChange={(e) => setForm((f) => ({ ...f, emplacement_destination: e.target.value }))} style={SELECT_STYLE}>
-                    <option value="">— Sélectionner —</option>
-                    {emplacements.map((e) => <option key={e} value={e}>{e}</option>)}
+              {showDest && (
+                <FField label="Emplacement destination" required={needsDest}>
+                  <select
+                    value={form.emplacement_destination}
+                    onChange={(e) => setForm((f) => ({ ...f, emplacement_destination: e.target.value }))}
+                    style={SELECT_STYLE}
+                  >
+                    <option value="">— Sélectionner un emplacement —</option>
+                    {emplacementOptions.map((e) => (
+                      <option key={`dst-${e}`} value={e}>{e}</option>
+                    ))}
                   </select>
                 </FField>
               )}

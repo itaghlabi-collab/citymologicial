@@ -5517,6 +5517,9 @@ tbody tr:last-child td { border-bottom: none; }
   white-space: nowrap;
 }
 
+/* Desktop : tableau uniquement — mobile : cartes uniquement */
+.inv-stock-mobile-only { display: none !important; }
+.inv-stock-desktop-only { display: block; }
 
 /* Fiche article stock — header dual (desktop / mobile) */
 .inv-article-detail-header-desktop {

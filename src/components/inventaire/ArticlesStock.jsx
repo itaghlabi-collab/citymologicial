@@ -18,12 +18,13 @@ import QrCodeDisplay from './QrCodeDisplay';
 import ArticleScanBar from './ArticleScanBar';
 import ArticleQuickActions, { ArticleMovementHistory } from './ArticleQuickActions';
 import ArticleRowActions from './ArticleRowActions';
+import ArticleCatalogForm from './ArticleCatalogForm';
 import { canExecuteStockAction } from '../../services/inventaire/articleQuickActions';
 import { useAuth } from '../../hooks/useAuth';
 import { can } from '../../services/admin/permissions';
 import { getArticleBarcodeValue, getArticlePublicUrl, syncArticleRoute } from '../../services/inventaire/barcodeUtils';
 import {
-  INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE, UNITES,
+  INPUT_STYLE, SELECT_STYLE, UNITES,
   TYPES_ARTICLE_STOCK, ETATS_ARTICLE_STOCK, STATUTS_ARTICLE_STOCK, EMPLACEMENTS_STOCK,
   CURRENT_STATES_ARTICLE, BADGE_CURRENT_STATE,
   KpiCard, EmptyState, Modal, SectionTitle, FField, FRow,
@@ -188,222 +189,8 @@ function todayInputDate() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function ArticleForm({ initial, categories, onSave, onCancel, saving, emplacementsList = EMPLACEMENTS_STOCK }) {
-  const [form, setForm] = useState(() => {
-    if (!initial) return { ...EMPTY_FORM, date_entree_stock: todayInputDate() };
-    return {
-      ...EMPTY_FORM,
-      ...initial,
-      code: initial.code || initial.reference || '',
-      stock_emplacement: initial.stock_emplacement || initial.emplacement || '',
-      date_entree_stock: initial.date_entree_stock || todayInputDate(),
-      quantite_initiale: '',
-    };
-  });
-  const [errors, setErrors] = useState({});
-  const [codeLoading, setCodeLoading] = useState(false);
-  const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
-  const isEdit = !!initial?.id;
-
-  useEffect(() => {
-    if (isEdit || form.code) return;
-    setCodeLoading(true);
-    generateStockArticleCode()
-      .then((code) => setForm((p) => (p.code ? p : { ...p, code })))
-      .catch(() => {})
-      .finally(() => setCodeLoading(false));
-  }, [isEdit, form.code]);
-
-  function validate() {
-    const e = {};
-    if (!form.designation?.trim()) e.designation = 'Requis';
-    if (!form.code?.trim()) e.code = 'Requis';
-    const qty = form.quantite_initiale !== '' && form.quantite_initiale != null ? Number(form.quantite_initiale) : null;
-    if (qty != null && !Number.isNaN(qty) && qty < 0) e.quantite_initiale = 'Quantité invalide';
-    if (qty != null && qty > 0 && !(form.stock_emplacement || form.emplacement || '').trim()) {
-      e.stock_emplacement = 'Requis avec une quantité';
-    }
-    return e;
-  }
-
-  function handleSubmit(ev) {
-    ev.preventDefault();
-    const e = validate();
-    if (Object.keys(e).length) { setErrors(e); return; }
-    onSave(form);
-  }
-
-  function emplacementOptions(current) {
-    const base = emplacementsList?.length ? emplacementsList : EMPLACEMENTS_STOCK;
-    const v = (current || '').trim();
-    if (v && !base.includes(v)) return [v, ...base];
-    return base;
-  }
-
-  return (
-    <form onSubmit={handleSubmit}>
-      <SectionTitle icon={<Package size={12} />}>Informations article</SectionTitle>
-      <FRow>
-        <FField label="Code article" required>
-          <input
-            value={form.code}
-            onChange={(e) => set('code', e.target.value)}
-            readOnly={isEdit}
-            placeholder={codeLoading ? 'Génération…' : 'ART-2026-0001'}
-            style={{ ...INPUT_STYLE, borderColor: errors.code ? 'var(--red)' : 'var(--border)', fontFamily: 'var(--font-head)', fontWeight: 700 }}
-          />
-          {errors.code && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.code}</div>}
-        </FField>
-        <FField label="Désignation" required>
-          <input
-            value={form.designation}
-            onChange={(e) => set('designation', e.target.value)}
-            placeholder="Nom de l'article..."
-            style={{ ...INPUT_STYLE, borderColor: errors.designation ? 'var(--red)' : 'var(--border)' }}
-          />
-          {errors.designation && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.designation}</div>}
-        </FField>
-        <FField label="Type">
-          <select value={form.type} onChange={(e) => set('type', e.target.value)} style={SELECT_STYLE}>
-            <option value="">— Sélectionner —</option>
-            {TYPES_ARTICLE_STOCK.map((t) => <option key={t} value={t}>{t}</option>)}
-          </select>
-        </FField>
-        <FField label="Catégorie">
-          <select value={form.categorie_id} onChange={(e) => set('categorie_id', e.target.value)} style={SELECT_STYLE}>
-            <option value="">— Sélectionner —</option>
-            {(categories || []).filter((c) => c.actif === 'Oui' || c.is_active !== false).map((c) => (
-              <option key={c.id} value={c.id}>{c.nom || c.name}</option>
-            ))}
-          </select>
-        </FField>
-        <FField label="N° de série">
-          <input value={form.numero_serie} onChange={(e) => set('numero_serie', e.target.value)} placeholder="Optionnel" style={INPUT_STYLE} />
-        </FField>
-        <FField label="Unité">
-          <select value={form.unite} onChange={(e) => set('unite', e.target.value)} style={SELECT_STYLE}>
-            {UNITES.map((u) => <option key={u} value={u}>{u}</option>)}
-          </select>
-        </FField>
-      </FRow>
-
-      <SectionTitle>Valeur & seuil d&apos;alerte</SectionTitle>
-      <FRow>
-        <FField label="Valeur unitaire (MAD)">
-          <input type="number" step="0.01" min="0" value={form.valeur} onChange={(e) => set('valeur', e.target.value)} placeholder="0.00" style={INPUT_STYLE} />
-        </FField>
-        <FField label="Stock minimum">
-          <input type="number" min="0" value={form.stock_minimum} onChange={(e) => set('stock_minimum', e.target.value)} placeholder="Seuil alerte..." style={INPUT_STYLE} />
-        </FField>
-        <FField label="État">
-          <select value={form.etat} onChange={(e) => set('etat', e.target.value)} style={SELECT_STYLE}>
-            {ETATS_ARTICLE_STOCK.map((e) => <option key={e} value={e}>{e}</option>)}
-          </select>
-        </FField>
-        <FField label="Statut">
-          <select value={form.statut} onChange={(e) => set('statut', e.target.value)} style={SELECT_STYLE}>
-            {STATUTS_ARTICLE_STOCK.map((s) => <option key={s} value={s}>{s}</option>)}
-          </select>
-        </FField>
-      </FRow>
-
-      <SectionTitle>Emplacement par défaut (fiche)</SectionTitle>
-      <FRow>
-        <FField label="Emplacement fiche article">
-          <select value={form.emplacement} onChange={(e) => set('emplacement', e.target.value)} style={SELECT_STYLE}>
-            <option value="">— Sélectionner —</option>
-            {emplacementOptions(form.emplacement).map((e) => (
-              <option key={e} value={e}>{e}</option>
-            ))}
-          </select>
-        </FField>
-      </FRow>
-
-      <SectionTitle icon={<Package size={12} />}>Gestion du stock</SectionTitle>
-      {isEdit && (
-        <div style={{ marginBottom: 12, padding: '10px 12px', background: 'var(--surface-2)', borderRadius: 8, fontSize: '0.82rem' }}>
-          Stock actuel (calculé) : <strong>{initial?.stock_actuel ?? 0} {initial?.unite || 'U'}</strong>
-          <div style={{ fontSize: '0.75rem', color: 'var(--text-3)', marginTop: 4 }}>
-            Le stock n&apos;est jamais saisi directement — seule une nouvelle quantité cible génère un mouvement.
-          </div>
-        </div>
-      )}
-      <FRow>
-        <FField label={isEdit ? 'Nouvelle quantité en stock' : 'Quantité initiale'}>
-          <input
-            type="number"
-            min="0"
-            step="0.001"
-            value={form.quantite_initiale}
-            onChange={(e) => set('quantite_initiale', e.target.value)}
-            placeholder={isEdit ? `Actuel : ${initial?.stock_actuel ?? 0}` : '0'}
-            style={{ ...INPUT_STYLE, borderColor: errors.quantite_initiale ? 'var(--red)' : 'var(--border)' }}
-          />
-          {errors.quantite_initiale && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.quantite_initiale}</div>}
-        </FField>
-        <FField label="Emplacement de stockage" required={form.quantite_initiale !== '' && Number(form.quantite_initiale) > 0}>
-          <select
-            value={form.stock_emplacement}
-            onChange={(e) => set('stock_emplacement', e.target.value)}
-            style={{ ...SELECT_STYLE, borderColor: errors.stock_emplacement ? 'var(--red)' : 'var(--border)' }}
-          >
-            <option value="">— Sélectionner —</option>
-            {emplacementOptions(form.stock_emplacement || form.emplacement).map((e) => (
-              <option key={`stock-${e}`} value={e}>{e}</option>
-            ))}
-          </select>
-          {errors.stock_emplacement && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.stock_emplacement}</div>}
-        </FField>
-        <FField label="Date d'entrée en stock">
-          <input type="date" value={form.date_entree_stock || todayInputDate()} onChange={(e) => set('date_entree_stock', e.target.value)} style={INPUT_STYLE} />
-        </FField>
-        <FField label="Fournisseur (optionnel)">
-          <input value={form.fournisseur_stock} onChange={(e) => set('fournisseur_stock', e.target.value)} placeholder="Nom fournisseur..." style={INPUT_STYLE} />
-        </FField>
-        <FField label="Réf. facture / BL (optionnel)">
-          <input value={form.reference_facture_bl} onChange={(e) => set('reference_facture_bl', e.target.value)} placeholder="FAC-… / BL-…" style={INPUT_STYLE} />
-        </FField>
-        <FField label="Prix d'achat unitaire (optionnel)">
-          <input type="number" step="0.01" min="0" value={form.prix_achat_unitaire} onChange={(e) => set('prix_achat_unitaire', e.target.value)} placeholder="MAD" style={INPUT_STYLE} />
-        </FField>
-      </FRow>
-      <div style={{ marginBottom: 14 }}>
-        <FField label="Observation">
-          <textarea value={form.observation_stock} onChange={(e) => set('observation_stock', e.target.value)} placeholder="Commentaire sur l'entrée en stock..." style={{ ...TEXTAREA_STYLE, minHeight: 56 }} />
-        </FField>
-      </div>
-      {!isEdit && (
-        <div style={{ marginBottom: 14, fontSize: '0.78rem', color: 'var(--text-3)' }}>
-          Une quantité initiale &gt; 0 crée automatiquement un mouvement <strong>Entrée de stock</strong> (origine : Stock initial).
-        </div>
-      )}
-      {isEdit && (
-        <div style={{ marginBottom: 14, fontSize: '0.78rem', color: 'var(--text-3)' }}>
-          Si la nouvelle quantité diffère du stock actuel, un mouvement <strong>Ajustement d&apos;inventaire</strong> sera enregistré dans l&apos;historique.
-        </div>
-      )}
-
-      <SectionTitle>Description & Notes</SectionTitle>
-      <div style={{ marginBottom: 14 }}>
-        <FField label="Description">
-          <textarea value={form.description} onChange={(e) => set('description', e.target.value)} placeholder="Description de l'article..." style={TEXTAREA_STYLE} />
-        </FField>
-      </div>
-      <div style={{ marginBottom: 16 }}>
-        <FField label="Notes internes">
-          <textarea value={form.notes} onChange={(e) => set('notes', e.target.value)} placeholder="Notes, remarques..." style={{ ...TEXTAREA_STYLE, minHeight: 56 }} />
-        </FField>
-      </div>
-
-      <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-        <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={saving}>Annuler</button>
-        <button type="submit" className="btn btn-primary" disabled={saving} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-          {saving ? <Loader2 size={14} className="cin-spin" /> : <Plus size={14} />}
-          {initial?.id ? 'Enregistrer' : 'Ajouter article'}
-        </button>
-      </div>
-    </form>
-  );
+function ArticleForm(props) {
+  return <ArticleCatalogForm {...props} />;
 }
 
 function DetailArticle({
@@ -445,7 +232,7 @@ function DetailArticle({
       <div className="inv-article-detail-quickbar inv-article-detail-header-desktop" role="toolbar" aria-label="Actions rapides">
         <button type="button" className="btn btn-secondary btn-sm" onClick={onEdit}><Edit2 size={13} /> Modifier</button>
         {onMouvementRapide && (
-          <button type="button" className="btn btn-primary btn-sm" onClick={onMouvementRapide}><Zap size={13} /> Mouvement rapide</button>
+          <button type="button" className="btn btn-primary btn-sm" onClick={onMouvementRapide}><Package size={13} /> Gérer dans Stocks</button>
         )}
         <button type="button" className="btn btn-ghost btn-sm" onClick={scrollToHistory}><History size={13} /> Voir historique</button>
         <button type="button" className="btn btn-ghost btn-sm" onClick={onBarcode}><Barcode size={13} /> Code-barres</button>
@@ -697,6 +484,7 @@ function MobileArticleRow({
         onOpen={onView}
         onEdit={onEdit}
         onMouvementRapide={onMouvementRapide}
+        mouvementRapideLabel="Gérer dans Stocks"
         onHistory={onHistory}
         onDuplicate={onDuplicate}
         onDelete={onDelete}
@@ -800,14 +588,19 @@ export default function ArticlesStock({
   function goMouvementRapide(article) {
     try {
       if (article?.id) {
-        sessionStorage.setItem('citymo_mr_prefill_article', JSON.stringify({
-          id: article.id,
-          code: article.code,
-          designation: article.designation,
-        }));
+        sessionStorage.setItem('citymo_stock_open_article', JSON.stringify({ id: article.id, code: article.code }));
       }
     } catch { /* ignore */ }
-    onNavigate?.('mouvement-rapide');
+    onNavigate?.('stocks');
+  }
+
+  function goGererStock(article) {
+    try {
+      if (article?.id) {
+        sessionStorage.setItem('citymo_stock_open_article', JSON.stringify({ id: article.id, code: article.code }));
+      }
+    } catch { /* ignore */ }
+    onNavigate?.('stocks');
   }
 
   async function handleArchive(id) {
@@ -1124,7 +917,7 @@ export default function ArticlesStock({
       <div className="page-header flex-between finance-page-header">
         <div>
           <h1 className="page-title">ARTICLES DE STOCK</h1>
-          <p className="page-subtitle finance-sub-hide-mobile">Gestion des articles, états et niveaux de stock.</p>
+          <p className="page-subtitle finance-sub-hide-mobile">Catalogue de référence — codes, désignations, catégories. La gestion des quantités se fait dans Stocks.</p>
         </div>
         <div className="finance-page-actions">
           <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowScanner(true)} title="Scanner avec la caméra">
@@ -1311,6 +1104,7 @@ export default function ArticlesStock({
                             onOpen={() => openArticleDetail(x)}
                             onEdit={() => { setEditItem(x); setShowModal(true); }}
                             onMouvementRapide={onNavigate ? () => goMouvementRapide(x) : undefined}
+                            mouvementRapideLabel="Gérer dans Stocks"
                             onHistory={() => openHistory(x.id)}
                             onDuplicate={() => handleDuplicate(x)}
                             onDelete={() => handleDelete(x.id)}

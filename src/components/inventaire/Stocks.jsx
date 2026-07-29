@@ -1,82 +1,411 @@
 /**
- * Stocks.jsx — Vue globale des niveaux de stock ERP CITYMO
+ * Stocks.jsx — Centre de gestion opérationnelle de l'inventaire.
+ * Réutilise saveMouvementRapide, updateStockArticle, getMovements — aucune logique dupliquée.
  */
-import { useState } from 'react';
-import { BarChart2, Package, AlertTriangle, ArrowUpDown, Search, Filter, Plus } from 'lucide-react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  INPUT_STYLE, SELECT_STYLE,
-  KpiCard, EmptyState,
-  formatMAD, StockAlert
+  BarChart2, Package, AlertTriangle, ArrowUpDown, Search, Filter, Plus,
+  ChevronLeft, Edit2, ArrowDownToLine, ArrowUpFromLine, ArrowLeftRight,
+  Scale, History, Zap, Loader2, FileText,
+} from 'lucide-react';
+import {
+  INPUT_STYLE, SELECT_STYLE, EMPLACEMENTS_STOCK,
+  KpiCard, EmptyState, Modal, SectionTitle, formatMAD, StockAlert,
+  BADGE_CURRENT_STATE,
 } from './shared.jsx';
-import ArticleRowActions from './ArticleRowActions';
+import StockOpsActions from './StockOpsActions';
+import StockDirectMovementModal from './StockDirectMovementModal';
+import StockFicheEditModal from './StockFicheEditModal';
+import ArticleCatalogForm from './ArticleCatalogForm';
+import { ArticleMovementHistory } from './ArticleQuickActions';
+import { useStockArticles } from '../../hooks/useStockArticles';
+import { listStockLevelsForArticle } from '../../services/inventaire/stockArticles';
+import { can } from '../../services/admin/permissions';
+import { useAuth } from '../../hooks/useAuth';
+import { getArticleBarcodeValue } from '../../services/inventaire/barcodeUtils';
 
-const OPEN_ARTICLE_KEY = 'citymo_stock_open_article';
+function getStatutStock(qte, seuil) {
+  const q = Number(qte) || 0;
+  const s = Number(seuil) || 0;
+  if (q === 0) return { label: 'Rupture', cls: 'badge-red' };
+  if (s > 0 && q <= s * 0.5) return { label: 'Critique', cls: 'badge-red' };
+  if (s > 0 && q <= s) return { label: 'Bas', cls: 'badge-orange' };
+  return { label: 'Normal', cls: 'badge-green' };
+}
 
-export default function Stocks({ articles, categories, depots, onNavigate }) {
+function collectDocs(article, movements = []) {
+  const docs = [];
+  const push = (label, value) => {
+    const v = String(value || '').trim();
+    if (!v || docs.some((d) => d.value === v)) return;
+    docs.push({ label, value: v });
+  };
+  push('Facture', article?.facture || article?.reference_facture);
+  push('Photo', article?.photo || article?.photo_url);
+  push('Fiche technique', article?.fiche_technique);
+  (movements || []).forEach((m) => {
+    const p = m.payload || {};
+    push('Facture / BL', p.reference_facture || p.reference_facture_bl);
+    if (m.ref) push('Mouvement', m.ref);
+  });
+  return docs;
+}
+
+function StockFiche({
+  article, categories, movements, movementsLoading, stockLevels, stockLevelsLoading,
+  onBack, onEditFiche, onEditCatalog, onMvt, onHistory, onMouvementRapide,
+}) {
+  const cat = (categories || []).find((c) => String(c.id) === String(article.categorie_id));
+  const catName = cat ? (cat.nom || cat.name) : '—';
+  const s = getStatutStock(article.stock_actuel, article.stock_minimum);
+  const stateBadge = BADGE_CURRENT_STATE[article.current_state] || 'badge-grey';
+  const docs = collectDocs(article, movements);
+  const valTot = (Number(article.valeur) || 0) * (Number(article.stock_actuel) || 0);
+
+  return (
+    <div className="animate-fade-in inv-article-detail">
+      <div className="finance-page-actions" style={{ marginBottom: 12, flexWrap: 'wrap', gap: 8 }}>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onBack}><ChevronLeft size={15} /> Retour</button>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '0.72rem', color: 'var(--red)' }}>{article.code}</div>
+          <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.05rem', margin: 0 }}>{article.designation}</h2>
+        </div>
+        <span className={`badge ${s.cls}`}>{s.label}</span>
+        <span className={`badge ${stateBadge}`}>{article.current_state || 'Disponible'}</span>
+      </div>
+
+      <div className="inv-article-detail-quickbar" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 16 }}>
+        <button type="button" className="btn btn-primary btn-sm" onClick={() => onMvt('Entrée')}><ArrowDownToLine size={13} /> Entrée</button>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => onMvt('Sortie')}><ArrowUpFromLine size={13} /> Sortie</button>
+        <button type="button" className="btn btn-secondary btn-sm" onClick={() => onMvt('Transfert')}><ArrowLeftRight size={13} /> Transfert</button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => onMvt('Régularisation')}><Scale size={13} /> Régularisation</button>
+        {onMouvementRapide && <button type="button" className="btn btn-ghost btn-sm" onClick={onMouvementRapide}><Zap size={13} /> Mouvement rapide</button>}
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onEditFiche}><Edit2 size={13} /> Modifier la fiche stock</button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onEditCatalog}><Package size={13} /> Modifier l&apos;article catalogue</button>
+      </div>
+
+      <div className="finance-detail-grid">
+        <div>
+          <div className="card" style={{ marginBottom: 14 }}>
+            <SectionTitle>En-tête article (catalogue)</SectionTitle>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12, fontSize: '0.84rem' }}>
+              {[
+                ['Code', article.code],
+                ['Désignation', article.designation],
+                ['Catégorie', catName],
+                ['Type', article.type],
+                ['Unité', article.unite],
+                ['Code-barres', getArticleBarcodeValue(article)],
+              ].map(([l, v]) => (
+                <div key={l}>
+                  <span style={{ color: 'var(--text-3)', fontSize: '0.7rem', fontWeight: 700, textTransform: 'uppercase', display: 'block' }}>{l}</span>
+                  <div style={{ fontWeight: l === 'Désignation' ? 700 : 500 }}>{v || '—'}</div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div className="card" style={{ marginBottom: 14 }}>
+            <SectionTitle>Répartition par emplacement</SectionTitle>
+            {stockLevelsLoading ? (
+              <div style={{ color: 'var(--text-3)' }}><Loader2 size={14} className="cin-spin" /> Chargement…</div>
+            ) : (stockLevels || []).filter((l) => Number(l.quantite) > 0).length === 0 ? (
+              <p style={{ margin: 0, color: 'var(--text-3)', fontSize: '0.84rem' }}>Aucun stock par emplacement.</p>
+            ) : (
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Emplacement</th>
+                      <th>Quantité</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(stockLevels || []).filter((l) => Number(l.quantite) > 0).map((l) => (
+                      <tr key={l.id || l.emplacement}>
+                        <td>{l.emplacement}</td>
+                        <td style={{ fontFamily: 'var(--font-head)', fontWeight: 800 }}>{l.quantite} {article.unite}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+
+          <div className="card" style={{ marginBottom: 14 }}>
+            <SectionTitle icon={<FileText size={12} />}>Documents</SectionTitle>
+            {docs.length === 0 ? (
+              <p style={{ margin: 0, color: 'var(--text-3)', fontSize: '0.84rem' }}>Aucun document.</p>
+            ) : (
+              <ul style={{ margin: 0, paddingLeft: 18 }}>
+                {docs.map((d) => <li key={`${d.label}-${d.value}`} style={{ fontSize: '0.84rem' }}><strong>{d.label}</strong> — {d.value}</li>)}
+              </ul>
+            )}
+          </div>
+
+          <div className="card" id="stock-historique">
+            <SectionTitle icon={<History size={12} />}>Historique des mouvements</SectionTitle>
+            <ArticleMovementHistory movements={movements} loading={movementsLoading} />
+            {movements?.length > 10 && (
+              <button type="button" className="btn btn-ghost btn-sm" style={{ marginTop: 8 }} onClick={onHistory}>Voir tout</button>
+            )}
+          </div>
+        </div>
+
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          <div className="card">
+            <SectionTitle>Indicateurs de stock</SectionTitle>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div>
+                <span style={{ fontSize: '0.7rem', color: 'var(--text-3)', fontWeight: 700, textTransform: 'uppercase' }}>Quantité disponible</span>
+                <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.4rem' }}>
+                  {article.stock_actuel || 0} <span style={{ fontSize: '0.9rem', color: 'var(--text-3)' }}>{article.unite}</span>
+                  <StockAlert qte={article.stock_actuel || 0} seuil={article.stock_minimum} />
+                </div>
+              </div>
+              <div><span style={{ fontSize: '0.7rem', color: 'var(--text-3)', fontWeight: 700, textTransform: 'uppercase' }}>Stock minimum</span><div style={{ fontWeight: 600 }}>{article.stock_minimum || '—'}</div></div>
+              <div><span style={{ fontSize: '0.7rem', color: 'var(--text-3)', fontWeight: 700, textTransform: 'uppercase' }}>Valeur unitaire</span><div style={{ fontWeight: 700, color: 'var(--red)' }}>{article.valeur ? formatMAD(article.valeur) : '—'}</div></div>
+              <div><span style={{ fontSize: '0.7rem', color: 'var(--text-3)', fontWeight: 700, textTransform: 'uppercase' }}>Valeur totale</span><div style={{ fontWeight: 700, color: 'var(--red)' }}>{valTot > 0 ? formatMAD(valTot) : '—'}</div></div>
+              <div><span style={{ fontSize: '0.7rem', color: 'var(--text-3)', fontWeight: 700, textTransform: 'uppercase' }}>État</span><div>{article.etat || '—'}</div></div>
+              <div><span style={{ fontSize: '0.7rem', color: 'var(--text-3)', fontWeight: 700, textTransform: 'uppercase' }}>Emplacement</span><div>{article.emplacement || '—'}</div></div>
+              <div><span className={`badge ${s.cls}`}>{s.label}</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export default function Stocks({
+  articles: articlesProp,
+  categories,
+  depots,
+  emplacementsList = EMPLACEMENTS_STOCK,
+  onNavigate,
+  onArticlesChange,
+}) {
+  const { user } = useAuth();
+  const {
+    records: hookArticles, loading, saving, reload, save, archive, remove, getMovements,
+  } = useStockArticles();
+
+  const arts = (hookArticles?.length ? hookArticles : articlesProp) || [];
+
+  useEffect(() => {
+    if (onArticlesChange && hookArticles?.length) onArticlesChange(hookArticles);
+  }, [hookArticles, onArticlesChange]);
+
   const [search, setSearch] = useState('');
   const [filterCat, setFilterCat] = useState('');
-  const [filterDepot, setFilterDepot] = useState('');
   const [filterAlerte, setFilterAlerte] = useState('');
   const [showFilters, setShowFilters] = useState(false);
+  const [detailId, setDetailId] = useState(null);
+  const [mvtModal, setMvtModal] = useState(null); // { type, article }
+  const [editFiche, setEditFiche] = useState(null);
+  const [catalogModal, setCatalogModal] = useState(null); // null | { article? } for create/edit
+  const [afterCreatePrompt, setAfterCreatePrompt] = useState(null);
+  const [historyModal, setHistoryModal] = useState(null);
+  const [historyRows, setHistoryRows] = useState([]);
+  const [historyLoading, setHistoryLoading] = useState(false);
+  const [docsModal, setDocsModal] = useState(null);
+  const [detailMovements, setDetailMovements] = useState([]);
+  const [detailMovementsLoading, setDetailMovementsLoading] = useState(false);
+  const [detailLevels, setDetailLevels] = useState([]);
+  const [detailLevelsLoading, setDetailLevelsLoading] = useState(false);
+  const [canDelete, setCanDelete] = useState(false);
 
-  const arts = articles || [];
+  useEffect(() => {
+    let cancelled = false;
+    can(user, 'stocks', 'supprimer').then((ok) => { if (!cancelled) setCanDelete(ok); }).catch(() => { if (!cancelled) setCanDelete(false); });
+    return () => { cancelled = true; };
+  }, [user?.id, user?.email]);
 
-  function openArticleFiche(article) {
+  const detailArt = detailId ? arts.find((a) => a.id === detailId) : null;
+
+  // Ouverture depuis Articles de stock / navigation
+  useEffect(() => {
+    if (loading || !arts.length) return;
+    let raw;
     try {
-      sessionStorage.setItem(OPEN_ARTICLE_KEY, JSON.stringify({ id: article.id, code: article.code }));
-    } catch { /* ignore */ }
-    onNavigate?.('articles-stock');
+      raw = sessionStorage.getItem('citymo_stock_open_article');
+      if (!raw) return;
+      sessionStorage.removeItem('citymo_stock_open_article');
+    } catch {
+      return;
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      parsed = { code: raw };
+    }
+    const article = arts.find((a) => a.id === parsed?.id)
+      || arts.find((a) => a.code === String(parsed?.code || '').trim());
+    if (article) setDetailId(article.id);
+  }, [loading, arts]);
+
+  useEffect(() => {
+    if (!detailId) {
+      setDetailMovements([]);
+      setDetailLevels([]);
+      return undefined;
+    }
+    let cancelled = false;
+    setDetailMovementsLoading(true);
+    setDetailLevelsLoading(true);
+    Promise.all([getMovements(detailId), listStockLevelsForArticle(detailId)])
+      .then(([mvts, levels]) => {
+        if (cancelled) return;
+        setDetailMovements(mvts || []);
+        setDetailLevels(levels || []);
+      })
+      .catch(() => {
+        if (!cancelled) { setDetailMovements([]); setDetailLevels([]); }
+      })
+      .finally(() => {
+        if (!cancelled) { setDetailMovementsLoading(false); setDetailLevelsLoading(false); }
+      });
+    return () => { cancelled = true; };
+  }, [detailId, getMovements]);
+
+  const refreshAll = useCallback(async () => {
+    await reload();
+    if (detailId) {
+      const [mvts, levels] = await Promise.all([getMovements(detailId), listStockLevelsForArticle(detailId)]);
+      setDetailMovements(mvts || []);
+      setDetailLevels(levels || []);
+    }
+  }, [reload, detailId, getMovements]);
+
+  function openHistory(article) {
+    setHistoryModal(article);
+    setHistoryLoading(true);
+    getMovements(article.id)
+      .then((rows) => setHistoryRows(rows || []))
+      .catch(() => setHistoryRows([]))
+      .finally(() => setHistoryLoading(false));
   }
 
   function goMouvementRapide(article) {
     try {
-      if (article?.id) {
-        sessionStorage.setItem('citymo_mr_prefill_article', JSON.stringify({
-          id: article.id,
-          code: article.code,
-          designation: article.designation,
-        }));
-      }
+      sessionStorage.setItem('citymo_mr_prefill_article', JSON.stringify({
+        id: article.id, code: article.code, designation: article.designation, type: undefined,
+      }));
     } catch { /* ignore */ }
     onNavigate?.('mouvement-rapide');
   }
-  const filtered = arts.filter(x => {
-    const cat   = (categories || []).find(c => String(c.id) === String(x.categorie_id));
-    const depot = (depots || []).find(d => String(d.id) === String(x.depot_id));
+
+  async function handleCatalogSave(form) {
+    const isCreate = !catalogModal?.article?.id;
+    const res = await save(form, catalogModal?.article?.id);
+    if (!res.success) return;
+    setCatalogModal(null);
+    await reload();
+    if (isCreate) {
+      setAfterCreatePrompt({ code: form.code, designation: form.designation });
+    }
+  }
+
+  async function handleDesactiver(article) {
+    if (!window.confirm(`Désactiver « ${article.designation} » ?`)) return;
+    await archive(article.id);
+    setDetailId(null);
+    await reload();
+  }
+
+  async function handleDelete(article) {
+    if (!canDelete) return;
+    if (!window.confirm('Supprimer définitivement ? Impossible s’il y a stock ou mouvements.')) return;
+    const res = await remove(article.id);
+    if (res?.success !== false) {
+      setDetailId(null);
+      await reload();
+    }
+  }
+
+  const filtered = useMemo(() => arts.filter((x) => {
+    const cat = (categories || []).find((c) => String(c.id) === String(x.categorie_id));
     const q = search.toLowerCase();
-    const matchQ = !q || x.code.toLowerCase().includes(q) || x.designation.toLowerCase().includes(q)
+    const matchQ = !q || x.code?.toLowerCase().includes(q) || x.designation?.toLowerCase().includes(q)
       || (cat?.nom || '').toLowerCase().includes(q);
-    const matchCat   = !filterCat   || String(x.categorie_id) === String(filterCat);
-    const matchDepot = !filterDepot || String(x.depot_id) === String(filterDepot);
-    const qte  = Number(x.stock_actuel) || 0;
+    const matchCat = !filterCat || String(x.categorie_id) === String(filterCat);
+    const qte = Number(x.stock_actuel) || 0;
     const seuil = Number(x.stock_minimum) || 0;
     let matchAlerte = true;
-    if (filterAlerte === 'critique')  matchAlerte = seuil > 0 && qte <= seuil * 0.5 && qte > 0;
-    if (filterAlerte === 'bas')       matchAlerte = seuil > 0 && qte > seuil * 0.5 && qte <= seuil;
-    if (filterAlerte === 'rupture')   matchAlerte = qte === 0;
-    if (filterAlerte === 'normal')    matchAlerte = seuil === 0 || qte > seuil;
-    return matchQ && matchCat && matchDepot && matchAlerte;
-  });
+    if (filterAlerte === 'critique') matchAlerte = seuil > 0 && qte <= seuil * 0.5 && qte > 0;
+    if (filterAlerte === 'bas') matchAlerte = seuil > 0 && qte > seuil * 0.5 && qte <= seuil;
+    if (filterAlerte === 'rupture') matchAlerte = qte === 0;
+    if (filterAlerte === 'normal') matchAlerte = seuil === 0 || qte > seuil;
+    return matchQ && matchCat && matchAlerte;
+  }), [arts, categories, search, filterCat, filterAlerte]);
 
-  const valeurTotale  = arts.reduce((s, a) => s + ((Number(a.valeur) || 0) * (Number(a.stock_actuel) || 0)), 0);
-  const stockFaible   = arts.filter(a => a.stock_minimum && Number(a.stock_actuel) <= Number(a.stock_minimum) && Number(a.stock_actuel) > 0).length;
-  const stockCritique = arts.filter(a => a.stock_minimum && Number(a.stock_actuel) <= Number(a.stock_minimum) * 0.5 && Number(a.stock_actuel) > 0).length;
-  const ruptures      = arts.filter(a => Number(a.stock_actuel) === 0).length;
-
-  // Alertes critiques visibles
-  const alertes = arts.filter(a => {
+  const valeurTotale = arts.reduce((s, a) => s + ((Number(a.valeur) || 0) * (Number(a.stock_actuel) || 0)), 0);
+  const stockFaible = arts.filter((a) => a.stock_minimum && Number(a.stock_actuel) <= Number(a.stock_minimum) && Number(a.stock_actuel) > 0).length;
+  const stockCritique = arts.filter((a) => a.stock_minimum && Number(a.stock_actuel) <= Number(a.stock_minimum) * 0.5 && Number(a.stock_actuel) > 0).length;
+  const ruptures = arts.filter((a) => Number(a.stock_actuel) === 0).length;
+  const alertes = arts.filter((a) => {
     const q = Number(a.stock_actuel) || 0;
     const s = Number(a.stock_minimum) || 0;
     return s > 0 && q <= s;
   });
 
-  function getStatutStock(qte, seuil) {
-    const q = Number(qte) || 0;
-    const s = Number(seuil) || 0;
-    if (q === 0) return { label: 'Rupture', cls: 'badge-red' };
-    if (s > 0 && q <= s * 0.5) return { label: 'Critique', cls: 'badge-red' };
-    if (s > 0 && q <= s) return { label: 'Bas', cls: 'badge-orange' };
-    return { label: 'Normal', cls: 'badge-green' };
+  // Resolve article after create for entrée prompt
+  useEffect(() => {
+    if (!afterCreatePrompt?.code || !arts.length) return;
+    const art = arts.find((a) => a.code === afterCreatePrompt.code);
+    if (art) setAfterCreatePrompt((p) => (p ? { ...p, article: art } : null));
+  }, [arts, afterCreatePrompt?.code]);
+
+  if (detailArt) {
+    return (
+      <div className="animate-fade-in">
+        <StockFiche
+          article={detailArt}
+          categories={categories}
+          movements={detailMovements}
+          movementsLoading={detailMovementsLoading}
+          stockLevels={detailLevels}
+          stockLevelsLoading={detailLevelsLoading}
+          onBack={() => setDetailId(null)}
+          onEditFiche={() => setEditFiche(detailArt)}
+          onEditCatalog={() => setCatalogModal({ article: detailArt })}
+          onMvt={(type) => setMvtModal({ type, article: detailArt })}
+          onHistory={() => openHistory(detailArt)}
+          onMouvementRapide={() => goMouvementRapide(detailArt)}
+        />
+        <StockDirectMovementModal
+          open={!!mvtModal}
+          type={mvtModal?.type}
+          article={mvtModal?.article}
+          emplacementsList={emplacementsList}
+          onClose={() => setMvtModal(null)}
+          onDone={refreshAll}
+        />
+        <StockFicheEditModal
+          open={!!editFiche}
+          article={editFiche}
+          emplacementsList={emplacementsList}
+          onClose={() => setEditFiche(null)}
+          onDone={refreshAll}
+        />
+        <Modal open={!!catalogModal} onClose={() => !saving && setCatalogModal(null)} title={catalogModal?.article ? 'Modifier l’article catalogue' : 'Nouvel article'} width={760}>
+          {catalogModal && (
+            <ArticleCatalogForm
+              initial={catalogModal.article || null}
+              categories={categories}
+              onSave={handleCatalogSave}
+              onCancel={() => setCatalogModal(null)}
+              saving={saving}
+            />
+          )}
+        </Modal>
+        <Modal open={!!historyModal} onClose={() => setHistoryModal(null)} title="Historique des mouvements" width={900}>
+          {historyLoading ? <Loader2 className="cin-spin" /> : <ArticleMovementHistory movements={historyRows} loading={false} />}
+        </Modal>
+      </div>
+    );
   }
 
   return (
@@ -84,164 +413,139 @@ export default function Stocks({ articles, categories, depots, onNavigate }) {
       <div className="page-header flex-between finance-page-header">
         <div>
           <h1 className="page-title">STOCKS</h1>
-          <p className="page-subtitle finance-sub-hide-mobile">Vue globale des niveaux et états de stock.</p>
+          <p className="page-subtitle finance-sub-hide-mobile">Gestion opérationnelle des quantités, emplacements et mouvements.</p>
         </div>
-        <div className="finance-page-actions" style={{ display: 'flex', gap: 8 }}>
+        <div className="finance-page-actions" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button type="button" className="btn btn-primary btn-sm" onClick={() => setCatalogModal({ article: null })}>
+            <Plus size={14} /> Nouvel article
+          </button>
           {onNavigate && (
-            <button className="btn btn-primary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => onNavigate('mouvement-rapide')}>
-              <Plus size={14} /> Mouvement rapide
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => onNavigate('mouvement-rapide')}>
+              <Zap size={14} /> Mouvement rapide
             </button>
           )}
-          <button className="btn btn-ghost btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => setShowFilters(f => !f)}>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowFilters((f) => !f)}>
             <Filter size={14} /> Filtres
           </button>
         </div>
       </div>
 
       <div className="stat-grid finance-kpi-grid finance-kpi-strip">
-        <KpiCard icon={<BarChart2 size={17} />}     label="Valeur totale stock"  value={formatMAD(valeurTotale)} color="red"    />
-        <KpiCard icon={<AlertTriangle size={17} />} label="Stock faible"         value={stockFaible}             color="orange" />
-        <KpiCard icon={<AlertTriangle size={17} />} label="Articles critiques"   value={stockCritique}           color="red"    />
-        <KpiCard icon={<Package size={17} />}       label="Ruptures de stock"    value={ruptures}                color="grey"   />
-        <KpiCard icon={<ArrowUpDown size={17} />}   label="Total articles"       value={arts.length}             color="blue"   />
+        <KpiCard icon={<BarChart2 size={17} />} label="Valeur totale stock" value={formatMAD(valeurTotale)} color="red" />
+        <KpiCard icon={<AlertTriangle size={17} />} label="Stock faible" value={stockFaible} color="orange" />
+        <KpiCard icon={<AlertTriangle size={17} />} label="Articles critiques" value={stockCritique} color="red" />
+        <KpiCard icon={<Package size={17} />} label="Ruptures de stock" value={ruptures} color="grey" />
+        <KpiCard icon={<ArrowUpDown size={17} />} label="Total articles" value={arts.length} color="blue" />
       </div>
 
-      {/* Alertes panel */}
       {alertes.length > 0 && (
         <div style={{ marginBottom: 16 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
             <AlertTriangle size={15} style={{ color: 'var(--red)' }} />
-            <span style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '0.82rem', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--red)' }}>
+            <span style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '0.82rem', color: 'var(--red)' }}>
               Alertes stock ({alertes.length})
             </span>
           </div>
-          <div className="inv-alerts-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: 10 }}>
-            {alertes.slice(0, 6).map(a => {
-              const s = getStatutStock(a.stock_actuel, a.stock_minimum);
-              const depot = (depots || []).find(d => String(d.id) === String(a.depot_id));
-              return (
-                <div key={a.id} style={{ background: '#fff', border: '1.5px solid', borderColor: s.cls === 'badge-red' ? 'var(--red)' : '#E65100', borderRadius: 8, padding: '12px 16px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <div style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.88rem' }}>{a.code}</div>
-                    <div style={{ fontSize: '0.78rem', color: 'var(--text-2)' }}>{a.designation}</div>
-                    {depot && <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>{depot.nom}</div>}
-                  </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.2rem', color: s.cls === 'badge-red' ? 'var(--red)' : '#E65100' }}>
-                      {a.stock_actuel || 0}
-                    </div>
-                    <span className={'badge ' + s.cls} style={{ fontSize: '0.68rem' }}>{s.label}</span>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          {alertes.length > 6 && (
-            <div style={{ fontSize: '0.78rem', color: 'var(--text-3)', marginTop: 8 }}>
-              + {alertes.length - 6} autres articles en alerte
-            </div>
-          )}
         </div>
       )}
 
-      {showFilters && (
+      {showFilters ? (
         <div className="card finance-toolbar" style={{ marginBottom: 16, padding: '14px 20px' }}>
           <div className="finance-toolbar-inner">
             <div style={{ flex: 1, minWidth: 180, position: 'relative' }}>
               <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
-              <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Code, désignation..." style={{ ...INPUT_STYLE, paddingLeft: 32 }} />
+              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Code, désignation…" style={{ ...INPUT_STYLE, paddingLeft: 32 }} />
             </div>
-            <select value={filterCat} onChange={e => setFilterCat(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 160 }}>
+            <select value={filterCat} onChange={(e) => setFilterCat(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 160 }}>
               <option value="">Toutes catégories</option>
-              {(categories || []).map(c => <option key={c.id} value={c.id}>{c.nom}</option>)}
+              {(categories || []).map((c) => <option key={c.id} value={c.id}>{c.nom}</option>)}
             </select>
-            <select value={filterDepot} onChange={e => setFilterDepot(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 160 }}>
-              <option value="">Tous dépôts</option>
-              {(depots || []).map(d => <option key={d.id} value={d.id}>{d.nom}</option>)}
-            </select>
-            <select value={filterAlerte} onChange={e => setFilterAlerte(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 140 }}>
+            <select value={filterAlerte} onChange={(e) => setFilterAlerte(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 140 }}>
               <option value="">Tous états</option>
               <option value="normal">Normal</option>
               <option value="bas">Stock bas</option>
               <option value="critique">Critique</option>
               <option value="rupture">Rupture</option>
             </select>
-            <button className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setFilterCat(''); setFilterDepot(''); setFilterAlerte(''); }}>Réinitialiser</button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setFilterCat(''); setFilterAlerte(''); }}>Réinitialiser</button>
           </div>
         </div>
-      )}
-
-      {!showFilters && (
+      ) : (
         <div className="card" style={{ marginBottom: 12, padding: '10px 14px' }}>
           <div style={{ position: 'relative' }}>
             <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
-            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Rechercher dans le stock..." style={{ ...INPUT_STYLE, paddingLeft: 32 }} />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher dans le stock…" style={{ ...INPUT_STYLE, paddingLeft: 32 }} />
           </div>
         </div>
       )}
 
-      <div className="card" style={{ padding: 0 }}>
-        {filtered.length === 0 ? (
-          <EmptyState icon={<Package size={24} />} title="Aucun article en stock"
-            sub={arts.length > 0 ? "Aucun résultat pour ces filtres" : "Ajoutez des articles dans la rubrique Articles de stock"}
-          />
+      <div className="card inv-stock-desktop-only" style={{ padding: 0 }}>
+        {loading && !arts.length ? (
+          <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-3)' }}><Loader2 className="cin-spin" /> Chargement…</div>
+        ) : filtered.length === 0 ? (
+          <EmptyState icon={<Package size={24} />} title="Aucun article en stock" sub="Créez un article catalogue puis effectuez une entrée." />
         ) : (
           <div className="table-wrap">
-            <table className="inv-stocks-table">
+            <table className="inv-stocks-table inv-articles-table">
               <thead>
                 <tr>
-                  <th>Référence</th>
-                  <th>Nom</th>
+                  <th>Code</th>
+                  <th>Désignation</th>
                   <th>Catégorie</th>
-                  <th>Quantité</th>
-                  <th>Valeur</th>
-                  <th>Statut</th>
+                  <th>Type</th>
+                  <th>Emplacement</th>
+                  <th>Qté</th>
+                  <th>Min.</th>
                   <th>État</th>
-                  <th style={{ width: 52 }}>Actions</th>
+                  <th>Valeur u.</th>
+                  <th>Valeur tot.</th>
+                  <th>Statut</th>
+                  <th>Dernier mvt</th>
+                  <th style={{ width: 48 }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {filtered.map(x => {
-                  const cat   = (categories || []).find(c => String(c.id) === String(x.categorie_id));
-                  const s     = getStatutStock(x.stock_actuel, x.stock_minimum);
+                {filtered.map((x) => {
+                  const cat = (categories || []).find((c) => String(c.id) === String(x.categorie_id));
+                  const st = getStatutStock(x.stock_actuel, x.stock_minimum);
                   const etatBadge = x.etat === 'Neuf' ? 'badge-green' : x.etat === 'Utilisé' ? 'badge-blue' : 'badge-orange';
+                  const valTot = (Number(x.valeur) || 0) * (Number(x.stock_actuel) || 0);
                   return (
-                    <tr
-                      key={x.id}
-                      className="inv-articles-row"
-                      onClick={() => openArticleFiche(x)}
-                      style={{ cursor: 'pointer' }}
-                    >
-                      <td data-label="Référence">
-                        <span className="inv-articles-ref">{x.code}</span>
-                      </td>
-                      <td data-label="Nom">
-                        <div className="inv-articles-name">{x.designation}</div>
-                      </td>
-                      <td data-label="Catégorie">
-                        {cat ? <span className="badge badge-blue inv-articles-badge">{cat.nom}</span> : '—'}
-                      </td>
-                      <td data-label="Quantité">
-                        <span className="inv-articles-qty" style={{ color: s.cls === 'badge-red' ? 'var(--red)' : s.cls === 'badge-orange' ? '#E65100' : 'var(--text)' }}>
-                          {x.stock_actuel || 0}
-                        </span>
+                    <tr key={x.id} className="inv-articles-row" style={{ cursor: 'pointer' }} onClick={() => setDetailId(x.id)}>
+                      <td><span className="inv-articles-ref">{x.code}</span></td>
+                      <td><div className="inv-articles-name">{x.designation}</div></td>
+                      <td>{cat ? <span className="badge badge-blue inv-articles-badge">{cat.nom}</span> : '—'}</td>
+                      <td style={{ fontSize: '0.82rem' }}>{x.type || '—'}</td>
+                      <td style={{ fontSize: '0.82rem' }}>{x.emplacement || '—'}</td>
+                      <td>
+                        <span className="inv-articles-qty" style={{ color: st.cls === 'badge-red' ? 'var(--red)' : undefined }}>{x.stock_actuel || 0}</span>
                         <span className="inv-articles-unit">{x.unite}</span>
-                        <StockAlert qte={x.stock_actuel || 0} seuil={x.stock_minimum} />
                       </td>
-                      <td data-label="Valeur" className="inv-articles-value">
-                        {x.valeur ? formatMAD(x.valeur) : '—'}
+                      <td style={{ color: 'var(--text-3)', fontSize: '0.82rem' }}>{x.stock_minimum || '—'}</td>
+                      <td><span className={`badge ${etatBadge} inv-articles-badge`}>{x.etat}</span></td>
+                      <td className="inv-articles-value">{x.valeur ? formatMAD(x.valeur) : '—'}</td>
+                      <td className="inv-articles-value" style={{ color: 'var(--red)' }}>{valTot > 0 ? formatMAD(valTot) : '—'}</td>
+                      <td><span className={`badge ${st.cls} inv-articles-badge`}>{st.label}</span></td>
+                      <td style={{ fontSize: '0.75rem', color: 'var(--text-2)' }}>
+                        {x.dernier_mouvement ? (
+                          <>{x.dernier_mouvement.date_label}<br /><span style={{ color: 'var(--text-3)' }}>{x.dernier_mouvement.action}</span></>
+                        ) : '—'}
                       </td>
-                      <td data-label="Statut">
-                        <span className={'badge ' + s.cls + ' inv-articles-badge'}>{s.label}</span>
-                      </td>
-                      <td data-label="État">
-                        <span className={'badge ' + etatBadge + ' inv-articles-badge'}>{x.etat}</span>
-                      </td>
-                      <td data-label="Actions" onClick={(e) => e.stopPropagation()}>
-                        <ArticleRowActions
-                          onOpen={() => openArticleFiche(x)}
+                      <td onClick={(e) => e.stopPropagation()}>
+                        <StockOpsActions
+                          onOpenFiche={() => setDetailId(x.id)}
+                          onEditFiche={() => setEditFiche(x)}
+                          onEntree={() => setMvtModal({ type: 'Entrée', article: x })}
+                          onSortie={() => setMvtModal({ type: 'Sortie', article: x })}
+                          onTransfert={() => setMvtModal({ type: 'Transfert', article: x })}
+                          onRegulariser={() => setMvtModal({ type: 'Régularisation', article: x })}
+                          onHistory={() => openHistory(x)}
+                          onDocuments={() => setDocsModal(x)}
+                          onEditCatalog={() => setCatalogModal({ article: x })}
                           onMouvementRapide={onNavigate ? () => goMouvementRapide(x) : undefined}
-                          canDelete={false}
+                          onDesactiver={() => handleDesactiver(x)}
+                          onDelete={() => handleDelete(x)}
+                          canDelete={canDelete}
                         />
                       </td>
                     </tr>
@@ -252,6 +556,108 @@ export default function Stocks({ articles, categories, depots, onNavigate }) {
           </div>
         )}
       </div>
+
+      <div className="card inv-stock-mobile-only inv-stock-mobile-list">
+        {filtered.map((x) => {
+          const st = getStatutStock(x.stock_actuel, x.stock_minimum);
+          return (
+            <div key={x.id} className="inv-stock-mobile-row">
+              <button type="button" className="inv-stock-mobile-main" onClick={() => setDetailId(x.id)}>
+                <div className="inv-stock-mobile-icon" aria-hidden><Package size={18} style={{ color: 'var(--red)' }} /></div>
+                <div className="inv-stock-mobile-name">
+                  <strong>{x.code}</strong>
+                  <span className="inv-stock-mobile-designation">{x.designation}</span>
+                  <span className="inv-stock-mobile-meta">Qté {x.stock_actuel || 0} {x.unite} · {x.emplacement || '—'}</span>
+                  <div className="inv-stock-mobile-badges">
+                    <span className={`badge ${st.cls}`}>{st.label}</span>
+                    <span className="badge badge-grey">{x.etat}</span>
+                  </div>
+                </div>
+              </button>
+              <div style={{ display: 'flex', gap: 4, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+                <button type="button" className="btn btn-ghost btn-sm" title="Entrée" onClick={() => setMvtModal({ type: 'Entrée', article: x })}><ArrowDownToLine size={14} /></button>
+                <button type="button" className="btn btn-ghost btn-sm" title="Sortie" onClick={() => setMvtModal({ type: 'Sortie', article: x })}><ArrowUpFromLine size={14} /></button>
+                <StockOpsActions
+                  onOpenFiche={() => setDetailId(x.id)}
+                  onEditFiche={() => setEditFiche(x)}
+                  onEntree={() => setMvtModal({ type: 'Entrée', article: x })}
+                  onSortie={() => setMvtModal({ type: 'Sortie', article: x })}
+                  onTransfert={() => setMvtModal({ type: 'Transfert', article: x })}
+                  onRegulariser={() => setMvtModal({ type: 'Régularisation', article: x })}
+                  onHistory={() => openHistory(x)}
+                  onDocuments={() => setDocsModal(x)}
+                  onEditCatalog={() => setCatalogModal({ article: x })}
+                  onMouvementRapide={onNavigate ? () => goMouvementRapide(x) : undefined}
+                  onDesactiver={() => handleDesactiver(x)}
+                  onDelete={() => handleDelete(x)}
+                  canDelete={canDelete}
+                />
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <StockDirectMovementModal
+        open={!!mvtModal}
+        type={mvtModal?.type}
+        article={mvtModal?.article}
+        emplacementsList={emplacementsList}
+        onClose={() => setMvtModal(null)}
+        onDone={refreshAll}
+      />
+      <StockFicheEditModal
+        open={!!editFiche}
+        article={editFiche}
+        emplacementsList={emplacementsList}
+        onClose={() => setEditFiche(null)}
+        onDone={refreshAll}
+      />
+      <Modal open={!!catalogModal} onClose={() => !saving && setCatalogModal(null)} title={catalogModal?.article ? 'Modifier l’article catalogue' : 'Nouvel article de stock'} width={760}>
+        {catalogModal && (
+          <ArticleCatalogForm
+            initial={catalogModal.article || null}
+            categories={categories}
+            onSave={handleCatalogSave}
+            onCancel={() => setCatalogModal(null)}
+            saving={saving}
+          />
+        )}
+      </Modal>
+      <Modal open={!!historyModal} onClose={() => setHistoryModal(null)} title="Historique des mouvements" width={900}>
+        {historyLoading ? <div style={{ padding: 24, textAlign: 'center' }}><Loader2 className="cin-spin" /></div> : <ArticleMovementHistory movements={historyRows} loading={false} />}
+      </Modal>
+      <Modal open={!!docsModal} onClose={() => setDocsModal(null)} title="Documents" width={480}>
+        {docsModal && (
+          collectDocs(docsModal).length === 0
+            ? <p style={{ color: 'var(--text-3)' }}>Aucun document.</p>
+            : (
+              <ul>
+                {collectDocs(docsModal).map((d) => <li key={d.value}><strong>{d.label}</strong> — {d.value}</li>)}
+              </ul>
+            )
+        )}
+      </Modal>
+      <Modal open={!!afterCreatePrompt} onClose={() => setAfterCreatePrompt(null)} title="Article créé" width={420}>
+        <p style={{ fontSize: '0.9rem' }}>
+          Article <strong>{afterCreatePrompt?.code}</strong> créé avec une quantité de zéro.
+          Souhaitez-vous effectuer une entrée en stock ?
+        </p>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 16 }}>
+          <button type="button" className="btn btn-secondary" onClick={() => setAfterCreatePrompt(null)}>Plus tard</button>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => {
+              const art = afterCreatePrompt?.article || arts.find((a) => a.code === afterCreatePrompt?.code);
+              setAfterCreatePrompt(null);
+              if (art) setMvtModal({ type: 'Entrée', article: art });
+            }}
+          >
+            Faire une entrée
+          </button>
+        </div>
+      </Modal>
     </div>
   );
 }

@@ -25,6 +25,7 @@ export default function ArticleRowActions({
   onOpen,
   onEdit,
   onMouvementRapide,
+  mouvementRapideLabel,
   onHistory,
   onDuplicate,
   onDelete,
@@ -107,7 +108,7 @@ export default function ArticleRowActions({
       )}
       {onMouvementRapide && (
         <button type="button" role="menuitem" onClick={run(onMouvementRapide)} style={ITEM_STYLE}>
-          <Zap size={14} /> Mouvement rapide
+          <Zap size={14} /> {mouvementRapideLabel || 'Mouvement rapide'}
         </button>
       )}
       {onHistory && (
