@@ -265,13 +265,11 @@ function cropAndNormalize(src, rect) {
   crop.height = rect.h;
   crop.getContext('2d').drawImage(src, rect.x, rect.y, rect.w, rect.h, 0, 0, rect.w, rect.h);
 
-  const ratio = rect.w / Math.max(1, rect.h);
-
-  let targetW = Math.min(1400, Math.max(720, rect.w));
+  // Sortie ID-1 stricte — remplir le cadre (cover), sans bandes grises
+  let targetW = Math.min(1400, Math.max(900, rect.w));
   let targetH = Math.round(targetW / ID1_RATIO);
-
-  if (ratio < 1) {
-    targetH = Math.min(1400, Math.max(720, rect.h));
+  if (targetH > 900) {
+    targetH = 900;
     targetW = Math.round(targetH * ID1_RATIO);
   }
 
@@ -279,10 +277,10 @@ function cropAndNormalize(src, rect) {
   out.width = targetW;
   out.height = targetH;
   const ctx = out.getContext('2d');
-  ctx.fillStyle = '#f7f7f7';
+  ctx.fillStyle = '#e8e8ea';
   ctx.fillRect(0, 0, targetW, targetH);
 
-  const scale = Math.min(targetW / rect.w, targetH / rect.h);
+  const scale = Math.max(targetW / rect.w, targetH / rect.h);
   const dw = Math.round(rect.w * scale);
   const dh = Math.round(rect.h * scale);
   const dx = Math.round((targetW - dw) / 2);

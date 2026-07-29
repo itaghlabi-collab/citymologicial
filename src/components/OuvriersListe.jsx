@@ -44,8 +44,8 @@ const STATUT_CFG = {
 };
 
 /** CIN marocaine ID-1 : 85.60 mm × 53.98 mm */
-const CIN_HINT = 'Cadrez la CIN dans le rectangle';
-const SCANNER_PLACE_HINT = 'Placez la CIN dans le cadre';
+const CIN_HINT = 'Alignez la carte dans le cadre';
+const SCANNER_PLACE_HINT = 'Alignez la carte dans le cadre, nous recadrons automatiquement';
 /** Identifiant build — vérifier dans la console Safari mobile que cette version est chargée */
 const CIN_SCANNER_VERSION = '2026-07-27-cin-back-btn';
 
@@ -127,11 +127,31 @@ function OcrConfBadge({ meta }) {
 }
 
 /** Cadre preview CIN — ratio officiel 85.60 / 53.98 mm */
-function CINFrame({ children, hasImage, hint = CIN_HINT, className = '' }) {
+function CINFrame({ children, hasImage, hint = CIN_HINT, className = '', detected = false }) {
   return (
-    <div className={'cin-id-frame' + (hasImage ? ' has-img' : '') + (className ? ' ' + className : '')}>
+    <div
+      className={
+        'cin-id-frame'
+        + (hasImage ? ' has-img' : '')
+        + (detected ? ' cin-id-frame--detected' : '')
+        + (className ? ' ' + className : '')
+      }
+    >
+      {!hasImage && (
+        <div className="cin-id-frame-guide" aria-hidden="true">
+          <span className="cin-id-frame-guide-corner cin-id-frame-guide-corner--tl" />
+          <span className="cin-id-frame-guide-corner cin-id-frame-guide-corner--tr" />
+          <span className="cin-id-frame-guide-corner cin-id-frame-guide-corner--bl" />
+          <span className="cin-id-frame-guide-corner cin-id-frame-guide-corner--br" />
+        </div>
+      )}
       {children}
       {hint && !hasImage && <div className="cin-id-frame-hint">{hint}</div>}
+      {detected && hasImage && (
+        <div className="cin-id-frame-detected-badge">
+          <CheckCircle size={12} /> Carte correctement détectée
+        </div>
+      )}
     </div>
   );
 }
@@ -208,6 +228,8 @@ function CINDocZone({ side, value, onChange, quality, cropHint }) {
   const [dragOver, setDragOver] = useState(false);
   const isRecto = side === 'recto';
   const title = isRecto ? 'CIN recto' : 'CIN verso';
+  const croppedOk = Boolean(value) && !cropHint;
+  const qLabel = quality?.label;
 
   function isImageFile(file) {
     if (!file) return false;
@@ -230,8 +252,15 @@ function CINDocZone({ side, value, onChange, quality, cropHint }) {
     inputRef.current?.click();
   }
 
-  const qLabel = quality?.label;
-  const qMsg = getReadableMessage(quality?.messages?.[0], '');
+  const qualityText = qLabel === 'bonne'
+    ? 'Bonne qualité'
+    : qLabel === 'acceptable'
+      ? 'Qualité acceptable'
+      : qLabel === 'faible'
+        ? 'Qualité faible'
+        : qLabel === 'inexploitable'
+          ? 'Qualité insuffisante'
+          : (getReadableMessage(quality?.messages?.[0], '') || '');
 
   return (
     <div className="cin-doc-zone-wrap">
@@ -245,7 +274,12 @@ function CINDocZone({ side, value, onChange, quality, cropHint }) {
           handleFile(e.dataTransfer?.files?.[0]);
         }}
       >
-        <CINFrame hasImage={Boolean(value)} hint={value ? '' : 'Importer JPG, PNG ou WEBP'} className="cin-doc-zone-frame">
+        <CINFrame
+          hasImage={Boolean(value)}
+          detected={croppedOk}
+          hint={value ? '' : 'Alignez la carte dans le cadre'}
+          className="cin-doc-zone-frame"
+        >
           {value ? (
             <>
               {(value.startsWith('data:image') || value.startsWith('http')) ? (
@@ -263,18 +297,18 @@ function CINDocZone({ side, value, onChange, quality, cropHint }) {
             <div className="cin-doc-zone-empty" onClick={openGallery} role="button" tabIndex={0}
               onKeyDown={e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); openGallery(); } }}>
               <div className="cin-doc-zone-icon">
-                <Upload size={28} strokeWidth={1.75} />
+                <Camera size={26} strokeWidth={1.75} />
               </div>
               <span className="cin-doc-zone-title">{title}</span>
-              <span className="cin-doc-zone-sub">Glisser-déposer ou importer</span>
+              <span className="cin-doc-zone-sub">Scanner ou importer · JPG, PNG, WEBP</span>
             </div>
           )}
         </CINFrame>
       </div>
 
       <div className="cin-doc-zone-actions">
-        <button type="button" className="cin-doc-zone-gallery" onClick={openGallery}>
-          <Upload size={12} /> {value ? 'Remplacer' : 'Importer une image'}
+        <button type="button" className="cin-doc-zone-gallery cin-doc-zone-gallery--primary" onClick={openGallery}>
+          <Camera size={14} /> {value ? 'Reprendre / Recadrer' : 'Scanner ou importer'}
         </button>
         {value && (
           <button type="button" className="cin-doc-zone-gallery" onClick={() => onChange('', null)}>
@@ -285,9 +319,10 @@ function CINDocZone({ side, value, onChange, quality, cropHint }) {
       {cropHint && (
         <div className="cin-crop-hint">{getReadableMessage(cropHint, 'Recadrage automatique impossible, vérifiez la photo')}</div>
       )}
-      {qLabel && (
-        <div className={'cin-quality-badge cin-quality-badge--' + qLabel}>
-          {qMsg || (qLabel === 'bonne' ? 'Bonne qualité.' : qLabel === 'acceptable' ? 'Qualité acceptable.' : getReadableMessage(qLabel, 'Qualité à vérifier'))}
+      {qLabel && qualityText && (
+        <div className={'cin-quality-badge cin-quality-badge--pill cin-quality-badge--' + qLabel}>
+          <span className="cin-quality-dot" aria-hidden />
+          {qualityText}
         </div>
       )}
 
@@ -896,6 +931,11 @@ function CINScanner({
         <span className="cin-vf-corner cin-vf-corner--tr" />
         <span className="cin-vf-corner cin-vf-corner--bl" />
         <span className="cin-vf-corner cin-vf-corner--br" />
+        {frameReady && cameraActive && (
+          <div className="cin-vf-detected">
+            <CheckCircle size={14} /> Carte correctement détectée
+          </div>
+        )}
         {captured && <div className="cin-capture-flash" />}
       </div>
 

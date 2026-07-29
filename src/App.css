@@ -4189,72 +4189,106 @@ tbody tr:last-child td { border-bottom: none; }
 
 /* =============================================
    CIN — Zones Documents (modal Ouvrier) + cadre preview
+   Format ID-1 fixe ≈ 1.586 (85.60 × 53.98 mm)
    ============================================= */
 
 .cin-id-frame {
   position: relative;
   width: 100%;
-  aspect-ratio: 85.6 / 54;
+  max-width: 420px;
+  margin: 0 auto;
+  aspect-ratio: 85.6 / 53.98;
   min-height: 0;
-  max-height: 220px;
-  border: 2px solid var(--red);
-  border-radius: 10px;
-  background: linear-gradient(180deg, #fafafa 0%, #f0f0f0 100%);
+  border: 1.5px solid rgba(0, 0, 0, 0.08);
+  border-radius: 16px;
+  background: #ececef;
   overflow: hidden;
   box-sizing: border-box;
+  box-shadow:
+    0 1px 2px rgba(0, 0, 0, 0.04),
+    0 8px 24px rgba(0, 0, 0, 0.08);
+  transition: box-shadow 0.25s ease, border-color 0.25s ease, transform 0.2s ease;
 }
 
 .cin-id-frame::before,
 .cin-id-frame::after {
-  content: '';
-  position: absolute;
-  width: 18px;
-  height: 18px;
-  border-color: var(--red);
-  border-style: solid;
-  z-index: 2;
-  pointer-events: none;
-}
-
-.cin-id-frame::before {
-  top: 6px;
-  left: 6px;
-  border-width: 3px 0 0 3px;
-  border-radius: 4px 0 0 0;
-}
-
-.cin-id-frame::after {
-  bottom: 6px;
-  right: 6px;
-  border-width: 0 3px 3px 0;
-  border-radius: 0 0 4px 0;
+  display: none;
 }
 
 .cin-id-frame.has-img {
-  background: #fff;
+  background: #1a1a1c;
+  border-color: rgba(0, 0, 0, 0.06);
+}
+
+.cin-id-frame--detected {
+  border-color: rgba(46, 125, 50, 0.45);
+  box-shadow:
+    0 0 0 2px rgba(76, 175, 80, 0.25),
+    0 8px 24px rgba(0, 0, 0, 0.1);
+}
+
+.cin-id-frame-guide {
+  position: absolute;
+  inset: 12%;
+  border: 1.5px dashed rgba(255, 255, 255, 0.35);
+  border-radius: 10px;
+  pointer-events: none;
+  z-index: 2;
+}
+
+.cin-id-frame-guide-corner {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  border-color: rgba(255, 255, 255, 0.75);
   border-style: solid;
 }
+.cin-id-frame-guide-corner--tl { top: -2px; left: -2px; border-width: 2.5px 0 0 2.5px; border-radius: 6px 0 0 0; }
+.cin-id-frame-guide-corner--tr { top: -2px; right: -2px; border-width: 2.5px 2.5px 0 0; border-radius: 0 6px 0 0; }
+.cin-id-frame-guide-corner--bl { bottom: -2px; left: -2px; border-width: 0 0 2.5px 2.5px; border-radius: 0 0 0 6px; }
+.cin-id-frame-guide-corner--br { bottom: -2px; right: -2px; border-width: 0 2.5px 2.5px 0; border-radius: 0 0 6px 0; }
 
 .cin-id-frame-hint {
   position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 8px;
+  left: 12px;
+  right: 12px;
+  bottom: 14px;
   text-align: center;
-  font-size: 0.68rem;
+  font-size: 0.72rem;
   font-weight: 600;
-  color: var(--text-3);
-  padding: 0 10px;
-  z-index: 1;
+  color: rgba(60, 60, 67, 0.72);
+  z-index: 3;
   pointer-events: none;
+  letter-spacing: 0.01em;
+}
+
+.cin-id-frame-detected-badge {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border-radius: 999px;
+  background: rgba(46, 125, 50, 0.92);
+  color: #fff;
+  font-size: 0.68rem;
+  font-weight: 700;
+  white-space: nowrap;
+  z-index: 4;
+  box-shadow: 0 4px 12px rgba(46, 125, 50, 0.35);
+  animation: cin-fade-up 0.28s ease;
 }
 
 .cin-id-frame-img {
   width: 100%;
   height: 100%;
-  object-fit: contain;
+  object-fit: cover;
+  object-position: center;
   display: block;
-  background: #fff;
+  background: #1a1a1c;
 }
 
 .cin-id-frame-empty {
@@ -4271,93 +4305,87 @@ tbody tr:last-child td { border-bottom: none; }
 .cin-doc-zone-wrap {
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 10px;
   width: 100%;
   min-width: 0;
 }
 
 .cin-doc-zone {
   cursor: pointer;
-  border-radius: 10px;
-  transition: box-shadow 0.15s;
+  border-radius: 16px;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
   outline: none;
 }
 
 .cin-doc-zone:hover {
-  box-shadow: 0 2px 12px rgba(211, 47, 47, 0.12);
+  transform: translateY(-1px);
 }
 
-.cin-doc-zone:focus-visible {
-  box-shadow: 0 0 0 3px rgba(211, 47, 47, 0.25);
+.cin-doc-zone:hover .cin-id-frame {
+  box-shadow:
+    0 2px 4px rgba(0, 0, 0, 0.05),
+    0 12px 28px rgba(0, 0, 0, 0.12);
+}
+
+.cin-doc-zone:focus-visible .cin-id-frame {
+  outline: 2px solid var(--red);
+  outline-offset: 2px;
 }
 
 .cin-doc-zone-frame {
-  min-height: 150px;
+  max-width: none;
 }
 
 .cin-doc-zone-empty {
+  width: 100%;
+  height: 100%;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
   gap: 6px;
-  height: 100%;
-  min-height: 130px;
-  padding: 16px 12px;
-  text-align: center;
+  padding: 16px 12px 28px;
   box-sizing: border-box;
+  text-align: center;
+  z-index: 1;
 }
 
 .cin-doc-zone-icon {
-  width: 52px;
-  height: 52px;
-  border-radius: 50%;
-  background: #FFEBEE;
-  color: var(--red);
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.72);
   display: flex;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0;
+  color: #3a3a3c;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  margin-bottom: 4px;
 }
 
 .cin-doc-zone-title {
-  display: block;
   font-family: var(--font-head);
-  font-size: 0.82rem;
   font-weight: 800;
-  color: var(--text);
-  line-height: 1.3;
+  font-size: 0.88rem;
+  color: #1c1c1e;
+  letter-spacing: 0.02em;
 }
 
 .cin-doc-zone-sub {
-  display: block;
   font-size: 0.72rem;
-  color: var(--text-3);
+  color: rgba(60, 60, 67, 0.65);
+  font-weight: 500;
+  max-width: 220px;
   line-height: 1.35;
 }
 
 .cin-doc-zone-hint {
-  display: block;
-  font-size: 0.65rem;
+  font-size: 0.68rem;
   color: var(--text-3);
-  margin-top: 2px;
-  line-height: 1.3;
 }
 
 .cin-doc-zone-rescan {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  background: rgba(0, 0, 0, 0.45);
-  color: #fff;
-  font-size: 0.78rem;
-  font-weight: 700;
-  opacity: 0;
-  transition: opacity 0.15s;
-  z-index: 3;
+  /* legacy */
 }
 
 .cin-doc-zone.has-img:hover .cin-doc-zone-rescan {
@@ -4368,9 +4396,9 @@ tbody tr:last-child td { border-bottom: none; }
   position: absolute;
   top: 8px;
   right: 8px;
-  z-index: 4;
-  width: 24px;
-  height: 24px;
+  z-index: 5;
+  width: 28px;
+  height: 28px;
   border-radius: 50%;
   border: none;
   background: rgba(0, 0, 0, 0.55);
@@ -4379,35 +4407,74 @@ tbody tr:last-child td { border-bottom: none; }
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  padding: 0;
-  transition: background 0.15s;
+  backdrop-filter: blur(6px);
+  transition: background 0.15s ease, transform 0.15s ease;
 }
 
 .cin-doc-zone-clear:hover {
-  background: var(--red);
+  background: rgba(198, 40, 40, 0.9);
+  transform: scale(1.05);
 }
 
 .cin-doc-zone-gallery {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  gap: 6px;
-  align-self: flex-start;
-  padding: 7px 14px;
-  font-size: 0.78rem;
-  font-weight: 600;
-  font-family: var(--font-body);
-  color: var(--text-2);
-  background: var(--surface);
-  border: 1.5px solid var(--border);
-  border-radius: 6px;
+  gap: 7px;
+  padding: 9px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  background: #fff;
+  font-size: 0.8rem;
+  font-weight: 650;
+  color: var(--text);
   cursor: pointer;
-  transition: border-color 0.15s, color 0.15s;
+  transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
 }
 
 .cin-doc-zone-gallery:hover {
+  border-color: #c8c8cc;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+}
+
+.cin-doc-zone-gallery--primary {
+  background: var(--red);
   border-color: var(--red);
-  color: var(--red);
+  color: #fff;
+  box-shadow: 0 4px 14px rgba(198, 40, 40, 0.28);
+}
+
+.cin-doc-zone-gallery--primary:hover {
+  filter: brightness(1.05);
+  border-color: var(--red);
+  box-shadow: 0 6px 18px rgba(198, 40, 40, 0.35);
+}
+
+@media (max-width: 760px) {
+  .cin-id-frame {
+    max-width: 100%;
+    border-radius: 14px;
+  }
+
+  .cin-id-frame-img {
+    object-fit: cover;
+  }
+
+  .cin-doc-zone-wrap {
+    gap: 8px;
+  }
+}
+
+.cin-crop-hint {
+  font-size: 0.72rem;
+  color: #EF6C00;
+  font-weight: 600;
+  padding: 0 2px;
+}
+
+@keyframes cin-fade-up {
+  from { opacity: 0; transform: translate(-50%, 6px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
 }
 
 .cin-doc-analyze-btn {
@@ -4415,38 +4482,6 @@ tbody tr:last-child td { border-bottom: none; }
   justify-content: center;
   min-height: 44px;
   gap: 8px;
-}
-
-@media (max-width: 768px) {
-  .cin-doc-analyze-btn {
-    width: 100%;
-  }
-
-  .cin-id-frame {
-    max-height: 38vw;
-    min-height: 0;
-    width: 100%;
-    height: auto;
-    aspect-ratio: 85.6 / 54;
-  }
-
-  .cin-id-frame-img {
-    width: 100%;
-    height: 100%;
-    object-fit: contain;
-  }
-
-  .cin-doc-zone-wrap {
-    max-width: 100%;
-  }
-}
-
-.cin-crop-hint {
-  margin-top: 6px;
-  font-size: 0.72rem;
-  color: #EF6C00;
-  font-weight: 600;
-  line-height: 1.3;
 }
 
 /* =============================================
@@ -4512,15 +4547,37 @@ tbody tr:last-child td { border-bottom: none; }
   /* height from aspect ratio: width * (54/85.6) */
   aspect-ratio: 85.6 / 54;
   transform: translateY(-50%);
-  border-radius: 11px;          /* ≈ 3.18mm / 85.6mm * frame_width */
+  border-radius: 16px;          /* coins type carte bancaire / CNIE */
   pointer-events: none;
   z-index: 10;
-  transition: box-shadow 0.3s ease;
+  transition: box-shadow 0.3s ease, border-color 0.25s ease;
 }
 
 /* When frame is ready (100% stable) — glow green */
 .cin-vf-frame--ready {
-  box-shadow: 0 0 0 2px #4CAF50, 0 0 16px rgba(76,175,80,0.4);
+  box-shadow: 0 0 0 2.5px #4CAF50, 0 0 20px rgba(76,175,80,0.45);
+  pointer-events: auto;
+}
+
+.cin-vf-detected {
+  position: absolute;
+  left: 50%;
+  bottom: 12px;
+  transform: translateX(-50%);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 999px;
+  background: rgba(46, 125, 50, 0.94);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 700;
+  white-space: nowrap;
+  z-index: 3;
+  box-shadow: 0 4px 14px rgba(46, 125, 50, 0.4);
+  animation: cin-fade-up 0.28s ease;
+  pointer-events: none;
 }
 
 /* Corner accents — exact card corner feel */
@@ -5517,9 +5574,6 @@ tbody tr:last-child td { border-bottom: none; }
   white-space: nowrap;
 }
 
-/* Desktop : tableau uniquement — mobile : cartes uniquement */
-.inv-stock-mobile-only { display: none !important; }
-.inv-stock-desktop-only { display: block; }
 
 /* Fiche article stock — header dual (desktop / mobile) */
 .inv-article-detail-header-desktop {
@@ -12942,24 +12996,41 @@ tbody tr:last-child td { border-bottom: none; }
   text-align: right;
 }
 .cin-quality-badge {
-  margin-top: 6px;
+  margin-top: 2px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font-size: 0.72rem;
-  font-weight: 600;
-  padding: 4px 8px;
-  border-radius: 6px;
+  font-weight: 650;
+  padding: 4px 10px;
+  border-radius: 999px;
+  width: fit-content;
 }
-.cin-quality-badge--bonne { background: #E8F5E9; color: #2E7D32; }
-.cin-quality-badge--acceptable { background: #FFF8E1; color: #F9A825; }
-.cin-quality-badge--faible { background: #FFF3E0; color: #EF6C00; }
-.cin-quality-badge--inexploitable { background: #FFEBEE; color: #C62828; }
+.cin-quality-badge--pill {
+  border: 1px solid transparent;
+}
+.cin-quality-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.5);
+}
+.cin-quality-badge--bonne { background: #E8F5E9; color: #2E7D32; border-color: #C8E6C9; }
+.cin-quality-badge--acceptable { background: #FFF8E1; color: #F9A825; border-color: #FFE082; }
+.cin-quality-badge--faible { background: #FFF3E0; color: #EF6C00; border-color: #FFCC80; }
+.cin-quality-badge--inexploitable { background: #FFEBEE; color: #C62828; border-color: #FFCDD2; }
 .cin-doc-zone-actions {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
-  margin-top: 8px;
+  margin-top: 2px;
+  align-items: center;
 }
-.cin-doc-zone--drag {
+.cin-doc-zone--drag .cin-id-frame {
   outline: 2px dashed var(--red);
+  outline-offset: 2px;
 }
 .cin-ocr-progress {
   font-size: 0.8rem;
