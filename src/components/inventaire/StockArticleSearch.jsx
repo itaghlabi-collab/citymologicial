@@ -156,12 +156,24 @@ export default function StockArticleSearch({
   }
 
   const showList = open && query.trim().length > 0 && !(selected && articleLabel(selected) === query.trim());
+  const hasIcon = !query;
 
-  // paddingLeft forcé après inputStyle pour éviter le chevauchement icône / texte
+  // Retirer tout padding du style parent (sinon le shorthand écrase paddingLeft)
+  const safeInputStyle = { ...(inputStyle || {}) };
+  delete safeInputStyle.padding;
+  delete safeInputStyle.paddingLeft;
+  delete safeInputStyle.paddingRight;
+  delete safeInputStyle.paddingTop;
+  delete safeInputStyle.paddingBottom;
+
   const mergedInputStyle = {
     ...DEFAULT_STYLE,
-    ...(inputStyle || {}),
-    paddingLeft: 34,
+    ...safeInputStyle,
+    paddingTop: 8,
+    paddingRight: 11,
+    paddingBottom: 8,
+    // Espace clair entre icône et placeholder / texte
+    paddingLeft: hasIcon ? 40 : 11,
   };
 
   const dropdown = showList && dropdownRect && createPortal(
@@ -222,13 +234,13 @@ export default function StockArticleSearch({
 
   return (
     <div ref={wrapRef} style={{ position: 'relative' }}>
-      {!query && (
+      {hasIcon && (
         <Search
           size={14}
           aria-hidden
           style={{
             position: 'absolute',
-            left: 11,
+            left: 12,
             top: '50%',
             transform: 'translateY(-50%)',
             color: 'var(--text-3)',
@@ -250,10 +262,7 @@ export default function StockArticleSearch({
         placeholder={placeholder}
         autoComplete="off"
         disabled={disabled}
-        style={{
-          ...mergedInputStyle,
-          paddingLeft: query ? 11 : 34,
-        }}
+        style={mergedInputStyle}
       />
       {dropdown}
     </div>
