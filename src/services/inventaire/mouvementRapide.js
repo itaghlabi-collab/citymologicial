@@ -8,7 +8,7 @@ import { requireSupabaseUserId } from '../supabase/requireUser';
 import {
   saveStockMovementBon,
   normalizeStockMovement,
-  listStockMovements,
+  deleteStockMovementBon,
 } from './stockMovements';
 import { computeArticleStock, listStockLevelsForArticle } from './stockArticles';
 
@@ -169,6 +169,19 @@ export async function listMouvementsRapides() {
     .order('created_at', { ascending: false });
   if (error) throw error;
   return (data || []).map((row) => normalizeStockMovement(row));
+}
+
+/**
+ * Supprime un mouvement rapide (inverse le stock si appliqué, puis efface les lignes).
+ * Réutilise deleteStockMovementBon.
+ */
+export async function deleteMouvementRapide(ref) {
+  if (!ref || !String(ref).startsWith('MR-')) {
+    const err = new Error('Référence mouvement rapide invalide.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  await deleteStockMovementBon(ref);
 }
 
 /**

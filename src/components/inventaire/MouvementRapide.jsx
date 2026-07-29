@@ -7,7 +7,7 @@ import {
   ArrowDownToLine, ArrowUpFromLine, ArrowLeftRight,
   Package, Search, Calendar, User, FileText, Eye,
   MoreHorizontal, XCircle, Download, ChevronDown, ChevronUp,
-  AlertTriangle, CheckCircle2, Plus, Filter, X,
+  AlertTriangle, CheckCircle2, Plus, Filter, X, Trash2,
 } from 'lucide-react';
 import {
   INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE,
@@ -17,10 +17,12 @@ import {
 import {
   saveMouvementRapide,
   annulerMouvementRapide,
+  deleteMouvementRapide,
   listMouvementsRapides,
   getArticleStockInfo,
 } from '../../services/inventaire/mouvementRapide';
 import StockArticleSearch from './StockArticleSearch.jsx';
+import { useAuth } from '../../hooks/useAuth';
 
 const MOTIFS_ENTREE = [
   'Réception directe', 'Retour chantier', 'Retour utilisateur',
@@ -42,9 +44,16 @@ const TYPE_CONFIG = {
 };
 
 export default function MouvementRapide({ articles = [], emplacementsList, onArticlesChange }) {
+  const { user } = useAuth();
+  const sessionName = (user?.nom || '').trim();
+
   const [view, setView] = useState('list'); // 'list' | 'form' | 'confirm' | 'detail'
   const [type, setType] = useState('');
-  const [form, setForm] = useState(initialForm());
+  const [form, setForm] = useState(() => ({
+    article_id: '', quantite: '', date_creation: new Date().toISOString().slice(0, 10),
+    motif: '', emplacement_source: '', emplacement_destination: '',
+    cree_par: sessionName, projet: '', note: '', beneficiaire: '', fournisseur: '', ref_externe: '',
+  }));
   const [selectedArticle, setSelectedArticle] = useState(null);
   const [articleStock, setArticleStock] = useState(null);
   const [historique, setHistorique] = useState([]);
@@ -54,6 +63,7 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
   const [detailItem, setDetailItem] = useState(null);
   const [cancelModal, setCancelModal] = useState(null);
   const [cancelMotif, setCancelMotif] = useState('');
+  const [deleteModal, setDeleteModal] = useState(null);
   const [searchHist, setSearchHist] = useState('');
   const [filterType, setFilterType] = useState('');
   const [showFilters, setShowFilters] = useState(false);
@@ -63,9 +73,15 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
     return {
       article_id: '', quantite: '', date_creation: new Date().toISOString().slice(0, 10),
       motif: '', emplacement_source: '', emplacement_destination: '',
-      cree_par: '', projet: '', note: '', beneficiaire: '', fournisseur: '', ref_externe: '',
+      cree_par: sessionName, projet: '', note: '', beneficiaire: '', fournisseur: '', ref_externe: '',
     };
   }
+
+  // Si le nom session arrive après le premier render, préremplir si champ encore vide
+  useEffect(() => {
+    if (!sessionName) return;
+    setForm((f) => (f.cree_par ? f : { ...f, cree_par: sessionName }));
+  }, [sessionName]);
 
   const loadHistorique = useCallback(async () => {
     try {
@@ -173,13 +189,37 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
     setLoading(true);
     setError('');
     try {
-      await annulerMouvementRapide(ref, cancelMotif, '');
+      await annulerMouvementRapide(ref, cancelMotif, sessionName);
       setSuccess(`Mouvement ${ref} annulé.`);
       setCancelModal(null);
       setCancelMotif('');
       loadHistorique();
     } catch (e) {
       setError(e?.message || 'Erreur lors de l\'annulation.');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleDelete(ref) {
+    setLoading(true);
+    setError('');
+    try {
+      await deleteMouvementRapide(ref);
+      setSuccess(`Mouvement ${ref} supprimé.`);
+      setDeleteModal(null);
+      if (detailItem?.ref === ref) {
+        setDetailItem(null);
+        setView('list');
+      }
+      loadHistorique();
+      if (onArticlesChange) {
+        const { listStockArticles } = await import('../../services/inventaire/stockArticles');
+        const refreshed = await listStockArticles();
+        onArticlesChange(refreshed || []);
+      }
+    } catch (e) {
+      setError(e?.message || 'Erreur lors de la suppression.');
     } finally {
       setLoading(false);
     }
@@ -318,6 +358,7 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
                               isCancelled={isCancelled}
                               onView={() => { setDetailItem(m); setView('detail'); }}
                               onCancel={() => setCancelModal(m.ref)}
+                              onDelete={() => setDeleteModal(m.ref)}
                             />
                           </td>
                         </tr>
@@ -355,7 +396,7 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
                           {m.emplacement_destination && <span>{m.emplacement_destination}</span>}
                         </div>
                       )}
-                      <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                      <div style={{ display: 'flex', gap: 8, marginTop: 8, flexWrap: 'wrap' }}>
                         <button className="btn btn-ghost btn-sm" onClick={() => { setDetailItem(m); setView('detail'); }} style={{ fontSize: '0.76rem' }}>
                           <Eye size={13} /> Voir
                         </button>
@@ -364,6 +405,9 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
                             <XCircle size={13} /> Annuler
                           </button>
                         )}
+                        <button className="btn btn-ghost btn-sm" onClick={() => setDeleteModal(m.ref)} style={{ fontSize: '0.76rem', color: 'var(--red)' }}>
+                          <Trash2 size={13} /> Supprimer
+                        </button>
                       </div>
                     </div>
                   );
@@ -383,9 +427,24 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
           </FField>
           {error && <div style={{ color: 'var(--red)', fontSize: '0.82rem', marginTop: 10 }}>{error}</div>}
           <div style={{ display: 'flex', gap: 10, marginTop: 20, justifyContent: 'flex-end' }}>
-            <button className="btn btn-ghost btn-sm" onClick={() => { setCancelModal(null); setCancelMotif(''); }}>Annuler</button>
+            <button className="btn btn-ghost btn-sm" onClick={() => { setCancelModal(null); setCancelMotif(''); }}>Fermer</button>
             <button className="btn btn-sm" style={{ background: 'var(--red)', color: '#fff' }} disabled={loading || !cancelMotif.trim()} onClick={() => handleCancel(cancelModal)}>
               {loading ? 'En cours...' : 'Confirmer l\'annulation'}
+            </button>
+          </div>
+        </Modal>
+
+        {/* Delete modal */}
+        <Modal open={!!deleteModal} onClose={() => setDeleteModal(null)} title="Supprimer le mouvement" width={480}>
+          <p style={{ fontSize: '0.88rem', marginBottom: 16 }}>
+            Confirmez-vous la suppression de <strong>{deleteModal}</strong> ?
+            Le stock sera recalculé (mouvement inverse) puis l&apos;enregistrement sera effacé.
+          </p>
+          {error && <div style={{ color: 'var(--red)', fontSize: '0.82rem', marginTop: 10 }}>{error}</div>}
+          <div style={{ display: 'flex', gap: 10, marginTop: 20, justifyContent: 'flex-end' }}>
+            <button className="btn btn-ghost btn-sm" onClick={() => setDeleteModal(null)}>Fermer</button>
+            <button className="btn btn-sm" style={{ background: 'var(--red)', color: '#fff' }} disabled={loading} onClick={() => handleDelete(deleteModal)}>
+              {loading ? 'Suppression...' : 'Supprimer définitivement'}
             </button>
           </div>
         </Modal>
@@ -666,14 +725,24 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
   function renderDetail() {
     if (!detailItem) return null;
     const m = detailItem;
-    const cfg = TYPE_CONFIG[m.type_mouvement] || {};
+    const isCancelled = (m.statut || 'Validé') === 'Annulé';
     return (
       <div className="animate-fade-in">
         <div className="page-header flex-between finance-page-header">
           <div>
             <h1 className="page-title">{m.ref}</h1>
           </div>
-          <button className="btn btn-ghost btn-sm" onClick={() => { setView('list'); setDetailItem(null); }}>← Retour</button>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            {!isCancelled && (
+              <button className="btn btn-ghost btn-sm" onClick={() => setCancelModal(m.ref)} style={{ color: 'var(--red)' }}>
+                <XCircle size={14} /> Annuler
+              </button>
+            )}
+            <button className="btn btn-ghost btn-sm" onClick={() => setDeleteModal(m.ref)} style={{ color: 'var(--red)' }}>
+              <Trash2 size={14} /> Supprimer
+            </button>
+            <button className="btn btn-ghost btn-sm" onClick={() => { setView('list'); setDetailItem(null); }}>← Retour</button>
+          </div>
         </div>
         <div className="card" style={{ padding: '24px', maxWidth: 640 }}>
           <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: '10px 16px', fontSize: '0.9rem' }}>
@@ -682,7 +751,7 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
             <span style={{ color: 'var(--text-3)', fontWeight: 700 }}>Type</span>
             <span className={`badge ${m.type_mouvement === 'Entrée' ? 'badge-green' : m.type_mouvement === 'Sortie' ? 'badge-red' : 'badge-blue'}`} style={{ fontSize: '0.72rem', width: 'fit-content' }}>{m.type_mouvement}</span>
             <span style={{ color: 'var(--text-3)', fontWeight: 700 }}>Statut</span>
-            <span className={`badge ${m.statut === 'Annulé' ? 'badge-red' : 'badge-green'}`} style={{ fontSize: '0.72rem', width: 'fit-content' }}>{m.statut || 'Validé'}</span>
+            <span className={`badge ${isCancelled ? 'badge-red' : 'badge-green'}`} style={{ fontSize: '0.72rem', width: 'fit-content' }}>{m.statut || 'Validé'}</span>
             <span style={{ color: 'var(--text-3)', fontWeight: 700 }}>Article</span>
             <span>{m.article_code} — {m.article_designation}</span>
             <span style={{ color: 'var(--text-3)', fontWeight: 700 }}>Quantité</span>
@@ -698,30 +767,85 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
             {m.note && <><span style={{ color: 'var(--text-3)', fontWeight: 700 }}>Notes</span><span>{m.note}</span></>}
           </div>
         </div>
+
+        <Modal open={!!cancelModal} onClose={() => { setCancelModal(null); setCancelMotif(''); }} title="Annuler le mouvement" width={480}>
+          <p style={{ fontSize: '0.88rem', marginBottom: 16 }}>
+            Cette action va créer un mouvement inverse pour annuler <strong>{cancelModal}</strong>.
+          </p>
+          <FField label="Motif d'annulation" required>
+            <textarea value={cancelMotif} onChange={(e) => setCancelMotif(e.target.value)} style={TEXTAREA_STYLE} placeholder="Raison de l'annulation..." />
+          </FField>
+          {error && <div style={{ color: 'var(--red)', fontSize: '0.82rem', marginTop: 10 }}>{error}</div>}
+          <div style={{ display: 'flex', gap: 10, marginTop: 20, justifyContent: 'flex-end' }}>
+            <button className="btn btn-ghost btn-sm" onClick={() => { setCancelModal(null); setCancelMotif(''); }}>Fermer</button>
+            <button className="btn btn-sm" style={{ background: 'var(--red)', color: '#fff' }} disabled={loading || !cancelMotif.trim()} onClick={() => handleCancel(cancelModal)}>
+              {loading ? 'En cours...' : 'Confirmer l\'annulation'}
+            </button>
+          </div>
+        </Modal>
+
+        <Modal open={!!deleteModal} onClose={() => setDeleteModal(null)} title="Supprimer le mouvement" width={480}>
+          <p style={{ fontSize: '0.88rem', marginBottom: 16 }}>
+            Confirmez-vous la suppression de <strong>{deleteModal}</strong> ?
+          </p>
+          {error && <div style={{ color: 'var(--red)', fontSize: '0.82rem', marginTop: 10 }}>{error}</div>}
+          <div style={{ display: 'flex', gap: 10, marginTop: 20, justifyContent: 'flex-end' }}>
+            <button className="btn btn-ghost btn-sm" onClick={() => setDeleteModal(null)}>Fermer</button>
+            <button className="btn btn-sm" style={{ background: 'var(--red)', color: '#fff' }} disabled={loading} onClick={() => handleDelete(deleteModal)}>
+              {loading ? 'Suppression...' : 'Supprimer définitivement'}
+            </button>
+          </div>
+        </Modal>
       </div>
     );
   }
 }
 
-function MRActions({ item, isCancelled, onView, onCancel }) {
+function MRActions({ item, isCancelled, onView, onCancel, onDelete }) {
   const [open, setOpen] = useState(false);
   return (
     <div style={{ position: 'relative' }}>
-      <button className="btn btn-ghost btn-sm" onClick={() => setOpen(!open)} style={{ padding: '4px 6px' }}>
+      <button
+        type="button"
+        className="btn btn-ghost btn-sm"
+        onClick={() => setOpen(!open)}
+        style={{ padding: '4px 8px' }}
+        title="Actions"
+        aria-label="Actions"
+      >
         <MoreHorizontal size={16} />
       </button>
       {open && (
         <>
           <div style={{ position: 'fixed', inset: 0, zIndex: 999 }} onClick={() => setOpen(false)} />
-          <div style={{ position: 'absolute', right: 0, top: '100%', background: '#fff', borderRadius: 8, boxShadow: 'var(--shadow-lg)', zIndex: 1000, minWidth: 160, padding: '4px 0', border: '1px solid var(--border)' }}>
-            <button onClick={() => { onView(); setOpen(false); }} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', width: '100%', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.84rem' }}>
+          <div style={{
+            position: 'absolute', right: 0, top: '100%', background: '#fff', borderRadius: 8,
+            boxShadow: 'var(--shadow-lg)', zIndex: 1000, minWidth: 180, padding: '4px 0',
+            border: '1px solid var(--border)',
+          }}>
+            <button
+              type="button"
+              onClick={() => { onView(); setOpen(false); }}
+              style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 14px', width: '100%', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.84rem' }}
+            >
               <Eye size={14} /> Voir
             </button>
             {!isCancelled && (
-              <button onClick={() => { onCancel(); setOpen(false); }} style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 14px', width: '100%', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.84rem', color: 'var(--red)' }}>
-                <XCircle size={14} /> Annuler
+              <button
+                type="button"
+                onClick={() => { onCancel(); setOpen(false); }}
+                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 14px', width: '100%', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.84rem' }}
+              >
+                <XCircle size={14} /> Annuler le mouvement
               </button>
             )}
+            <button
+              type="button"
+              onClick={() => { onDelete(); setOpen(false); }}
+              style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 14px', width: '100%', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.84rem', color: 'var(--red)' }}
+            >
+              <Trash2 size={14} /> Supprimer
+            </button>
           </div>
         </>
       )}
