@@ -12,6 +12,7 @@ import {
   INPUT_STYLE, SELECT_STYLE, EMPLACEMENTS_STOCK,
   KpiCard, EmptyState, Modal, SectionTitle, formatMAD, StockAlert,
   BADGE_CURRENT_STATE,
+  FILTER_SANS_EMPLACEMENT, formatEmplacementDisplay, filterVisibleEmplacements, isSansEmplacement,
 } from './shared.jsx';
 import StockOpsActions from './StockOpsActions';
 import StockDirectMovementModal from './StockDirectMovementModal';
@@ -124,7 +125,7 @@ function StockFiche({
                   <tbody>
                     {(stockLevels || []).filter((l) => Number(l.quantite) > 0).map((l) => (
                       <tr key={l.id || l.emplacement}>
-                        <td>{l.emplacement}</td>
+                        <td>{formatEmplacementDisplay(l.emplacement)}</td>
                         <td style={{ fontFamily: 'var(--font-head)', fontWeight: 800 }}>{l.quantite} {article.unite}</td>
                       </tr>
                     ))}
@@ -169,7 +170,7 @@ function StockFiche({
               <div><span style={{ fontSize: '0.7rem', color: 'var(--text-3)', fontWeight: 700, textTransform: 'uppercase' }}>Valeur unitaire</span><div style={{ fontWeight: 700, color: 'var(--red)' }}>{article.valeur ? formatMAD(article.valeur) : '—'}</div></div>
               <div><span style={{ fontSize: '0.7rem', color: 'var(--text-3)', fontWeight: 700, textTransform: 'uppercase' }}>Valeur totale</span><div style={{ fontWeight: 700, color: 'var(--red)' }}>{valTot > 0 ? formatMAD(valTot) : '—'}</div></div>
               <div><span style={{ fontSize: '0.7rem', color: 'var(--text-3)', fontWeight: 700, textTransform: 'uppercase' }}>État</span><div>{article.etat || '—'}</div></div>
-              <div><span style={{ fontSize: '0.7rem', color: 'var(--text-3)', fontWeight: 700, textTransform: 'uppercase' }}>Emplacement</span><div>{article.emplacement || '—'}</div></div>
+              <div><span style={{ fontSize: '0.7rem', color: 'var(--text-3)', fontWeight: 700, textTransform: 'uppercase' }}>Emplacement</span><div>{formatEmplacementDisplay(article.emplacement)}</div></div>
               <div><span className={`badge ${s.cls}`}>{s.label}</span></div>
             </div>
           </div>
@@ -335,7 +336,10 @@ export default function Stocks({
     const matchQ = !q || x.code?.toLowerCase().includes(q) || x.designation?.toLowerCase().includes(q)
       || (cat?.nom || '').toLowerCase().includes(q) || bc.includes(q);
     const matchCat = !filterCat || String(x.categorie_id) === String(filterCat);
-    const matchEmp = !filterEmplacement || String(x.emplacement || '').trim() === filterEmplacement;
+    const matchEmp = !filterEmplacement
+      || (filterEmplacement === FILTER_SANS_EMPLACEMENT
+        ? isSansEmplacement(x.emplacement)
+        : String(x.emplacement || '').trim() === filterEmplacement);
     const qte = Number(x.stock_actuel) || 0;
     const seuil = Number(x.stock_minimum) || 0;
     let matchAlerte = true;
@@ -350,9 +354,9 @@ export default function Stocks({
     const set = new Set();
     arts.forEach((a) => {
       const e = String(a.emplacement || '').trim();
-      if (e) set.add(e);
+      if (e && !isSansEmplacement(e)) set.add(e);
     });
-    return [...set].sort((a, b) => a.localeCompare(b, 'fr'));
+    return filterVisibleEmplacements([...set]);
   }, [arts]);
 
   const valeurTotale = arts.reduce((s, a) => s + ((Number(a.valeur) || 0) * (Number(a.stock_actuel) || 0)), 0);
@@ -476,6 +480,7 @@ export default function Stocks({
             </select>
             <select value={filterEmplacement} onChange={(e) => setFilterEmplacement(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 200 }}>
               <option value="">Tous emplacements</option>
+              <option value={FILTER_SANS_EMPLACEMENT}>Sans emplacement</option>
               {emplacements.map((e) => <option key={e} value={e}>{e}</option>)}
             </select>
             <select value={filterAlerte} onChange={(e) => setFilterAlerte(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 140 }}>
@@ -512,7 +517,7 @@ export default function Stocks({
                   <div className="inv-stock-mobile-name">
                     <strong>{x.code}</strong>
                     <span className="inv-stock-mobile-designation">{x.designation}</span>
-                    <span className="inv-stock-mobile-meta">Qté {x.stock_actuel || 0} {x.unite} · {x.emplacement || '—'}</span>
+                    <span className="inv-stock-mobile-meta">Qté {x.stock_actuel || 0} {x.unite} · {formatEmplacementDisplay(x.emplacement)}</span>
                     <div className="inv-stock-mobile-badges">
                       <span className={`badge ${st.cls}`}>{st.label}</span>
                       <span className="badge badge-grey">{x.etat}</span>
@@ -587,7 +592,7 @@ export default function Stocks({
                         <td><div className="inv-articles-name">{x.designation}</div></td>
                         <td>{cat ? <span className="badge badge-blue inv-articles-badge">{cat.nom}</span> : '—'}</td>
                         <td style={{ fontSize: '0.82rem' }}>{x.type || '—'}</td>
-                        <td style={{ fontSize: '0.82rem' }}>{x.emplacement || '—'}</td>
+                        <td style={{ fontSize: '0.82rem' }}>{formatEmplacementDisplay(x.emplacement)}</td>
                         <td>
                           <span className="inv-articles-qty" style={{ color: st.cls === 'badge-red' ? 'var(--red)' : undefined }}>{x.stock_actuel || 0}</span>
                           <span className="inv-articles-unit">{x.unite}</span>

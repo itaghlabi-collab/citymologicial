@@ -29,6 +29,7 @@ import {
   CURRENT_STATES_ARTICLE, BADGE_CURRENT_STATE,
   KpiCard, EmptyState, Modal, SectionTitle, FField, FRow,
   formatMAD, StockAlert,
+  FILTER_SANS_EMPLACEMENT, formatEmplacementDisplay, filterVisibleEmplacements, isSansEmplacement,
 } from './shared.jsx';
 
 const PAGE_SIZE = 15;
@@ -108,8 +109,8 @@ function ArticleStockByLocation({ article, levels, loading }) {
                 }}
               >
                 <span style={{ fontWeight: isDeclared ? 600 : 500, color: 'var(--text-2)', minWidth: 0, wordBreak: 'break-word' }}>
-                  {l.emplacement}
-                  {isDeclared && (
+                  {formatEmplacementDisplay(l.emplacement)}
+                  {isDeclared && formatEmplacementDisplay(l.emplacement) !== '—' && (
                     <span style={{ marginLeft: 6, fontSize: '0.68rem', color: 'var(--text-3)', fontWeight: 700 }}>fiche</span>
                   )}
                 </span>
@@ -307,7 +308,7 @@ function DetailArticle({
                 ['Type', article.type],
                 ['N° série', article.numero_serie],
                 ['Unité', article.unite],
-                ['Emplacement', article.emplacement],
+                ['Emplacement', formatEmplacementDisplay(article.emplacement)],
                 ['État', article.etat],
                 ['Statut', article.statut],
                 ['État opérationnel', article.current_state || 'Disponible'],
@@ -807,7 +808,10 @@ export default function ArticlesStock({
       && (!filterType || x.type === filterType)
       && (!filterEtat || x.etat === filterEtat)
       && (!filterStatut || x.statut === filterStatut)
-      && (!filterEmplacement || x.emplacement === filterEmplacement)
+      && (!filterEmplacement
+        || (filterEmplacement === FILTER_SANS_EMPLACEMENT
+          ? isSansEmplacement(x.emplacement)
+          : x.emplacement === filterEmplacement))
       && (!filterCurrentState || x.current_state === filterCurrentState);
   }), [articles, search, filterCat, filterType, filterEtat, filterStatut, filterEmplacement, filterCurrentState, categories]);
 
@@ -984,7 +988,8 @@ export default function ArticlesStock({
             </select>
             <select value={filterEmplacement} onChange={(e) => setFilterEmplacement(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 200 }}>
               <option value="">Tous emplacements</option>
-              {emplacementsList.map((e) => <option key={e} value={e}>{e}</option>)}
+              <option value={FILTER_SANS_EMPLACEMENT}>Sans emplacement</option>
+              {filterVisibleEmplacements(emplacementsList).map((e) => <option key={e} value={e}>{e}</option>)}
             </select>
             <select value={filterCurrentState} onChange={(e) => setFilterCurrentState(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 170 }}>
               <option value="">Tous états opérationnels</option>
@@ -1089,8 +1094,8 @@ export default function ArticlesStock({
                         </td>
                         <td data-label="Nom">
                           <div className="inv-articles-name">{x.designation}</div>
-                          {x.emplacement ? (
-                            <div className="inv-articles-sub">{x.emplacement}</div>
+                          {formatEmplacementDisplay(x.emplacement) !== '—' ? (
+                            <div className="inv-articles-sub">{formatEmplacementDisplay(x.emplacement)}</div>
                           ) : null}
                         </td>
                         <td data-label="Catégorie">

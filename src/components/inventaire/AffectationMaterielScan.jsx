@@ -9,12 +9,12 @@ import { executeArticleQuickAction } from '../../services/inventaire/articleQuic
 import { useArticleScanner } from '../../hooks/useArticleScanner';
 import { useAuth } from '../../hooks/useAuth';
 import ArticleScanBar from './ArticleScanBar.jsx';
-import { EMPLACEMENTS_STOCK, INPUT_STYLE, SELECT_STYLE } from './shared.jsx';
+import { EMPLACEMENTS_STOCK, INPUT_STYLE, SELECT_STYLE, filterVisibleEmplacements } from './shared.jsx';
 import { articleScanLabel } from '../../services/inventaire/scanFeedback';
 
-const CHANTIER_EMPLACEMENTS = EMPLACEMENTS_STOCK.filter((e) =>
+const CHANTIER_EMPLACEMENTS = filterVisibleEmplacements(EMPLACEMENTS_STOCK.filter((e) =>
   e.toUpperCase().includes('CHANTIER') || e.toUpperCase().includes('VILLA') || e.includes('LOGIPARC') || e.includes('ONDA'),
-);
+));
 
 export default function AffectationMaterielScan() {
   const { user } = useAuth();

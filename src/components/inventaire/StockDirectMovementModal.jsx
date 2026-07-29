@@ -7,6 +7,7 @@ import { Loader2 } from 'lucide-react';
 import {
   INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE, EMPLACEMENTS_STOCK,
   Modal, FField, FRow, SectionTitle,
+  filterVisibleEmplacements, formatEmplacementDisplay, isSansEmplacement,
 } from './shared.jsx';
 import { saveMouvementRapide, getArticleStockInfo } from '../../services/inventaire/mouvementRapide';
 import { useAuth } from '../../hooks/useAuth';
@@ -28,7 +29,7 @@ export default function StockDirectMovementModal({
 }) {
   const { user } = useAuth();
   const sessionName = user?.user_metadata?.full_name || user?.nom || user?.email?.split('@')[0] || '';
-  const emplacements = emplacementsList?.length ? emplacementsList : EMPLACEMENTS_STOCK;
+  const emplacements = filterVisibleEmplacements(emplacementsList?.length ? emplacementsList : EMPLACEMENTS_STOCK);
 
   const [form, setForm] = useState({});
   const [stockInfo, setStockInfo] = useState(null);
@@ -39,7 +40,8 @@ export default function StockDirectMovementModal({
 
   useEffect(() => {
     if (!open || !article) return;
-    const prefEmp = article.emplacement || emplacements[0] || '';
+    const raw = (article.emplacement || '').trim();
+    const prefEmp = raw && !isSansEmplacement(raw) ? raw : (emplacements[0] || '');
     setForm({
       quantite: '',
       date_creation: new Date().toISOString().slice(0, 10),
@@ -68,7 +70,7 @@ export default function StockDirectMovementModal({
   const sourceOptions = useMemo(() => {
     const levels = stockInfo?.levels || [];
     const byEmp = new Map(levels.map((l) => [l.emplacement, Number(l.quantite) || 0]));
-    const all = [...new Set([...levels.map((l) => l.emplacement), ...emplacements].filter(Boolean))];
+    const all = filterVisibleEmplacements([...levels.map((l) => l.emplacement), ...emplacements]);
     return all.map((e) => ({ value: e, qty: byEmp.has(e) ? byEmp.get(e) : null }));
   }, [stockInfo, emplacements]);
 

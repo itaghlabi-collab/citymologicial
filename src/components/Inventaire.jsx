@@ -15,7 +15,7 @@ import AffectationMaterielScan from './inventaire/AffectationMaterielScan.jsx';
 import { listStockArticles } from '../services/inventaire/stockArticles';
 import { listStockCategories } from '../services/inventaire/stockCategories';
 import { ensureStockWarehousesSeeded } from '../services/inventaire/stockWarehouses';
-import { EMPLACEMENTS_STOCK } from './inventaire/shared.jsx';
+import { EMPLACEMENTS_STOCK, filterVisibleEmplacements } from './inventaire/shared.jsx';
 
 export default function Inventaire({ activeTab, initialArticleCode, onArticleCodeConsumed, onNavigate }) {
   const tab = activeTab || 'categories-stock';
@@ -34,14 +34,14 @@ export default function Inventaire({ activeTab, initialArticleCode, onArticleCod
       .catch(() => {});
     ensureStockWarehousesSeeded(EMPLACEMENTS_STOCK)
       .then((rows) => {
-        if (rows?.length) setEmplacementNoms(rows.map((r) => r.nom));
+        if (rows?.length) setEmplacementNoms(filterVisibleEmplacements(rows.map((r) => r.nom)));
       })
       .catch(() => {});
   }, [tab]);
 
   const handleDepotsChange = useCallback((list) => {
     setDepots(list);
-    if (list?.length) setEmplacementNoms(list.map((d) => d.nom));
+    if (list?.length) setEmplacementNoms(filterVisibleEmplacements(list.map((d) => d.nom)));
   }, []);
 
   return (

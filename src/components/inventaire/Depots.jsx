@@ -6,6 +6,7 @@ import { MapPin, Search, Filter, Eye, ChevronLeft, Plus, Trash2, Loader2 } from 
 import {
   INPUT_STYLE, SELECT_STYLE, EMPLACEMENTS_STOCK,
   KpiCard, EmptyState, SectionTitle, Modal, FField, FRow,
+  isDeprecatedEmplacement, isSansEmplacement,
 } from './shared.jsx';
 import {
   ensureStockWarehousesSeeded,
@@ -109,12 +110,14 @@ export default function Depots({ articles, onDepotsChange }) {
       if (!rows.length) {
         rows = await listStockWarehouses();
       }
-      const mapped = rows.map((w) => ({
-        id: w.id,
-        nom: w.nom,
-        type: w.type,
-        statut: w.statut || 'Actif',
-      }));
+      const mapped = rows
+        .filter((w) => !isDeprecatedEmplacement(w.nom))
+        .map((w) => ({
+          id: w.id,
+          nom: w.nom,
+          type: w.type,
+          statut: w.statut || 'Actif',
+        }));
       setEmplacements(mapped);
       onDepotsChangeRef.current?.(mapped);
     } catch (err) {
@@ -144,7 +147,7 @@ export default function Depots({ articles, onDepotsChange }) {
 
   const types = [...new Set(emplacements.map((e) => e.type))];
   const totalArticles = (articles || []).length;
-  const avecEmplacement = (articles || []).filter((a) => (a.emplacement || '').trim()).length;
+  const avecEmplacement = (articles || []).filter((a) => !isSansEmplacement(a.emplacement)).length;
   const chantiers = emplacements.filter((x) => x.type === 'Chantier').length;
   const depotsCount = emplacements.filter((x) => x.type === 'Dépôt').length;
 

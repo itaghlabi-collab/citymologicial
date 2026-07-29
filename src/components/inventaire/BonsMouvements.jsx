@@ -14,6 +14,7 @@ import {
   INPUT_STYLE, SELECT_STYLE, EMPLACEMENTS_STOCK,
   TYPES_MOUVEMENT, STATUTS_MOUVEMENT, BADGE_MOUVEMENT, BADGE_STATUT_MV,
   KpiCard, EmptyState, SectionTitle,
+  FILTER_SANS_EMPLACEMENT, formatEmplacementDisplay, filterVisibleEmplacements, isSansEmplacement,
 } from './shared.jsx';
 
 const TYPE_ICONS = {
@@ -52,8 +53,8 @@ function DetailBon({ bon, articles, onBack, onEdit, onPdf, onDelete, pdfLoading 
         <div className="finance-detail-fields" style={{ fontSize: '0.84rem' }}>
           {[
             ['Type', bon.type_mouvement],
-            ['Source', bon.emplacement_source],
-            ['Destination', bon.emplacement_destination],
+            ['Source', formatEmplacementDisplay(bon.emplacement_source)],
+            ['Destination', formatEmplacementDisplay(bon.emplacement_destination)],
             ['Créé par', bon.cree_par],
             ['Livreur', bon.livreur],
             ['Réceptionnaire', bon.receptionnaire],
@@ -122,8 +123,9 @@ export default function BonsMouvements({ articles, onArticlesChange }) {
   const filtered = bons.filter((x) => {
     const q = search.toLowerCase();
     const matchEmp = !filterEmplacement
-      || x.emplacement_source === filterEmplacement
-      || x.emplacement_destination === filterEmplacement;
+      || (filterEmplacement === FILTER_SANS_EMPLACEMENT
+        ? (isSansEmplacement(x.emplacement_source) && isSansEmplacement(x.emplacement_destination))
+        : (x.emplacement_source === filterEmplacement || x.emplacement_destination === filterEmplacement));
     return (!q || x.ref.toLowerCase().includes(q) || (x.motif || '').toLowerCase().includes(q) || (x.cree_par || '').toLowerCase().includes(q))
       && (!filterType || x.type_mouvement === filterType)
       && (!filterStatut || x.statut === filterStatut)
@@ -259,7 +261,8 @@ export default function BonsMouvements({ articles, onArticlesChange }) {
             </select>
             <select value={filterEmplacement} onChange={(e) => setFilterEmplacement(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 220 }}>
               <option value="">Tous emplacements</option>
-              {EMPLACEMENTS_STOCK.map((e) => <option key={e} value={e}>{e}</option>)}
+              <option value={FILTER_SANS_EMPLACEMENT}>Sans emplacement</option>
+              {filterVisibleEmplacements(EMPLACEMENTS_STOCK).map((e) => <option key={e} value={e}>{e}</option>)}
             </select>
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setFilterType(''); setFilterStatut(''); setFilterEmplacement(''); }}>
               Réinitialiser
@@ -311,8 +314,8 @@ export default function BonsMouvements({ articles, onArticlesChange }) {
                     </td>
                     <td data-label="Lignes" style={{ fontWeight: 700 }}>{x.lignes?.length || 0}</td>
                     <td data-label="Qté" style={{ fontWeight: 700 }}>{x.quantite_totale || 0}</td>
-                    <td data-label="Source" style={{ fontSize: '0.82rem', color: 'var(--text-2)' }}>{x.emplacement_source || '—'}</td>
-                    <td data-label="Destination" style={{ fontSize: '0.82rem', color: 'var(--text-2)' }}>{x.emplacement_destination || '—'}</td>
+                    <td data-label="Source" style={{ fontSize: '0.82rem', color: 'var(--text-2)' }}>{formatEmplacementDisplay(x.emplacement_source)}</td>
+                    <td data-label="Destination" style={{ fontSize: '0.82rem', color: 'var(--text-2)' }}>{formatEmplacementDisplay(x.emplacement_destination)}</td>
                     <td data-label="Date">{x.date_creation}</td>
                     <td data-label="Statut">
                       <span className={`badge ${BADGE_STATUT_MV[x.statut] || 'badge-grey'}`} style={{ fontSize: '0.72rem' }}>{x.statut}</span>

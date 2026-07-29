@@ -6,7 +6,7 @@ import {
   MapPin, Warehouse, ArrowRightLeft, Wrench, RotateCcw,
   Ban, AlertTriangle, Loader2, History,
 } from 'lucide-react';
-import { Modal, SELECT_STYLE, TEXTAREA_STYLE, EMPLACEMENTS_STOCK } from './shared.jsx';
+import { Modal, SELECT_STYLE, TEXTAREA_STYLE, EMPLACEMENTS_STOCK, filterVisibleEmplacements, formatEmplacementDisplay, isSansEmplacement } from './shared.jsx';
 import { QUICK_ACTIONS, executeArticleQuickAction, canExecuteStockAction, getArticleStockQty } from '../../services/inventaire/articleQuickActions';
 
 const ACTION_ICONS = {
@@ -28,14 +28,18 @@ const DEPOT_EMPLACEMENTS = EMPLACEMENTS_STOCK.filter((e) =>
 );
 
 function destinationOptions(actionKey) {
-  if (actionKey === 'affecter_chantier') return CHANTIER_EMPLACEMENTS.length ? CHANTIER_EMPLACEMENTS : EMPLACEMENTS_STOCK;
+  if (actionKey === 'affecter_chantier') {
+    return filterVisibleEmplacements(CHANTIER_EMPLACEMENTS.length ? CHANTIER_EMPLACEMENTS : EMPLACEMENTS_STOCK);
+  }
   if (actionKey === 'retour_depot' || actionKey === 'retour_reparation') {
-    return DEPOT_EMPLACEMENTS.length ? DEPOT_EMPLACEMENTS : EMPLACEMENTS_STOCK;
+    return filterVisibleEmplacements(DEPOT_EMPLACEMENTS.length ? DEPOT_EMPLACEMENTS : EMPLACEMENTS_STOCK);
   }
   if (actionKey === 'envoyer_reparation') {
-    return EMPLACEMENTS_STOCK.filter((e) => e.toUpperCase().includes('SAV') || e.toUpperCase().includes('ATELIER'));
+    return filterVisibleEmplacements(
+      EMPLACEMENTS_STOCK.filter((e) => e.toUpperCase().includes('SAV') || e.toUpperCase().includes('ATELIER')),
+    );
   }
-  return EMPLACEMENTS_STOCK;
+  return filterVisibleEmplacements(EMPLACEMENTS_STOCK);
 }
 
 export default function ArticleQuickActions({ article, userName, onDone, disabled, onHistory }) {
@@ -54,7 +58,8 @@ export default function ArticleQuickActions({ article, userName, onDone, disable
     setPending(key);
     setError('');
     setObservation('');
-    setDestination(cfg?.defaultDest || article?.emplacement || '');
+    const emp = (article?.emplacement || '').trim();
+    setDestination(cfg?.defaultDest || (emp && !isSansEmplacement(emp) ? emp : '') || '');
   }
 
   async function confirmAction() {
@@ -132,7 +137,7 @@ export default function ArticleQuickActions({ article, userName, onDone, disable
         {config && (
           <div>
             <p style={{ fontSize: '0.84rem', color: 'var(--text-2)', marginTop: 0 }}>
-              Article <strong>{article?.code}</strong> — emplacement actuel : <strong>{article?.emplacement || '—'}</strong>
+              Article <strong>{article?.code}</strong> — emplacement actuel : <strong>{formatEmplacementDisplay(article?.emplacement)}</strong>
             </p>
             {config.needsDest && (
               <div style={{ marginBottom: 12 }}>

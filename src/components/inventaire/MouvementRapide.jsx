@@ -14,6 +14,7 @@ import {
   INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE,
   EmptyState, SectionTitle, Modal, FField, FRow,
   EMPLACEMENTS_STOCK,
+  formatEmplacementDisplay, filterVisibleEmplacements, isSansEmplacement,
 } from './shared.jsx';
 import {
   saveMouvementRapide,
@@ -158,10 +159,16 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
     (articleStock?.levels || []).forEach((l) => {
       if (l?.emplacement) set.add(String(l.emplacement).trim());
     });
-    if (selectedArticle?.emplacement) set.add(String(selectedArticle.emplacement).trim());
-    if (form.emplacement_source) set.add(String(form.emplacement_source).trim());
-    if (form.emplacement_destination) set.add(String(form.emplacement_destination).trim());
-    return [...set].filter(Boolean).sort((a, b) => a.localeCompare(b, 'fr'));
+    if (selectedArticle?.emplacement && !isSansEmplacement(selectedArticle.emplacement)) {
+      set.add(String(selectedArticle.emplacement).trim());
+    }
+    if (form.emplacement_source && !isSansEmplacement(form.emplacement_source)) {
+      set.add(String(form.emplacement_source).trim());
+    }
+    if (form.emplacement_destination && !isSansEmplacement(form.emplacement_destination)) {
+      set.add(String(form.emplacement_destination).trim());
+    }
+    return filterVisibleEmplacements([...set]);
   }, [emplacements, articleStock, selectedArticle, form.emplacement_source, form.emplacement_destination]);
 
   const qtyByEmplacement = useMemo(() => {
@@ -182,19 +189,21 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
         const withStock = (articleStock?.levels || [])
           .filter((l) => Number(l.quantite) > 0)
           .sort((a, b) => Number(b.quantite) - Number(a.quantite));
-        const prefer = (selectedArticle.emplacement || '').trim()
+        const preferRaw = (selectedArticle.emplacement || '').trim()
           || withStock[0]?.emplacement
           || '';
+        const prefer = preferRaw && !isSansEmplacement(preferRaw) ? preferRaw : (withStock.find((l) => !isSansEmplacement(l.emplacement))?.emplacement || '');
         if (prefer) {
           next.emplacement_source = prefer;
           changed = true;
         }
       }
       if (needsDest && !f.emplacement_destination) {
-        const prefer = (selectedArticle.emplacement || '').trim()
+        const preferRaw = (selectedArticle.emplacement || '').trim()
           || emplacements[0]
           || EMPLACEMENTS_STOCK[0]
           || '';
+        const prefer = preferRaw && !isSansEmplacement(preferRaw) ? preferRaw : (filterVisibleEmplacements(emplacements)[0] || EMPLACEMENTS_STOCK[0] || '');
         if (prefer) {
           next.emplacement_destination = prefer;
           changed = true;
@@ -493,8 +502,8 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
                             <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>{m.article_code}</div>
                           </td>
                           <td style={{ fontFamily: 'var(--font-head)', fontWeight: 700 }}>{m.quantite}</td>
-                          <td style={{ fontSize: '0.82rem' }}>{m.emplacement_source || '—'}</td>
-                          <td style={{ fontSize: '0.82rem' }}>{m.emplacement_destination || '—'}</td>
+                          <td style={{ fontSize: '0.82rem' }}>{formatEmplacementDisplay(m.emplacement_source)}</td>
+                          <td style={{ fontSize: '0.82rem' }}>{formatEmplacementDisplay(m.emplacement_destination)}</td>
                           <td style={{ fontSize: '0.82rem', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.motif || '—'}</td>
                           <td style={{ fontSize: '0.82rem' }}>{m.cree_par || '—'}</td>
                           <td>
@@ -674,14 +683,12 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
                       {stockAvant} {selectedArticle.unite || 'U'}
                     </div>
                   </div>
-                  {selectedArticle.emplacement && (
-                    <div><span style={{ fontSize: '0.7rem', color: 'var(--text-3)', textTransform: 'uppercase' }}>Emplacement</span><div>{selectedArticle.emplacement}</div></div>
-                  )}
+                  <div><span style={{ fontSize: '0.7rem', color: 'var(--text-3)', textTransform: 'uppercase' }}>Emplacement</span><div>{formatEmplacementDisplay(selectedArticle.emplacement)}</div></div>
                 </div>
                 {articleStock?.levels?.length > 0 && (
                   <div style={{ marginTop: 10, fontSize: '0.78rem', color: 'var(--text-2)' }}>
                     <strong>Par emplacement :</strong>{' '}
-                    {articleStock.levels.filter((l) => l.quantite > 0).map((l) => `${l.emplacement}: ${l.quantite}`).join(' · ') || 'Aucun stock réparti'}
+                    {articleStock.levels.filter((l) => l.quantite > 0).map((l) => `${formatEmplacementDisplay(l.emplacement)}: ${l.quantite}`).join(' · ') || 'Aucun stock réparti'}
                   </div>
                 )}
               </div>

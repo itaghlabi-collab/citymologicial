@@ -73,6 +73,33 @@ export const EMPLACEMENTS_STOCK = [
   'ATELIER DE FERRONNERIE',
   'BUREAU CITYMO BD MED 5',
 ];
+
+/** Emplacements legacy à masquer à l’affichage / dans les filtres (données DB inchangées). */
+export const DEPRECATED_EMPLACEMENTS = ['F5', 'G3'];
+/** Valeur de filtre UI — articles sans emplacement réel. */
+export const FILTER_SANS_EMPLACEMENT = '__sans_emplacement__';
+
+export function isDeprecatedEmplacement(value) {
+  const k = String(value || '').trim().toUpperCase();
+  return DEPRECATED_EMPLACEMENTS.some((d) => d.toUpperCase() === k);
+}
+
+/** Vide ou legacy (F5 / G3) → traité comme « sans emplacement » côté UI. */
+export function isSansEmplacement(value) {
+  const e = String(value || '').trim();
+  return !e || isDeprecatedEmplacement(e);
+}
+
+/** Affichage listes / fiches : tiret si vide ou emplacement deprecated. */
+export function formatEmplacementDisplay(value) {
+  return isSansEmplacement(value) ? '—' : String(value).trim();
+}
+
+/** Listes déroulantes : exclure F5 / G3 sans modifier la base. */
+export function filterVisibleEmplacements(list) {
+  return [...new Set((list || []).map((e) => String(e || '').trim()).filter((e) => e && !isDeprecatedEmplacement(e)))]
+    .sort((a, b) => a.localeCompare(b, 'fr'));
+}
 export const UNITES         = ['U', 'kg', 'g', 't', 'm', 'm²', 'm³', 'ml', 'cm', 'l', 'cl', 'sac', 'rouleau', 'boîte', 'palette', 'lot', 'pièce'];
 export const TYPES_MOUVEMENT = ['Entrée', 'Sortie', 'Transfert', 'Retour', 'Rebut'];
 export const STATUTS_MOUVEMENT = ['Brouillon', 'Validé', 'En cours', 'Terminé', 'Annulé'];

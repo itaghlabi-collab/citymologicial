@@ -6,9 +6,10 @@ import { ClipboardCheck, Play, RotateCcw, Loader2 } from 'lucide-react';
 import { listStockArticles } from '../../services/inventaire/stockArticles';
 import { useArticleScanner } from '../../hooks/useArticleScanner';
 import ArticleScanBar from './ArticleScanBar.jsx';
-import { EMPLACEMENTS_STOCK, INPUT_STYLE, SELECT_STYLE, KpiCard } from './shared.jsx';
+import { EMPLACEMENTS_STOCK, INPUT_STYLE, SELECT_STYLE, KpiCard, filterVisibleEmplacements } from './shared.jsx';
 
 export default function InventairePhysiqueScan({ emplacementsList = EMPLACEMENTS_STOCK }) {
+  const emplacements = filterVisibleEmplacements(emplacementsList);
   const [articles, setArticles] = useState([]);
   const [loading, setLoading] = useState(true);
   const [depot, setDepot] = useState('');
@@ -95,7 +96,7 @@ export default function InventairePhysiqueScan({ emplacementsList = EMPLACEMENTS
             <div style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 6 }}>Dépôt / emplacement</div>
             <select value={depot} onChange={(e) => setDepot(e.target.value)} style={SELECT_STYLE} disabled={active}>
               <option value="">— Choisir le dépôt —</option>
-              {emplacementsList.map((e) => <option key={e} value={e}>{e}</option>)}
+              {emplacements.map((e) => <option key={e} value={e}>{e}</option>)}
             </select>
           </div>
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>

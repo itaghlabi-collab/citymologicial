@@ -8,6 +8,7 @@ import {
   INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE, EMPLACEMENTS_STOCK,
   ETATS_ARTICLE_STOCK, CURRENT_STATES_ARTICLE,
   Modal, FField, FRow, SectionTitle,
+  filterVisibleEmplacements, isSansEmplacement, isDeprecatedEmplacement,
 } from './shared.jsx';
 import { updateStockArticle, patchStockArticle } from '../../services/inventaire/stockArticles';
 
@@ -18,7 +19,7 @@ export default function StockFicheEditModal({
   onClose,
   onDone,
 }) {
-  const emplacements = emplacementsList?.length ? emplacementsList : EMPLACEMENTS_STOCK;
+  const emplacements = filterVisibleEmplacements(emplacementsList?.length ? emplacementsList : EMPLACEMENTS_STOCK);
   const [form, setForm] = useState({
     emplacement: '',
     stock_minimum: '',
@@ -33,7 +34,8 @@ export default function StockFicheEditModal({
   useEffect(() => {
     if (!open || !article) return;
     setForm({
-      emplacement: article.emplacement || '',
+      // F5/G3 masqués à l’UI — valeur DB conservée tant que l’utilisateur ne choisit pas autre chose
+      emplacement: isSansEmplacement(article.emplacement) ? '' : (article.emplacement || ''),
       stock_minimum: article.stock_minimum ?? '',
       etat: article.etat || 'Neuf',
       valeur: article.valeur ?? '',
@@ -51,9 +53,14 @@ export default function StockFicheEditModal({
     setSaving(true);
     setError('');
     try {
+      let emplacementToSave = form.emplacement;
+      // Ne pas écraser F5/G3 en base si l’utilisateur n’a pas choisi un nouvel emplacement
+      if (!emplacementToSave && isDeprecatedEmplacement(article.emplacement)) {
+        emplacementToSave = article.emplacement;
+      }
       await updateStockArticle(article.id, {
         ...article,
-        emplacement: form.emplacement,
+        emplacement: emplacementToSave,
         stock_minimum: form.stock_minimum,
         etat: form.etat,
         valeur: form.valeur,
@@ -61,7 +68,7 @@ export default function StockFicheEditModal({
         quantite_initiale: '',
       });
       await patchStockArticle(article.id, {
-        emplacement: form.emplacement,
+        emplacement: emplacementToSave,
         current_state: form.current_state,
       });
       onDone?.();

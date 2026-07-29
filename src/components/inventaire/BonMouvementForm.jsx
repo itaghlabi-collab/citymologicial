@@ -12,7 +12,7 @@ import { useArticleScanner } from '../../hooks/useArticleScanner';
 import { addOrIncrementMovementLine } from '../../services/inventaire/articleScanWorkflow';
 import ArticleScanBar from './ArticleScanBar.jsx';
 import StockArticleSearch from './StockArticleSearch.jsx';
-import { EMPLACEMENTS_STOCK, TYPES_MOUVEMENT } from './shared.jsx';
+import { EMPLACEMENTS_STOCK, TYPES_MOUVEMENT, filterVisibleEmplacements, isDeprecatedEmplacement } from './shared.jsx';
 
 const CITYMO_LOGO = 'https://i.ibb.co/N6SbC06M/logopng.png';
 const CITYMO_COMPANY = {
@@ -67,8 +67,9 @@ function Label({ children, required }) {
 
 function emplacementOptions(current) {
   const v = (current || '').trim();
-  if (v && !EMPLACEMENTS_STOCK.includes(v)) return [v, ...EMPLACEMENTS_STOCK];
-  return EMPLACEMENTS_STOCK;
+  const base = filterVisibleEmplacements(EMPLACEMENTS_STOCK);
+  if (v && !isDeprecatedEmplacement(v) && !base.includes(v)) return [v, ...base];
+  return base;
 }
 
 function BonDocumentHeader({ form, onFieldChange }) {
