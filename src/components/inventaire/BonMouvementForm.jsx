@@ -11,6 +11,7 @@ import { listEmployees, employeeFullName } from '../../services/rh/employees';
 import { useArticleScanner } from '../../hooks/useArticleScanner';
 import { addOrIncrementMovementLine } from '../../services/inventaire/articleScanWorkflow';
 import ArticleScanBar from './ArticleScanBar.jsx';
+import StockArticleSearch from './StockArticleSearch.jsx';
 import { EMPLACEMENTS_STOCK, TYPES_MOUVEMENT } from './shared.jsx';
 
 const CITYMO_LOGO = 'https://i.ibb.co/N6SbC06M/logopng.png';
@@ -353,12 +354,14 @@ export default function BonMouvementForm({
               >
                 <div>
                   <Label required>Article (catalogue)</Label>
-                  <select value={ligne.article_id} onChange={(e) => updateLigne(idx, { article_id: e.target.value })} style={IS(false)}>
-                    <option value="">— Sélectionner —</option>
-                    {(articles || []).filter((a) => a.statut !== 'Archivé').map((a) => (
-                      <option key={a.id} value={a.id}>{a.code} — {a.designation}</option>
-                    ))}
-                  </select>
+                  <StockArticleSearch
+                    articles={articles}
+                    value={ligne.article_id}
+                    onChange={(id) => updateLigne(idx, { article_id: id })}
+                    disabled={form.applied}
+                    placeholder="Tapez une lettre pour rechercher…"
+                    inputStyle={IS(false)}
+                  />
                   <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 4 }}>
                     Unité : {art?.unite || '—'}
                   </div>

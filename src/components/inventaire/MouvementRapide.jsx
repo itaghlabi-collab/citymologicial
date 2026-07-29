@@ -20,6 +20,7 @@ import {
   listMouvementsRapides,
   getArticleStockInfo,
 } from '../../services/inventaire/mouvementRapide';
+import StockArticleSearch from './StockArticleSearch.jsx';
 
 const MOTIFS_ENTREE = [
   'Réception directe', 'Retour chantier', 'Retour utilisateur',
@@ -56,8 +57,6 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
   const [searchHist, setSearchHist] = useState('');
   const [filterType, setFilterType] = useState('');
   const [showFilters, setShowFilters] = useState(false);
-  const [articleSearch, setArticleSearch] = useState('');
-
   const emplacements = emplacementsList?.length ? emplacementsList : EMPLACEMENTS_STOCK;
 
   function initialForm() {
@@ -91,15 +90,6 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
     setForm((f) => ({ ...f, article_id: artId }));
     loadArticleStock(artId);
   }, [articles, loadArticleStock]);
-
-  const filteredArticles = useMemo(() => {
-    if (!articleSearch) return articles.slice(0, 50);
-    const q = articleSearch.toLowerCase();
-    return articles.filter((a) =>
-      (a.code || a.reference || '').toLowerCase().includes(q)
-      || (a.designation || a.nom || '').toLowerCase().includes(q)
-    ).slice(0, 50);
-  }, [articles, articleSearch]);
 
   const filteredHistorique = useMemo(() => {
     return historique.filter((m) => {
@@ -460,27 +450,12 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
             {/* Article selection */}
             <SectionTitle icon={<Package size={14} />}>Article *</SectionTitle>
             <div style={{ marginBottom: 16 }}>
-              <div style={{ position: 'relative', marginBottom: 8 }}>
-                <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
-                <input
-                  value={articleSearch}
-                  onChange={(e) => setArticleSearch(e.target.value)}
-                  placeholder="Rechercher un article..."
-                  style={{ ...INPUT_STYLE, paddingLeft: 32 }}
-                />
-              </div>
-              <select
+              <StockArticleSearch
+                articles={articles}
                 value={form.article_id}
-                onChange={(e) => handleSelectArticle(e.target.value)}
-                style={SELECT_STYLE}
-              >
-                <option value="">— Sélectionner un article —</option>
-                {filteredArticles.map((a) => (
-                  <option key={a.id} value={a.id}>
-                    {a.code || a.reference} — {a.designation || a.nom}
-                  </option>
-                ))}
-              </select>
+                onChange={handleSelectArticle}
+                placeholder="Tapez une lettre pour rechercher…"
+              />
             </div>
 
             {/* Article info card */}
