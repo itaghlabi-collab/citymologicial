@@ -83,6 +83,40 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
     setForm((f) => (f.cree_par ? f : { ...f, cree_par: sessionName }));
   }, [sessionName]);
 
+  const loadArticleStock = useCallback(async (artId) => {
+    if (!artId) { setArticleStock(null); return; }
+    try {
+      const info = await getArticleStockInfo(artId);
+      setArticleStock(info);
+    } catch { setArticleStock(null); }
+  }, []);
+
+  // Prefill article depuis la fiche article (navigation UI)
+  useEffect(() => {
+    let raw;
+    try {
+      raw = sessionStorage.getItem('citymo_mr_prefill_article');
+      if (!raw) return;
+      sessionStorage.removeItem('citymo_mr_prefill_article');
+    } catch {
+      return;
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return;
+    }
+    const art = (articles || []).find((a) => a.id === parsed?.id)
+      || (articles || []).find((a) => a.code === parsed?.code);
+    if (!art) return;
+    setView('form');
+    setType('Sortie');
+    setSelectedArticle(art);
+    setForm((f) => ({ ...f, article_id: art.id }));
+    loadArticleStock(art.id);
+  }, [articles, loadArticleStock]);
+
   const loadHistorique = useCallback(async () => {
     try {
       const data = await listMouvementsRapides();
@@ -91,14 +125,6 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
   }, []);
 
   useEffect(() => { loadHistorique(); }, [loadHistorique]);
-
-  const loadArticleStock = useCallback(async (artId) => {
-    if (!artId) { setArticleStock(null); return; }
-    try {
-      const info = await getArticleStockInfo(artId);
-      setArticleStock(info);
-    } catch { setArticleStock(null); }
-  }, []);
 
   const handleSelectArticle = useCallback((artId) => {
     const art = articles.find((a) => String(a.id) === String(artId));

@@ -5,10 +5,12 @@ import { useState } from 'react';
 import { BarChart2, Package, AlertTriangle, ArrowUpDown, Search, Filter, Plus } from 'lucide-react';
 import {
   INPUT_STYLE, SELECT_STYLE,
-  KpiCard, EmptyState, SectionTitle,
+  KpiCard, EmptyState,
   formatMAD, StockAlert
 } from './shared.jsx';
-import { ETATS_ARTICLE } from './shared.jsx';
+import ArticleRowActions from './ArticleRowActions';
+
+const OPEN_ARTICLE_KEY = 'citymo_stock_open_article';
 
 export default function Stocks({ articles, categories, depots, onNavigate }) {
   const [search, setSearch] = useState('');
@@ -19,6 +21,25 @@ export default function Stocks({ articles, categories, depots, onNavigate }) {
 
   const arts = articles || [];
 
+  function openArticleFiche(article) {
+    try {
+      sessionStorage.setItem(OPEN_ARTICLE_KEY, JSON.stringify({ id: article.id, code: article.code }));
+    } catch { /* ignore */ }
+    onNavigate?.('articles-stock');
+  }
+
+  function goMouvementRapide(article) {
+    try {
+      if (article?.id) {
+        sessionStorage.setItem('citymo_mr_prefill_article', JSON.stringify({
+          id: article.id,
+          code: article.code,
+          designation: article.designation,
+        }));
+      }
+    } catch { /* ignore */ }
+    onNavigate?.('mouvement-rapide');
+  }
   const filtered = arts.filter(x => {
     const cat   = (categories || []).find(c => String(c.id) === String(x.categorie_id));
     const depot = (depots || []).find(d => String(d.id) === String(x.depot_id));
@@ -166,56 +187,62 @@ export default function Stocks({ articles, categories, depots, onNavigate }) {
           />
         ) : (
           <div className="table-wrap">
-            <table>
+            <table className="inv-stocks-table">
               <thead>
                 <tr>
-                  <th>Article</th>
+                  <th>Référence</th>
+                  <th>Nom</th>
                   <th>Catégorie</th>
-                  <th>Dépôt</th>
                   <th>Quantité</th>
-                  <th>Stock min.</th>
+                  <th>Valeur</th>
+                  <th>Statut</th>
                   <th>État</th>
-                  <th>Valeur unitaire</th>
-                  <th>Valeur totale</th>
-                  <th>Statut stock</th>
+                  <th style={{ width: 52 }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.map(x => {
                   const cat   = (categories || []).find(c => String(c.id) === String(x.categorie_id));
-                  const depot = (depots || []).find(d => String(d.id) === String(x.depot_id));
                   const s     = getStatutStock(x.stock_actuel, x.stock_minimum);
-                  const valTot = (Number(x.valeur) || 0) * (Number(x.stock_actuel) || 0);
+                  const etatBadge = x.etat === 'Neuf' ? 'badge-green' : x.etat === 'Utilisé' ? 'badge-blue' : 'badge-orange';
                   return (
-                    <tr key={x.id}>
-                      <td>
-                        <div>
-                          <div style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.82rem', color: 'var(--red)' }}>{x.code}</div>
-                          <div style={{ fontSize: '0.82rem', fontWeight: 600 }}>{x.designation}</div>
-                        </div>
+                    <tr
+                      key={x.id}
+                      className="inv-articles-row"
+                      onClick={() => openArticleFiche(x)}
+                      style={{ cursor: 'pointer' }}
+                    >
+                      <td data-label="Référence">
+                        <span className="inv-articles-ref">{x.code}</span>
+                      </td>
+                      <td data-label="Nom">
+                        <div className="inv-articles-name">{x.designation}</div>
                       </td>
                       <td data-label="Catégorie">
-                        {cat ? <span className="badge badge-blue" style={{ fontSize: '0.7rem' }}>{cat.nom}</span> : '—'}
+                        {cat ? <span className="badge badge-blue inv-articles-badge">{cat.nom}</span> : '—'}
                       </td>
-                      <td data-label="Dépôt" style={{ fontSize: '0.83rem' }}>{depot ? depot.nom : '—'}</td>
                       <td data-label="Quantité">
-                        <span style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1rem', color: s.cls === 'badge-red' ? 'var(--red)' : s.cls === 'badge-orange' ? '#E65100' : 'var(--text)' }}>
+                        <span className="inv-articles-qty" style={{ color: s.cls === 'badge-red' ? 'var(--red)' : s.cls === 'badge-orange' ? '#E65100' : 'var(--text)' }}>
                           {x.stock_actuel || 0}
                         </span>
-                        <span style={{ marginLeft: 4, fontSize: '0.78rem', color: 'var(--text-3)' }}>{x.unite}</span>
+                        <span className="inv-articles-unit">{x.unite}</span>
+                        <StockAlert qte={x.stock_actuel || 0} seuil={x.stock_minimum} />
                       </td>
-                      <td data-label="Min." style={{ color: 'var(--text-3)', fontSize: '0.83rem' }}>{x.stock_minimum || '—'}</td>
-                      <td data-label="État">
-                        <span className={'badge ' + (x.etat === 'Neuf' ? 'badge-green' : x.etat === 'Utilisé' ? 'badge-blue' : 'badge-orange')} style={{ fontSize: '0.7rem' }}>{x.etat}</span>
-                      </td>
-                      <td data-label="Valeur u." style={{ fontFamily: 'var(--font-head)', fontWeight: 600 }}>
+                      <td data-label="Valeur" className="inv-articles-value">
                         {x.valeur ? formatMAD(x.valeur) : '—'}
                       </td>
-                      <td data-label="Valeur tot." style={{ fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--red)' }}>
-                        {valTot > 0 ? formatMAD(valTot) : '—'}
-                      </td>
                       <td data-label="Statut">
-                        <span className={'badge ' + s.cls} style={{ fontSize: '0.72rem' }}>{s.label}</span>
+                        <span className={'badge ' + s.cls + ' inv-articles-badge'}>{s.label}</span>
+                      </td>
+                      <td data-label="État">
+                        <span className={'badge ' + etatBadge + ' inv-articles-badge'}>{x.etat}</span>
+                      </td>
+                      <td data-label="Actions" onClick={(e) => e.stopPropagation()}>
+                        <ArticleRowActions
+                          onOpen={() => openArticleFiche(x)}
+                          onMouvementRapide={onNavigate ? () => goMouvementRapide(x) : undefined}
+                          canDelete={false}
+                        />
                       </td>
                     </tr>
                   );

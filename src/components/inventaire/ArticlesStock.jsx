@@ -1,11 +1,11 @@
 /**
  * ArticlesStock.jsx — Articles de stock ERP CITYMO (Supabase)
  */
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import {
-  Package, Plus, Edit2, Trash2, Eye, Search, Filter, Download,
+  Package, Plus, Edit2, Trash2, Search, Filter, Download,
   ChevronLeft, Loader2, RefreshCw, Archive, History, CheckCircle2,
-  Barcode, ScanLine, Printer, MapPin, AlertTriangle,
+  Barcode, ScanLine, Printer, MapPin, AlertTriangle, Zap, FileText,
 } from 'lucide-react';
 import { useStockArticles } from '../../hooks/useStockArticles';
 import { useStockCategories } from '../../hooks/useStockCategories';
@@ -17,8 +17,10 @@ import BarcodeDisplay from './BarcodeDisplay';
 import QrCodeDisplay from './QrCodeDisplay';
 import ArticleScanBar from './ArticleScanBar';
 import ArticleQuickActions, { ArticleMovementHistory } from './ArticleQuickActions';
+import ArticleRowActions from './ArticleRowActions';
 import { canExecuteStockAction } from '../../services/inventaire/articleQuickActions';
 import { useAuth } from '../../hooks/useAuth';
+import { can } from '../../services/admin/permissions';
 import { getArticleBarcodeValue, getArticlePublicUrl, syncArticleRoute } from '../../services/inventaire/barcodeUtils';
 import {
   INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE, UNITES,
@@ -29,6 +31,30 @@ import {
 } from './shared.jsx';
 
 const PAGE_SIZE = 15;
+const OPEN_ARTICLE_KEY = 'citymo_stock_open_article';
+
+/** Documents éventuels déjà présents sur l'article (affichage uniquement). */
+function collectArticleDocuments(article, movements = []) {
+  const docs = [];
+  const push = (label, value) => {
+    const v = String(value || '').trim();
+    if (!v) return;
+    if (docs.some((d) => d.label === label && d.value === v)) return;
+    docs.push({ label, value: v });
+  };
+  const a = article || {};
+  push('Facture', a.facture || a.facture_url || a.reference_facture);
+  push('Photo', a.photo || a.photo_url);
+  push('Fiche technique', a.fiche_technique || a.fiche_technique_url);
+  push('Manuel', a.manuel || a.manuel_url);
+  push('Garantie', a.garantie || a.garantie_url);
+  push('Document', a.document || a.document_url);
+  (movements || []).forEach((m) => {
+    const p = m.payload || {};
+    push('Facture / BL', p.reference_facture || p.reference_facture_bl);
+  });
+  return docs;
+}
 
 function emplacementMatch(a, b) {
   return String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
@@ -383,73 +409,90 @@ function ArticleForm({ initial, categories, onSave, onCancel, saving, emplacemen
 function DetailArticle({
   article, categories, movements, movementsLoading, stockLevels, stockLevelsLoading,
   onBack, onEdit, onHistory, onArchive, onBarcode, onRefresh, userName,
-  onScan, scanLoading, scanError,
+  onScan, scanLoading, scanError, onMouvementRapide, onDelete, canDelete = true,
 }) {
   const cat = (categories || []).find((c) => String(c.id) === String(article.categorie_id));
   const catName = cat ? (cat.nom || cat.name) : '';
   const stateBadge = BADGE_CURRENT_STATE[article.current_state] || 'badge-grey';
+  const etatBadge = article.etat === 'Neuf' ? 'badge-green' : article.etat === 'Utilisé' ? 'badge-blue' : 'badge-orange';
+  const statutBadge = article.statut === 'Actif' ? 'badge-green' : article.statut === 'Archivé' ? 'badge-orange' : 'badge-grey';
+  const documents = collectArticleDocuments(article, movements);
+  const historyRef = useRef(null);
+
+  const scrollToHistory = () => {
+    onHistory?.();
+    historyRef.current?.scrollIntoView?.({ behavior: 'smooth', block: 'start' });
+  };
 
   return (
     <div className="animate-fade-in inv-article-detail">
-      {/* Header Desktop — présentation inchangée */}
-      <div className="finance-page-actions finance-detail-actions inv-article-detail-header-desktop" style={{ marginBottom: 20, flexWrap: 'wrap', gap: 10 }}>
+      {/* Header Desktop */}
+      <div className="finance-page-actions finance-detail-actions inv-article-detail-header-desktop" style={{ marginBottom: 16, flexWrap: 'wrap', gap: 10 }}>
         <button type="button" className="btn btn-ghost btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }} onClick={onBack}>
           <ChevronLeft size={15} /> Retour
         </button>
-        <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1rem', flex: 1, minWidth: 0 }}>
-          {article.code} — {article.designation}
-        </h2>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '0.72rem', color: 'var(--red)', letterSpacing: '0.04em' }}>{article.code}</div>
+          <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.05rem', margin: 0 }}>{article.designation}</h2>
+        </div>
+        <span className={`badge ${catName ? 'badge-blue' : 'badge-grey'}`} style={{ fontSize: '0.72rem' }}>{catName || 'Sans catégorie'}</span>
         <span className={`badge ${stateBadge}`} style={{ fontSize: '0.72rem' }}>{article.current_state || 'Disponible'}</span>
-        <span className={`badge ${article.etat === 'Neuf' ? 'badge-green' : article.etat === 'Utilisé' ? 'badge-blue' : 'badge-orange'}`} style={{ fontSize: '0.72rem' }}>{article.etat}</span>
+        <span className={`badge ${etatBadge}`} style={{ fontSize: '0.72rem' }}>{article.etat}</span>
+        <span className={`badge ${statutBadge}`} style={{ fontSize: '0.72rem' }}>{article.statut}</span>
+      </div>
+
+      {/* Actions rapides — desktop */}
+      <div className="inv-article-detail-quickbar inv-article-detail-header-desktop" role="toolbar" aria-label="Actions rapides">
+        <button type="button" className="btn btn-secondary btn-sm" onClick={onEdit}><Edit2 size={13} /> Modifier</button>
+        {onMouvementRapide && (
+          <button type="button" className="btn btn-primary btn-sm" onClick={onMouvementRapide}><Zap size={13} /> Mouvement rapide</button>
+        )}
+        <button type="button" className="btn btn-ghost btn-sm" onClick={scrollToHistory}><History size={13} /> Voir historique</button>
         <button type="button" className="btn btn-ghost btn-sm" onClick={onBarcode}><Barcode size={13} /> Code-barres</button>
         <button type="button" className="btn btn-ghost btn-sm" onClick={() => downloadStockArticleLabel(article, 'standard')}><Download size={13} /> Étiquette</button>
         <button type="button" className="btn btn-ghost btn-sm" onClick={() => printStockArticleLabel(article, 'standard')}><Printer size={13} /> Imprimer</button>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={onHistory}><History size={13} /> Historique</button>
-        <button type="button" className="btn btn-secondary btn-sm" onClick={onEdit}><Edit2 size={13} /> Modifier</button>
         {article.statut !== 'Archivé' && (
           <button type="button" className="btn btn-ghost btn-sm" onClick={onArchive}><Archive size={13} /> Archiver</button>
         )}
+        {canDelete && (
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onDelete} style={{ color: 'var(--red)' }}><Trash2 size={13} /> Supprimer</button>
+        )}
       </div>
 
-      {/* Header Mobile PWA — hiérarchie compacte */}
+      {/* Header Mobile PWA */}
       <header className="inv-article-detail-header-mobile">
         <div className="inv-article-detail-code-block">
-          <span className="inv-article-detail-kicker">Code article</span>
+          <span className="inv-article-detail-kicker">Référence</span>
           <div className="inv-article-detail-code">{article.code}</div>
         </div>
         <div className="inv-article-detail-title-block">
-          <span className="inv-article-detail-kicker">Désignation</span>
+          <span className="inv-article-detail-kicker">Article</span>
           <h2 className="inv-article-detail-title">{article.designation}</h2>
         </div>
         <div className="inv-article-detail-badges">
+          {catName && <span className="badge badge-blue">{catName}</span>}
           <span className={`badge ${stateBadge}`}>{article.current_state || 'Disponible'}</span>
-          <span className={`badge ${article.etat === 'Neuf' ? 'badge-green' : article.etat === 'Utilisé' ? 'badge-blue' : 'badge-orange'}`}>{article.etat}</span>
-          {article.statut && article.statut !== 'Actif' && (
-            <span className={`badge ${article.statut === 'Archivé' ? 'badge-orange' : 'badge-grey'}`}>{article.statut}</span>
-          )}
+          <span className={`badge ${etatBadge}`}>{article.etat}</span>
+          {article.statut && <span className={`badge ${statutBadge}`}>{article.statut}</span>}
         </div>
         <div className="inv-article-detail-toolbar" role="toolbar" aria-label="Actions article">
           <button type="button" className="btn btn-ghost btn-sm inv-article-detail-tool" onClick={onBack} title="Retour" aria-label="Retour">
             <ChevronLeft size={18} />
           </button>
-          <button type="button" className="btn btn-ghost btn-sm inv-article-detail-tool" onClick={onBarcode} title="Code-barres" aria-label="Code-barres">
-            <Barcode size={18} />
-          </button>
-          <button type="button" className="btn btn-ghost btn-sm inv-article-detail-tool" onClick={() => downloadStockArticleLabel(article, 'standard')} title="Télécharger" aria-label="Télécharger">
-            <Download size={18} />
-          </button>
-          <button type="button" className="btn btn-ghost btn-sm inv-article-detail-tool" onClick={() => printStockArticleLabel(article, 'standard')} title="Imprimer" aria-label="Imprimer">
-            <Printer size={18} />
-          </button>
-          <button type="button" className="btn btn-ghost btn-sm inv-article-detail-tool" onClick={onHistory} title="Historique" aria-label="Historique">
-            <History size={18} />
-          </button>
           <button type="button" className="btn btn-secondary btn-sm inv-article-detail-tool" onClick={onEdit} title="Modifier" aria-label="Modifier">
             <Edit2 size={18} />
           </button>
-          {article.statut !== 'Archivé' && (
-            <button type="button" className="btn btn-ghost btn-sm inv-article-detail-tool" onClick={onArchive} title="Archiver" aria-label="Archiver">
-              <Archive size={18} />
+          {onMouvementRapide && (
+            <button type="button" className="btn btn-primary btn-sm inv-article-detail-tool" onClick={onMouvementRapide} title="Mouvement rapide" aria-label="Mouvement rapide">
+              <Zap size={18} />
+            </button>
+          )}
+          <button type="button" className="btn btn-ghost btn-sm inv-article-detail-tool" onClick={scrollToHistory} title="Historique" aria-label="Historique">
+            <History size={18} />
+          </button>
+          {canDelete && (
+            <button type="button" className="btn btn-ghost btn-sm inv-article-detail-tool" onClick={onDelete} title="Supprimer" aria-label="Supprimer" style={{ color: 'var(--red)' }}>
+              <Trash2 size={18} />
             </button>
           )}
         </div>
@@ -466,52 +509,82 @@ function DetailArticle({
 
       <div className="finance-detail-grid">
         <div>
+          {/* Informations article */}
           <div className="card" style={{ marginBottom: 14 }}>
-            <SectionTitle icon={<Package size={12} />}>État actuel & informations</SectionTitle>
-            <div style={{ marginBottom: 12, padding: '10px 12px', background: 'var(--bg-2)', borderRadius: 8, display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: '0.72rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase' }}>État opérationnel</span>
-              <span className={`badge ${stateBadge}`}>{article.current_state || 'Disponible'}</span>
-              <span style={{ fontSize: '0.78rem', color: 'var(--text-2)' }}>Emplacement : <strong>{article.emplacement || '—'}</strong></span>
-            </div>
+            <SectionTitle icon={<Package size={12} />}>Informations article</SectionTitle>
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12, fontSize: '0.84rem' }}>
               {[
-                ['Code article', article.code],
-                ['Code-barres', getArticleBarcodeValue(article)],
-                ['Désignation', article.designation],
+                ['Référence', article.code],
+                ['Nom', article.designation],
                 ['Catégorie', catName || '—'],
                 ['Type', article.type],
                 ['N° série', article.numero_serie],
-                ['Emplacement actuel', article.emplacement],
-                ['État physique', article.etat],
-                ['Statut opérationnel', article.current_state || 'Disponible'],
+                ['Unité', article.unite],
+                ['Emplacement', article.emplacement],
+                ['État', article.etat],
                 ['Statut', article.statut],
-                ['Stock minimum', article.stock_minimum || '—'],
+                ['État opérationnel', article.current_state || 'Disponible'],
+                ['Code-barres', getArticleBarcodeValue(article)],
               ].map(([l, v]) => (
                 <div key={l}>
                   <span style={{ color: 'var(--text-3)', fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', display: 'block' }}>{l}</span>
-                  <div style={{ fontWeight: 500 }}>{v || '—'}</div>
+                  <div style={{ fontWeight: l === 'Nom' || l === 'Référence' ? 700 : 500 }}>{v || '—'}</div>
                 </div>
               ))}
             </div>
           </div>
 
-          {article.description && (
-            <div className="card" style={{ marginBottom: 14 }}>
-              <SectionTitle>Description</SectionTitle>
+          {/* Description */}
+          <div className="card" style={{ marginBottom: 14 }}>
+            <SectionTitle>Description</SectionTitle>
+            {article.description ? (
               <p style={{ fontSize: '0.84rem', color: 'var(--text-2)', margin: 0, whiteSpace: 'pre-wrap' }}>{article.description}</p>
-            </div>
-          )}
+            ) : (
+              <p style={{ fontSize: '0.84rem', color: 'var(--text-3)', margin: 0 }}>Aucune description.</p>
+            )}
+            {article.notes ? (
+              <div style={{ marginTop: 12, paddingTop: 12, borderTop: '1px solid var(--border)' }}>
+                <span style={{ color: 'var(--text-3)', fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', display: 'block', marginBottom: 4 }}>Notes</span>
+                <p style={{ fontSize: '0.84rem', color: 'var(--text-2)', margin: 0, whiteSpace: 'pre-wrap' }}>{article.notes}</p>
+              </div>
+            ) : null}
+          </div>
 
-          <ArticleQuickActions
-            article={article}
-            userName={userName}
-            onDone={onRefresh}
-            onHistory={onHistory}
-            disabled={!canExecuteStockAction(article)}
-          />
+          {/* Documents */}
+          <div className="card" style={{ marginBottom: 14 }}>
+            <SectionTitle icon={<FileText size={12} />}>Documents</SectionTitle>
+            {documents.length === 0 ? (
+              <p style={{ fontSize: '0.84rem', color: 'var(--text-3)', margin: 0 }}>Aucun document.</p>
+            ) : (
+              <ul style={{ margin: 0, paddingLeft: 18, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {documents.map((d) => (
+                  <li key={`${d.label}-${d.value}`} style={{ fontSize: '0.84rem' }}>
+                    <strong>{d.label}</strong>
+                    {' — '}
+                    {/^https?:\/\//i.test(d.value) ? (
+                      <a href={d.value} target="_blank" rel="noreferrer">{d.value}</a>
+                    ) : d.value}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
 
-          <div className="card">
-            <SectionTitle icon={<History size={12} />}>Historique complet</SectionTitle>
+          {/* Gestion du stock (actions rapides métier existantes) */}
+          <div className="card" style={{ marginBottom: 14 }}>
+            <SectionTitle>Gestion du stock</SectionTitle>
+            <ArticleQuickActions
+              article={article}
+              userName={userName}
+              onDone={onRefresh}
+              onHistory={onHistory}
+              disabled={!canExecuteStockAction(article)}
+            />
+          </div>
+
+          {/* Historique des mouvements */}
+          <div className="card" ref={historyRef} id="inv-article-historique">
+            <SectionTitle icon={<History size={12} />}>Historique des mouvements</SectionTitle>
             <ArticleMovementHistory movements={movements} loading={movementsLoading} compact />
             {movements?.length > 10 && (
               <button type="button" className="btn btn-ghost btn-sm" style={{ marginTop: 10 }} onClick={onHistory}>
@@ -522,8 +595,9 @@ function DetailArticle({
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {/* Valeur & seuil */}
           <div className="card">
-            <SectionTitle>Stock & Valeur</SectionTitle>
+            <SectionTitle>Valeur &amp; seuil</SectionTitle>
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               <div>
                 <span style={{ color: 'var(--text-3)', fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', display: 'block' }}>Stock disponible</span>
@@ -534,9 +608,8 @@ function DetailArticle({
                 </div>
               </div>
               <div>
-                <span style={{ color: 'var(--text-3)', fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', display: 'block' }}>Stock minimum</span>
+                <span style={{ color: 'var(--text-3)', fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', display: 'block' }}>Seuil d&apos;alerte</span>
                 <div style={{ fontWeight: 600 }}>{article.stock_minimum || '—'} {article.stock_minimum ? article.unite : ''}</div>
-                <div style={{ fontSize: '0.7rem', color: 'var(--text-3)', marginTop: 4 }}>Seuil d&apos;alerte — pas le stock actuel</div>
               </div>
               <div>
                 <span style={{ color: 'var(--text-3)', fontSize: '0.72rem', fontWeight: 700, textTransform: 'uppercase', display: 'block' }}>Valeur unitaire</span>
@@ -555,6 +628,7 @@ function DetailArticle({
               />
             </div>
           </div>
+
           <div className="card">
             <SectionTitle>Suivi</SectionTitle>
             <div style={{ fontSize: '0.82rem', display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -563,6 +637,7 @@ function DetailArticle({
               <div><span style={{ color: 'var(--text-3)' }}>Dernier scan : </span>{article.last_scanned_at ? new Date(article.last_scanned_at).toLocaleString('fr-FR') : '—'}</div>
             </div>
           </div>
+
           <div className="card">
             <SectionTitle icon={<Barcode size={12} />}>Code-barres & QR code</SectionTitle>
             <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start', flexWrap: 'wrap' }}>
@@ -593,24 +668,40 @@ function DetailArticle({
   );
 }
 
-function MobileArticleRow({ item, catName, onView, onEdit, onArchive, onHistory, onDelete, onBarcode }) {
+function MobileArticleRow({
+  item, catName, onView, onEdit, onHistory, onDelete, onDuplicate, onMouvementRapide, canDelete,
+}) {
+  const stateBadge = BADGE_CURRENT_STATE[item.current_state] || 'badge-grey';
+  const etatBadge = item.etat === 'Neuf' ? 'badge-green' : item.etat === 'Utilisé' ? 'badge-blue' : 'badge-orange';
+  const statutBadge = item.statut === 'Actif' ? 'badge-green' : item.statut === 'Archivé' ? 'badge-orange' : 'badge-grey';
   return (
     <div className="inv-stock-mobile-row">
-      <div className="inv-stock-mobile-icon" aria-hidden><Package size={18} style={{ color: 'var(--red)' }} /></div>
-      <button type="button" className="inv-stock-mobile-name" onClick={onView}>
-        <strong>{item.code}</strong>
-        <span>{item.designation}</span>
-        <span style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>{catName} · Stock {item.stock_actuel || 0} {item.unite}</span>
+      <button type="button" className="inv-stock-mobile-main" onClick={onView}>
+        <div className="inv-stock-mobile-icon" aria-hidden><Package size={18} style={{ color: 'var(--red)' }} /></div>
+        <div className="inv-stock-mobile-name">
+          <strong>{item.code}</strong>
+          <span className="inv-stock-mobile-designation">{item.designation}</span>
+          <span className="inv-stock-mobile-meta">
+            {catName || '—'} · Qté {item.stock_actuel || 0} {item.unite}
+            {item.valeur ? ` · ${formatMAD(item.valeur)}` : ''}
+          </span>
+          <div className="inv-stock-mobile-badges">
+            {catName ? <span className="badge badge-blue">{catName}</span> : null}
+            <span className={`badge ${etatBadge}`}>{item.etat}</span>
+            <span className={`badge ${statutBadge}`}>{item.statut}</span>
+            <span className={`badge ${stateBadge}`}>{item.current_state || 'Disponible'}</span>
+          </div>
+        </div>
       </button>
-      <span className={`inv-stock-mobile-status ${item.statut === 'Actif' ? 'is-active' : 'is-inactive'}`} title={item.statut} aria-label={item.statut} />
-      <div className="inv-stock-mobile-actions">
-        <button type="button" className="btn btn-ghost btn-sm inv-stock-mobile-btn" title="Voir" onClick={onView}><Eye size={14} /></button>
-        <button type="button" className="btn btn-ghost btn-sm inv-stock-mobile-btn" title="Code-barres" onClick={onBarcode}><Barcode size={14} /></button>
-        <button type="button" className="btn btn-ghost btn-sm inv-stock-mobile-btn" title="Modifier" onClick={onEdit}><Edit2 size={14} /></button>
-        <button type="button" className="btn btn-ghost btn-sm inv-stock-mobile-btn" title="Historique" onClick={onHistory}><History size={14} /></button>
-        <button type="button" className="btn btn-ghost btn-sm inv-stock-mobile-btn" title="Archiver" onClick={onArchive}><Archive size={14} /></button>
-        <button type="button" className="btn btn-ghost btn-sm inv-stock-mobile-btn inv-stock-mobile-btn--danger" title="Supprimer" onClick={onDelete}><Trash2 size={14} /></button>
-      </div>
+      <ArticleRowActions
+        onOpen={onView}
+        onEdit={onEdit}
+        onMouvementRapide={onMouvementRapide}
+        onHistory={onHistory}
+        onDuplicate={onDuplicate}
+        onDelete={onDelete}
+        canDelete={canDelete}
+      />
     </div>
   );
 }
@@ -620,6 +711,7 @@ export default function ArticlesStock({
   emplacementsList = EMPLACEMENTS_STOCK,
   initialArticleCode,
   onArticleCodeConsumed,
+  onNavigate,
 }) {
   const { user } = useAuth();
   const userName = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Utilisateur';
@@ -629,6 +721,7 @@ export default function ArticlesStock({
     removeDuplicates, findDuplicates, lookupByBarcode,
   } = useStockArticles();
   const { records: categories } = useStockCategories();
+  const [canDelete, setCanDelete] = useState(true);
 
   const [search, setSearch] = useState('');
   const [filterCat, setFilterCat] = useState('');
@@ -659,6 +752,19 @@ export default function ArticlesStock({
     if (onArticlesChange) onArticlesChange(articles);
   }, [articles, onArticlesChange]);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const ok = await can(user, 'articles-stock', 'supprimer');
+        if (!cancelled) setCanDelete(ok);
+      } catch {
+        if (!cancelled) setCanDelete(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [user?.id, user?.email]);
+
   useEffect(() => { setPage(1); }, [search, filterCat, filterType, filterEtat, filterStatut, filterEmplacement, filterCurrentState]);
 
   const handleSave = useCallback(async (data) => {
@@ -666,9 +772,43 @@ export default function ArticlesStock({
     if (res.success) {
       setShowModal(false);
       setEditItem(null);
-      if (detailId === editItem?.id) setDetailId(null);
+      // rester sur la fiche si on éditait depuis la fiche
     }
-  }, [editItem, save, detailId]);
+  }, [editItem, save]);
+
+  function buildDuplicateDraft(article) {
+    if (!article) return null;
+    return {
+      ...article,
+      id: undefined,
+      code: '',
+      reference: '',
+      barcode_value: '',
+      stock_actuel: 0,
+      quantite_initiale: '',
+      date_entree_stock: todayInputDate(),
+      last_scanned_at: null,
+      dernier_mouvement: null,
+    };
+  }
+
+  function handleDuplicate(article) {
+    setEditItem(buildDuplicateDraft(article));
+    setShowModal(true);
+  }
+
+  function goMouvementRapide(article) {
+    try {
+      if (article?.id) {
+        sessionStorage.setItem('citymo_mr_prefill_article', JSON.stringify({
+          id: article.id,
+          code: article.code,
+          designation: article.designation,
+        }));
+      }
+    } catch { /* ignore */ }
+    onNavigate?.('mouvement-rapide');
+  }
 
   async function handleArchive(id) {
     if (!window.confirm('Archiver cet article ?')) return;
@@ -681,6 +821,7 @@ export default function ArticlesStock({
   }
 
   async function handleDelete(id) {
+    if (!canDelete) return;
     if (!window.confirm('Supprimer définitivement cet article ? (impossible si mouvements ou stock)')) return;
     const res = await remove(id);
     if (res.success) {
@@ -829,16 +970,39 @@ export default function ArticlesStock({
       const { article, error: lookupErr } = await lookupByBarcode(initialArticleCode, articles);
       if (cancelled) return;
       setScanLoading(false);
-      onArticleCodeConsumed?.();
-      if (!article) {
-        setScanError(lookupErr || 'Aucun article trouvé pour ce code.');
-        syncArticleRoute(null, { replace: true });
-        return;
+      if (article) {
+        openArticleDetail(article);
+        onArticleCodeConsumed?.();
+      } else {
+        setScanError(lookupErr || 'Article introuvable.');
+        onArticleCodeConsumed?.();
       }
-      openArticleDetail(article);
     })();
     return () => { cancelled = true; };
   }, [initialArticleCode, loading, articles, lookupByBarcode, onArticleCodeConsumed, openArticleDetail]);
+
+  // Ouverture depuis la vue Stocks (sessionStorage) — UI only
+  useEffect(() => {
+    if (loading || !articles.length) return;
+    let raw;
+    try {
+      raw = sessionStorage.getItem(OPEN_ARTICLE_KEY);
+      if (!raw) return;
+      sessionStorage.removeItem(OPEN_ARTICLE_KEY);
+    } catch {
+      return;
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      parsed = { code: raw };
+    }
+    const article = articles.find((a) => a.id === parsed?.id)
+      || articles.find((a) => getArticleBarcodeValue(a) === String(parsed?.code || '').trim())
+      || articles.find((a) => a.code === String(parsed?.code || '').trim());
+    if (article) openArticleDetail(article);
+  }, [loading, articles, openArticleDetail]);
 
   const filtered = useMemo(() => articles.filter((x) => {
     const q = search.toLowerCase();
@@ -914,6 +1078,9 @@ export default function ArticlesStock({
           onScan={handleBarcodeScan}
           scanLoading={scanLoading}
           scanError={scanError}
+          onMouvementRapide={onNavigate ? () => goMouvementRapide(detailArt) : undefined}
+          onDelete={canDelete ? () => handleDelete(detailArt.id) : undefined}
+          canDelete={canDelete}
         />
       )}
 
@@ -1074,7 +1241,7 @@ export default function ArticlesStock({
         <>
           <div className="card inv-stock-desktop-only" style={{ padding: 0 }}>
             <div className="table-wrap">
-              <table>
+              <table className="inv-articles-table">
                 <thead>
                   <tr>
                     <th style={{ width: 36 }}>
@@ -1085,61 +1252,70 @@ export default function ArticlesStock({
                         aria-label="Sélectionner la page"
                       />
                     </th>
-                    <th>Code</th>
-                    <th>Code-barres</th>
-                    <th>Désignation</th>
-                    <th>Type</th>
+                    <th>Référence</th>
+                    <th>Nom</th>
                     <th>Catégorie</th>
-                    <th>État op.</th>
-                    <th>Emplacement</th>
-                    <th>Dernier mouvement</th>
-                    <th>Dernier scan</th>
-                    <th>Actions</th>
+                    <th>Quantité</th>
+                    <th>Valeur</th>
+                    <th>Statut</th>
+                    <th>État</th>
+                    <th style={{ width: 52 }}>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {pageItems.map((x) => {
                     const cat = categories.find((c) => String(c.id) === String(x.categorie_id));
+                    const catName = cat ? (cat.nom || cat.name) : '';
                     const stateBadge = BADGE_CURRENT_STATE[x.current_state] || 'badge-grey';
+                    const etatBadge = x.etat === 'Neuf' ? 'badge-green' : x.etat === 'Utilisé' ? 'badge-blue' : 'badge-orange';
+                    const statutBadge = x.statut === 'Actif' ? 'badge-green' : x.statut === 'Archivé' ? 'badge-orange' : 'badge-grey';
                     return (
-                      <tr key={x.id}>
-                        <td>
+                      <tr
+                        key={x.id}
+                        className="inv-articles-row"
+                        onClick={() => openArticleDetail(x)}
+                        style={{ cursor: 'pointer' }}
+                      >
+                        <td onClick={(e) => e.stopPropagation()}>
                           <input type="checkbox" checked={selectedIds.includes(x.id)} onChange={() => toggleSelect(x.id)} aria-label={`Sélectionner ${x.code}`} />
                         </td>
-                        <td>
-                          <span style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.82rem', color: 'var(--red)' }}>{x.code}</span>
+                        <td data-label="Référence">
+                          <span className="inv-articles-ref">{x.code}</span>
                         </td>
-                        <td data-label="Code-barres">
-                          <button type="button" className="btn btn-ghost btn-sm" title={getArticleBarcodeValue(x)} onClick={() => openBarcode(x)} style={{ fontFamily: 'monospace', fontSize: '0.72rem', padding: '2px 6px' }}>
-                            <Barcode size={12} /> {getArticleBarcodeValue(x)}
-                          </button>
+                        <td data-label="Nom">
+                          <div className="inv-articles-name">{x.designation}</div>
+                          {x.emplacement ? (
+                            <div className="inv-articles-sub">{x.emplacement}</div>
+                          ) : null}
                         </td>
-                        <td data-label="Désignation" style={{ fontWeight: 600 }}>{x.designation}</td>
-                        <td data-label="Type" style={{ fontSize: '0.82rem' }}>{x.type || '—'}</td>
                         <td data-label="Catégorie">
-                          {cat ? <span className="badge badge-blue" style={{ fontSize: '0.7rem' }}>{cat.nom || cat.name}</span> : '—'}
+                          {catName ? <span className="badge badge-blue inv-articles-badge">{catName}</span> : '—'}
                         </td>
-                        <td data-label="État op.">
-                          <span className={`badge ${stateBadge}`} style={{ fontSize: '0.7rem' }}>{x.current_state || 'Disponible'}</span>
+                        <td data-label="Quantité">
+                          <span className="inv-articles-qty">{x.stock_actuel || 0}</span>
+                          <span className="inv-articles-unit">{x.unite}</span>
+                          <StockAlert qte={x.stock_actuel || 0} seuil={x.stock_minimum} />
                         </td>
-                        <td data-label="Lieu stock" style={{ fontSize: '0.82rem', color: 'var(--text-2)' }}>{x.emplacement || '—'}</td>
-                        <td data-label="Dernier mouvement" style={{ fontSize: '0.78rem', color: 'var(--text-2)' }}>
-                          {x.dernier_mouvement ? (
-                            <span>{x.dernier_mouvement.date_label}<br /><span style={{ color: 'var(--text-3)' }}>{x.dernier_mouvement.action}</span></span>
-                          ) : '—'}
+                        <td data-label="Valeur" className="inv-articles-value">
+                          {x.valeur ? formatMAD(x.valeur) : '—'}
                         </td>
-                        <td data-label="Dernier scan" style={{ fontSize: '0.78rem', color: 'var(--text-2)' }}>
-                          {x.last_scanned_at ? new Date(x.last_scanned_at).toLocaleDateString('fr-FR') : '—'}
+                        <td data-label="Statut">
+                          <span className={`badge ${statutBadge} inv-articles-badge`}>{x.statut}</span>
+                          <span className={`badge ${stateBadge} inv-articles-badge`} style={{ marginLeft: 4 }}>{x.current_state || 'Disponible'}</span>
                         </td>
-                        <td>
-                          <div style={{ display: 'flex', gap: 3, flexWrap: 'wrap' }}>
-                            <button type="button" className="btn btn-secondary btn-sm" title="Voir" onClick={() => openArticleDetail(x)}><Eye size={13} /></button>
-                            <button type="button" className="btn btn-ghost btn-sm" title="Code-barres" onClick={() => openBarcode(x)}><Barcode size={13} /></button>
-                            <button type="button" className="btn btn-ghost btn-sm" title="Modifier" onClick={() => { setEditItem(x); setShowModal(true); }}><Edit2 size={13} /></button>
-                            <button type="button" className="btn btn-ghost btn-sm" title="Historique" onClick={() => openHistory(x.id)}><History size={13} /></button>
-                            <button type="button" className="btn btn-ghost btn-sm" title="Archiver" onClick={() => handleArchive(x.id)}><Archive size={13} /></button>
-                            <button type="button" className="btn btn-ghost btn-sm" title="Supprimer" onClick={() => handleDelete(x.id)} style={{ color: 'var(--red)' }}><Trash2 size={13} /></button>
-                          </div>
+                        <td data-label="État">
+                          <span className={`badge ${etatBadge} inv-articles-badge`}>{x.etat}</span>
+                        </td>
+                        <td data-label="Actions" onClick={(e) => e.stopPropagation()}>
+                          <ArticleRowActions
+                            onOpen={() => openArticleDetail(x)}
+                            onEdit={() => { setEditItem(x); setShowModal(true); }}
+                            onMouvementRapide={onNavigate ? () => goMouvementRapide(x) : undefined}
+                            onHistory={() => openHistory(x.id)}
+                            onDuplicate={() => handleDuplicate(x)}
+                            onDelete={() => handleDelete(x.id)}
+                            canDelete={canDelete}
+                          />
                         </td>
                       </tr>
                     );
@@ -1158,11 +1334,12 @@ export default function ArticlesStock({
                   item={x}
                   catName={cat ? (cat.nom || cat.name) : '—'}
                   onView={() => openArticleDetail(x)}
-                  onBarcode={() => openBarcode(x)}
                   onEdit={() => { setEditItem(x); setShowModal(true); }}
                   onHistory={() => openHistory(x.id)}
-                  onArchive={() => handleArchive(x.id)}
+                  onDuplicate={() => handleDuplicate(x)}
+                  onMouvementRapide={onNavigate ? () => goMouvementRapide(x) : undefined}
                   onDelete={() => handleDelete(x.id)}
+                  canDelete={canDelete}
                 />
               );
             })}

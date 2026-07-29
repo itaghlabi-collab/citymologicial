@@ -182,28 +182,37 @@ export function ArticleMovementHistory({ movements, loading, compact = false }) 
   const rows = compact ? movements.slice(0, 10) : movements;
   return (
     <div className="table-wrap">
-      <table>
+      <table className="inv-article-mvt-table">
         <thead>
           <tr>
             <th>Date</th>
-            <th>Utilisateur</th>
-            <th>Action</th>
+            <th>Type</th>
+            <th>Quantité</th>
             <th>Origine</th>
             <th>Destination</th>
-            <th>Observation</th>
+            <th>Projet</th>
+            <th>Utilisateur</th>
+            <th>Référence</th>
           </tr>
         </thead>
         <tbody>
-          {rows.map((m) => (
-            <tr key={m.id}>
-              <td style={{ fontSize: '0.8rem' }}>{m.date_label || m.date || '—'}</td>
-              <td style={{ fontSize: '0.8rem' }}>{m.utilisateur || '—'}</td>
-              <td style={{ fontSize: '0.8rem', fontWeight: 600 }}>{m.action || m.motif || m.type}</td>
-              <td style={{ fontSize: '0.8rem', color: 'var(--text-2)' }}>{m.origine || '—'}</td>
-              <td style={{ fontSize: '0.8rem', color: 'var(--text-2)' }}>{m.destination || '—'}</td>
-              <td style={{ fontSize: '0.8rem', color: 'var(--text-2)' }}>{m.observation || '—'}</td>
-            </tr>
-          ))}
+          {rows.map((m) => {
+            const p = m.payload || {};
+            const projet = p.projet || p.projet_lie || p.project_name || p.destination_projet || '—';
+            const qty = m.quantite != null && m.quantite !== '' ? m.quantite : '—';
+            return (
+              <tr key={m.id}>
+                <td style={{ fontSize: '0.8rem' }}>{m.date_label || m.date || '—'}</td>
+                <td style={{ fontSize: '0.8rem', fontWeight: 600 }}>{m.type || m.action || m.motif || '—'}</td>
+                <td style={{ fontSize: '0.8rem', fontFamily: 'var(--font-head)', fontWeight: 700 }}>{qty}</td>
+                <td style={{ fontSize: '0.8rem', color: 'var(--text-2)' }}>{m.origine || '—'}</td>
+                <td style={{ fontSize: '0.8rem', color: 'var(--text-2)' }}>{m.destination || '—'}</td>
+                <td style={{ fontSize: '0.8rem', color: 'var(--text-2)' }}>{projet}</td>
+                <td style={{ fontSize: '0.8rem' }}>{m.utilisateur || '—'}</td>
+                <td style={{ fontSize: '0.78rem', fontFamily: 'monospace', color: 'var(--text-2)' }}>{m.ref || '—'}</td>
+              </tr>
+            );
+          })}
         </tbody>
       </table>
     </div>

@@ -5397,8 +5397,126 @@ tbody tr:last-child td { border-bottom: none; }
 .mes-docs-mobile-only { display: none !important; }
 .mes-docs-desktop-only { display: block; }
 
-.inv-stock-mobile-only { display: none !important; }
-.inv-stock-desktop-only { display: block; }
+/* ── Articles / Stocks — fiche & tableau lisible ── */
+.inv-article-detail-quickbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 16px;
+  padding: 10px 12px;
+  background: var(--bg-2, #f7f7f8);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+
+.inv-articles-table,
+.inv-stocks-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.inv-articles-table th,
+.inv-articles-table td,
+.inv-stocks-table th,
+.inv-stocks-table td {
+  padding: 14px 12px;
+  vertical-align: middle;
+}
+
+.inv-articles-row:hover {
+  background: rgba(0, 0, 0, 0.025);
+}
+
+.inv-articles-ref {
+  font-family: var(--font-head);
+  font-weight: 800;
+  font-size: 0.88rem;
+  color: var(--red);
+  letter-spacing: 0.02em;
+}
+
+.inv-articles-name {
+  font-weight: 700;
+  font-size: 0.9rem;
+  color: var(--text);
+  line-height: 1.35;
+}
+
+.inv-articles-sub {
+  margin-top: 2px;
+  font-size: 0.72rem;
+  color: var(--text-3);
+}
+
+.inv-articles-qty {
+  font-family: var(--font-head);
+  font-weight: 800;
+  font-size: 1.05rem;
+}
+
+.inv-articles-unit {
+  margin-left: 4px;
+  font-size: 0.75rem;
+  color: var(--text-3);
+}
+
+.inv-articles-value {
+  font-family: var(--font-head);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.inv-articles-badge {
+  font-size: 0.7rem !important;
+  font-weight: 700;
+}
+
+.inv-article-row-actions-btn {
+  padding: 6px 10px !important;
+}
+
+.inv-stock-mobile-main {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  flex: 1;
+  min-width: 0;
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+  color: inherit;
+}
+
+.inv-stock-mobile-designation {
+  font-weight: 600 !important;
+  font-size: 0.88rem !important;
+  color: var(--text) !important;
+}
+
+.inv-stock-mobile-meta {
+  font-size: 0.72rem !important;
+  color: var(--text-3) !important;
+}
+
+.inv-stock-mobile-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
+
+.inv-stock-mobile-badges .badge {
+  font-size: 0.65rem;
+}
+
+.inv-article-mvt-table th,
+.inv-article-mvt-table td {
+  padding: 10px 8px;
+  white-space: nowrap;
+}
+
 
 /* Fiche article stock — header dual (desktop / mobile) */
 .inv-article-detail-header-desktop {

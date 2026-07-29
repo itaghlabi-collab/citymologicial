@@ -53,6 +53,7 @@ export default function Inventaire({ activeTab, initialArticleCode, onArticleCod
           emplacementsList={emplacementNoms}
           initialArticleCode={initialArticleCode}
           onArticleCodeConsumed={onArticleCodeConsumed}
+          onNavigate={onNavigate}
         />
       )}
       {tab === 'depots' && (
