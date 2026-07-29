@@ -22,7 +22,8 @@ import {
   isRealFieldConflict,
   getReadableMessage,
 } from '../services/ocr';
-import { captureCINFromVideo, prepareImportedCINImage } from '../services/cinCapture';
+import { captureCINFromVideo, prepareImportedCINImage, dataUrlToCaptureFile } from '../services/cinCapture';
+import CINManualCropModal from './cin/CINManualCropModal';
 import { generateWorkerPdf } from '../services/rh/workerPdf';
 import { workerTarifJournalier } from '../services/rh/workers';
 
@@ -44,10 +45,10 @@ const STATUT_CFG = {
 };
 
 /** CIN marocaine ID-1 : 85.60 mm × 53.98 mm */
-const CIN_HINT = 'Alignez la carte dans le cadre';
-const SCANNER_PLACE_HINT = 'Alignez la carte dans le cadre, nous recadrons automatiquement';
+const CIN_HINT = 'Placez toute la carte dans le cadre';
+const SCANNER_PLACE_HINT = 'Placez toute la carte dans le cadre';
 /** Identifiant build — vérifier dans la console Safari mobile que cette version est chargée */
-const CIN_SCANNER_VERSION = '2026-07-27-cin-back-btn';
+const CIN_SCANNER_VERSION = '2026-07-29-cin-contain-frame';
 
 const EMPTY_FORM = {
   prenom: '', nom: '', telephone: '', cin: '', fonction: '', tarif: '', tarif_unite: 'jour',
@@ -127,13 +128,14 @@ function OcrConfBadge({ meta }) {
 }
 
 /** Cadre preview CIN — ratio officiel 85.60 / 53.98 mm */
-function CINFrame({ children, hasImage, hint = CIN_HINT, className = '', detected = false }) {
+function CINFrame({ children, hasImage, hint = CIN_HINT, className = '', detected = false, needsCheck = false }) {
   return (
     <div
       className={
         'cin-id-frame'
         + (hasImage ? ' has-img' : '')
         + (detected ? ' cin-id-frame--detected' : '')
+        + (needsCheck ? ' cin-id-frame--check' : '')
         + (className ? ' ' + className : '')
       }
     >
@@ -150,6 +152,11 @@ function CINFrame({ children, hasImage, hint = CIN_HINT, className = '', detecte
       {detected && hasImage && (
         <div className="cin-id-frame-detected-badge">
           <CheckCircle size={12} /> Carte correctement détectée
+        </div>
+      )}
+      {needsCheck && hasImage && !detected && (
+        <div className="cin-id-frame-check-badge">
+          <AlertCircle size={12} /> Cadrage à vérifier
         </div>
       )}
     </div>
@@ -223,12 +230,22 @@ function PhotoUpload({ value, onChange, label }) {
 }
 
 /* ── Zone Documents CIN — import image (pas d'ouverture caméra auto) ── */
-function CINDocZone({ side, value, onChange, quality, cropHint }) {
+function CINDocZone({
+  side,
+  value,
+  onChange,
+  quality,
+  cropHint,
+  detected = false,
+  originalDataUrl = '',
+  onUseOriginal,
+  onOpenManualCrop,
+}) {
   const inputRef = useRef(null);
   const [dragOver, setDragOver] = useState(false);
   const isRecto = side === 'recto';
   const title = isRecto ? 'CIN recto' : 'CIN verso';
-  const croppedOk = Boolean(value) && !cropHint;
+  const needsCheck = Boolean(value) && (!detected || Boolean(cropHint));
   const qLabel = quality?.label;
 
   function isImageFile(file) {
@@ -276,8 +293,9 @@ function CINDocZone({ side, value, onChange, quality, cropHint }) {
       >
         <CINFrame
           hasImage={Boolean(value)}
-          detected={croppedOk}
-          hint={value ? '' : 'Alignez la carte dans le cadre'}
+          detected={Boolean(value) && detected && !cropHint}
+          needsCheck={needsCheck}
+          hint={value ? '' : CIN_HINT}
           className="cin-doc-zone-frame"
         >
           {value ? (
@@ -308,16 +326,30 @@ function CINDocZone({ side, value, onChange, quality, cropHint }) {
 
       <div className="cin-doc-zone-actions">
         <button type="button" className="cin-doc-zone-gallery cin-doc-zone-gallery--primary" onClick={openGallery}>
-          <Camera size={14} /> {value ? 'Reprendre / Recadrer' : 'Scanner ou importer'}
+          <Camera size={14} /> {value ? 'Reprendre la photo' : 'Scanner ou importer'}
         </button>
+        {value && (
+          <button type="button" className="cin-doc-zone-gallery" onClick={() => onOpenManualCrop?.(originalDataUrl || value)}>
+            <ScanLine size={12} /> Recadrer manuellement
+          </button>
+        )}
         {value && (
           <button type="button" className="cin-doc-zone-gallery" onClick={() => onChange('', null)}>
             <X size={12} /> Supprimer
           </button>
         )}
       </div>
-      {cropHint && (
-        <div className="cin-crop-hint">{getReadableMessage(cropHint, 'Recadrage automatique impossible, vérifiez la photo')}</div>
+      {needsCheck && (
+        <div className="cin-crop-hint-actions">
+          <div className="cin-crop-hint">{getReadableMessage(cropHint, 'Cadrage à vérifier')}</div>
+          <div className="cin-crop-hint-btns">
+            <button type="button" className="btn btn-ghost btn-sm" onClick={openGallery}>Reprendre la photo</button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => onOpenManualCrop?.(originalDataUrl || value)}>Recadrer manuellement</button>
+            {originalDataUrl && onUseOriginal && (
+              <button type="button" className="btn btn-ghost btn-sm" onClick={onUseOriginal}>Continuer avec la photo originale</button>
+            )}
+          </div>
+        </div>
       )}
       {qLabel && qualityText && (
         <div className={'cin-quality-badge cin-quality-badge--pill cin-quality-badge--' + qLabel}>
@@ -330,6 +362,7 @@ function CINDocZone({ side, value, onChange, quality, cropHint }) {
         ref={inputRef}
         type="file"
         accept="image/jpeg,image/png,image/webp"
+        capture="environment"
         onChange={e => { handleFile(e.target.files?.[0]); e.target.value = ''; }}
         style={{ display: 'none' }}
         tabIndex={-1}
@@ -691,11 +724,14 @@ function CINScanner({
     if (!streamRef.current || video.readyState < 2) return;
 
     try {
-      const { previewDataUrl, ocrFile, fullDataUrl } = await captureCINFromVideo(video, frameEl, sideRef.current);
+      const {
+        previewDataUrl, ocrFile, fullDataUrl, detected, cropMessage,
+      } = await captureCINFromVideo(video, frameEl, sideRef.current);
       console.info('[OCR CIN] using original/cropped file', {
         side: sideRef.current,
         ocrBytes: ocrFile.size,
-        display: 'cropped-viewfinder',
+        detected: Boolean(detected),
+        display: 'unified-preview-ocr',
       });
 
       setCaptured(true);
@@ -704,18 +740,20 @@ function CINScanner({
       if (sideRef.current === 'recto') {
         rectoRef.current = previewDataUrl;
         rectoFileRef.current = ocrFile;
-        rectoFullDataUrlRef.current = fullDataUrl || null;
+        rectoFullDataUrlRef.current = fullDataUrl || previewDataUrl;
         setRecto(previewDataUrl);
+        if (!detected && cropMessage) setError(cropMessage);
         if (!isCaptureMode && !versoRef.current) setSide('verso');
       } else {
         versoRef.current = previewDataUrl;
         versoFileRef.current = ocrFile;
-        versoFullDataUrlRef.current = fullDataUrl || null;
+        versoFullDataUrlRef.current = fullDataUrl || previewDataUrl;
         setVerso(previewDataUrl);
+        if (!detected && cropMessage) setError(cropMessage);
       }
     } catch (err) {
       console.error('[SCAN CIN] capture failed', err);
-      setError('Capture impossible — cadrez la CIN dans le rectangle rouge et réessayez.');
+      setError('Capture impossible — placez toute la carte dans le cadre et réessayez.');
     }
   }
 
@@ -907,7 +945,7 @@ function CINScanner({
         <defs>
           <mask id={`cin-cutout-${importUid}`}>
             <rect width="100" height="100" fill="white" />
-            <rect x="9" y="24.15" width="82" height="51.70" rx="2.2" ry="2.2" fill="black" />
+            <rect x="6" y="22.25" width="88" height="55.50" rx="2.2" ry="2.2" fill="black" />
           </mask>
         </defs>
         <rect width="100" height="100" fill="rgba(0,0,0,0.72)" mask={`url(#cin-cutout-${importUid})`} />
@@ -932,8 +970,13 @@ function CINScanner({
         <span className="cin-vf-corner cin-vf-corner--bl" />
         <span className="cin-vf-corner cin-vf-corner--br" />
         {frameReady && cameraActive && (
-          <div className="cin-vf-detected">
-            <CheckCircle size={14} /> Carte correctement détectée
+          <div className="cin-vf-ready-hint">
+            Cadre stable — appuyez pour capturer
+          </div>
+        )}
+        {!frameReady && cameraActive && (
+          <div className="cin-vf-place-hint">
+            Placez toute la carte dans le cadre
           </div>
         )}
         {captured && <div className="cin-capture-flash" />}
@@ -1251,11 +1294,17 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
   const [qualityVerso, setQualityVerso] = useState(null);
   const [cropHintRecto, setCropHintRecto] = useState('');
   const [cropHintVerso, setCropHintVerso] = useState('');
+  const [detectedRecto, setDetectedRecto] = useState(false);
+  const [detectedVerso, setDetectedVerso] = useState(false);
+  const [originalRecto, setOriginalRecto] = useState('');
+  const [originalVerso, setOriginalVerso] = useState('');
+  const [manualCropSide, setManualCropSide] = useState(null); // 'recto' | 'verso' | null
   const [fieldConflicts, setFieldConflicts] = useState(null);
   const [duplicateHit, setDuplicateHit] = useState(null);
   const [cinAmbiguous, setCinAmbiguous] = useState(null); // candidates[]
   const ocrFilesRef = useRef({ recto: null, verso: null });
   const ocrFullDataUrlRef = useRef({ recto: null, verso: null });
+  const cinOriginalRef = useRef({ recto: null, verso: null });
   const lastOcrMetaRef = useRef(null);
 
   const formTabs = [
@@ -1282,12 +1331,20 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
       set(side === 'recto' ? 'cin_recto' : 'cin_verso', '');
       ocrFilesRef.current[side] = null;
       ocrFullDataUrlRef.current[side] = null;
-      if (side === 'recto') { setQualityRecto(null); setCropHintRecto(''); }
-      else { setQualityVerso(null); setCropHintVerso(''); }
+      cinOriginalRef.current[side] = null;
+      if (side === 'recto') {
+        setQualityRecto(null); setCropHintRecto(''); setDetectedRecto(false); setOriginalRecto('');
+      } else {
+        setQualityVerso(null); setCropHintVerso(''); setDetectedVerso(false); setOriginalVerso('');
+      }
       return;
     }
     if (!file) {
       set(side === 'recto' ? 'cin_recto' : 'cin_verso', preview);
+      cinOriginalRef.current[side] = preview;
+      if (side === 'recto') setOriginalRecto(preview);
+      else setOriginalVerso(preview);
+      ocrFullDataUrlRef.current[side] = preview;
       const q = await assessClientQuality(preview);
       if (side === 'recto') setQualityRecto(q);
       else setQualityVerso(q);
@@ -1295,32 +1352,79 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
     }
     try {
       const prepared = await prepareImportedCINImage(preview, file, side);
-      // Image recadrée pour preview ET OCR
+      // Même image pour preview ET OCR
       set(side === 'recto' ? 'cin_recto' : 'cin_verso', prepared.previewDataUrl);
       ocrFilesRef.current[side] = prepared.ocrFile;
       ocrFullDataUrlRef.current[side] = prepared.fullDataUrl || prepared.previewDataUrl || null;
-      const q = await assessClientQuality(prepared.fullDataUrl || prepared.previewDataUrl);
+      cinOriginalRef.current[side] = prepared.originalDataUrl || preview;
+      if (side === 'recto') setOriginalRecto(prepared.originalDataUrl || preview);
+      else setOriginalVerso(prepared.originalDataUrl || preview);
+      const q = await assessClientQuality(prepared.previewDataUrl);
       if (side === 'recto') {
         setQualityRecto(q);
-        setCropHintRecto(prepared.cropFailed ? (prepared.cropMessage || 'Recadrage automatique impossible, vérifiez la photo') : '');
+        setDetectedRecto(Boolean(prepared.detected));
+        setCropHintRecto(prepared.detected ? '' : (prepared.cropMessage || 'Cadrage à vérifier'));
       } else {
         setQualityVerso(q);
-        setCropHintVerso(prepared.cropFailed ? (prepared.cropMessage || 'Recadrage automatique impossible, vérifiez la photo') : '');
+        setDetectedVerso(Boolean(prepared.detected));
+        setCropHintVerso(prepared.detected ? '' : (prepared.cropMessage || 'Cadrage à vérifier'));
       }
     } catch (err) {
       console.error('[SCAN CIN] doc zone crop failed', getReadableMessage(err));
       set(side === 'recto' ? 'cin_recto' : 'cin_verso', preview);
       ocrFilesRef.current[side] = file;
       ocrFullDataUrlRef.current[side] = preview;
+      cinOriginalRef.current[side] = preview;
+      if (side === 'recto') setOriginalRecto(preview);
+      else setOriginalVerso(preview);
       const q = await assessClientQuality(preview);
       if (side === 'recto') {
         setQualityRecto(q);
-        setCropHintRecto('Recadrage automatique impossible, vérifiez la photo');
+        setDetectedRecto(false);
+        setCropHintRecto('Cadrage à vérifier');
       } else {
         setQualityVerso(q);
-        setCropHintVerso('Recadrage automatique impossible, vérifiez la photo');
+        setDetectedVerso(false);
+        setCropHintVerso('Cadrage à vérifier');
       }
     }
+  }
+
+  async function applyCinOriginal(side) {
+    const original = cinOriginalRef.current[side] || (side === 'recto' ? originalRecto : originalVerso);
+    if (!original) return;
+    const file = dataUrlToCaptureFile(original, side, 'original');
+    set(side === 'recto' ? 'cin_recto' : 'cin_verso', original);
+    ocrFilesRef.current[side] = file;
+    ocrFullDataUrlRef.current[side] = original;
+    const q = await assessClientQuality(original);
+    if (side === 'recto') {
+      setQualityRecto(q);
+      setDetectedRecto(false);
+      setCropHintRecto('Cadrage à vérifier');
+    } else {
+      setQualityVerso(q);
+      setDetectedVerso(false);
+      setCropHintVerso('Cadrage à vérifier');
+    }
+  }
+
+  async function applyManualCrop(side, result) {
+    if (!result?.previewDataUrl) return;
+    set(side === 'recto' ? 'cin_recto' : 'cin_verso', result.previewDataUrl);
+    ocrFilesRef.current[side] = result.ocrFile;
+    ocrFullDataUrlRef.current[side] = result.fullDataUrl || result.previewDataUrl;
+    const q = await assessClientQuality(result.previewDataUrl);
+    if (side === 'recto') {
+      setQualityRecto(q);
+      setDetectedRecto(true);
+      setCropHintRecto('');
+    } else {
+      setQualityVerso(q);
+      setDetectedVerso(true);
+      setCropHintVerso('');
+    }
+    setManualCropSide(null);
   }
 
   function openCINScanner() {
@@ -1669,6 +1773,18 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
         />
       )}
 
+      <CINManualCropModal
+        open={Boolean(manualCropSide)}
+        side={manualCropSide || 'recto'}
+        imageDataUrl={
+          manualCropSide === 'verso'
+            ? (originalVerso || form.cin_verso)
+            : (originalRecto || form.cin_recto)
+        }
+        onCancel={() => setManualCropSide(null)}
+        onValidate={(result) => applyManualCrop(manualCropSide, result)}
+      />
+
       {/* OCR success toast */}
       {ocrToast && (
         <div className={'ocr-toast' + (ocrToastType === 'error' ? ' ocr-toast--error' : '')}>
@@ -1890,6 +2006,10 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
                       value={form.cin_recto}
                       quality={qualityRecto}
                       cropHint={cropHintRecto}
+                      detected={detectedRecto}
+                      originalDataUrl={originalRecto}
+                      onUseOriginal={() => applyCinOriginal('recto')}
+                      onOpenManualCrop={() => setManualCropSide('recto')}
                       onChange={(preview, file) => handleCINDocImport('recto', preview, file)}
                     />
                   </div>
@@ -1900,6 +2020,10 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
                       value={form.cin_verso}
                       quality={qualityVerso}
                       cropHint={cropHintVerso}
+                      detected={detectedVerso}
+                      originalDataUrl={originalVerso}
+                      onUseOriginal={() => applyCinOriginal('verso')}
+                      onOpenManualCrop={() => setManualCropSide('verso')}
                       onChange={(preview, file) => handleCINDocImport('verso', preview, file)}
                     />
                   </div>

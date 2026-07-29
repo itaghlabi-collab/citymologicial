@@ -1,17 +1,19 @@
 /**
- * cinCapture.js — Recadrage CIN selon le cadre rouge du scanner (viewport → vidéo)
- * Ratio officielle ID-1 : 85,60 × 53,98 mm
+ * cinCapture.js — Recadrage CIN selon le cadre guide du scanner (viewport → vidéo)
+ * Ratio officiel ID-1 : 85,60 × 53,98 mm
+ *
+ * Règle : l’image d’aperçu = l’image envoyée à l’OCR (même data URL / fichier).
  */
 
 export const CIN_ASPECT_RATIO = 85.60 / 53.98;
 
-/** Aligné sur SVG mask + .cin-vf-frame (viewBox %) — recto (zone noms) */
-export const CIN_FRAME_MASK = { x: 0.09, y: 0.2415, w: 0.82, h: 0.517 };
+/** Aligné sur SVG mask + .cin-vf-frame (viewBox %) — recto */
+export const CIN_FRAME_MASK = { x: 0.06, y: 0.2225, w: 0.88, h: 0.555 };
 
-/** Verso : carte quasi entière (adresse haut + MRZ bas) */
+/** Verso : carte quasi entière */
 export const CIN_VERSO_MASK = { x: 0.04, y: 0.04, w: 0.92, h: 0.92 };
 
-/** @deprecated alias — même zone que le cadre rouge */
+/** @deprecated alias */
 export const CIN_CROP = CIN_FRAME_MASK;
 
 export function getCinFrameMaskForSide(side) {
@@ -44,8 +46,8 @@ export function computeCoverTransform(displayW, displayH, videoW, videoH) {
 }
 
 /**
- * Convertit le rectangle du cadre rouge (viewport) en coordonnées pixels vidéo (object-fit: cover).
- * @returns {{ x, y, w, h, videoW, videoH, frameRect, videoRect, cover }}
+ * Convertit le rectangle du cadre guide (viewport) en coordonnées pixels vidéo
+ * (le flux vidéo est affiché en object-fit: cover — mapping uniquement, pas le preview final).
  */
 export function mapFrameRectToVideoCrop(videoEl, frameEl, options = {}) {
   const margin = options.margin ?? DEFAULT_MARGIN;
@@ -104,7 +106,6 @@ export function mapFrameRectToVideoCrop(videoEl, frameEl, options = {}) {
   };
 }
 
-/** Recadrage image importée (galerie) selon les mêmes ratios que le masque. */
 export function cropImageDataUrlByMask(dataUrl, ratios = CIN_FRAME_MASK, margin = DEFAULT_MARGIN) {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -126,7 +127,7 @@ export function cropImageDataUrlByMask(dataUrl, ratios = CIN_FRAME_MASK, margin 
         c.width = cw;
         c.height = ch;
         const ctx = c.getContext('2d');
-        ctx.fillStyle = '#fff';
+        ctx.fillStyle = '#f3f4f6';
         ctx.fillRect(0, 0, cw, ch);
         ctx.drawImage(img, x, y, w, h, 0, 0, cw, ch);
         resolve({
@@ -147,14 +148,52 @@ export function drawVideoCrop(video, crop, quality = 0.92) {
   c.width = crop.w;
   c.height = crop.h;
   const ctx = c.getContext('2d');
-  ctx.fillStyle = '#fff';
+  ctx.fillStyle = '#f3f4f6';
   ctx.fillRect(0, 0, crop.w, crop.h);
   ctx.drawImage(video, crop.x, crop.y, crop.w, crop.h, 0, 0, crop.w, crop.h);
   return { canvas: c, dataUrl: c.toDataURL('image/jpeg', quality) };
 }
 
 /**
- * Capture scanner : fichier plein cadre pour OCR + preview/fiche cropée.
+ * Fit un dataURL dans un canvas ID-1 en mode contain (bandes neutres si besoin).
+ */
+export async function fitDataUrlToId1Contain(dataUrl, quality = 0.92) {
+  const { ID1_RATIO } = await import('./cnieAutoCrop');
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      try {
+        let targetW = Math.min(1400, Math.max(900, img.width));
+        let targetH = Math.round(targetW / ID1_RATIO);
+        if (targetH > 900) {
+          targetH = 900;
+          targetW = Math.round(targetH * ID1_RATIO);
+        }
+        const out = document.createElement('canvas');
+        out.width = targetW;
+        out.height = targetH;
+        const ctx = out.getContext('2d');
+        ctx.fillStyle = '#f3f4f6';
+        ctx.fillRect(0, 0, targetW, targetH);
+        const scale = Math.min(targetW / img.width, targetH / img.height);
+        const dw = Math.round(img.width * scale);
+        const dh = Math.round(img.height * scale);
+        const dx = Math.round((targetW - dw) / 2);
+        const dy = Math.round((targetH - dh) / 2);
+        ctx.drawImage(img, 0, 0, img.width, img.height, dx, dy, dw, dh);
+        resolve(out.toDataURL('image/jpeg', quality));
+      } catch (e) {
+        reject(e);
+      }
+    };
+    img.onerror = () => reject(new Error('Image non chargeable.'));
+    img.src = dataUrl;
+  });
+}
+
+/**
+ * Capture scanner : cadre guide → une seule image pour aperçu + OCR.
+ * Puis tentative de détection carte (prudente) ; sinon cadre guide en contain ID-1.
  */
 export async function captureCINFromVideo(video, frameEl, side, options = {}) {
   const crop = mapFrameRectToVideoCrop(video, frameEl, options);
@@ -171,52 +210,78 @@ export async function captureCINFromVideo(video, frameEl, side, options = {}) {
   fullCanvas.width = crop.videoW;
   fullCanvas.height = crop.videoH;
   fullCanvas.getContext('2d').drawImage(video, 0, 0);
-  const fullDataUrl = fullCanvas.toDataURL('image/jpeg', 0.98);
+  const fullRawDataUrl = fullCanvas.toDataURL('image/jpeg', 0.98);
 
-  const { dataUrl: croppedDataUrl } = drawVideoCrop(video, crop);
-  const ocrFile = dataUrlToCaptureFile(fullDataUrl, side, 'ocr');
-  const displayFile = dataUrlToCaptureFile(croppedDataUrl, side);
+  const { dataUrl: guideCropDataUrl } = drawVideoCrop(video, crop, 0.95);
 
-  console.info('[SCAN CIN] cropped file created', {
+  const { autoCropCnieImage } = await import('./cnieAutoCrop');
+  // Détection sur l’image complète (plus fiable) ; fallback = contenu du cadre guide
+  const auto = await autoCropCnieImage(fullRawDataUrl);
+  let useUrl;
+  let detected = false;
+  let cropMessage = null;
+
+  if (auto.detected && auto.cropped) {
+    useUrl = auto.dataUrl;
+    detected = true;
+  } else {
+    useUrl = await fitDataUrlToId1Contain(guideCropDataUrl);
+    detected = false;
+    cropMessage = 'Cadrage à vérifier';
+  }
+
+  const sharedFile = dataUrlToCaptureFile(useUrl, side, detected ? 'ocr-detected' : 'ocr-guide');
+
+  console.info('[SCAN CIN] capture unified', {
     side,
-    cropW: crop.w,
-    cropH: crop.h,
-    ocrBytes: ocrFile.size,
-    displayBytes: displayFile.size,
+    detected,
+    bytes: sharedFile.size,
   });
 
   return {
-    previewDataUrl: croppedDataUrl,
-    fullDataUrl,
-    ocrFile,
-    displayFile,
+    previewDataUrl: useUrl,
+    fullDataUrl: useUrl,
+    originalDataUrl: fullRawDataUrl,
+    ocrFile: sharedFile,
+    displayFile: sharedFile,
+    detected,
+    cropFailed: !detected,
+    cropMessage,
     crop,
   };
 }
 
 /**
- * Galerie / import : recadrage auto de la CNIE.
- * L’image recadrée est utilisée pour la preview ET pour Google Vision.
+ * Galerie / import : recadrage auto prudent.
+ * Aperçu === fichier OCR (même bytes).
  */
 export async function prepareImportedCINImage(dataUrl, file, side) {
   const { autoCropCnieImage } = await import('./cnieAutoCrop');
   const cropped = await autoCropCnieImage(dataUrl);
-  const useUrl = cropped.dataUrl || dataUrl;
+  const useUrl = (cropped.detected && cropped.dataUrl) ? cropped.dataUrl : dataUrl;
 
   console.info('[SCAN CIN] import crop', {
     side,
     cropped: cropped.cropped,
-    // pas de PII / pas de data URL
+    detected: cropped.detected,
+    status: cropped.status,
   });
 
-  const ocrFile = dataUrlToCaptureFile(useUrl, side, cropped.cropped ? 'ocr-cropped' : 'ocr-full');
+  const ocrFile = dataUrlToCaptureFile(
+    useUrl,
+    side,
+    cropped.detected ? 'ocr-cropped' : 'ocr-full',
+  );
 
   return {
     previewDataUrl: useUrl,
     fullDataUrl: useUrl,
+    originalDataUrl: dataUrl,
     ocrFile,
-    displayFile: dataUrlToCaptureFile(useUrl, side),
-    cropFailed: !cropped.cropped,
-    cropMessage: cropped.message || null,
+    displayFile: ocrFile,
+    cropFailed: !cropped.detected,
+    cropMessage: cropped.detected ? null : (cropped.message || 'Cadrage à vérifier'),
+    detected: Boolean(cropped.detected),
+    status: cropped.status || (cropped.detected ? 'ok' : 'uncertain'),
   };
 }

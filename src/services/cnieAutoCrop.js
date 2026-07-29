@@ -1,12 +1,18 @@
 /**
- * Recadrage automatique CNIE (client) — détection carte vs fond + normalisation ID-1.
+ * Recadrage automatique CNIE (client) — détection prudente + normalisation ID-1.
  *
- * Principe fondamental : NE JAMAIS couper la carte.
- *   → marge de sécurité systématique (5 %)
- *   → en cas de doute, garder l'image originale
+ * Règles :
+ * - ne jamais zoomer (cover) sur une zone incertaine ;
+ * - ne jamais traiter toute l’image comme une carte ;
+ * - si la détection est douteuse → renvoyer l’original intact.
  */
 const ID1_RATIO = 85.6 / 53.98; // ≈ 1.586
-const SAFETY_MARGIN = 0.05;
+const SAFETY_MARGIN = 0.04;
+/** Tolérance ratio autour d’ID-1 (ex. 1.15–2.0 après orientation). */
+const RATIO_TOLERANCE = 0.38;
+const MIN_COVER = 0.12;
+const MAX_COVER = 0.78;
+const MIN_SCORE = 0.55;
 const LOG = (...args) => console.info('[CIN CROP]', ...args);
 
 function loadImage(dataUrl) {
@@ -62,17 +68,16 @@ function isCardPixel(r, g, b) {
   if (isBackgroundPixel(r, g, b)) return false;
   const L = lum(r, g, b);
   if (L < 55) return false;
+  // Reflets métalliques / clavier (gris saturé uniforme) — ne pas compter comme carte
+  const chroma = Math.max(r, g, b) - Math.min(r, g, b);
+  if (L > 140 && chroma < 18) return false;
   if (b > r + 15 && b > 80 && L > 60) return true;
-  if (L > 90 && r > 100 && g > 90 && b > 70) return true;
-  if (L > 120) return true;
+  if (L > 90 && r > 100 && g > 90 && b > 70 && chroma > 12) return true;
+  if (L > 130 && chroma > 20) return true;
   if (r > g && g > b && L > 70 && L < 210) return true;
-  return L > 85;
+  return L > 95 && chroma > 15;
 }
 
-/**
- * Expand rect with safety margin — never shrink.
- * Ensures we never cut into the card.
- */
 function expandWithSafety(rect, W, H, margin = SAFETY_MARGIN) {
   if (!rect) return null;
   const mx = Math.round(W * margin);
@@ -83,20 +88,63 @@ function expandWithSafety(rect, W, H, margin = SAFETY_MARGIN) {
   const y2 = Math.min(H, rect.y + rect.h + my);
   const w = x2 - x;
   const h = y2 - y;
-  if (w < 100 || h < 60) return null;
+  if (w < 120 || h < 70) return null;
   return { x, y, w, h };
 }
 
-function scoreRect(rect, W, H) {
-  if (!rect) return -1;
-  const area = rect.w * rect.h;
-  const cover = area / (W * H);
-  if (cover < 0.08 || cover > 0.95) return -1;
+function rectCorners(rect) {
+  return orderQuad([
+    { x: rect.x, y: rect.y },
+    { x: rect.x + rect.w, y: rect.y },
+    { x: rect.x + rect.w, y: rect.y + rect.h },
+    { x: rect.x, y: rect.y + rect.h },
+  ]);
+}
+
+/**
+ * Validation stricte : 4 coins, ratio proche ID-1, surface cohérente, carte non coupée.
+ */
+function validateCardGeometry(rect, W, H) {
+  if (!rect) return { ok: false, reason: 'missing' };
+  const cover = (rect.w * rect.h) / (W * H);
+  if (cover < MIN_COVER || cover > MAX_COVER) {
+    return { ok: false, reason: 'coverage', cover };
+  }
   const ratio = rect.w / Math.max(1, rect.h);
   const r = ratio >= 1 ? ratio : 1 / ratio;
-  const ratioScore = 1 - Math.min(1, Math.abs(r - ID1_RATIO) / 0.9);
-  const coverScore = cover >= 0.15 && cover <= 0.75 ? 1 : cover < 0.15 ? cover / 0.15 : Math.max(0, 1 - (cover - 0.75) / 0.2);
-  return ratioScore * 0.55 + coverScore * 0.45;
+  if (Math.abs(r - ID1_RATIO) > RATIO_TOLERANCE) {
+    return { ok: false, reason: 'ratio', ratio: r };
+  }
+
+  const edgeTol = Math.max(2, Math.round(Math.min(W, H) * 0.012));
+  const touchesLeft = rect.x <= edgeTol;
+  const touchesRight = rect.x + rect.w >= W - edgeTol;
+  const touchesTop = rect.y <= edgeTol;
+  const touchesBottom = rect.y + rect.h >= H - edgeTol;
+  const edgeHits = [touchesLeft, touchesRight, touchesTop, touchesBottom].filter(Boolean).length;
+
+  // Quasi plein cadre / carte coupée par les bords
+  if (edgeHits >= 3) return { ok: false, reason: 'clipped', edgeHits };
+  if ((touchesLeft && touchesRight) || (touchesTop && touchesBottom)) {
+    return { ok: false, reason: 'edge-span', edgeHits };
+  }
+
+  const corners = rectCorners(rect);
+  if (corners.length !== 4) return { ok: false, reason: 'corners' };
+
+  return { ok: true, corners, ratio: r, cover };
+}
+
+function scoreRect(rect, W, H) {
+  const geo = validateCardGeometry(rect, W, H);
+  if (!geo.ok) return -1;
+  const ratioScore = 1 - Math.min(1, Math.abs(geo.ratio - ID1_RATIO) / RATIO_TOLERANCE);
+  const coverScore = geo.cover >= 0.18 && geo.cover <= 0.65
+    ? 1
+    : geo.cover < 0.18
+      ? geo.cover / 0.18
+      : Math.max(0, 1 - (geo.cover - 0.65) / 0.15);
+  return ratioScore * 0.6 + coverScore * 0.4;
 }
 
 function detectByForeground(canvas) {
@@ -105,7 +153,7 @@ function detectByForeground(canvas) {
   const { data } = ctx.getImageData(0, 0, W, H);
   const step = Math.max(2, Math.floor(Math.min(W, H) / 240));
 
-  let minX = W, minY = H, maxX = 0, maxY = 0, count = 0;
+  let minX = W; let minY = H; let maxX = 0; let maxY = 0; let count = 0;
 
   for (let y = 0; y < H; y += step) {
     for (let x = 0; x < W; x += step) {
@@ -119,7 +167,7 @@ function detectByForeground(canvas) {
     }
   }
 
-  if (count < 40) return null;
+  if (count < 80) return null;
   return expandWithSafety({ x: minX, y: minY, w: maxX - minX, h: maxY - minY }, W, H);
 }
 
@@ -140,15 +188,15 @@ function detectById1Window(canvas) {
   let best = null;
   let bestScore = 0;
 
-  const widths = [0.92, 0.82, 0.72, 0.62, 0.52, 0.42].map((f) => Math.round(sw * f));
+  const widths = [0.88, 0.78, 0.68, 0.58, 0.48].map((f) => Math.round(sw * f));
   for (const ww of widths) {
     const hh = Math.round(ww / ID1_RATIO);
-    if (hh < 24 || hh > sh * 0.95) continue;
-    const stepX = Math.max(4, Math.floor(ww / 10));
-    const stepY = Math.max(4, Math.floor(hh / 10));
-    for (let y = 0; y <= sh - hh; y += stepY) {
-      for (let x = 0; x <= sw - ww; x += stepX) {
-        let inSum = 0, inN = 0, outSum = 0, outN = 0, cardN = 0;
+    if (hh < 28 || hh > sh * 0.88) continue;
+    const stepX = Math.max(4, Math.floor(ww / 9));
+    const stepY = Math.max(4, Math.floor(hh / 9));
+    for (let y = Math.round(sh * 0.04); y <= sh - hh - Math.round(sh * 0.04); y += stepY) {
+      for (let x = Math.round(sw * 0.04); x <= sw - ww - Math.round(sw * 0.04); x += stepX) {
+        let inSum = 0; let inN = 0; let outSum = 0; let outN = 0; let cardN = 0;
         const sample = 3;
         for (let yy = y; yy < y + hh; yy += sample) {
           for (let xx = x; xx < x + ww; xx += sample) {
@@ -159,7 +207,7 @@ function detectById1Window(canvas) {
             if (isCardPixel(data[i], data[i + 1], data[i + 2])) cardN += 1;
           }
         }
-        const pad = Math.max(4, Math.floor(Math.min(ww, hh) * 0.08));
+        const pad = Math.max(4, Math.floor(Math.min(ww, hh) * 0.1));
         const x0 = Math.max(0, x - pad);
         const y0 = Math.max(0, y - pad);
         const x1 = Math.min(sw, x + ww + pad);
@@ -177,8 +225,9 @@ function detectById1Window(canvas) {
         const outMean = outSum / outN;
         const cardRatio = cardN / inN;
         const contrast = inMean - outMean;
-        if (contrast < 12 && cardRatio < 0.35) continue;
-        const score = contrast * 0.5 + cardRatio * 80 + (inMean > 90 ? 10 : 0);
+        // Clavier / bureau : contraste faible ou peu de pixels « carte »
+        if (contrast < 22 || cardRatio < 0.42) continue;
+        const score = contrast * 0.45 + cardRatio * 90 + (inMean > 95 ? 12 : 0);
         if (score > bestScore) {
           bestScore = score;
           best = {
@@ -192,8 +241,8 @@ function detectById1Window(canvas) {
     }
   }
 
-  if (!best || bestScore < 25) return null;
-  return expandWithSafety(best, W, H, SAFETY_MARGIN * 0.8);
+  if (!best || bestScore < 48) return null;
+  return expandWithSafety(best, W, H, SAFETY_MARGIN * 0.7);
 }
 
 function detectByBrightness(canvas) {
@@ -210,17 +259,17 @@ function detectByBrightness(canvas) {
       n += 1;
     }
   }
-  let acc = 0, thr = 110;
+  let acc = 0; let thr = 110;
   for (let g = 255; g >= 40; g -= 1) {
     acc += hist[g];
     if (acc / n > 0.28) { thr = Math.max(60, g - 10); break; }
   }
-  let minX = W, minY = H, maxX = 0, maxY = 0, count = 0;
-  for (let y = Math.floor(H * 0.05); y < H * 0.95; y += step) {
-    for (let x = Math.floor(W * 0.05); x < W * 0.95; x += step) {
+  let minX = W; let minY = H; let maxX = 0; let maxY = 0; let count = 0;
+  for (let y = Math.floor(H * 0.06); y < H * 0.94; y += step) {
+    for (let x = Math.floor(W * 0.06); x < W * 0.94; x += step) {
       const i = (y * W + x) * 4;
       const L = lum(data[i], data[i + 1], data[i + 2]);
-      if (L >= thr && L < 252 && !isBackgroundPixel(data[i], data[i + 1], data[i + 2])) {
+      if (L >= thr && L < 252 && isCardPixel(data[i], data[i + 1], data[i + 2])) {
         minX = Math.min(minX, x);
         minY = Math.min(minY, y);
         maxX = Math.max(maxX, x);
@@ -229,7 +278,7 @@ function detectByBrightness(canvas) {
       }
     }
   }
-  if (count < 50) return null;
+  if (count < 90) return null;
   return expandWithSafety({ x: minX, y: minY, w: maxX - minX, h: maxY - minY }, W, H);
 }
 
@@ -243,29 +292,30 @@ function detectCardRect(canvas) {
 
   if (!candidates.length) return null;
 
-  let best = candidates[0];
-  let bestScore = scoreRect(best, W, H);
-  for (let i = 1; i < candidates.length; i += 1) {
-    const s = scoreRect(candidates[i], W, H);
+  let best = null;
+  let bestScore = -1;
+  for (const c of candidates) {
+    const s = scoreRect(c, W, H);
     if (s > bestScore) {
-      best = candidates[i];
+      best = c;
       bestScore = s;
     }
   }
-  return bestScore >= 0.2 ? best : null;
+  if (!best || bestScore < MIN_SCORE) return null;
+  const geo = validateCardGeometry(best, W, H);
+  if (!geo.ok) return null;
+  return { rect: best, score: bestScore, geo };
 }
 
 /**
- * Crop + fit into ID-1 canvas (contain mode, no stretching).
- * The crop already has safety margins so the entire card is preserved.
+ * Crop + fit ID-1 en mode CONTAIN (jamais cover / zoom).
  */
-function cropAndNormalize(src, rect) {
+function cropAndNormalizeContain(src, rect) {
   const crop = document.createElement('canvas');
   crop.width = rect.w;
   crop.height = rect.h;
   crop.getContext('2d').drawImage(src, rect.x, rect.y, rect.w, rect.h, 0, 0, rect.w, rect.h);
 
-  // Sortie ID-1 stricte — remplir le cadre (cover), sans bandes grises
   let targetW = Math.min(1400, Math.max(900, rect.w));
   let targetH = Math.round(targetW / ID1_RATIO);
   if (targetH > 900) {
@@ -277,10 +327,10 @@ function cropAndNormalize(src, rect) {
   out.width = targetW;
   out.height = targetH;
   const ctx = out.getContext('2d');
-  ctx.fillStyle = '#e8e8ea';
+  ctx.fillStyle = '#f3f4f6';
   ctx.fillRect(0, 0, targetW, targetH);
 
-  const scale = Math.max(targetW / rect.w, targetH / rect.h);
+  const scale = Math.min(targetW / rect.w, targetH / rect.h);
   const dw = Math.round(rect.w * scale);
   const dh = Math.round(rect.h * scale);
   const dx = Math.round((targetW - dw) / 2);
@@ -290,38 +340,83 @@ function cropAndNormalize(src, rect) {
 }
 
 /**
+ * Normalise un crop libre (manuel) vers ID-1 contain.
  * @param {string} dataUrl
- * @returns {Promise<{ dataUrl: string, cropped: boolean, message: string|null }>}
+ * @param {{ x:number, y:number, w:number, h:number }} rect — coords image source
+ */
+export async function cropRectToId1Contain(dataUrl, rect) {
+  const img = await loadImage(dataUrl);
+  const base = toCanvas(img, 2400);
+  const scaleX = base.width / (img.naturalWidth || img.width);
+  const scaleY = base.height / (img.naturalHeight || img.height);
+  const r = {
+    x: Math.max(0, Math.round(rect.x * scaleX)),
+    y: Math.max(0, Math.round(rect.y * scaleY)),
+    w: Math.max(1, Math.round(rect.w * scaleX)),
+    h: Math.max(1, Math.round(rect.h * scaleY)),
+  };
+  r.w = Math.min(r.w, base.width - r.x);
+  r.h = Math.min(r.h, base.height - r.y);
+  const out = cropAndNormalizeContain(base, r);
+  return out.toDataURL('image/jpeg', 0.92);
+}
+
+/**
+ * @param {string} dataUrl
+ * @returns {Promise<{
+ *   dataUrl: string,
+ *   cropped: boolean,
+ *   detected: boolean,
+ *   message: string|null,
+ *   status: 'ok'|'uncertain'|'failed',
+ * }>}
  */
 export async function autoCropCnieImage(dataUrl) {
+  const fail = (message) => ({
+    dataUrl,
+    cropped: false,
+    detected: false,
+    message: message || 'Cadrage à vérifier',
+    status: 'uncertain',
+  });
+
   if (!dataUrl || typeof dataUrl !== 'string') {
-    return { dataUrl, cropped: false, message: 'Recadrage automatique impossible, vérifiez la photo' };
+    return { ...fail('Recadrage automatique impossible, vérifiez la photo'), status: 'failed' };
   }
   try {
     const img = await loadImage(dataUrl);
     const base = toCanvas(img);
-    const rect = detectCardRect(base);
-    if (!rect) {
+    const found = detectCardRect(base);
+    if (!found) {
       LOG('detect miss — keep original', { w: base.width, h: base.height });
-      return { dataUrl, cropped: false, message: 'Recadrage automatique impossible, vérifiez la photo' };
+      return fail('Cadrage à vérifier');
     }
-    const cover = (rect.w * rect.h) / (base.width * base.height);
-    if (cover > 0.92) {
-      LOG('crop ≈ full image — keep original', { cover: Number(cover.toFixed(2)) });
-      return { dataUrl, cropped: false, message: null };
+    const { rect, score, geo } = found;
+    if (geo.cover > 0.88) {
+      LOG('crop ≈ full image — keep original', { cover: Number(geo.cover.toFixed(2)) });
+      return fail('Cadrage à vérifier');
     }
-    const out = cropAndNormalize(base, rect);
+    const out = cropAndNormalizeContain(base, rect);
     const croppedUrl = out.toDataURL('image/jpeg', 0.92);
     LOG('crop ok', {
       src: `${base.width}x${base.height}`,
       crop: `${rect.w}x${rect.h}`,
-      cover: Number(cover.toFixed(2)),
+      cover: Number(geo.cover.toFixed(2)),
+      ratio: Number(geo.ratio.toFixed(3)),
+      score: Number(score.toFixed(2)),
       out: `${out.width}x${out.height}`,
+      mode: 'contain',
     });
-    return { dataUrl: croppedUrl, cropped: true, message: null };
+    return {
+      dataUrl: croppedUrl,
+      cropped: true,
+      detected: true,
+      message: null,
+      status: 'ok',
+    };
   } catch (_) {
-    return { dataUrl, cropped: false, message: 'Recadrage automatique impossible, vérifiez la photo' };
+    return { ...fail('Recadrage automatique impossible, vérifiez la photo'), status: 'failed' };
   }
 }
 
-export { ID1_RATIO, orderQuad };
+export { ID1_RATIO, orderQuad, validateCardGeometry };
