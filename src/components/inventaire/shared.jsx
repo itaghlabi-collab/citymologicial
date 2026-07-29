@@ -75,7 +75,7 @@ export const EMPLACEMENTS_STOCK = [
 ];
 
 /** Emplacements legacy à masquer à l’affichage / dans les filtres (données DB inchangées). */
-export const DEPRECATED_EMPLACEMENTS = ['F5', 'G3'];
+export const DEPRECATED_EMPLACEMENTS = ['F5', 'G3', 'F2'];
 /** Valeur de filtre UI — articles sans emplacement réel. */
 export const FILTER_SANS_EMPLACEMENT = '__sans_emplacement__';
 
