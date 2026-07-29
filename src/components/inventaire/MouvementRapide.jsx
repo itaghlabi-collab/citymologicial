@@ -147,29 +147,62 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
 
   const needsSource = type === 'Sortie' || type === 'Transfert';
   const needsDest = type === 'Entrée' || type === 'Transfert';
-  // Entrée : on affiche aussi la source (provenance) pour la renseigner dans l'historique
-  const showSource = needsSource || type === 'Entrée';
-  const showDest = needsDest || type === 'Sortie';
+  // Afficher les deux listes dès qu'un type est choisi (source optionnelle en Entrée, dest optionnelle en Sortie)
+  const showSource = !!type;
+  const showDest = !!type;
 
   const emplacementOptions = useMemo(() => {
-    const fromProps = (emplacements || []).map((e) => String(e || '').trim()).filter(Boolean);
-    const fromLevels = (articleStock?.levels || [])
-      .map((l) => String(l.emplacement || '').trim())
-      .filter(Boolean);
-    const current = [form.emplacement_source, form.emplacement_destination]
-      .map((e) => String(e || '').trim())
-      .filter(Boolean);
-    return [...new Set([...fromLevels, ...fromProps, ...current, ...EMPLACEMENTS_STOCK])];
-  }, [emplacements, articleStock, form.emplacement_source, form.emplacement_destination]);
+    const set = new Set();
+    (emplacements || []).forEach((e) => { if (String(e || '').trim()) set.add(String(e).trim()); });
+    (EMPLACEMENTS_STOCK || []).forEach((e) => { if (e) set.add(e); });
+    (articleStock?.levels || []).forEach((l) => {
+      if (l?.emplacement) set.add(String(l.emplacement).trim());
+    });
+    if (selectedArticle?.emplacement) set.add(String(selectedArticle.emplacement).trim());
+    if (form.emplacement_source) set.add(String(form.emplacement_source).trim());
+    if (form.emplacement_destination) set.add(String(form.emplacement_destination).trim());
+    return [...set].filter(Boolean).sort((a, b) => a.localeCompare(b, 'fr'));
+  }, [emplacements, articleStock, selectedArticle, form.emplacement_source, form.emplacement_destination]);
 
-  const sourceOptionsWithStock = useMemo(() => {
-    const levels = articleStock?.levels || [];
-    const byEmp = new Map(levels.map((l) => [String(l.emplacement || '').trim(), Number(l.quantite) || 0]));
-    return emplacementOptions.map((emp) => ({
-      value: emp,
-      qty: byEmp.has(emp) ? byEmp.get(emp) : null,
-    }));
-  }, [emplacementOptions, articleStock]);
+  const qtyByEmplacement = useMemo(() => {
+    const map = {};
+    (articleStock?.levels || []).forEach((l) => {
+      if (l?.emplacement) map[l.emplacement] = Number(l.quantite) || 0;
+    });
+    return map;
+  }, [articleStock]);
+
+  // Préremplir source (Sortie/Transfert) et destination (Entrée) depuis l'article / stock
+  useEffect(() => {
+    if (!type || !selectedArticle) return;
+    setForm((f) => {
+      const next = { ...f };
+      let changed = false;
+      if (needsSource && !f.emplacement_source) {
+        const withStock = (articleStock?.levels || [])
+          .filter((l) => Number(l.quantite) > 0)
+          .sort((a, b) => Number(b.quantite) - Number(a.quantite));
+        const prefer = (selectedArticle.emplacement || '').trim()
+          || withStock[0]?.emplacement
+          || '';
+        if (prefer) {
+          next.emplacement_source = prefer;
+          changed = true;
+        }
+      }
+      if (needsDest && !f.emplacement_destination) {
+        const prefer = (selectedArticle.emplacement || '').trim()
+          || emplacements[0]
+          || EMPLACEMENTS_STOCK[0]
+          || '';
+        if (prefer) {
+          next.emplacement_destination = prefer;
+          changed = true;
+        }
+      }
+      return changed ? next : f;
+    });
+  }, [type, selectedArticle, articleStock, needsSource, needsDest, emplacements]);
 
   const stockAvant = articleStock?.totalStock ?? 0;
   const qty = Number(form.quantite) || 0;
@@ -178,39 +211,20 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
     : stockAvant; // Transfert: global unchanged
 
   const sourceLevel = useMemo(() => {
-    if (!form.emplacement_source || !articleStock?.levels) return null;
+    if (!needsSource || !form.emplacement_source || !articleStock?.levels) return null;
     return articleStock.levels.find((l) => l.emplacement === form.emplacement_source);
-  }, [form.emplacement_source, articleStock]);
+  }, [needsSource, form.emplacement_source, articleStock]);
 
   const sourceQty = sourceLevel?.quantite ?? stockAvant;
 
-  // Préremplir source / destination dès qu'article + type sont connus
-  useEffect(() => {
-    if (!type || !selectedArticle) return;
-    const levels = articleStock?.levels || [];
-    const withStock = levels
-      .filter((l) => Number(l.quantite) > 0)
-      .sort((a, b) => Number(b.quantite) - Number(a.quantite));
-    const preferredSource = withStock[0]?.emplacement
-      || selectedArticle.emplacement
-      || emplacements[0]
-      || '';
-    const preferredDest = selectedArticle.emplacement
-      || emplacements[0]
-      || EMPLACEMENTS_STOCK[0]
-      || '';
-
-    setForm((f) => {
-      const next = { ...f };
-      if (showSource && !f.emplacement_source && preferredSource) {
-        next.emplacement_source = preferredSource;
-      }
-      if (showDest && !f.emplacement_destination && preferredDest) {
-        next.emplacement_destination = preferredDest;
-      }
-      return next;
-    });
-  }, [type, selectedArticle, articleStock, emplacements, showSource, showDest]);
+  function labelEmplacement(name, forSource = false) {
+    if (!forSource || !selectedArticle) return name;
+    if (Object.prototype.hasOwnProperty.call(qtyByEmplacement, name)) {
+      const q = qtyByEmplacement[name];
+      return `${name} (${q} ${selectedArticle.unite || 'U'})`;
+    }
+    return name;
+  }
 
   function validate() {
     if (!type) return 'Sélectionnez un type de mouvement.';
@@ -688,22 +702,20 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
 
             <FRow>
               {showSource && (
-                <FField label={type === 'Entrée' ? 'Emplacement provenance' : 'Emplacement source'} required={needsSource}>
+                <FField label="Emplacement source" required={needsSource}>
                   <select
                     value={form.emplacement_source}
                     onChange={(e) => setForm((f) => ({ ...f, emplacement_source: e.target.value }))}
                     style={SELECT_STYLE}
                   >
-                    <option value="">— Sélectionner un emplacement —</option>
-                    {sourceOptionsWithStock.map(({ value, qty: q }) => (
-                      <option key={`src-${value}`} value={value}>
-                        {q != null ? `${value} (${q} dispo.)` : value}
-                      </option>
+                    <option value="">{needsSource ? '— Sélectionner —' : '— Optionnel —'}</option>
+                    {emplacementOptions.map((e) => (
+                      <option key={`src-${e}`} value={e}>{labelEmplacement(e, true)}</option>
                     ))}
                   </select>
-                  {needsSource && form.emplacement_source && (
+                  {needsSource && selectedArticle && form.emplacement_source && (
                     <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 4 }}>
-                      Stock à cet emplacement : <strong>{sourceQty}</strong> {selectedArticle?.unite || 'U'}
+                      Stock à cet emplacement : {sourceQty} {selectedArticle.unite || 'U'}
                     </div>
                   )}
                 </FField>
@@ -715,7 +727,7 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
                     onChange={(e) => setForm((f) => ({ ...f, emplacement_destination: e.target.value }))}
                     style={SELECT_STYLE}
                   >
-                    <option value="">— Sélectionner un emplacement —</option>
+                    <option value="">{needsDest ? '— Sélectionner —' : '— Optionnel —'}</option>
                     {emplacementOptions.map((e) => (
                       <option key={`dst-${e}`} value={e}>{e}</option>
                     ))}
@@ -828,8 +840,8 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
             <span style={{ fontWeight: 600 }}>{selectedArticle?.code || selectedArticle?.reference} — {selectedArticle?.designation || selectedArticle?.nom}</span>
             <span style={{ color: 'var(--text-3)', fontWeight: 700 }}>Quantité</span>
             <span style={{ fontWeight: 700, fontSize: '1.05rem' }}>{qty} {selectedArticle?.unite || 'U'}</span>
-            {needsSource && <><span style={{ color: 'var(--text-3)', fontWeight: 700 }}>Source</span><span>{form.emplacement_source}</span></>}
-            {needsDest && <><span style={{ color: 'var(--text-3)', fontWeight: 700 }}>Destination</span><span>{form.emplacement_destination}</span></>}
+            {form.emplacement_source && <><span style={{ color: 'var(--text-3)', fontWeight: 700 }}>Source</span><span>{form.emplacement_source}</span></>}
+            {form.emplacement_destination && <><span style={{ color: 'var(--text-3)', fontWeight: 700 }}>Destination</span><span>{form.emplacement_destination}</span></>}
             <span style={{ color: 'var(--text-3)', fontWeight: 700 }}>Date</span>
             <span>{form.date_creation}</span>
             <span style={{ color: 'var(--text-3)', fontWeight: 700 }}>Motif</span>
