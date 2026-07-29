@@ -2,7 +2,8 @@
  * MouvementRapide.jsx — Parcours simplifié d'enregistrement de mouvement (1 article).
  * Réutilise la logique stock_movements existante.
  */
-import { useState, useEffect, useMemo, useCallback } from 'react';
+import { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ArrowDownToLine, ArrowUpFromLine, ArrowLeftRight,
   Package, Search, Eye,
@@ -407,7 +408,6 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
                           <td style={{ fontSize: '0.82rem' }}>{m.cree_par || '—'}</td>
                           <td>
                             <MRActions
-                              item={m}
                               isCancelled={isCancelled}
                               onView={() => { setDetailItem(m); setView('detail'); }}
                               onCancel={() => setCancelModal(m.ref)}
@@ -854,54 +854,110 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
   }
 }
 
-function MRActions({ item, isCancelled, onView, onCancel, onDelete }) {
+function MRActions({ isCancelled, onView, onCancel, onDelete }) {
   const [open, setOpen] = useState(false);
-  return (
-    <div style={{ position: 'relative' }}>
+  const btnRef = useRef(null);
+  const menuRef = useRef(null);
+  const [menuPos, setMenuPos] = useState(null);
+
+  const updatePos = useCallback(() => {
+    if (!btnRef.current) return;
+    const r = btnRef.current.getBoundingClientRect();
+    const menuW = 190;
+    const left = Math.max(8, Math.min(r.right - menuW, window.innerWidth - menuW - 8));
+    // Ouvrir vers le haut si pas assez de place en bas
+    const spaceBelow = window.innerHeight - r.bottom;
+    const openUp = spaceBelow < 160;
+    setMenuPos({
+      top: openUp ? undefined : r.bottom + 4,
+      bottom: openUp ? window.innerHeight - r.top + 4 : undefined,
+      left,
+      width: menuW,
+    });
+  }, []);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    updatePos();
+    const onReposition = () => updatePos();
+    window.addEventListener('scroll', onReposition, true);
+    window.addEventListener('resize', onReposition);
+    return () => {
+      window.removeEventListener('scroll', onReposition, true);
+      window.removeEventListener('resize', onReposition);
+    };
+  }, [open, updatePos]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    function onDocClick(e) {
+      if (btnRef.current?.contains(e.target)) return;
+      if (menuRef.current?.contains(e.target)) return;
+      setOpen(false);
+    }
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [open]);
+
+  const menu = open && menuPos && createPortal(
+    <div
+      ref={menuRef}
+      style={{
+        position: 'fixed',
+        top: menuPos.top,
+        bottom: menuPos.bottom,
+        left: menuPos.left,
+        width: menuPos.width,
+        zIndex: 10050,
+        background: '#fff',
+        borderRadius: 8,
+        boxShadow: '0 12px 32px rgba(0,0,0,0.16)',
+        border: '1px solid var(--border)',
+        padding: '4px 0',
+      }}
+    >
       <button
         type="button"
+        onClick={() => { onView(); setOpen(false); }}
+        style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 14px', width: '100%', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.84rem', color: 'var(--text)' }}
+      >
+        <Eye size={14} /> Voir
+      </button>
+      {!isCancelled && (
+        <button
+          type="button"
+          onClick={() => { onCancel(); setOpen(false); }}
+          style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 14px', width: '100%', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.84rem', color: 'var(--text)' }}
+        >
+          <XCircle size={14} /> Annuler le mouvement
+        </button>
+      )}
+      <button
+        type="button"
+        onClick={() => { onDelete(); setOpen(false); }}
+        style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 14px', width: '100%', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.84rem', color: 'var(--red)' }}
+      >
+        <Trash2 size={14} /> Supprimer
+      </button>
+    </div>,
+    document.body,
+  );
+
+  return (
+    <div style={{ position: 'relative', display: 'inline-flex' }}>
+      <button
+        ref={btnRef}
+        type="button"
         className="btn btn-ghost btn-sm"
-        onClick={() => setOpen(!open)}
+        onClick={() => setOpen((v) => !v)}
         style={{ padding: '4px 8px' }}
         title="Actions"
         aria-label="Actions"
+        aria-expanded={open}
       >
         <MoreHorizontal size={16} />
       </button>
-      {open && (
-        <>
-          <div style={{ position: 'fixed', inset: 0, zIndex: 999 }} onClick={() => setOpen(false)} />
-          <div style={{
-            position: 'absolute', right: 0, top: '100%', background: '#fff', borderRadius: 8,
-            boxShadow: 'var(--shadow-lg)', zIndex: 1000, minWidth: 180, padding: '4px 0',
-            border: '1px solid var(--border)',
-          }}>
-            <button
-              type="button"
-              onClick={() => { onView(); setOpen(false); }}
-              style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 14px', width: '100%', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.84rem' }}
-            >
-              <Eye size={14} /> Voir
-            </button>
-            {!isCancelled && (
-              <button
-                type="button"
-                onClick={() => { onCancel(); setOpen(false); }}
-                style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 14px', width: '100%', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.84rem' }}
-              >
-                <XCircle size={14} /> Annuler le mouvement
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={() => { onDelete(); setOpen(false); }}
-              style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '9px 14px', width: '100%', background: 'none', border: 'none', cursor: 'pointer', fontSize: '0.84rem', color: 'var(--red)' }}
-            >
-              <Trash2 size={14} /> Supprimer
-            </button>
-          </div>
-        </>
-      )}
+      {menu}
     </div>
   );
 }
