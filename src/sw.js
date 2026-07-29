@@ -180,7 +180,7 @@ registerRoute(({ request, url }) => isMutatingMethod(request.method) || isForbid
 registerRoute(
   isSameOriginStaticAsset,
   new CacheFirst({
-    cacheName: 'citymo-static-assets-v1',
+    cacheName: 'citymo-static-assets-v2',
     plugins: [
       new CacheableResponsePlugin({ statuses: [200] }),
       new ExpirationPlugin({

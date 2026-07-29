@@ -5454,6 +5454,18 @@ tbody tr:last-child td { border-bottom: none; }
 .mes-docs-mobile-only { display: none !important; }
 .mes-docs-desktop-only { display: block; }
 
+/* Stocks / Articles : tableau desktop + liste compacte mobile (mutuellement exclusifs) */
+.inv-stock-mobile-only { display: none !important; }
+.inv-stock-desktop-only { display: block; }
+
+/* Stocks hub — conteneurs exclusifs (ceinture CSS ; le JSX ne rend qu’une vue) */
+.stock-desktop-view {
+  display: block;
+}
+.stock-mobile-view {
+  display: none;
+}
+
 /* ── Articles / Stocks — fiche & tableau lisible ── */
 .inv-article-detail-quickbar {
   display: flex;
@@ -5886,6 +5898,13 @@ tbody tr:last-child td { border-bottom: none; }
     display: block !important;
   }
   .inv-stock-desktop-only { display: none !important; }
+
+  .stock-desktop-view {
+    display: none;
+  }
+  .stock-mobile-view {
+    display: block;
+  }
 
   .inv-article-detail-header-desktop {
     display: none !important;

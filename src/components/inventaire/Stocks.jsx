@@ -23,6 +23,7 @@ import { listStockLevelsForArticle } from '../../services/inventaire/stockArticl
 import { can } from '../../services/admin/permissions';
 import { useAuth } from '../../hooks/useAuth';
 import { getArticleBarcodeValue } from '../../services/inventaire/barcodeUtils';
+import { useIsMobile } from '../../hooks/useIsMobile';
 
 function getStatutStock(qte, seuil) {
   const q = Number(qte) || 0;
@@ -216,6 +217,7 @@ export default function Stocks({
   const [detailLevels, setDetailLevels] = useState([]);
   const [detailLevelsLoading, setDetailLevelsLoading] = useState(false);
   const [canDelete, setCanDelete] = useState(false);
+  const isMobile = useIsMobile();
 
   useEffect(() => {
     let cancelled = false;
@@ -495,131 +497,137 @@ export default function Stocks({
         </div>
       )}
 
-      <div className="card inv-stock-desktop-only" style={{ padding: 0 }}>
-        {loading && !arts.length ? (
-          <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-3)' }}><Loader2 className="cin-spin" /> Chargement…</div>
-        ) : filtered.length === 0 ? (
-          <EmptyState icon={<Package size={24} />} title="Aucun article en stock" sub="Créez un article catalogue puis effectuez une entrée." />
-        ) : (
-          <div className="table-wrap">
-            <table className="inv-stocks-table inv-articles-table">
-              <thead>
-                <tr>
-                  <th>Code</th>
-                  <th>Code-barres</th>
-                  <th>Désignation</th>
-                  <th>Catégorie</th>
-                  <th>Type</th>
-                  <th>Emplacement</th>
-                  <th>Qté</th>
-                  <th>Min.</th>
-                  <th>État</th>
-                  <th>Valeur u.</th>
-                  <th>Valeur tot.</th>
-                  <th>Statut</th>
-                  <th>Dernier mvt</th>
-                  <th style={{ width: 48 }}>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((x) => {
-                  const cat = (categories || []).find((c) => String(c.id) === String(x.categorie_id));
-                  const st = getStatutStock(x.stock_actuel, x.stock_minimum);
-                  const etatBadge = x.etat === 'Neuf' ? 'badge-green' : x.etat === 'Utilisé' ? 'badge-blue' : 'badge-orange';
-                  const valTot = (Number(x.valeur) || 0) * (Number(x.stock_actuel) || 0);
-                  const barcode = getArticleBarcodeValue(x);
-                  return (
-                    <tr key={x.id} className="inv-articles-row" style={{ cursor: 'pointer' }} onClick={() => setDetailId(x.id)}>
-                      <td><span className="inv-articles-ref">{x.code}</span></td>
-                      <td data-label="Code-barres">
-                        <span style={{ fontFamily: 'monospace', fontSize: '0.72rem', display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--text-2)' }}>
-                          <Barcode size={12} /> {barcode || '—'}
-                        </span>
-                      </td>
-                      <td><div className="inv-articles-name">{x.designation}</div></td>
-                      <td>{cat ? <span className="badge badge-blue inv-articles-badge">{cat.nom}</span> : '—'}</td>
-                      <td style={{ fontSize: '0.82rem' }}>{x.type || '—'}</td>
-                      <td style={{ fontSize: '0.82rem' }}>{x.emplacement || '—'}</td>
-                      <td>
-                        <span className="inv-articles-qty" style={{ color: st.cls === 'badge-red' ? 'var(--red)' : undefined }}>{x.stock_actuel || 0}</span>
-                        <span className="inv-articles-unit">{x.unite}</span>
-                      </td>
-                      <td style={{ color: 'var(--text-3)', fontSize: '0.82rem' }}>{x.stock_minimum || '—'}</td>
-                      <td><span className={`badge ${etatBadge} inv-articles-badge`}>{x.etat}</span></td>
-                      <td className="inv-articles-value">{x.valeur ? formatMAD(x.valeur) : '—'}</td>
-                      <td className="inv-articles-value" style={{ color: 'var(--red)' }}>{valTot > 0 ? formatMAD(valTot) : '—'}</td>
-                      <td><span className={`badge ${st.cls} inv-articles-badge`}>{st.label}</span></td>
-                      <td style={{ fontSize: '0.75rem', color: 'var(--text-2)' }}>
-                        {x.dernier_mouvement ? (
-                          <>{x.dernier_mouvement.date_label}<br /><span style={{ color: 'var(--text-3)' }}>{x.dernier_mouvement.action}</span></>
-                        ) : '—'}
-                      </td>
-                      <td onClick={(e) => e.stopPropagation()}>
-                        <StockOpsActions
-                          onOpenFiche={() => setDetailId(x.id)}
-                          onEditFiche={() => setEditFiche(x)}
-                          onEntree={() => setMvtModal({ type: 'Entrée', article: x })}
-                          onSortie={() => setMvtModal({ type: 'Sortie', article: x })}
-                          onTransfert={() => setMvtModal({ type: 'Transfert', article: x })}
-                          onRegulariser={() => setMvtModal({ type: 'Régularisation', article: x })}
-                          onHistory={() => openHistory(x)}
-                          onDocuments={() => setDocsModal(x)}
-                          onEditCatalog={() => setCatalogModal({ article: x })}
-                          onMouvementRapide={onNavigate ? () => goMouvementRapide(x) : undefined}
-                          onDesactiver={() => handleDesactiver(x)}
-                          onDelete={() => handleDelete(x)}
-                          canDelete={canDelete}
-                        />
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-
-      <div className="card inv-stock-mobile-only inv-stock-mobile-list">
-        {filtered.map((x) => {
-          const st = getStatutStock(x.stock_actuel, x.stock_minimum);
-          return (
-            <div key={x.id} className="inv-stock-mobile-row">
-              <button type="button" className="inv-stock-mobile-main" onClick={() => setDetailId(x.id)}>
-                <div className="inv-stock-mobile-icon" aria-hidden><Package size={18} style={{ color: 'var(--red)' }} /></div>
-                <div className="inv-stock-mobile-name">
-                  <strong>{x.code}</strong>
-                  <span className="inv-stock-mobile-designation">{x.designation}</span>
-                  <span className="inv-stock-mobile-meta">Qté {x.stock_actuel || 0} {x.unite} · {x.emplacement || '—'}</span>
-                  <div className="inv-stock-mobile-badges">
-                    <span className={`badge ${st.cls}`}>{st.label}</span>
-                    <span className="badge badge-grey">{x.etat}</span>
+      {isMobile ? (
+        <div className="card stock-mobile-view inv-stock-mobile-list">
+          {loading && !arts.length ? (
+            <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-3)' }}><Loader2 className="cin-spin" /> Chargement…</div>
+          ) : filtered.length === 0 ? (
+            <EmptyState icon={<Package size={24} />} title="Aucun article en stock" sub="Créez un article catalogue puis effectuez une entrée." />
+          ) : filtered.map((x) => {
+            const st = getStatutStock(x.stock_actuel, x.stock_minimum);
+            return (
+              <div key={x.id} className="inv-stock-mobile-row">
+                <button type="button" className="inv-stock-mobile-main" onClick={() => setDetailId(x.id)}>
+                  <div className="inv-stock-mobile-icon" aria-hidden><Package size={18} style={{ color: 'var(--red)' }} /></div>
+                  <div className="inv-stock-mobile-name">
+                    <strong>{x.code}</strong>
+                    <span className="inv-stock-mobile-designation">{x.designation}</span>
+                    <span className="inv-stock-mobile-meta">Qté {x.stock_actuel || 0} {x.unite} · {x.emplacement || '—'}</span>
+                    <div className="inv-stock-mobile-badges">
+                      <span className={`badge ${st.cls}`}>{st.label}</span>
+                      <span className="badge badge-grey">{x.etat}</span>
+                    </div>
                   </div>
+                </button>
+                <div style={{ display: 'flex', gap: 4, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+                  <button type="button" className="btn btn-ghost btn-sm" title="Entrée" onClick={() => setMvtModal({ type: 'Entrée', article: x })}><ArrowDownToLine size={14} /></button>
+                  <button type="button" className="btn btn-ghost btn-sm" title="Sortie" onClick={() => setMvtModal({ type: 'Sortie', article: x })}><ArrowUpFromLine size={14} /></button>
+                  <StockOpsActions
+                    onOpenFiche={() => setDetailId(x.id)}
+                    onEditFiche={() => setEditFiche(x)}
+                    onEntree={() => setMvtModal({ type: 'Entrée', article: x })}
+                    onSortie={() => setMvtModal({ type: 'Sortie', article: x })}
+                    onTransfert={() => setMvtModal({ type: 'Transfert', article: x })}
+                    onRegulariser={() => setMvtModal({ type: 'Régularisation', article: x })}
+                    onHistory={() => openHistory(x)}
+                    onDocuments={() => setDocsModal(x)}
+                    onEditCatalog={() => setCatalogModal({ article: x })}
+                    onMouvementRapide={onNavigate ? () => goMouvementRapide(x) : undefined}
+                    onDesactiver={() => handleDesactiver(x)}
+                    onDelete={() => handleDelete(x)}
+                    canDelete={canDelete}
+                  />
                 </div>
-              </button>
-              <div style={{ display: 'flex', gap: 4, flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
-                <button type="button" className="btn btn-ghost btn-sm" title="Entrée" onClick={() => setMvtModal({ type: 'Entrée', article: x })}><ArrowDownToLine size={14} /></button>
-                <button type="button" className="btn btn-ghost btn-sm" title="Sortie" onClick={() => setMvtModal({ type: 'Sortie', article: x })}><ArrowUpFromLine size={14} /></button>
-                <StockOpsActions
-                  onOpenFiche={() => setDetailId(x.id)}
-                  onEditFiche={() => setEditFiche(x)}
-                  onEntree={() => setMvtModal({ type: 'Entrée', article: x })}
-                  onSortie={() => setMvtModal({ type: 'Sortie', article: x })}
-                  onTransfert={() => setMvtModal({ type: 'Transfert', article: x })}
-                  onRegulariser={() => setMvtModal({ type: 'Régularisation', article: x })}
-                  onHistory={() => openHistory(x)}
-                  onDocuments={() => setDocsModal(x)}
-                  onEditCatalog={() => setCatalogModal({ article: x })}
-                  onMouvementRapide={onNavigate ? () => goMouvementRapide(x) : undefined}
-                  onDesactiver={() => handleDesactiver(x)}
-                  onDelete={() => handleDelete(x)}
-                  canDelete={canDelete}
-                />
               </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="card stock-desktop-view" style={{ padding: 0 }}>
+          {loading && !arts.length ? (
+            <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-3)' }}><Loader2 className="cin-spin" /> Chargement…</div>
+          ) : filtered.length === 0 ? (
+            <EmptyState icon={<Package size={24} />} title="Aucun article en stock" sub="Créez un article catalogue puis effectuez une entrée." />
+          ) : (
+            <div className="table-wrap">
+              <table className="inv-stocks-table inv-articles-table">
+                <thead>
+                  <tr>
+                    <th>Code</th>
+                    <th>Code-barres</th>
+                    <th>Désignation</th>
+                    <th>Catégorie</th>
+                    <th>Type</th>
+                    <th>Emplacement</th>
+                    <th>Qté</th>
+                    <th>Min.</th>
+                    <th>État</th>
+                    <th>Valeur u.</th>
+                    <th>Valeur tot.</th>
+                    <th>Statut</th>
+                    <th>Dernier mvt</th>
+                    <th style={{ width: 48 }}>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((x) => {
+                    const cat = (categories || []).find((c) => String(c.id) === String(x.categorie_id));
+                    const st = getStatutStock(x.stock_actuel, x.stock_minimum);
+                    const etatBadge = x.etat === 'Neuf' ? 'badge-green' : x.etat === 'Utilisé' ? 'badge-blue' : 'badge-orange';
+                    const valTot = (Number(x.valeur) || 0) * (Number(x.stock_actuel) || 0);
+                    const barcode = getArticleBarcodeValue(x);
+                    return (
+                      <tr key={x.id} className="inv-articles-row" style={{ cursor: 'pointer' }} onClick={() => setDetailId(x.id)}>
+                        <td><span className="inv-articles-ref">{x.code}</span></td>
+                        <td data-label="Code-barres">
+                          <span style={{ fontFamily: 'monospace', fontSize: '0.72rem', display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--text-2)' }}>
+                            <Barcode size={12} /> {barcode || '—'}
+                          </span>
+                        </td>
+                        <td><div className="inv-articles-name">{x.designation}</div></td>
+                        <td>{cat ? <span className="badge badge-blue inv-articles-badge">{cat.nom}</span> : '—'}</td>
+                        <td style={{ fontSize: '0.82rem' }}>{x.type || '—'}</td>
+                        <td style={{ fontSize: '0.82rem' }}>{x.emplacement || '—'}</td>
+                        <td>
+                          <span className="inv-articles-qty" style={{ color: st.cls === 'badge-red' ? 'var(--red)' : undefined }}>{x.stock_actuel || 0}</span>
+                          <span className="inv-articles-unit">{x.unite}</span>
+                        </td>
+                        <td style={{ color: 'var(--text-3)', fontSize: '0.82rem' }}>{x.stock_minimum || '—'}</td>
+                        <td><span className={`badge ${etatBadge} inv-articles-badge`}>{x.etat}</span></td>
+                        <td className="inv-articles-value">{x.valeur ? formatMAD(x.valeur) : '—'}</td>
+                        <td className="inv-articles-value" style={{ color: 'var(--red)' }}>{valTot > 0 ? formatMAD(valTot) : '—'}</td>
+                        <td><span className={`badge ${st.cls} inv-articles-badge`}>{st.label}</span></td>
+                        <td style={{ fontSize: '0.75rem', color: 'var(--text-2)' }}>
+                          {x.dernier_mouvement ? (
+                            <>{x.dernier_mouvement.date_label}<br /><span style={{ color: 'var(--text-3)' }}>{x.dernier_mouvement.action}</span></>
+                          ) : '—'}
+                        </td>
+                        <td onClick={(e) => e.stopPropagation()}>
+                          <StockOpsActions
+                            onOpenFiche={() => setDetailId(x.id)}
+                            onEditFiche={() => setEditFiche(x)}
+                            onEntree={() => setMvtModal({ type: 'Entrée', article: x })}
+                            onSortie={() => setMvtModal({ type: 'Sortie', article: x })}
+                            onTransfert={() => setMvtModal({ type: 'Transfert', article: x })}
+                            onRegulariser={() => setMvtModal({ type: 'Régularisation', article: x })}
+                            onHistory={() => openHistory(x)}
+                            onDocuments={() => setDocsModal(x)}
+                            onEditCatalog={() => setCatalogModal({ article: x })}
+                            onMouvementRapide={onNavigate ? () => goMouvementRapide(x) : undefined}
+                            onDesactiver={() => handleDesactiver(x)}
+                            onDelete={() => handleDelete(x)}
+                            canDelete={canDelete}
+                          />
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
             </div>
-          );
-        })}
-      </div>
+          )}
+        </div>
+      )}
 
       <StockDirectMovementModal
         open={!!mvtModal}
