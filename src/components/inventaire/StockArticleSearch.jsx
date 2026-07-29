@@ -222,19 +222,21 @@ export default function StockArticleSearch({
 
   return (
     <div ref={wrapRef} style={{ position: 'relative' }}>
-      <Search
-        size={14}
-        aria-hidden
-        style={{
-          position: 'absolute',
-          left: 11,
-          top: '50%',
-          transform: 'translateY(-50%)',
-          color: 'var(--text-3)',
-          pointerEvents: 'none',
-          zIndex: 1,
-        }}
-      />
+      {!query && (
+        <Search
+          size={14}
+          aria-hidden
+          style={{
+            position: 'absolute',
+            left: 11,
+            top: '50%',
+            transform: 'translateY(-50%)',
+            color: 'var(--text-3)',
+            pointerEvents: 'none',
+            zIndex: 1,
+          }}
+        />
+      )}
       <input
         type="text"
         value={query}
@@ -248,7 +250,10 @@ export default function StockArticleSearch({
         placeholder={placeholder}
         autoComplete="off"
         disabled={disabled}
-        style={mergedInputStyle}
+        style={{
+          ...mergedInputStyle,
+          paddingLeft: query ? 11 : 34,
+        }}
       />
       {dropdown}
     </div>
