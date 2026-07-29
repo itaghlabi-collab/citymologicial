@@ -12875,4 +12875,7 @@ tbody tr:last-child td { border-bottom: none; }
 @media (max-width: 760px) {
   .mr-desktop-table { display: none; }
   .mr-mobile-cards { display: block; }
+  .mr-type-tabs {
+    grid-template-columns: 1fr 1fr !important;
+  }
 }

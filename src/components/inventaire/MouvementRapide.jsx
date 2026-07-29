@@ -5,14 +5,14 @@
 import { useState, useEffect, useMemo, useCallback } from 'react';
 import {
   ArrowDownToLine, ArrowUpFromLine, ArrowLeftRight,
-  Package, Search, Calendar, User, FileText, Eye,
-  MoreHorizontal, XCircle, Download, ChevronDown, ChevronUp,
-  AlertTriangle, CheckCircle2, Plus, Filter, X, Trash2,
+  Package, Search, Eye,
+  MoreHorizontal, XCircle,
+  AlertTriangle, CheckCircle2, Plus, X, Trash2,
 } from 'lucide-react';
 import {
   INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE,
-  KpiCard, EmptyState, SectionTitle, Modal, FField, FRow,
-  EMPLACEMENTS_STOCK, UNITES,
+  EmptyState, SectionTitle, Modal, FField, FRow,
+  EMPLACEMENTS_STOCK,
 } from './shared.jsx';
 import {
   saveMouvementRapide,
@@ -66,7 +66,6 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
   const [deleteModal, setDeleteModal] = useState(null);
   const [searchHist, setSearchHist] = useState('');
   const [filterType, setFilterType] = useState('');
-  const [showFilters, setShowFilters] = useState(false);
   const emplacements = emplacementsList?.length ? emplacementsList : EMPLACEMENTS_STOCK;
 
   function initialForm() {
@@ -273,26 +272,76 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
           </div>
         )}
 
-        <div className="stat-grid finance-kpi-grid finance-kpi-strip">
-          <KpiCard icon={<FileText size={17} />} label="Total mouvements" value={totalMR} color="blue" />
-          <KpiCard icon={<ArrowDownToLine size={17} />} label="Entrées" value={entrees} color="green" />
-          <KpiCard icon={<ArrowUpFromLine size={17} />} label="Sorties" value={sorties} color="red" />
-          <KpiCard icon={<ArrowLeftRight size={17} />} label="Transferts" value={transferts} color="orange" />
+        {/* Tabs de filtre par type */}
+        <div
+          className="mr-type-tabs"
+          style={{
+            display: 'grid',
+            gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
+            gap: 0,
+            marginBottom: 14,
+            borderRadius: 10,
+            overflow: 'hidden',
+            border: '1px solid var(--border)',
+            background: '#fff',
+          }}
+        >
+          {[
+            { key: '', label: 'Tous', count: totalMR, color: '#1565C0', bg: '#E3F2FD' },
+            { key: 'Entrée', label: 'Entrée en stock', count: entrees, color: '#2E7D32', bg: '#E8F5E9' },
+            { key: 'Sortie', label: 'Sortie de stock', count: sorties, color: '#C62828', bg: '#FFEBEE' },
+            { key: 'Transfert', label: 'Transfert', count: transferts, color: '#1565C0', bg: '#E3F2FD' },
+          ].map((tab, idx) => {
+            const active = filterType === tab.key;
+            return (
+              <button
+                key={tab.key || 'all'}
+                type="button"
+                onClick={() => setFilterType(tab.key)}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 8,
+                  padding: '14px 10px',
+                  border: 'none',
+                  borderLeft: idx === 0 ? 'none' : '1px solid var(--border)',
+                  cursor: 'pointer',
+                  background: active ? tab.bg : '#fff',
+                  color: active ? tab.color : 'var(--text-2)',
+                  fontFamily: 'var(--font-head)',
+                  fontWeight: 800,
+                  fontSize: '0.88rem',
+                  transition: 'background 0.15s, color 0.15s',
+                  boxShadow: active ? `inset 0 -3px 0 ${tab.color}` : 'none',
+                }}
+              >
+                <span>{tab.label}</span>
+                <span style={{
+                  fontSize: '0.72rem',
+                  fontWeight: 700,
+                  padding: '2px 7px',
+                  borderRadius: 999,
+                  background: active ? `${tab.color}22` : 'var(--surface-2)',
+                  color: active ? tab.color : 'var(--text-3)',
+                }}>
+                  {tab.count}
+                </span>
+              </button>
+            );
+          })}
         </div>
 
-        {/* Filters */}
+        {/* Recherche */}
         <div className="card" style={{ marginBottom: 12, padding: '10px 14px' }}>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <div style={{ flex: 1, minWidth: 180, position: 'relative' }}>
-              <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
-              <input value={searchHist} onChange={(e) => setSearchHist(e.target.value)} placeholder="Référence, article..." style={{ ...INPUT_STYLE, paddingLeft: 32 }} />
-            </div>
-            <select value={filterType} onChange={(e) => setFilterType(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 150 }}>
-              <option value="">Tous types</option>
-              <option value="Entrée">Entrée</option>
-              <option value="Sortie">Sortie</option>
-              <option value="Transfert">Transfert</option>
-            </select>
+          <div style={{ position: 'relative' }}>
+            <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
+            <input
+              value={searchHist}
+              onChange={(e) => setSearchHist(e.target.value)}
+              placeholder="Référence, article..."
+              style={{ ...INPUT_STYLE, paddingLeft: 32 }}
+            />
           </div>
         </div>
 
@@ -301,10 +350,12 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
           {filteredHistorique.length === 0 ? (
             <EmptyState
               icon={<ArrowLeftRight size={24} />}
-              title="Aucun mouvement rapide"
-              sub="Cliquez sur + Mouvement rapide pour en créer un."
-              action="Mouvement rapide"
-              onAction={startNew}
+              title={filterType || searchHist ? 'Aucun résultat' : 'Aucun mouvement rapide'}
+              sub={filterType || searchHist
+                ? 'Aucun mouvement pour ce filtre / cette recherche.'
+                : 'Cliquez sur + Mouvement rapide pour en créer un.'}
+              action={filterType || searchHist ? undefined : 'Mouvement rapide'}
+              onAction={filterType || searchHist ? undefined : startNew}
             />
           ) : (
             <>
