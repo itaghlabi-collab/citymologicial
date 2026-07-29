@@ -1,7 +1,7 @@
 /**
  * Recherche article stock — suggestions dès 1 caractère (code / désignation commence par…).
  */
-import { useState, useEffect, useRef, useMemo } from 'react';
+import { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { Search } from 'lucide-react';
 
@@ -30,7 +30,10 @@ function articleLabel(art) {
 
 const DEFAULT_STYLE = {
   width: '100%',
-  padding: '8px 11px 8px 32px',
+  paddingTop: 8,
+  paddingRight: 11,
+  paddingBottom: 8,
+  paddingLeft: 34,
   border: '1.5px solid var(--border)',
   borderRadius: 6,
   fontSize: '0.86rem',
@@ -44,7 +47,7 @@ const DEFAULT_STYLE = {
 /**
  * @param {{
  *   articles: Array,
- *   value: string,           // article_id sélectionné
+ *   value: string,
  *   onChange: (id: string) => void,
  *   inputStyle?: object,
  *   placeholder?: string,
@@ -71,7 +74,6 @@ export default function StockArticleSearch({
     [articles, value],
   );
 
-  // Sync display when parent sets value (scan, reset…)
   useEffect(() => {
     if (!touched) {
       setQuery(selected ? articleLabel(selected) : '');
@@ -86,18 +88,30 @@ export default function StockArticleSearch({
   const filtered = useMemo(() => {
     const q = query.trim();
     if (!q) return [];
-    // Si le champ affiche déjà l'article sélectionné complet, ne pas relister tout
     if (selected && articleLabel(selected) === q) return [];
     return activeList
       .filter((a) => stockArticleMatchesQuery(a, q))
-      .slice(0, 40);
+      .slice(0, 80);
   }, [activeList, query, selected]);
 
-  const updateDropdownRect = () => {
+  const updateDropdownRect = useCallback(() => {
     if (!wrapRef.current) return;
     const r = wrapRef.current.getBoundingClientRect();
-    setDropdownRect({ top: r.bottom + 4, left: r.left, width: r.width });
-  };
+    const gap = 4;
+    const spaceBelow = window.innerHeight - r.bottom - gap - 8;
+    const spaceAbove = r.top - 8;
+    const preferred = 320;
+    // Ouvrir vers le haut si peu de place en bas
+    const openUp = spaceBelow < 160 && spaceAbove > spaceBelow;
+    const maxH = Math.max(140, Math.min(preferred, openUp ? spaceAbove : spaceBelow));
+    setDropdownRect({
+      top: openUp ? undefined : r.bottom + gap,
+      bottom: openUp ? window.innerHeight - r.top + gap : undefined,
+      left: r.left,
+      width: r.width,
+      maxHeight: maxH,
+    });
+  }, []);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -109,7 +123,7 @@ export default function StockArticleSearch({
       window.removeEventListener('scroll', onReposition, true);
       window.removeEventListener('resize', onReposition);
     };
-  }, [open, query]);
+  }, [open, query, filtered.length, updateDropdownRect]);
 
   useEffect(() => {
     function onDocClick(e) {
@@ -138,42 +152,58 @@ export default function StockArticleSearch({
     setQuery(next);
     setOpen(true);
     updateDropdownRect();
-    // Effacer la sélection si l'utilisateur retape
     if (value) onChange?.('');
   }
 
   const showList = open && query.trim().length > 0 && !(selected && articleLabel(selected) === query.trim());
 
+  // paddingLeft forcé après inputStyle pour éviter le chevauchement icône / texte
+  const mergedInputStyle = {
+    ...DEFAULT_STYLE,
+    ...(inputStyle || {}),
+    paddingLeft: 34,
+  };
+
   const dropdown = showList && dropdownRect && createPortal(
     <div
       ref={dropdownRef}
+      onWheel={(e) => e.stopPropagation()}
       style={{
         position: 'fixed',
         top: dropdownRect.top,
+        bottom: dropdownRect.bottom,
         left: dropdownRect.left,
         width: dropdownRect.width,
-        zIndex: 10000,
+        zIndex: 10050,
         background: '#fff',
         border: '1.5px solid var(--border)',
         borderRadius: 8,
         boxShadow: '0 12px 32px rgba(0,0,0,0.14)',
-        maxHeight: 280,
+        maxHeight: dropdownRect.maxHeight,
         overflowY: 'auto',
+        overscrollBehavior: 'contain',
+        WebkitOverflowScrolling: 'touch',
       }}
     >
       {filtered.length === 0 ? (
         <div style={{ padding: '12px 14px', fontSize: '0.85rem', color: 'var(--text-3)' }}>
           Aucun article ne commence par « {query.trim()} »
         </div>
-      ) : filtered.map((a) => (
+      ) : filtered.map((a, i) => (
         <button
           key={a.id}
           type="button"
           onClick={() => pick(a)}
           style={{
-            display: 'block', width: '100%', textAlign: 'left', padding: '10px 14px',
-            border: 'none', background: '#fff', cursor: 'pointer',
-            fontSize: '0.86rem', borderBottom: '1px solid var(--border)',
+            display: 'block',
+            width: '100%',
+            textAlign: 'left',
+            padding: '10px 14px',
+            border: 'none',
+            background: '#fff',
+            cursor: 'pointer',
+            fontSize: '0.86rem',
+            borderBottom: i === filtered.length - 1 ? 'none' : '1px solid var(--border)',
             color: 'var(--text)',
           }}
           onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--surface-2)'; }}
@@ -192,7 +222,19 @@ export default function StockArticleSearch({
 
   return (
     <div ref={wrapRef} style={{ position: 'relative' }}>
-      <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)', pointerEvents: 'none', zIndex: 1 }} />
+      <Search
+        size={14}
+        aria-hidden
+        style={{
+          position: 'absolute',
+          left: 11,
+          top: '50%',
+          transform: 'translateY(-50%)',
+          color: 'var(--text-3)',
+          pointerEvents: 'none',
+          zIndex: 1,
+        }}
+      />
       <input
         type="text"
         value={query}
@@ -206,7 +248,7 @@ export default function StockArticleSearch({
         placeholder={placeholder}
         autoComplete="off"
         disabled={disabled}
-        style={{ ...DEFAULT_STYLE, ...inputStyle }}
+        style={mergedInputStyle}
       />
       {dropdown}
     </div>
