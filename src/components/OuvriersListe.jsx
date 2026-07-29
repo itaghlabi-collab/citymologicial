@@ -1449,6 +1449,7 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
     setOcrToastType('success');
     setOcrProgress('Analyse…');
     setCinAmbiguous(null);
+    setFieldConflicts(null);
     try {
       console.info('[OCR CHAIN]', 'Appel scanCIN…');
       const result = await scanCIN(
@@ -1548,19 +1549,22 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
       {fieldConflicts && (
         <div className="cin-verify-overlay" role="dialog" aria-modal="true">
           <div className="cin-verify-box" style={{ maxWidth: 480 }}>
-            <h2>Valeurs déjà renseignées</h2>
-            <p className="cin-verify-sub">Cette valeur est déjà renseignée. Voulez-vous la remplacer ?</p>
+            <h2>Nouvelle carte scannée</h2>
+            <p className="cin-verify-sub">
+              Le formulaire contient déjà des valeurs. Les valeurs « Issues du scan » viennent uniquement
+              de la carte analysée maintenant (aucune donnée d’une autre carte n’est réutilisée).
+            </p>
             {Object.entries(fieldConflicts.conflicts).map(([k, v]) => (
               <div key={k} className="cin-conflict-row">
                 <strong>{k}</strong>
-                <div>Actuelle : {v.current}</div>
-                <div>Détectée : {v.detected}</div>
+                <div>Dans le formulaire : {v.current}</div>
+                <div>Issues du scan : {v.detected}</div>
                 <div style={{ display: 'flex', gap: 8, marginTop: 6 }}>
                   <button type="button" className="btn btn-ghost btn-sm" onClick={() => resolveConflicts({ [k]: 'keep', ...Object.fromEntries(Object.keys(fieldConflicts.conflicts).filter((x) => x !== k).map((x) => [x, 'use'])) })}>
-                    Conserver actuelle
+                    Conserver le formulaire
                   </button>
                   <button type="button" className="btn btn-primary btn-sm" onClick={() => resolveConflicts({ [k]: 'use', ...Object.fromEntries(Object.keys(fieldConflicts.conflicts).filter((x) => x !== k).map((x) => [x, 'keep'])) })}>
-                    Utiliser détectée
+                    Utiliser le scan
                   </button>
                 </div>
               </div>
@@ -1573,7 +1577,7 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
                   Object.keys(fieldConflicts.conflicts).forEach((k) => { all[k] = 'use'; });
                   resolveConflicts(all);
                 }}>
-                  Remplacer toutes
+                  Utiliser tout le scan
                 </button>
               )}
             </div>

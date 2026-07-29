@@ -1,6 +1,9 @@
 /**
  * Parser CNIE marocaine — Google Vision → champs structurés.
  *
+ * Stateless et générique : chaque appel ne dépend que des images / textes fournis.
+ * Aucune CNIE d'exemple, aucun cache inter-analyses, aucune donnée codée en dur.
+ *
  * Stratégie (par priorité) :
  *   1. MRZ du verso (nom, prénom, dates, sexe, nationalité) — très fiable
  *   2. Labels français du recto (NOM, PRENOM, Née le, à …) avec bounding boxes
@@ -49,7 +52,7 @@ function normText(s) {
 
 /**
  * Normalise un CIN uniquement si le raw a déjà un préfixe lettres + chiffres.
- * Ne convertit JAMAIS un nom tout-lettres (ex. TAGHLABI → TA6181).
+ * Ne convertit JAMAIS un nom tout-lettres en CIN (pas de mapping OCR lettres→chiffres sur un mot).
  */
 function normalizeCin(raw, { applyOcrFixes = false } = {}) {
   const s = String(raw || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
@@ -74,23 +77,16 @@ function isValidCin(v) {
 function isRejectedCinCandidate(raw, normalized) {
   const s = String(raw || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
   if (!normalized || !isValidCin(normalized)) return true;
-  // Tout-lettres d'origine = nom (TAGHLABI), jamais un CIN
+  // Tout-lettres d'origine = nom / libellé, jamais un CIN
   if (/^[A-Z]+$/.test(s)) return true;
-  // Préfixe CAN (numéro vertical technique)
+  // Préfixe CAN (numéro vertical technique sur le bord)
   if (/^CAN/i.test(s) || /^CAN\d/i.test(normalized)) return true;
-  // Trop de 0/1 après normalisation OCR agressive
+  // Trop de 0/1 → souvent artefact OCR / numéro technique
   const digits = normalized.replace(/^[A-Z]+/, '');
   const zeroOne = (digits.match(/[01]/g) || []).length;
   if (digits.length >= 5 && zeroOne / digits.length >= 0.85) return true;
-  // Doc number MRZ type OPI9VXW7 (lettres mélangées au milieu)
-  if (/^[A-Z]{2,3}\d[A-Z0-9]*[A-Z]\d*$/i.test(s) && /[A-Z]/.test(s.slice(2))) {
-    // si le raw a encore des lettres après le préfixe hors OCR digit zone → douteux
-    const after = s.slice(s.match(/^[A-Z]{1,3}/)[0].length);
-    if (/[A-Z]/.test(after) && !/^\d+$/.test(normalizeCin(s, { applyOcrFixes: true }).replace(/^[A-Z]+/, ''))) {
-      // Keep if normalizeCin without OCR already worked (pure digits after letters)
-    }
-  }
-  if (/[A-Z]/.test(s.replace(/^[A-Z]{1,3}/, ''))) return true; // letters inside number body
+  // Doc number MRZ (lettres mélangées au milieu) — pas un CIN imprimé
+  if (/[A-Z]/.test(s.replace(/^[A-Z]{1,3}/, ''))) return true;
   return false;
 }
 
@@ -182,8 +178,7 @@ function extractMRZ(fullText) {
 
   // L1 TD1: ID + MAR + documentNumber(9) + check + optionalData
   // Sur CNIE marocaine, le CIN imprimé est souvent dans optionalData (après le check),
-  // pas dans le documentNumber (ex. OPI9VXW7).
-  // Ex: IDMAROPI9VXW7<5BE884115<<<<<<<  → CIN = BE884115
+  // pas dans le documentNumber technique MRZ.
   const optional = l1.slice(15).replace(/</g, ' ');
   const cinInOptional = optional.match(/\b([A-Z]{1,3}\d{4,8})\b/);
   if (cinInOptional) {
@@ -192,7 +187,7 @@ function extractMRZ(fullText) {
       result.cin_mrz = cin;
     }
   }
-  // Doc number (positions 5-13 after IDMAR = chars 5-13 of L1) — jamais utilisé seul comme CIN
+  // Doc number technique — jamais utilisé seul comme CIN
   const docRaw = l1.slice(5, 14).replace(/</g, '');
   if (docRaw.length >= 5) result.doc_number_mrz = docRaw;
 

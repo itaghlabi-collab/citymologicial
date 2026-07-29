@@ -1,5 +1,6 @@
 /**
  * Tests unitaires parser CNIE Google Vision (mock, sans appel réseau).
+ * Données entièrement synthétiques — aucune CNIE réelle / carte de développement.
  * Usage: node --test server/tests/cnieGoogleParser.test.js
  */
 'use strict';
@@ -19,12 +20,13 @@ describe('cnieGoogleParser', () => {
   it('normalise et valide un CIN (sans transformer un nom)', () => {
     assert.equal(normalizeCin('AB 123456'), 'AB123456');
     assert.equal(isValidCin('AB123456'), true);
-    assert.equal(isValidCin('BE884115'), true);
+    assert.equal(isValidCin('XX998877'), true);
     assert.equal(isValidCin('AB12'), false);
-    // TAGHLABI ne doit PLUS devenir TA6181
-    assert.equal(normalizeCin('TAGHLABI'), '');
-    assert.equal(isRejectedCinCandidate('TAGHLABI', 'TA6181'), true);
+    // Un nom tout-lettres ne devient jamais un CIN
+    assert.equal(normalizeCin('NOMEXEMPLE'), '');
+    assert.equal(isRejectedCinCandidate('NOMEXEMPLE', 'NO6131'), true);
     assert.equal(isRejectedCinCandidate('CAN413261', 'CA413261'), true);
+    assert.equal(isRejectedCinCandidate('CA1010101', 'CA1010101'), true);
   });
 
   it('parse des dates JJ.MM.AAAA', () => {
@@ -71,48 +73,49 @@ describe('cnieGoogleParser', () => {
   });
 
   it('non-régression CIN : vrai CIN près de N° + faux CAN vertical + MRZ concordante', () => {
-    // Structure anonymisée reproduisant le bug TAGHLABI→TA6181 / CAN→faux / BE884115 vrai
+    // Structure synthétique : label N° + CIN + nom piège + CAN vertical + MRZ
+    const trueCin = 'XX998877';
     const front = {
       fullText: [
         'ROYAUME DU MAROC',
         'CARTE NATIONALE D IDENTITE',
         'No',
-        'BE884115',
-        'IMANE',
-        'TAGHLABI',
+        trueCin,
+        'PRENOMEX',
+        'NOMEXEMPLE',
         'Née le',
         '08.04.1995',
-        'à ANFA CASABLANCA ANFA',
+        'à VILLE TEST',
         'CAN 413261',
         "Valable jusqu'au 13.11.2033",
       ].join('\n'),
       blocks: [
         { text: 'ROYAUME DU MAROC', confidence: 0.99, bbox: [95, 417, 416, 478] },
-        { text: 'IMANE', confidence: 0.98, bbox: [435, 540, 519, 560] },
-        { text: 'TAGHLABI', confidence: 0.97, bbox: [435, 607, 563, 626] }, // faux positif historique
+        { text: 'PRENOMEX', confidence: 0.98, bbox: [435, 540, 519, 560] },
+        { text: 'NOMEXEMPLE', confidence: 0.97, bbox: [435, 607, 563, 626] },
         { text: 'Née le', confidence: 0.94, bbox: [436, 648, 488, 665] },
         { text: '08.04.1995', confidence: 0.98, bbox: [655, 643, 784, 661] },
-        { text: 'à ANFA CASABLANCA ANFA', confidence: 0.95, bbox: [436, 719, 790, 741] },
-        { text: 'CAN 413261', confidence: 0.97, bbox: [1049, 802, 1069, 926] }, // vertical droit
+        { text: 'à VILLE TEST', confidence: 0.95, bbox: [436, 719, 790, 741] },
+        { text: 'CAN 413261', confidence: 0.97, bbox: [1049, 802, 1069, 926] },
         { text: 'No', confidence: 0.76, bbox: [135, 960, 157, 975] },
-        { text: 'BE884115', confidence: 0.97, bbox: [188, 954, 332, 975] }, // vrai CIN bas-gauche
+        { text: trueCin, confidence: 0.97, bbox: [188, 954, 332, 975] },
         { text: "Valable jusqu'au 13.11.2033", confidence: 0.97, bbox: [646, 956, 1074, 982] },
       ],
     };
     const back = {
       fullText: [
-        'رقم N BE884115',
+        `رقم N ${trueCin}`,
         'N° état civil',
         'Sexe F',
-        'IDMAROPI9VXW7<5BE884115<<<<<<<',
+        `IDMARABC1DEF2G<5${trueCin}<<<<<<<`,
         '9504084F3311134MAR<<<<<<<<<<<6',
-        'TAGHLABI<<IMANE<<<<<<<<<<<<<<<',
+        'NOMEXEMPLE<<PRENOMEX<<<<<<<<<<<<<<<',
       ].join('\n'),
       blocks: [
-        { text: 'رقم N BE884115', confidence: 0.96, bbox: [111, 338, 348, 363] },
+        { text: `رقم N ${trueCin}`, confidence: 0.96, bbox: [111, 338, 348, 363] },
         { text: 'Sexe F', confidence: 0.99, bbox: [875, 392, 944, 414] },
         {
-          text: 'IDMAROPI9VXW7 < 5BE884115 <<<<<<< 9504084F3311134MAR <<<<<<<<<<< 6 TAGHLABI << IMANE <<<<<<<<<<<<<<<',
+          text: `IDMARABC1DEF2G < 5${trueCin} <<<<<<< 9504084F3311134MAR <<<<<<<<<<< 6 NOMEXEMPLE << PRENOMEX <<<<<<<<<<<<<<<`,
           confidence: 0.92,
           bbox: [142, 681, 998, 838],
         },
@@ -121,35 +124,31 @@ describe('cnieGoogleParser', () => {
 
     const fields = parseCnieFromVision(front, back);
 
-    // Vrai CIN sélectionné
-    assert.equal(fields.cin.value, 'BE884115');
-    // Faux nom→CIN et CAN vertical rejetés
-    assert.notEqual(fields.cin.value, 'TA6181');
+    assert.equal(fields.cin.value, trueCin);
+    assert.notEqual(fields.cin.value, 'NO6131');
     assert.notEqual(fields.cin.value, 'CA413261');
     assert.notEqual(fields.cin.value, 'CA1010101');
-    // Concordance recto + MRZ → haute confiance
     assert.ok(fields.cin.confidence >= 0.9, `conf=${fields.cin.confidence}`);
     assert.equal(fields.cin.requires_manual_review, false);
     assert.match(fields.cin.source, /recto|mrz/);
-    // Noms depuis MRZ (pas le label arabe)
-    assert.equal(fields.nom.value, 'TAGHLABI');
-    assert.equal(fields.prenom.value, 'IMANE');
+    assert.equal(fields.nom.value, 'NOMEXEMPLE');
+    assert.equal(fields.prenom.value, 'PRENOMEX');
   });
 
   it('n extrait pas un CIN depuis un document number MRZ seul', () => {
+    const trueCin = 'XX998877';
     const front = {
       fullText: 'ROYAUME DU MAROC',
       blocks: [],
     };
     const back = {
-      fullText: 'IDMAROPI9VXW7<5BE884115<<<<<<<\n9504084F3311134MAR<<<<<<<<<<<6\nTAGHLABI<<IMANE<<<<<<<<<<<<<<<',
+      fullText: `IDMARABC1DEF2G<5${trueCin}<<<<<<<\n9504084F3311134MAR<<<<<<<<<<<6\nNOMEXEMPLE<<PRENOMEX<<<<<<<<<<<<<<<`,
       blocks: [],
     };
     const fields = parseCnieFromVision(front, back);
-    // CIN depuis optional data MRZ, mais sans croisement → review
     if (fields.cin.value) {
-      assert.equal(fields.cin.value, 'BE884115');
-      assert.notEqual(fields.cin.value, 'OPI9VXW7');
+      assert.equal(fields.cin.value, trueCin);
+      assert.notEqual(fields.cin.value, 'ABC1DEF2G');
       assert.ok(fields.cin.requires_manual_review || fields.cin.confidence < 0.85);
     }
   });
@@ -159,5 +158,41 @@ describe('cnieGoogleParser', () => {
     assert.equal(fields.cin.value, null);
     assert.equal(fields.nom.value, null);
     assert.equal(fields.cin.valid, false);
+  });
+
+  it('deux analyses indépendantes ne se contaminent pas', () => {
+    const cardA = parseCnieFromVision(
+      {
+        fullText: 'No AA23456 PRENOM A NOM A',
+        blocks: [
+          { text: 'No', confidence: 0.9, bbox: [10, 900, 40, 920] },
+          { text: 'AA23456', confidence: 0.95, bbox: [50, 900, 160, 920] },
+          { text: 'PRENOMA', confidence: 0.9, bbox: [10, 100, 100, 120] },
+          { text: 'NOMA', confidence: 0.9, bbox: [10, 130, 80, 150] },
+        ],
+      },
+      {
+        fullText: 'رقم N AA23456\nIDMARZZZ9YYY8X<5AA23456<<<<<<<\n9001011M3001011MAR<<<<<<<<<<<6\nNOMA<<PRENOMA<<<<<<<<<<<<<<<',
+        blocks: [{ text: 'رقم N AA23456', confidence: 0.9, bbox: [10, 40, 200, 60] }],
+      },
+    );
+    const cardB = parseCnieFromVision(
+      {
+        fullText: 'No BB78901 PRENOM B NOM B',
+        blocks: [
+          { text: 'No', confidence: 0.9, bbox: [10, 900, 40, 920] },
+          { text: 'BB78901', confidence: 0.95, bbox: [50, 900, 160, 920] },
+          { text: 'PRENOMB', confidence: 0.9, bbox: [10, 100, 100, 120] },
+          { text: 'NOMB', confidence: 0.9, bbox: [10, 130, 80, 150] },
+        ],
+      },
+      {
+        fullText: 'رقم N BB78901\nIDMARQQQ1WWW2V<5BB78901<<<<<<<\n0102034F2901014MAR<<<<<<<<<<<6\nNOMB<<PRENOMB<<<<<<<<<<<<<<<',
+        blocks: [{ text: 'رقم N BB78901', confidence: 0.9, bbox: [10, 40, 200, 60] }],
+      },
+    );
+    assert.equal(cardA.cin.value, 'AA23456');
+    assert.equal(cardB.cin.value, 'BB78901');
+    assert.notEqual(cardA.cin.value, cardB.cin.value);
   });
 });
