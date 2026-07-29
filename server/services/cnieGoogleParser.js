@@ -47,17 +47,51 @@ function normText(s) {
   return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/\s+/g, ' ').trim().toUpperCase();
 }
 
-function normalizeCin(raw) {
-  let s = String(raw || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
-  const m = s.match(/^([A-Z]{1,2})(.+)$/);
-  if (!m) return s;
+/**
+ * Normalise un CIN uniquement si le raw a déjà un préfixe lettres + chiffres.
+ * Ne convertit JAMAIS un nom tout-lettres (ex. TAGHLABI → TA6181).
+ */
+function normalizeCin(raw, { applyOcrFixes = false } = {}) {
+  const s = String(raw || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+  const m = s.match(/^([A-Z]{1,3})(\d[A-Z0-9]*)$/);
+  if (!m) return '';
   const head = m[1];
-  const rest = m[2].split('').map((c) => OCR_DIGIT[c] || c).join('').replace(/\D/g, '');
+  let rest = m[2];
+  if (applyOcrFixes) {
+    rest = rest.split('').map((c) => (/\d/.test(c) ? c : (OCR_DIGIT[c] || ''))).join('');
+  } else {
+    rest = rest.replace(/\D/g, '');
+  }
+  if (!rest || rest.length < 4) return '';
   return head + rest;
 }
 
 function isValidCin(v) {
-  return /^[A-Z]{1,2}\d{4,7}$/.test(v) && v.length >= 5 && v.length <= 9;
+  return /^[A-Z]{1,3}\d{4,8}$/.test(v) && v.length >= 5 && v.length <= 11;
+}
+
+/** Rejette les faux positifs techniques / noms / CAN vertical. */
+function isRejectedCinCandidate(raw, normalized) {
+  const s = String(raw || '').replace(/[^A-Za-z0-9]/g, '').toUpperCase();
+  if (!normalized || !isValidCin(normalized)) return true;
+  // Tout-lettres d'origine = nom (TAGHLABI), jamais un CIN
+  if (/^[A-Z]+$/.test(s)) return true;
+  // Préfixe CAN (numéro vertical technique)
+  if (/^CAN/i.test(s) || /^CAN\d/i.test(normalized)) return true;
+  // Trop de 0/1 après normalisation OCR agressive
+  const digits = normalized.replace(/^[A-Z]+/, '');
+  const zeroOne = (digits.match(/[01]/g) || []).length;
+  if (digits.length >= 5 && zeroOne / digits.length >= 0.85) return true;
+  // Doc number MRZ type OPI9VXW7 (lettres mélangées au milieu)
+  if (/^[A-Z]{2,3}\d[A-Z0-9]*[A-Z]\d*$/i.test(s) && /[A-Z]/.test(s.slice(2))) {
+    // si le raw a encore des lettres après le préfixe hors OCR digit zone → douteux
+    const after = s.slice(s.match(/^[A-Z]{1,3}/)[0].length);
+    if (/[A-Z]/.test(after) && !/^\d+$/.test(normalizeCin(s, { applyOcrFixes: true }).replace(/^[A-Z]+/, ''))) {
+      // Keep if normalizeCin without OCR already worked (pure digits after letters)
+    }
+  }
+  if (/[A-Z]/.test(s.replace(/^[A-Z]{1,3}/, ''))) return true; // letters inside number body
+  return false;
 }
 
 function toIso(d, m, y) {
@@ -146,12 +180,21 @@ function extractMRZ(fullText) {
   const natSlice = l2.slice(15, 18);
   if (natSlice === 'MAR') result.nationalite = 'Marocaine';
 
-  // L1: CIN after IDMAR
-  const l1m = l1.match(/^IDMAR(.+?)(<|$)/);
-  if (l1m) {
-    const docNum = l1m[1].replace(/</g, '');
-    if (docNum.length >= 5) result.cin_mrz = docNum;
+  // L1 TD1: ID + MAR + documentNumber(9) + check + optionalData
+  // Sur CNIE marocaine, le CIN imprimé est souvent dans optionalData (après le check),
+  // pas dans le documentNumber (ex. OPI9VXW7).
+  // Ex: IDMAROPI9VXW7<5BE884115<<<<<<<  → CIN = BE884115
+  const optional = l1.slice(15).replace(/</g, ' ');
+  const cinInOptional = optional.match(/\b([A-Z]{1,3}\d{4,8})\b/);
+  if (cinInOptional) {
+    const cin = normalizeCin(cinInOptional[1]);
+    if (isValidCin(cin) && !isRejectedCinCandidate(cinInOptional[1], cin)) {
+      result.cin_mrz = cin;
+    }
   }
+  // Doc number (positions 5-13 after IDMAR = chars 5-13 of L1) — jamais utilisé seul comme CIN
+  const docRaw = l1.slice(5, 14).replace(/</g, '');
+  if (docRaw.length >= 5) result.doc_number_mrz = docRaw;
 
   return result;
 }
@@ -188,24 +231,17 @@ function extractRectoFields(blocks) {
     (b) => isLeftHalf(b) && !isHeader(b.text) && !isMrzLike(b.text) && !isArabic(b.text)
   );
 
-  // Find CIN: block matching pattern, usually near bottom-left of recto or top-right
-  for (const b of sorted) {
-    if (isMrzLike(b.text)) continue;
-    const cleaned = b.text.replace(/^(N[°O.]?|NO|NUM)\s*/i, '').replace(/\s/g, '');
-    const cin = normalizeCin(cleaned);
-    if (isValidCin(cin)) {
-      result.cin = { value: cin, confidence: b.confidence || 0.85 };
-      break;
-    }
-  }
+  // CIN : géré exclusivement par selectCin() (bbox + MRZ + croisement)
 
   // Find names from Latin labels in left half
   // Strategy: look for blocks that are purely Latin names (no labels, no dates)
   const nameBlocks = latinBlocks.filter((b) => {
     const t = b.text.trim();
     if (!isLatinName(t)) return false;
-    if (/^(No|Née?\s+le|Valable|CIN|Sexe|N°)$/i.test(t)) return false;
+    if (/^(No|Née?\s+le|Valable|CIN|Sexe|N°|NOM|PRENOM|PRÉNOM|NAME)$/i.test(t)) return false;
     if (/^[A-Z]{1}$/i.test(t)) return false;
+    // Ne pas traiter un CIN-like comme nom
+    if (isValidCin(normalizeCin(t))) return false;
     return true;
   });
 
@@ -290,14 +326,7 @@ function extractVersoFields(blocks) {
       }
     }
 
-    // CIN from verso (often at top)
-    if (!result.cin) {
-      const cinText = t.replace(/^(N[°O.]?|رقم|NUM|NO)\s*/i, '').replace(/\s/g, '');
-      const cin = normalizeCin(cinText);
-      if (isValidCin(cin)) {
-        result.cin = { value: cin, confidence: b.confidence || 0.8 };
-      }
-    }
+    // CIN verso : géré par selectCin()
 
     // "Valable jusqu'au DD.MM.YYYY"
     const expM = t.match(/(?:Valable|jusqu|صالحة)[^0-9]*(\d{1,2}[./\-]\d{1,2}[./\-]\d{2,4})/i);
@@ -340,26 +369,268 @@ function extractVersoFields(blocks) {
   return result;
 }
 
-/* ── CIN from fullText sweep (fallback) ────────────── */
+/* ── CIN : candidats + scoring + validation croisée ── */
 
-function extractCinFromText(fullText) {
-  const candidates = [];
-  for (const line of String(fullText || '').split(/\n+/)) {
-    if (isMrzLike(line)) continue;
-    const cleaned = line.replace(/^(N[°O.]?|NO|NUM|رقم)\s*/i, '');
-    const re = /\b([A-Z]{1,2}\s*\d{4,7})\b/gi;
+const CIN_TOKEN_RE = /\b([A-Z]{1,3}\s*\d{4,8})\b/gi;
+
+function pushCinCandidate(list, raw, meta) {
+  const value = normalizeCin(raw);
+  if (isRejectedCinCandidate(raw, value)) return;
+  list.push({
+    value,
+    raw: String(raw || '').replace(/\s/g, '').toUpperCase(),
+    source: meta.source,
+    nearLabel: !!meta.nearLabel,
+    vertical: !!meta.vertical,
+    bottomLeft: !!meta.bottomLeft,
+    confidence: Number(meta.confidence) || 0.7,
+  });
+}
+
+function collectCinCandidates(frontBlocks, backBlocks, frontFullText, backFullText, mrz) {
+  const list = [];
+  const imgW = Math.max(1, ...frontBlocks.map((b) => b.bbox[2] || 0));
+  const imgH = Math.max(1, ...frontBlocks.map((b) => b.bbox[3] || 0));
+
+  for (const b of frontBlocks) {
+    if (isMrzLike(b.text)) continue;
+    const [x0, y0, x1, y1] = b.bbox;
+    const cx = (x0 + x1) / 2;
+    const cy = (y0 + y1) / 2;
+    const vertical = cx > imgW * 0.78 || ((y1 - y0) > (x1 - x0) * 1.6 && cx > imgW * 0.7);
+    const bottomLeft = cy > imgH * 0.65 && cx < imgW * 0.5;
+    const nearLabel = /N[°ºo.]|Nº|\bCIN\b|CARTE\s*NATIONALE|NUM/i.test(b.text)
+      || (bottomLeft && /^(N[°ºo.]?|NO)\b/i.test(String(b.text).trim()));
+
+    // Bloc voisin d'un label N° (bloc précédent)
+    let labelNearby = nearLabel;
+    // aussi scanner le texte
     let m;
-    while ((m = re.exec(cleaned))) {
-      const cin = normalizeCin(m[1]);
-      if (isValidCin(cin)) candidates.push(cin);
+    const re = new RegExp(CIN_TOKEN_RE.source, 'gi');
+    while ((m = re.exec(b.text))) {
+      pushCinCandidate(list, m[1], {
+        source: 'recto',
+        nearLabel: labelNearby || /N[°ºo.]|Nº|\bCIN\b/i.test(b.text),
+        vertical,
+        bottomLeft,
+        confidence: b.confidence,
+      });
     }
   }
-  if (!candidates.length) return null;
-  // Most frequent
-  const counts = {};
-  for (const c of candidates) counts[c] = (counts[c] || 0) + 1;
-  const best = Object.entries(counts).sort((a, b) => b[1] - a[1])[0];
-  return { value: best[0], confidence: best[1] >= 2 ? 0.95 : 0.8 };
+
+  // Label N° seul suivi d'un bloc CIN bas-gauche
+  for (let i = 0; i < frontBlocks.length; i += 1) {
+    const b = frontBlocks[i];
+    if (!/^(N[°ºo.]?|NO|Nº|CIN)\s*$/i.test(String(b.text || '').trim())) continue;
+    for (let j = i + 1; j < Math.min(i + 4, frontBlocks.length); j += 1) {
+      const n = frontBlocks[j];
+      const cx = (n.bbox[0] + n.bbox[2]) / 2;
+      if (cx > imgW * 0.78) continue;
+      const m = String(n.text || '').match(/([A-Z]{1,3}\s*\d{4,8})/i);
+      if (m) {
+        pushCinCandidate(list, m[1], {
+          source: 'recto',
+          nearLabel: true,
+          vertical: false,
+          bottomLeft: true,
+          confidence: Math.max(n.confidence || 0.8, 0.9),
+        });
+      }
+    }
+  }
+
+  for (const b of backBlocks) {
+    if (isMrzLike(b.text)) continue;
+    const nearLabel = /N[°ºo.]|رقم|CIN|NUM/i.test(b.text);
+    let m;
+    const re = new RegExp(CIN_TOKEN_RE.source, 'gi');
+    while ((m = re.exec(b.text))) {
+      pushCinCandidate(list, m[1], {
+        source: 'verso',
+        nearLabel,
+        vertical: false,
+        bottomLeft: false,
+        confidence: b.confidence,
+      });
+    }
+  }
+
+  if (mrz?.cin_mrz) {
+    pushCinCandidate(list, mrz.cin_mrz, {
+      source: 'mrz',
+      nearLabel: false,
+      vertical: false,
+      bottomLeft: false,
+      confidence: 0.88,
+    });
+  }
+
+  // Regex globale last resort (hors MRZ)
+  for (const [side, text] of [['recto', frontFullText], ['verso', backFullText]]) {
+    for (const line of String(text || '').split(/\n+/)) {
+      if (isMrzLike(line)) continue;
+      let m;
+      const re = new RegExp(CIN_TOKEN_RE.source, 'gi');
+      while ((m = re.exec(line))) {
+        pushCinCandidate(list, m[1], {
+          source: 'regex',
+          nearLabel: false,
+          vertical: false,
+          bottomLeft: false,
+          confidence: 0.55,
+        });
+      }
+    }
+  }
+
+  return list;
+}
+
+/** Distance OCR prudente (O/0, I/1, B/8, S/5) — uniquement pour croiser 2 sources. */
+function cinOcrDistance(a, b) {
+  const x = String(a || '').toUpperCase();
+  const y = String(b || '').toUpperCase();
+  if (x.length !== y.length) return Infinity;
+  const map = { O: '0', '0': 'O', I: '1', '1': 'I', B: '8', '8': 'B', S: '5', '5': 'S' };
+  let d = 0;
+  for (let i = 0; i < x.length; i += 1) {
+    if (x[i] === y[i]) continue;
+    if (map[x[i]] === y[i]) { d += 1; continue; }
+    return Infinity;
+  }
+  return d;
+}
+
+/**
+ * Si deux sources indépendantes ne diffèrent que par confusions OCR,
+ * unifier vers la valeur la mieux ancrée (recto près de N° > verso > mrz).
+ */
+function unifyOcrCrossMatches(candidates) {
+  const out = [...candidates];
+  for (let i = 0; i < candidates.length; i += 1) {
+    for (let j = i + 1; j < candidates.length; j += 1) {
+      const a = candidates[i];
+      const b = candidates[j];
+      if (a.value === b.value) continue;
+      if (a.source === b.source) continue; // sources indépendantes uniquement
+      if (a.vertical || b.vertical) continue;
+      const d = cinOcrDistance(a.value, b.value);
+      if (d < 1 || d > 2) continue;
+      // Préférer ancrage recto/nearLabel
+      const preferA = (a.source === 'recto' && a.nearLabel)
+        || (a.source === 'recto' && b.source !== 'recto')
+        || (a.source === 'verso' && b.source === 'mrz');
+      const canon = preferA ? a.value : b.value;
+      out.push({
+        ...a,
+        value: canon,
+        source: a.source,
+        confidence: Math.max(a.confidence, b.confidence),
+      });
+      out.push({
+        ...b,
+        value: canon,
+        source: b.source,
+        confidence: Math.max(a.confidence, b.confidence),
+      });
+    }
+  }
+  return out;
+}
+
+function scoreCinCandidate(c, all) {
+  let score = 0;
+  if (c.vertical) return -100; // JAMAIS le CAN vertical
+  if (c.source === 'recto' && c.nearLabel) score += 50;
+  if (c.source === 'recto' && c.bottomLeft) score += 35;
+  if (c.source === 'recto') score += 20;
+  if (c.source === 'verso' && c.nearLabel) score += 30;
+  if (c.source === 'verso') score += 15;
+  if (c.source === 'mrz') score += 25; // utile seulement en croisement
+  if (c.source === 'regex') score += 5;
+
+  const same = all.filter((x) => x.value === c.value && !x.vertical);
+  const sources = new Set(same.map((x) => x.source));
+  if (sources.has('recto') && sources.has('mrz')) score += 60;
+  if (sources.has('recto') && sources.has('verso')) score += 45;
+  if (sources.has('verso') && sources.has('mrz')) score += 40;
+  if (sources.size >= 2) score += 20;
+
+  score += Math.min(10, (c.confidence || 0) * 10);
+  return score;
+}
+
+/**
+ * Sélection CIN — priorité :
+ * 1. Recto près de N° / bas-gauche
+ * 2. MRZ si concordante avec autre source
+ * 3. Verso haut
+ * 4. Regex globale
+ */
+function selectCin(frontBlocks, backBlocks, frontFullText, backFullText, mrz) {
+  const rawCandidates = collectCinCandidates(frontBlocks, backBlocks, frontFullText, backFullText, mrz);
+  const candidates = unifyOcrCrossMatches(rawCandidates);
+  if (!candidates.length) return emptyField();
+
+  // Agréger par valeur
+  const byValue = new Map();
+  for (const c of candidates) {
+    if (!byValue.has(c.value)) byValue.set(c.value, []);
+    byValue.get(c.value).push(c);
+  }
+
+  let best = null;
+  let bestScore = -Infinity;
+  for (const [value, group] of byValue) {
+    // Prendre le meilleur représentant du groupe
+    const ranked = group
+      .map((c) => ({ ...c, score: scoreCinCandidate(c, candidates) }))
+      .sort((a, b) => b.score - a.score);
+    const top = ranked[0];
+    if (top.score > bestScore) {
+      bestScore = top.score;
+      const sources = [...new Set(group.map((g) => g.source))];
+      best = { value, score: top.score, sources, group };
+    }
+  }
+
+  if (!best || best.score < 15) {
+    // Aucune source contextuelle fiable → ne pas injecter
+    return emptyField('cin_unconfirmed');
+  }
+
+  const sources = best.sources.filter((s) => s !== 'regex');
+  const hasRecto = sources.includes('recto');
+  const hasMrz = sources.includes('mrz');
+  const hasVerso = sources.includes('verso');
+  const concordant = (hasRecto && hasMrz) || (hasRecto && hasVerso) || (hasVerso && hasMrz);
+
+  // MRZ seul sans croisement → pas de confiance haute
+  if (sources.length === 1 && sources[0] === 'mrz') {
+    return makeField(best.value, 0.55, 'mrz', true, { fromVision: true });
+  }
+  // Regex seule → à vérifier ou vide si score faible
+  if (sources.length === 0 || (sources.length === 1 && best.sources.includes('regex') && !hasRecto && !hasVerso && !hasMrz)) {
+    if (best.score < 25) return emptyField('cin_unconfirmed');
+    return makeField(best.value, 0.5, 'regex', true, { fromVision: false });
+  }
+
+  let conf = 0.7;
+  let source = hasRecto ? 'recto' : (hasVerso ? 'verso' : 'mrz');
+  let review = true;
+  if (concordant) {
+    conf = 0.95;
+    source = hasRecto && hasMrz ? 'recto+mrz' : (hasRecto && hasVerso ? 'recto+verso' : 'verso+mrz');
+    review = false;
+  } else if (hasRecto) {
+    conf = 0.78;
+    review = true;
+  } else if (hasVerso) {
+    conf = 0.72;
+    review = true;
+  }
+
+  return makeField(best.value, conf, source, review, { fromVision: true });
 }
 
 /* ── Main parse function ───────────────────────────── */
@@ -378,18 +649,14 @@ function parseCnieFromVision(frontResult, backResult) {
   // 3. Verso labels
   const verso = backBlocks.length > 0 ? extractVersoFields(backBlocks) : {};
 
-  // 4. CIN from text sweep
-  const cinText = extractCinFromText(fullText);
-
-  // ── Merge with priority: MRZ > recto labels > verso labels > text sweep ──
-
-  const cinValue = mrz?.cin_mrz || recto.cin?.value || verso.cin?.value || cinText?.value || null;
-  const cinConf = cinValue
-    ? (cinValue === mrz?.cin_mrz ? 0.75 : (recto.cin?.confidence || verso.cin?.confidence || cinText?.confidence || 0.7))
-    : 0;
-  // MRZ CIN is the document number, not always the CIN printed on card — prefer recto/verso CIN
-  const finalCin = recto.cin?.value || verso.cin?.value || cinText?.value || null;
-  const finalCinConf = finalCin ? (recto.cin?.confidence || verso.cin?.confidence || cinText?.confidence || 0.75) : 0;
+  // 4. CIN — scoring + croisement (jamais un nom / CAN vertical)
+  const cin = selectCin(
+    frontBlocks,
+    backBlocks,
+    frontResult?.fullText || '',
+    backResult?.fullText || '',
+    mrz,
+  );
 
   // Names: MRZ > recto labels
   const nom = mrz?.nom
@@ -448,7 +715,7 @@ function parseCnieFromVision(frontResult, backResult) {
     : emptyField();
 
   const fields = {
-    cin: finalCin ? makeField(finalCin, finalCinConf, 'vision', finalCinConf < 0.90, { fromVision: true }) : emptyField(),
+    cin,
     nom,
     prenom,
     date_naissance: dateNaissance,
@@ -533,5 +800,9 @@ module.exports = {
   makeField,
   normalizeCin,
   isValidCin,
+  isRejectedCinCandidate,
+  selectCin,
+  collectCinCandidates,
+  scoreCinCandidate,
   parseDateToken,
 };
