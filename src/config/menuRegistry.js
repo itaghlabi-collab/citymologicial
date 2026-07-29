@@ -158,6 +158,7 @@ export const ERP_RUBRIQUES = Object.freeze([
       { code: 'articles-stock', label: 'Articles de stock' },
       { code: 'depots', label: 'Emplacements' },
       { code: 'bons-mouvements', label: 'Bons de mouvements' },
+      { code: 'mouvement-rapide', label: 'Mouvement rapide' },
       { code: 'demandes-chantier', label: 'Demandes chantier' },
       { code: 'stocks', label: 'Stocks' },
       { code: 'inventaire-physique', label: 'Inventaire par scan' },
@@ -272,7 +273,7 @@ export const ROLE_TEMPLATES = Object.freeze({
     departmentId: 9,
     permissions: () => {
       const m = emptySubmodulePermissions();
-      ['vehicules', 'interventions', 'historique-interv', 'categories-stock', 'articles-stock', 'depots', 'bons-mouvements', 'demandes-chantier', 'stocks', 'inventaire-physique', 'affectation-materiel'].forEach((code) => {
+      ['vehicules', 'interventions', 'historique-interv', 'categories-stock', 'articles-stock', 'depots', 'bons-mouvements', 'mouvement-rapide', 'demandes-chantier', 'stocks', 'inventaire-physique', 'affectation-materiel'].forEach((code) => {
         m[code] = { voir: true, creer: true, modifier: true, supprimer: false, valider: false, exporter: true };
       });
       return m;

@@ -2,7 +2,7 @@
  * Stocks.jsx — Vue globale des niveaux de stock ERP CITYMO
  */
 import { useState } from 'react';
-import { BarChart2, Package, AlertTriangle, ArrowUpDown, Search, Filter } from 'lucide-react';
+import { BarChart2, Package, AlertTriangle, ArrowUpDown, Search, Filter, Plus } from 'lucide-react';
 import {
   INPUT_STYLE, SELECT_STYLE,
   KpiCard, EmptyState, SectionTitle,
@@ -10,7 +10,7 @@ import {
 } from './shared.jsx';
 import { ETATS_ARTICLE } from './shared.jsx';
 
-export default function Stocks({ articles, categories, depots }) {
+export default function Stocks({ articles, categories, depots, onNavigate }) {
   const [search, setSearch] = useState('');
   const [filterCat, setFilterCat] = useState('');
   const [filterDepot, setFilterDepot] = useState('');
@@ -65,7 +65,12 @@ export default function Stocks({ articles, categories, depots }) {
           <h1 className="page-title">STOCKS</h1>
           <p className="page-subtitle finance-sub-hide-mobile">Vue globale des niveaux et états de stock.</p>
         </div>
-        <div className="finance-page-actions finance-page-actions--solo">
+        <div className="finance-page-actions" style={{ display: 'flex', gap: 8 }}>
+          {onNavigate && (
+            <button className="btn btn-primary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => onNavigate('mouvement-rapide')}>
+              <Plus size={14} /> Mouvement rapide
+            </button>
+          )}
           <button className="btn btn-ghost btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => setShowFilters(f => !f)}>
             <Filter size={14} /> Filtres
           </button>

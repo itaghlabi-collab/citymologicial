@@ -184,6 +184,7 @@ const NAV = [
       { id: 'articles-stock',     label: 'Articles de stock',    icon: Package },
       { id: 'depots',             label: 'Emplacements',         icon: Boxes },
       { id: 'bons-mouvements',    label: 'Bons de mouvements',   icon: ArrowUpDown },
+      { id: 'mouvement-rapide',  label: 'Mouvement rapide',     icon: ArrowUpDown },
       { id: 'demandes-chantier', label: 'Demandes chantier',    icon: ClipboardList },
       { id: 'stocks',             label: 'Stocks',               icon: BarChart3 },
     ],
@@ -255,6 +256,7 @@ const MODULE_LABELS = {
   'articles-stock':    'Articles de stock',
   depots:              'Emplacements',
   'bons-mouvements':   'Bons de mouvements',
+  'mouvement-rapide':  'Mouvement rapide',
   'demandes-chantier': 'Demandes chantier',
   stocks:              'Stocks',
   utilisateurs:        'Utilisateurs',
@@ -353,8 +355,9 @@ function PageContent({
     );
     case 'depots':              return <Inventaire activeTab="depots" />;
     case 'bons-mouvements':     return <Inventaire activeTab="bons-mouvements" />;
+    case 'mouvement-rapide':    return <Inventaire activeTab="mouvement-rapide" />;
     case 'demandes-chantier':   return <Inventaire activeTab="demandes-chantier" onNavigate={onNavigate} />;
-    case 'stocks':              return <Inventaire activeTab="stocks" />;
+    case 'stocks':              return <Inventaire activeTab="stocks" onNavigate={onNavigate} />;
     case 'inventaire-physique': return <Inventaire activeTab="inventaire-physique" />;
     case 'affectation-materiel': return <Inventaire activeTab="affectation-materiel" />;
     /* Administration */

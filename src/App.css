@@ -12868,3 +12868,11 @@ tbody tr:last-child td { border-bottom: none; }
   }
 }
 .cin-conf-inline { display: inline-block; margin-top: 4px; font-size: 0.68rem; font-weight: 700; }
+
+/* ── Mouvement rapide ── */
+.mr-mobile-cards { display: none; }
+.mr-desktop-table { display: block; }
+@media (max-width: 760px) {
+  .mr-desktop-table { display: none; }
+  .mr-mobile-cards { display: block; }
+}

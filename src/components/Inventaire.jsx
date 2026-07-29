@@ -7,6 +7,7 @@ import CategoriesStock from './inventaire/CategoriesStock.jsx';
 import ArticlesStock   from './inventaire/ArticlesStock.jsx';
 import Depots          from './inventaire/Depots.jsx';
 import BonsMouvements  from './inventaire/BonsMouvements.jsx';
+import MouvementRapide from './inventaire/MouvementRapide.jsx';
 import DemandesChantier from './inventaire/DemandesChantier.jsx';
 import Stocks          from './inventaire/Stocks.jsx';
 import InventairePhysiqueScan from './inventaire/InventairePhysiqueScan.jsx';
@@ -66,12 +67,20 @@ export default function Inventaire({ activeTab, initialArticleCode, onArticleCod
           onArticlesChange={setArticles}
         />
       )}
+      {tab === 'mouvement-rapide' && (
+        <MouvementRapide
+          articles={articles}
+          emplacementsList={emplacementNoms}
+          onArticlesChange={setArticles}
+        />
+      )}
       {tab === 'demandes-chantier' && <DemandesChantier onNavigate={onNavigate} />}
       {tab === 'stocks' && (
         <Stocks
           articles={articles}
           categories={categories}
           depots={depots}
+          onNavigate={onNavigate}
         />
       )}
       {tab === 'inventaire-physique' && (
