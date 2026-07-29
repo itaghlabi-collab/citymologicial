@@ -6,7 +6,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   BarChart2, Package, AlertTriangle, ArrowUpDown, Search, Filter, Plus,
   ChevronLeft, Edit2, ArrowDownToLine, ArrowUpFromLine, ArrowLeftRight,
-  Scale, History, Zap, Loader2, FileText,
+  Scale, History, Zap, Loader2, FileText, Barcode,
 } from 'lucide-react';
 import {
   INPUT_STYLE, SELECT_STYLE, EMPLACEMENTS_STOCK,
@@ -199,6 +199,7 @@ export default function Stocks({
 
   const [search, setSearch] = useState('');
   const [filterCat, setFilterCat] = useState('');
+  const [filterEmplacement, setFilterEmplacement] = useState('');
   const [filterAlerte, setFilterAlerte] = useState('');
   const [showFilters, setShowFilters] = useState(false);
   const [detailId, setDetailId] = useState(null);
@@ -328,9 +329,11 @@ export default function Stocks({
   const filtered = useMemo(() => arts.filter((x) => {
     const cat = (categories || []).find((c) => String(c.id) === String(x.categorie_id));
     const q = search.toLowerCase();
+    const bc = getArticleBarcodeValue(x).toLowerCase();
     const matchQ = !q || x.code?.toLowerCase().includes(q) || x.designation?.toLowerCase().includes(q)
-      || (cat?.nom || '').toLowerCase().includes(q);
+      || (cat?.nom || '').toLowerCase().includes(q) || bc.includes(q);
     const matchCat = !filterCat || String(x.categorie_id) === String(filterCat);
+    const matchEmp = !filterEmplacement || String(x.emplacement || '').trim() === filterEmplacement;
     const qte = Number(x.stock_actuel) || 0;
     const seuil = Number(x.stock_minimum) || 0;
     let matchAlerte = true;
@@ -338,8 +341,17 @@ export default function Stocks({
     if (filterAlerte === 'bas') matchAlerte = seuil > 0 && qte > seuil * 0.5 && qte <= seuil;
     if (filterAlerte === 'rupture') matchAlerte = qte === 0;
     if (filterAlerte === 'normal') matchAlerte = seuil === 0 || qte > seuil;
-    return matchQ && matchCat && matchAlerte;
-  }), [arts, categories, search, filterCat, filterAlerte]);
+    return matchQ && matchCat && matchEmp && matchAlerte;
+  }), [arts, categories, search, filterCat, filterEmplacement, filterAlerte]);
+
+  const emplacements = useMemo(() => {
+    const set = new Set();
+    arts.forEach((a) => {
+      const e = String(a.emplacement || '').trim();
+      if (e) set.add(e);
+    });
+    return [...set].sort((a, b) => a.localeCompare(b, 'fr'));
+  }, [arts]);
 
   const valeurTotale = arts.reduce((s, a) => s + ((Number(a.valeur) || 0) * (Number(a.stock_actuel) || 0)), 0);
   const stockFaible = arts.filter((a) => a.stock_minimum && Number(a.stock_actuel) <= Number(a.stock_minimum) && Number(a.stock_actuel) > 0).length;
@@ -460,6 +472,10 @@ export default function Stocks({
               <option value="">Toutes catégories</option>
               {(categories || []).map((c) => <option key={c.id} value={c.id}>{c.nom}</option>)}
             </select>
+            <select value={filterEmplacement} onChange={(e) => setFilterEmplacement(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 200 }}>
+              <option value="">Tous emplacements</option>
+              {emplacements.map((e) => <option key={e} value={e}>{e}</option>)}
+            </select>
             <select value={filterAlerte} onChange={(e) => setFilterAlerte(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 140 }}>
               <option value="">Tous états</option>
               <option value="normal">Normal</option>
@@ -467,7 +483,7 @@ export default function Stocks({
               <option value="critique">Critique</option>
               <option value="rupture">Rupture</option>
             </select>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setFilterCat(''); setFilterAlerte(''); }}>Réinitialiser</button>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setFilterCat(''); setFilterEmplacement(''); setFilterAlerte(''); }}>Réinitialiser</button>
           </div>
         </div>
       ) : (
@@ -490,6 +506,7 @@ export default function Stocks({
               <thead>
                 <tr>
                   <th>Code</th>
+                  <th>Code-barres</th>
                   <th>Désignation</th>
                   <th>Catégorie</th>
                   <th>Type</th>
@@ -510,9 +527,15 @@ export default function Stocks({
                   const st = getStatutStock(x.stock_actuel, x.stock_minimum);
                   const etatBadge = x.etat === 'Neuf' ? 'badge-green' : x.etat === 'Utilisé' ? 'badge-blue' : 'badge-orange';
                   const valTot = (Number(x.valeur) || 0) * (Number(x.stock_actuel) || 0);
+                  const barcode = getArticleBarcodeValue(x);
                   return (
                     <tr key={x.id} className="inv-articles-row" style={{ cursor: 'pointer' }} onClick={() => setDetailId(x.id)}>
                       <td><span className="inv-articles-ref">{x.code}</span></td>
+                      <td data-label="Code-barres">
+                        <span style={{ fontFamily: 'monospace', fontSize: '0.72rem', display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--text-2)' }}>
+                          <Barcode size={12} /> {barcode || '—'}
+                        </span>
+                      </td>
                       <td><div className="inv-articles-name">{x.designation}</div></td>
                       <td>{cat ? <span className="badge badge-blue inv-articles-badge">{cat.nom}</span> : '—'}</td>
                       <td style={{ fontSize: '0.82rem' }}>{x.type || '—'}</td>

@@ -1046,6 +1046,7 @@ export default function ArticlesStock({
                       />
                     </th>
                     <th>Référence</th>
+                    <th>Code-barres</th>
                     <th>Nom</th>
                     <th>Catégorie</th>
                     <th>Quantité</th>
@@ -1074,6 +1075,17 @@ export default function ArticlesStock({
                         </td>
                         <td data-label="Référence">
                           <span className="inv-articles-ref">{x.code}</span>
+                        </td>
+                        <td data-label="Code-barres" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            title={getArticleBarcodeValue(x)}
+                            onClick={() => openBarcode(x)}
+                            style={{ fontFamily: 'monospace', fontSize: '0.72rem', padding: '2px 6px', display: 'inline-flex', alignItems: 'center', gap: 4 }}
+                          >
+                            <Barcode size={12} /> {getArticleBarcodeValue(x) || '—'}
+                          </button>
                         </td>
                         <td data-label="Nom">
                           <div className="inv-articles-name">{x.designation}</div>
