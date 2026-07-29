@@ -272,26 +272,23 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
           </div>
         )}
 
-        {/* Tabs de filtre par type */}
+        {/* Tabs pastilles de filtre par type */}
         <div
           className="mr-type-tabs"
           style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(4, minmax(0, 1fr))',
-            gap: 0,
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 10,
             marginBottom: 14,
-            borderRadius: 10,
-            overflow: 'hidden',
-            border: '1px solid var(--border)',
-            background: '#fff',
+            alignItems: 'center',
           }}
         >
           {[
-            { key: '', label: 'Tous', count: totalMR, color: '#1565C0', bg: '#E3F2FD' },
-            { key: 'Entrée', label: 'Entrée en stock', count: entrees, color: '#2E7D32', bg: '#E8F5E9' },
-            { key: 'Sortie', label: 'Sortie de stock', count: sorties, color: '#C62828', bg: '#FFEBEE' },
-            { key: 'Transfert', label: 'Transfert', count: transferts, color: '#1565C0', bg: '#E3F2FD' },
-          ].map((tab, idx) => {
+            { key: '', label: 'Tous', count: totalMR, color: 'var(--red)' },
+            { key: 'Entrée', label: 'Entrée en stock', count: entrees, color: '#2E7D32' },
+            { key: 'Sortie', label: 'Sortie de stock', count: sorties, color: '#C62828' },
+            { key: 'Transfert', label: 'Transfert', count: transferts, color: '#1565C0' },
+          ].map((tab) => {
             const active = filterType === tab.key;
             return (
               <button
@@ -299,31 +296,36 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
                 type="button"
                 onClick={() => setFilterType(tab.key)}
                 style={{
-                  display: 'flex',
+                  display: 'inline-flex',
                   alignItems: 'center',
-                  justifyContent: 'center',
                   gap: 8,
-                  padding: '14px 10px',
-                  border: 'none',
-                  borderLeft: idx === 0 ? 'none' : '1px solid var(--border)',
+                  padding: '8px 16px',
+                  borderRadius: 999,
+                  border: active ? `1.5px solid ${tab.color}` : '1.5px solid var(--border)',
                   cursor: 'pointer',
-                  background: active ? tab.bg : '#fff',
-                  color: active ? tab.color : 'var(--text-2)',
+                  background: active ? tab.color : '#fff',
+                  color: active ? '#fff' : 'var(--text-2)',
                   fontFamily: 'var(--font-head)',
-                  fontWeight: 800,
-                  fontSize: '0.88rem',
-                  transition: 'background 0.15s, color 0.15s',
-                  boxShadow: active ? `inset 0 -3px 0 ${tab.color}` : 'none',
+                  fontWeight: 700,
+                  fontSize: '0.84rem',
+                  boxShadow: active ? '0 2px 8px rgba(0,0,0,0.08)' : 'none',
+                  transition: 'background 0.15s, color 0.15s, border-color 0.15s',
+                  whiteSpace: 'nowrap',
                 }}
               >
                 <span>{tab.label}</span>
                 <span style={{
-                  fontSize: '0.72rem',
-                  fontWeight: 700,
-                  padding: '2px 7px',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  minWidth: 22,
+                  height: 22,
+                  padding: '0 6px',
                   borderRadius: 999,
-                  background: active ? `${tab.color}22` : 'var(--surface-2)',
-                  color: active ? tab.color : 'var(--text-3)',
+                  fontSize: '0.72rem',
+                  fontWeight: 800,
+                  background: active ? 'rgba(255,255,255,0.28)' : 'var(--surface-2)',
+                  color: active ? '#fff' : 'var(--text-3)',
                 }}>
                   {tab.count}
                 </span>

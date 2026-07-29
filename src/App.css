@@ -12876,6 +12876,9 @@ tbody tr:last-child td { border-bottom: none; }
   .mr-desktop-table { display: none; }
   .mr-mobile-cards { display: block; }
   .mr-type-tabs {
-    grid-template-columns: 1fr 1fr !important;
+    flex-wrap: nowrap !important;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
   }
 }
