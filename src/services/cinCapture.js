@@ -37,6 +37,21 @@ export function computeCoverTransform(displayW, displayH, videoW, videoH) {
   const dispW = videoW * scale;
   const dispH = videoH * scale;
   return {
+    mode: 'cover',
+    scale,
+    offsetX: (displayW - dispW) / 2,
+    offsetY: (displayH - dispH) / 2,
+    dispW,
+    dispH,
+  };
+}
+
+export function computeContainTransform(displayW, displayH, videoW, videoH) {
+  const scale = Math.min(displayW / videoW, displayH / videoH);
+  const dispW = videoW * scale;
+  const dispH = videoH * scale;
+  return {
+    mode: 'contain',
     scale,
     offsetX: (displayW - dispW) / 2,
     offsetY: (displayH - dispH) / 2,
@@ -46,28 +61,45 @@ export function computeCoverTransform(displayW, displayH, videoW, videoH) {
 }
 
 /**
- * Convertit le rectangle du cadre guide (viewport) en coordonnées pixels vidéo
- * (le flux vidéo est affiché en object-fit: cover — mapping uniquement, pas le preview final).
+ * Détecte object-fit réel du <video> (cover / contain / fill) et renvoie le mapping CSS → pixels.
  */
-export function mapFrameRectToVideoCrop(videoEl, frameEl, options = {}) {
-  const margin = options.margin ?? DEFAULT_MARGIN;
+export function computeVideoDisplayTransform(videoEl) {
   const videoW = videoEl.videoWidth || 0;
   const videoH = videoEl.videoHeight || 0;
-  if (!videoW || !videoH) {
-    throw new Error('Vidéo non prête pour le recadrage.');
-  }
-
   const videoRect = videoEl.getBoundingClientRect();
-  const frameRect = frameEl.getBoundingClientRect();
   const displayW = videoRect.width;
   const displayH = videoRect.height;
-  const { scale, offsetX, offsetY } = computeCoverTransform(displayW, displayH, videoW, videoH);
+  if (!videoW || !videoH || !displayW || !displayH) {
+    throw new Error('Vidéo non prête pour le mapping.');
+  }
+  const fit = (typeof window !== 'undefined' && window.getComputedStyle)
+    ? (window.getComputedStyle(videoEl).objectFit || 'cover')
+    : 'cover';
+  const transform = fit === 'contain'
+    ? computeContainTransform(displayW, displayH, videoW, videoH)
+    : fit === 'fill'
+      ? { mode: 'fill', scaleX: displayW / videoW, scaleY: displayH / videoH, offsetX: 0, offsetY: 0, dispW: displayW, dispH: displayH }
+      : computeCoverTransform(displayW, displayH, videoW, videoH);
+  return { ...transform, videoW, videoH, displayW, displayH, videoRect, objectFit: fit };
+}
+
+/**
+ * Convertit le rectangle du cadre guide (viewport) en coordonnées pixels vidéo.
+ * Respecte object-fit cover/contain + offsets. Marge = expansion autour du guide visible.
+ * @param {number} [options.margin=0.04] — 4 % de marge sécurité de chaque côté
+ */
+export function mapFrameRectToVideoCrop(videoEl, frameEl, options = {}) {
+  const margin = options.margin ?? 0.04;
+  const mapped = computeVideoDisplayTransform(videoEl);
+  const { videoW, videoH, displayW, displayH, videoRect } = mapped;
+  const frameRect = frameEl.getBoundingClientRect();
 
   let relLeft = frameRect.left - videoRect.left;
   let relTop = frameRect.top - videoRect.top;
   let relW = frameRect.width;
   let relH = frameRect.height;
 
+  // Marge de sécurité : zone capturée légèrement plus large que le guide visible
   relLeft -= relW * margin;
   relTop -= relH * margin;
   relW *= 1 + 2 * margin;
@@ -78,10 +110,23 @@ export function mapFrameRectToVideoCrop(videoEl, frameEl, options = {}) {
   relW = Math.min(displayW - relLeft, relW);
   relH = Math.min(displayH - relTop, relH);
 
-  let cropX = (relLeft - offsetX) / scale;
-  let cropY = (relTop - offsetY) / scale;
-  let cropW = relW / scale;
-  let cropH = relH / scale;
+  let cropX;
+  let cropY;
+  let cropW;
+  let cropH;
+
+  if (mapped.mode === 'fill') {
+    cropX = relLeft / mapped.scaleX;
+    cropY = relTop / mapped.scaleY;
+    cropW = relW / mapped.scaleX;
+    cropH = relH / mapped.scaleY;
+  } else {
+    const { scale, offsetX, offsetY } = mapped;
+    cropX = (relLeft - offsetX) / scale;
+    cropY = (relTop - offsetY) / scale;
+    cropW = relW / scale;
+    cropH = relH / scale;
+  }
 
   cropX = Math.max(0, Math.min(videoW - 1, cropX));
   cropY = Math.max(0, Math.min(videoH - 1, cropY));
@@ -95,6 +140,7 @@ export function mapFrameRectToVideoCrop(videoEl, frameEl, options = {}) {
     h: Math.round(cropH),
     videoW,
     videoH,
+    margin,
     frameRect: {
       left: frameRect.left,
       top: frameRect.top,
@@ -102,7 +148,7 @@ export function mapFrameRectToVideoCrop(videoEl, frameEl, options = {}) {
       height: frameRect.height,
     },
     videoRect: { width: displayW, height: displayH },
-    cover: { scale, offsetX, offsetY },
+    transform: mapped,
   };
 }
 
@@ -192,63 +238,50 @@ export async function fitDataUrlToId1Contain(dataUrl, quality = 0.92) {
 }
 
 /**
- * Capture scanner : cadre guide → une seule image pour aperçu + OCR.
- * Puis tentative de détection carte (prudente) ; sinon cadre guide en contain ID-1.
+ * Capture guidée : uniquement la zone du cadre (+ marge), sans auto-crop ultérieur.
+ * Une seule image = aperçu = OCR (finalImageFile).
  */
-export async function captureCINFromVideo(video, frameEl, side, options = {}) {
-  const crop = mapFrameRectToVideoCrop(video, frameEl, options);
+export async function captureGuidedCINFrame(video, frameEl, side, options = {}) {
+  const margin = options.margin ?? 0.04;
+  const crop = mapFrameRectToVideoCrop(video, frameEl, { margin });
+  const { dataUrl } = drawVideoCrop(video, crop, 0.95);
 
-  console.info('[SCAN CIN] frame rect', crop.frameRect);
-  console.info('[SCAN CIN] video size', { width: crop.videoW, height: crop.videoH });
-  console.info('[SCAN CIN] crop coordinates', {
-    x: crop.x, y: crop.y, w: crop.w, h: crop.h,
-    ratio: (crop.w / crop.h).toFixed(3),
-    targetRatio: CIN_ASPECT_RATIO.toFixed(3),
-  });
+  // Normaliser en canvas ID-1 contain (pas de zoom cover)
+  const finalImageDataUrl = await fitDataUrlToId1Contain(dataUrl, 0.92);
+  const finalImageFile = dataUrlToCaptureFile(finalImageDataUrl, side, 'guided-frame');
 
-  const fullCanvas = document.createElement('canvas');
-  fullCanvas.width = crop.videoW;
-  fullCanvas.height = crop.videoH;
-  fullCanvas.getContext('2d').drawImage(video, 0, 0);
-  const fullRawDataUrl = fullCanvas.toDataURL('image/jpeg', 0.98);
-
-  const { dataUrl: guideCropDataUrl } = drawVideoCrop(video, crop, 0.95);
-
-  const { autoCropCnieImage } = await import('./cnieAutoCrop');
-  // Détection sur l’image complète (plus fiable) ; fallback = contenu du cadre guide
-  const auto = await autoCropCnieImage(fullRawDataUrl);
-  let useUrl;
-  let detected = false;
-  let cropMessage = null;
-
-  if (auto.detected && auto.cropped) {
-    useUrl = auto.dataUrl;
-    detected = true;
-  } else {
-    useUrl = await fitDataUrlToId1Contain(guideCropDataUrl);
-    detected = false;
-    cropMessage = 'Cadrage à vérifier';
-  }
-
-  const sharedFile = dataUrlToCaptureFile(useUrl, side, detected ? 'ocr-detected' : 'ocr-guide');
-
-  console.info('[SCAN CIN] capture unified', {
+  console.info('[SCAN CIN] guided frame capture', {
     side,
-    detected,
-    bytes: sharedFile.size,
+    crop: { x: crop.x, y: crop.y, w: crop.w, h: crop.h },
+    ratio: (crop.w / Math.max(1, crop.h)).toFixed(3),
+    target: CIN_ASPECT_RATIO.toFixed(3),
+    margin,
+    objectFit: crop.transform?.objectFit,
+    bytes: finalImageFile.size,
   });
 
   return {
-    previewDataUrl: useUrl,
-    fullDataUrl: useUrl,
-    originalDataUrl: fullRawDataUrl,
-    ocrFile: sharedFile,
-    displayFile: sharedFile,
-    detected,
-    cropFailed: !detected,
-    cropMessage,
+    previewDataUrl: finalImageDataUrl,
+    fullDataUrl: finalImageDataUrl,
+    finalImageDataUrl,
+    finalImageFile,
+    ocrFile: finalImageFile,
+    displayFile: finalImageFile,
+    originalDataUrl: finalImageDataUrl,
+    detected: false, // pas de faux positif « carte détectée »
+    cropFailed: false,
+    cropMessage: null,
+    guided: true,
     crop,
   };
+}
+
+/**
+ * Capture scanner legacy : cadre guide → une seule image pour aperçu + OCR.
+ * Préfère désormais le crop exact du cadre (sans auto-crop agressif).
+ */
+export async function captureCINFromVideo(video, frameEl, side, options = {}) {
+  return captureGuidedCINFrame(video, frameEl, side, options);
 }
 
 /**
