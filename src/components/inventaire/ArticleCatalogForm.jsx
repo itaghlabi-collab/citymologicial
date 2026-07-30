@@ -138,6 +138,17 @@ export default function ArticleCatalogForm({
             {UNITES.map((u) => <option key={u} value={u}>{u}</option>)}
           </select>
         </FField>
+        <FField label="Valeur unitaire (MAD)">
+          <input
+            type="number"
+            step="0.01"
+            min="0"
+            value={form.valeur}
+            onChange={(e) => set('valeur', e.target.value)}
+            placeholder="Prix unitaire…"
+            style={INPUT_STYLE}
+          />
+        </FField>
         <FField label="Statut">
           <select value={form.statut} onChange={(e) => set('statut', e.target.value)} style={SELECT_STYLE}>
             {STATUTS_ARTICLE_STOCK.filter((s) => s !== 'Archivé').map((s) => <option key={s} value={s}>{s}</option>)}
