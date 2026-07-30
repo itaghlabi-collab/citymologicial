@@ -110,7 +110,21 @@ export default function StockFicheEditModal({
             </select>
           </FField>
           <FField label="Valeur unitaire (MAD)">
-            <input type="number" step="0.01" min="0" value={form.valeur} onChange={(e) => set('valeur', e.target.value)} style={INPUT_STYLE} />
+            <input
+              type="number"
+              step="1"
+              min="0"
+              inputMode="numeric"
+              value={form.valeur}
+              onChange={(e) => {
+                const raw = e.target.value;
+                if (raw === '') { set('valeur', ''); return; }
+                const n = Math.max(0, Math.round(Number(raw)));
+                set('valeur', Number.isFinite(n) ? String(n) : '');
+              }}
+              placeholder="Ex. 150"
+              style={INPUT_STYLE}
+            />
           </FField>
           <FField label="Statut opérationnel">
             <select value={form.current_state} onChange={(e) => set('current_state', e.target.value)} style={SELECT_STYLE}>
