@@ -755,7 +755,20 @@ function LigneComposer({ draft, setDraft, categories, articles, onArticleSelect,
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, minmax(0, 1fr))', gap: 10, marginBottom: 12, alignItems: 'end' }}>
             <div>
               <Label>Quantité</Label>
-              <input type="number" min="0" step="0.01" value={draft.quantite} onChange={(e) => setF('quantite', e.target.value)} style={IS(false)} />
+              <input
+                type="number"
+                min="0"
+                step="1"
+                inputMode="numeric"
+                value={draft.quantite}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  if (raw === '') { setF('quantite', ''); return; }
+                  const n = Math.max(0, Math.round(Number(raw)));
+                  setF('quantite', Number.isFinite(n) ? String(n) : '');
+                }}
+                style={IS(false)}
+              />
             </div>
             <div>
               <Label>Unité</Label>
@@ -765,7 +778,20 @@ function LigneComposer({ draft, setDraft, categories, articles, onArticleSelect,
             </div>
             <div>
               <Label><span style={{ whiteSpace: 'nowrap', letterSpacing: '0.04em' }}>PRIX.U.HT.</span></Label>
-              <input type="number" min="0" step="0.01" value={draft.prix_ht} onChange={(e) => setF('prix_ht', e.target.value)} style={IS(false)} />
+              <input
+                type="number"
+                min="0"
+                step="1"
+                inputMode="numeric"
+                value={draft.prix_ht}
+                onChange={(e) => {
+                  const raw = e.target.value;
+                  if (raw === '') { setF('prix_ht', ''); return; }
+                  const n = Math.max(0, Math.round(Number(raw)));
+                  setF('prix_ht', Number.isFinite(n) ? String(n) : '');
+                }}
+                style={IS(false)}
+              />
             </div>
             <div>
               <Label>Remise %</Label>

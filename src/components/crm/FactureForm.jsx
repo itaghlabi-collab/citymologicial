@@ -161,7 +161,20 @@ function LigneRow({ ligne, categories, articles, onChange, onDelete, onDuplicate
         </div>
       </td>
       <td style={{ padding: '6px 5px', width: 70 }}>
-        <input type="number" min="0" step="0.01" value={ligne.quantite} onChange={e => set('quantite', e.target.value)} style={{ ...IS(false), textAlign: 'center', fontSize: '0.85rem' }} />
+        <input
+          type="number"
+          min="0"
+          step="1"
+          inputMode="numeric"
+          value={ligne.quantite}
+          onChange={(e) => {
+            const raw = e.target.value;
+            if (raw === '') { set('quantite', ''); return; }
+            const n = Math.max(0, Math.round(Number(raw)));
+            set('quantite', Number.isFinite(n) ? String(n) : '');
+          }}
+          style={{ ...IS(false), textAlign: 'center', fontSize: '0.85rem' }}
+        />
       </td>
       <td style={{ padding: '6px 5px', width: 80 }}>
         <select value={ligne.unite} onChange={e => set('unite', e.target.value)} style={{ ...IS(false), fontSize: '0.82rem' }}>
@@ -169,7 +182,20 @@ function LigneRow({ ligne, categories, articles, onChange, onDelete, onDuplicate
         </select>
       </td>
       <td style={{ padding: '6px 5px', width: 105 }}>
-        <input type="number" min="0" step="0.01" value={ligne.prix_ht} onChange={e => set('prix_ht', e.target.value)} style={{ ...IS(false), textAlign: 'right', fontSize: '0.85rem' }} />
+        <input
+          type="number"
+          min="0"
+          step="1"
+          inputMode="numeric"
+          value={ligne.prix_ht}
+          onChange={(e) => {
+            const raw = e.target.value;
+            if (raw === '') { set('prix_ht', ''); return; }
+            const n = Math.max(0, Math.round(Number(raw)));
+            set('prix_ht', Number.isFinite(n) ? String(n) : '');
+          }}
+          style={{ ...IS(false), textAlign: 'right', fontSize: '0.85rem' }}
+        />
       </td>
       <td style={{ padding: '6px 5px', width: 65 }}>
         <input type="number" min="0" max="100" step="1" value={ligne.remise} onChange={e => set('remise', e.target.value)} style={{ ...IS(false), textAlign: 'center', fontSize: '0.85rem' }} />
