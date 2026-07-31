@@ -450,9 +450,13 @@ export function filterLeaves(leaves, filterKey) {
 }
 
 export function canEditLeave(row, { userId, canManageLeaves, superAdmin }) {
-  if (!row || row._statut !== 'En attente') return false;
-  if (canManageLeaves || superAdmin) return true;
-  return row.created_by === userId;
+  if (!row) return false;
+  // RH / super admin : modification via les actions (tous statuts sauf annulé)
+  if (canManageLeaves || superAdmin) {
+    return (row._statut || row.statut) !== 'Annule';
+  }
+  // Créateur : uniquement tant que la demande est en attente
+  return (row._statut || row.statut) === 'En attente' && row.created_by === userId;
 }
 
 export function canDeleteLeave(row, { userId, canManageLeaves, superAdmin }) {
