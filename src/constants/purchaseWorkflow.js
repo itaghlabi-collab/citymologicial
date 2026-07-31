@@ -202,11 +202,30 @@ export const OP_ACHATS_STATUS_BADGE = {
   'En attente': 'badge-orange',
 };
 
-export function canEditPurchaseRequest(statut, { isSuperAdmin = false } = {}) {
+export function canEditPurchaseRequest(statut, { isSuperAdmin = false, userEmail = '' } = {}) {
   const s = normalizePurchaseStatus(statut);
+  if (s === 'Refusée') return false;
   if (s === 'Brouillon') return true;
-  if (isSuperAdmin && s !== 'Refusée') return true;
+  if (isSuperAdmin) return true;
+  if (canPreDgEditPurchaseByEmail(userEmail) && isPurchaseStatusBeforeDgValidation(s)) return true;
   return false;
+}
+
+/** Emails autorisés à modifier une DA tant que le DG n’a pas validé le devis. */
+export const PURCHASE_PRE_DG_EDIT_EMAILS = new Set([
+  'h.zirari@citymo.ma',
+  'n.fatihi@citymo.ma',
+]);
+
+export function canPreDgEditPurchaseByEmail(email) {
+  return PURCHASE_PRE_DG_EDIT_EMAILS.has(String(email || '').toLowerCase().trim());
+}
+
+/** Statuts avant validation DG (Devis validé et suivants = plus de modif pour ces comptes). */
+export function isPurchaseStatusBeforeDgValidation(statut) {
+  const s = normalizePurchaseStatus(statut);
+  if (s === 'Refusée' || s === 'Clôturée') return false;
+  return purchaseStatusRank(s) < purchaseStatusRank('Devis validé');
 }
 
 /** Devis modifiable : actif, ou devis retenu par le super admin. */

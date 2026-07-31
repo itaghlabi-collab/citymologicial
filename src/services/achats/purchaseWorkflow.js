@@ -2,7 +2,7 @@
  * purchaseWorkflow.js — Orchestration workflow demandes d'achat
  */
 import { getSupabase } from '../../lib/supabase';
-import { PURCHASE_ASSIGNEE, normalizePurchaseStatus, OA_TO_REQUEST_STATUS, purchaseStatusRank } from '../../constants/purchaseWorkflow';
+import { PURCHASE_ASSIGNEE, normalizePurchaseStatus, OA_TO_REQUEST_STATUS, purchaseStatusRank, isPurchaseStatusBeforeDgValidation, canPreDgEditPurchaseByEmail } from '../../constants/purchaseWorkflow';
 import { appendPurchaseRequestHistory } from './purchaseRequestHistory';
 import {
   createPurchaseRequestQuote,
@@ -207,11 +207,60 @@ async function syncLinkedOrdersFromPurchaseRequest(request) {
 export async function updatePurchaseRequestWorkflow(id, form) {
   const ctx = await getAuthContext();
   const existing = await fetchRequest(id);
-  if (normalizePurchaseStatus(existing.statut) === 'Brouillon') {
+  const status = normalizePurchaseStatus(existing.statut);
+  if (status === 'Brouillon') {
     return updatePurchaseRequestDraft(id, form);
+  }
+  if (isPurchaseStatusBeforeDgValidation(status) && canPreDgEditPurchaseByEmail(ctx.user?.email)) {
+    return updatePurchaseRequestPreDg(id, form, existing, ctx);
   }
   await assertSuperAdmin(ctx);
   return updatePurchaseRequestSuperAdmin(id, form, existing, ctx);
+}
+
+/**
+ * Modification DA avant validation DG — réservée à h.zirari / n.fatihi.
+ * Pas de sync OA/OP (créés après validation DG).
+ */
+export async function updatePurchaseRequestPreDg(id, form, existing = null, ctx = null) {
+  const authCtx = ctx || await getAuthContext();
+  if (!canPreDgEditPurchaseByEmail(authCtx.user?.email)) {
+    const err = new Error('Modification non autorisée.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  const current = existing || await fetchRequest(id);
+  if (!isPurchaseStatusBeforeDgValidation(current.statut)) {
+    const err = new Error('Cette demande a été validée par le DG — modification impossible.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  if (!isOffProjectPurchaseRequest(form) && !isGroupedPurchaseRequest(form) && !(form.projet_lie || form.project_name || '').trim()) {
+    const err = new Error('Le projet lié est obligatoire.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  if (isGroupedPurchaseRequest(form)) {
+    validateGroupedRequestLines(form.payload?.lines || form.lignes);
+  }
+  const patch = {
+    ...toPurchaseRequestRow({
+      ...form,
+      statut: current.statut,
+      ref: current.ref,
+      ref_demande: current.ref,
+      assigned_employee_id: form.assigned_employee_id ?? current.assigned_employee_id,
+      assigned_employee_name: form.assigned_employee_name || current.assigned_employee_name || current.requester_name,
+    }),
+    commentaires_internes: form.commentaires_internes ?? current.commentaires_internes,
+  };
+  return patchRequest(
+    id,
+    patch,
+    'Modification',
+    'Demande modifiée (avant validation DG)',
+    authCtx,
+  );
 }
 
 export async function updatePurchaseRequestSuperAdmin(id, form, existing = null, ctx = null) {
