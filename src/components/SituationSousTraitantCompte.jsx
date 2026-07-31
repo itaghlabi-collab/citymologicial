@@ -907,9 +907,10 @@ export default function SituationSousTraitantCompte({
   }
 
   const {
-    subcontractor: sub, kpis, situations, history, documents, payments,
+    subcontractor: sub, situations, history, documents, payments,
     advances, imputations, performance, evaluations, assignments,
   } = account;
+  const kpis = account.kpis || {};
   const statutLabel = SUB_STATUT_LABEL[sub.statut] || sub.statut || '—';
   const sitRows = situations?.length ? situations : null;
   const resteNet = kpis.resteNetAPayer ?? kpis.resteAPayer;

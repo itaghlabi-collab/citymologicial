@@ -108,7 +108,8 @@ html, body, #root {
   width: 100%;
   max-width: 460px;
   padding: 20px 16px;
-  animation: fadeUp 0.7s ease both;
+  opacity: 1;
+  animation: fadeUpMotion 0.7s ease forwards;
 }
 
 /* ---- Brand strip (logo + separator + tagline) ---- */
@@ -124,7 +125,8 @@ html, body, #root {
   height: 62px;
   object-fit: contain;
   filter: drop-shadow(0 3px 14px rgba(0,0,0,0.55));
-  animation: fadeDown 0.6s ease both;
+  opacity: 1;
+  animation: fadeDownMotion 0.6s ease forwards;
 }
 
 .login-brand-sep {
@@ -155,7 +157,8 @@ html, body, #root {
     0 1px 0 rgba(255,255,255,0.8) inset;
   border: 1px solid rgba(255,255,255,0.6);
   backdrop-filter: blur(12px);
-  animation: fadeUp 0.65s 0.1s ease both;
+  opacity: 1;
+  animation: fadeUpMotion 0.65s ease forwards;
 }
 
 /* red top accent on card */
@@ -330,7 +333,19 @@ html, body, #root {
   display: flex;
   align-items: center;
   gap: 10px;
-  animation: fadeUp 0.6s 0.3s ease both;
+  opacity: 1;
+  animation: fadeUpMotion 0.6s ease forwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .login-center,
+  .login-card,
+  .login-brand-logo,
+  .login-badges {
+    animation: none !important;
+    opacity: 1 !important;
+    transform: none !important;
+  }
 }
 
 .login-badge-item {
@@ -1646,6 +1661,17 @@ tbody tr:last-child td { border-bottom: none; }
 @keyframes fadeUp {
   from { opacity: 0; transform: translateY(14px); }
   to { opacity: 1; transform: translateY(0); }
+}
+
+/* Login only: motion without opacity — avoids blank screen if anim timeline stalls */
+@keyframes fadeDownMotion {
+  from { transform: translateY(-14px); }
+  to { transform: translateY(0); }
+}
+
+@keyframes fadeUpMotion {
+  from { transform: translateY(14px); }
+  to { transform: translateY(0); }
 }
 
 @keyframes fadeIn {
