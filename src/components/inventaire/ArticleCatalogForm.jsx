@@ -65,6 +65,8 @@ export default function ArticleCatalogForm({
     const e = {};
     if (!form.designation?.trim()) e.designation = 'Requis';
     if (!form.code?.trim()) e.code = 'Requis';
+    if (!form.type?.trim()) e.type = 'Requis';
+    if (!form.categorie_id) e.categorie_id = 'Requis';
     return e;
   }
 
@@ -116,19 +118,29 @@ export default function ArticleCatalogForm({
           />
           {errors.designation && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.designation}</div>}
         </FField>
-        <FField label="Type">
-          <select value={form.type} onChange={(e) => set('type', e.target.value)} style={SELECT_STYLE}>
+        <FField label="Type" required>
+          <select
+            value={form.type}
+            onChange={(e) => set('type', e.target.value)}
+            style={{ ...SELECT_STYLE, borderColor: errors.type ? 'var(--red)' : 'var(--border)' }}
+          >
             <option value="">— Sélectionner —</option>
             {TYPES_ARTICLE_STOCK.map((t) => <option key={t} value={t}>{t}</option>)}
           </select>
+          {errors.type && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.type}</div>}
         </FField>
-        <FField label="Catégorie">
-          <select value={form.categorie_id} onChange={(e) => set('categorie_id', e.target.value)} style={SELECT_STYLE}>
+        <FField label="Catégorie" required>
+          <select
+            value={form.categorie_id}
+            onChange={(e) => set('categorie_id', e.target.value)}
+            style={{ ...SELECT_STYLE, borderColor: errors.categorie_id ? 'var(--red)' : 'var(--border)' }}
+          >
             <option value="">— Sélectionner —</option>
             {(categories || []).filter((c) => c.actif === 'Oui' || c.is_active !== false).map((c) => (
               <option key={c.id} value={c.id}>{c.nom || c.name}</option>
             ))}
           </select>
+          {errors.categorie_id && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.categorie_id}</div>}
         </FField>
         <FField label="N° de série">
           <input value={form.numero_serie} onChange={(e) => set('numero_serie', e.target.value)} placeholder="Optionnel" style={INPUT_STYLE} />
