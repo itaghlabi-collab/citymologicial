@@ -19,6 +19,10 @@ export function calcSubPaymentAmount(type, line) {
   if (type === 'metre') {
     return round2((Number(line.quantity) || 0) * (Number(line.unitPrice) || 0));
   }
+  if (type === 'pourcentage') {
+    // quantity = % ; unitPrice = budget global de l’opération / prestation
+    return round2(((Number(line.quantity) || 0) * (Number(line.unitPrice) || 0)) / 100);
+  }
   return round2(Number(line.amount) || 0);
 }
 
@@ -48,6 +52,11 @@ export function validateSubcontractorPaymentForm(form, paymentSelectedLines) {
       if (!l.designation?.trim()) err[`d_${key}`] = 'Désignation requise';
       if (!l.quantity || Number(l.quantity) <= 0) err[`q_${key}`] = 'Quantité requise';
       if (!l.unitPrice || Number(l.unitPrice) <= 0) err[`p_${key}`] = 'Prix unitaire requis';
+    } else if (form.paymentType === 'pourcentage') {
+      if (!l.designation?.trim()) err[`d_${key}`] = 'Désignation / prestation requise';
+      if (!l.quantity || Number(l.quantity) <= 0) err[`q_${key}`] = 'Pourcentage requis';
+      if (Number(l.quantity) > 100) err[`q_${key}`] = 'Pourcentage max 100 %';
+      if (!l.unitPrice || Number(l.unitPrice) <= 0) err[`p_${key}`] = 'Budget global requis';
     } else if (form.paymentType === 'tache') {
       if (!l.designation?.trim()) err[`d_${key}`] = 'Tâche requise';
       if (!l.amount || Number(l.amount) <= 0) err[`a_${key}`] = 'Montant requis';
@@ -77,7 +86,7 @@ export function buildSubcontractorPaymentPayload(form, paymentSelectedLines, pay
       designation: l.designation,
       lineDescription: l.lineDescription,
       quantity: l.quantity,
-      unit: l.unit,
+      unit: form.paymentType === 'pourcentage' ? '%' : l.unit,
       unitPrice: l.unitPrice,
       amount: l.amount,
       grossAmount: totals.gross,

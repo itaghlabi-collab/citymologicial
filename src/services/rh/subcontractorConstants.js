@@ -1,5 +1,16 @@
-export const REMUNERATION_TYPES = ['À la tâche', 'Au m²', 'Au ml', 'Au forfait', 'Par service', 'Autre'];
-export const UNIT_TYPES = ['tâche', 'm²', 'ml', 'unité', 'forfait', 'jour', 'heure'];
+/** Type d’affectation : % du budget global d’une opération / prestation projet. */
+export const REMUNERATION_PCT_BUDGET = '% du budget global';
+
+export const REMUNERATION_TYPES = [
+  'À la tâche',
+  'Au m²',
+  'Au ml',
+  'Au forfait',
+  'Par service',
+  REMUNERATION_PCT_BUDGET,
+  'Autre',
+];
+export const UNIT_TYPES = ['tâche', 'm²', 'ml', 'unité', 'forfait', 'jour', 'heure', '%'];
 export const ASSIGNMENT_STATUSES = ['active', 'terminée', 'suspendue', 'annulée'];
 export const SERVICE_STATUSES = ['pending', 'validated', 'rejected', 'paid'];
 export const PAYMENT_METHODS = ['espèces', 'virement', 'chèque', 'autre'];
@@ -8,8 +19,9 @@ export const PAYMENT_TYPES = [
   { id: 'metre', label: 'Par mètre travaillé' },
   { id: 'tache', label: 'Par tâche réalisée' },
   { id: 'service', label: 'Par service' },
+  { id: 'pourcentage', label: '% du budget global' },
 ];
-export const PAYMENT_UNITS = ['m²', 'ml', 'm³', 'm', 'unité', 'forfait'];
+export const PAYMENT_UNITS = ['m²', 'ml', 'm³', 'm', 'unité', 'forfait', '%'];
 export const PAYMENT_STATUS_UI = ['En attente', 'Payé', 'Partiel'];
 const PAYMENT_STATUS_UI_TO_DB = {
   'En attente': 'pending',
@@ -29,6 +41,14 @@ export function paymentStatusFromDb(db) {
   return PAYMENT_STATUS_DB_TO_UI[db] || db;
 }
 
+export function isPctBudgetRemuneration(type) {
+  return type === REMUNERATION_PCT_BUDGET;
+}
+
+export function isPctBudgetPayment(type) {
+  return type === 'pourcentage';
+}
+
 export const EMPTY_SUB_PAYMENT = {
   projectId: '',
   paymentDate: new Date().toISOString().slice(0, 10),
@@ -43,6 +63,9 @@ export const EMPTY_SUB_PAYMENT = {
 export function calcSubPaymentAmount(type, line) {
   if (type === 'metre') {
     return Math.round((Number(line.quantity) || 0) * (Number(line.unitPrice) || 0) * 100) / 100;
+  }
+  if (type === 'pourcentage') {
+    return Math.round((Number(line.quantity) || 0) * (Number(line.unitPrice) || 0)) / 100;
   }
   return Math.round((Number(line.amount) || 0) * 100) / 100;
 }

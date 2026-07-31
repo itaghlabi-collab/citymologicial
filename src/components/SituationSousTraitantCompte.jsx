@@ -26,6 +26,7 @@ import {
   RETENTION_TYPES,
   SUB_STATUT_LABEL,
   REMUNERATION_TYPES,
+  isPctBudgetRemuneration,
 } from '../services/rh/subcontractorConstants';
 import { exportSubcontractorPaymentPdf } from '../services/rh/subcontractorPaymentPdf';
 import { exportSubcontractorAccountPdf } from '../services/rh/subcontractorAccountPdf';
@@ -36,7 +37,7 @@ import { listRetenues, createRetenue, releaseRetenue } from '../services/rh/subc
 import { logSubcontractorAccountEvent } from '../services/rh/subcontractorAccountEvents';
 import { formatSupabaseError } from '../services/supabase/formatError';
 import { isSupabaseConfigured } from '../lib/supabase';
-import { listProjectsForSelect } from '../services/projects/projects';
+import { listProjectsForSelect, getProjectById } from '../services/projects/projects';
 import { paymentTypeLabel } from '../utils/rh/subcontractorPaymentFormUtils';
 import {
   updateSubcontractorPayment,
@@ -170,6 +171,8 @@ export default function SituationSousTraitantCompte({
     remunerationType: REMUNERATION_TYPES[0],
     startDate: new Date().toISOString().slice(0, 10),
     estimatedTotal: '',
+    budgetBase: '',
+    percentage: '',
     role: '',
     notes: '',
   });
@@ -598,6 +601,8 @@ export default function SituationSousTraitantCompte({
       remunerationType: REMUNERATION_TYPES[0],
       startDate: new Date().toISOString().slice(0, 10),
       estimatedTotal: '',
+      budgetBase: '',
+      percentage: '',
       role: account?.subcontractor?.responsableInterne || '',
       notes: '',
     });
@@ -610,16 +615,49 @@ export default function SituationSousTraitantCompte({
     }
   }
 
+  async function handleAddProjectProjectChange(projectId) {
+    setAddProjectForm((p) => ({ ...p, projectId }));
+    if (!projectId) return;
+    try {
+      const full = await getProjectById(projectId);
+      const budget = Number(full?.budget_approuve || full?.budget_estime) || 0;
+      if (budget > 0) {
+        setAddProjectForm((p) => (
+          isPctBudgetRemuneration(p.remunerationType)
+            ? { ...p, projectId, budgetBase: String(budget) }
+            : { ...p, projectId }
+        ));
+      }
+    } catch {
+      /* saisie manuelle du budget */
+    }
+  }
+
   async function handleAddProject(e) {
     e.preventDefault();
     if (!addProjectForm.projectId) {
       onNotify?.('error', 'Sélectionnez un projet ou chantier.');
       return;
     }
+    const isPct = isPctBudgetRemuneration(addProjectForm.remunerationType);
+    const pct = Number(addProjectForm.percentage) || 0;
+    const budget = Number(addProjectForm.budgetBase) || 0;
+    if (isPct) {
+      if (!(pct > 0) || pct > 100) {
+        onNotify?.('error', 'Indiquez un pourcentage entre 0 et 100.');
+        return;
+      }
+      if (!(budget > 0)) {
+        onNotify?.('error', 'Indiquez le budget global de l’opération / prestation.');
+        return;
+      }
+    }
     setAddProjectSaving(true);
     try {
       const pr = projectOptions.find((p) => String(p.id) === String(addProjectForm.projectId));
-      const estimated = Number(addProjectForm.estimatedTotal) || 0;
+      const estimated = isPct
+        ? Math.round((pct * budget) / 100 * 100) / 100
+        : (Number(addProjectForm.estimatedTotal) || 0);
       await createAssignment(subcontractorId, {
         projectId: addProjectForm.projectId,
         projectName: pr?.nom || '',
@@ -628,15 +666,19 @@ export default function SituationSousTraitantCompte({
         startDate: addProjectForm.startDate || null,
         role: addProjectForm.role || '',
         notes: addProjectForm.notes || '',
-        estimatedQuantity: estimated > 0 ? 1 : 0,
-        unitPrice: estimated,
+        unitType: isPct ? '%' : '',
+        estimatedQuantity: isPct ? pct : (estimated > 0 ? 1 : 0),
+        unitPrice: isPct ? budget : estimated,
+        estimatedTotal: estimated,
         status: 'active',
       });
       await logSubcontractorAccountEvent({
         subcontractorId,
         eventType: 'assignment_added',
         projectId: addProjectForm.projectId,
-        observation: 'Projet ajouté (sans situation)',
+        observation: isPct
+          ? `Projet ajouté — ${pct} % du budget (${estimated.toLocaleString('fr-MA')} MAD)`
+          : 'Projet ajouté (sans situation)',
       }).catch(() => {});
       onNotify?.('success', 'Projet ajouté.');
       setShowAddProject(false);
@@ -1638,15 +1680,40 @@ export default function SituationSousTraitantCompte({
       {showAddProject && (
         <div className="rh-ext-modal-overlay">
           <div className="card rh-ext-modal-box rh-ext-modal-box--md">
-            <div className="flex-between" style={{ marginBottom: 12 }}>
-              <h2 style={{ margin: 0, fontFamily: 'var(--font-head)', fontWeight: 800 }}>Ajouter un projet</h2>
-              <button type="button" onClick={() => setShowAddProject(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
+            <div className="flex-between" style={{ marginBottom: 20, flexWrap: 'wrap', gap: 8 }}>
+              <div>
+                <button
+                  type="button"
+                  className="rh-ext-back-btn"
+                  onClick={() => setShowAddProject(false)}
+                  aria-label="Retour au compte"
+                  style={{ marginBottom: 8 }}
+                >
+                  ← Retour
+                </button>
+                <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.2rem', textTransform: 'uppercase', margin: 0 }}>
+                  Ajouter un projet
+                </h2>
+                <p className="rh-ext-modal-sub">
+                  Affectation au chantier — aucune situation n’est créée automatiquement.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAddProject(false)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', minWidth: 44, minHeight: 44 }}
+                aria-label="Fermer"
+              >
+                <X size={20} />
+              </button>
             </div>
-            <form onSubmit={handleAddProject} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <label>Projet ou chantier *
+            <form onSubmit={handleAddProject} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div className="form-group">
+                <label htmlFor="add-prj">Projet ou chantier *</label>
                 <select
+                  id="add-prj"
                   value={addProjectForm.projectId}
-                  onChange={(e) => setAddProjectForm((p) => ({ ...p, projectId: e.target.value }))}
+                  onChange={(e) => handleAddProjectProjectChange(e.target.value)}
                   required
                 >
                   <option value="">— Sélectionner —</option>
@@ -1654,51 +1721,119 @@ export default function SituationSousTraitantCompte({
                     <option key={p.id} value={p.id}>{p.ref ? `${p.ref} — ${p.nom}` : p.nom}</option>
                   ))}
                 </select>
-              </label>
-              <label>Type de prestation
-                <select
-                  value={addProjectForm.remunerationType}
-                  onChange={(e) => setAddProjectForm((p) => ({ ...p, remunerationType: e.target.value }))}
-                >
-                  {REMUNERATION_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                </select>
-              </label>
-              <label>Date de début
+              </div>
+
+              <div className="form-grid-2">
+                <div className="form-group">
+                  <label htmlFor="add-remu">Type de prestation</label>
+                  <select
+                    id="add-remu"
+                    value={addProjectForm.remunerationType}
+                    onChange={(e) => {
+                      const remunerationType = e.target.value;
+                      setAddProjectForm((p) => ({ ...p, remunerationType }));
+                      if (isPctBudgetRemuneration(remunerationType) && addProjectForm.projectId) {
+                        void handleAddProjectProjectChange(addProjectForm.projectId);
+                      }
+                    }}
+                  >
+                    {REMUNERATION_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label htmlFor="add-start">Date de début</label>
+                  <input
+                    id="add-start"
+                    type="date"
+                    value={addProjectForm.startDate}
+                    onChange={(e) => setAddProjectForm((p) => ({ ...p, startDate: e.target.value }))}
+                  />
+                </div>
+              </div>
+
+              {isPctBudgetRemuneration(addProjectForm.remunerationType) ? (
+                <div className="form-callout">
+                  <div className="form-grid-2">
+                    <div className="form-group">
+                      <label htmlFor="add-pct">Pourcentage (%) *</label>
+                      <input
+                        id="add-pct"
+                        type="number"
+                        min="0.01"
+                        max="100"
+                        step="0.01"
+                        value={addProjectForm.percentage}
+                        onChange={(e) => setAddProjectForm((p) => ({ ...p, percentage: e.target.value }))}
+                        placeholder="Ex : 15"
+                        required
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label htmlFor="add-budget">Budget global opération / prestation (MAD) *</label>
+                      <input
+                        id="add-budget"
+                        type="number"
+                        min="0.01"
+                        step="0.01"
+                        value={addProjectForm.budgetBase}
+                        onChange={(e) => setAddProjectForm((p) => ({ ...p, budgetBase: e.target.value }))}
+                        placeholder="Budget de référence"
+                        required
+                      />
+                    </div>
+                  </div>
+                  <p className="form-hint">
+                    Montant estimé = {(
+                      ((Number(addProjectForm.percentage) || 0) * (Number(addProjectForm.budgetBase) || 0)) / 100
+                    ).toLocaleString('fr-MA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MAD
+                    {' '}(% × budget). Modifiable ensuite à chaque situation / paiement.
+                  </p>
+                </div>
+              ) : (
+                <div className="form-group">
+                  <label htmlFor="add-est">Montant prévu (optionnel)</label>
+                  <input
+                    id="add-est"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={addProjectForm.estimatedTotal}
+                    onChange={(e) => setAddProjectForm((p) => ({ ...p, estimatedTotal: e.target.value }))}
+                    placeholder="0"
+                  />
+                </div>
+              )}
+
+              <div className="form-group">
+                <label htmlFor="add-role">Responsable ou chef de projet</label>
                 <input
-                  type="date"
-                  value={addProjectForm.startDate}
-                  onChange={(e) => setAddProjectForm((p) => ({ ...p, startDate: e.target.value }))}
-                />
-              </label>
-              <label>Montant prévu (optionnel)
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={addProjectForm.estimatedTotal}
-                  onChange={(e) => setAddProjectForm((p) => ({ ...p, estimatedTotal: e.target.value }))}
-                  placeholder="0"
-                />
-              </label>
-              <label>Responsable ou chef de projet
-                <input
+                  id="add-role"
                   value={addProjectForm.role}
                   onChange={(e) => setAddProjectForm((p) => ({ ...p, role: e.target.value }))}
                 />
-              </label>
-              <label>Observation
-                <input
+              </div>
+              <div className="form-group">
+                <label htmlFor="add-notes">Observation</label>
+                <textarea
+                  id="add-notes"
+                  rows={2}
                   value={addProjectForm.notes}
                   onChange={(e) => setAddProjectForm((p) => ({ ...p, notes: e.target.value }))}
+                  placeholder="Remarque optionnelle…"
                 />
-              </label>
-              <p style={{ fontSize: '0.8rem', color: 'var(--text-3)', margin: 0 }}>
-                Aucune situation n’est créée automatiquement. Ajoutez ensuite une situation pour saisir des travaux.
+              </div>
+              <p className="form-hint">
+                Ajoutez ensuite une situation pour saisir des travaux
+                {isPctBudgetRemuneration(addProjectForm.remunerationType)
+                  ? ' (type de paiement « % du budget global » disponible).'
+                  : '.'}
               </p>
-              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                <button type="button" className="btn btn-secondary" onClick={() => setShowAddProject(false)}>Annuler</button>
+              <div className="form-actions">
+                <button type="button" className="btn btn-secondary" onClick={() => setShowAddProject(false)} disabled={addProjectSaving}>
+                  Annuler
+                </button>
                 <button type="submit" className="btn btn-primary" disabled={addProjectSaving}>
-                  {addProjectSaving ? '…' : 'Ajouter le projet'}
+                  {addProjectSaving ? 'Enregistrement…' : 'Ajouter le projet'}
                 </button>
               </div>
             </form>

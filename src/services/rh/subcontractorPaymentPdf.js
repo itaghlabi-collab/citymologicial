@@ -27,6 +27,13 @@ export async function exportSubcontractorPaymentPdf(record, { print = false } = 
       formatPdfMAD(record.unitPrice),
       formatPdfMAD(record.grossAmount),
     ]);
+  } else if (record.paymentType === 'pourcentage') {
+    detailRows.push([
+      record.designation || 'Prestation',
+      `${record.quantity} %`,
+      formatPdfMAD(record.unitPrice),
+      formatPdfMAD(record.grossAmount || record.amount),
+    ]);
   } else {
     detailRows.push([
       record.designation || 'Prestation',

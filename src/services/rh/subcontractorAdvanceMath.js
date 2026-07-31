@@ -77,7 +77,7 @@ export function deriveAdvanceStatus(amount, consumed, cancelled = false) {
 
 /**
  * Résultat d’une situation / paiement — délègue à calcSubPaymentTotals.
- * paymentType: metre | tache | service
+ * paymentType: metre | tache | service | pourcentage
  */
 export function computeSituationPaymentResult({
   paymentType,

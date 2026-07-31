@@ -171,6 +171,10 @@ export default function SituationCalculPage({
       if (l.paymentType === 'metre') {
         if (!(Number(l.quantity) > 0)) e[`line_${i}_quantity`] = 'Quantité requise';
         if (!(Number(l.unitPrice) > 0)) e[`line_${i}_unitPrice`] = 'PU requis';
+      } else if (l.paymentType === 'pourcentage') {
+        if (!(Number(l.quantity) > 0)) e[`line_${i}_quantity`] = 'Pourcentage requis';
+        if (Number(l.quantity) > 100) e[`line_${i}_quantity`] = 'Max 100 %';
+        if (!(Number(l.unitPrice) > 0)) e[`line_${i}_unitPrice`] = 'Budget requis';
       } else if (!(Number(l.amount) > 0)) {
         e[`line_${i}_amount`] = 'Montant requis';
       }
@@ -364,6 +368,31 @@ export default function SituationCalculPage({
                         step="0.01"
                         value={line.unitPrice}
                         onChange={(e) => setLine(line.key, { unitPrice: e.target.value })}
+                      />
+                    </label>
+                  </>
+                ) : line.paymentType === 'pourcentage' ? (
+                  <>
+                    <label>
+                      Pourcentage (%) *
+                      <input
+                        type="number"
+                        min="0"
+                        max="100"
+                        step="0.01"
+                        value={line.quantity}
+                        onChange={(e) => setLine(line.key, { quantity: e.target.value, unit: '%' })}
+                      />
+                    </label>
+                    <label className="st-calcul-span2">
+                      Budget global opération / prestation (MAD) *
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={line.unitPrice}
+                        onChange={(e) => setLine(line.key, { unitPrice: e.target.value })}
+                        placeholder="Budget de référence"
                       />
                     </label>
                   </>

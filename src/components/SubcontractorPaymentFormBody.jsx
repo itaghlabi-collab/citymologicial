@@ -140,6 +140,58 @@ function PaymentTypeFields({ paymentType, sel, assignmentId, formErr, setSubPaym
     );
   }
 
+  if (paymentType === 'pourcentage') {
+    return (
+      <div style={{ display: 'grid', gap: 8 }}>
+        <div>
+          <LABEL req>Opération / prestation</LABEL>
+          <input
+            placeholder="Ex : Carrelage, ferraillage, plomberie…"
+            value={sel.designation || ''}
+            onChange={(e) => setSubPaymentField(assignmentId, 'designation', e.target.value)}
+            style={INPUT_S(formErr[`d_${assignmentId}`])}
+          />
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+          <div>
+            <LABEL req>Pourcentage (%)</LABEL>
+            <input
+              type="number" min="0" max="100" step="0.01"
+              placeholder="Ex : 15"
+              value={sel.quantity ?? ''}
+              onChange={(e) => setSubPaymentField(assignmentId, 'quantity', e.target.value)}
+              style={INPUT_S(formErr[`q_${assignmentId}`])}
+            />
+          </div>
+          <div>
+            <LABEL req>Budget global (MAD)</LABEL>
+            <input
+              type="number" min="0" step="0.01"
+              placeholder="Budget opération / prestation"
+              value={sel.unitPrice ?? ''}
+              onChange={(e) => setSubPaymentField(assignmentId, 'unitPrice', e.target.value)}
+              style={INPUT_S(formErr[`p_${assignmentId}`])}
+            />
+          </div>
+        </div>
+        <div>
+          <LABEL>Description</LABEL>
+          <textarea
+            rows={2}
+            placeholder="Précisions sur le budget de référence…"
+            value={sel.lineDescription || ''}
+            onChange={(e) => setSubPaymentField(assignmentId, 'lineDescription', e.target.value)}
+            style={{ ...INPUT_S(false), resize: 'vertical' }}
+          />
+        </div>
+        <div style={{ padding: '8px 12px', background: '#E3F2FD', borderRadius: 8, display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem' }}>
+          <span>Montant brut = % × budget</span>
+          <strong style={{ color: '#1565C0' }}>{fmtMAD(gross)}</strong>
+        </div>
+      </div>
+    );
+  }
+
   // service
   return (
     <div style={{ display: 'grid', gap: 8 }}>

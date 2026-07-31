@@ -24,6 +24,7 @@ const LABEL = ({ children, req }) => (
 
 export function paymentToEditForm(p) {
   const isMetre = p.paymentType === 'metre';
+  const isPct = p.paymentType === 'pourcentage';
   return {
     paymentType: p.paymentType || 'metre',
     paymentDate: p.paymentDate || '',
@@ -32,10 +33,10 @@ export function paymentToEditForm(p) {
     description: p.description || '',
     statusUi: paymentStatusFromDb(p.status) || 'En attente',
     designation: p.designation || '',
-    quantity: isMetre ? String(p.quantity ?? '') : '',
-    unit: p.unit || 'm²',
-    unitPrice: isMetre ? String(p.unitPrice ?? '') : '',
-    amount: !isMetre ? String(p.grossAmount ?? p.amount ?? '') : '',
+    quantity: (isMetre || isPct) ? String(p.quantity ?? '') : '',
+    unit: p.unit || (isPct ? '%' : 'm²'),
+    unitPrice: (isMetre || isPct) ? String(p.unitPrice ?? '') : '',
+    amount: (!isMetre && !isPct) ? String(p.grossAmount ?? p.amount ?? '') : '',
     avances: String(p.avances ?? 0),
     retenues: String(p.retenues ?? 0),
   };
@@ -75,6 +76,19 @@ export default function SubcontractorPaymentEditForm({ form, setF, formErr, read
                 {METRE_UNITS.map((u) => <option key={u} value={u}>{u}</option>)}
               </select></div>
             <div><LABEL req>Prix unitaire</LABEL>
+              <input type="number" min="0" step="0.01" value={form.unitPrice ?? ''} onChange={(e) => setF('unitPrice', e.target.value)} style={INPUT_S(formErr.unitPrice)} {...disabled} /></div>
+          </div>
+        </>
+      )}
+
+      {form.paymentType === 'pourcentage' && (
+        <>
+          <div><LABEL req>Opération / prestation</LABEL>
+            <input value={form.designation || ''} onChange={(e) => setF('designation', e.target.value)} style={INPUT_S(formErr.designation)} {...disabled} /></div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+            <div><LABEL req>Pourcentage (%)</LABEL>
+              <input type="number" min="0" max="100" step="0.01" value={form.quantity ?? ''} onChange={(e) => setF('quantity', e.target.value)} style={INPUT_S(formErr.quantity)} {...disabled} /></div>
+            <div><LABEL req>Budget global (MAD)</LABEL>
               <input type="number" min="0" step="0.01" value={form.unitPrice ?? ''} onChange={(e) => setF('unitPrice', e.target.value)} style={INPUT_S(formErr.unitPrice)} {...disabled} /></div>
           </div>
         </>
@@ -140,6 +154,11 @@ export function validateSubcontractorPaymentEdit(form) {
     if (!form.designation?.trim()) err.designation = 'Requis';
     if (!form.quantity || Number(form.quantity) <= 0) err.quantity = 'Requis';
     if (!form.unitPrice || Number(form.unitPrice) <= 0) err.unitPrice = 'Requis';
+  } else if (form.paymentType === 'pourcentage') {
+    if (!form.designation?.trim()) err.designation = 'Requis';
+    if (!form.quantity || Number(form.quantity) <= 0) err.quantity = 'Requis';
+    if (Number(form.quantity) > 100) err.quantity = 'Max 100 %';
+    if (!form.unitPrice || Number(form.unitPrice) <= 0) err.unitPrice = 'Budget requis';
   } else {
     if (!form.designation?.trim()) err.designation = 'Requis';
     if (!form.amount || Number(form.amount) <= 0) err.amount = 'Requis';
@@ -150,6 +169,7 @@ export function validateSubcontractorPaymentEdit(form) {
 
 export function buildSubcontractorPaymentUpdatePayload(form, meta = {}) {
   const totals = calcSubPaymentTotals(form.paymentType, form);
+  const storesQtyPrice = form.paymentType === 'metre' || form.paymentType === 'pourcentage';
   return {
     projectId: meta.projectId,
     assignmentId: meta.assignmentId,
@@ -159,10 +179,10 @@ export function buildSubcontractorPaymentUpdatePayload(form, meta = {}) {
     reference: form.reference,
     description: form.description,
     designation: form.designation,
-    quantity: form.paymentType === 'metre' ? form.quantity : 0,
-    unit: form.paymentType === 'metre' ? form.unit : null,
-    unitPrice: form.paymentType === 'metre' ? form.unitPrice : 0,
-    amount: form.paymentType === 'metre' ? totals.gross : form.amount,
+    quantity: storesQtyPrice ? form.quantity : 0,
+    unit: form.paymentType === 'metre' ? form.unit : (form.paymentType === 'pourcentage' ? '%' : null),
+    unitPrice: storesQtyPrice ? form.unitPrice : 0,
+    amount: storesQtyPrice ? totals.gross : form.amount,
     grossAmount: totals.gross,
     avances: totals.avances,
     retenues: totals.retenues,

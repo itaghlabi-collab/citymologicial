@@ -129,7 +129,11 @@ export function normalizePayment(row) {
   if (!row) return null;
   const qty = Number(row.quantity) || 0;
   const unitPrice = Number(row.unit_price) || 0;
-  const grossAmount = Number(row.gross_amount) || round2(qty * unitPrice) || Number(row.amount) || 0;
+  const paymentType = row.payment_type || '';
+  const derivedGross = paymentType === 'pourcentage'
+    ? round2((qty * unitPrice) / 100)
+    : round2(qty * unitPrice);
+  const grossAmount = Number(row.gross_amount) || derivedGross || Number(row.amount) || 0;
   const avances = Number(row.avances) || 0;
   const retenues = Number(row.retenues) || 0;
   const amount = Number(row.amount) || round2(Math.max(0, grossAmount - avances - retenues));
@@ -209,6 +213,10 @@ function toSubcontractorRow(form) {
 function toAssignmentRow(form, subcontractorId) {
   const qty = Number(form.estimatedQuantity) || 0;
   const price = Number(form.unitPrice) || 0;
+  const isPct = form.remunerationType === '% du budget global' || form.unitType === '%';
+  const estimatedTotal = form.estimatedTotal != null && form.estimatedTotal !== ''
+    ? round2(Number(form.estimatedTotal) || 0)
+    : (isPct ? round2((qty * price) / 100) : round2(qty * price));
   return {
     subcontractor_id: subcontractorId,
     project_id: emptyToNull(form.projectId) || null,
@@ -218,10 +226,10 @@ function toAssignmentRow(form, subcontractorId) {
     end_date: emptyToNull(form.endDate),
     role: emptyToNull(form.role?.trim()),
     remuneration_type: emptyToNull(form.remunerationType),
-    unit_type: emptyToNull(form.unitType),
+    unit_type: emptyToNull(form.unitType) || (isPct ? '%' : null),
     unit_price: price,
     estimated_quantity: qty,
-    estimated_total: round2(qty * price),
+    estimated_total: estimatedTotal,
     status: form.status || 'active',
     notes: emptyToNull(form.notes?.trim()),
   };
@@ -249,9 +257,12 @@ function toPaymentRow(form, subcontractorId, { userId = null } = {}) {
   const paymentType = form.paymentType || null;
   const quantity = Number(form.quantity) || 0;
   const unitPrice = Number(form.unitPrice) || 0;
+  const storesQtyPrice = paymentType === 'metre' || paymentType === 'pourcentage';
   let grossAmount = Number(form.grossAmount) || 0;
   if (!grossAmount) {
-    grossAmount = paymentType === 'metre' ? round2(quantity * unitPrice) : round2(Number(form.amount) || 0);
+    if (paymentType === 'metre') grossAmount = round2(quantity * unitPrice);
+    else if (paymentType === 'pourcentage') grossAmount = round2((quantity * unitPrice) / 100);
+    else grossAmount = round2(Number(form.amount) || 0);
   }
   const avances = round2(Math.min(Math.max(0, Number(form.avances) || 0), grossAmount));
   const retenues = round2(Math.max(0, Number(form.retenues) || 0));
@@ -264,9 +275,11 @@ function toPaymentRow(form, subcontractorId, { userId = null } = {}) {
     payment_date: form.paymentDate,
     payment_type: paymentType,
     designation: emptyToNull(form.designation?.trim()),
-    quantity: paymentType === 'metre' ? quantity : 0,
-    unit: paymentType === 'metre' ? emptyToNull(form.unit) : null,
-    unit_price: paymentType === 'metre' ? unitPrice : 0,
+    quantity: storesQtyPrice ? quantity : 0,
+    unit: paymentType === 'metre'
+      ? emptyToNull(form.unit)
+      : (paymentType === 'pourcentage' ? '%' : null),
+    unit_price: storesQtyPrice ? unitPrice : 0,
     gross_amount: grossAmount,
     avances,
     retenues,
