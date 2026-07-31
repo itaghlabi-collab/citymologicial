@@ -2803,6 +2803,101 @@ tbody tr:last-child td { border-bottom: none; }
 .rh-ext-modal-box--lg { max-width: 680px; }
 .rh-ext-modal-box--xl { max-width: 960px; }
 
+.rh-ext-modal-sub {
+  margin: 6px 0 0;
+  font-size: 0.82rem;
+  color: var(--text-3);
+  line-height: 1.45;
+  font-weight: 500;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.rh-ext-modal-box .form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.rh-ext-modal-box .form-group > label {
+  font-size: 0.75rem;
+  font-weight: 700;
+  color: var(--text-2);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.rh-ext-modal-box .form-group input,
+.rh-ext-modal-box .form-group select,
+.rh-ext-modal-box .form-group textarea {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 12px 14px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 0.95rem;
+  font-family: var(--font-body);
+  color: var(--text);
+  background: var(--surface);
+  transition: border-color 0.2s, box-shadow 0.2s;
+  outline: none;
+  min-height: 44px;
+}
+
+.rh-ext-modal-box .form-group textarea {
+  min-height: 72px;
+  resize: vertical;
+}
+
+.rh-ext-modal-box .form-group input:focus,
+.rh-ext-modal-box .form-group select:focus,
+.rh-ext-modal-box .form-group textarea:focus {
+  border-color: var(--red);
+  box-shadow: 0 0 0 3px rgba(211, 47, 47, 0.1);
+}
+
+.rh-ext-modal-box .form-hint {
+  margin: 0;
+  font-size: 0.75rem;
+  color: var(--text-3);
+  line-height: 1.4;
+}
+
+.rh-ext-modal-box .form-grid-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+
+.rh-ext-modal-box .form-callout {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border-radius: var(--radius);
+  background: var(--bg);
+  border: 1px solid var(--border);
+}
+
+.rh-ext-modal-box .form-callout--warn {
+  background: #FFF8F0;
+  border-color: #FFCC80;
+}
+
+.rh-ext-modal-box .form-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+@media (max-width: 560px) {
+  .rh-ext-modal-box .form-grid-2 {
+    grid-template-columns: 1fr;
+  }
+}
+
 .rh-pay-detail-modal {
   padding: 20px 24px 24px;
 }

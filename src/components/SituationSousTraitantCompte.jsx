@@ -1709,57 +1709,135 @@ export default function SituationSousTraitantCompte({
       {showAdvance && (
         <div className="rh-ext-modal-overlay">
           <div className="card rh-ext-modal-box rh-ext-modal-box--md">
-            <div className="flex-between" style={{ marginBottom: 12 }}>
-              <h2 style={{ margin: 0, fontFamily: 'var(--font-head)', fontWeight: 800 }}>Avance versée</h2>
-              <button type="button" onClick={() => setShowAdvance(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
-            </div>
-            <p style={{ fontSize: '0.82rem', color: 'var(--text-3)' }}>
-              Une seule opération financière si « à comptabiliser ». L’imputation sur les projets est analytique.
-            </p>
-            <form onSubmit={handleCreateAdvance} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <label>Date de l’opération *
-                <input type="date" value={advForm.advanceDate} onChange={(e) => setAdvForm((p) => ({ ...p, advanceDate: e.target.value }))} required />
-              </label>
-              <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-3)' }}>
-                Date réelle (peut être antérieure à la mise en service). La date de saisie ERP est enregistrée automatiquement.
-              </p>
-              <label>Montant (MAD)<input type="number" min="0.01" step="0.01" value={advForm.amount} onChange={(e) => setAdvForm((p) => ({ ...p, amount: e.target.value }))} required /></label>
-              <label>Cette opération a-t-elle déjà été comptabilisée avant l’ERP ? *
-                <select
-                  value={advForm.alreadyAccounted ? 'true' : 'false'}
-                  onChange={(e) => setAdvForm((p) => ({ ...p, alreadyAccounted: e.target.value === 'true' }))}
-                  required
+            <div className="flex-between" style={{ marginBottom: 20, flexWrap: 'wrap', gap: 8 }}>
+              <div>
+                <button
+                  type="button"
+                  className="rh-ext-back-btn"
+                  onClick={() => setShowAdvance(false)}
+                  aria-label="Retour au compte"
+                  style={{ marginBottom: 8 }}
                 >
-                  <option value="false">Non, à comptabiliser dans l’ERP</option>
-                  <option value="true">Oui, déjà comptabilisée</option>
-                </select>
-              </label>
-              <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-3)' }}>
-                Sélectionnez Oui pour une ancienne opération déjà intégrée dans vos comptes.
-                Elle restera visible dans l’historique sans être comptabilisée une deuxième fois.
-              </p>
-              {advForm.alreadyAccounted && (
-                <label>Dont déjà consommé avant l’ERP (MAD)
+                  ← Retour
+                </button>
+                <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.2rem', textTransform: 'uppercase', margin: 0 }}>
+                  Avance versée
+                </h2>
+                <p className="rh-ext-modal-sub">
+                  Une seule opération financière si « à comptabiliser ». L’imputation sur les projets est analytique.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowAdvance(false)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', minWidth: 44, minHeight: 44 }}
+                aria-label="Fermer"
+              >
+                <X size={20} />
+              </button>
+            </div>
+            <form onSubmit={handleCreateAdvance} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div className="form-grid-2">
+                <div className="form-group">
+                  <label htmlFor="adv-date">Date de l’opération *</label>
                   <input
-                    type="number"
-                    min="0"
-                    step="0.01"
-                    value={advForm.consumedAmount}
-                    onChange={(e) => setAdvForm((p) => ({ ...p, consumedAmount: e.target.value }))}
-                    placeholder="Ex. 20000 si avance 30000 partiellement consommée"
+                    id="adv-date"
+                    type="date"
+                    value={advForm.advanceDate}
+                    onChange={(e) => setAdvForm((p) => ({ ...p, advanceDate: e.target.value }))}
+                    required
                   />
-                </label>
-              )}
-              <label>Mode
-                <select value={advForm.paymentMethod} onChange={(e) => setAdvForm((p) => ({ ...p, paymentMethod: e.target.value }))}>
-                  {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
-                </select>
-              </label>
-              <label>Référence<input value={advForm.reference} onChange={(e) => setAdvForm((p) => ({ ...p, reference: e.target.value }))} /></label>
-              <label>Observation<input value={advForm.observation} onChange={(e) => setAdvForm((p) => ({ ...p, observation: e.target.value }))} /></label>
-              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                <button type="button" className="btn btn-secondary" onClick={() => setShowAdvance(false)}>Annuler</button>
-                <button type="submit" className="btn btn-primary" disabled={advSaving}>{advSaving ? '…' : 'Enregistrer'}</button>
+                  <p className="form-hint">
+                    Date réelle (peut être antérieure à la mise en service). La date de saisie ERP est enregistrée automatiquement.
+                  </p>
+                </div>
+                <div className="form-group">
+                  <label htmlFor="adv-amount">Montant (MAD) *</label>
+                  <input
+                    id="adv-amount"
+                    type="number"
+                    min="0.01"
+                    step="0.01"
+                    placeholder="0,00"
+                    value={advForm.amount}
+                    onChange={(e) => setAdvForm((p) => ({ ...p, amount: e.target.value }))}
+                    required
+                  />
+                </div>
+              </div>
+
+              <div className={`form-callout${advForm.alreadyAccounted ? ' form-callout--warn' : ''}`}>
+                <div className="form-group">
+                  <label htmlFor="adv-accounted">Comptabilisation *</label>
+                  <select
+                    id="adv-accounted"
+                    value={advForm.alreadyAccounted ? 'true' : 'false'}
+                    onChange={(e) => setAdvForm((p) => ({ ...p, alreadyAccounted: e.target.value === 'true' }))}
+                    required
+                  >
+                    <option value="false">Non, à comptabiliser dans l’ERP</option>
+                    <option value="true">Oui, déjà comptabilisée avant l’ERP</option>
+                  </select>
+                  <p className="form-hint">
+                    « Oui » = ancienne opération déjà intégrée dans vos comptes : visible en historique, sans double comptabilisation.
+                  </p>
+                </div>
+                {advForm.alreadyAccounted && (
+                  <div className="form-group">
+                    <label htmlFor="adv-consumed">Dont déjà consommé avant l’ERP (MAD)</label>
+                    <input
+                      id="adv-consumed"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={advForm.consumedAmount}
+                      onChange={(e) => setAdvForm((p) => ({ ...p, consumedAmount: e.target.value }))}
+                      placeholder="Ex. 20000 si avance 30000 partiellement consommée"
+                    />
+                  </div>
+                )}
+              </div>
+
+              <div className="form-grid-2">
+                <div className="form-group">
+                  <label htmlFor="adv-method">Mode de paiement</label>
+                  <select
+                    id="adv-method"
+                    value={advForm.paymentMethod}
+                    onChange={(e) => setAdvForm((p) => ({ ...p, paymentMethod: e.target.value }))}
+                  >
+                    {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
+                  </select>
+                </div>
+                <div className="form-group">
+                  <label htmlFor="adv-ref">Référence</label>
+                  <input
+                    id="adv-ref"
+                    value={advForm.reference}
+                    onChange={(e) => setAdvForm((p) => ({ ...p, reference: e.target.value }))}
+                    placeholder="N° chèque, virement…"
+                  />
+                </div>
+              </div>
+
+              <div className="form-group">
+                <label htmlFor="adv-obs">Observation</label>
+                <textarea
+                  id="adv-obs"
+                  rows={2}
+                  value={advForm.observation}
+                  onChange={(e) => setAdvForm((p) => ({ ...p, observation: e.target.value }))}
+                  placeholder="Remarque optionnelle…"
+                />
+              </div>
+
+              <div className="form-actions">
+                <button type="button" className="btn btn-secondary" onClick={() => setShowAdvance(false)} disabled={advSaving}>
+                  Annuler
+                </button>
+                <button type="submit" className="btn btn-primary" disabled={advSaving}>
+                  {advSaving ? 'Enregistrement…' : 'Enregistrer'}
+                </button>
               </div>
             </form>
           </div>
@@ -1769,48 +1847,151 @@ export default function SituationSousTraitantCompte({
       {showOpening && (
         <div className="rh-ext-modal-overlay">
           <div className="card rh-ext-modal-box rh-ext-modal-box--md">
-            <div className="flex-between" style={{ marginBottom: 12 }}>
-              <h2 style={{ margin: 0, fontFamily: 'var(--font-head)', fontWeight: 800 }}>Situation initiale / Solde d’ouverture</h2>
-              <button type="button" onClick={() => setShowOpening(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
+            <div className="flex-between" style={{ marginBottom: 20, flexWrap: 'wrap', gap: 8 }}>
+              <div>
+                <button
+                  type="button"
+                  className="rh-ext-back-btn"
+                  onClick={() => setShowOpening(false)}
+                  aria-label="Retour au compte"
+                  style={{ marginBottom: 8 }}
+                >
+                  ← Retour
+                </button>
+                <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.2rem', textTransform: 'uppercase', margin: 0 }}>
+                  Solde d’ouverture
+                </h2>
+                <p className="rh-ext-modal-sub">
+                  Situation initiale déjà comptabilisée — aucun nouveau décaissement ERP.
+                  Ne pas combiner avec une saisie détaillée des mêmes montants.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowOpening(false)}
+                style={{ background: 'none', border: 'none', cursor: 'pointer', minWidth: 44, minHeight: 44 }}
+                aria-label="Fermer"
+              >
+                <X size={20} />
+              </button>
             </div>
-            <p style={{ fontSize: '0.82rem', color: 'var(--text-3)' }}>
-              Méthode 2 — solde d’ouverture déjà comptabilisé. Aucun nouveau décaissement ERP.
-              Ne pas combiner avec une saisie détaillée des mêmes montants.
-            </p>
-            <form onSubmit={handleCreateOpening} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <label>Date d’arrêté *
-                <input type="date" value={openingForm.arreteeDate} onChange={(e) => setOpeningForm((p) => ({ ...p, arreteeDate: e.target.value }))} required />
-              </label>
-              <label>Travaux cumulés antérieurs (MAD)
-                <input type="number" min="0" step="0.01" value={openingForm.travauxAnterieurs} onChange={(e) => setOpeningForm((p) => ({ ...p, travauxAnterieurs: e.target.value }))} />
-              </label>
-              <label>Avances versées antérieures (MAD)
-                <input type="number" min="0" step="0.01" value={openingForm.avancesVerseesAnterieures} onChange={(e) => setOpeningForm((p) => ({ ...p, avancesVerseesAnterieures: e.target.value }))} />
-              </label>
-              <label>Avances consommées antérieures (MAD)
-                <input type="number" min="0" step="0.01" value={openingForm.avancesConsommeesAnterieures} onChange={(e) => setOpeningForm((p) => ({ ...p, avancesConsommeesAnterieures: e.target.value }))} />
-              </label>
-              <label>Solde d’avance disponible à l’ouverture (MAD)
-                <input type="number" min="0" step="0.01" value={openingForm.soldeAvanceOuverture} onChange={(e) => setOpeningForm((p) => ({ ...p, soldeAvanceOuverture: e.target.value }))} placeholder="Auto = versées − consommées" />
-              </label>
-              <label>Paiements antérieurs (MAD)
-                <input type="number" min="0" step="0.01" value={openingForm.paiementsAnterieurs} onChange={(e) => setOpeningForm((p) => ({ ...p, paiementsAnterieurs: e.target.value }))} />
-              </label>
-              <label>Reste antérieur à payer (MAD)
-                <input type="number" min="0" step="0.01" value={openingForm.resteAnterieur} onChange={(e) => setOpeningForm((p) => ({ ...p, resteAnterieur: e.target.value }))} />
-              </label>
-              <label>Retenues antérieures (MAD)
-                <input type="number" min="0" step="0.01" value={openingForm.retenuesAnterieures} onChange={(e) => setOpeningForm((p) => ({ ...p, retenuesAnterieures: e.target.value }))} />
-              </label>
-              <label>Observation
-                <input value={openingForm.observation} onChange={(e) => setOpeningForm((p) => ({ ...p, observation: e.target.value }))} />
-              </label>
-              <label>Pièce justificative (URL / chemin)
-                <input value={openingForm.pieceUrl} onChange={(e) => setOpeningForm((p) => ({ ...p, pieceUrl: e.target.value }))} />
-              </label>
-              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
-                <button type="button" className="btn btn-secondary" onClick={() => setShowOpening(false)}>Annuler</button>
-                <button type="submit" className="btn btn-primary" disabled={openingSaving}>{openingSaving ? '…' : 'Enregistrer l’ouverture'}</button>
+            <form onSubmit={handleCreateOpening} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+              <div className="form-group">
+                <label htmlFor="open-date">Date d’arrêté *</label>
+                <input
+                  id="open-date"
+                  type="date"
+                  value={openingForm.arreteeDate}
+                  onChange={(e) => setOpeningForm((p) => ({ ...p, arreteeDate: e.target.value }))}
+                  required
+                />
+              </div>
+              <div className="form-grid-2">
+                <div className="form-group">
+                  <label htmlFor="open-travaux">Travaux cumulés antérieurs</label>
+                  <input
+                    id="open-travaux"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={openingForm.travauxAnterieurs}
+                    onChange={(e) => setOpeningForm((p) => ({ ...p, travauxAnterieurs: e.target.value }))}
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="open-av-versees">Avances versées antérieures</label>
+                  <input
+                    id="open-av-versees"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={openingForm.avancesVerseesAnterieures}
+                    onChange={(e) => setOpeningForm((p) => ({ ...p, avancesVerseesAnterieures: e.target.value }))}
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="open-av-conso">Avances consommées antérieures</label>
+                  <input
+                    id="open-av-conso"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={openingForm.avancesConsommeesAnterieures}
+                    onChange={(e) => setOpeningForm((p) => ({ ...p, avancesConsommeesAnterieures: e.target.value }))}
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="open-solde">Solde d’avance à l’ouverture</label>
+                  <input
+                    id="open-solde"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={openingForm.soldeAvanceOuverture}
+                    onChange={(e) => setOpeningForm((p) => ({ ...p, soldeAvanceOuverture: e.target.value }))}
+                    placeholder="Auto = versées − consommées"
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="open-paiements">Paiements antérieurs</label>
+                  <input
+                    id="open-paiements"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={openingForm.paiementsAnterieurs}
+                    onChange={(e) => setOpeningForm((p) => ({ ...p, paiementsAnterieurs: e.target.value }))}
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="open-reste">Reste antérieur à payer</label>
+                  <input
+                    id="open-reste"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={openingForm.resteAnterieur}
+                    onChange={(e) => setOpeningForm((p) => ({ ...p, resteAnterieur: e.target.value }))}
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="open-retenues">Retenues antérieures</label>
+                  <input
+                    id="open-retenues"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={openingForm.retenuesAnterieures}
+                    onChange={(e) => setOpeningForm((p) => ({ ...p, retenuesAnterieures: e.target.value }))}
+                  />
+                </div>
+                <div className="form-group">
+                  <label htmlFor="open-piece">Pièce justificative</label>
+                  <input
+                    id="open-piece"
+                    value={openingForm.pieceUrl}
+                    onChange={(e) => setOpeningForm((p) => ({ ...p, pieceUrl: e.target.value }))}
+                    placeholder="URL ou chemin"
+                  />
+                </div>
+              </div>
+              <div className="form-group">
+                <label htmlFor="open-obs">Observation</label>
+                <textarea
+                  id="open-obs"
+                  rows={2}
+                  value={openingForm.observation}
+                  onChange={(e) => setOpeningForm((p) => ({ ...p, observation: e.target.value }))}
+                  placeholder="Remarque optionnelle…"
+                />
+              </div>
+              <div className="form-actions">
+                <button type="button" className="btn btn-secondary" onClick={() => setShowOpening(false)} disabled={openingSaving}>
+                  Annuler
+                </button>
+                <button type="submit" className="btn btn-primary" disabled={openingSaving}>
+                  {openingSaving ? 'Enregistrement…' : 'Enregistrer l’ouverture'}
+                </button>
               </div>
             </form>
           </div>
