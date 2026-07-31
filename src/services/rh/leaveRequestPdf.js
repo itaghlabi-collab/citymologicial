@@ -1,7 +1,8 @@
 /**
- * leaveRequestPdf.js — PDF demande de congé (A4, jsPDF)
+ * leaveRequestPdf.js — PDF demande de congé (A4 strictement 1 page, jsPDF)
  */
 import { jsPDF } from 'jspdf';
+import { leaveTypeLabelForPdf } from './leaveBalance';
 
 const LOGO_URL = 'https://i.ibb.co/Ldm3WWdK/Capture-d-e-cran-2026-05-26-a-12-16-21.png';
 
@@ -13,23 +14,25 @@ const ROW_GRAY = [245, 245, 245];
 
 const COMPANY_LINES = [
   '228 Bd Mohammed V, Casablanca 20000',
-  'Tél : +212 52 231 0043',
-  'contact@citymo.ma',
-  'Capital de 200000 MAD RC: 401959',
-  'Patente: 32173075',
-  'IF: 25080805 - ICE: 002023116000060',
+  'Tél : +212 52 231 0043 · contact@citymo.ma',
+  'Capital 200000 MAD · RC 401959 · Patente 32173075',
+  'IF 25080805 · ICE 002023116000060',
 ];
 
 const PAGE_W = 210;
 const PAGE_H = 297;
-const MARGIN = 14;
+const MARGIN = 11;
 const CONTENT_W = PAGE_W - MARGIN * 2;
+const FOOTER_Y = PAGE_H - 6;
+const CONTENT_BOTTOM = FOOTER_Y - 3;
 
-const LOGO_MAX_W = 48;
-const LOGO_MAX_H = 15;
+const LOGO_MAX_W = 38;
+const LOGO_MAX_H = 12;
 
-function dash(v) {
-  const s = v == null ? '' : String(v).trim();
+function displayValue(v) {
+  if (v == null || v === '') return '—';
+  if (typeof v === 'number' && Number.isFinite(v)) return String(v);
+  const s = String(v).trim();
   return s || '—';
 }
 
@@ -38,7 +41,7 @@ function fmtDate(d) {
   try {
     const raw = String(d).slice(0, 10);
     if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
-      return new Date(raw + 'T12:00:00').toLocaleDateString('fr-FR', {
+      return new Date(`${raw}T12:00:00`).toLocaleDateString('fr-FR', {
         day: '2-digit',
         month: '2-digit',
         year: 'numeric',
@@ -125,7 +128,7 @@ function drawLogoPlain(doc, logoData, x, y, maxW, maxH, ratio) {
 function drawWatermark(doc, logoData, logoRatio) {
   if (!logoData) return;
   try {
-    const fit = fitInBox(80, 26, logoRatio);
+    const fit = fitInBox(68, 22, logoRatio);
     const x = (PAGE_W - fit.w) / 2;
     const y = (PAGE_H - fit.h) / 2;
     if (typeof doc.saveGraphicsState === 'function' && typeof doc.GState === 'function') {
@@ -139,137 +142,153 @@ function drawWatermark(doc, logoData, logoRatio) {
 
 function drawSectionTitle(doc, title, y) {
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(10);
+  doc.setFontSize(8.5);
   doc.setTextColor(...RED);
   doc.text(title, MARGIN, y);
   doc.setDrawColor(...RED);
-  doc.setLineWidth(0.35);
-  doc.line(MARGIN, y + 1.5, PAGE_W - MARGIN, y + 1.5);
-  return y + 6;
+  doc.setLineWidth(0.28);
+  doc.line(MARGIN, y + 1.1, PAGE_W - MARGIN, y + 1.1);
+  return y + 4;
 }
 
-function drawTable(doc, rows, startY) {
-  const col1W = CONTENT_W * 0.38;
+function drawTable(doc, rows, startY, { fontSize = 7.5, padY = 3.4, lineH = 2.9 } = {}) {
+  const col1W = CONTENT_W * 0.32;
   const col2W = CONTENT_W - col1W;
   let y = startY;
 
   rows.forEach(([label, value]) => {
-    const val = dash(value);
-    doc.setFontSize(9);
-    const valueLines = val === '—' ? ['—'] : doc.splitTextToSize(val, col2W - 6);
-    const rowH = Math.max(6.2, valueLines.length * 3.8 + 2.5);
+    const val = displayValue(value);
+    doc.setFontSize(fontSize);
+    const valueLines = val === '—' ? ['—'] : doc.splitTextToSize(val, col2W - 4);
+    const rowH = Math.max(padY + 0.8, valueLines.length * lineH + 1.6);
 
     doc.setFillColor(...ROW_GRAY);
     doc.rect(MARGIN, y, col1W, rowH, 'F');
     doc.setFillColor(255, 255, 255);
     doc.rect(MARGIN + col1W, y, col2W, rowH, 'F');
     doc.setDrawColor(...BORDER);
-    doc.setLineWidth(0.15);
+    doc.setLineWidth(0.1);
     doc.rect(MARGIN, y, CONTENT_W, rowH);
     doc.line(MARGIN + col1W, y, MARGIN + col1W, y + rowH);
 
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9);
+    doc.setFontSize(fontSize);
     doc.setTextColor(...MUTED);
-    doc.text(label, MARGIN + 3, y + 5);
+    doc.text(label, MARGIN + 2, y + padY - 0.4);
 
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(...TEXT);
-    doc.text(valueLines, MARGIN + col1W + 3, y + 5);
+    doc.text(valueLines, MARGIN + col1W + 2, y + padY - 0.4);
 
     y += rowH;
   });
 
-  return y + 2;
-}
-
-function drawValidationZone(doc, startY) {
-  const FOOTER_RESERVE = 12; // espace pour « DOCUMENT INTERNE »
-  const titleBlock = 8;
-  const boxH = 34;
-  const gapAfterTitle = 2;
-  const needed = titleBlock + gapAfterTitle + boxH + 2;
-  const maxBottom = PAGE_H - FOOTER_RESERVE;
-
-  let y = startY;
-  // Si le bloc signatures ne tient pas, passer à la page suivante
-  if (y + needed > maxBottom) {
-    doc.addPage();
-    y = MARGIN;
-  }
-
-  y = drawSectionTitle(doc, 'VALIDATION', y);
-
-  const boxGap = 5;
-  const boxW = (CONTENT_W - boxGap * 2) / 3;
-  const labels = ['Signature salarié', 'Validation RH', 'Direction'];
-
-  labels.forEach((label, i) => {
-    const x = MARGIN + i * (boxW + boxGap);
-    doc.setDrawColor(...BORDER);
-    doc.setLineWidth(0.3);
-    doc.setFillColor(255, 255, 255);
-    doc.rect(x, y, boxW, boxH, 'FD');
-
-    // Libellé en haut à l’intérieur de la case (évite le débordement sous la page)
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(8);
-    doc.setTextColor(...MUTED);
-    doc.text(label, x + boxW / 2, y + 5.5, { align: 'center' });
-
-    // Ligne de signature
-    doc.setDrawColor(190, 190, 190);
-    doc.setLineWidth(0.2);
-    doc.line(x + 4, y + boxH - 10, x + boxW - 4, y + boxH - 10);
-
-    doc.setFont('helvetica', 'italic');
-    doc.setFontSize(7);
-    doc.setTextColor(140, 140, 140);
-    doc.text('Date : _______________', x + boxW / 2, y + boxH - 4, { align: 'center' });
-  });
-
-  return y + boxH + 4;
+  return y + 1.2;
 }
 
 function drawRoundedBox(doc, x, y, w, h) {
   doc.setDrawColor(...BORDER);
   doc.setFillColor(255, 255, 255);
-  doc.setLineWidth(0.35);
+  doc.setLineWidth(0.28);
   if (typeof doc.roundedRect === 'function') {
-    doc.roundedRect(x, y, w, h, 3, 3, 'FD');
+    doc.roundedRect(x, y, w, h, 2, 2, 'FD');
   } else {
     doc.rect(x, y, w, h, 'FD');
   }
 }
 
-function drawLabeledLines(doc, x, y, w, rows, title) {
-  let cy = y + 6;
+function drawLabeledLines(doc, x, y, w, rows, title, rowStep = 4.6) {
+  let cy = y + 4;
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(8.5);
+  doc.setFontSize(7.5);
   doc.setTextColor(...RED);
   doc.text(title, x + w / 2, cy, { align: 'center' });
-  cy += 6.5;
+  cy += 4.2;
 
   rows.forEach(([label, value]) => {
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(8.5);
+    doc.setFontSize(7.5);
     doc.setTextColor(...TEXT);
-    doc.text(label, x + 5, cy);
-    const labelW = doc.getTextWidth(label) + 2;
-    const val = dash(value);
+    doc.text(label, x + 3.5, cy);
+    const labelW = doc.getTextWidth(label) + 1.2;
+    const val = displayValue(value);
     doc.setFont('helvetica', 'normal');
     doc.setTextColor(...TEXT);
-    const maxValW = w - labelW - 12;
+    const maxValW = w - labelW - 8;
     const lines = doc.splitTextToSize(val, maxValW);
-    doc.text(lines[0] || '—', x + 5 + labelW, cy);
-    const lineY = cy + 1.2;
+    doc.text(lines[0] || '—', x + 3.5 + labelW, cy);
     doc.setDrawColor(180, 180, 180);
-    doc.setLineWidth(0.2);
-    doc.line(x + 5 + labelW, lineY, x + w - 5, lineY);
-    cy += Math.max(6.5, lines.length * 3.5 + 3);
+    doc.setLineWidth(0.12);
+    doc.line(x + 3.5 + labelW, cy + 0.9, x + w - 3.5, cy + 0.9);
+    cy += Math.max(rowStep, lines.length * 2.8 + 1.6);
   });
 
-  return cy + 2;
+  return cy + 1;
+}
+
+/**
+ * Zone signatures — jamais de 2ᵉ page : hauteur = espace restant sur la feuille.
+ */
+function drawValidationZone(doc, startY, leave) {
+  const preferredBoxH = 24;
+  const minBoxH = 16;
+  let y = drawSectionTitle(doc, 'VALIDATION', startY);
+
+  const available = CONTENT_BOTTOM - y;
+  const finalBoxH = Math.max(minBoxH, Math.min(preferredBoxH, available));
+  const boxGap = 3.5;
+  const boxW = (CONTENT_W - boxGap * 2) / 3;
+  const statut = leave._statut || leave.statut || 'En attente';
+  const dateDemande = fmtDateTime(leave.created_at);
+  const dateDecision = fmtDateTime(leave.updated_at || leave.balance_snapshot_at || leave.created_at);
+
+  const boxes = [
+    {
+      label: 'Signature salarié',
+      line2: `Demande : ${dateDemande}`,
+    },
+    {
+      label: 'Validation RH',
+      line2: statut === 'En attente' ? 'En attente de décision' : `Statut : ${statut}`,
+      line3: statut !== 'En attente' ? `Le ${dateDecision}` : null,
+    },
+    {
+      label: 'Direction',
+      line2: 'Visa / cachet',
+    },
+  ];
+
+  boxes.forEach((box, i) => {
+    const x = MARGIN + i * (boxW + boxGap);
+    doc.setDrawColor(...BORDER);
+    doc.setLineWidth(0.22);
+    doc.setFillColor(255, 255, 255);
+    doc.rect(x, y, boxW, finalBoxH, 'FD');
+
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7);
+    doc.setTextColor(...MUTED);
+    doc.text(box.label, x + boxW / 2, y + 4, { align: 'center' });
+
+    doc.setDrawColor(190, 190, 190);
+    doc.setLineWidth(0.12);
+    const sigY = y + finalBoxH - (box.line3 ? 9.5 : 7.5);
+    doc.line(x + 3, sigY, x + boxW - 3, sigY);
+
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6);
+    doc.setTextColor(...TEXT);
+    doc.text(box.line2, x + boxW / 2, y + finalBoxH - (box.line3 ? 5.5 : 3.2), {
+      align: 'center',
+      maxWidth: boxW - 4,
+    });
+    if (box.line3) {
+      doc.setTextColor(...MUTED);
+      doc.text(box.line3, x + boxW / 2, y + finalBoxH - 2.2, { align: 'center' });
+    }
+  });
+
+  return y + finalBoxH;
 }
 
 function resolveEmployee(leave, employee) {
@@ -280,10 +299,10 @@ function resolveEmployee(leave, employee) {
     || (leave?.employe_label || leave?.employe || '');
   const parts = full.trim().split(/\s+/).filter(Boolean);
   return {
-    prenom: dash(prenom || (parts[0] || '')),
-    nom: dash(nom || (parts.length > 1 ? parts.slice(1).join(' ') : '')),
-    poste: dash(emp.poste),
-    departement: dash(emp.department),
+    prenom: displayValue(prenom || (parts[0] || '')),
+    nom: displayValue(nom || (parts.length > 1 ? parts.slice(1).join(' ') : '')),
+    poste: displayValue(emp.poste || leave?.poste),
+    departement: displayValue(emp.department || leave?.department),
   };
 }
 
@@ -303,7 +322,7 @@ export function leavePdfFilename(leave, employee) {
 }
 
 /**
- * Génère et télécharge le PDF d'une demande de congé.
+ * Génère et télécharge le PDF d'une demande de congé (toujours exactement 1 page A4).
  * @param {object} leave — ligne congé normalisée
  * @param {object} [employee] — employé RH (optionnel)
  */
@@ -314,41 +333,42 @@ export async function generateLeaveRequestPdf(leave, employee = null) {
 
   drawWatermark(doc, logoData, logoRatio);
 
+  // ── En-tête compact : logo + société côte à côte ──
   let y = MARGIN;
   const logoFit = drawLogoPlain(doc, logoData, MARGIN, y, LOGO_MAX_W, LOGO_MAX_H, logoRatio);
-  y += (logoFit.h || 12) + 3;
-
+  const companyX = MARGIN + Math.max(logoFit.w, 32) + 5;
+  let companyY = y + 0.8;
   doc.setFont('helvetica', 'normal');
-  doc.setFontSize(7.5);
+  doc.setFontSize(6);
   doc.setTextColor(...MUTED);
   COMPANY_LINES.forEach((line) => {
-    doc.text(line, MARGIN, y);
-    y += 3.2;
+    doc.text(line, companyX, companyY);
+    companyY += 2.5;
   });
+  y = Math.max(y + (logoFit.h || 10), companyY) + 2.5;
 
-  y += 4;
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(16);
+  doc.setFontSize(13);
   doc.setTextColor(...TEXT);
   doc.text('DEMANDE DE CONGÉ', PAGE_W / 2, y, { align: 'center' });
-  y += 4;
+  y += 2.5;
   doc.setDrawColor(...RED);
-  doc.setLineWidth(0.6);
-  doc.line(MARGIN + 24, y, PAGE_W - MARGIN - 24, y);
-  y += 7;
+  doc.setLineWidth(0.45);
+  doc.line(MARGIN + 30, y, PAGE_W - MARGIN - 30, y);
+  y += 4;
 
   const empInfo = resolveEmployee(leave, employee);
   const statut = leave._statut || leave.statut || 'En attente';
   const joursAccordes = leave.snap_jours_accordes != null ? leave.snap_jours_accordes : leave.jours;
   const reliquatNouveau = leave.snap_reliquat_nouveau;
 
-  // Deux blocs côte à côte (comme le formulaire)
-  const gap = 6;
+  const gap = 4;
   const boxW = (CONTENT_W - gap) / 2;
   const idRows = [
     ['NOM :', empInfo.nom],
     ['PRÉNOM :', empInfo.prenom],
     ['FONCTION :', empInfo.poste],
+    ['DÉPARTEMENT :', empInfo.departement],
   ];
   const rightsRows = [
     ['JOURS TRAVAILLÉS :', leave.snap_jours_travailles],
@@ -361,16 +381,27 @@ export async function generateLeaveRequestPdf(leave, employee = null) {
     ['RELIQUAT À NOUVEAU :', reliquatNouveau],
   ];
 
-  const measureBoxH = (rows) => 6 + 6.5 + rows.length * 6.5 + 4;
+  const rowStep = 4.5;
+  const measureBoxH = (rows) => 4 + 4.2 + rows.length * rowStep + 2.5;
   const boxH = Math.max(measureBoxH(idRows), measureBoxH(rightsRows));
 
   drawRoundedBox(doc, MARGIN, y, boxW, boxH);
-  drawLabeledLines(doc, MARGIN, y, boxW, idRows, "IDENTIFICATION DE L'EMPLOYÉ(E)");
+  drawLabeledLines(doc, MARGIN, y, boxW, idRows, "IDENTIFICATION DE L'EMPLOYÉ(E)", rowStep);
 
   drawRoundedBox(doc, MARGIN + boxW + gap, y, boxW, boxH);
-  drawLabeledLines(doc, MARGIN + boxW + gap, y, boxW, rightsRows, 'CALCUL DES DROITS');
+  drawLabeledLines(doc, MARGIN + boxW + gap, y, boxW, rightsRows, 'CALCUL DES DROITS', rowStep);
 
-  y += boxH + 6;
+  y += boxH + 3;
+
+  // Réserver VALIDATION (~titre 4 + cases 20) avant de dessiner le bas
+  const SIGNATURE_RESERVE = 26;
+  const detailsBudget = Math.max(40, CONTENT_BOTTOM - SIGNATURE_RESERVE - y);
+
+  // Densité tables adaptée à l’espace restant (détails + droits ≈ 13 lignes)
+  const compact = detailsBudget < 95;
+  const tableOpts = compact
+    ? { fontSize: 7, padY: 3.1, lineH: 2.7 }
+    : { fontSize: 7.5, padY: 3.4, lineH: 2.9 };
 
   y = drawSectionTitle(doc, 'DÉTAILS DU CONGÉ', y);
   y = drawTable(doc, [
@@ -382,35 +413,35 @@ export async function generateLeaveRequestPdf(leave, employee = null) {
     ['Motif', leave.raison],
     ['Statut', statut],
     ['Date de demande', fmtDateTime(leave.created_at)],
-  ], y);
+  ], y, tableOpts);
 
-  try {
-    const { leaveTypeLabelForPdf } = await import('./leaveBalance');
-    const typePhrase = leaveTypeLabelForPdf(leave.type);
-    const civilite = 'M./Mme';
-    const nomComplet = [empInfo.prenom, empInfo.nom].filter((x) => x && x !== '—').join(' ')
-      || leave.employe
-      || '—';
-    y = drawSectionTitle(doc, 'DROITS DE CONGÉ', y);
-    y = drawTable(doc, [
-      ['Décision', `Vu à ses droits de congé, il est accordé à ${civilite} ${nomComplet}`],
-      ['Nature', `Au titre d'un ${typePhrase} de : ${joursAccordes != null ? joursAccordes : '—'} jours`],
-      ['Période', `Allant du ${fmtDate(leave.dateDebut || leave.date_debut)} au ${fmtDate(leave.dateFin || leave.date_fin)}`],
-      ['Date de retour', fmtDate(leave.dateRetour || leave.date_retour)],
-      ['Reliquat à nouveau', reliquatNouveau != null ? `${reliquatNouveau} jours` : '—'],
-    ], y);
-  } catch { /* optionnel */ }
+  const typePhrase = leaveTypeLabelForPdf(leave.type);
+  const civilite = 'M./Mme';
+  const nomComplet = [empInfo.prenom, empInfo.nom].filter((x) => x && x !== '—').join(' ')
+    || leave.employe
+    || leave.employe_label
+    || '—';
 
-  drawValidationZone(doc, y);
+  y = drawSectionTitle(doc, 'DROITS DE CONGÉ', y);
+  y = drawTable(doc, [
+    ['Décision', `Vu à ses droits de congé, il est accordé à ${civilite} ${nomComplet}`],
+    ['Nature', `Au titre d'un ${typePhrase} de : ${joursAccordes != null ? joursAccordes : '—'} jours`],
+    ['Période', `Allant du ${fmtDate(leave.dateDebut || leave.date_debut)} au ${fmtDate(leave.dateFin || leave.date_fin)}`],
+    ['Date de retour', fmtDate(leave.dateRetour || leave.date_retour)],
+    ['Reliquat à nouveau', reliquatNouveau != null ? `${reliquatNouveau} jours` : '—'],
+  ], y, tableOpts);
 
-  // Pied de page sur chaque feuille, sous les cases (jamais chevauché)
-  const pageCount = typeof doc.getNumberOfPages === 'function' ? doc.getNumberOfPages() : 1;
-  for (let p = 1; p <= pageCount; p += 1) {
-    doc.setPage(p);
-    doc.setFont('helvetica', 'bold');
-    doc.setFontSize(7);
-    doc.setTextColor(...MUTED);
-    doc.text('DOCUMENT INTERNE CITYMO', PAGE_W / 2, PAGE_H - 8, { align: 'center' });
+  // Toujours sur la même page — jamais doc.addPage()
+  drawValidationZone(doc, Math.min(y, CONTENT_BOTTOM - SIGNATURE_RESERVE), leave);
+
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(6);
+  doc.setTextColor(...MUTED);
+  doc.text('DOCUMENT INTERNE CITYMO', PAGE_W / 2, FOOTER_Y, { align: 'center' });
+
+  // Sécurité : une seule page A4
+  while (doc.getNumberOfPages() > 1) {
+    doc.deletePage(doc.getNumberOfPages());
   }
 
   const filename = leavePdfFilename(leave, employee);
