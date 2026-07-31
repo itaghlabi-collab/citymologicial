@@ -18,6 +18,13 @@ import {
 } from './subcontractorAdvanceMath';
 import { logSubcontractorAccountEvent } from './subcontractorAccountEvents';
 import { getSituation, patchSituationTotals, deriveAndSetSituationStatus } from './subcontractorSituations';
+import {
+  buildHistoricalInsertFields,
+  normalizeHistoricalFlags,
+  isMissingHistoricalColumnError,
+  stripHistoricalColumns,
+  isAlreadyAccounted,
+} from './subcontractorHistorical';
 
 const ADV_TABLE = 'subcontractor_global_advances';
 const IMP_TABLE = 'subcontractor_advance_imputations';
@@ -44,6 +51,7 @@ export function normalizeAdvance(row) {
   const amount = Number(row.amount) || 0;
   const consumedAmount = Number(row.consumed_amount) || 0;
   const status = row.status || deriveAdvanceStatus(amount, consumedAmount, !!row.cancelled_at);
+  const hist = normalizeHistoricalFlags(row);
   return {
     id: row.id,
     subcontractorId: row.subcontractor_id,
@@ -59,6 +67,7 @@ export function normalizeAdvance(row) {
     created_at: row.created_at,
     updated_at: row.updated_at,
     cancelledAt: row.cancelled_at || null,
+    ...hist,
   };
 }
 
@@ -113,10 +122,14 @@ export function summarizeAdvances(advances = []) {
 }
 
 /**
- * Enregistre une avance globale + UNE opération caisse idempotente.
- * Clé : (subcontractor_advance, advance.id)
+ * Enregistre une avance globale.
+ * already_accounted=true → aucun sync caisse (historique pré-ERP).
+ * Date réelle = advanceDate (jamais écrasée par la date du jour si fournie).
  */
-export async function createGlobalAdvance(subcontractorId, form, { subcontractorName } = {}) {
+export async function createGlobalAdvance(subcontractorId, form, {
+  subcontractorName,
+  skipCashSync = false,
+} = {}) {
   const userId = await getAuthUserId();
   const amount = round2(Number(form.amount) || 0);
   if (amount <= 0) {
@@ -124,44 +137,71 @@ export async function createGlobalAdvance(subcontractorId, form, { subcontractor
     err.code = 'VALIDATION';
     throw err;
   }
+  if (!form.advanceDate) {
+    const err = new Error('Date de l’opération requise.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  const histFields = buildHistoricalInsertFields(form, userId);
+  const already = !!histFields.already_accounted;
+  let consumedAmount = round2(Math.max(0, Number(form.consumedAmount) || 0));
+  if (consumedAmount > amount) consumedAmount = amount;
+  if (!already) consumedAmount = 0;
+
   const row = {
     subcontractor_id: subcontractorId,
-    advance_date: form.advanceDate || new Date().toISOString().slice(0, 10),
+    advance_date: form.advanceDate,
     amount,
-    consumed_amount: 0,
+    consumed_amount: consumedAmount,
     payment_method: form.paymentMethod || 'virement',
     reference: form.reference?.trim() || null,
     observation: form.observation?.trim() || null,
-    status: 'unused',
+    status: deriveAdvanceStatus(amount, consumedAmount, false),
     created_by: userId,
+    ...histFields,
   };
-  const { data, error } = await getSupabase().from(ADV_TABLE).insert([row]).select('*').single();
+
+  let data;
+  let error;
+  ({ data, error } = await getSupabase().from(ADV_TABLE).insert([row]).select('*').single());
+  if (error && isMissingHistoricalColumnError(error)) {
+    ({ data, error } = await getSupabase()
+      .from(ADV_TABLE)
+      .insert([stripHistoricalColumns(row)])
+      .select('*')
+      .single());
+  }
   if (error) throw error;
   const advance = normalizeAdvance(data);
 
-  // Sync caisse — une seule écriture (idempotente sur advance.id)
-  await syncFinanceTransaction(FINANCE_SOURCE_TYPES.SUBCONTRACTOR_ADVANCE, advance.id, {
-    entity: {
-      id: advance.id,
-      status: 'paid',
-      paymentDate: advance.advanceDate,
-      amount: advance.amount,
-      paymentMethod: advance.paymentMethod,
-      reference: advance.reference,
-      description: advance.observation || `Avance sous-traitant — ${subcontractorName || ''}`.trim(),
-      subcontractorName: subcontractorName || 'Sous-traitant',
-      projectId: null,
-      projectName: '',
-    },
-  });
+  // Sync caisse uniquement pour les nouvelles opérations ERP
+  if (!already && !skipCashSync && !isAlreadyAccounted(advance)) {
+    await syncFinanceTransaction(FINANCE_SOURCE_TYPES.SUBCONTRACTOR_ADVANCE, advance.id, {
+      entity: {
+        id: advance.id,
+        status: 'paid',
+        paymentDate: advance.advanceDate,
+        amount: advance.amount,
+        paymentMethod: advance.paymentMethod,
+        reference: advance.reference,
+        description: advance.observation || `Avance sous-traitant — ${subcontractorName || ''}`.trim(),
+        subcontractorName: subcontractorName || 'Sous-traitant',
+        projectId: null,
+        projectName: '',
+      },
+    });
+  }
 
   await logSubcontractorAccountEvent({
     subcontractorId,
-    eventType: 'advance_paid',
+    eventType: already ? 'historical' : 'advance_paid',
     advanceId: advance.id,
     amount: advance.amount,
     reference: advance.reference,
-    observation: advance.observation,
+    observation: already
+      ? `Avance historique déjà comptabilisée (${advance.advanceDate})`
+      : advance.observation,
+    meta: { alreadyAccounted: already, enteredAt: advance.enteredAt },
   });
 
   return advance;
@@ -197,6 +237,20 @@ export async function updateGlobalAdvance(advanceId, subcontractorId, form = {},
     throw err;
   }
 
+  // Interdit le basculement silencieux already_accounted
+  if (form.alreadyAccounted != null || form.already_accounted != null) {
+    const want = form.alreadyAccounted === true || form.already_accounted === true
+      || form.alreadyAccounted === 'true';
+    if (want !== prev.alreadyAccounted) {
+      const err = new Error(
+        'Le statut « Déjà comptabilisée » ne peut pas être modifié ici. '
+        + 'Utilisez le changement contrôlé avec motif.',
+      );
+      err.code = 'VALIDATION';
+      throw err;
+    }
+  }
+
   const patch = {
     advance_date: form.advanceDate || prev.advanceDate,
     payment_method: form.paymentMethod ?? prev.paymentMethod,
@@ -215,7 +269,8 @@ export async function updateGlobalAdvance(advanceId, subcontractorId, form = {},
   if (error) throw error;
   const updated = normalizeAdvance(data);
 
-  if (syncCash && nextAmount !== prev.amount) {
+  // Jamais de sync caisse pour une avance déjà comptabilisée historiquement
+  if (syncCash && nextAmount !== prev.amount && !prev.alreadyAccounted) {
     await syncFinanceTransaction(FINANCE_SOURCE_TYPES.SUBCONTRACTOR_ADVANCE, advanceId, {
       entity: {
         id: advanceId,

@@ -19,6 +19,13 @@ import { listAccountEvents } from './subcontractorAccountEvents';
 import { buildSubcontractorLedger } from './subcontractorLedger';
 import { listEvaluations, summarizePerformance } from './subcontractorEvaluations';
 import { round2, totalAdvancesPaid, totalAdvancesConsumed } from './subcontractorAdvanceMath';
+import {
+  buildDualFinancialViews,
+  getOpeningBalance,
+  isAlreadyAccounted,
+  accountingStatusOf,
+  accountingStatusLabel,
+} from './subcontractorHistorical';
 
 function isPaid(p) {
   return (p.status || 'paid') === 'paid';
@@ -70,6 +77,7 @@ export function buildAccountKpis({
   situations = [],
   advances = [],
   imputations = [],
+  opening = null,
 } = {}) {
   const all = payments || [];
   const paid = all.filter(isPaid);
@@ -127,27 +135,37 @@ export function buildAccountKpis({
 
   if (hasGlobalAdvances) {
     avancesVersees = totalAdvancesPaid(activeAdvances);
-    // Consommées = imputations réelles ; fallback analytique plafonnée.
-    // Ne PAS prendre max(..., consumed_amount ledger) : le ledger peut être gonflé
-    // si des paiements ont stocké avances > brut sans imputation correcte.
     const fromImputations = hasImputationRows ? imputationsSum : avancesImputeesEffectives;
     avancesConsommees = round2(Math.min(avancesVersees, fromImputations));
     reliquatAvance = round2(Math.max(0, avancesVersees - avancesConsommees));
     kpiSource = hasImputationRows ? 'imputations' : 'analytical_capped';
   } else {
-    // Pas de versement réel enregistré : ne pas inventer des « avances versées »
-    // à partir des colonnes paiement (sinon double comptage multi-projets).
     avancesVersees = 0;
     avancesConsommees = avancesImputeesEffectives;
     reliquatAvance = 0;
     kpiSource = 'legacy_no_advance_ledger';
   }
 
-  // Brut à payer = travaux non couverts par les avances CONSOMMÉES (pas versées)
-  const montantBrutAPayer = round2(Math.max(0, travauxRealises - avancesConsommees));
-  const resteNetAPayer = round2(Math.max(0, montantBrutAPayer - montantsPayes - retenues));
-  /** Affichage « Total déjà payé » = avance consommée + paiements complémentaires. */
-  const totalDejaPaye = round2(avancesConsommees + montantsPayes);
+  // Si solde d’ouverture sans avance liée : ajouter les travaux / retenues d’ouverture
+  // (les avances d’ouverture sont déjà dans global_advances si linked).
+  const openingTravaux = opening && !opening.linkedAdvanceId
+    ? round2(Number(opening.travauxAnterieurs) || 0)
+    : (opening ? round2(Number(opening.travauxAnterieurs) || 0) : 0);
+  // Travaux d’ouverture : toujours additionnés s’il n’y a pas déjà de situations historiques
+  // couvrant le même montant — on ajoute opening.travaux uniquement si fourni.
+  const travauxWithOpening = opening
+    ? round2(travauxRealises + (Number(opening.travauxAnterieurs) || 0))
+    : travauxRealises;
+  const retenuesWithOpening = opening
+    ? round2(retenues + (Number(opening.retenuesAnterieures) || 0))
+    : retenues;
+  const paiementsWithOpening = opening
+    ? round2(montantsPayes + (Number(opening.paiementsAnterieurs) || 0))
+    : montantsPayes;
+
+  const montantBrutAPayer = round2(Math.max(0, travauxWithOpening - avancesConsommees));
+  const resteNetAPayer = round2(Math.max(0, montantBrutAPayer - paiementsWithOpening - retenuesWithOpening));
+  const totalDejaPaye = round2(avancesConsommees + paiementsWithOpening);
 
   const projectIds = new Set();
   payments.forEach((p) => { if (p.projectId) projectIds.add(String(p.projectId)); });
@@ -176,24 +194,38 @@ export function buildAccountKpis({
       .reduce((s, x) => s + (Number(x.grossAmount) || 0), 0),
   );
 
-  // Diagnostic (ex. double comptage historique)
   const rawPaymentAvancesUncapped = round2(
     all.reduce((s, p) => s + Math.max(0, Number(p.avances) || 0), 0),
   );
   const ledgerConsumed = hasGlobalAdvances ? totalAdvancesConsumed(activeAdvances) : 0;
+
+  const dual = buildDualFinancialViews({
+    payments: paid,
+    situations: activeSituations,
+    advances: activeAdvances,
+    imputations: activeImputations,
+    opening,
+  });
+
+  // Décaissements ERP : uniquement already_accounted=false
+  const erpAdvancesVersees = round2(
+    activeAdvances.filter((a) => !isAlreadyAccounted(a)).reduce((s, a) => s + (Number(a.amount) || 0), 0),
+  );
+  const erpPaiements = round2(
+    paid.filter((p) => !isAlreadyAccounted(p)).reduce((s, p) => s + (Number(p.amount) || 0), 0),
+  );
 
   return {
     avancesVersees,
     avancesConsommees,
     reliquatAvance,
     avancesGlobalesDisponibles: hasGlobalAdvances || avancesConsommees > 0,
-    travauxRealises,
+    travauxRealises: travauxWithOpening,
     montantBrutAPayer,
-    montantsPayes,
-    /** Affichage réglé (avance consommée + paiements complémentaires). */
+    montantsPayes: paiementsWithOpening,
     totalDejaPaye,
     montantRegle: totalDejaPaye,
-    retenues,
+    retenues: retenuesWithOpening,
     resteNetAPayer,
     resteAPayer: resteNetAPayer,
     nombreProjets: projectIds.size,
@@ -202,10 +234,21 @@ export function buildAccountKpis({
     situationsCloturees,
     situationsValidees,
     situationsEnAttente,
-    montantValide: activeSituations.length ? montantValide : (situations.length ? 0 : travauxRealises),
+    montantValide: activeSituations.length ? montantValide : (situations.length ? 0 : travauxWithOpening),
     montantEnAttente: activeSituations.length ? montantEnAttente : 0,
     totalSituations: activeSituations.length,
     derniereOperation: payments[0]?.paymentDate || activeSituations[0]?.situationDate || null,
+    // Dual lecture financière
+    dual,
+    historique: dual.historique,
+    erp: {
+      ...dual.erp,
+      avancesVersees: erpAdvancesVersees,
+      paiements: erpPaiements,
+      decaissements: round2(erpAdvancesVersees + erpPaiements),
+      montantAComptabiliser: round2(erpAdvancesVersees + erpPaiements),
+    },
+    opening,
     _debug: {
       kpiSource,
       hasGlobalAdvances,
@@ -215,6 +258,7 @@ export function buildAccountKpis({
       rawPaymentAvancesUncapped,
       ledgerConsumed,
       advancesCount: activeAdvances.length,
+      openingTravaux,
     },
   };
 }
@@ -303,28 +347,73 @@ export function buildProjectSituations({ payments = [], balances = [], assignmen
     .sort((a, b) => String(b.lastDate || '').localeCompare(String(a.lastDate || '')));
 }
 
-export function buildAccountHistory(payments = [], events = [], imputations = []) {
-  const fromPayments = (payments || []).map((p) => ({
-    id: `pay-${p.id}`,
-    date: p.paymentDate || p.created_at || null,
-    type: 'paiement',
-    typeLabel: 'Paiement / situation',
-    projectId: p.projectId || '',
-    projectLabel: p.projectName || (p.projectId ? 'Projet' : 'Non affecté'),
-    situationLabel: p.reference || '',
-    montant: Number(p.amount) || 0,
-    montantBrut: Number(p.grossAmount) || 0,
-    avances: Number(p.avances) || 0,
-    retenues: Number(p.retenues) || 0,
-    reference: p.reference || '',
-    observation: p.description || p.notes || '',
-    statut: paymentStatusFromDb(p.status),
-    payment: p,
-    isHistorical: !!p.isHistorical,
-  }));
+export function buildAccountHistory(payments = [], events = [], imputations = [], advances = []) {
+  const fromPayments = (payments || []).map((p) => {
+    const status = accountingStatusOf(p, { paid: (p.status || 'paid') === 'paid' });
+    return {
+      id: `pay-${p.id}`,
+      date: p.paymentDate || p.created_at || null,
+      dateReelle: p.paymentDate || null,
+      dateSaisie: p.enteredAt || p.created_at || null,
+      type: 'paiement',
+      typeLabel: 'Paiement / situation',
+      projectId: p.projectId || '',
+      projectLabel: p.projectName || (p.projectId ? 'Projet' : 'Non affecté'),
+      situationLabel: p.reference || '',
+      montant: Number(p.amount) || 0,
+      montantBrut: Number(p.grossAmount) || 0,
+      avances: Number(p.avances) || 0,
+      retenues: Number(p.retenues) || 0,
+      reference: p.reference || '',
+      observation: p.description || p.notes || '',
+      statut: paymentStatusFromDb(p.status),
+      payment: p,
+      isHistorical: isAlreadyAccounted(p),
+      alreadyAccounted: isAlreadyAccounted(p),
+      accountingStatus: status,
+      accountingStatusLabel: accountingStatusLabel(status),
+      impactGlobal: Number(p.amount) || Number(p.grossAmount) || 0,
+      impactErp: isAlreadyAccounted(p) ? 0 : (Number(p.amount) || 0),
+      userLabel: '',
+      operationKind: isAlreadyAccounted(p) ? 'Ancienne opération' : 'Nouvelle opération',
+    };
+  });
+  const fromAdvances = (advances || []).map((a) => {
+    const status = accountingStatusOf(a);
+    return {
+      id: `adv-${a.id}`,
+      date: a.advanceDate || a.created_at || null,
+      dateReelle: a.advanceDate || null,
+      dateSaisie: a.enteredAt || a.created_at || null,
+      type: 'advance_paid',
+      typeLabel: 'Avance versée',
+      projectId: '',
+      projectLabel: '—',
+      situationLabel: a.reference || '',
+      montant: Number(a.amount) || 0,
+      montantBrut: Number(a.amount) || 0,
+      avances: Number(a.amount) || 0,
+      retenues: 0,
+      reference: a.reference || '',
+      observation: a.observation || '',
+      statut: a.statusLabel || '',
+      payment: null,
+      advance: a,
+      isHistorical: isAlreadyAccounted(a),
+      alreadyAccounted: isAlreadyAccounted(a),
+      accountingStatus: status,
+      accountingStatusLabel: accountingStatusLabel(status),
+      impactGlobal: Number(a.amount) || 0,
+      impactErp: isAlreadyAccounted(a) ? 0 : (Number(a.amount) || 0),
+      userLabel: '',
+      operationKind: isAlreadyAccounted(a) ? 'Ancienne opération' : 'Nouvelle opération',
+    };
+  });
   const fromEvents = (events || []).map((e) => ({
     id: `evt-${e.id}`,
     date: e.date,
+    dateReelle: e.date,
+    dateSaisie: e.date,
     type: e.type,
     typeLabel: e.typeLabel,
     projectId: e.projectId || '',
@@ -339,10 +428,19 @@ export function buildAccountHistory(payments = [], events = [], imputations = []
     statut: '',
     userLabel: e.userLabel || '',
     payment: null,
+    isHistorical: e.type === 'historical',
+    alreadyAccounted: e.type === 'historical',
+    accountingStatus: e.type === 'historical' ? 'already_accounted' : 'erp_accounted',
+    accountingStatusLabel: e.type === 'historical' ? 'Déjà comptabilisée' : 'Comptabilisée dans l’ERP',
+    impactGlobal: e.amount || 0,
+    impactErp: e.type === 'historical' ? 0 : (e.amount || 0),
+    operationKind: e.type === 'historical' ? 'Ancienne opération' : 'Nouvelle opération',
   }));
   const fromImp = (imputations || []).map((i) => ({
     id: `imp-${i.id}`,
     date: i.imputationDate || i.created_at,
+    dateReelle: i.imputationDate || null,
+    dateSaisie: i.created_at || null,
     type: 'advance_imputed',
     typeLabel: 'Imputation d’avance',
     projectId: i.projectId || '',
@@ -356,8 +454,16 @@ export function buildAccountHistory(payments = [], events = [], imputations = []
     observation: `Reliquat après : ${Number(i.reliquatAfter || 0).toLocaleString('fr-MA')} MAD`,
     statut: '',
     payment: null,
+    isHistorical: false,
+    alreadyAccounted: false,
+    accountingStatus: 'erp_accounted',
+    accountingStatusLabel: 'Comptabilisée dans l’ERP',
+    impactGlobal: i.amount || 0,
+    impactErp: 0,
+    operationKind: 'Nouvelle opération',
+    userLabel: '',
   }));
-  return [...fromPayments, ...fromEvents, ...fromImp]
+  return [...fromPayments, ...fromAdvances, ...fromEvents, ...fromImp]
     .sort((a, b) => String(b.date || '').localeCompare(String(a.date || '')));
 }
 
@@ -422,7 +528,7 @@ export async function listSubcontractorAccounts() {
 export async function getSubcontractorAccount(subcontractorId) {
   if (!subcontractorId) throw new Error('Sous-traitant requis.');
 
-  const [sub, paymentsRaw, assignments, documents, balances, situations, advances, imputations, events, evaluations] = await Promise.all([
+  const [sub, paymentsRaw, assignments, documents, balances, situations, advances, imputations, events, evaluations, opening] = await Promise.all([
     getSubcontractor(subcontractorId),
     listPayments(subcontractorId),
     listAssignments(subcontractorId),
@@ -433,6 +539,7 @@ export async function getSubcontractorAccount(subcontractorId) {
     safeList(listAdvanceImputations(subcontractorId)),
     safeList(listAccountEvents(subcontractorId)),
     safeList(listEvaluations(subcontractorId)),
+    safeList(getOpeningBalance(subcontractorId), null),
   ]);
 
   const projectNameById = new Map();
@@ -450,12 +557,12 @@ export async function getSubcontractorAccount(subcontractorId) {
   }));
 
   const kpis = buildAccountKpis({
-    payments, balances, assignments, situations, advances, imputations,
+    payments, balances, assignments, situations, advances, imputations, opening,
   });
   const legacySituations = situations.length
     ? []
     : buildProjectSituations({ payments, balances, assignments });
-  const history = buildAccountHistory(payments, events, imputations);
+  const history = buildAccountHistory(payments, events, imputations, advances);
   const ledger = buildSubcontractorLedger({
     advances, payments, situations, imputations, events,
   });
@@ -477,5 +584,6 @@ export async function getSubcontractorAccount(subcontractorId) {
     events,
     evaluations,
     performance,
+    opening,
   };
 }

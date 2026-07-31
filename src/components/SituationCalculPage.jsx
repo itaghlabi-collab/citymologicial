@@ -36,6 +36,7 @@ const emptyForm = {
   otherDeductions: '',
   paymentMethod: 'virement',
   paymentDate: new Date().toISOString().slice(0, 10),
+  alreadyAccounted: false,
   statusUi: 'Payé',
   description: '',
   notes: '',
@@ -459,9 +460,25 @@ export default function SituationCalculPage({
               </select>
             </label>
             <label>
-              Date
-              <input type="date" value={form.paymentDate} onChange={(e) => setF('paymentDate', e.target.value)} />
+              Date de l’opération
+              <input type="date" value={form.paymentDate} onChange={(e) => setF('paymentDate', e.target.value)} required />
             </label>
+            <label className="st-calcul-span2">
+              Cette opération a-t-elle déjà été comptabilisée avant l’ERP ?
+              <select
+                value={form.alreadyAccounted ? 'true' : 'false'}
+                onChange={(e) => setF('alreadyAccounted', e.target.value === 'true')}
+              >
+                <option value="false">Non, à comptabiliser dans l’ERP</option>
+                <option value="true">Oui, déjà comptabilisée</option>
+              </select>
+            </label>
+            {form.alreadyAccounted && (
+              <p className="st-calcul-span2" style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-3)' }}>
+                Sélectionnez Oui pour une ancienne opération déjà intégrée dans vos comptes.
+                Elle restera visible dans l’historique sans être comptabilisée une deuxième fois.
+              </p>
+            )}
             <label>
               Statut paiement
               <select value={form.statusUi} onChange={(e) => setF('statusUi', e.target.value)}>

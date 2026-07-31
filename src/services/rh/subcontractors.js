@@ -7,6 +7,13 @@ import {
   removeLinkedFinanceTransaction,
   FINANCE_SOURCE_TYPES,
 } from '../finance/financeSync';
+import {
+  buildHistoricalInsertFields,
+  normalizeHistoricalFlags,
+  isMissingHistoricalColumnError,
+  stripHistoricalColumns,
+  isAlreadyAccounted,
+} from './subcontractorHistorical';
 
 const SUB_TABLE = 'subcontractors';
 const ASSIGN_TABLE = 'subcontractor_project_assignments';
@@ -126,6 +133,7 @@ export function normalizePayment(row) {
   const avances = Number(row.avances) || 0;
   const retenues = Number(row.retenues) || 0;
   const amount = Number(row.amount) || round2(Math.max(0, grossAmount - avances - retenues));
+  const hist = normalizeHistoricalFlags(row);
   return {
     id: row.id,
     subcontractorId: row.subcontractor_id,
@@ -149,6 +157,7 @@ export function normalizePayment(row) {
     situationId: row.situation_id || null,
     created_at: row.created_at,
     updated_at: row.updated_at,
+    ...hist,
   };
 }
 
@@ -236,7 +245,7 @@ function toServiceRow(form, subcontractorId) {
   };
 }
 
-function toPaymentRow(form, subcontractorId) {
+function toPaymentRow(form, subcontractorId, { userId = null } = {}) {
   const paymentType = form.paymentType || null;
   const quantity = Number(form.quantity) || 0;
   const unitPrice = Number(form.unitPrice) || 0;
@@ -247,6 +256,7 @@ function toPaymentRow(form, subcontractorId) {
   const avances = round2(Math.min(Math.max(0, Number(form.avances) || 0), grossAmount));
   const retenues = round2(Math.max(0, Number(form.retenues) || 0));
   const net = round2(Math.max(0, grossAmount - avances - retenues));
+  const histFields = buildHistoricalInsertFields(form, userId);
   const row = {
     subcontractor_id: subcontractorId,
     project_id: emptyToNull(form.projectId) || null,
@@ -266,6 +276,7 @@ function toPaymentRow(form, subcontractorId) {
     description: emptyToNull(form.lineDescription?.trim()) || emptyToNull(form.description?.trim()),
     status: form.status || 'paid',
     notes: emptyToNull(form.notes?.trim()),
+    ...histFields,
   };
   // situation_id uniquement si fourni (colonne ajoutée par RUN_SUBCONTRACTOR_ACCOUNT_V2.sql)
   if (form.situationId) {
@@ -744,10 +755,10 @@ async function applyAdjustmentsForPayment(payment) {
 }
 
 export async function createPayment(subcontractorId, form) {
-  await getAuthUserId();
-  const row = toPaymentRow(form, subcontractorId);
+  const userId = await getAuthUserId();
+  const row = toPaymentRow(form, subcontractorId, { userId });
   if (!row.payment_date) {
-    const err = new Error('Date requise.');
+    const err = new Error('Date de l’opération requise.');
     err.code = 'VALIDATION';
     throw err;
   }
@@ -756,23 +767,35 @@ export async function createPayment(subcontractorId, form) {
     err.code = 'VALIDATION';
     throw err;
   }
-  const { data, error } = await getSupabase().from(PAYMENT_TABLE).insert([row]).select(`
+  let data;
+  let error;
+  ({ data, error } = await getSupabase().from(PAYMENT_TABLE).insert([row]).select(`
     *,
     subcontractors ( prenom, nom, raison_sociale ),
     projects ( nom )
-  `).single();
+  `).single());
+  if (error && isMissingHistoricalColumnError(error)) {
+    ({ data, error } = await getSupabase().from(PAYMENT_TABLE).insert([stripHistoricalColumns(row)]).select(`
+      *,
+      subcontractors ( prenom, nom, raison_sociale ),
+      projects ( nom )
+    `).single());
+  }
   if (error) throw error;
   const payment = normalizePayment(data);
   await applyAdjustmentsForPayment(payment);
-  await syncSubcontractorPaymentToCash(payment, {
-    subcontractorName: subcontractorFullName(data.subcontractors),
-    projectName: data.projects?.nom || '',
-  });
+  // Pas de sync caisse pour les opérations déjà comptabilisées hors ERP
+  if (!isAlreadyAccounted(payment)) {
+    await syncSubcontractorPaymentToCash(payment, {
+      subcontractorName: subcontractorFullName(data.subcontractors),
+      projectName: data.projects?.nom || '',
+    });
+  }
   return payment;
 }
 
 export async function createPaymentBatch(projectId, sharedForm, lines) {
-  await getAuthUserId();
+  const userId = await getAuthUserId();
   if (!projectId || !lines?.length) {
     const err = new Error('Projet et sous-traitants requis.');
     err.code = 'VALIDATION';
@@ -783,32 +806,74 @@ export async function createPaymentBatch(projectId, sharedForm, lines) {
     ...line,
     projectId,
     assignmentId: line.assignmentId,
-  }, line.subcontractorId));
+  }, line.subcontractorId, { userId }));
 
-  const { data, error } = await getSupabase().from(PAYMENT_TABLE).insert(rows).select(`
+  let data;
+  let error;
+  ({ data, error } = await getSupabase().from(PAYMENT_TABLE).insert(rows).select(`
     *,
     subcontractors ( prenom, nom, raison_sociale ),
     projects ( nom )
-  `);
+  `));
+  if (error && isMissingHistoricalColumnError(error)) {
+    ({ data, error } = await getSupabase()
+      .from(PAYMENT_TABLE)
+      .insert(rows.map(stripHistoricalColumns))
+      .select(`
+        *,
+        subcontractors ( prenom, nom, raison_sociale ),
+        projects ( nom )
+      `));
+  }
   if (error) throw error;
   const payments = (data || []).map(normalizePayment);
   await Promise.all(payments.map(applyAdjustmentsForPayment));
-  await Promise.all((data || []).map((row, i) => syncSubcontractorPaymentToCash(payments[i], {
-    subcontractorName: subcontractorFullName(row.subcontractors),
-    projectName: row.projects?.nom || '',
-  })));
+  await Promise.all((data || []).map((row, i) => {
+    if (isAlreadyAccounted(payments[i])) return null;
+    return syncSubcontractorPaymentToCash(payments[i], {
+      subcontractorName: subcontractorFullName(row.subcontractors),
+      projectName: row.projects?.nom || '',
+    });
+  }));
   return payments;
 }
 
 export async function updateSubcontractorPayment(id, form, subcontractorId) {
-  await getAuthUserId();
-  const row = toPaymentRow({ ...form, subcontractorId }, subcontractorId);
+  const userId = await getAuthUserId();
+  // Charger l’existant pour protéger already_accounted
+  const { data: prevRaw, error: prevErr } = await getSupabase()
+    .from(PAYMENT_TABLE)
+    .select('*')
+    .eq('id', id)
+    .single();
+  if (prevErr) throw prevErr;
+  const prev = normalizePayment(prevRaw);
+
+  if (form.alreadyAccounted != null || form.already_accounted != null) {
+    const want = form.alreadyAccounted === true || form.already_accounted === true
+      || form.alreadyAccounted === 'true';
+    if (want !== prev.alreadyAccounted) {
+      const err = new Error(
+        'Le statut « Déjà comptabilisée » ne peut pas être modifié ici. '
+        + 'Utilisez le changement contrôlé avec motif.',
+      );
+      err.code = 'VALIDATION';
+      throw err;
+    }
+  }
+
+  const row = toPaymentRow({ ...form, subcontractorId, alreadyAccounted: prev.alreadyAccounted }, subcontractorId, { userId });
+  // Ne pas réécrire entered_at / entered_by à chaque update
+  delete row.entered_at;
+  delete row.entered_by;
   if (!row.gross_amount || row.gross_amount <= 0) {
     const err = new Error('Montant brut requis.');
     err.code = 'VALIDATION';
     throw err;
   }
-  const { data, error } = await getSupabase()
+  let data;
+  let error;
+  ({ data, error } = await getSupabase()
     .from(PAYMENT_TABLE)
     .update(row)
     .eq('id', id)
@@ -817,14 +882,28 @@ export async function updateSubcontractorPayment(id, form, subcontractorId) {
       subcontractors ( prenom, nom, raison_sociale ),
       projects ( nom )
     `)
-    .single();
+    .single());
+  if (error && isMissingHistoricalColumnError(error)) {
+    ({ data, error } = await getSupabase()
+      .from(PAYMENT_TABLE)
+      .update(stripHistoricalColumns(row))
+      .eq('id', id)
+      .select(`
+        *,
+        subcontractors ( prenom, nom, raison_sociale ),
+        projects ( nom )
+      `)
+      .single());
+  }
   if (error) throw error;
   const payment = {
     ...normalizePayment(data),
     subcontractorName: subcontractorFullName(data.subcontractors),
     projectName: data.projects?.nom || '',
   };
-  await syncSubcontractorPaymentToCash(payment);
+  if (!isAlreadyAccounted(payment) && !isAlreadyAccounted(prev)) {
+    await syncSubcontractorPaymentToCash(payment);
+  }
   return payment;
 }
 

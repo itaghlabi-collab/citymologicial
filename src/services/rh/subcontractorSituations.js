@@ -5,6 +5,12 @@
 import { getSupabase } from '../../lib/supabase';
 import { situationRemaining, round2 } from './subcontractorAdvanceMath';
 import { logSubcontractorAccountEvent } from './subcontractorAccountEvents';
+import {
+  buildHistoricalInsertFields,
+  normalizeHistoricalFlags,
+  isMissingHistoricalColumnError,
+  stripHistoricalColumns,
+} from './subcontractorHistorical';
 
 const TABLE = 'subcontractor_situations';
 
@@ -75,14 +81,19 @@ export function normalizeSituation(row) {
     situationDate: row.situation_date || '',
     closedAt: row.closed_at || null,
     notes: row.notes || '',
-    isHistorical: !!row.is_historical,
+    isHistorical: !!row.is_historical || !!row.already_accounted,
     groupId: row.group_id || null,
     created_at: row.created_at,
     updated_at: row.updated_at,
+    ...normalizeHistoricalFlags(row),
   };
 }
 
-function toSituationRow(form, subcontractorId) {
+function toSituationRow(form, subcontractorId, { userId = null } = {}) {
+  const hist = buildHistoricalInsertFields({
+    ...form,
+    alreadyAccounted: form.alreadyAccounted ?? form.isHistorical,
+  }, userId);
   const row = {
     subcontractor_id: subcontractorId,
     project_id: emptyToNull(form.projectId) || null,
@@ -100,7 +111,8 @@ function toSituationRow(form, subcontractorId) {
     status: form.status || 'in_progress',
     situation_date: form.situationDate || new Date().toISOString().slice(0, 10),
     notes: emptyToNull(form.notes?.trim()),
-    is_historical: !!form.isHistorical,
+    is_historical: !!form.isHistorical || !!hist.already_accounted,
+    ...hist,
   };
   if (form.groupId) row.group_id = form.groupId;
   return row;
@@ -133,7 +145,7 @@ export async function getSituation(id) {
 export async function createSituation(subcontractorId, form) {
   const userId = await getAuthUserId();
   const row = {
-    ...toSituationRow(form, subcontractorId),
+    ...toSituationRow(form, subcontractorId, { userId }),
     created_by: userId,
   };
   if (!row.gross_amount || row.gross_amount <= 0) {
@@ -155,16 +167,25 @@ export async function createSituation(subcontractorId, form) {
       .select('*, projects ( nom )')
       .single());
   }
+  if (error && isMissingHistoricalColumnError(error)) {
+    ({ data, error } = await getSupabase()
+      .from(TABLE)
+      .insert([stripHistoricalColumns(row)])
+      .select('*, projects ( nom )')
+      .single());
+  }
   if (error) throw error;
   const sit = normalizeSituation(data);
   await logSubcontractorAccountEvent({
     subcontractorId,
-    eventType: 'situation_created',
+    eventType: sit.alreadyAccounted ? 'historical' : 'situation_created',
     projectId: sit.projectId || null,
     situationId: sit.id,
     amount: sit.grossAmount,
     reference: sit.reference,
-    observation: sit.designation,
+    observation: sit.alreadyAccounted
+      ? `Travaux historiques déjà comptabilisés — ${sit.designation || ''}`.trim()
+      : sit.designation,
   });
   return sit;
 }

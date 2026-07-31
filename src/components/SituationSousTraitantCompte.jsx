@@ -17,6 +17,10 @@ import {
   resyncAdvanceConsumedFromImputations,
 } from '../services/rh/subcontractorAdvances';
 import {
+  createOpeningBalance,
+  changeAlreadyAccountedFlag,
+} from '../services/rh/subcontractorHistorical';
+import {
   PAYMENT_METHODS,
   SUBCONTRACTOR_DOC_TYPES,
   RETENTION_TYPES,
@@ -103,11 +107,27 @@ export default function SituationSousTraitantCompte({
   const [advForm, setAdvForm] = useState({
     advanceDate: new Date().toISOString().slice(0, 10),
     amount: '',
+    consumedAmount: '',
     paymentMethod: 'virement',
     reference: '',
     observation: '',
+    alreadyAccounted: false,
   });
   const [advSaving, setAdvSaving] = useState(false);
+  const [showOpening, setShowOpening] = useState(false);
+  const [openingForm, setOpeningForm] = useState({
+    arreteeDate: new Date().toISOString().slice(0, 10),
+    travauxAnterieurs: '',
+    avancesVerseesAnterieures: '',
+    avancesConsommeesAnterieures: '',
+    soldeAvanceOuverture: '',
+    paiementsAnterieurs: '',
+    resteAnterieur: '',
+    retenuesAnterieures: '',
+    observation: '',
+    pieceUrl: '',
+  });
+  const [openingSaving, setOpeningSaving] = useState(false);
   const [projectPick, setProjectPick] = useState(null);
   const [sitEdit, setSitEdit] = useState(null);
   const [sitSaving, setSitSaving] = useState(false);
@@ -347,23 +367,82 @@ export default function SituationSousTraitantCompte({
     e.preventDefault();
     setAdvSaving(true);
     try {
-      await createGlobalAdvance(subcontractorId, advForm, {
+      const already = advForm.alreadyAccounted === true || advForm.alreadyAccounted === 'true';
+      await createGlobalAdvance(subcontractorId, {
+        ...advForm,
+        alreadyAccounted: already,
+        consumedAmount: already ? advForm.consumedAmount : 0,
+      }, {
         subcontractorName: account?.subcontractor?.fullName,
+        skipCashSync: already,
       });
-      onNotify?.('success', 'Avance enregistrée (1 écriture caisse).');
+      onNotify?.(
+        'success',
+        already
+          ? 'Avance historique enregistrée (aucun décaissement ERP).'
+          : 'Avance enregistrée (1 écriture caisse).',
+      );
       setShowAdvance(false);
       setAdvForm({
         advanceDate: new Date().toISOString().slice(0, 10),
         amount: '',
+        consumedAmount: '',
         paymentMethod: 'virement',
         reference: '',
         observation: '',
+        alreadyAccounted: false,
       });
       await load();
     } catch (err) {
       onNotify?.('error', formatSupabaseError(err, 'Erreur avance.'));
     } finally {
       setAdvSaving(false);
+    }
+  }
+
+  async function handleCreateOpening(e) {
+    e.preventDefault();
+    if (account?.opening) {
+      onNotify?.('error', 'Une situation d’ouverture existe déjà — double comptage interdit.');
+      return;
+    }
+    setOpeningSaving(true);
+    try {
+      await createOpeningBalance(subcontractorId, openingForm, {
+        subcontractorName: account?.subcontractor?.fullName,
+      });
+      onNotify?.('success', 'Situation d’ouverture enregistrée (déjà comptabilisée, 0 décaissement ERP).');
+      setShowOpening(false);
+      await load();
+    } catch (err) {
+      onNotify?.('error', formatSupabaseError(err, 'Erreur solde d’ouverture.'));
+    } finally {
+      setOpeningSaving(false);
+    }
+  }
+
+  async function handleToggleAdvanceAccounted(adv) {
+    if (!adv?.id) return;
+    const next = !adv.alreadyAccounted;
+    const reason = window.prompt(
+      next
+        ? 'Motif obligatoire — marquer cette avance comme déjà comptabilisée :'
+        : 'Motif obligatoire — basculer cette avance vers « à comptabiliser dans l’ERP » :',
+    );
+    if (reason == null) return;
+    try {
+      await changeAlreadyAccountedFlag({
+        table: 'subcontractor_global_advances',
+        id: adv.id,
+        subcontractorId,
+        nextValue: next,
+        reason,
+        entityLabel: 'avance',
+      });
+      onNotify?.('success', 'Statut de comptabilisation mis à jour.');
+      await load();
+    } catch (err) {
+      onNotify?.('error', formatSupabaseError(err, 'Changement de statut impossible.'));
     }
   }
 
@@ -889,6 +968,11 @@ export default function SituationSousTraitantCompte({
             <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowAdvance(true)}>
               <Plus size={14} /> Avance
             </button>
+            {!account?.opening && (
+              <button type="button" className="btn btn-secondary btn-sm" onClick={() => setShowOpening(true)}>
+                <Plus size={14} /> Solde d’ouverture
+              </button>
+            )}
             <button type="button" className="btn btn-primary btn-sm" onClick={() => onNewSituation?.(subcontractorId)}>
               <Plus size={14} /> Situation / Travaux
             </button>
@@ -910,7 +994,7 @@ export default function SituationSousTraitantCompte({
         </div>
       </div>
 
-      <div className="stat-grid rh-ext-stat-grid finance-kpi-strip st-compte-kpi" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(140px,1fr))', marginBottom: 20 }}>
+      <div className="stat-grid rh-ext-stat-grid finance-kpi-strip st-compte-kpi" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(140px,1fr))', marginBottom: 12 }}>
         <Kpi label="Travaux réalisés" value={fmtMAD(kpis.travauxRealises)} />
         <Kpi label="Avances versées" value={fmtMAD(kpis.avancesVersees)} accent="#E65100" />
         <Kpi label="Avances consommées" value={fmtMAD(kpis.avancesConsommees)} accent="#E65100" />
@@ -920,6 +1004,47 @@ export default function SituationSousTraitantCompte({
         <Kpi label="Total déjà payé" value={fmtMAD(totalDejaPaye)} accent="#2E7D32" hint="Avance utilisée + paiements complémentaires" />
         <Kpi label="Reste net à payer" value={fmtMAD(resteNet)} accent={resteNet > 0 ? '#C62828' : undefined} />
       </div>
+
+      {(kpis.historique || kpis.erp) && (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: 12, marginBottom: 20 }}>
+          <div className="card" style={{ padding: 12 }}>
+            <div style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 8 }}>
+              A. Situation cumulée globale
+            </div>
+            <div style={{ fontSize: '0.82rem', display: 'grid', gap: 4 }}>
+              <div>Travaux globaux : <strong>{fmtMAD(kpis.dual?.global?.travaux ?? kpis.travauxRealises)}</strong></div>
+              <div>Réglé global : <strong>{fmtMAD(kpis.dual?.global?.regle ?? totalDejaPaye)}</strong></div>
+              <div>Reste global : <strong style={{ color: resteNet > 0 ? 'var(--red)' : undefined }}>{fmtMAD(kpis.dual?.global?.reste ?? resteNet)}</strong></div>
+              <div style={{ marginTop: 6, color: '#E65100' }}>
+                Avance historique : {fmtMAD(kpis.historique?.avancesVersees || 0)}
+                {' · '}déjà consommée : {fmtMAD(kpis.historique?.avancesConsommees || 0)}
+                {' · '}solde ouverture : {fmtMAD(kpis.historique?.soldeAvanceOuverture || 0)}
+              </div>
+            </div>
+          </div>
+          <div className="card" style={{ padding: 12 }}>
+            <div style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 8 }}>
+              B. Mouvements depuis le démarrage ERP
+            </div>
+            <div style={{ fontSize: '0.82rem', display: 'grid', gap: 4 }}>
+              <div>Avances ERP : <strong>{fmtMAD(kpis.erp?.avancesVersees || 0)}</strong></div>
+              <div>Paiements ERP : <strong>{fmtMAD(kpis.erp?.paiements || 0)}</strong></div>
+              <div>À comptabiliser depuis l’ERP : <strong style={{ color: 'var(--red)' }}>{fmtMAD(kpis.erp?.montantAComptabiliser || 0)}</strong></div>
+              <div style={{ color: 'var(--text-3)', marginTop: 4 }}>
+                Les opérations « Déjà comptabilisée » sont exclues de ces montants.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+      {account?.opening && (
+        <p style={{ fontSize: '0.78rem', color: 'var(--text-3)', margin: '-8px 0 16px' }}>
+          Situation d’ouverture arrêtée au {fmtDate(account.opening.arreteeDate)}
+          {' — '}travaux ant. {fmtMAD(account.opening.travauxAnterieurs)}
+          {' · '}avances ant. {fmtMAD(account.opening.avancesVerseesAnterieures)}
+          {' · '}solde dispo {fmtMAD(account.opening.soldeAvanceOuverture)}.
+        </p>
+      )}
       {kpis._debug?.rawPaymentAvancesUncapped > (kpis.avancesConsommees || 0) + 0.01 && (
         <p style={{ fontSize: '0.78rem', color: 'var(--text-3)', margin: '-8px 0 16px' }}>
           Note : la somme brute des champs « avances » sur paiements (
@@ -963,7 +1088,7 @@ export default function SituationSousTraitantCompte({
                   <thead>
                     <tr>
                       <th>Date</th><th>Montant</th><th>Consommé</th><th>Reliquat</th>
-                      <th>Mode</th><th>Réf.</th><th>Statut</th><th>Actions</th>
+                      <th>Mode</th><th>Réf.</th><th>Statut</th><th>Comptabilisation</th><th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -976,6 +1101,11 @@ export default function SituationSousTraitantCompte({
                         <td>{a.paymentMethod || '—'}</td>
                         <td>{a.reference || '—'}</td>
                         <td><span className="badge badge-orange">{a.statusLabel}</span></td>
+                        <td>
+                          <span className={`badge ${a.alreadyAccounted ? 'badge-grey' : 'badge-green'}`}>
+                            {a.accountingStatusLabel || (a.alreadyAccounted ? 'Déjà comptabilisée' : 'Comptabilisée dans l’ERP')}
+                          </span>
+                        </td>
                         <td>
                           <div className="payment-row-actions">
                             <button type="button" className="btn btn-secondary btn-sm" title="Modifier" onClick={() => setAdvEdit({
@@ -991,6 +1121,14 @@ export default function SituationSousTraitantCompte({
                             </button>
                             <button type="button" className="btn btn-secondary btn-sm" title="Resync conso." onClick={() => handleResyncAdvance(a)}>
                               Recalc.
+                            </button>
+                            <button
+                              type="button"
+                              className="btn btn-secondary btn-sm"
+                              title="Changer le statut de comptabilisation (motif requis)"
+                              onClick={() => handleToggleAdvanceAccounted(a)}
+                            >
+                              Comptab.
                             </button>
                             {a.status !== 'cancelled' && a.consumedAmount <= 0.009 && (
                               <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleCancelAdvance(a)}>Annuler</button>
@@ -1388,7 +1526,7 @@ export default function SituationSousTraitantCompte({
 
       {tab === 'historique' && (
         <div className="card rh-ext-table-card">
-          <div className="card-title" style={{ marginBottom: 12 }}>Historique des actions (lecture seule)</div>
+          <div className="card-title" style={{ marginBottom: 12 }}>Historique des actions</div>
           {(history || []).length === 0 ? (
             <p style={{ color: 'var(--text-3)' }}>Aucun mouvement.</p>
           ) : (
@@ -1396,18 +1534,34 @@ export default function SituationSousTraitantCompte({
               <table>
                 <thead>
                   <tr>
-                    <th>Date</th><th>Action</th><th>Projet</th><th>Réf.</th><th>Montant</th>
-                    <th>Observation</th><th>Utilisateur</th><th>Opérations liées</th>
+                    <th>Date réelle</th>
+                    <th>Date saisie</th>
+                    <th>Type</th>
+                    <th>Comptabilisation</th>
+                    <th>Opération</th>
+                    <th>Montant</th>
+                    <th>Impact global</th>
+                    <th>Impact ERP</th>
+                    <th>Observation</th>
+                    <th>Utilisateur</th>
+                    <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {history.map((h) => (
                     <tr key={h.id}>
-                      <td>{fmtDateTime(h.date)}</td>
+                      <td>{fmtDate(h.dateReelle || h.date)}</td>
+                      <td>{fmtDateTime(h.dateSaisie || h.date)}</td>
                       <td>{h.typeLabel}</td>
-                      <td>{h.projectLabel || '—'}</td>
-                      <td>{h.reference || '—'}</td>
+                      <td>
+                        <span className={`badge ${h.alreadyAccounted ? 'badge-grey' : 'badge-green'}`}>
+                          {h.accountingStatusLabel || '—'}
+                        </span>
+                      </td>
+                      <td>{h.operationKind || '—'}</td>
                       <td>{fmtMAD(h.montant || h.montantBrut)}</td>
+                      <td>{fmtMAD(h.impactGlobal)}</td>
+                      <td>{fmtMAD(h.impactErp)}</td>
                       <td>{h.observation || '—'}</td>
                       <td>{h.userLabel || '—'}</td>
                       <td>
@@ -1559,11 +1713,42 @@ export default function SituationSousTraitantCompte({
               <button type="button" onClick={() => setShowAdvance(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
             </div>
             <p style={{ fontSize: '0.82rem', color: 'var(--text-3)' }}>
-              Une seule opération financière. L’imputation sur les projets est analytique.
+              Une seule opération financière si « à comptabiliser ». L’imputation sur les projets est analytique.
             </p>
             <form onSubmit={handleCreateAdvance} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-              <label>Date<input type="date" value={advForm.advanceDate} onChange={(e) => setAdvForm((p) => ({ ...p, advanceDate: e.target.value }))} required /></label>
+              <label>Date de l’opération *
+                <input type="date" value={advForm.advanceDate} onChange={(e) => setAdvForm((p) => ({ ...p, advanceDate: e.target.value }))} required />
+              </label>
+              <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-3)' }}>
+                Date réelle (peut être antérieure à la mise en service). La date de saisie ERP est enregistrée automatiquement.
+              </p>
               <label>Montant (MAD)<input type="number" min="0.01" step="0.01" value={advForm.amount} onChange={(e) => setAdvForm((p) => ({ ...p, amount: e.target.value }))} required /></label>
+              <label>Cette opération a-t-elle déjà été comptabilisée avant l’ERP ? *
+                <select
+                  value={advForm.alreadyAccounted ? 'true' : 'false'}
+                  onChange={(e) => setAdvForm((p) => ({ ...p, alreadyAccounted: e.target.value === 'true' }))}
+                  required
+                >
+                  <option value="false">Non, à comptabiliser dans l’ERP</option>
+                  <option value="true">Oui, déjà comptabilisée</option>
+                </select>
+              </label>
+              <p style={{ margin: 0, fontSize: '0.75rem', color: 'var(--text-3)' }}>
+                Sélectionnez Oui pour une ancienne opération déjà intégrée dans vos comptes.
+                Elle restera visible dans l’historique sans être comptabilisée une deuxième fois.
+              </p>
+              {advForm.alreadyAccounted && (
+                <label>Dont déjà consommé avant l’ERP (MAD)
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={advForm.consumedAmount}
+                    onChange={(e) => setAdvForm((p) => ({ ...p, consumedAmount: e.target.value }))}
+                    placeholder="Ex. 20000 si avance 30000 partiellement consommée"
+                  />
+                </label>
+              )}
               <label>Mode
                 <select value={advForm.paymentMethod} onChange={(e) => setAdvForm((p) => ({ ...p, paymentMethod: e.target.value }))}>
                   {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{m}</option>)}
@@ -1574,6 +1759,57 @@ export default function SituationSousTraitantCompte({
               <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
                 <button type="button" className="btn btn-secondary" onClick={() => setShowAdvance(false)}>Annuler</button>
                 <button type="submit" className="btn btn-primary" disabled={advSaving}>{advSaving ? '…' : 'Enregistrer'}</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {showOpening && (
+        <div className="rh-ext-modal-overlay">
+          <div className="card rh-ext-modal-box rh-ext-modal-box--md">
+            <div className="flex-between" style={{ marginBottom: 12 }}>
+              <h2 style={{ margin: 0, fontFamily: 'var(--font-head)', fontWeight: 800 }}>Situation initiale / Solde d’ouverture</h2>
+              <button type="button" onClick={() => setShowOpening(false)} style={{ background: 'none', border: 'none', cursor: 'pointer' }}><X size={18} /></button>
+            </div>
+            <p style={{ fontSize: '0.82rem', color: 'var(--text-3)' }}>
+              Méthode 2 — solde d’ouverture déjà comptabilisé. Aucun nouveau décaissement ERP.
+              Ne pas combiner avec une saisie détaillée des mêmes montants.
+            </p>
+            <form onSubmit={handleCreateOpening} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <label>Date d’arrêté *
+                <input type="date" value={openingForm.arreteeDate} onChange={(e) => setOpeningForm((p) => ({ ...p, arreteeDate: e.target.value }))} required />
+              </label>
+              <label>Travaux cumulés antérieurs (MAD)
+                <input type="number" min="0" step="0.01" value={openingForm.travauxAnterieurs} onChange={(e) => setOpeningForm((p) => ({ ...p, travauxAnterieurs: e.target.value }))} />
+              </label>
+              <label>Avances versées antérieures (MAD)
+                <input type="number" min="0" step="0.01" value={openingForm.avancesVerseesAnterieures} onChange={(e) => setOpeningForm((p) => ({ ...p, avancesVerseesAnterieures: e.target.value }))} />
+              </label>
+              <label>Avances consommées antérieures (MAD)
+                <input type="number" min="0" step="0.01" value={openingForm.avancesConsommeesAnterieures} onChange={(e) => setOpeningForm((p) => ({ ...p, avancesConsommeesAnterieures: e.target.value }))} />
+              </label>
+              <label>Solde d’avance disponible à l’ouverture (MAD)
+                <input type="number" min="0" step="0.01" value={openingForm.soldeAvanceOuverture} onChange={(e) => setOpeningForm((p) => ({ ...p, soldeAvanceOuverture: e.target.value }))} placeholder="Auto = versées − consommées" />
+              </label>
+              <label>Paiements antérieurs (MAD)
+                <input type="number" min="0" step="0.01" value={openingForm.paiementsAnterieurs} onChange={(e) => setOpeningForm((p) => ({ ...p, paiementsAnterieurs: e.target.value }))} />
+              </label>
+              <label>Reste antérieur à payer (MAD)
+                <input type="number" min="0" step="0.01" value={openingForm.resteAnterieur} onChange={(e) => setOpeningForm((p) => ({ ...p, resteAnterieur: e.target.value }))} />
+              </label>
+              <label>Retenues antérieures (MAD)
+                <input type="number" min="0" step="0.01" value={openingForm.retenuesAnterieures} onChange={(e) => setOpeningForm((p) => ({ ...p, retenuesAnterieures: e.target.value }))} />
+              </label>
+              <label>Observation
+                <input value={openingForm.observation} onChange={(e) => setOpeningForm((p) => ({ ...p, observation: e.target.value }))} />
+              </label>
+              <label>Pièce justificative (URL / chemin)
+                <input value={openingForm.pieceUrl} onChange={(e) => setOpeningForm((p) => ({ ...p, pieceUrl: e.target.value }))} />
+              </label>
+              <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setShowOpening(false)}>Annuler</button>
+                <button type="submit" className="btn btn-primary" disabled={openingSaving}>{openingSaving ? '…' : 'Enregistrer l’ouverture'}</button>
               </div>
             </form>
           </div>

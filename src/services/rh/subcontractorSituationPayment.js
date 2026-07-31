@@ -37,6 +37,7 @@ export async function createSituationAndPayment(input) {
     otherDeductions = 0,
     paymentMethod = 'virement',
     paymentDate,
+    alreadyAccounted = false,
     statusUi = 'Payé',
     description = '',
     notes = '',
@@ -55,6 +56,7 @@ export async function createSituationAndPayment(input) {
     retenues: Number(retenues) || 0,
   });
   const totalRetenues = round2((Number(retenues) || 0) + (Number(otherDeductions) || 0));
+  const isHistorical = alreadyAccounted === true || alreadyAccounted === 'true';
 
   let situation = null;
   try {
@@ -75,6 +77,8 @@ export async function createSituationAndPayment(input) {
       situationDate: paymentDate || new Date().toISOString().slice(0, 10),
       notes,
       groupId: groupId || null,
+      alreadyAccounted: isHistorical,
+      isHistorical,
     });
   } catch (err) {
     // Table situations absente → paiement seul (rétrocompat)
@@ -145,6 +149,7 @@ export async function createSituationAndPayment(input) {
     description: description || designation,
     status,
     notes,
+    alreadyAccounted: isHistorical,
   });
 
   if (situation?.id) {
@@ -221,6 +226,7 @@ export async function createMultiProjectSituation(input) {
       otherDeductions: line.otherDeductions ?? 0,
       paymentMethod: input.paymentMethod || 'virement',
       paymentDate: input.paymentDate,
+      alreadyAccounted: input.alreadyAccounted === true || input.alreadyAccounted === 'true',
       statusUi: input.statusUi || 'Payé',
       description: input.description || '',
       notes: input.notes || '',
