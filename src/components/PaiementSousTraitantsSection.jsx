@@ -24,7 +24,7 @@ function fmtDate(iso) {
 }
 
 /**
- * Liste des comptes sous-traitants (1 ligne / ST) + modal Nouveau paiement inchangé.
+ * Liste des comptes sous-traitants (1 ligne / ST) + modal Nouvelle opération.
  * variant="payments" conserve l’ancienne liste paiements (non utilisé en Situation).
  */
 export default function PaiementSousTraitantsSection({
@@ -128,7 +128,7 @@ export default function PaiementSousTraitantsSection({
         </div>
         <div className="finance-page-actions finance-page-actions--solo">
           <button type="button" className="btn btn-primary" onClick={openCreate}>
-            <Plus size={15} /> Nouveau paiement
+            <Plus size={15} /> Nouvelle opération
           </button>
         </div>
       </div>
