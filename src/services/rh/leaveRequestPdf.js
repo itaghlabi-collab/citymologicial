@@ -145,7 +145,7 @@ function drawSectionTitle(doc, title, y) {
   doc.setDrawColor(...RED);
   doc.setLineWidth(0.35);
   doc.line(MARGIN, y + 1.5, PAGE_W - MARGIN, y + 1.5);
-  return y + 8;
+  return y + 6;
 }
 
 function drawTable(doc, rows, startY) {
@@ -157,7 +157,7 @@ function drawTable(doc, rows, startY) {
     const val = dash(value);
     doc.setFontSize(9);
     const valueLines = val === '—' ? ['—'] : doc.splitTextToSize(val, col2W - 6);
-    const rowH = Math.max(7, valueLines.length * 4 + 3);
+    const rowH = Math.max(6.2, valueLines.length * 3.8 + 2.5);
 
     doc.setFillColor(...ROW_GRAY);
     doc.rect(MARGIN, y, col1W, rowH, 'F');
@@ -180,32 +180,55 @@ function drawTable(doc, rows, startY) {
     y += rowH;
   });
 
-  return y + 4;
+  return y + 2;
 }
 
-function drawValidationZone(doc, y) {
-  y = drawSectionTitle(doc, 'VALIDATION', y + 2);
+function drawValidationZone(doc, startY) {
+  const FOOTER_RESERVE = 12; // espace pour « DOCUMENT INTERNE »
+  const titleBlock = 8;
+  const boxH = 34;
+  const gapAfterTitle = 2;
+  const needed = titleBlock + gapAfterTitle + boxH + 2;
+  const maxBottom = PAGE_H - FOOTER_RESERVE;
 
-  const boxW = (CONTENT_W - 12) / 3;
-  const boxH = 28;
+  let y = startY;
+  // Si le bloc signatures ne tient pas, passer à la page suivante
+  if (y + needed > maxBottom) {
+    doc.addPage();
+    y = MARGIN;
+  }
+
+  y = drawSectionTitle(doc, 'VALIDATION', y);
+
+  const boxGap = 5;
+  const boxW = (CONTENT_W - boxGap * 2) / 3;
   const labels = ['Signature salarié', 'Validation RH', 'Direction'];
 
   labels.forEach((label, i) => {
-    const x = MARGIN + i * (boxW + 6);
+    const x = MARGIN + i * (boxW + boxGap);
     doc.setDrawColor(...BORDER);
-    doc.setLineWidth(0.25);
-    doc.rect(x, y, boxW, boxH);
+    doc.setLineWidth(0.3);
+    doc.setFillColor(255, 255, 255);
+    doc.rect(x, y, boxW, boxH, 'FD');
+
+    // Libellé en haut à l’intérieur de la case (évite le débordement sous la page)
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(8);
     doc.setTextColor(...MUTED);
-    doc.text(label, x + boxW / 2, y + boxH + 5, { align: 'center' });
+    doc.text(label, x + boxW / 2, y + 5.5, { align: 'center' });
+
+    // Ligne de signature
+    doc.setDrawColor(190, 190, 190);
+    doc.setLineWidth(0.2);
+    doc.line(x + 4, y + boxH - 10, x + boxW - 4, y + boxH - 10);
+
     doc.setFont('helvetica', 'italic');
     doc.setFontSize(7);
-    doc.setTextColor(160, 160, 160);
-    doc.text('Date : _______________', x + boxW / 2, y + boxH + 10, { align: 'center' });
+    doc.setTextColor(140, 140, 140);
+    doc.text('Date : _______________', x + boxW / 2, y + boxH - 4, { align: 'center' });
   });
 
-  return y + boxH + 16;
+  return y + boxH + 4;
 }
 
 function drawRoundedBox(doc, x, y, w, h) {
@@ -220,16 +243,16 @@ function drawRoundedBox(doc, x, y, w, h) {
 }
 
 function drawLabeledLines(doc, x, y, w, rows, title) {
-  let cy = y + 7;
+  let cy = y + 6;
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(9);
+  doc.setFontSize(8.5);
   doc.setTextColor(...RED);
   doc.text(title, x + w / 2, cy, { align: 'center' });
-  cy += 8;
+  cy += 6.5;
 
   rows.forEach(([label, value]) => {
     doc.setFont('helvetica', 'bold');
-    doc.setFontSize(9);
+    doc.setFontSize(8.5);
     doc.setTextColor(...TEXT);
     doc.text(label, x + 5, cy);
     const labelW = doc.getTextWidth(label) + 2;
@@ -239,15 +262,14 @@ function drawLabeledLines(doc, x, y, w, rows, title) {
     const maxValW = w - labelW - 12;
     const lines = doc.splitTextToSize(val, maxValW);
     doc.text(lines[0] || '—', x + 5 + labelW, cy);
-    // ligne de saisie sous la valeur
-    const lineY = cy + 1.5;
+    const lineY = cy + 1.2;
     doc.setDrawColor(180, 180, 180);
     doc.setLineWidth(0.2);
     doc.line(x + 5 + labelW, lineY, x + w - 5, lineY);
-    cy += Math.max(8, lines.length * 4 + 4);
+    cy += Math.max(6.5, lines.length * 3.5 + 3);
   });
 
-  return cy + 4;
+  return cy + 2;
 }
 
 function resolveEmployee(leave, employee) {
@@ -301,19 +323,19 @@ export async function generateLeaveRequestPdf(leave, employee = null) {
   doc.setTextColor(...MUTED);
   COMPANY_LINES.forEach((line) => {
     doc.text(line, MARGIN, y);
-    y += 3.6;
+    y += 3.2;
   });
 
-  y += 6;
+  y += 4;
   doc.setFont('helvetica', 'bold');
-  doc.setFontSize(18);
+  doc.setFontSize(16);
   doc.setTextColor(...TEXT);
   doc.text('DEMANDE DE CONGÉ', PAGE_W / 2, y, { align: 'center' });
-  y += 5;
+  y += 4;
   doc.setDrawColor(...RED);
   doc.setLineWidth(0.6);
   doc.line(MARGIN + 24, y, PAGE_W - MARGIN - 24, y);
-  y += 10;
+  y += 7;
 
   const empInfo = resolveEmployee(leave, employee);
   const statut = leave._statut || leave.statut || 'En attente';
@@ -339,7 +361,7 @@ export async function generateLeaveRequestPdf(leave, employee = null) {
     ['RELIQUAT À NOUVEAU :', reliquatNouveau],
   ];
 
-  const measureBoxH = (rows) => 7 + 8 + rows.length * 8 + 6;
+  const measureBoxH = (rows) => 6 + 6.5 + rows.length * 6.5 + 4;
   const boxH = Math.max(measureBoxH(idRows), measureBoxH(rightsRows));
 
   drawRoundedBox(doc, MARGIN, y, boxW, boxH);
@@ -348,7 +370,7 @@ export async function generateLeaveRequestPdf(leave, employee = null) {
   drawRoundedBox(doc, MARGIN + boxW + gap, y, boxW, boxH);
   drawLabeledLines(doc, MARGIN + boxW + gap, y, boxW, rightsRows, 'CALCUL DES DROITS');
 
-  y += boxH + 10;
+  y += boxH + 6;
 
   y = drawSectionTitle(doc, 'DÉTAILS DU CONGÉ', y);
   y = drawTable(doc, [
@@ -381,10 +403,15 @@ export async function generateLeaveRequestPdf(leave, employee = null) {
 
   drawValidationZone(doc, y);
 
-  doc.setFont('helvetica', 'bold');
-  doc.setFontSize(7);
-  doc.setTextColor(...MUTED);
-  doc.text('DOCUMENT INTERNE CITYMO', PAGE_W / 2, PAGE_H - 10, { align: 'center' });
+  // Pied de page sur chaque feuille, sous les cases (jamais chevauché)
+  const pageCount = typeof doc.getNumberOfPages === 'function' ? doc.getNumberOfPages() : 1;
+  for (let p = 1; p <= pageCount; p += 1) {
+    doc.setPage(p);
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(7);
+    doc.setTextColor(...MUTED);
+    doc.text('DOCUMENT INTERNE CITYMO', PAGE_W / 2, PAGE_H - 8, { align: 'center' });
+  }
 
   const filename = leavePdfFilename(leave, employee);
   downloadPdfBlob(doc.output('blob'), filename);
