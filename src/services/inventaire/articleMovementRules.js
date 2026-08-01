@@ -65,6 +65,23 @@ export const SORTIE_BLOCKED_MESSAGE =
 export const SORTIE_CLEARED_HINT =
   'Le mouvement Sortie n’est pas autorisé pour un matériel ou un outil. Sélectionnez Entrée ou Transfert.';
 
+export const ARTICLE_CLEARED_FOR_SORTIE_HINT =
+  'Cet article n’est pas disponible pour une sortie. Sélectionnez un consommable.';
+
+/** UI : un article est-il autorisé pour ce type de mouvement ? */
+export function articleAllowedForMovementType(articleOrType, typeMouvement) {
+  const type = String(typeMouvement || '').trim();
+  if (!type) return false;
+  return allowedMovementTypesForArticle(articleOrType).includes(type);
+}
+
+/** UI : filtre la liste d’articles selon le type de mouvement choisi. */
+export function filterArticlesForMovementType(articles, typeMouvement) {
+  const type = String(typeMouvement || '').trim();
+  if (!type) return [];
+  return (articles || []).filter((a) => articleAllowedForMovementType(a, type));
+}
+
 /**
  * Lève une erreur VALIDATION si Sortie + Matériel/Outil.
  */

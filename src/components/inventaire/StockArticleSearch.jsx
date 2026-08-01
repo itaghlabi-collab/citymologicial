@@ -52,6 +52,7 @@ const DEFAULT_STYLE = {
  *   inputStyle?: object,
  *   placeholder?: string,
  *   disabled?: boolean,
+ *   emptyMessage?: string,
  * }} props
  */
 export default function StockArticleSearch({
@@ -61,6 +62,7 @@ export default function StockArticleSearch({
   inputStyle,
   placeholder = 'Tapez une lettre pour rechercher…',
   disabled = false,
+  emptyMessage,
 }) {
   const wrapRef = useRef(null);
   const dropdownRef = useRef(null);
@@ -199,35 +201,43 @@ export default function StockArticleSearch({
     >
       {filtered.length === 0 ? (
         <div style={{ padding: '12px 14px', fontSize: '0.85rem', color: 'var(--text-3)' }}>
-          Aucun article ne commence par « {query.trim()} »
+          {emptyMessage || `Aucun article ne commence par « ${query.trim()} »`}
         </div>
-      ) : filtered.map((a, i) => (
-        <button
-          key={a.id}
-          type="button"
-          onClick={() => pick(a)}
-          style={{
-            display: 'block',
-            width: '100%',
-            textAlign: 'left',
-            padding: '10px 14px',
-            border: 'none',
-            background: '#fff',
-            cursor: 'pointer',
-            fontSize: '0.86rem',
-            borderBottom: i === filtered.length - 1 ? 'none' : '1px solid var(--border)',
-            color: 'var(--text)',
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--surface-2)'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = '#fff'; }}
-        >
-          <div style={{ fontWeight: 700, color: 'var(--red)' }}>{a.code || a.reference}</div>
-          <div style={{ fontSize: '0.8rem', marginTop: 2 }}>{a.designation || a.nom}</div>
-          {a.unite && (
-            <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 2 }}>Unité : {a.unite}</div>
-          )}
-        </button>
-      ))}
+      ) : filtered.map((a, i) => {
+        const artType = a.article_type || a.type || '';
+        const stock = a.stock_actuel ?? a.stock ?? null;
+        const emp = a.emplacement || '';
+        return (
+          <button
+            key={a.id}
+            type="button"
+            onClick={() => pick(a)}
+            style={{
+              display: 'block',
+              width: '100%',
+              textAlign: 'left',
+              padding: '10px 14px',
+              border: 'none',
+              background: '#fff',
+              cursor: 'pointer',
+              fontSize: '0.86rem',
+              borderBottom: i === filtered.length - 1 ? 'none' : '1px solid var(--border)',
+              color: 'var(--text)',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--surface-2)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = '#fff'; }}
+          >
+            <div style={{ fontWeight: 700, color: 'var(--red)' }}>{a.code || a.reference}</div>
+            <div style={{ fontSize: '0.8rem', marginTop: 2 }}>{a.designation || a.nom}</div>
+            <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: '4px 12px' }}>
+              {artType && <span>Type : {artType}</span>}
+              <span>Unité : {a.unite || 'U'}</span>
+              {stock != null && <span>Stock : {stock}</span>}
+              {emp && <span>Empl. : {emp}</span>}
+            </div>
+          </button>
+        );
+      })}
     </div>,
     document.body,
   );

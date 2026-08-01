@@ -24,9 +24,10 @@ import {
   getArticleStockInfo,
 } from '../../services/inventaire/mouvementRapide';
 import {
-  allowedMovementTypesForArticle,
   normalizeArticleType,
-  articleAllowsStandardSortie,
+  filterArticlesForMovementType,
+  articleAllowedForMovementType,
+  ARTICLE_CLEARED_FOR_SORTIE_HINT,
   SORTIE_CLEARED_HINT,
 } from '../../services/inventaire/articleMovementRules';
 import StockArticleSearch from './StockArticleSearch.jsx';
@@ -51,6 +52,21 @@ const TYPE_CONFIG = {
   Sortie: { icon: ArrowUpFromLine, color: '#C62828', bg: '#FFEBEE', label: 'Sortie de stock', motifs: MOTIFS_SORTIE },
   Transfert: { icon: ArrowLeftRight, color: '#1565C0', bg: '#E3F2FD', label: 'Transfert', motifs: MOTIFS_TRANSFERT },
 };
+
+const MOVEMENT_TYPES = ['Entrée', 'Transfert', 'Sortie'];
+
+function articleFilterHint(type) {
+  if (type === 'Sortie') return 'Seuls les consommables sont disponibles pour une sortie.';
+  if (type === 'Transfert' || type === 'Entrée') return 'Consommables, outils et matériels disponibles.';
+  return '';
+}
+
+function emptyArticlesMessage(type) {
+  if (type === 'Sortie') return 'Aucun consommable disponible pour une sortie de stock.';
+  if (type === 'Transfert') return 'Aucun article disponible pour un transfert.';
+  if (type === 'Entrée') return 'Aucun article disponible pour une entrée en stock.';
+  return 'Aucun article disponible.';
+}
 
 export default function MouvementRapide({ articles = [], emplacementsList, onArticlesChange, onNavigate }) {
   const { user } = useAuth();
@@ -100,7 +116,7 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
     } catch { setArticleStock(null); }
   }, []);
 
-  // Prefill article depuis la fiche article (navigation UI)
+  // Prefill article depuis la fiche article (navigation UI) — type à choisir ensuite
   useEffect(() => {
     let raw;
     try {
@@ -141,36 +157,78 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
     [selectedArticle],
   );
 
-  const allowedTypes = useMemo(
-    () => (selectedArticle ? allowedMovementTypesForArticle(selectedArticle) : []),
-    [selectedArticle],
+  const filteredArticles = useMemo(
+    () => filterArticlesForMovementType(articles, type),
+    [articles, type],
   );
 
+  const clearSelectedArticle = useCallback(() => {
+    setSelectedArticle(null);
+    setArticleStock(null);
+    setForm((f) => ({
+      ...f,
+      article_id: '',
+      emplacement_destination: type === 'Sortie' ? '' : f.emplacement_destination,
+    }));
+  }, [type]);
+
+  const handleSelectType = useCallback((nextType) => {
+    setType(nextType || '');
+    setForm((f) => ({
+      ...f,
+      emplacement_destination: nextType === 'Sortie' ? '' : f.emplacement_destination,
+    }));
+
+    if (!nextType) {
+      setTypeHint('');
+      return;
+    }
+
+    setSelectedArticle((prev) => {
+      if (!prev) {
+        setTypeHint('');
+        return null;
+      }
+      if (articleAllowedForMovementType(prev, nextType)) {
+        setTypeHint('');
+        return prev;
+      }
+      setTypeHint(
+        nextType === 'Sortie'
+          ? ARTICLE_CLEARED_FOR_SORTIE_HINT
+          : 'Cet article n’est pas disponible pour ce type de mouvement.',
+      );
+      setArticleStock(null);
+      setForm((f) => ({
+        ...f,
+        article_id: '',
+        emplacement_destination: nextType === 'Sortie' ? '' : f.emplacement_destination,
+      }));
+      return null;
+    });
+  }, []);
+
   const handleSelectArticle = useCallback((artId) => {
-    const art = articles.find((a) => String(a.id) === String(artId));
-    setSelectedArticle(art || null);
+    if (!artId) {
+      clearSelectedArticle();
+      return;
+    }
+    const art = filteredArticles.find((a) => String(a.id) === String(artId))
+      || articles.find((a) => String(a.id) === String(artId));
+    if (!art || (type && !articleAllowedForMovementType(art, type))) {
+      clearSelectedArticle();
+      if (type === 'Sortie') setTypeHint(ARTICLE_CLEARED_FOR_SORTIE_HINT);
+      return;
+    }
+    setSelectedArticle(art);
     setForm((f) => ({
       ...f,
       article_id: artId,
-      // Sortie : destination physique vide (projet séparément)
-      emplacement_destination: '',
+      emplacement_destination: type === 'Sortie' ? '' : f.emplacement_destination,
     }));
     loadArticleStock(artId);
     setTypeHint('');
-    setType((prev) => {
-      if (!art || !prev) return '';
-      if (prev === 'Sortie' && !articleAllowsStandardSortie(art)) {
-        setTypeHint(SORTIE_CLEARED_HINT);
-        return '';
-      }
-      const allowed = allowedMovementTypesForArticle(art);
-      if (prev && !allowed.includes(prev)) {
-        setTypeHint(SORTIE_CLEARED_HINT);
-        return '';
-      }
-      return prev;
-    });
-  }, [articles, loadArticleStock]);
+  }, [articles, filteredArticles, type, loadArticleStock, clearSelectedArticle]);
 
   const filteredHistorique = useMemo(() => {
     return historique.filter((m) => {
@@ -274,10 +332,10 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
   }
 
   function validate() {
-    if (!form.article_id || !selectedArticle) return 'Sélectionnez un article.';
     if (!type) return 'Sélectionnez un type de mouvement.';
-    if (!allowedTypes.includes(type)) {
-      return SORTIE_CLEARED_HINT;
+    if (!form.article_id || !selectedArticle) return 'Sélectionnez un article.';
+    if (!articleAllowedForMovementType(selectedArticle, type)) {
+      return type === 'Sortie' ? ARTICLE_CLEARED_FOR_SORTIE_HINT : SORTIE_CLEARED_HINT;
     }
     if (!qty || qty <= 0) return 'La quantité doit être supérieure à 0.';
     if (!form.date_creation) return 'La date est requise.';
@@ -656,98 +714,98 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
         <div className="page-header flex-between finance-page-header">
           <div>
             <h1 className="page-title">NOUVEAU MOUVEMENT RAPIDE</h1>
-            <p className="page-subtitle finance-sub-hide-mobile">Enregistrement simplifié d'un mouvement sur un article.</p>
+            <p className="page-subtitle finance-sub-hide-mobile">Enregistrement simplifié d&apos;un mouvement sur un article.</p>
           </div>
-          <button className="btn btn-ghost btn-sm" onClick={() => { setView('list'); setType(''); setTypeHint(''); setForm(initialForm()); setSelectedArticle(null); }}>
+          <button className="btn btn-ghost btn-sm" onClick={() => { setView('list'); setType(''); setTypeHint(''); setForm(initialForm()); setSelectedArticle(null); setArticleStock(null); }}>
             ← Retour
           </button>
         </div>
 
-        {/* 1. Article d’abord */}
-        <div className="card" style={{ padding: '24px', marginBottom: 16 }}>
-          <SectionTitle icon={<Package size={14} />}>Article *</SectionTitle>
-          <div style={{ marginBottom: 12 }}>
-            <StockArticleSearch
-              articles={articles}
-              value={form.article_id}
-              onChange={handleSelectArticle}
-              placeholder="Tapez une lettre pour rechercher…"
-            />
-          </div>
-
-          {selectedArticle && (
-            <div style={{ background: 'var(--surface-2)', borderRadius: 8, padding: '14px 18px', border: '1px solid var(--border)' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 10 }}>
-                <div><span style={{ fontSize: '0.7rem', color: 'var(--text-3)', textTransform: 'uppercase' }}>Référence</span><div style={{ fontWeight: 700 }}>{selectedArticle.code || selectedArticle.reference}</div></div>
-                <div><span style={{ fontSize: '0.7rem', color: 'var(--text-3)', textTransform: 'uppercase' }}>Désignation</span><div style={{ fontWeight: 600 }}>{selectedArticle.designation || selectedArticle.nom}</div></div>
-                <div>
-                  <span style={{ fontSize: '0.7rem', color: 'var(--text-3)', textTransform: 'uppercase' }}>Type d&apos;article</span>
-                  <div style={{ fontWeight: 700 }}>{articleKind || '—'}</div>
-                </div>
-                <div><span style={{ fontSize: '0.7rem', color: 'var(--text-3)', textTransform: 'uppercase' }}>Unité</span><div>{selectedArticle.unite || 'U'}</div></div>
-                <div>
-                  <span style={{ fontSize: '0.7rem', color: 'var(--text-3)', textTransform: 'uppercase' }}>Stock disponible</span>
-                  <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.1rem', color: stockAvant > 0 ? '#2E7D32' : 'var(--red)' }}>
-                    {stockAvant} {selectedArticle.unite || 'U'}
-                  </div>
-                </div>
-                <div><span style={{ fontSize: '0.7rem', color: 'var(--text-3)', textTransform: 'uppercase' }}>Emplacement</span><div>{formatEmplacementDisplay(selectedArticle.emplacement)}</div></div>
-              </div>
-              {articleStock?.levels?.length > 0 && (
-                <div style={{ marginTop: 10, fontSize: '0.78rem', color: 'var(--text-2)' }}>
-                  <strong>Par emplacement :</strong>{' '}
-                  {articleStock.levels.filter((l) => l.quantite > 0).map((l) => `${formatEmplacementDisplay(l.emplacement)}: ${l.quantite}`).join(' · ') || 'Aucun stock réparti'}
-                </div>
-              )}
-            </div>
-          )}
-        </div>
-
-        {/* 2. Type de mouvement (adapté au type d’article) */}
+        {/* 1. Type de mouvement d’abord */}
         <div style={{ marginBottom: 24 }}>
           <SectionTitle>Type de mouvement *</SectionTitle>
-          {!selectedArticle ? (
-            <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-3)' }}>Sélectionnez d&apos;abord un article.</p>
+          {!type && (
+            <p style={{ margin: '0 0 10px', fontSize: '0.85rem', color: 'var(--text-3)' }}>Choisissez d&apos;abord le type de mouvement.</p>
+          )}
+          {typeHint && (
+            <p style={{ margin: '0 0 10px', fontSize: '0.82rem', color: 'var(--red)' }}>{typeHint}</p>
+          )}
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 14 }}>
+            {MOVEMENT_TYPES.map((t) => {
+              const cfg = TYPE_CONFIG[t];
+              const Icon = cfg.icon;
+              const active = type === t;
+              return (
+                <button
+                  key={t}
+                  type="button"
+                  onClick={() => handleSelectType(t)}
+                  style={{
+                    background: active ? cfg.bg : '#fff',
+                    border: `2px solid ${active ? cfg.color : `${cfg.color}22`}`,
+                    borderRadius: 12,
+                    padding: '24px 20px', cursor: 'pointer', textAlign: 'center',
+                    transition: 'all 0.15s',
+                  }}
+                >
+                  <Icon size={32} style={{ color: cfg.color, marginBottom: 10 }} />
+                  <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '0.95rem', color: cfg.color }}>{cfg.label}</div>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* 2. Article (filtré selon le type) */}
+        <div className="card" style={{ padding: '24px', marginBottom: 16 }}>
+          <SectionTitle icon={<Package size={14} />}>Article *</SectionTitle>
+          {!type ? (
+            <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-3)' }}>Sélectionnez d&apos;abord un type de mouvement.</p>
           ) : (
             <>
-              {typeHint && (
-                <p style={{ margin: '0 0 10px', fontSize: '0.82rem', color: 'var(--red)' }}>{typeHint}</p>
+              <p style={{ margin: '0 0 10px', fontSize: '0.78rem', color: 'var(--text-3)' }}>{articleFilterHint(type)}</p>
+              {filteredArticles.length === 0 ? (
+                <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-3)' }}>{emptyArticlesMessage(type)}</p>
+              ) : (
+                <div style={{ marginBottom: 12 }}>
+                  <StockArticleSearch
+                    articles={filteredArticles}
+                    value={form.article_id}
+                    onChange={handleSelectArticle}
+                    placeholder="Tapez une lettre pour rechercher…"
+                    emptyMessage={type === 'Sortie'
+                      ? 'Aucun consommable ne correspond à cette recherche.'
+                      : undefined}
+                  />
+                </div>
               )}
-              {!articleAllowsStandardSortie(selectedArticle) && (
-                <p style={{ margin: '0 0 10px', fontSize: '0.78rem', color: 'var(--text-3)' }}>
-                  Matériel / outil : sortie standard interdite — utilisez Entrée ou Transfert pour rester localisable.
-                </p>
+
+              {selectedArticle && (
+                <div style={{ background: 'var(--surface-2)', borderRadius: 8, padding: '14px 18px', border: '1px solid var(--border)', marginTop: 4 }}>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 10 }}>
+                    <div><span style={{ fontSize: '0.7rem', color: 'var(--text-3)', textTransform: 'uppercase' }}>Référence</span><div style={{ fontWeight: 700 }}>{selectedArticle.code || selectedArticle.reference}</div></div>
+                    <div><span style={{ fontSize: '0.7rem', color: 'var(--text-3)', textTransform: 'uppercase' }}>Désignation</span><div style={{ fontWeight: 600 }}>{selectedArticle.designation || selectedArticle.nom}</div></div>
+                    <div>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--text-3)', textTransform: 'uppercase' }}>Type d&apos;article</span>
+                      <div style={{ fontWeight: 700 }}>{articleKind || '—'}</div>
+                    </div>
+                    <div><span style={{ fontSize: '0.7rem', color: 'var(--text-3)', textTransform: 'uppercase' }}>Unité</span><div>{selectedArticle.unite || 'U'}</div></div>
+                    <div>
+                      <span style={{ fontSize: '0.7rem', color: 'var(--text-3)', textTransform: 'uppercase' }}>Stock disponible</span>
+                      <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.1rem', color: stockAvant > 0 ? '#2E7D32' : 'var(--red)' }}>
+                        {stockAvant} {selectedArticle.unite || 'U'}
+                      </div>
+                    </div>
+                    <div><span style={{ fontSize: '0.7rem', color: 'var(--text-3)', textTransform: 'uppercase' }}>Emplacement</span><div>{formatEmplacementDisplay(selectedArticle.emplacement)}</div></div>
+                  </div>
+                  {articleStock?.levels?.length > 0 && (
+                    <div style={{ marginTop: 10, fontSize: '0.78rem', color: 'var(--text-2)' }}>
+                      <strong>Par emplacement :</strong>{' '}
+                      {articleStock.levels.filter((l) => l.quantite > 0).map((l) => `${formatEmplacementDisplay(l.emplacement)}: ${l.quantite}`).join(' · ') || 'Aucun stock réparti'}
+                    </div>
+                  )}
+                </div>
               )}
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 14 }}>
-                {allowedTypes.map((t) => {
-                  const cfg = TYPE_CONFIG[t];
-                  const Icon = cfg.icon;
-                  const active = type === t;
-                  return (
-                    <button
-                      key={t}
-                      type="button"
-                      onClick={() => {
-                        setType(t);
-                        setTypeHint('');
-                        if (t === 'Sortie') {
-                          setForm((f) => ({ ...f, emplacement_destination: '' }));
-                        }
-                      }}
-                      style={{
-                        background: active ? cfg.bg : '#fff',
-                        border: `2px solid ${active ? cfg.color : `${cfg.color}22`}`,
-                        borderRadius: 12,
-                        padding: '24px 20px', cursor: 'pointer', textAlign: 'center',
-                        transition: 'all 0.15s',
-                      }}
-                    >
-                      <Icon size={32} style={{ color: cfg.color, marginBottom: 10 }} />
-                      <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '0.95rem', color: cfg.color }}>{cfg.label}</div>
-                    </button>
-                  );
-                })}
-              </div>
             </>
           )}
         </div>
@@ -757,22 +815,10 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
               {(() => { const cfg = TYPE_CONFIG[type]; const Icon = cfg.icon; return <Icon size={20} style={{ color: cfg.color }} />; })()}
               <span style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1rem' }}>{TYPE_CONFIG[type].label}</span>
-              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setType('')} style={{ marginLeft: 'auto', fontSize: '0.76rem' }}>Changer le type</button>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleSelectType('')} style={{ marginLeft: 'auto', fontSize: '0.76rem' }}>Changer le type</button>
             </div>
 
-            {/* Form fields */}
-            <FRow>
-              <FField label="Quantité" required>
-                <input type="number" min="1" value={form.quantite} onChange={(e) => setForm((f) => ({ ...f, quantite: e.target.value }))} style={INPUT_STYLE} placeholder="0" />
-              </FField>
-              <FField label="Date du mouvement" required>
-                <input type="date" value={form.date_creation} onChange={(e) => setForm((f) => ({ ...f, date_creation: e.target.value }))} style={INPUT_STYLE} />
-              </FField>
-              <FField label="Effectué par" required>
-                <input value={form.cree_par} onChange={(e) => setForm((f) => ({ ...f, cree_par: e.target.value }))} style={INPUT_STYLE} placeholder="Nom de la personne" />
-              </FField>
-            </FRow>
-
+            {/* 4. Source / Destination */}
             <FRow>
               {showSource && (
                 <FField label="Emplacement source" required={needsSource}>
@@ -809,15 +855,29 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
               )}
             </FRow>
 
+            {/* 5. Quantité (+ date / effectué par) */}
             <FRow>
+              <FField label="Quantité" required>
+                <input type="number" min="1" value={form.quantite} onChange={(e) => setForm((f) => ({ ...f, quantite: e.target.value }))} style={INPUT_STYLE} placeholder="0" />
+              </FField>
+              <FField label="Date du mouvement" required>
+                <input type="date" value={form.date_creation} onChange={(e) => setForm((f) => ({ ...f, date_creation: e.target.value }))} style={INPUT_STYLE} />
+              </FField>
+              <FField label="Effectué par" required>
+                <input value={form.cree_par} onChange={(e) => setForm((f) => ({ ...f, cree_par: e.target.value }))} style={INPUT_STYLE} placeholder="Nom de la personne" />
+              </FField>
+            </FRow>
+
+            {/* 6. Projet — 7. Motif */}
+            <FRow>
+              <FField label="Projet / chantier lié">
+                <input value={form.projet} onChange={(e) => setForm((f) => ({ ...f, projet: e.target.value }))} style={INPUT_STYLE} placeholder="Optionnel" />
+              </FField>
               <FField label="Motif" required>
                 <select value={form.motif} onChange={(e) => setForm((f) => ({ ...f, motif: e.target.value }))} style={SELECT_STYLE}>
                   <option value="">— Sélectionner —</option>
                   {(TYPE_CONFIG[type]?.motifs || []).map((m) => <option key={m} value={m}>{m}</option>)}
                 </select>
-              </FField>
-              <FField label="Projet / chantier lié">
-                <input value={form.projet} onChange={(e) => setForm((f) => ({ ...f, projet: e.target.value }))} style={INPUT_STYLE} placeholder="Optionnel" />
               </FField>
             </FRow>
 
@@ -876,7 +936,7 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
             )}
 
             <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}>
-              <button className="btn btn-ghost btn-sm" onClick={() => { setView('list'); setType(''); setTypeHint(''); setForm(initialForm()); setSelectedArticle(null); }}>Annuler</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => { setView('list'); setType(''); setTypeHint(''); setForm(initialForm()); setSelectedArticle(null); setArticleStock(null); }}>Annuler</button>
               <button className="btn btn-primary btn-sm" onClick={handleGoConfirm} disabled={loading}>
                 Vérifier et confirmer
               </button>
