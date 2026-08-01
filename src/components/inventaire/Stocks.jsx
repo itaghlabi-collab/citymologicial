@@ -21,6 +21,12 @@ import ArticleCatalogForm from './ArticleCatalogForm';
 import { ArticleMovementHistory } from './ArticleQuickActions';
 import { useStockArticles } from '../../hooks/useStockArticles';
 import { listStockLevelsForArticle } from '../../services/inventaire/stockArticles';
+import {
+  listAllStockLevels,
+  expandArticlesByEmplacement,
+  rebuildStockLevelsFromMovements,
+  subscribeStockChanged,
+} from '../../services/inventaire/stockSync';
 import { can } from '../../services/admin/permissions';
 import { useAuth } from '../../hooks/useAuth';
 import { getArticleBarcodeValue } from '../../services/inventaire/barcodeUtils';
@@ -194,10 +200,36 @@ export default function Stocks({
   } = useStockArticles();
 
   const arts = (hookArticles?.length ? hookArticles : articlesProp) || [];
+  const [levels, setLevels] = useState([]);
+  const [rebuildOpen, setRebuildOpen] = useState(false);
+  const [rebuildBusy, setRebuildBusy] = useState(false);
+  const [rebuildReport, setRebuildReport] = useState(null);
+  const [rebuildError, setRebuildError] = useState('');
+
+  const loadLevels = useCallback(async () => {
+    try {
+      const rows = await listAllStockLevels();
+      setLevels(rows || []);
+    } catch (err) {
+      console.error('[CITYMO] Stocks levels', err);
+      setLevels([]);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadLevels();
+  }, [loadLevels]);
 
   useEffect(() => {
     if (onArticlesChange && hookArticles?.length) onArticlesChange(hookArticles);
   }, [hookArticles, onArticlesChange]);
+
+  useEffect(() => subscribeStockChanged(() => { loadLevels(); }), [loadLevels]);
+
+  const stockRows = useMemo(
+    () => expandArticlesByEmplacement(arts, levels),
+    [arts, levels],
+  );
 
   const [search, setSearch] = useState('');
   const [filterCat, setFilterCat] = useState('');
@@ -275,13 +307,13 @@ export default function Stocks({
   }, [detailId, getMovements]);
 
   const refreshAll = useCallback(async () => {
-    await reload();
+    await Promise.all([reload(), loadLevels()]);
     if (detailId) {
-      const [mvts, levels] = await Promise.all([getMovements(detailId), listStockLevelsForArticle(detailId)]);
+      const [mvts, lv] = await Promise.all([getMovements(detailId), listStockLevelsForArticle(detailId)]);
       setDetailMovements(mvts || []);
-      setDetailLevels(levels || []);
+      setDetailLevels(lv || []);
     }
-  }, [reload, detailId, getMovements]);
+  }, [reload, loadLevels, detailId, getMovements]);
 
   function openHistory(article) {
     setHistoryModal(article);
@@ -306,7 +338,7 @@ export default function Stocks({
     const res = await save(form, catalogModal?.article?.id);
     if (!res.success) return;
     setCatalogModal(null);
-    await reload();
+    await refreshAll();
     if (isCreate) {
       setAfterCreatePrompt({ code: form.code, designation: form.designation });
     }
@@ -316,7 +348,7 @@ export default function Stocks({
     if (!window.confirm(`Désactiver « ${article.designation} » ?`)) return;
     await archive(article.id);
     setDetailId(null);
-    await reload();
+    await refreshAll();
   }
 
   async function handleDelete(article) {
@@ -325,21 +357,57 @@ export default function Stocks({
     const res = await remove(article.id);
     if (res?.success !== false) {
       setDetailId(null);
-      await reload();
+      await refreshAll();
     }
   }
 
-  const filtered = useMemo(() => arts.filter((x) => {
+  async function runRebuildDryRun() {
+    setRebuildBusy(true);
+    setRebuildError('');
+    try {
+      const res = await rebuildStockLevelsFromMovements({ dryRun: true });
+      setRebuildReport(res);
+    } catch (err) {
+      setRebuildError(err?.message || 'Erreur recalcul.');
+    } finally {
+      setRebuildBusy(false);
+    }
+  }
+
+  async function runRebuildApply() {
+    if (!rebuildReport) return;
+    if (!window.confirm(
+      `Écrire ${rebuildReport.divergences?.length || 0} correction(s) dans stock_levels ?\nAucun mouvement ne sera supprimé.`,
+    )) return;
+    setRebuildBusy(true);
+    setRebuildError('');
+    try {
+      const res = await rebuildStockLevelsFromMovements({ dryRun: false });
+      setRebuildReport(res);
+      await refreshAll();
+    } catch (err) {
+      setRebuildError(err?.message || 'Erreur écriture stock.');
+    } finally {
+      setRebuildBusy(false);
+    }
+  }
+
+  const filtered = useMemo(() => stockRows.filter((x) => {
     const cat = (categories || []).find((c) => String(c.id) === String(x.categorie_id));
     const q = search.toLowerCase();
     const bc = getArticleBarcodeValue(x).toLowerCase();
     const matchQ = !q || x.code?.toLowerCase().includes(q) || x.designation?.toLowerCase().includes(q)
       || (cat?.nom || '').toLowerCase().includes(q) || bc.includes(q);
     const matchCat = !filterCat || String(x.categorie_id) === String(filterCat);
-    const matchEmp = !filterEmplacement
-      || (filterEmplacement === FILTER_SANS_EMPLACEMENT
-        ? isSansEmplacement(x.emplacement)
-        : String(x.emplacement || '').trim() === filterEmplacement);
+
+    const emp = String(x.emplacement || '').trim();
+    let matchEmp = true;
+    if (filterEmplacement === FILTER_SANS_EMPLACEMENT) {
+      matchEmp = isSansEmplacement(emp) || !x.is_level_row;
+    } else if (filterEmplacement) {
+      matchEmp = emp.toLowerCase() === String(filterEmplacement).trim().toLowerCase();
+    }
+
     const qte = Number(x.stock_actuel) || 0;
     const seuil = Number(x.stock_minimum) || 0;
     let matchAlerte = true;
@@ -347,19 +415,41 @@ export default function Stocks({
     if (filterAlerte === 'bas') matchAlerte = seuil > 0 && qte > seuil * 0.5 && qte <= seuil;
     if (filterAlerte === 'rupture') matchAlerte = qte === 0;
     if (filterAlerte === 'normal') matchAlerte = seuil === 0 || qte > seuil;
+
+    // Par défaut : uniquement quantités > 0 (rupture via filtre d'état)
+    if (!filterAlerte && qte <= 0) return false;
+
     return matchQ && matchCat && matchEmp && matchAlerte;
-  }), [arts, categories, search, filterCat, filterEmplacement, filterAlerte]);
+  }), [stockRows, categories, search, filterCat, filterEmplacement, filterAlerte]);
 
   const emplacements = useMemo(
     () => filterVisibleEmplacements(emplacementsList?.length ? emplacementsList : EMPLACEMENTS_STOCK),
     [emplacementsList],
   );
 
-  const valeurTotale = arts.reduce((s, a) => s + ((Number(a.valeur) || 0) * (Number(a.stock_actuel) || 0)), 0);
-  const stockFaible = arts.filter((a) => a.stock_minimum && Number(a.stock_actuel) <= Number(a.stock_minimum) && Number(a.stock_actuel) > 0).length;
-  const stockCritique = arts.filter((a) => a.stock_minimum && Number(a.stock_actuel) <= Number(a.stock_minimum) * 0.5 && Number(a.stock_actuel) > 0).length;
-  const ruptures = arts.filter((a) => Number(a.stock_actuel) === 0).length;
-  const alertes = arts.filter((a) => {
+  // KPI selon le filtre actif (lignes affichables avant filtre alerte pour totaux emplacement)
+  const kpiRows = useMemo(() => {
+    if (!filterEmplacement && !filterCat && !search && !filterAlerte) {
+      // Global : agréger par article pour éviter de compter N fois
+      return arts;
+    }
+    return filtered;
+  }, [filterEmplacement, filterCat, search, filterAlerte, arts, filtered]);
+
+  const valeurTotale = useMemo(() => {
+    if (!filterEmplacement && !filterCat && !search && !filterAlerte) {
+      return arts.reduce((s, a) => s + ((Number(a.valeur) || 0) * (Number(a.stock_actuel) || 0)), 0);
+    }
+    return filtered.reduce((s, a) => s + ((Number(a.valeur) || 0) * (Number(a.stock_actuel) || 0)), 0);
+  }, [filterEmplacement, filterCat, search, filterAlerte, arts, filtered]);
+
+  const stockFaible = kpiRows.filter((a) => a.stock_minimum && Number(a.stock_actuel) <= Number(a.stock_minimum) && Number(a.stock_actuel) > 0).length;
+  const stockCritique = kpiRows.filter((a) => a.stock_minimum && Number(a.stock_actuel) <= Number(a.stock_minimum) * 0.5 && Number(a.stock_actuel) > 0).length;
+  const ruptures = kpiRows.filter((a) => Number(a.stock_actuel) === 0).length;
+  const totalArticlesKpi = filterEmplacement || filterCat || search || filterAlerte
+    ? new Set(filtered.map((r) => r.id)).size
+    : arts.length;
+  const alertes = kpiRows.filter((a) => {
     const q = Number(a.stock_actuel) || 0;
     const s = Number(a.stock_minimum) || 0;
     return s > 0 && q <= s;
@@ -438,6 +528,9 @@ export default function Stocks({
               <Zap size={14} /> Mouvement rapide
             </button>
           )}
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setRebuildOpen(true); setRebuildReport(null); setRebuildError(''); }}>
+            <Scale size={14} /> Recalculer stocks
+          </button>
           <button type="button" className="btn btn-ghost btn-sm" onClick={() => setShowFilters((f) => !f)}>
             <Filter size={14} /> Filtres
           </button>
@@ -449,7 +542,7 @@ export default function Stocks({
         <KpiCard icon={<AlertTriangle size={17} />} label="Stock faible" value={stockFaible} color="orange" />
         <KpiCard icon={<AlertTriangle size={17} />} label="Articles critiques" value={stockCritique} color="red" />
         <KpiCard icon={<Package size={17} />} label="Ruptures de stock" value={ruptures} color="grey" />
-        <KpiCard icon={<ArrowUpDown size={17} />} label="Total articles" value={arts.length} color="blue" />
+        <KpiCard icon={<ArrowUpDown size={17} />} label="Total articles" value={totalArticlesKpi} color="blue" />
       </div>
 
       {alertes.length > 0 && (
@@ -503,11 +596,17 @@ export default function Stocks({
           {loading && !arts.length ? (
             <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-3)' }}><Loader2 className="cin-spin" /> Chargement…</div>
           ) : filtered.length === 0 ? (
-            <EmptyState icon={<Package size={24} />} title="Aucun article en stock" sub="Créez un article catalogue puis effectuez une entrée." />
+            <EmptyState
+              icon={<Package size={24} />}
+              title="Aucun article en stock"
+              sub={filterEmplacement
+                ? `Aucune quantité à « ${filterEmplacement} ». Vérifiez les transferts ou lancez un recalcul.`
+                : 'Créez un article catalogue puis effectuez une entrée.'}
+            />
           ) : filtered.map((x) => {
             const st = getStatutStock(x.stock_actuel, x.stock_minimum);
             return (
-              <div key={x.id} className="inv-stock-mobile-row">
+              <div key={x._rowKey || x.id} className="inv-stock-mobile-row">
                 <button type="button" className="inv-stock-mobile-main" onClick={() => setDetailId(x.id)}>
                   <div className="inv-stock-mobile-icon" aria-hidden><Package size={18} style={{ color: 'var(--red)' }} /></div>
                   <div className="inv-stock-mobile-name">
@@ -548,7 +647,13 @@ export default function Stocks({
           {loading && !arts.length ? (
             <div style={{ padding: 32, textAlign: 'center', color: 'var(--text-3)' }}><Loader2 className="cin-spin" /> Chargement…</div>
           ) : filtered.length === 0 ? (
-            <EmptyState icon={<Package size={24} />} title="Aucun article en stock" sub="Créez un article catalogue puis effectuez une entrée." />
+            <EmptyState
+              icon={<Package size={24} />}
+              title="Aucun article en stock"
+              sub={filterEmplacement
+                ? `Aucune quantité à « ${filterEmplacement} ». Vérifiez les transferts ou lancez un recalcul.`
+                : 'Créez un article catalogue puis effectuez une entrée.'}
+            />
           ) : (
             <div className="table-wrap">
               <table className="inv-stocks-table inv-articles-table">
@@ -578,7 +683,7 @@ export default function Stocks({
                     const valTot = (Number(x.valeur) || 0) * (Number(x.stock_actuel) || 0);
                     const barcode = getArticleBarcodeValue(x);
                     return (
-                      <tr key={x.id} className="inv-articles-row" style={{ cursor: 'pointer' }} onClick={() => setDetailId(x.id)}>
+                      <tr key={x._rowKey || x.id} className="inv-articles-row" style={{ cursor: 'pointer' }} onClick={() => setDetailId(x.id)}>
                         <td><span className="inv-articles-ref">{x.code}</span></td>
                         <td data-label="Code-barres">
                           <span style={{ fontFamily: 'monospace', fontSize: '0.72rem', display: 'inline-flex', alignItems: 'center', gap: 4, color: 'var(--text-2)' }}>
@@ -689,6 +794,72 @@ export default function Stocks({
             Faire une entrée
           </button>
         </div>
+      </Modal>
+
+      <Modal
+        open={rebuildOpen}
+        onClose={() => !rebuildBusy && setRebuildOpen(false)}
+        title="Recalcul des stocks (DRY RUN)"
+        width={920}
+      >
+        <p style={{ fontSize: '0.85rem', color: 'var(--text-2)', marginTop: 0 }}>
+          Rejoue les mouvements validés (chronologique) pour comparer <strong>stock_levels</strong> au stock recalculé.
+          Aucun mouvement n’est modifié ni supprimé. L’écriture n’a lieu qu’après confirmation explicite.
+        </p>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 12 }}>
+          <button type="button" className="btn btn-primary btn-sm" disabled={rebuildBusy} onClick={runRebuildDryRun}>
+            {rebuildBusy ? <Loader2 size={14} className="cin-spin" /> : <Scale size={14} />} Lancer DRY RUN
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary btn-sm"
+            disabled={rebuildBusy || !rebuildReport || !(rebuildReport.divergences?.length)}
+            onClick={runRebuildApply}
+          >
+            Appliquer les corrections
+          </button>
+          <button type="button" className="btn btn-ghost btn-sm" disabled={rebuildBusy} onClick={() => setRebuildOpen(false)}>Fermer</button>
+        </div>
+        {rebuildError && <p style={{ color: 'var(--red)', fontSize: '0.85rem' }}>{rebuildError}</p>}
+        {rebuildReport?.summary && (
+          <div style={{ fontSize: '0.82rem', marginBottom: 10, color: 'var(--text-2)' }}>
+            Mouvements : {rebuildReport.summary.mouvements_appliques}/{rebuildReport.summary.mouvements_total}
+            {' · '}ignorés : {rebuildReport.summary.mouvements_ignores}
+            {' · '}divergences : <strong style={{ color: rebuildReport.summary.divergences ? 'var(--red)' : 'var(--green)' }}>{rebuildReport.summary.divergences}</strong>
+            {rebuildReport.summary.written ? ' · écriture effectuée' : ' · mode lecture seule'}
+          </div>
+        )}
+        {rebuildReport?.divergences?.length > 0 && (
+          <div className="table-wrap" style={{ maxHeight: 360, overflow: 'auto' }}>
+            <table>
+              <thead>
+                <tr>
+                  <th>Article</th>
+                  <th>Emplacement</th>
+                  <th>Actuel</th>
+                  <th>Recalculé</th>
+                  <th>Écart</th>
+                  <th>Mouvements</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rebuildReport.divergences.slice(0, 200).map((r) => (
+                  <tr key={`${r.article_id}-${r.emplacement}`}>
+                    <td style={{ fontSize: '0.78rem' }}><strong>{r.article_code}</strong><br />{r.article_nom}</td>
+                    <td style={{ fontSize: '0.78rem' }}>{r.emplacement}</td>
+                    <td>{r.stock_actuel}</td>
+                    <td>{r.stock_recalcule}</td>
+                    <td style={{ color: r.ecart ? 'var(--red)' : undefined, fontWeight: 700 }}>{r.ecart}</td>
+                    <td style={{ fontSize: '0.7rem', color: 'var(--text-3)' }}>{(r.mouvements || []).slice(0, 4).join(', ')}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {rebuildReport && !rebuildReport.divergences?.length && (
+          <p style={{ color: 'var(--text-2)', fontSize: '0.85rem' }}>Aucune divergence : stock_levels est aligné sur l’historique.</p>
+        )}
       </Modal>
     </div>
   );

@@ -16,6 +16,7 @@ import { listStockArticles } from '../services/inventaire/stockArticles';
 import { listStockCategories } from '../services/inventaire/stockCategories';
 import { ensureStockWarehousesSeeded } from '../services/inventaire/stockWarehouses';
 import { EMPLACEMENTS_STOCK, filterVisibleEmplacements } from './inventaire/shared.jsx';
+import { subscribeStockChanged } from '../services/inventaire/stockSync';
 
 export default function Inventaire({ activeTab, initialArticleCode, onArticleCodeConsumed, onNavigate }) {
   const tab = activeTab || 'categories-stock';
@@ -38,6 +39,14 @@ export default function Inventaire({ activeTab, initialArticleCode, onArticleCod
       })
       .catch(() => {});
   }, [tab]);
+
+  useEffect(() => {
+    return subscribeStockChanged(() => {
+      listStockArticles()
+        .then((rows) => setArticles(rows || []))
+        .catch(() => {});
+    });
+  }, []);
 
   const handleDepotsChange = useCallback((list) => {
     setDepots(list);

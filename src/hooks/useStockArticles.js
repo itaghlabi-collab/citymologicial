@@ -16,6 +16,8 @@ import {
   findStockArticleByBarcode,
   recordStockArticleScan,
 } from '../services/inventaire/stockArticles';
+import { subscribeStockChanged } from '../services/inventaire/stockSync';
+import { formatSupabaseError } from '../services/supabase/formatError';
 
 export function useStockArticles() {
   const { user, loading: authLoading } = useAuth();
@@ -62,6 +64,11 @@ export function useStockArticles() {
   }, [configured, authLoading, user]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (!configured) return undefined;
+    return subscribeStockChanged(() => { load(); });
+  }, [configured, load]);
 
   useEffect(() => {
     if (!configured) return undefined;

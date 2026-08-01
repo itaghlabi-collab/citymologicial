@@ -3,7 +3,8 @@
  */
 import { getSupabase } from '../../lib/supabase';
 import { requireSupabaseUserId } from '../supabase/requireUser';
-import { movementDelta, computeArticleStock } from './stockArticles';
+import { computeArticleStock } from './stockArticles';
+import { notifyStockChanged } from './stockSync';
 
 const TABLE = 'stock_movements';
 const LEVELS = 'stock_levels';
@@ -235,64 +236,36 @@ async function insertLevel(articleId, emplacement, quantite) {
 }
 
 /**
- * Où déduire le stock quand l'emplacement affiché (article.emplacement) n'a pas
- * de ligne stock_levels correspondante — évite le décalage stock global vs par emplacement.
+ * Ajuste stock_levels à l'emplacement exact demandé (pas de bascule silencieuse).
+ * Sortie / transfert : bloque si stock insuffisant à la source.
  */
-async function resolveDeductionEmplacement(articleId, preferredEmp, qtyNeeded) {
-  const preferred = (preferredEmp || '').trim();
-  const qty = Math.max(0, Number(qtyNeeded) || 0);
-  if (!articleId || qty <= 0) return preferred;
-
-  const preferredLevel = preferred ? await findLevel(articleId, preferred) : null;
-  if (preferredLevel && Number(preferredLevel.quantite) >= qty) {
-    return (preferredLevel.emplacement || preferred).trim();
-  }
-
-  const levels = await listArticleStockLevels(articleId);
-  const withStock = levels
-    .filter((l) => Number(l.quantite) > 0)
-    .sort((a, b) => Number(b.quantite) - Number(a.quantite));
-
-  const enough = withStock.find((l) => Number(l.quantite) >= qty);
-  if (enough) return (enough.emplacement || '').trim();
-
-  const totalAtLevels = withStock.reduce((s, l) => s + Number(l.quantite), 0);
-  if (totalAtLevels >= qty && withStock.length) {
-    return (withStock[0].emplacement || '').trim();
-  }
-
-  if (levels.length === 0 && preferred) {
-    const total = await computeArticleStock(articleId);
-    if (total >= qty) {
-      await insertLevel(articleId, preferred, total);
-      return preferred;
-    }
-  }
-
-  return preferred;
-}
-
 async function adjustLevel(articleId, emplacement, delta) {
-  let emp = (emplacement || '').trim();
+  const emp = (emplacement || '').trim();
   const d = Number(delta) || 0;
   if (!articleId || !emp || !d) return emp;
 
   if (d < 0) {
-    const qtyNeeded = Math.abs(d);
     let existing = await findLevel(articleId, emp);
-    if (!existing || Number(existing.quantite) < qtyNeeded) {
-      const resolved = await resolveDeductionEmplacement(articleId, emp, qtyNeeded);
-      if (resolved && resolved !== emp) emp = resolved;
-      existing = await findLevel(articleId, emp);
+    // Si aucune ligne levels mais stock global orphelin → initialiser à cet emplacement
+    if (!existing) {
+      const levels = await listArticleStockLevels(articleId);
+      if (!levels.length) {
+        const total = await computeArticleStock(articleId);
+        if (total >= Math.abs(d)) {
+          existing = await insertLevel(articleId, emp, total);
+        }
+      }
     }
     if (!existing) {
-      const err = new Error(`Aucun stock à l'emplacement « ${emplacement || emp} ».`);
+      const err = new Error(`Aucun stock à l'emplacement « ${emp} ».`);
       err.code = 'VALIDATION';
       throw err;
     }
     const newQty = Number(existing.quantite || 0) + d;
     if (newQty < 0) {
-      const err = new Error(`Stock insuffisant à l'emplacement « ${emp} ».`);
+      const err = new Error(
+        `Stock insuffisant à l'emplacement « ${emp} » (disponible : ${Number(existing.quantite) || 0}).`,
+      );
       err.code = 'VALIDATION';
       throw err;
     }
@@ -307,11 +280,6 @@ async function adjustLevel(articleId, emplacement, delta) {
   const existing = await findLevel(articleId, emp);
   if (existing) {
     const newQty = Number(existing.quantite || 0) + d;
-    if (newQty < 0) {
-      const err = new Error(`Stock insuffisant à l'emplacement « ${emp} ».`);
-      err.code = 'VALIDATION';
-      throw err;
-    }
     const { error } = await getSupabase()
       .from(LEVELS)
       .update({ quantite: newQty })
@@ -467,9 +435,19 @@ export async function saveStockMovementBon(bon) {
 
   const savedBon = normalizeBonFromRows(data);
   if (applyNow) {
-    await applyBonEffects(savedBon);
-    await markBonApplied(ref, bon.statut);
-    savedBon.applied = true;
+    try {
+      await applyBonEffects(savedBon);
+      await markBonApplied(ref, bon.statut);
+      savedBon.applied = true;
+      notifyStockChanged({ reason: 'save', ref });
+    } catch (err) {
+      // Cohérence : pas de mouvement « Validé » sans stock mis à jour
+      try { await applyBonEffects(savedBon, true); } catch { /* best effort */ }
+      try {
+        await getSupabase().from(TABLE).delete().eq('ref_mouvement', ref);
+      } catch { /* best effort */ }
+      throw err;
+    }
   }
   return savedBon;
 }
@@ -488,14 +466,21 @@ export async function validateStockMovementBon(ref) {
     throw err;
   }
   validateBonForm(bon);
-  await applyBonEffects(bon);
-  await markBonApplied(ref, 'Validé');
+  try {
+    await applyBonEffects(bon);
+    await markBonApplied(ref, 'Validé');
+    notifyStockChanged({ reason: 'validate', ref });
+  } catch (err) {
+    try { await applyBonEffects(bon, true); } catch { /* best effort */ }
+    throw err;
+  }
   return getStockMovementBon(ref);
 }
 
 export async function deleteStockMovementBon(ref) {
   await requireSupabaseUserId();
   await deleteBonRows(ref, true);
+  notifyStockChanged({ reason: 'delete', ref });
 }
 
 /** @deprecated single-line — use saveStockMovementBon */
@@ -524,6 +509,14 @@ export async function deleteStockMovement(id) {
   await deleteStockMovementBon(data.ref_mouvement);
 }
 
+/** Delta global (transfert = 0) — pour totaux article uniquement. */
 export function movementStockDelta(type, qty) {
-  return movementDelta(typeToDb(type), qty);
+  const t = String(type || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  const q = Number(qty) || 0;
+  if (t.includes('entree') || t.includes('retour')) return q;
+  if (t.includes('sortie') || t.includes('rebut')) return -q;
+  return 0;
 }
