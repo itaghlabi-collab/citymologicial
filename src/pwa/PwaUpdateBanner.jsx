@@ -53,7 +53,7 @@ function clearSnooze() {
 /**
  * Bannière de mise à jour PWA.
  * - Pas de skipWaiting / clientsClaim / reload automatiques.
- * - Affichage forcé au plus tard après MAX_DEFER_MS (évite les sessions où la bannière ne sort jamais).
+ * - Affichage forcé au plus tard après MAX_DEFER_MS (timer unique, non reset par l’activité).
  * - « Plus tard » = snooze 30 min (session), pas un dismiss définitif.
  */
 export default function PwaUpdateBanner() {
@@ -98,18 +98,17 @@ export default function PwaUpdateBanner() {
     const scheduleOffer = () => {
       if (!waitingRef.current || reloadingRef.current || isSnoozed()) return;
 
+      // Timer forcé : une seule fois (ne pas le clear à chaque clic — sinon la bannière
+      // ne s’affiche jamais tant que l’utilisateur reste actif).
       if (!firstOfferAtRef.current) {
         firstOfferAtRef.current = Date.now();
+        if (forceTimerRef.current) clearTimeout(forceTimerRef.current);
+        forceTimerRef.current = setTimeout(() => showIfReady({ force: true }), MAX_DEFER_MS);
       }
 
+      // Soft : après courte inactivité
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
       idleTimerRef.current = setTimeout(() => showIfReady({ force: false }), IDLE_MS);
-
-      // Garantie : afficher même si la session reste « active »
-      if (forceTimerRef.current) clearTimeout(forceTimerRef.current);
-      const elapsed = Date.now() - firstOfferAtRef.current;
-      const remaining = Math.max(0, MAX_DEFER_MS - elapsed);
-      forceTimerRef.current = setTimeout(() => showIfReady({ force: true }), remaining);
     };
 
     const offerWaiting = (sw) => {
@@ -120,15 +119,8 @@ export default function PwaUpdateBanner() {
 
     const syncWaitingFromRegistration = (registration) => {
       if (!registration || cancelled) return;
-      const waiting = registration.waiting;
-      // Afficher dès qu’un SW est en attente (controller optionnel : 1er install géré à part)
-      if (waiting) {
-        if (navigator.serviceWorker.controller) {
-          offerWaiting(waiting);
-        } else {
-          // Pas encore de controller : attendre le contrôle puis proposer si un waiting apparaît
-          offerWaiting(waiting);
-        }
+      if (registration.waiting) {
+        offerWaiting(registration.waiting);
       }
     };
 
@@ -142,8 +134,10 @@ export default function PwaUpdateBanner() {
     const markActivity = () => {
       if (ignoreActivityRef.current) return;
       lastActivityRef.current = Date.now();
+      // Ne reschedule que le délai soft — le force timer reste intact
       if (waitingRef.current && !isSnoozed()) {
-        scheduleOffer();
+        if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+        idleTimerRef.current = setTimeout(() => showIfReady({ force: false }), IDLE_MS);
       }
     };
 
@@ -152,7 +146,6 @@ export default function PwaUpdateBanner() {
       if (!installing) return;
       installing.addEventListener('statechange', () => {
         if (installing.state === 'installed') {
-          // Nouveau SW prêt (remplace ou attend) → proposer la mise à jour
           offerWaiting(registration.waiting || installing);
         }
       });
@@ -175,15 +168,27 @@ export default function PwaUpdateBanner() {
 
     const pollId = window.setInterval(checkForUpdates, UPDATE_POLL_MS);
 
-    navigator.serviceWorker
-      .register('/sw.js', { type: 'module' })
-      .then((registration) => {
-        if (cancelled) return;
-        registrationRef.current = registration;
+    // sw.js buildé par vite-plugin-pwa = script classique (bundle), pas ES module
+    const bindRegistration = (registration) => {
+      if (cancelled || !registration) return;
+      registrationRef.current = registration;
+      syncWaitingFromRegistration(registration);
+      registration.addEventListener('updatefound', () => onUpdateFound(registration));
+      registration.update().catch(() => {});
+    };
 
-        syncWaitingFromRegistration(registration);
-        registration.addEventListener('updatefound', () => onUpdateFound(registration));
-        registration.update().catch(() => {});
+    navigator.serviceWorker
+      .getRegistration()
+      .then((existing) => {
+        if (cancelled) return null;
+        if (existing) {
+          bindRegistration(existing);
+          return existing;
+        }
+        return navigator.serviceWorker.register('/sw.js').then((registration) => {
+          bindRegistration(registration);
+          return registration;
+        });
       })
       .catch(() => {
         /* enregistrement non bloquant */
@@ -206,6 +211,7 @@ export default function PwaUpdateBanner() {
     writeSnooze();
     if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
     if (forceTimerRef.current) clearTimeout(forceTimerRef.current);
+    firstOfferAtRef.current = 0;
     setVisible(false);
   };
 
