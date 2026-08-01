@@ -85,8 +85,12 @@ function roundMoney(n) {
  * 4. prix_unitaire article
  * Jamais le prix de vente.
  */
-export async function resolveConsumableUnitCost(articleId, sourceEmplacement = '') {
+export async function resolveConsumableUnitCost(articleId, sourceEmplacement = '', unitCostOverride = null) {
   if (!articleId) return { unitCost: 0, method: 'none' };
+  const override = Number(unitCostOverride);
+  if (Number.isFinite(override) && override > 0) {
+    return { unitCost: override, method: 'override' };
+  }
   const sb = getSupabase();
 
   // 1. Coût moyen / unit_cost sur le niveau source
@@ -339,6 +343,7 @@ export async function syncDiversGeneralExpenseForMovementLine({
   statut,
   annule,
   articleTypeHint,
+  unitCostOverride = null,
 } = {}) {
   const qty = Number(quantite) || 0;
   if (!movementId || qty <= 0) return { action: 'none', id: null };
@@ -363,7 +368,13 @@ export async function syncDiversGeneralExpenseForMovementLine({
   const destCanonical = mapping.canonical_destination;
 
   const refKey = diversChargeRefKey(movementId);
-  const existing = await findChargeByRefPaiement(refKey);
+  let existing = null;
+  try {
+    existing = await findChargeByRefPaiement(refKey);
+  } catch (err) {
+    // maybeSingle échoue s'il y a des doublons — on continue pour créer / récupérer
+    console.warn('[CITYMO] findChargeByRefPaiement', err);
+  }
   if (existing?.id && !/annul/i.test(String(existing.statut || ''))) {
     await setFinancialSyncStatus(movementId, FINANCIAL_SYNC.SYNCED, {
       expenseId: existing.id,
@@ -372,10 +383,14 @@ export async function syncDiversGeneralExpenseForMovementLine({
     return { action: 'existing', id: existing.id, ref: existing.ref_charge, mapping };
   }
 
-  const { unitCost, method } = await resolveConsumableUnitCost(articleId, emplacementSource);
+  const { unitCost, method } = await resolveConsumableUnitCost(
+    articleId,
+    emplacementSource,
+    unitCostOverride,
+  );
   const montant = roundMoney(qty * unitCost);
   if (montant <= 0) {
-    const errMsg = `Coût unitaire nul ou invalide (méthode ${method}). Impossible de créer la dépense ${qty} × ${unitCost}.`;
+    const errMsg = `Coût unitaire nul ou invalide (méthode ${method}). Renseignez le prix unitaire de l’article (ex. 20 MAD) puis réessayez. Impossible de créer la dépense ${qty} × ${unitCost}.`;
     await setFinancialSyncStatus(movementId, FINANCIAL_SYNC.FAILED, { error: errMsg });
     return { action: 'failed', id: null, reason: 'zero_cost', error: errMsg, mapping };
   }
@@ -387,8 +402,8 @@ export async function syncDiversGeneralExpenseForMovementLine({
     const articleNom = art?.nom || '';
     const unit = art?.unite || 'U';
 
-    const chargeRow = {
-      date_charge: dateMouvement || new Date().toISOString().slice(0, 10),
+    const chargeForm = {
+      date: dateMouvement || new Date().toISOString().slice(0, 10),
       libelle: `Affectation stock DIVERS — ${articleNom || articleCode || 'Article'}`,
       categorie: STOCK_DIVERS_CHARGE_CATEGORY,
       category_id: categoryId,
@@ -397,7 +412,7 @@ export async function syncDiversGeneralExpenseForMovementLine({
       projet_lie: null,
       project_id: null,
       departement: subCat || DIVERS_EMPLACEMENT_CODE,
-      mode_paiement: 'Stock',
+      mode_paiement: 'Autre',
       ref_paiement: refKey,
       statut: STOCK_DIVERS_CHARGE_STATUT,
       commentaire: buildMetaCommentaire({
@@ -422,7 +437,23 @@ export async function syncDiversGeneralExpenseForMovementLine({
       const refCharge = await assignChargeRefIfMissing(existing.id, existing.ref_charge);
       const { data, error } = await sb
         .from('finance_charges')
-        .update({ ...chargeRow, ref_charge: refCharge })
+        .update({
+          date_charge: chargeForm.date,
+          libelle: chargeForm.libelle,
+          categorie: chargeForm.categorie,
+          category_id: chargeForm.category_id,
+          montant: chargeForm.montant,
+          fournisseur: chargeForm.fournisseur,
+          projet_lie: null,
+          project_id: null,
+          departement: chargeForm.departement,
+          mode_paiement: chargeForm.mode_paiement,
+          ref_paiement: chargeForm.ref_paiement,
+          statut: chargeForm.statut,
+          commentaire: chargeForm.commentaire,
+          validateur: chargeForm.validateur,
+          ref_charge: refCharge,
+        })
         .eq('id', existing.id)
         .select('id, ref_charge')
         .single();
@@ -434,10 +465,24 @@ export async function syncDiversGeneralExpenseForMovementLine({
       return { action: 'updated', id: data.id, ref: data.ref_charge, montant, unitCost, mapping };
     }
 
+    // Insert direct (même table que Dépenses générales) — hors projet, idempotent via ref_paiement
     const { data, error } = await sb
       .from('finance_charges')
       .insert([{
-        ...chargeRow,
+        date_charge: chargeForm.date,
+        libelle: chargeForm.libelle,
+        categorie: chargeForm.categorie,
+        category_id: chargeForm.category_id,
+        montant: chargeForm.montant,
+        fournisseur: chargeForm.fournisseur,
+        projet_lie: null,
+        project_id: null,
+        departement: chargeForm.departement,
+        mode_paiement: chargeForm.mode_paiement,
+        ref_paiement: chargeForm.ref_paiement,
+        statut: chargeForm.statut,
+        commentaire: chargeForm.commentaire,
+        validateur: chargeForm.validateur,
         ref_charge: await generateChargeRef(),
         created_by: uid || null,
       }])
@@ -451,7 +496,7 @@ export async function syncDiversGeneralExpenseForMovementLine({
     });
     return { action: 'created', id: data.id, ref: data.ref_charge, montant, unitCost, mapping };
   } catch (err) {
-    const errMsg = err?.message || String(err);
+    const errMsg = err?.message || err?.details || String(err);
     await setFinancialSyncStatus(movementId, FINANCIAL_SYNC.FAILED, { error: errMsg });
     return { action: 'failed', id: null, error: errMsg, mapping };
   }
@@ -544,7 +589,7 @@ export async function syncDiversReturnExpenseForMovementLine({
     projet_lie: null,
     project_id: null,
     departement: DIVERS_EMPLACEMENT_CODE,
-    mode_paiement: 'Stock',
+    mode_paiement: 'Autre',
     ref_paiement: refKey,
     statut: STOCK_DIVERS_CHARGE_STATUT,
     commentaire: [
@@ -633,6 +678,7 @@ export async function syncDiversExpensesForBon(bon) {
     if (!movementId || !ligne.article_id) continue;
 
     try {
+      const unitCostOverride = Number(ligne.cout_unitaire ?? bon.cout_unitaire) || null;
       const toDivers = await syncDiversGeneralExpenseForMovementLine({
         movementId,
         refMouvement: bon.ref,
@@ -644,6 +690,7 @@ export async function syncDiversExpensesForBon(bon) {
         dateMouvement: bon.date_creation,
         creePar: bon.cree_par,
         statut,
+        unitCostOverride,
       });
       if (toDivers.action === 'created' || toDivers.action === 'updated' || toDivers.action === 'existing') {
         results.push({ movementId, kind: 'to_divers', ...toDivers });
@@ -700,14 +747,97 @@ export async function retryDiversExpenseSync(movementId) {
     date_creation: row.date_mouvement,
     cree_par: p.cree_par || '',
     statut: p.statut || 'Validé',
+    cout_unitaire: Number(p.cout_unitaire) || Number(row.stock_articles?.prix_unitaire) || null,
     lignes: [{
       id: row.id,
       article_id: row.article_id,
       quantite: row.quantite,
+      cout_unitaire: Number(p.cout_unitaire) || Number(row.stock_articles?.prix_unitaire) || null,
     }],
   };
   const results = await syncDiversExpensesForBon(bonLike);
   return results[0] || { action: 'none' };
+}
+
+/**
+ * Backfill : crée les dépenses générales manquantes pour les mouvements
+ * consommables → DIVERS déjà validés (idempotent).
+ */
+export async function backfillPendingDiversGeneralExpenses({ limit = 150 } = {}) {
+  await ensureDiversWarehouse().catch(() => null);
+  const { data, error } = await getSupabase()
+    .from('stock_movements')
+    .select('id, ref_mouvement, type_mouvement, quantite, date_mouvement, payload, article_id, stock_articles(article_type, prix_unitaire)')
+    .in('type_mouvement', ['Sortie', 'Transfert', 'sortie', 'transfert'])
+    .order('date_mouvement', { ascending: false })
+    .limit(limit);
+  if (error) throw error;
+
+  const created = [];
+  const failed = [];
+  const skipped = [];
+
+  for (const row of data || []) {
+    const p = row.payload || {};
+    if (/annul/i.test(String(p.statut || ''))) {
+      skipped.push({ id: row.id, reason: 'annule' });
+      continue;
+    }
+    const dest = p.emplacement_destination || '';
+    const artType = row.stock_articles?.article_type;
+    if (!shouldCreateDiversGeneralExpense({
+      typeMouvement: row.type_mouvement === 'Entree' ? 'Entrée' : row.type_mouvement,
+      articleType: artType,
+      destination: dest,
+      statut: p.statut || 'Validé',
+      annule: false,
+    })) {
+      skipped.push({ id: row.id, reason: 'not_eligible' });
+      continue;
+    }
+
+    // Déjà sync OK
+    if (p.financial_sync_status === FINANCIAL_SYNC.SYNCED) {
+      const existing = await findChargeByRefPaiement(diversChargeRefKey(row.id)).catch(() => null);
+      if (existing?.id) {
+        skipped.push({ id: row.id, reason: 'already_synced' });
+        continue;
+      }
+    }
+
+    const res = await syncDiversGeneralExpenseForMovementLine({
+      movementId: row.id,
+      refMouvement: row.ref_mouvement,
+      typeMouvement: row.type_mouvement === 'Entree' ? 'Entrée' : row.type_mouvement,
+      articleId: row.article_id,
+      quantite: row.quantite,
+      emplacementSource: p.emplacement_source || '',
+      emplacementDestination: dest,
+      dateMouvement: row.date_mouvement,
+      creePar: p.cree_par || '',
+      statut: p.statut || 'Validé',
+      articleTypeHint: artType,
+      unitCostOverride: Number(p.cout_unitaire) || Number(row.stock_articles?.prix_unitaire) || null,
+    });
+
+    if (res.action === 'created' || res.action === 'updated') {
+      created.push({ id: row.id, ref: row.ref_mouvement, ...res });
+    } else if (res.action === 'existing') {
+      skipped.push({ id: row.id, reason: 'existing_charge' });
+    } else if (res.action === 'failed') {
+      failed.push({ id: row.id, ref: row.ref_mouvement, error: res.error });
+    } else {
+      skipped.push({ id: row.id, reason: res.reason || res.action });
+    }
+  }
+
+  return {
+    scanned: (data || []).length,
+    created_count: created.length,
+    failed_count: failed.length,
+    created,
+    failed,
+  };
 }
 
 /**

@@ -37,6 +37,7 @@ import {
   parseDiversMetaFromCharge,
   shouldCreateDiversGeneralExpense,
   retryDiversExpenseSync,
+  backfillPendingDiversGeneralExpenses,
   FINANCIAL_SYNC,
 } from '../../services/inventaire/stockDiversExpense';
 import StockArticleSearch from './StockArticleSearch.jsx';
@@ -88,6 +89,7 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
     article_id: '', quantite: '', date_creation: new Date().toISOString().slice(0, 10),
     motif: '', emplacement_source: '', emplacement_destination: '',
     cree_par: sessionName, projet: '', note: '', beneficiaire: '', fournisseur: '', ref_externe: '',
+    cout_unitaire: '',
   }));
   const [selectedArticle, setSelectedArticle] = useState(null);
   const [articleStock, setArticleStock] = useState(null);
@@ -111,6 +113,7 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
       article_id: '', quantite: '', date_creation: new Date().toISOString().slice(0, 10),
       motif: '', emplacement_source: '', emplacement_destination: '',
       cree_par: sessionName, projet: '', note: '', beneficiaire: '', fournisseur: '', ref_externe: '',
+      cout_unitaire: '',
     };
   }
 
@@ -157,6 +160,8 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
 
   const loadHistorique = useCallback(async () => {
     try {
+      // Rattrapage dépenses générales manquantes (consommables → DIVERS)
+      await backfillPendingDiversGeneralExpenses({ limit: 80 }).catch(() => null);
       const data = await listMouvementsRapides();
       setHistorique(data || []);
     } catch { /* ignore */ }
@@ -265,6 +270,7 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
     setForm((f) => ({
       ...f,
       article_id: artId,
+      cout_unitaire: Number(art.prix_unitaire) || Number(art.valeur) || f.cout_unitaire || '',
     }));
     loadArticleStock(artId);
     setTypeHint('');
@@ -283,10 +289,13 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
   }, [historique, searchHist, filterType]);
 
   const needsSource = type === 'Sortie' || type === 'Transfert';
-  const needsDest = type === 'Entrée' || type === 'Transfert';
-  // Sortie : destination optionnelle (liste complète) — stock ne crédite pas la destination
+  const needsDest = type === 'Entrée' || type === 'Transfert' || type === 'Sortie';
   const showSource = type === 'Entrée' || type === 'Sortie' || type === 'Transfert';
   const showDest = type === 'Entrée' || type === 'Sortie' || type === 'Transfert';
+  const showDiversCost = selectedArticle
+    && normalizeArticleType(selectedArticle) === ARTICLE_TYPE_CONSOMMABLE
+    && isDiversEmplacement(form.emplacement_destination)
+    && (type === 'Sortie' || type === 'Transfert');
 
   const emplacementOptions = useMemo(() => {
     const set = new Set();
@@ -400,6 +409,9 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
     if ((type === 'Sortie' || type === 'Transfert') && qty > sourceQty) {
       return `Stock insuffisant (${sourceQty} disponible à cet emplacement).`;
     }
+    if (showDiversCost && !(Number(form.cout_unitaire) > 0)) {
+      return 'Le coût unitaire est requis pour comptabiliser la dépense générale (DIVERS).';
+    }
     return null;
   }
 
@@ -414,8 +426,16 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
     setLoading(true);
     setError('');
     try {
-      await saveMouvementRapide({ ...form, type_mouvement: type });
-      setSuccess('Mouvement enregistré avec succès.');
+      const saved = await saveMouvementRapide({ ...form, type_mouvement: type });
+      if (saved?.finance_sync_warning) {
+        setSuccess('Mouvement enregistré.');
+        setError(`Dépense générale non créée : ${saved.finance_sync_warning}`);
+      } else {
+        const created = (saved?.finance_sync || []).find((r) => r.action === 'created' || r.action === 'existing');
+        setSuccess(created?.montant
+          ? `Mouvement enregistré. Dépense générale créée : ${formatMAD(created.montant)}.`
+          : 'Mouvement enregistré avec succès.');
+      }
       setView('list');
       setType('');
       setForm(initialForm());
@@ -912,6 +932,25 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
                 </FField>
               )}
             </FRow>
+
+            {showDiversCost && (
+              <FRow>
+                <FField label="Coût unitaire (MAD)" required>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={form.cout_unitaire}
+                    onChange={(e) => setForm((f) => ({ ...f, cout_unitaire: e.target.value }))}
+                    style={INPUT_STYLE}
+                    placeholder="Ex. 20"
+                  />
+                  <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 4 }}>
+                    Montant dépense : {formatMAD((Number(form.quantite) || 0) * (Number(form.cout_unitaire) || 0))}
+                  </div>
+                </FField>
+              </FRow>
+            )}
 
             {/* 5. Quantité (+ date / effectué par) */}
             <FRow>

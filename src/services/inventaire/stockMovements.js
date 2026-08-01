@@ -117,6 +117,7 @@ export function normalizeBonFromRows(rows) {
 }
 
 function bonHeaderPayload(bon, statut, applied = false) {
+  const cout = Number(bon.cout_unitaire);
   return {
     emplacement_source: (bon.emplacement_source || '').trim(),
     emplacement_destination: (bon.emplacement_destination || '').trim(),
@@ -126,6 +127,7 @@ function bonHeaderPayload(bon, statut, applied = false) {
     note: (bon.note || '').trim(),
     statut: statut || bon.statut || 'Brouillon',
     applied,
+    ...(Number.isFinite(cout) && cout > 0 ? { cout_unitaire: cout } : {}),
   };
 }
 
@@ -391,7 +393,8 @@ async function applyBonEffects(bon, reverse = false) {
 function validateBonForm(bon) {
   const type = bon.type_mouvement;
   const needsSource = ['Sortie', 'Transfert', 'Retour', 'Rebut'].includes(type);
-  const needsDest = ['Entrée', 'Transfert', 'Retour'].includes(type);
+  // Sortie : destination requise pour la traçabilité (ex. DIVERS → dépenses générales)
+  const needsDest = ['Entrée', 'Transfert', 'Retour', 'Sortie'].includes(type);
 
   if (!bon.lignes?.length) {
     const err = new Error('Ajoutez au moins une ligne article.');
@@ -519,9 +522,18 @@ export async function saveStockMovementBon(bon) {
       await markBonApplied(ref, bon.statut);
       savedBon.applied = true;
       notifyStockChanged({ reason: 'save', ref });
-      await syncDiversExpensesForBon(savedBon).catch((err) => {
+      try {
+        const syncResults = await syncDiversExpensesForBon(savedBon);
+        savedBon.finance_sync = syncResults;
+        const failed = (syncResults || []).find((r) => r.action === 'failed');
+        if (failed) {
+          savedBon.finance_sync_warning = failed.error
+            || 'La dépense générale DIVERS n’a pas pu être créée.';
+        }
+      } catch (err) {
         console.warn('[CITYMO] sync DIVERS → dépenses générales', err);
-      });
+        savedBon.finance_sync_warning = err?.message || String(err);
+      }
     } catch (err) {
       // Cohérence : pas de mouvement « Validé » sans stock mis à jour
       try { await applyBonEffects(savedBon, true); } catch { /* best effort */ }
@@ -554,9 +566,20 @@ export async function validateStockMovementBon(ref) {
     await markBonApplied(ref, 'Validé');
     notifyStockChanged({ reason: 'validate', ref });
     const refreshed = await getStockMovementBon(ref);
-    await syncDiversExpensesForBon(refreshed).catch((err) => {
+    try {
+      const syncResults = await syncDiversExpensesForBon(refreshed);
+      if (refreshed) {
+        refreshed.finance_sync = syncResults;
+        const failed = (syncResults || []).find((r) => r.action === 'failed');
+        if (failed) {
+          refreshed.finance_sync_warning = failed.error
+            || 'La dépense générale DIVERS n’a pas pu être créée.';
+        }
+      }
+    } catch (err) {
       console.warn('[CITYMO] sync DIVERS → dépenses générales', err);
-    });
+      if (refreshed) refreshed.finance_sync_warning = err?.message || String(err);
+    }
   } catch (err) {
     try { await applyBonEffects(bon, true); } catch { /* best effort */ }
     throw err;

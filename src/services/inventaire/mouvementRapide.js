@@ -80,6 +80,7 @@ export async function saveMouvementRapide(form) {
     date_creation: form.date_creation || new Date().toISOString().slice(0, 10),
     motif: form.motif || '',
     cree_par: form.cree_par || '',
+    cout_unitaire: Number(form.cout_unitaire) || Number(article.prix_unitaire) || Number(article.valeur) || 0,
     note: [
       form.note || '',
       form.projet ? `Projet: ${form.projet}` : '',
@@ -92,6 +93,7 @@ export async function saveMouvementRapide(form) {
       article_id: form.article_id,
       quantite: Number(form.quantite) || 0,
       notes: '',
+      cout_unitaire: Number(form.cout_unitaire) || Number(article.prix_unitaire) || Number(article.valeur) || 0,
     }],
   };
 

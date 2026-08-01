@@ -11,6 +11,7 @@ import { chargeDisplayRef, listProjectsForCharges } from '../../services/finance
 import {
   isStockDiversCharge,
   parseDiversMetaFromCharge,
+  backfillPendingDiversGeneralExpenses,
 } from '../../services/inventaire/stockDiversExpense';
 import {
   uploadChargeFile,
@@ -404,7 +405,7 @@ function DetailCharge({ charge, onBack, onEdit, onDelete, onValider, onComptabil
 
 export default function Charges({ categories, onNavigate }) {
   const { user } = useAuth();
-  const { records: charges, loading, error, save, remove } = useFinanceCharges();
+  const { records: charges, loading, error, save, remove, reload } = useFinanceCharges();
   const [search, setSearch] = useState('');
   const [filterStatut, setFilterStatut] = useState('');
   const [filterCat, setFilterCat] = useState('');
@@ -415,6 +416,24 @@ export default function Charges({ categories, onNavigate }) {
   const [detailId, setDetailId] = useState(null);
   const [projects, setProjects] = useState([]);
   const [canDelete, setCanDelete] = useState(true);
+  const [backfillNote, setBackfillNote] = useState('');
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const report = await backfillPendingDiversGeneralExpenses({ limit: 150 });
+        if (cancelled) return;
+        if (report?.created_count > 0) {
+          setBackfillNote(`${report.created_count} dépense(s) stock DIVERS rattrapée(s).`);
+          await reload();
+        }
+      } catch (err) {
+        console.warn('[CITYMO] backfill DIVERS charges', err);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [reload]);
 
   useEffect(() => {
     let id;
@@ -503,7 +522,7 @@ export default function Charges({ categories, onNavigate }) {
   const depMois      = charges.filter(c => (c.date || '').startsWith(moisActuel)).reduce((s, c) => s + (c.montant || 0), 0);
   const depProjet    = charges.filter(c => c.projet_lie).reduce((s, c) => s + (c.montant || 0), 0);
   const depHorsProj  = charges.filter(c => !c.projet_lie).reduce((s, c) => s + (c.montant || 0), 0);
-  const validees     = charges.filter(c => c.statut === 'Validée' || c.statut === 'Comptabilisée').length;
+  const validees     = charges.filter(c => c.statut === 'Validée' || c.statut === 'Comptabilisée' || c.statut === 'Comptabilisée automatiquement').length;
   const enAttente    = charges.filter(c => c.statut === 'En attente validation' || c.statut === 'Brouillon').length;
 
   if (loading && !charges.length) {
@@ -535,6 +554,9 @@ export default function Charges({ categories, onNavigate }) {
     <div className="animate-fade-in">
       {error && (
         <div className="card" style={{ marginBottom: 12, padding: 12, color: 'var(--red)', fontSize: '0.85rem' }}>{error}</div>
+      )}
+      {backfillNote && (
+        <div className="card" style={{ marginBottom: 12, padding: 12, color: 'var(--green, #1a7f4b)', fontSize: '0.85rem' }}>{backfillNote}</div>
       )}
       {/* Header */}
       <div className="page-header flex-between finance-page-header">
