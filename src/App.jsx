@@ -330,13 +330,13 @@ function PageContent({
     case 'liens-publics':       return <Documents activeTab="liens-publics" />;
     case 'corbeille':           return <Documents activeTab="corbeille" />;
     /* Finance */
-    case 'finance-dashboard':   return <Finance activeTab="finance-dashboard" />;
-    case 'feuille-caisse':      return <Finance activeTab="feuille-caisse" />;
-    case 'categories-charge':   return <Finance activeTab="categories-charge" />;
-    case 'charges':             return <Finance activeTab="charges" />;
-    case 'depenses-par-projet': return <Finance activeTab="depenses-par-projet" />;
+    case 'finance-dashboard':   return <Finance activeTab="finance-dashboard" onNavigate={onNavigate} />;
+    case 'feuille-caisse':      return <Finance activeTab="feuille-caisse" onNavigate={onNavigate} />;
+    case 'categories-charge':   return <Finance activeTab="categories-charge" onNavigate={onNavigate} />;
+    case 'charges':             return <Finance activeTab="charges" onNavigate={onNavigate} />;
+    case 'depenses-par-projet': return <Finance activeTab="depenses-par-projet" onNavigate={onNavigate} />;
     case 'ordres-paiement-achats':
-    case 'ordres-paiement':     return <Finance activeTab="ordres-paiement" />;
+    case 'ordres-paiement':     return <Finance activeTab="ordres-paiement" onNavigate={onNavigate} />;
     /* Achats */
     case 'demandes-achat':      return <Achats activeTab="demandes-achat" onNavigate={onNavigate} />;
     case 'bons-commande':       return <Achats activeTab="bons-commande" onNavigate={onNavigate} />;

@@ -72,6 +72,7 @@ export const EMPLACEMENTS_STOCK = [
   "ATELIER D'ALUMINIUM",
   'ATELIER DE FERRONNERIE',
   'BUREAU CITYMO BD MED 5',
+  'DIVERS',
 ];
 
 /** Emplacements legacy à masquer à l’affichage / dans les filtres (données DB inchangées). */

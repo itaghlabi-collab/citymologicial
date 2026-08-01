@@ -29,10 +29,18 @@ import {
   articleAllowedForMovementType,
   ARTICLE_CLEARED_FOR_SORTIE_HINT,
   SORTIE_CLEARED_HINT,
+  ARTICLE_TYPE_CONSOMMABLE,
 } from '../../services/inventaire/articleMovementRules';
+import { isDiversEmplacement } from '../../services/inventaire/stockWarehouses';
+import {
+  findDiversChargeForMovement,
+  parseDiversMetaFromCharge,
+  shouldCreateDiversGeneralExpense,
+} from '../../services/inventaire/stockDiversExpense';
 import StockArticleSearch from './StockArticleSearch.jsx';
 import BonMouvementTraceabilite from './BonMouvementTraceabilite.jsx';
 import { useAuth } from '../../hooks/useAuth';
+import { formatMAD } from '../finance/shared.jsx';
 
 const MOTIFS_ENTREE = [
   'Réception directe', 'Retour chantier', 'Retour utilisateur',
@@ -92,6 +100,7 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
   const [searchHist, setSearchHist] = useState('');
   const [filterType, setFilterType] = useState('');
   const [typeHint, setTypeHint] = useState('');
+  const [diversCharge, setDiversCharge] = useState(null);
   const emplacements = emplacementsList?.length ? emplacementsList : EMPLACEMENTS_STOCK;
 
   function initialForm() {
@@ -151,6 +160,42 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
   }, []);
 
   useEffect(() => { loadHistorique(); }, [loadHistorique]);
+
+  // Ouvrir un mouvement depuis Dépenses générales
+  useEffect(() => {
+    let ref;
+    try {
+      ref = sessionStorage.getItem('citymo_open_mouvement_ref');
+      if (!ref) return;
+      sessionStorage.removeItem('citymo_open_mouvement_ref');
+    } catch {
+      return;
+    }
+    const found = (historique || []).find((m) => m.ref === ref);
+    if (found) {
+      setDetailItem(found);
+      setView('detail');
+    }
+  }, [historique]);
+
+  // Charger impact financier DIVERS en détail
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      if (view !== 'detail' || !detailItem?.id) {
+        setDiversCharge(null);
+        return;
+      }
+      try {
+        const ch = await findDiversChargeForMovement(detailItem.id);
+        if (!cancelled) setDiversCharge(ch);
+      } catch {
+        if (!cancelled) setDiversCharge(null);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [view, detailItem?.id]);
 
   const articleKind = useMemo(
     () => normalizeArticleType(selectedArticle),
@@ -854,6 +899,13 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
                       <option key={`dst-${e}`} value={e}>{e}</option>
                     ))}
                   </select>
+                  {selectedArticle
+                    && normalizeArticleType(selectedArticle) === ARTICLE_TYPE_CONSOMMABLE
+                    && isDiversEmplacement(form.emplacement_destination) && (
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-3)', marginTop: 6 }}>
+                      Ce mouvement sera automatiquement comptabilisé dans Dépenses générales.
+                    </div>
+                  )}
                 </FField>
               )}
             </FRow>
@@ -1064,6 +1116,42 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
             {m.note && <><span style={{ color: 'var(--text-3)', fontWeight: 700 }}>Notes</span><span>{m.note}</span></>}
           </div>
         </div>
+
+        {diversCharge && (() => {
+          const meta = parseDiversMetaFromCharge(diversCharge) || {};
+          return (
+            <div className="card" style={{ padding: '24px', maxWidth: 640, marginTop: 16 }}>
+              <SectionTitle>Impact financier — Dépense générale</SectionTitle>
+              <div style={{ display: 'grid', gridTemplateColumns: '140px 1fr', gap: '10px 16px', fontSize: '0.9rem' }}>
+                <span style={{ color: 'var(--text-3)', fontWeight: 700 }}>Article</span>
+                <span>{meta.article_nom || m.article_designation}</span>
+                <span style={{ color: 'var(--text-3)', fontWeight: 700 }}>Quantité</span>
+                <span>{meta.quantite ?? m.quantite} {meta.unite || ''}</span>
+                <span style={{ color: 'var(--text-3)', fontWeight: 700 }}>Coût unitaire</span>
+                <span>{meta.cout_unitaire != null ? formatMAD(meta.cout_unitaire) : '—'}</span>
+                <span style={{ color: 'var(--text-3)', fontWeight: 700 }}>Montant imputé</span>
+                <span style={{ fontWeight: 800, color: 'var(--red)' }}>{formatMAD(diversCharge.montant)}</span>
+                <span style={{ color: 'var(--text-3)', fontWeight: 700 }}>Statut</span>
+                <span>{diversCharge.statut}</span>
+                <span style={{ color: 'var(--text-3)', fontWeight: 700 }}>Réf. dépense</span>
+                <span style={{ fontWeight: 700 }}>{diversCharge.ref_charge || diversCharge.id}</span>
+              </div>
+              <button
+                type="button"
+                className="btn btn-ghost btn-sm"
+                style={{ marginTop: 14 }}
+                onClick={() => {
+                  try {
+                    sessionStorage.setItem('citymo_open_charge_id', diversCharge.id);
+                  } catch { /* ignore */ }
+                  onNavigate?.('charges');
+                }}
+              >
+                Voir dans Dépenses générales
+              </button>
+            </div>
+          );
+        })()}
 
         <div style={{ marginTop: 16, maxWidth: 960 }}>
           <BonMouvementTraceabilite

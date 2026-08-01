@@ -16,6 +16,7 @@ import {
   normalizeArticleType,
   SORTIE_BLOCKED_MESSAGE,
 } from './articleMovementRules';
+import { cancelDiversExpensesForBon } from './stockDiversExpense';
 
 const TABLE = 'stock_movements';
 const ARTICLES = 'stock_articles';
@@ -159,7 +160,11 @@ export async function annulerMouvementRapide(refOriginal, motifAnnulation, userN
 
   const saved = await saveStockMovementBon(inverseBon);
 
-  // Mark original as cancelled
+  // Mark original as cancelled + annuler dépenses générales DIVERS liées
+  await cancelDiversExpensesForBon(data).catch((err) => {
+    console.warn('[CITYMO] cancel DIVERS expenses on annulation', err);
+  });
+
   await Promise.all(data.map((row) =>
     getSupabase()
       .from(TABLE)

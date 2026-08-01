@@ -12,7 +12,7 @@ export const SELECT_STYLE = { ...INPUT_STYLE, cursor: 'pointer' };
 export const TEXTAREA_STYLE = { ...INPUT_STYLE, minHeight: 72, resize: 'vertical' };
 
 export const MODES_PAIEMENT = ['Espèces', 'Virement', 'Chèque', 'Carte bancaire', 'Mobile payment', 'Autre'];
-export const STATUTS_CHARGE = ['Brouillon', 'Validé', 'Payé', 'Annulé', 'En attente validation', 'Validée', 'Refusée', 'Comptabilisée'];
+export const STATUTS_CHARGE = ['Brouillon', 'Validé', 'Payé', 'Annulé', 'En attente validation', 'Validée', 'Refusée', 'Comptabilisée', 'Comptabilisée automatiquement'];
 export const STATUTS_ORDRE  = ['À préparer', 'Initié', 'Payé'];
 export const TYPES_ENTREE_CAISSE = ['alimentation_caisse', 'reglement_client', 'remboursement', 'autre_entree'];
 export const TYPES_SORTIE_CAISSE = ['charge', 'ordre_paiement', 'autre_sortie'];
@@ -28,6 +28,7 @@ export const BADGE_STATUT_CHARGE = {
   'Validée':               'badge-green',
   'Refusée':               'badge-red',
   'Comptabilisée':         'badge-blue',
+  'Comptabilisée automatiquement': 'badge-blue',
 };
 export const BADGE_STATUT_ORDRE = {
   'À préparer':   'badge-orange',

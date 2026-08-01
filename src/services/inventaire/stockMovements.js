@@ -6,6 +6,7 @@ import { requireSupabaseUserId } from '../supabase/requireUser';
 import { computeArticleStock } from './stockArticles';
 import { notifyStockChanged } from './stockSync';
 import { assertMovementAllowedForArticle } from './articleMovementRules';
+import { syncDiversExpensesForBon, cancelDiversExpensesForBon } from './stockDiversExpense';
 
 const TABLE = 'stock_movements';
 const LEVELS = 'stock_levels';
@@ -488,6 +489,9 @@ export async function saveStockMovementBon(bon) {
       await markBonApplied(ref, bon.statut);
       savedBon.applied = true;
       notifyStockChanged({ reason: 'save', ref });
+      await syncDiversExpensesForBon(savedBon).catch((err) => {
+        console.warn('[CITYMO] sync DIVERS → dépenses générales', err);
+      });
     } catch (err) {
       // Cohérence : pas de mouvement « Validé » sans stock mis à jour
       try { await applyBonEffects(savedBon, true); } catch { /* best effort */ }
@@ -519,6 +523,10 @@ export async function validateStockMovementBon(ref) {
     await applyBonEffects(bon);
     await markBonApplied(ref, 'Validé');
     notifyStockChanged({ reason: 'validate', ref });
+    const refreshed = await getStockMovementBon(ref);
+    await syncDiversExpensesForBon(refreshed).catch((err) => {
+      console.warn('[CITYMO] sync DIVERS → dépenses générales', err);
+    });
   } catch (err) {
     try { await applyBonEffects(bon, true); } catch { /* best effort */ }
     throw err;
@@ -528,6 +536,12 @@ export async function validateStockMovementBon(ref) {
 
 export async function deleteStockMovementBon(ref) {
   await requireSupabaseUserId();
+  const bon = await getStockMovementBon(ref);
+  if (bon) {
+    await cancelDiversExpensesForBon(bon).catch((err) => {
+      console.warn('[CITYMO] cancel DIVERS expenses on delete', err);
+    });
+  }
   await deleteBonRows(ref, true);
   notifyStockChanged({ reason: 'delete', ref });
 }

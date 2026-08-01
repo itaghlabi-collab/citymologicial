@@ -2,12 +2,16 @@
  * Charges.jsx — Gestion des dépenses et charges ERP CITYMO
  * Backend-ready / Supabase/S3-ready
  */
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useMemo } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useFinanceCharges } from '../../hooks/useFinanceCharges';
 import { useAuth } from '../../hooks/useAuth';
 import { can } from '../../services/admin/permissions';
 import { chargeDisplayRef, listProjectsForCharges } from '../../services/finance/charges';
+import {
+  isStockDiversCharge,
+  parseDiversMetaFromCharge,
+} from '../../services/inventaire/stockDiversExpense';
 import {
   uploadChargeFile,
   resolveChargeAttachments,
@@ -19,7 +23,7 @@ import { projectOptionLabel } from '../../services/achats/purchaseRequests';
 import {
   TrendingDown, Plus, Eye, Edit2, Trash2, Archive, Download,
   CheckCircle, XCircle, Search, Filter, FileText, Paperclip,
-  BookOpen, AlertTriangle, ExternalLink
+  BookOpen, AlertTriangle, ExternalLink, Package
 } from 'lucide-react';
 import {
   INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE,
@@ -263,8 +267,10 @@ function ChargeForm({ initial, categories, projects = [], onSave, onCancel }) {
   );
 }
 
-function DetailCharge({ charge, onBack, onEdit, onDelete, onValider, onComptabiliser, canDelete }) {
+function DetailCharge({ charge, onBack, onEdit, onDelete, onValider, onComptabiliser, canDelete, onNavigate }) {
   const [attachments, setAttachments] = useState([]);
+  const diversMeta = useMemo(() => parseDiversMetaFromCharge(charge), [charge]);
+  const isDivers = isStockDiversCharge(charge);
 
   useEffect(() => {
     let cancelled = false;
@@ -273,6 +279,15 @@ function DetailCharge({ charge, onBack, onEdit, onDelete, onValider, onComptabil
     });
     return () => { cancelled = true; };
   }, [charge?.id, charge?.justificatifs]);
+
+  function goToMouvement() {
+    const ref = diversMeta?.ref_mouvement;
+    if (!ref) return;
+    try {
+      sessionStorage.setItem('citymo_open_mouvement_ref', ref);
+    } catch { /* ignore */ }
+    onNavigate?.('mouvement-rapide');
+  }
 
   return (
     <div className="animate-fade-in">
@@ -283,8 +298,16 @@ function DetailCharge({ charge, onBack, onEdit, onDelete, onValider, onComptabil
         <div>
           <h1 className="page-title" style={{ marginBottom: 4 }}>{chargeDisplayRef(charge) || '—'}</h1>
           <p className="page-subtitle">{charge.libelle} — {charge.date}</p>
+          {isDivers && (
+            <span className="badge badge-blue" style={{ fontSize: '0.72rem', marginTop: 6 }}>Origine : Stock</span>
+          )}
         </div>
         <div className="finance-page-actions">
+          {isDivers && diversMeta?.ref_mouvement && (
+            <button type="button" className="btn btn-ghost btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={goToMouvement}>
+              <Package size={13} /> Voir le mouvement
+            </button>
+          )}
           <button className="btn btn-secondary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={onEdit}><Edit2 size={13} /> Modifier</button>
           {charge.statut === 'En attente validation' && (
             <button className="btn btn-primary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => onValider(charge)}>
@@ -318,6 +341,15 @@ function DetailCharge({ charge, onBack, onEdit, onDelete, onValider, onComptabil
                 ['Fournisseur', charge.fournisseur || '—'],
                 ['Projet lié', charge.projet_lie || '—'],
                 ['Département', charge.departement || '—'],
+                ...(isDivers ? [
+                  ['Article', diversMeta?.article_nom || charge.fournisseur || '—'],
+                  ['Réf. article', diversMeta?.article_code || '—'],
+                  ['Quantité', diversMeta?.quantite != null ? `${diversMeta.quantite} ${diversMeta.unite || ''}` : '—'],
+                  ['Coût unitaire', diversMeta?.cout_unitaire != null ? formatMAD(diversMeta.cout_unitaire) : '—'],
+                  ['Source', diversMeta?.emplacement_source || '—'],
+                  ['Destination', diversMeta?.emplacement_destination || 'DIVERS'],
+                  ['Réf. mouvement', diversMeta?.ref_mouvement || '—'],
+                ] : []),
               ].map(([lbl, val]) => (
                 <div key={lbl} style={{ paddingBottom: 10, borderBottom: '1px solid var(--surface-2)' }}>
                   <div style={{ fontSize: '0.68rem', fontWeight: 800, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.07em', marginBottom: 3 }}>{lbl}</div>
@@ -350,13 +382,14 @@ function DetailCharge({ charge, onBack, onEdit, onDelete, onValider, onComptabil
               ['Montant', <span style={{ fontFamily: 'var(--font-head)', fontSize: '1.2rem', fontWeight: 800, color: 'var(--red)' }}>{formatMAD(charge.montant)}</span>],
               ['Statut', <span className={"badge " + (BADGE_STATUT_CHARGE[charge.statut] || 'badge-grey')}>{charge.statut}</span>],
               ['Créé le', charge.date_creation || '—'],
+              ...(isDivers ? [['Origine', 'Stock']] : []),
             ].map(([lbl, val]) => (
               <div key={lbl} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.83rem', paddingBottom: 8, borderBottom: '1px solid var(--border)' }}>
                 <span style={{ color: 'var(--text-3)', fontWeight: 600, fontSize: '0.72rem', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{lbl}</span>
                 <span style={{ fontWeight: 600, textAlign: 'right' }}>{val}</span>
               </div>
             ))}
-            {charge.commentaire && (
+            {charge.commentaire && !isDivers && (
               <div style={{ padding: '10px 12px', background: 'var(--surface-2)', borderRadius: 8, fontSize: '0.82rem', color: 'var(--text-2)' }}>
                 <div style={{ fontSize: '0.68rem', fontWeight: 800, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 4 }}>Commentaire</div>
                 {charge.commentaire}
@@ -369,7 +402,7 @@ function DetailCharge({ charge, onBack, onEdit, onDelete, onValider, onComptabil
   );
 }
 
-export default function Charges({ categories }) {
+export default function Charges({ categories, onNavigate }) {
   const { user } = useAuth();
   const { records: charges, loading, error, save, remove } = useFinanceCharges();
   const [search, setSearch] = useState('');
@@ -382,6 +415,18 @@ export default function Charges({ categories }) {
   const [detailId, setDetailId] = useState(null);
   const [projects, setProjects] = useState([]);
   const [canDelete, setCanDelete] = useState(true);
+
+  useEffect(() => {
+    let id;
+    try {
+      id = sessionStorage.getItem('citymo_open_charge_id');
+      if (!id) return;
+      sessionStorage.removeItem('citymo_open_charge_id');
+    } catch {
+      return;
+    }
+    if (id) setDetailId(id);
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -481,6 +526,7 @@ export default function Charges({ categories }) {
         onValider={handleValider}
         onComptabiliser={handleComptabiliser}
         canDelete={canDelete}
+        onNavigate={onNavigate}
       />
     );
   }
@@ -591,6 +637,9 @@ export default function Charges({ categories }) {
                     <td data-label="Date">{c.date || '—'}</td>
                     <td data-label="Libellé">
                       <div style={{ fontWeight: 600, fontSize: '0.87rem', maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.libelle}</div>
+                      {isStockDiversCharge(c) && (
+                        <span className="badge badge-blue" style={{ fontSize: '0.65rem', marginTop: 4 }}>Origine : Stock</span>
+                      )}
                     </td>
                     <td data-label="Catégorie">
                       {c.categorie ? <span className="badge badge-grey" style={{ fontSize: '0.72rem' }}>{c.categorie}</span> : '—'}

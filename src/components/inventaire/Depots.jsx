@@ -13,6 +13,7 @@ import {
   listStockWarehouses,
   createStockWarehouse,
   deleteStockWarehouse,
+  ensureDiversWarehouse,
   EMPLACEMENT_TYPES,
 } from '../../services/inventaire/stockWarehouses';
 
@@ -110,6 +111,8 @@ export default function Depots({ articles, onDepotsChange }) {
       if (!rows.length) {
         rows = await listStockWarehouses();
       }
+      await ensureDiversWarehouse().catch(() => null);
+      rows = await listStockWarehouses();
       const mapped = rows
         .filter((w) => !isDeprecatedEmplacement(w.nom))
         .map((w) => ({

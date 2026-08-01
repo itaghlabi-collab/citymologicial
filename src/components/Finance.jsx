@@ -10,7 +10,7 @@ import OrdresPaiement from './finance/OrdresPaiement.jsx';
 import DepensesParProjet from './finance/DepensesParProjet.jsx';
 import { useChargeCategories } from '../hooks/useChargeCategories';
 
-export default function Finance({ activeTab }) {
+export default function Finance({ activeTab, onNavigate }) {
   const { records: categories, reload: reloadCategories } = useChargeCategories();
 
   useEffect(() => {
@@ -23,7 +23,7 @@ export default function Finance({ activeTab }) {
     <div className="finance-module">
       {tab === 'finance-dashboard' && <FinanceDashboard />}
       {tab === 'categories-charge' && <CategoriesCharge />}
-      {tab === 'charges' && <Charges categories={categories} />}
+      {tab === 'charges' && <Charges categories={categories} onNavigate={onNavigate} />}
       {tab === 'feuille-caisse' && <FeuilleCaisse />}
       {tab === 'ordres-paiement' && <OrdresPaiement categories={categories} />}
       {tab === 'depenses-par-projet' && <DepensesParProjet />}
