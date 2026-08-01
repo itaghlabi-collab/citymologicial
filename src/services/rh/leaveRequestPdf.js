@@ -140,15 +140,19 @@ function drawWatermark(doc, logoData, logoRatio) {
   } catch { /* optionnel */ }
 }
 
+/** Espace vertical avant un titre de section (évite le chevauchement avec le bloc précédent). */
+const SECTION_GAP = 5.5;
+
 function drawSectionTitle(doc, title, y) {
+  const titleY = y + SECTION_GAP;
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(8.5);
   doc.setTextColor(...RED);
-  doc.text(title, MARGIN, y);
+  doc.text(title, MARGIN, titleY);
   doc.setDrawColor(...RED);
   doc.setLineWidth(0.28);
-  doc.line(MARGIN, y + 1.1, PAGE_W - MARGIN, y + 1.1);
-  return y + 4;
+  doc.line(MARGIN, titleY + 1.2, PAGE_W - MARGIN, titleY + 1.2);
+  return titleY + 5;
 }
 
 function drawTable(doc, rows, startY, { fontSize = 7.5, padY = 3.4, lineH = 2.9 } = {}) {
@@ -183,7 +187,7 @@ function drawTable(doc, rows, startY, { fontSize = 7.5, padY = 3.4, lineH = 2.9 
     y += rowH;
   });
 
-  return y + 1.2;
+  return y + 2;
 }
 
 function drawRoundedBox(doc, x, y, w, h) {
@@ -230,12 +234,13 @@ function drawLabeledLines(doc, x, y, w, rows, title, rowStep = 4.6) {
  * Zone signatures — jamais de 2ᵉ page : hauteur = espace restant sur la feuille.
  */
 function drawValidationZone(doc, startY, leave) {
-  const preferredBoxH = 24;
-  const minBoxH = 16;
+  const preferredBoxH = 22;
+  const minBoxH = 15;
   let y = drawSectionTitle(doc, 'VALIDATION', startY);
 
   const available = CONTENT_BOTTOM - y;
-  const finalBoxH = Math.max(minBoxH, Math.min(preferredBoxH, available));
+  // Ne jamais remonter au-dessus du contenu : on réduit les cases si besoin
+  const finalBoxH = Math.max(minBoxH, Math.min(preferredBoxH, Math.max(minBoxH, available)));
   const boxGap = 3.5;
   const boxW = (CONTENT_W - boxGap * 2) / 3;
   const statut = leave._statut || leave.statut || 'En attente';
@@ -268,23 +273,23 @@ function drawValidationZone(doc, startY, leave) {
     doc.setFont('helvetica', 'bold');
     doc.setFontSize(7);
     doc.setTextColor(...MUTED);
-    doc.text(box.label, x + boxW / 2, y + 4, { align: 'center' });
+    doc.text(box.label, x + boxW / 2, y + 3.5, { align: 'center' });
 
     doc.setDrawColor(190, 190, 190);
     doc.setLineWidth(0.12);
-    const sigY = y + finalBoxH - (box.line3 ? 9.5 : 7.5);
+    const sigY = y + finalBoxH - (box.line3 ? 8.5 : 6.5);
     doc.line(x + 3, sigY, x + boxW - 3, sigY);
 
     doc.setFont('helvetica', 'normal');
     doc.setFontSize(6);
     doc.setTextColor(...TEXT);
-    doc.text(box.line2, x + boxW / 2, y + finalBoxH - (box.line3 ? 5.5 : 3.2), {
+    doc.text(box.line2, x + boxW / 2, y + finalBoxH - (box.line3 ? 5 : 2.8), {
       align: 'center',
       maxWidth: boxW - 4,
     });
     if (box.line3) {
       doc.setTextColor(...MUTED);
-      doc.text(box.line3, x + boxW / 2, y + finalBoxH - 2.2, { align: 'center' });
+      doc.text(box.line3, x + boxW / 2, y + finalBoxH - 2, { align: 'center' });
     }
   });
 
@@ -391,17 +396,21 @@ export async function generateLeaveRequestPdf(leave, employee = null) {
   drawRoundedBox(doc, MARGIN + boxW + gap, y, boxW, boxH);
   drawLabeledLines(doc, MARGIN + boxW + gap, y, boxW, rightsRows, 'CALCUL DES DROITS', rowStep);
 
-  y += boxH + 3;
+  y += boxH + 5;
 
-  // Réserver VALIDATION (~titre 4 + cases 20) avant de dessiner le bas
-  const SIGNATURE_RESERVE = 26;
-  const detailsBudget = Math.max(40, CONTENT_BOTTOM - SIGNATURE_RESERVE - y);
+  // Réserver VALIDATION (titre + gap + cases) — ne jamais dessiner par-dessus le contenu
+  const SIGNATURE_RESERVE = 34;
+  const detailsBudget = Math.max(36, CONTENT_BOTTOM - SIGNATURE_RESERVE - y);
 
   // Densité tables adaptée à l’espace restant (détails + droits ≈ 13 lignes)
-  const compact = detailsBudget < 95;
-  const tableOpts = compact
-    ? { fontSize: 7, padY: 3.1, lineH: 2.7 }
-    : { fontSize: 7.5, padY: 3.4, lineH: 2.9 };
+  let tableOpts;
+  if (detailsBudget < 78) {
+    tableOpts = { fontSize: 6.5, padY: 2.6, lineH: 2.4 };
+  } else if (detailsBudget < 100) {
+    tableOpts = { fontSize: 7, padY: 2.9, lineH: 2.6 };
+  } else {
+    tableOpts = { fontSize: 7.5, padY: 3.2, lineH: 2.8 };
+  }
 
   y = drawSectionTitle(doc, 'DÉTAILS DU CONGÉ', y);
   y = drawTable(doc, [
@@ -431,8 +440,8 @@ export async function generateLeaveRequestPdf(leave, employee = null) {
     ['Reliquat à nouveau', reliquatNouveau != null ? `${reliquatNouveau} jours` : '—'],
   ], y, tableOpts);
 
-  // Toujours sur la même page — jamais doc.addPage()
-  drawValidationZone(doc, Math.min(y, CONTENT_BOTTOM - SIGNATURE_RESERVE), leave);
+  // Toujours sur la même page — jamais doc.addPage() ni remonter y (cause du chevauchement)
+  drawValidationZone(doc, y, leave);
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(6);
