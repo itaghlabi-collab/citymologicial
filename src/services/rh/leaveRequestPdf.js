@@ -202,12 +202,12 @@ function drawRoundedBox(doc, x, y, w, h) {
 }
 
 function drawLabeledLines(doc, x, y, w, rows, title, rowStep = 4.6) {
-  let cy = y + 4;
+  let cy = y + 5;
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(7.5);
   doc.setTextColor(...RED);
   doc.text(title, x + w / 2, cy, { align: 'center' });
-  cy += 4.2;
+  cy += 5;
 
   rows.forEach(([label, value]) => {
     doc.setFont('helvetica', 'bold');
@@ -227,7 +227,7 @@ function drawLabeledLines(doc, x, y, w, rows, title, rowStep = 4.6) {
     cy += Math.max(rowStep, lines.length * 2.8 + 1.6);
   });
 
-  return cy + 1;
+  return cy + 1.5;
 }
 
 /**
@@ -338,29 +338,32 @@ export async function generateLeaveRequestPdf(leave, employee = null) {
 
   drawWatermark(doc, logoData, logoRatio);
 
-  // ── En-tête compact : logo + société côte à côte ──
+  // ── En-tête aéré : logo + société, puis titre ──
   let y = MARGIN;
   const logoFit = drawLogoPlain(doc, logoData, MARGIN, y, LOGO_MAX_W, LOGO_MAX_H, logoRatio);
-  const companyX = MARGIN + Math.max(logoFit.w, 32) + 5;
-  let companyY = y + 0.8;
+  const companyX = MARGIN + Math.max(logoFit.w, 32) + 6;
+  let companyY = y + 1.2;
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(6);
   doc.setTextColor(...MUTED);
   COMPANY_LINES.forEach((line) => {
     doc.text(line, companyX, companyY);
-    companyY += 2.5;
+    companyY += 3;
   });
-  y = Math.max(y + (logoFit.h || 10), companyY) + 2.5;
+  // Air entre bloc logo/adresse et le titre
+  y = Math.max(y + (logoFit.h || 10), companyY) + 6;
 
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(13);
   doc.setTextColor(...TEXT);
   doc.text('DEMANDE DE CONGÉ', PAGE_W / 2, y, { align: 'center' });
-  y += 2.5;
+  // Air entre titre et trait rouge
+  y += 4;
   doc.setDrawColor(...RED);
   doc.setLineWidth(0.45);
   doc.line(MARGIN + 30, y, PAGE_W - MARGIN - 30, y);
-  y += 4;
+  // Air entre trait rouge et les cadres Identification / Calcul des droits
+  y += 7;
 
   const empInfo = resolveEmployee(leave, employee);
   const statut = leave._statut || leave.statut || 'En attente';
@@ -386,8 +389,8 @@ export async function generateLeaveRequestPdf(leave, employee = null) {
     ['RELIQUAT À NOUVEAU :', reliquatNouveau],
   ];
 
-  const rowStep = 4.5;
-  const measureBoxH = (rows) => 4 + 4.2 + rows.length * rowStep + 2.5;
+  const rowStep = 5;
+  const measureBoxH = (rows) => 5 + 5 + rows.length * rowStep + 3;
   const boxH = Math.max(measureBoxH(idRows), measureBoxH(rightsRows));
 
   drawRoundedBox(doc, MARGIN, y, boxW, boxH);
