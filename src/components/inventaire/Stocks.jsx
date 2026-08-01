@@ -350,14 +350,10 @@ export default function Stocks({
     return matchQ && matchCat && matchEmp && matchAlerte;
   }), [arts, categories, search, filterCat, filterEmplacement, filterAlerte]);
 
-  const emplacements = useMemo(() => {
-    const set = new Set();
-    arts.forEach((a) => {
-      const e = String(a.emplacement || '').trim();
-      if (e && !isSansEmplacement(e)) set.add(e);
-    });
-    return filterVisibleEmplacements([...set]);
-  }, [arts]);
+  const emplacements = useMemo(
+    () => filterVisibleEmplacements(emplacementsList?.length ? emplacementsList : EMPLACEMENTS_STOCK),
+    [emplacementsList],
+  );
 
   const valeurTotale = arts.reduce((s, a) => s + ((Number(a.valeur) || 0) * (Number(a.stock_actuel) || 0)), 0);
   const stockFaible = arts.filter((a) => a.stock_minimum && Number(a.stock_actuel) <= Number(a.stock_minimum) && Number(a.stock_actuel) > 0).length;
