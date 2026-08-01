@@ -315,18 +315,28 @@ async function applyMovementEffects(mvt, reverse = false) {
 
   const sign = reverse ? -1 : 1;
   const type = mvt.type_mouvement;
-  const src = mvt.emplacement_source;
-  const dest = mvt.emplacement_destination;
+  const src = (mvt.emplacement_source || '').trim();
+  const dest = (mvt.emplacement_destination || '').trim();
 
-  if (type === 'Entrée') {
+  // Source + destination physiques distinctes → transfert (y compris Sortie mal libellée)
+  const isTransferLike = !!(src && dest && src.toLowerCase() !== dest.toLowerCase());
+
+  if (isTransferLike && type !== 'Entrée') {
+    await adjustLevel(mvt.article_id, src, sign * -qty);
     await adjustLevel(mvt.article_id, dest, sign * qty);
     if (!reverse) await updateArticleEmplacement(mvt.article_id, dest);
-  } else if (type === 'Sortie' || type === 'Rebut') {
-    await adjustLevel(mvt.article_id, src, sign * -qty);
+    return;
+  }
+
+  if (type === 'Entrée' || (type === 'Retour' && dest && !src)) {
+    await adjustLevel(mvt.article_id, dest, sign * qty);
+    if (!reverse) await updateArticleEmplacement(mvt.article_id, dest);
   } else if (type === 'Transfert' || type === 'Retour') {
     await adjustLevel(mvt.article_id, src, sign * -qty);
     await adjustLevel(mvt.article_id, dest, sign * qty);
     if (!reverse) await updateArticleEmplacement(mvt.article_id, dest);
+  } else if (type === 'Sortie' || type === 'Rebut') {
+    await adjustLevel(mvt.article_id, src, sign * -qty);
   }
 }
 

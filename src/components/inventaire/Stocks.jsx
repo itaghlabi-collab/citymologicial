@@ -19,13 +19,17 @@ import StockDirectMovementModal from './StockDirectMovementModal';
 import StockFicheEditModal from './StockFicheEditModal';
 import ArticleCatalogForm from './ArticleCatalogForm';
 import { ArticleMovementHistory } from './ArticleQuickActions';
+import StockEmplacementControl, { EmplacementExtraFilters } from './StockEmplacementControl';
 import { useStockArticles } from '../../hooks/useStockArticles';
 import { listStockLevelsForArticle } from '../../services/inventaire/stockArticles';
 import {
   listAllStockLevels,
+  listAllStockMovementsRaw,
   expandArticlesByEmplacement,
+  buildEmplacementControlView,
   rebuildStockLevelsFromMovements,
   subscribeStockChanged,
+  periodRange,
 } from '../../services/inventaire/stockSync';
 import { can } from '../../services/admin/permissions';
 import { useAuth } from '../../hooks/useAuth';
@@ -201,45 +205,28 @@ export default function Stocks({
 
   const arts = (hookArticles?.length ? hookArticles : articlesProp) || [];
   const [levels, setLevels] = useState([]);
+  const [allMovements, setAllMovements] = useState([]);
+  const [movementsLoading, setMovementsLoading] = useState(false);
   const [rebuildOpen, setRebuildOpen] = useState(false);
   const [rebuildBusy, setRebuildBusy] = useState(false);
   const [rebuildReport, setRebuildReport] = useState(null);
   const [rebuildError, setRebuildError] = useState('');
-
-  const loadLevels = useCallback(async () => {
-    try {
-      const rows = await listAllStockLevels();
-      setLevels(rows || []);
-    } catch (err) {
-      console.error('[CITYMO] Stocks levels', err);
-      setLevels([]);
-    }
-  }, []);
-
-  useEffect(() => {
-    loadLevels();
-  }, [loadLevels]);
-
-  useEffect(() => {
-    if (onArticlesChange && hookArticles?.length) onArticlesChange(hookArticles);
-  }, [hookArticles, onArticlesChange]);
-
-  useEffect(() => subscribeStockChanged(() => { loadLevels(); }), [loadLevels]);
-
-  const stockRows = useMemo(
-    () => expandArticlesByEmplacement(arts, levels),
-    [arts, levels],
-  );
-
+  const [periodKey, setPeriodKey] = useState('all');
+  const [customFrom, setCustomFrom] = useState('');
+  const [customTo, setCustomTo] = useState('');
+  const [visibility, setVisibility] = useState('avec_stock');
+  const [filterTypeMvt, setFilterTypeMvt] = useState('');
+  const [filterProjet, setFilterProjet] = useState('');
+  const [filterUser, setFilterUser] = useState('');
   const [search, setSearch] = useState('');
   const [filterCat, setFilterCat] = useState('');
   const [filterEmplacement, setFilterEmplacement] = useState('');
   const [filterAlerte, setFilterAlerte] = useState('');
-  const [showFilters, setShowFilters] = useState(false);
+  const [showFilters, setShowFilters] = useState(true);
   const [detailId, setDetailId] = useState(null);
-  const [mvtModal, setMvtModal] = useState(null); // { type, article }
+  const [mvtModal, setMvtModal] = useState(null);
   const [editFiche, setEditFiche] = useState(null);
-  const [catalogModal, setCatalogModal] = useState(null); // null | { article? } for create/edit
+  const [catalogModal, setCatalogModal] = useState(null);
   const [afterCreatePrompt, setAfterCreatePrompt] = useState(null);
   const [historyModal, setHistoryModal] = useState(null);
   const [historyRows, setHistoryRows] = useState([]);
@@ -251,6 +238,64 @@ export default function Stocks({
   const [detailLevelsLoading, setDetailLevelsLoading] = useState(false);
   const [canDelete, setCanDelete] = useState(false);
   const isMobile = useIsMobile();
+
+  const loadLevels = useCallback(async () => {
+    try {
+      const rows = await listAllStockLevels();
+      setLevels(rows || []);
+    } catch (err) {
+      console.error('[CITYMO] Stocks levels', err);
+      setLevels([]);
+    }
+  }, []);
+
+  const loadMovements = useCallback(async () => {
+    setMovementsLoading(true);
+    try {
+      const rows = await listAllStockMovementsRaw();
+      setAllMovements(rows || []);
+    } catch (err) {
+      console.error('[CITYMO] Stocks movements', err);
+      setAllMovements([]);
+    } finally {
+      setMovementsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    loadLevels();
+    loadMovements();
+  }, [loadLevels, loadMovements]);
+
+  useEffect(() => {
+    if (onArticlesChange && hookArticles?.length) onArticlesChange(hookArticles);
+  }, [hookArticles, onArticlesChange]);
+
+  useEffect(() => subscribeStockChanged(() => {
+    loadLevels();
+    loadMovements();
+  }), [loadLevels, loadMovements]);
+
+  const stockRows = useMemo(
+    () => expandArticlesByEmplacement(arts, levels),
+    [arts, levels],
+  );
+
+  const period = useMemo(
+    () => periodRange(periodKey, customFrom, customTo),
+    [periodKey, customFrom, customTo],
+  );
+
+  const controlView = useMemo(() => {
+    if (!filterEmplacement || filterEmplacement === FILTER_SANS_EMPLACEMENT) return null;
+    return buildEmplacementControlView({
+      articles: arts,
+      movements: allMovements,
+      emplacement: filterEmplacement,
+      levels,
+      period,
+    });
+  }, [filterEmplacement, arts, allMovements, levels, period]);
 
   useEffect(() => {
     let cancelled = false;
@@ -307,13 +352,13 @@ export default function Stocks({
   }, [detailId, getMovements]);
 
   const refreshAll = useCallback(async () => {
-    await Promise.all([reload(), loadLevels()]);
+    await Promise.all([reload(), loadLevels(), loadMovements()]);
     if (detailId) {
       const [mvts, lv] = await Promise.all([getMovements(detailId), listStockLevelsForArticle(detailId)]);
       setDetailMovements(mvts || []);
       setDetailLevels(lv || []);
     }
-  }, [reload, loadLevels, detailId, getMovements]);
+  }, [reload, loadLevels, loadMovements, detailId, getMovements]);
 
   function openHistory(article) {
     setHistoryModal(article);
@@ -517,7 +562,11 @@ export default function Stocks({
       <div className="page-header flex-between finance-page-header">
         <div>
           <h1 className="page-title">STOCKS</h1>
-          <p className="page-subtitle finance-sub-hide-mobile">Gestion opérationnelle des quantités, emplacements et mouvements.</p>
+          <p className="page-subtitle finance-sub-hide-mobile">
+            {filterEmplacement && filterEmplacement !== FILTER_SANS_EMPLACEMENT
+              ? `Contrôle emplacement — ${filterEmplacement}`
+              : 'Gestion opérationnelle des quantités, emplacements et mouvements.'}
+          </p>
         </div>
         <div className="finance-page-actions" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button type="button" className="btn btn-primary btn-sm" onClick={() => setCatalogModal({ article: null })}>
@@ -537,6 +586,87 @@ export default function Stocks({
         </div>
       </div>
 
+      {(showFilters || !!filterEmplacement) ? (
+        <div className="card finance-toolbar" style={{ marginBottom: 16, padding: '14px 20px' }}>
+          <div className="finance-toolbar-inner" style={{ flexWrap: 'wrap', gap: 8 }}>
+            <div style={{ flex: 1, minWidth: 180, position: 'relative' }}>
+              <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
+              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Code, désignation…" style={{ ...INPUT_STYLE, paddingLeft: 32 }} />
+            </div>
+            <select value={filterCat} onChange={(e) => setFilterCat(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 160 }}>
+              <option value="">Toutes catégories</option>
+              {(categories || []).map((c) => <option key={c.id} value={c.id}>{c.nom}</option>)}
+            </select>
+            <select value={filterEmplacement} onChange={(e) => setFilterEmplacement(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 220 }}>
+              <option value="">Tous emplacements</option>
+              <option value={FILTER_SANS_EMPLACEMENT}>Sans emplacement</option>
+              {emplacements.map((e) => <option key={e} value={e}>{e}</option>)}
+            </select>
+            {!controlView && (
+              <select value={filterAlerte} onChange={(e) => setFilterAlerte(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 140 }}>
+                <option value="">Tous états</option>
+                <option value="normal">Normal</option>
+                <option value="bas">Stock bas</option>
+                <option value="critique">Critique</option>
+                <option value="rupture">Rupture</option>
+              </select>
+            )}
+            {controlView && (
+              <EmplacementExtraFilters
+                periodKey={periodKey}
+                setPeriodKey={setPeriodKey}
+                customFrom={customFrom}
+                setCustomFrom={setCustomFrom}
+                customTo={customTo}
+                setCustomTo={setCustomTo}
+                visibility={visibility}
+                setVisibility={setVisibility}
+                filterTypeMvt={filterTypeMvt}
+                setFilterTypeMvt={setFilterTypeMvt}
+                filterProjet={filterProjet}
+                setFilterProjet={setFilterProjet}
+                filterUser={filterUser}
+                setFilterUser={setFilterUser}
+              />
+            )}
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => {
+                setSearch(''); setFilterCat(''); setFilterEmplacement(''); setFilterAlerte('');
+                setPeriodKey('all'); setVisibility('avec_stock'); setFilterTypeMvt('');
+                setFilterProjet(''); setFilterUser(''); setCustomFrom(''); setCustomTo('');
+              }}
+            >
+              Réinitialiser
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="card" style={{ marginBottom: 12, padding: '10px 14px' }}>
+          <div style={{ position: 'relative' }}>
+            <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher dans le stock…" style={{ ...INPUT_STYLE, paddingLeft: 32 }} />
+          </div>
+        </div>
+      )}
+
+      {controlView ? (
+        <StockEmplacementControl
+          controlView={controlView}
+          loading={loading || movementsLoading}
+          visibility={visibility}
+          search={search}
+          filterCat={filterCat}
+          filterTypeMvt={filterTypeMvt}
+          filterProjet={filterProjet}
+          filterUser={filterUser}
+          categories={categories}
+          onOpenArticle={(row) => setDetailId(row.id || row.article_id)}
+          onMvt={(type, row) => setMvtModal({ type, article: row })}
+        />
+      ) : (
+        <>
       <div className="stat-grid finance-kpi-grid finance-kpi-strip">
         <KpiCard icon={<BarChart2 size={17} />} label="Valeur totale stock" value={formatMAD(valeurTotale)} color="red" />
         <KpiCard icon={<AlertTriangle size={17} />} label="Stock faible" value={stockFaible} color="orange" />
@@ -552,41 +682,6 @@ export default function Stocks({
             <span style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '0.82rem', color: 'var(--red)' }}>
               Alertes stock ({alertes.length})
             </span>
-          </div>
-        </div>
-      )}
-
-      {showFilters ? (
-        <div className="card finance-toolbar" style={{ marginBottom: 16, padding: '14px 20px' }}>
-          <div className="finance-toolbar-inner">
-            <div style={{ flex: 1, minWidth: 180, position: 'relative' }}>
-              <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
-              <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Code, désignation…" style={{ ...INPUT_STYLE, paddingLeft: 32 }} />
-            </div>
-            <select value={filterCat} onChange={(e) => setFilterCat(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 160 }}>
-              <option value="">Toutes catégories</option>
-              {(categories || []).map((c) => <option key={c.id} value={c.id}>{c.nom}</option>)}
-            </select>
-            <select value={filterEmplacement} onChange={(e) => setFilterEmplacement(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 200 }}>
-              <option value="">Tous emplacements</option>
-              <option value={FILTER_SANS_EMPLACEMENT}>Sans emplacement</option>
-              {emplacements.map((e) => <option key={e} value={e}>{e}</option>)}
-            </select>
-            <select value={filterAlerte} onChange={(e) => setFilterAlerte(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 140 }}>
-              <option value="">Tous états</option>
-              <option value="normal">Normal</option>
-              <option value="bas">Stock bas</option>
-              <option value="critique">Critique</option>
-              <option value="rupture">Rupture</option>
-            </select>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setSearch(''); setFilterCat(''); setFilterEmplacement(''); setFilterAlerte(''); }}>Réinitialiser</button>
-          </div>
-        </div>
-      ) : (
-        <div className="card" style={{ marginBottom: 12, padding: '10px 14px' }}>
-          <div style={{ position: 'relative' }}>
-            <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Rechercher dans le stock…" style={{ ...INPUT_STYLE, paddingLeft: 32 }} />
           </div>
         </div>
       )}
@@ -734,6 +829,8 @@ export default function Stocks({
           )}
         </div>
       )}
+        </>
+      )}
 
       <StockDirectMovementModal
         open={!!mvtModal}
@@ -839,7 +936,9 @@ export default function Stocks({
                   <th>Actuel</th>
                   <th>Recalculé</th>
                   <th>Écart</th>
-                  <th>Mouvements</th>
+                  <th>Nb mvt</th>
+                  <th>Dernier mvt</th>
+                  <th>Anomalies</th>
                 </tr>
               </thead>
               <tbody>
@@ -850,7 +949,9 @@ export default function Stocks({
                     <td>{r.stock_actuel}</td>
                     <td>{r.stock_recalcule}</td>
                     <td style={{ color: r.ecart ? 'var(--red)' : undefined, fontWeight: 700 }}>{r.ecart}</td>
-                    <td style={{ fontSize: '0.7rem', color: 'var(--text-3)' }}>{(r.mouvements || []).slice(0, 4).join(', ')}</td>
+                    <td>{r.nb_mouvements ?? (r.mouvements || []).length}</td>
+                    <td style={{ fontSize: '0.7rem', color: 'var(--text-3)' }}>{r.dernier_mouvement || '—'}</td>
+                    <td style={{ fontSize: '0.7rem', color: 'var(--red)' }}>{(r.anomalies || []).join(', ') || '—'}</td>
                   </tr>
                 ))}
               </tbody>
