@@ -65,7 +65,7 @@ export function isMovementStockApplicable(row) {
 /**
  * Normalise le type métier :
  * source + destination physiques distinctes → transfert interne
- * (même si le libellé DB est « Sortie »).
+ * sauf Sortie / Rebut (destination éventuelle = traçabilité, pas un crédit stock).
  */
 export function normalizeMovementKind(row) {
   const p = row?.payload || {};
@@ -73,6 +73,27 @@ export function normalizeMovementKind(row) {
   const dest = normEmp(p.emplacement_destination);
   const raw = typeFromDb(row?.type_mouvement);
   const qty = Number(row?.quantite) || 0;
+
+  if (raw === 'Sortie') {
+    return {
+      normalized_type: 'exit',
+      label: 'Consommation / sortie',
+      src,
+      dest,
+      qty,
+      raw_type: raw,
+    };
+  }
+  if (raw === 'Rebut') {
+    return {
+      normalized_type: 'scrap',
+      label: 'Rebut',
+      src,
+      dest,
+      qty,
+      raw_type: raw,
+    };
+  }
 
   if (src && dest && empKey(src) !== empKey(dest)) {
     return {
@@ -87,15 +108,12 @@ export function normalizeMovementKind(row) {
   if (raw === 'Entrée' || (!src && dest)) {
     return { normalized_type: 'entry', label: 'Entrée', src, dest, qty, raw_type: raw };
   }
-  if (raw === 'Rebut') {
-    return { normalized_type: 'scrap', label: 'Rebut', src, dest, qty, raw_type: raw };
-  }
   if (raw === 'Retour' && dest) {
     return { normalized_type: 'entry', label: 'Retour', src, dest, qty, raw_type: raw };
   }
   return {
     normalized_type: 'exit',
-    label: raw === 'Sortie' ? 'Consommation / sortie' : (raw || 'Sortie'),
+    label: raw || 'Sortie',
     src,
     dest,
     qty,

@@ -75,9 +75,7 @@ export async function saveMouvementRapide(form) {
     ref,
     type_mouvement: form.type_mouvement,
     emplacement_source: form.emplacement_source || '',
-    emplacement_destination: form.type_mouvement === 'Sortie'
-      ? ''
-      : (form.emplacement_destination || ''),
+    emplacement_destination: form.emplacement_destination || '',
     date_creation: form.date_creation || new Date().toISOString().slice(0, 10),
     motif: form.motif || '',
     cree_par: form.cree_par || '',

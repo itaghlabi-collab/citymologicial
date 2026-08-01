@@ -319,7 +319,13 @@ async function applyMovementEffects(mvt, reverse = false) {
   const src = (mvt.emplacement_source || '').trim();
   const dest = (mvt.emplacement_destination || '').trim();
 
-  // Source + destination physiques distinctes → transfert (y compris Sortie mal libellée)
+  // Sortie / Rebut : débit source uniquement (destination éventuelle = traçabilité, pas de crédit stock)
+  if (type === 'Sortie' || type === 'Rebut') {
+    if (src) await adjustLevel(mvt.article_id, src, sign * -qty);
+    return;
+  }
+
+  // Source + destination physiques distinctes → transfert
   const isTransferLike = !!(src && dest && src.toLowerCase() !== dest.toLowerCase());
 
   if (isTransferLike && type !== 'Entrée') {
@@ -336,8 +342,6 @@ async function applyMovementEffects(mvt, reverse = false) {
     await adjustLevel(mvt.article_id, src, sign * -qty);
     await adjustLevel(mvt.article_id, dest, sign * qty);
     if (!reverse) await updateArticleEmplacement(mvt.article_id, dest);
-  } else if (type === 'Sortie' || type === 'Rebut') {
-    await adjustLevel(mvt.article_id, src, sign * -qty);
   }
 }
 

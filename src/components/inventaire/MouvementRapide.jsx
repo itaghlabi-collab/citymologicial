@@ -168,17 +168,11 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
     setForm((f) => ({
       ...f,
       article_id: '',
-      emplacement_destination: type === 'Sortie' ? '' : f.emplacement_destination,
     }));
-  }, [type]);
+  }, []);
 
   const handleSelectType = useCallback((nextType) => {
     setType(nextType || '');
-    setForm((f) => ({
-      ...f,
-      emplacement_destination: nextType === 'Sortie' ? '' : f.emplacement_destination,
-    }));
-
     if (!nextType) {
       setTypeHint('');
       return;
@@ -202,7 +196,6 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
       setForm((f) => ({
         ...f,
         article_id: '',
-        emplacement_destination: nextType === 'Sortie' ? '' : f.emplacement_destination,
       }));
       return null;
     });
@@ -224,7 +217,6 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
     setForm((f) => ({
       ...f,
       article_id: artId,
-      emplacement_destination: type === 'Sortie' ? '' : f.emplacement_destination,
     }));
     loadArticleStock(artId);
     setTypeHint('');
@@ -244,9 +236,9 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
 
   const needsSource = type === 'Sortie' || type === 'Transfert';
   const needsDest = type === 'Entrée' || type === 'Transfert';
-  // Sortie consommable : destination physique masquée (projet / motif séparés)
+  // Sortie : destination optionnelle (liste complète) — stock ne crédite pas la destination
   const showSource = type === 'Entrée' || type === 'Sortie' || type === 'Transfert';
-  const showDest = type === 'Entrée' || type === 'Transfert';
+  const showDest = type === 'Entrée' || type === 'Sortie' || type === 'Transfert';
 
   const emplacementOptions = useMemo(() => {
     const set = new Set();
@@ -266,6 +258,17 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
     }
     return filterVisibleEmplacements([...set]);
   }, [emplacements, articleStock, selectedArticle, form.emplacement_source, form.emplacement_destination]);
+
+  /** Destination : toujours la liste complète des emplacements (dépôts + chantiers). */
+  const destinationOptions = useMemo(() => {
+    const set = new Set();
+    (emplacements || []).forEach((e) => { if (String(e || '').trim()) set.add(String(e).trim()); });
+    (EMPLACEMENTS_STOCK || []).forEach((e) => { if (e) set.add(e); });
+    if (form.emplacement_destination && !isSansEmplacement(form.emplacement_destination)) {
+      set.add(String(form.emplacement_destination).trim());
+    }
+    return filterVisibleEmplacements([...set]);
+  }, [emplacements, form.emplacement_destination]);
 
   const qtyByEmplacement = useMemo(() => {
     const map = {};
@@ -847,7 +850,7 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
                     style={SELECT_STYLE}
                   >
                     <option value="">{needsDest ? '— Sélectionner —' : '— Optionnel —'}</option>
-                    {emplacementOptions.map((e) => (
+                    {(type === 'Sortie' ? destinationOptions : emplacementOptions).map((e) => (
                       <option key={`dst-${e}`} value={e}>{e}</option>
                     ))}
                   </select>
