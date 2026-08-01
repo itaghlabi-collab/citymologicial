@@ -23,6 +23,12 @@ import {
   listMouvementsRapides,
   getArticleStockInfo,
 } from '../../services/inventaire/mouvementRapide';
+import {
+  allowedMovementTypesForArticle,
+  normalizeArticleType,
+  articleAllowsStandardSortie,
+  SORTIE_CLEARED_HINT,
+} from '../../services/inventaire/articleMovementRules';
 import StockArticleSearch from './StockArticleSearch.jsx';
 import BonMouvementTraceabilite from './BonMouvementTraceabilite.jsx';
 import { useAuth } from '../../hooks/useAuth';
@@ -69,6 +75,7 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
   const [deleteModal, setDeleteModal] = useState(null);
   const [searchHist, setSearchHist] = useState('');
   const [filterType, setFilterType] = useState('');
+  const [typeHint, setTypeHint] = useState('');
   const emplacements = emplacementsList?.length ? emplacementsList : EMPLACEMENTS_STOCK;
 
   function initialForm() {
@@ -113,7 +120,8 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
       || (articles || []).find((a) => a.code === parsed?.code);
     if (!art) return;
     setView('form');
-    setType('Sortie');
+    setType('');
+    setTypeHint('');
     setSelectedArticle(art);
     setForm((f) => ({ ...f, article_id: art.id }));
     loadArticleStock(art.id);
@@ -128,11 +136,40 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
 
   useEffect(() => { loadHistorique(); }, [loadHistorique]);
 
+  const articleKind = useMemo(
+    () => normalizeArticleType(selectedArticle),
+    [selectedArticle],
+  );
+
+  const allowedTypes = useMemo(
+    () => (selectedArticle ? allowedMovementTypesForArticle(selectedArticle) : []),
+    [selectedArticle],
+  );
+
   const handleSelectArticle = useCallback((artId) => {
     const art = articles.find((a) => String(a.id) === String(artId));
     setSelectedArticle(art || null);
-    setForm((f) => ({ ...f, article_id: artId }));
+    setForm((f) => ({
+      ...f,
+      article_id: artId,
+      // Sortie : destination physique vide (projet séparément)
+      emplacement_destination: '',
+    }));
     loadArticleStock(artId);
+    setTypeHint('');
+    setType((prev) => {
+      if (!art || !prev) return '';
+      if (prev === 'Sortie' && !articleAllowsStandardSortie(art)) {
+        setTypeHint(SORTIE_CLEARED_HINT);
+        return '';
+      }
+      const allowed = allowedMovementTypesForArticle(art);
+      if (prev && !allowed.includes(prev)) {
+        setTypeHint(SORTIE_CLEARED_HINT);
+        return '';
+      }
+      return prev;
+    });
   }, [articles, loadArticleStock]);
 
   const filteredHistorique = useMemo(() => {
@@ -149,9 +186,9 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
 
   const needsSource = type === 'Sortie' || type === 'Transfert';
   const needsDest = type === 'Entrée' || type === 'Transfert';
-  // Afficher les deux listes dès qu'un type est choisi (source optionnelle en Entrée, dest optionnelle en Sortie)
-  const showSource = !!type;
-  const showDest = !!type;
+  // Sortie consommable : destination physique masquée (projet / motif séparés)
+  const showSource = type === 'Entrée' || type === 'Sortie' || type === 'Transfert';
+  const showDest = type === 'Entrée' || type === 'Transfert';
 
   const emplacementOptions = useMemo(() => {
     const set = new Set();
@@ -237,8 +274,11 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
   }
 
   function validate() {
+    if (!form.article_id || !selectedArticle) return 'Sélectionnez un article.';
     if (!type) return 'Sélectionnez un type de mouvement.';
-    if (!form.article_id) return 'Sélectionnez un article.';
+    if (!allowedTypes.includes(type)) {
+      return SORTIE_CLEARED_HINT;
+    }
     if (!qty || qty <= 0) return 'La quantité doit être supérieure à 0.';
     if (!form.date_creation) return 'La date est requise.';
     if (!form.motif) return 'Le motif est requis.';
@@ -328,6 +368,7 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
 
   function startNew() {
     setType('');
+    setTypeHint('');
     setForm(initialForm());
     setSelectedArticle(null);
     setArticleStock(null);
@@ -617,83 +658,107 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
             <h1 className="page-title">NOUVEAU MOUVEMENT RAPIDE</h1>
             <p className="page-subtitle finance-sub-hide-mobile">Enregistrement simplifié d'un mouvement sur un article.</p>
           </div>
-          <button className="btn btn-ghost btn-sm" onClick={() => { setView('list'); setType(''); setForm(initialForm()); setSelectedArticle(null); }}>
+          <button className="btn btn-ghost btn-sm" onClick={() => { setView('list'); setType(''); setTypeHint(''); setForm(initialForm()); setSelectedArticle(null); }}>
             ← Retour
           </button>
         </div>
 
-        {/* Type selection cards */}
-        {!type && (
-          <div style={{ marginBottom: 24 }}>
-            <SectionTitle>Type de mouvement *</SectionTitle>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 14 }}>
-              {['Entrée', 'Sortie', 'Transfert'].map((t) => {
-                const cfg = TYPE_CONFIG[t];
-                const Icon = cfg.icon;
-                return (
-                  <button
-                    key={t}
-                    onClick={() => setType(t)}
-                    style={{
-                      background: cfg.bg, border: `2px solid ${cfg.color}22`, borderRadius: 12,
-                      padding: '24px 20px', cursor: 'pointer', textAlign: 'center',
-                      transition: 'all 0.15s',
-                    }}
-                    onMouseEnter={(e) => { e.currentTarget.style.borderColor = cfg.color; e.currentTarget.style.transform = 'translateY(-2px)'; }}
-                    onMouseLeave={(e) => { e.currentTarget.style.borderColor = `${cfg.color}22`; e.currentTarget.style.transform = 'none'; }}
-                  >
-                    <Icon size={32} style={{ color: cfg.color, marginBottom: 10 }} />
-                    <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '0.95rem', color: cfg.color }}>{cfg.label}</div>
-                  </button>
-                );
-              })}
-            </div>
+        {/* 1. Article d’abord */}
+        <div className="card" style={{ padding: '24px', marginBottom: 16 }}>
+          <SectionTitle icon={<Package size={14} />}>Article *</SectionTitle>
+          <div style={{ marginBottom: 12 }}>
+            <StockArticleSearch
+              articles={articles}
+              value={form.article_id}
+              onChange={handleSelectArticle}
+              placeholder="Tapez une lettre pour rechercher…"
+            />
           </div>
-        )}
 
-        {type && (
+          {selectedArticle && (
+            <div style={{ background: 'var(--surface-2)', borderRadius: 8, padding: '14px 18px', border: '1px solid var(--border)' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 10 }}>
+                <div><span style={{ fontSize: '0.7rem', color: 'var(--text-3)', textTransform: 'uppercase' }}>Référence</span><div style={{ fontWeight: 700 }}>{selectedArticle.code || selectedArticle.reference}</div></div>
+                <div><span style={{ fontSize: '0.7rem', color: 'var(--text-3)', textTransform: 'uppercase' }}>Désignation</span><div style={{ fontWeight: 600 }}>{selectedArticle.designation || selectedArticle.nom}</div></div>
+                <div>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-3)', textTransform: 'uppercase' }}>Type d&apos;article</span>
+                  <div style={{ fontWeight: 700 }}>{articleKind || '—'}</div>
+                </div>
+                <div><span style={{ fontSize: '0.7rem', color: 'var(--text-3)', textTransform: 'uppercase' }}>Unité</span><div>{selectedArticle.unite || 'U'}</div></div>
+                <div>
+                  <span style={{ fontSize: '0.7rem', color: 'var(--text-3)', textTransform: 'uppercase' }}>Stock disponible</span>
+                  <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.1rem', color: stockAvant > 0 ? '#2E7D32' : 'var(--red)' }}>
+                    {stockAvant} {selectedArticle.unite || 'U'}
+                  </div>
+                </div>
+                <div><span style={{ fontSize: '0.7rem', color: 'var(--text-3)', textTransform: 'uppercase' }}>Emplacement</span><div>{formatEmplacementDisplay(selectedArticle.emplacement)}</div></div>
+              </div>
+              {articleStock?.levels?.length > 0 && (
+                <div style={{ marginTop: 10, fontSize: '0.78rem', color: 'var(--text-2)' }}>
+                  <strong>Par emplacement :</strong>{' '}
+                  {articleStock.levels.filter((l) => l.quantite > 0).map((l) => `${formatEmplacementDisplay(l.emplacement)}: ${l.quantite}`).join(' · ') || 'Aucun stock réparti'}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* 2. Type de mouvement (adapté au type d’article) */}
+        <div style={{ marginBottom: 24 }}>
+          <SectionTitle>Type de mouvement *</SectionTitle>
+          {!selectedArticle ? (
+            <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-3)' }}>Sélectionnez d&apos;abord un article.</p>
+          ) : (
+            <>
+              {typeHint && (
+                <p style={{ margin: '0 0 10px', fontSize: '0.82rem', color: 'var(--red)' }}>{typeHint}</p>
+              )}
+              {!articleAllowsStandardSortie(selectedArticle) && (
+                <p style={{ margin: '0 0 10px', fontSize: '0.78rem', color: 'var(--text-3)' }}>
+                  Matériel / outil : sortie standard interdite — utilisez Entrée ou Transfert pour rester localisable.
+                </p>
+              )}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 14 }}>
+                {allowedTypes.map((t) => {
+                  const cfg = TYPE_CONFIG[t];
+                  const Icon = cfg.icon;
+                  const active = type === t;
+                  return (
+                    <button
+                      key={t}
+                      type="button"
+                      onClick={() => {
+                        setType(t);
+                        setTypeHint('');
+                        if (t === 'Sortie') {
+                          setForm((f) => ({ ...f, emplacement_destination: '' }));
+                        }
+                      }}
+                      style={{
+                        background: active ? cfg.bg : '#fff',
+                        border: `2px solid ${active ? cfg.color : `${cfg.color}22`}`,
+                        borderRadius: 12,
+                        padding: '24px 20px', cursor: 'pointer', textAlign: 'center',
+                        transition: 'all 0.15s',
+                      }}
+                    >
+                      <Icon size={32} style={{ color: cfg.color, marginBottom: 10 }} />
+                      <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '0.95rem', color: cfg.color }}>{cfg.label}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+        </div>
+
+        {selectedArticle && type && (
           <div className="card" style={{ padding: '24px' }}>
-            {/* Type badge + change */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 20 }}>
               {(() => { const cfg = TYPE_CONFIG[type]; const Icon = cfg.icon; return <Icon size={20} style={{ color: cfg.color }} />; })()}
               <span style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1rem' }}>{TYPE_CONFIG[type].label}</span>
-              <button className="btn btn-ghost btn-sm" onClick={() => setType('')} style={{ marginLeft: 'auto', fontSize: '0.76rem' }}>Changer</button>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setType('')} style={{ marginLeft: 'auto', fontSize: '0.76rem' }}>Changer le type</button>
             </div>
-
-            {/* Article selection */}
-            <SectionTitle icon={<Package size={14} />}>Article *</SectionTitle>
-            <div style={{ marginBottom: 16 }}>
-              <StockArticleSearch
-                articles={articles}
-                value={form.article_id}
-                onChange={handleSelectArticle}
-                placeholder="Tapez une lettre pour rechercher…"
-              />
-            </div>
-
-            {/* Article info card */}
-            {selectedArticle && (
-              <div style={{ background: 'var(--surface-2)', borderRadius: 8, padding: '14px 18px', marginBottom: 20, border: '1px solid var(--border)' }}>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 10 }}>
-                  <div><span style={{ fontSize: '0.7rem', color: 'var(--text-3)', textTransform: 'uppercase' }}>Référence</span><div style={{ fontWeight: 700 }}>{selectedArticle.code || selectedArticle.reference}</div></div>
-                  <div><span style={{ fontSize: '0.7rem', color: 'var(--text-3)', textTransform: 'uppercase' }}>Désignation</span><div style={{ fontWeight: 600 }}>{selectedArticle.designation || selectedArticle.nom}</div></div>
-                  <div><span style={{ fontSize: '0.7rem', color: 'var(--text-3)', textTransform: 'uppercase' }}>Unité</span><div>{selectedArticle.unite || 'U'}</div></div>
-                  <div>
-                    <span style={{ fontSize: '0.7rem', color: 'var(--text-3)', textTransform: 'uppercase' }}>Stock disponible</span>
-                    <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.1rem', color: stockAvant > 0 ? '#2E7D32' : 'var(--red)' }}>
-                      {stockAvant} {selectedArticle.unite || 'U'}
-                    </div>
-                  </div>
-                  <div><span style={{ fontSize: '0.7rem', color: 'var(--text-3)', textTransform: 'uppercase' }}>Emplacement</span><div>{formatEmplacementDisplay(selectedArticle.emplacement)}</div></div>
-                </div>
-                {articleStock?.levels?.length > 0 && (
-                  <div style={{ marginTop: 10, fontSize: '0.78rem', color: 'var(--text-2)' }}>
-                    <strong>Par emplacement :</strong>{' '}
-                    {articleStock.levels.filter((l) => l.quantite > 0).map((l) => `${formatEmplacementDisplay(l.emplacement)}: ${l.quantite}`).join(' · ') || 'Aucun stock réparti'}
-                  </div>
-                )}
-              </div>
-            )}
 
             {/* Form fields */}
             <FRow>
@@ -811,7 +876,7 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
             )}
 
             <div style={{ display: 'flex', gap: 10, marginTop: 24, justifyContent: 'flex-end' }}>
-              <button className="btn btn-ghost btn-sm" onClick={() => { setView('list'); setType(''); setForm(initialForm()); setSelectedArticle(null); }}>Annuler</button>
+              <button className="btn btn-ghost btn-sm" onClick={() => { setView('list'); setType(''); setTypeHint(''); setForm(initialForm()); setSelectedArticle(null); }}>Annuler</button>
               <button className="btn btn-primary btn-sm" onClick={handleGoConfirm} disabled={loading}>
                 Vérifier et confirmer
               </button>

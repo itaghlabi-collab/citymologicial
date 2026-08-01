@@ -10,9 +10,15 @@ import {
   normalizeStockMovement,
   deleteStockMovementBon,
 } from './stockMovements';
-import { computeArticleStock, listStockLevelsForArticle } from './stockArticles';
+import { computeArticleStock, listStockLevelsForArticle, getStockArticleById } from './stockArticles';
+import {
+  assertMovementAllowedForArticle,
+  normalizeArticleType,
+  SORTIE_BLOCKED_MESSAGE,
+} from './articleMovementRules';
 
 const TABLE = 'stock_movements';
+const ARTICLES = 'stock_articles';
 
 export async function generateMRRef() {
   const y = new Date().getFullYear();
@@ -48,13 +54,30 @@ export async function generateMRRef() {
  * @param {string} [form.ref_externe]
  */
 export async function saveMouvementRapide(form) {
+  const articleId = form.article_id;
+  if (!articleId) {
+    const err = new Error('Sélectionnez un article.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+
+  const article = await getStockArticleById(articleId);
+  if (!article) {
+    const err = new Error('Article introuvable.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  assertMovementAllowedForArticle(article, form.type_mouvement);
+
   const ref = await generateMRRef();
 
   const bon = {
     ref,
     type_mouvement: form.type_mouvement,
     emplacement_source: form.emplacement_source || '',
-    emplacement_destination: form.emplacement_destination || '',
+    emplacement_destination: form.type_mouvement === 'Sortie'
+      ? ''
+      : (form.emplacement_destination || ''),
     date_creation: form.date_creation || new Date().toISOString().slice(0, 10),
     motif: form.motif || '',
     cree_par: form.cree_par || '',
@@ -191,4 +214,46 @@ export async function getArticleStockInfo(articleId) {
   const totalStock = await computeArticleStock(articleId);
   const levels = await listStockLevelsForArticle(articleId);
   return { totalStock, levels };
+}
+
+/**
+ * Audit lecture seule : sorties historiques par type d’article.
+ * Ne modifie aucun mouvement.
+ */
+export async function auditHistoricalSortiesByArticleType() {
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .select('id, ref_mouvement, type_mouvement, article_id, quantite, date_mouvement, payload, stock_articles(reference, nom, article_type)')
+    .in('type_mouvement', ['Sortie', 'sortie'])
+    .order('date_mouvement', { ascending: false });
+  if (error) throw error;
+
+  const rows = (data || []).map((row) => {
+    const p = row.payload || {};
+    const art = row.stock_articles || {};
+    const articleType = normalizeArticleType(art.article_type);
+    return {
+      reference: row.ref_mouvement || '',
+      article_code: art.reference || '',
+      article_nom: art.nom || '',
+      article_type: articleType || art.article_type || '—',
+      quantite: Number(row.quantite) || 0,
+      source: p.emplacement_source || '',
+      destination: p.emplacement_destination || '',
+      date: row.date_mouvement || '',
+      statut: p.statut || '',
+      categorie: articleType === 'Matériel' || articleType === 'Outil'
+        ? 'sortie_materiel_ou_outil'
+        : (articleType === 'Consommable' ? 'sortie_consommable' : 'sortie_autre'),
+    };
+  });
+
+  return {
+    total: rows.length,
+    materiel_outil: rows.filter((r) => r.categorie === 'sortie_materiel_ou_outil'),
+    consommable: rows.filter((r) => r.categorie === 'sortie_consommable'),
+    autre: rows.filter((r) => r.categorie === 'sortie_autre'),
+    rows,
+    message: SORTIE_BLOCKED_MESSAGE,
+  };
 }

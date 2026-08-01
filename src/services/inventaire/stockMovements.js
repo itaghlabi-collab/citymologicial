@@ -5,6 +5,7 @@ import { getSupabase } from '../../lib/supabase';
 import { requireSupabaseUserId } from '../supabase/requireUser';
 import { computeArticleStock } from './stockArticles';
 import { notifyStockChanged } from './stockSync';
+import { assertMovementAllowedForArticle } from './articleMovementRules';
 
 const TABLE = 'stock_movements';
 const LEVELS = 'stock_levels';
@@ -393,6 +394,38 @@ function validateBonForm(bon) {
   }
 }
 
+/** Validation métier article × type (Sortie interdite Matériel/Outil). */
+async function assertBonArticlesAllowMovement(bon) {
+  const type = bon.type_mouvement;
+  if (type !== 'Sortie' && type !== 'Rebut') return;
+
+  // Annulation / contre-mouvement : pas une sortie opérationnelle standard
+  const motif = String(bon.motif || '');
+  if (/^Annulation\b/i.test(motif) || /annulation du mouvement/i.test(String(bon.note || ''))) {
+    return;
+  }
+
+  const ids = [...new Set((bon.lignes || []).map((l) => l.article_id).filter(Boolean))];
+  if (!ids.length) return;
+
+  const { data, error } = await getSupabase()
+    .from(ARTICLES)
+    .select('id, reference, nom, article_type')
+    .in('id', ids);
+  if (error) throw error;
+
+  const byId = new Map((data || []).map((a) => [String(a.id), a]));
+  for (const id of ids) {
+    const art = byId.get(String(id));
+    if (!art) {
+      const err = new Error(`Article introuvable (${id}).`);
+      err.code = 'VALIDATION';
+      throw err;
+    }
+    assertMovementAllowedForArticle(art, type);
+  }
+}
+
 async function deleteBonRows(ref, reverseIfApplied = false) {
   const bon = await getStockMovementBon(ref);
   if (!bon) return;
@@ -418,6 +451,7 @@ async function markBonApplied(ref, statut) {
 export async function saveStockMovementBon(bon) {
   const uid = await requireSupabaseUserId();
   validateBonForm(bon);
+  await assertBonArticlesAllowMovement(bon);
 
   const ref = (bon.ref || '').trim() || await generateMovementRef();
   const existing = bon.ref ? await getStockMovementBon(bon.ref) : null;
@@ -476,6 +510,7 @@ export async function validateStockMovementBon(ref) {
     throw err;
   }
   validateBonForm(bon);
+  await assertBonArticlesAllowMovement(bon);
   try {
     await applyBonEffects(bon);
     await markBonApplied(ref, 'Validé');
