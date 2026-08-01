@@ -354,8 +354,8 @@ function PageContent({
       />
     );
     case 'depots':              return <Inventaire activeTab="depots" />;
-    case 'bons-mouvements':     return <Inventaire activeTab="bons-mouvements" />;
-    case 'mouvement-rapide':    return <Inventaire activeTab="mouvement-rapide" />;
+    case 'bons-mouvements':     return <Inventaire activeTab="bons-mouvements" onNavigate={onNavigate} />;
+    case 'mouvement-rapide':    return <Inventaire activeTab="mouvement-rapide" onNavigate={onNavigate} />;
     case 'demandes-chantier':   return <Inventaire activeTab="demandes-chantier" onNavigate={onNavigate} />;
     case 'stocks':              return <Inventaire activeTab="stocks" onNavigate={onNavigate} />;
     case 'inventaire-physique': return <Inventaire activeTab="inventaire-physique" />;

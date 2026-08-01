@@ -10,6 +10,7 @@ import {
 import { useStockMovements } from '../../hooks/useStockMovements';
 import { generateMouvementPdf } from '../../services/inventaire/mouvementPdf';
 import BonMouvementForm from './BonMouvementForm.jsx';
+import BonMouvementTraceabilite from './BonMouvementTraceabilite.jsx';
 import {
   INPUT_STYLE, SELECT_STYLE, EMPLACEMENTS_STOCK,
   TYPES_MOUVEMENT, STATUTS_MOUVEMENT, BADGE_MOUVEMENT, BADGE_STATUT_MV,
@@ -25,7 +26,7 @@ const TYPE_ICONS = {
   Rebut: <AlertTriangle size={13} />,
 };
 
-function DetailBon({ bon, articles, onBack, onEdit, onPdf, onDelete, pdfLoading }) {
+function DetailBon({ bon, articles, onBack, onEdit, onPdf, onDelete, pdfLoading, onNavigate }) {
   return (
     <div className="animate-fade-in">
       <div className="finance-page-actions finance-detail-actions" style={{ marginBottom: 20, flexWrap: 'wrap', gap: 10 }}>
@@ -70,7 +71,7 @@ function DetailBon({ bon, articles, onBack, onEdit, onPdf, onDelete, pdfLoading 
         {bon.note && <p style={{ marginTop: 12, fontSize: '0.84rem', color: 'var(--text-2)' }}>{bon.note}</p>}
       </div>
 
-      <div className="card" style={{ padding: 0 }}>
+      <div className="card" style={{ padding: 0, marginBottom: 14 }}>
         <div className="table-wrap">
           <table>
             <thead>
@@ -100,11 +101,17 @@ function DetailBon({ bon, articles, onBack, onEdit, onPdf, onDelete, pdfLoading 
           Lignes : {bon.lignes?.length || 0} — Quantité totale : {bon.quantite_totale || 0}
         </div>
       </div>
+
+      <BonMouvementTraceabilite
+        bon={bon}
+        articles={articles}
+        onNavigateStocks={() => onNavigate?.('stocks')}
+      />
     </div>
   );
 }
 
-export default function BonsMouvements({ articles, onArticlesChange }) {
+export default function BonsMouvements({ articles, onArticlesChange, onNavigate }) {
   const {
     records: bons, loading, saving, error, success, configured,
     reload, save, remove,
@@ -190,6 +197,7 @@ export default function BonsMouvements({ articles, onArticlesChange }) {
         onPdf={() => handlePdf(bon)}
         onDelete={() => handleDelete(bon.ref)}
         pdfLoading={pdfLoading}
+        onNavigate={onNavigate}
       />
     );
   }

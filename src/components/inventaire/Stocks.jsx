@@ -20,6 +20,7 @@ import StockFicheEditModal from './StockFicheEditModal';
 import ArticleCatalogForm from './ArticleCatalogForm';
 import { ArticleMovementHistory } from './ArticleQuickActions';
 import StockEmplacementControl, { EmplacementExtraFilters } from './StockEmplacementControl';
+import { STOCK_FILTER_KEY } from './BonMouvementTraceabilite';
 import { useStockArticles } from '../../hooks/useStockArticles';
 import { listStockLevelsForArticle } from '../../services/inventaire/stockArticles';
 import {
@@ -215,9 +216,6 @@ export default function Stocks({
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
   const [visibility, setVisibility] = useState('avec_stock');
-  const [filterTypeMvt, setFilterTypeMvt] = useState('');
-  const [filterProjet, setFilterProjet] = useState('');
-  const [filterUser, setFilterUser] = useState('');
   const [search, setSearch] = useState('');
   const [filterCat, setFilterCat] = useState('');
   const [filterEmplacement, setFilterEmplacement] = useState('');
@@ -305,7 +303,18 @@ export default function Stocks({
 
   const detailArt = detailId ? arts.find((a) => a.id === detailId) : null;
 
-  // Ouverture depuis Articles de stock / navigation
+  // Ouverture depuis Articles de stock / navigation / lien traçabilité
+  useEffect(() => {
+    try {
+      const empFilter = sessionStorage.getItem(STOCK_FILTER_KEY);
+      if (empFilter) {
+        sessionStorage.removeItem(STOCK_FILTER_KEY);
+        setFilterEmplacement(empFilter);
+        setShowFilters(true);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
   useEffect(() => {
     if (loading || !arts.length) return;
     let raw;
@@ -621,12 +630,6 @@ export default function Stocks({
                 setCustomTo={setCustomTo}
                 visibility={visibility}
                 setVisibility={setVisibility}
-                filterTypeMvt={filterTypeMvt}
-                setFilterTypeMvt={setFilterTypeMvt}
-                filterProjet={filterProjet}
-                setFilterProjet={setFilterProjet}
-                filterUser={filterUser}
-                setFilterUser={setFilterUser}
               />
             )}
             <button
@@ -634,8 +637,8 @@ export default function Stocks({
               className="btn btn-ghost btn-sm"
               onClick={() => {
                 setSearch(''); setFilterCat(''); setFilterEmplacement(''); setFilterAlerte('');
-                setPeriodKey('all'); setVisibility('avec_stock'); setFilterTypeMvt('');
-                setFilterProjet(''); setFilterUser(''); setCustomFrom(''); setCustomTo('');
+                setPeriodKey('all'); setVisibility('avec_stock');
+                setCustomFrom(''); setCustomTo('');
               }}
             >
               Réinitialiser
@@ -658,9 +661,6 @@ export default function Stocks({
           visibility={visibility}
           search={search}
           filterCat={filterCat}
-          filterTypeMvt={filterTypeMvt}
-          filterProjet={filterProjet}
-          filterUser={filterUser}
           categories={categories}
           onOpenArticle={(row) => setDetailId(row.id || row.article_id)}
           onMvt={(type, row) => setMvtModal({ type, article: row })}

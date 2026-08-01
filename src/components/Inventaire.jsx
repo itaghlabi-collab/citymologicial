@@ -75,6 +75,7 @@ export default function Inventaire({ activeTab, initialArticleCode, onArticleCod
         <BonsMouvements
           articles={articles}
           onArticlesChange={setArticles}
+          onNavigate={onNavigate}
         />
       )}
       {tab === 'mouvement-rapide' && (
@@ -82,6 +83,7 @@ export default function Inventaire({ activeTab, initialArticleCode, onArticleCod
           articles={articles}
           emplacementsList={emplacementNoms}
           onArticlesChange={setArticles}
+          onNavigate={onNavigate}
         />
       )}
       {tab === 'demandes-chantier' && <DemandesChantier onNavigate={onNavigate} />}

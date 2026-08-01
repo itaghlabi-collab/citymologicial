@@ -24,6 +24,7 @@ import {
   getArticleStockInfo,
 } from '../../services/inventaire/mouvementRapide';
 import StockArticleSearch from './StockArticleSearch.jsx';
+import BonMouvementTraceabilite from './BonMouvementTraceabilite.jsx';
 import { useAuth } from '../../hooks/useAuth';
 
 const MOTIFS_ENTREE = [
@@ -45,7 +46,7 @@ const TYPE_CONFIG = {
   Transfert: { icon: ArrowLeftRight, color: '#1565C0', bg: '#E3F2FD', label: 'Transfert', motifs: MOTIFS_TRANSFERT },
 };
 
-export default function MouvementRapide({ articles = [], emplacementsList, onArticlesChange }) {
+export default function MouvementRapide({ articles = [], emplacementsList, onArticlesChange, onNavigate }) {
   const { user } = useAuth();
   const sessionName = (user?.nom || '').trim();
 
@@ -934,6 +935,34 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
             <span>{m.cree_par || '—'}</span>
             {m.note && <><span style={{ color: 'var(--text-3)', fontWeight: 700 }}>Notes</span><span>{m.note}</span></>}
           </div>
+        </div>
+
+        <div style={{ marginTop: 16, maxWidth: 960 }}>
+          <BonMouvementTraceabilite
+            bon={{
+              ref: m.ref,
+              type_mouvement: m.type_mouvement,
+              emplacement_source: m.emplacement_source,
+              emplacement_destination: m.emplacement_destination,
+              date_creation: m.date_creation,
+              motif: m.motif,
+              cree_par: m.cree_par,
+              note: m.note,
+              statut: m.statut || 'Validé',
+              applied: m.applied !== false && (m.statut || 'Validé') !== 'Annulé',
+              receptionnaire: '',
+              article_id: m.article_id,
+              quantite_totale: m.quantite,
+              lignes: [{
+                article_id: m.article_id,
+                article_code: m.article_code,
+                article_designation: m.article_designation,
+                quantite: m.quantite,
+              }],
+            }}
+            articles={articles}
+            onNavigateStocks={() => onNavigate?.('stocks')}
+          />
         </div>
 
         <Modal open={!!cancelModal} onClose={() => { setCancelModal(null); setCancelMotif(''); }} title="Annuler le mouvement" width={480}>
