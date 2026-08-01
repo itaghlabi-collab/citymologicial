@@ -36,6 +36,8 @@ import {
   findDiversChargeForMovement,
   parseDiversMetaFromCharge,
   shouldCreateDiversGeneralExpense,
+  retryDiversExpenseSync,
+  FINANCIAL_SYNC,
 } from '../../services/inventaire/stockDiversExpense';
 import StockArticleSearch from './StockArticleSearch.jsx';
 import BonMouvementTraceabilite from './BonMouvementTraceabilite.jsx';
@@ -101,6 +103,7 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
   const [filterType, setFilterType] = useState('');
   const [typeHint, setTypeHint] = useState('');
   const [diversCharge, setDiversCharge] = useState(null);
+  const [diversSyncBusy, setDiversSyncBusy] = useState(false);
   const emplacements = emplacementsList?.length ? emplacementsList : EMPLACEMENTS_STOCK;
 
   function initialForm() {
@@ -1131,7 +1134,9 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
                 <span>{meta.cout_unitaire != null ? formatMAD(meta.cout_unitaire) : '—'}</span>
                 <span style={{ color: 'var(--text-3)', fontWeight: 700 }}>Montant imputé</span>
                 <span style={{ fontWeight: 800, color: 'var(--red)' }}>{formatMAD(diversCharge.montant)}</span>
-                <span style={{ color: 'var(--text-3)', fontWeight: 700 }}>Statut</span>
+                <span style={{ color: 'var(--text-3)', fontWeight: 700 }}>Statut sync</span>
+                <span>{m.financial_sync_status || FINANCIAL_SYNC.SYNCED}</span>
+                <span style={{ color: 'var(--text-3)', fontWeight: 700 }}>Statut dépense</span>
                 <span>{diversCharge.statut}</span>
                 <span style={{ color: 'var(--text-3)', fontWeight: 700 }}>Réf. dépense</span>
                 <span style={{ fontWeight: 700 }}>{diversCharge.ref_charge || diversCharge.id}</span>
@@ -1152,6 +1157,58 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
             </div>
           );
         })()}
+
+        {!diversCharge && (m.financial_sync_status === FINANCIAL_SYNC.FAILED
+          || (isDiversEmplacement(m.emplacement_destination)
+            && shouldCreateDiversGeneralExpense({
+              typeMouvement: m.type_mouvement,
+              articleType: articles.find((a) => String(a.id) === String(m.article_id))?.article_type
+                || articles.find((a) => String(a.id) === String(m.article_id))?.type,
+              destination: m.emplacement_destination,
+              statut: m.statut || 'Validé',
+              annule: (m.statut || '') === 'Annulé',
+            }))) && (
+          <div className="card" style={{ padding: '24px', maxWidth: 640, marginTop: 16 }}>
+            <SectionTitle>Impact financier — Dépense générale</SectionTitle>
+            <div style={{ fontSize: '0.88rem', color: 'var(--red)', marginBottom: 10 }}>
+              Statut : {m.financial_sync_status || FINANCIAL_SYNC.FAILED}
+            </div>
+            {m.financial_sync_error && (
+              <div style={{ fontSize: '0.82rem', color: 'var(--text-2)', marginBottom: 12 }}>{m.financial_sync_error}</div>
+            )}
+            {!m.financial_sync_error && (
+              <div style={{ fontSize: '0.82rem', color: 'var(--text-3)', marginBottom: 12 }}>
+                Aucune dépense générale trouvée pour ce mouvement. Le stock et la finance ne sont pas synchronisés.
+              </div>
+            )}
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              disabled={diversSyncBusy || !m.id}
+              onClick={async () => {
+                setDiversSyncBusy(true);
+                setError('');
+                try {
+                  const res = await retryDiversExpenseSync(m.id);
+                  if (res?.action === 'failed') {
+                    setError(res.error || 'Échec de synchronisation financière.');
+                  }
+                  const ch = await findDiversChargeForMovement(m.id);
+                  setDiversCharge(ch);
+                  await loadHistorique();
+                  const refreshed = (await listMouvementsRapides()).find((x) => x.id === m.id || x.ref === m.ref);
+                  if (refreshed) setDetailItem(refreshed);
+                } catch (e) {
+                  setError(e?.message || 'Échec de synchronisation financière.');
+                } finally {
+                  setDiversSyncBusy(false);
+                }
+              }}
+            >
+              {diversSyncBusy ? 'Synchronisation…' : 'Réessayer la synchronisation'}
+            </button>
+          </div>
+        )}
 
         <div style={{ marginTop: 16, maxWidth: 960 }}>
           <BonMouvementTraceabilite

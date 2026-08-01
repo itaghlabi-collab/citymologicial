@@ -67,57 +67,63 @@ export function isMovementStockApplicable(row) {
  * source + destination physiques distinctes → transfert interne
  * sauf Sortie / Rebut (destination éventuelle = traçabilité, pas un crédit stock).
  */
+/**
+ * Normalise le type métier pour recalcul / ledger.
+ * Le type explicite Sortie / Rebut / Transfert / Entrée prime toujours.
+ * src+dest → transfert UNIQUEMENT si le type n’est pas une Sortie/Rebut/Entrée explicite
+ * (réparation d’anciens mouvements ambigus).
+ */
 export function normalizeMovementKind(row) {
   const p = row?.payload || {};
   const src = normEmp(p.emplacement_source);
   const dest = normEmp(p.emplacement_destination);
-  const raw = typeFromDb(row?.type_mouvement);
+  const rawDb = typeFromDb(row?.type_mouvement);
+  const key = String(rawDb || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
   const qty = Number(row?.quantite) || 0;
 
-  if (raw === 'Sortie') {
-    return {
-      normalized_type: 'exit',
-      label: 'Consommation / sortie',
-      src,
-      dest,
-      qty,
-      raw_type: raw,
-    };
+  if (key === 'sortie') {
+    return { normalized_type: 'exit', label: 'Consommation / sortie', src, dest, qty, raw_type: 'Sortie' };
   }
-  if (raw === 'Rebut') {
-    return {
-      normalized_type: 'scrap',
-      label: 'Rebut',
-      src,
-      dest,
-      qty,
-      raw_type: raw,
-    };
+  if (key === 'rebut') {
+    return { normalized_type: 'scrap', label: 'Rebut', src, dest, qty, raw_type: 'Rebut' };
+  }
+  if (key === 'transfert') {
+    return { normalized_type: 'transfer', label: 'Transfert', src, dest, qty, raw_type: 'Transfert' };
+  }
+  if (key === 'entree' || key === 'entrée') {
+    return { normalized_type: 'entry', label: 'Entrée', src, dest, qty, raw_type: 'Entrée' };
+  }
+  if (key === 'retour') {
+    if (src && dest && empKey(src) !== empKey(dest)) {
+      return { normalized_type: 'transfer', label: 'Retour / transfert', src, dest, qty, raw_type: 'Retour' };
+    }
+    return { normalized_type: 'entry', label: 'Retour', src, dest, qty, raw_type: 'Retour' };
   }
 
+  // Historique ambigu (type manquant / inconnu) : src+dest → transfert
   if (src && dest && empKey(src) !== empKey(dest)) {
     return {
       normalized_type: 'transfer',
-      label: raw === 'Retour' ? 'Retour / transfert' : 'Transfert',
+      label: 'Transfert',
       src,
       dest,
       qty,
-      raw_type: raw,
+      raw_type: rawDb || 'Transfert',
     };
   }
-  if (raw === 'Entrée' || (!src && dest)) {
-    return { normalized_type: 'entry', label: 'Entrée', src, dest, qty, raw_type: raw };
-  }
-  if (raw === 'Retour' && dest) {
-    return { normalized_type: 'entry', label: 'Retour', src, dest, qty, raw_type: raw };
+  if (!src && dest) {
+    return { normalized_type: 'entry', label: 'Entrée', src, dest, qty, raw_type: rawDb || 'Entrée' };
   }
   return {
     normalized_type: 'exit',
-    label: raw || 'Sortie',
+    label: rawDb || 'Sortie',
     src,
     dest,
     qty,
-    raw_type: raw,
+    raw_type: rawDb || 'Sortie',
   };
 }
 

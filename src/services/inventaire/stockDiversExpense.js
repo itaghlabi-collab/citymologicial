@@ -19,6 +19,13 @@ export const EXPENSE_SCOPE_GENERAL = 'general';
 export const SOURCE_MODULE_INVENTORY = 'inventory';
 export const SOURCE_TYPE_STOCK_MOVEMENT = 'stock_movement';
 
+export const FINANCIAL_SYNC = {
+  PENDING: 'pending',
+  SYNCED: 'synced',
+  FAILED: 'failed',
+  NOT_APPLICABLE: 'not_applicable',
+};
+
 const REF_PREFIX = 'citymo:sm:general:';
 const RETURN_REF_PREFIX = 'citymo:sm:general-return:';
 
@@ -29,6 +36,19 @@ function normKey(s) {
     .replace(/[\u0300-\u036f]/g, '')
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+function normalizeMvtType(type) {
+  const k = String(type || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  if (k === 'sortie') return 'Sortie';
+  if (k === 'transfert') return 'Transfert';
+  if (k === 'entree') return 'Entrée';
+  if (k === 'retour') return 'Retour';
+  if (k === 'rebut') return 'Rebut';
+  return String(type || '').trim();
 }
 
 export function diversChargeRefKey(movementLineId) {
@@ -103,7 +123,7 @@ export async function resolveConsumableUnitCost(articleId, sourceEmplacement = '
     }
   } catch { /* table optionnelle */ }
 
-  // 4. Fallback article
+  // 4. Fallback article (prix_unitaire — jamais prix de vente)
   const { data: art, error } = await sb
     .from('stock_articles')
     .select('id, prix_unitaire, article_type, nom, reference, unite, category_id, stock_categories(nom)')
@@ -115,6 +135,37 @@ export async function resolveConsumableUnitCost(articleId, sourceEmplacement = '
     unitCost: pu,
     method: 'prix_unitaire_article',
     article: art,
+  };
+}
+
+/**
+ * Résout DIVERS par id / code / libellé (rapport de mapping).
+ */
+export async function resolveDiversLocation(formValue) {
+  await ensureDiversWarehouse().catch(() => null);
+  const { data: warehouses } = await getSupabase()
+    .from('stock_warehouses')
+    .select('id, nom, type_depot, statut, projet_lie')
+    .order('nom');
+  const diversRows = (warehouses || []).filter((w) => isDiversEmplacement(w.nom)
+    && String(w.statut || 'Actif').toLowerCase() !== 'inactif');
+  const divers = diversRows[0] || null;
+  const sent = String(formValue || '').trim();
+  const matched = isDiversEmplacement(sent)
+    || (divers && String(divers.nom).trim().toLowerCase() === sent.toLowerCase())
+    || (divers && String(divers.id) === sent);
+
+  return {
+    form_value_sent: sent,
+    backend_received: sent,
+    matched,
+    divers_id: divers?.id || null,
+    divers_code: divers ? DIVERS_EMPLACEMENT_CODE : null,
+    divers_label: divers?.nom || null,
+    divers_type: divers?.type_depot || null,
+    divers_actif: divers ? String(divers.statut || 'Actif') : null,
+    divers_projet_lie: divers?.projet_lie || null,
+    canonical_destination: matched ? (divers?.nom || DIVERS_EMPLACEMENT_CODE) : sent,
   };
 }
 
@@ -204,11 +255,8 @@ export function parseDiversMetaFromCharge(charge) {
 export function shouldCreateDiversGeneralExpense({ typeMouvement, articleType, destination, statut, annule }) {
   if (annule) return false;
   const st = String(statut || '').trim();
-  if (st && !['Validé', 'Terminé', 'Comptabilisée automatiquement'].includes(st) && /annul/i.test(st)) {
-    return false;
-  }
   if (/annul/i.test(st)) return false;
-  const type = String(typeMouvement || '').trim();
+  const type = normalizeMvtType(typeMouvement);
   if (type !== 'Transfert' && type !== 'Sortie') return false;
   if (normalizeArticleType(articleType) !== ARTICLE_TYPE_CONSOMMABLE) return false;
   if (!isDiversEmplacement(destination)) return false;
@@ -221,8 +269,7 @@ export function shouldCreateDiversGeneralExpense({ typeMouvement, articleType, d
 export function shouldCreateDiversReturnExpense({ typeMouvement, articleType, source, destination, statut, annule }) {
   if (annule) return false;
   if (/annul/i.test(String(statut || ''))) return false;
-  const type = String(typeMouvement || '').trim();
-  // Transfert retour ou Entrée depuis DIVERS
+  const type = normalizeMvtType(typeMouvement);
   const fromDivers = isDiversEmplacement(source);
   const toNonDivers = destination && !isDiversEmplacement(destination);
   if (!fromDivers || !toNonDivers) return false;
@@ -241,8 +288,8 @@ async function loadArticle(articleId) {
   return data;
 }
 
-async function markMovementFinanceLink(movementId, chargeId, kind = 'general') {
-  if (!movementId || !chargeId) return;
+async function markMovementFinanceLink(movementId, patch = {}) {
+  if (!movementId) return;
   const { data: row } = await getSupabase()
     .from('stock_movements')
     .select('id, payload')
@@ -251,11 +298,29 @@ async function markMovementFinanceLink(movementId, chargeId, kind = 'general') {
   if (!row) return;
   const payload = {
     ...(row.payload || {}),
-    finance_charge_id: chargeId,
-    finance_expense_scope: kind,
-    financially_allocated_quantity: Number((row.payload || {}).financially_allocated_quantity) || undefined,
+    ...patch,
   };
+  // Nettoyer undefined
+  Object.keys(payload).forEach((k) => {
+    if (payload[k] === undefined) delete payload[k];
+  });
   await getSupabase().from('stock_movements').update({ payload }).eq('id', movementId);
+}
+
+async function setFinancialSyncStatus(movementId, status, {
+  expenseId = null,
+  error = null,
+  scope = EXPENSE_SCOPE_GENERAL,
+  qty = undefined,
+} = {}) {
+  await markMovementFinanceLink(movementId, {
+    financial_sync_status: status,
+    financial_expense_id: expenseId,
+    financial_sync_error: error,
+    finance_expense_scope: scope,
+    finance_charge_id: expenseId || undefined,
+    ...(qty != null ? { financially_allocated_quantity: qty } : {}),
+  });
 }
 
 /**
@@ -288,87 +353,108 @@ export async function syncDiversGeneralExpenseForMovementLine({
     statut,
     annule,
   })) {
+    await setFinancialSyncStatus(movementId, FINANCIAL_SYNC.NOT_APPLICABLE);
     return { action: 'skipped', id: null, reason: 'not_eligible' };
   }
+
+  await setFinancialSyncStatus(movementId, FINANCIAL_SYNC.PENDING);
+
+  const mapping = await resolveDiversLocation(emplacementDestination);
+  const destCanonical = mapping.canonical_destination;
 
   const refKey = diversChargeRefKey(movementId);
   const existing = await findChargeByRefPaiement(refKey);
   if (existing?.id && !/annul/i.test(String(existing.statut || ''))) {
-    return { action: 'existing', id: existing.id, ref: existing.ref_charge };
+    await setFinancialSyncStatus(movementId, FINANCIAL_SYNC.SYNCED, {
+      expenseId: existing.id,
+      qty: Number(quantite) || 0,
+    });
+    return { action: 'existing', id: existing.id, ref: existing.ref_charge, mapping };
   }
 
   const { unitCost, method } = await resolveConsumableUnitCost(articleId, emplacementSource);
   const montant = roundMoney(qty * unitCost);
   if (montant <= 0) {
-    console.warn('[CITYMO] DIVERS expense skipped — coût unitaire nul', { articleId, movementId });
-    return { action: 'skipped', id: null, reason: 'zero_cost' };
+    const errMsg = `Coût unitaire nul ou invalide (méthode ${method}). Impossible de créer la dépense ${qty} × ${unitCost}.`;
+    await setFinancialSyncStatus(movementId, FINANCIAL_SYNC.FAILED, { error: errMsg });
+    return { action: 'failed', id: null, reason: 'zero_cost', error: errMsg, mapping };
   }
 
-  const categoryId = await ensureConsumablesCategoryId();
-  const subCat = art?.stock_categories?.nom || '';
-  const articleCode = art?.reference || '';
-  const articleNom = art?.nom || '';
-  const unit = art?.unite || 'U';
+  try {
+    const categoryId = await ensureConsumablesCategoryId();
+    const subCat = art?.stock_categories?.nom || '';
+    const articleCode = art?.reference || '';
+    const articleNom = art?.nom || '';
+    const unit = art?.unite || 'U';
 
-  const chargeRow = {
-    date_charge: dateMouvement || new Date().toISOString().slice(0, 10),
-    libelle: `Affectation stock DIVERS — ${articleNom || articleCode || 'Article'}`,
-    categorie: STOCK_DIVERS_CHARGE_CATEGORY,
-    category_id: categoryId,
-    montant,
-    fournisseur: articleCode || null,
-    projet_lie: null,
-    project_id: null,
-    departement: subCat || DIVERS_EMPLACEMENT_CODE,
-    mode_paiement: 'Stock',
-    ref_paiement: refKey,
-    statut: STOCK_DIVERS_CHARGE_STATUT,
-    commentaire: buildMetaCommentaire({
-      refMouvement,
-      articleCode,
-      articleNom,
-      qty,
-      unit,
-      unitCost,
-      source: emplacementSource,
-      destination: DIVERS_EMPLACEMENT_CODE,
-      sourceId: movementId,
-      method,
-    }),
-    validateur: creePar || null,
-  };
+    const chargeRow = {
+      date_charge: dateMouvement || new Date().toISOString().slice(0, 10),
+      libelle: `Affectation stock DIVERS — ${articleNom || articleCode || 'Article'}`,
+      categorie: STOCK_DIVERS_CHARGE_CATEGORY,
+      category_id: categoryId,
+      montant,
+      fournisseur: articleCode || null,
+      projet_lie: null,
+      project_id: null,
+      departement: subCat || DIVERS_EMPLACEMENT_CODE,
+      mode_paiement: 'Stock',
+      ref_paiement: refKey,
+      statut: STOCK_DIVERS_CHARGE_STATUT,
+      commentaire: buildMetaCommentaire({
+        refMouvement,
+        articleCode,
+        articleNom,
+        qty,
+        unit,
+        unitCost,
+        source: emplacementSource,
+        destination: destCanonical || DIVERS_EMPLACEMENT_CODE,
+        sourceId: movementId,
+        method,
+      }),
+      validateur: creePar || null,
+    };
 
-  const sb = getSupabase();
-  const uid = (await sb.auth.getUser()).data?.user?.id;
+    const sb = getSupabase();
+    const uid = (await sb.auth.getUser()).data?.user?.id;
 
-  if (existing?.id) {
-    // Réactivation éventuelle après annulation
-    const refCharge = await assignChargeRefIfMissing(existing.id, existing.ref_charge);
+    if (existing?.id) {
+      const refCharge = await assignChargeRefIfMissing(existing.id, existing.ref_charge);
+      const { data, error } = await sb
+        .from('finance_charges')
+        .update({ ...chargeRow, ref_charge: refCharge })
+        .eq('id', existing.id)
+        .select('id, ref_charge')
+        .single();
+      if (error) throw error;
+      await setFinancialSyncStatus(movementId, FINANCIAL_SYNC.SYNCED, {
+        expenseId: data.id,
+        qty,
+      });
+      return { action: 'updated', id: data.id, ref: data.ref_charge, montant, unitCost, mapping };
+    }
+
     const { data, error } = await sb
       .from('finance_charges')
-      .update({ ...chargeRow, ref_charge: refCharge })
-      .eq('id', existing.id)
+      .insert([{
+        ...chargeRow,
+        ref_charge: await generateChargeRef(),
+        created_by: uid || null,
+      }])
       .select('id, ref_charge')
       .single();
     if (error) throw error;
-    await markMovementFinanceLink(movementId, data.id);
-    return { action: 'updated', id: data.id, ref: data.ref_charge, montant, unitCost };
+
+    await setFinancialSyncStatus(movementId, FINANCIAL_SYNC.SYNCED, {
+      expenseId: data.id,
+      qty,
+    });
+    return { action: 'created', id: data.id, ref: data.ref_charge, montant, unitCost, mapping };
+  } catch (err) {
+    const errMsg = err?.message || String(err);
+    await setFinancialSyncStatus(movementId, FINANCIAL_SYNC.FAILED, { error: errMsg });
+    return { action: 'failed', id: null, error: errMsg, mapping };
   }
-
-  const { data, error } = await sb
-    .from('finance_charges')
-    .insert([{
-      ...chargeRow,
-      ref_charge: await generateChargeRef(),
-      created_by: uid || null,
-    }])
-    .select('id, ref_charge')
-    .single();
-  if (error) throw error;
-
-  await markMovementFinanceLink(movementId, data.id);
-  // Pas de sync caisse / project_expenses : imputation stock hors projet
-  return { action: 'created', id: data.id, ref: data.ref_charge, montant, unitCost };
 }
 
 /**
@@ -559,7 +645,11 @@ export async function syncDiversExpensesForBon(bon) {
         creePar: bon.cree_par,
         statut,
       });
-      if (toDivers.action !== 'skipped' && toDivers.action !== 'none') {
+      if (toDivers.action === 'created' || toDivers.action === 'updated' || toDivers.action === 'existing') {
+        results.push({ movementId, kind: 'to_divers', ...toDivers });
+        continue;
+      }
+      if (toDivers.action === 'failed') {
         results.push({ movementId, kind: 'to_divers', ...toDivers });
         continue;
       }
@@ -581,10 +671,147 @@ export async function syncDiversExpensesForBon(bon) {
       }
     } catch (err) {
       console.warn('[CITYMO] sync DIVERS expense', err);
-      results.push({ movementId, action: 'error', error: err?.message });
+      await setFinancialSyncStatus(movementId, FINANCIAL_SYNC.FAILED, {
+        error: err?.message || String(err),
+      }).catch(() => {});
+      results.push({ movementId, action: 'failed', error: err?.message });
     }
   }
   return results;
+}
+
+/** Réessayer la sync financière d’une ligne de mouvement. */
+export async function retryDiversExpenseSync(movementId) {
+  if (!movementId) throw new Error('movementId requis');
+  const { data: row, error } = await getSupabase()
+    .from('stock_movements')
+    .select('*, stock_articles(reference, nom, article_type, prix_unitaire, unite)')
+    .eq('id', movementId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!row) throw new Error('Mouvement introuvable');
+
+  const p = row.payload || {};
+  const bonLike = {
+    ref: row.ref_mouvement,
+    type_mouvement: row.type_mouvement === 'Entree' ? 'Entrée' : row.type_mouvement,
+    emplacement_source: p.emplacement_source || '',
+    emplacement_destination: p.emplacement_destination || '',
+    date_creation: row.date_mouvement,
+    cree_par: p.cree_par || '',
+    statut: p.statut || 'Validé',
+    lignes: [{
+      id: row.id,
+      article_id: row.article_id,
+      quantite: row.quantite,
+    }],
+  };
+  const results = await syncDiversExpensesForBon(bonLike);
+  return results[0] || { action: 'none' };
+}
+
+/**
+ * DRY RUN lecture seule — cas PEINTURE VINYLIQUE / DIVERS / 6 kg.
+ * Ne modifie aucune donnée.
+ */
+export async function dryRunPeintureDiversSortieBug({
+  articleNameIncludes = 'PEINTURE VINYLIQUE',
+  qty = 6,
+} = {}) {
+  const mapping = await resolveDiversLocation(DIVERS_EMPLACEMENT_CODE);
+  const { data, error } = await getSupabase()
+    .from('stock_movements')
+    .select('id, ref_mouvement, type_mouvement, quantite, date_mouvement, payload, stock_articles(id, reference, nom, article_type, prix_unitaire, unite)')
+    .order('date_mouvement', { ascending: false })
+    .limit(200);
+  if (error) throw error;
+
+  const needle = String(articleNameIncludes || '').toUpperCase();
+  const candidates = (data || []).filter((row) => {
+    const art = row.stock_articles || {};
+    const name = String(art.nom || '').toUpperCase();
+    const p = row.payload || {};
+    const dest = p.emplacement_destination || '';
+    const q = Number(row.quantite) || 0;
+    return name.includes(needle)
+      && (qty == null || q === Number(qty))
+      && isDiversEmplacement(dest);
+  });
+
+  const rows = [];
+  for (const row of candidates) {
+    const p = row.payload || {};
+    const art = row.stock_articles || {};
+    const src = p.emplacement_source || '';
+    const dest = p.emplacement_destination || '';
+    const typeDb = row.type_mouvement;
+    const typeUi = typeDb === 'Entree' ? 'Entrée' : typeDb;
+    const kind = (() => {
+      const k = String(typeUi || '').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+      if (k === 'sortie') return 'exit (Sortie — pas de crédit dest)';
+      if (k === 'transfert') return 'transfer';
+      return k;
+    })();
+    const unitCost = Number(art.prix_unitaire) || 0;
+    const q = Number(row.quantite) || 0;
+    const expected = roundMoney(q * unitCost);
+    const existing = await findChargeByRefPaiement(diversChargeRefKey(row.id)).catch(() => null);
+
+    // Niveaux actuels (lecture)
+    let levelDepot = null;
+    let levelDivers = null;
+    try {
+      const { data: levels } = await getSupabase()
+        .from('stock_levels')
+        .select('emplacement, quantite')
+        .eq('article_id', art.id || row.article_id);
+      (levels || []).forEach((l) => {
+        if (String(l.emplacement || '').toUpperCase().includes('LAKHYAYTA')) levelDepot = l;
+        if (isDiversEmplacement(l.emplacement)) levelDivers = l;
+      });
+    } catch { /* ignore */ }
+
+    const isSortie = String(typeUi).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '') === 'sortie';
+
+    rows.push({
+      movement_id: row.id,
+      reference: row.ref_mouvement,
+      type_enregistre_db: typeDb,
+      type_selectionne_utilisateur: typeUi,
+      type_normalise: kind,
+      source: src,
+      destination: dest,
+      quantite: q,
+      article: `${art.reference || ''} — ${art.nom || ''}`,
+      article_type: art.article_type,
+      cout_unitaire: unitCost,
+      montant_attendu: expected || 120,
+      impact_actuel_depot: levelDepot ? Number(levelDepot.quantite) : null,
+      impact_actuel_divers: levelDivers ? Number(levelDivers.quantite) : null,
+      depense_generale: existing
+        ? { id: existing.id, ref: existing.ref_charge, montant: existing.montant, statut: existing.statut }
+        : null,
+      financial_sync_status: p.financial_sync_status || null,
+      financial_sync_error: p.financial_sync_error || null,
+      divers_mapping: mapping,
+      proposition_si_sortie: isSortie ? {
+        retirer_qty_divers: q,
+        conserver_debit_depot: true,
+        creer_depense_generale: !existing,
+        montant: expected || (q * 20),
+        ne_pas_supprimer_mouvement: true,
+        note: 'Aucune modification appliquée — validation explicite requise.',
+      } : null,
+    });
+  }
+
+  return {
+    generated_at: new Date().toISOString(),
+    note: 'DRY RUN — aucune donnée modifiée.',
+    divers_emplacement: mapping,
+    total_candidates: rows.length,
+    rows,
+  };
 }
 
 /** Annulation de toutes les dépenses liées aux lignes d’un bon. */

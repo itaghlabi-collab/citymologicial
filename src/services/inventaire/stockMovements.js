@@ -32,6 +32,22 @@ function typeFromDb(type) {
   return TYPE_FROM_DB[type] || type || 'Entrée';
 }
 
+/** Normalise le type pour les effets stock (respecte le choix utilisateur). */
+export function normalizeMovementTypeLabel(type) {
+  const raw = String(type || '').trim();
+  if (!raw) return '';
+  const key = raw
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '');
+  if (key === 'entree' || key === 'entrée') return 'Entrée';
+  if (key === 'sortie') return 'Sortie';
+  if (key === 'transfert') return 'Transfert';
+  if (key === 'retour') return 'Retour';
+  if (key === 'rebut') return 'Rebut';
+  return typeFromDb(raw);
+}
+
 function shouldApplyStock(statut) {
   return statut === 'Validé' || statut === 'Terminé';
 }
@@ -60,6 +76,9 @@ export function normalizeStockMovement(row, article = null) {
     applied: !!p.applied,
     ligne_notes: p.ligne_notes || '',
     ligne_index: p.ligne_index ?? 0,
+    financial_sync_status: p.financial_sync_status || null,
+    financial_expense_id: p.financial_expense_id || p.finance_charge_id || null,
+    financial_sync_error: p.financial_sync_error || null,
     created_at: row.created_at,
   };
 }
@@ -316,30 +335,41 @@ async function applyMovementEffects(mvt, reverse = false) {
   if (!mvt.article_id || qty <= 0) return;
 
   const sign = reverse ? -1 : 1;
-  const type = mvt.type_mouvement;
+  const type = normalizeMovementTypeLabel(mvt.type_mouvement);
   const src = (mvt.emplacement_source || '').trim();
   const dest = (mvt.emplacement_destination || '').trim();
 
-  // Sortie / Rebut : débit source uniquement (destination éventuelle = traçabilité, pas de crédit stock)
+  // Sortie / Rebut : TOUJOURS débit source uniquement.
+  // Ne jamais créditer la destination (même DIVERS) — le type choisi prime.
   if (type === 'Sortie' || type === 'Rebut') {
     if (src) await adjustLevel(mvt.article_id, src, sign * -qty);
     return;
   }
 
-  // Source + destination physiques distinctes → transfert
-  const isTransferLike = !!(src && dest && src.toLowerCase() !== dest.toLowerCase());
-
-  if (isTransferLike && type !== 'Entrée') {
-    await adjustLevel(mvt.article_id, src, sign * -qty);
-    await adjustLevel(mvt.article_id, dest, sign * qty);
-    if (!reverse) await updateArticleEmplacement(mvt.article_id, dest);
+  // Transfert explicite
+  if (type === 'Transfert') {
+    if (src) await adjustLevel(mvt.article_id, src, sign * -qty);
+    if (dest) await adjustLevel(mvt.article_id, dest, sign * qty);
+    if (!reverse && dest) await updateArticleEmplacement(mvt.article_id, dest);
     return;
   }
 
   if (type === 'Entrée' || (type === 'Retour' && dest && !src)) {
     await adjustLevel(mvt.article_id, dest, sign * qty);
     if (!reverse) await updateArticleEmplacement(mvt.article_id, dest);
-  } else if (type === 'Transfert' || type === 'Retour') {
+    return;
+  }
+
+  if (type === 'Retour') {
+    if (src) await adjustLevel(mvt.article_id, src, sign * -qty);
+    if (dest) await adjustLevel(mvt.article_id, dest, sign * qty);
+    if (!reverse && dest) await updateArticleEmplacement(mvt.article_id, dest);
+    return;
+  }
+
+  // Types ambigus / historiques uniquement : src+dest → transfert
+  const isTransferLike = !!(src && dest && src.toLowerCase() !== dest.toLowerCase());
+  if (isTransferLike) {
     await adjustLevel(mvt.article_id, src, sign * -qty);
     await adjustLevel(mvt.article_id, dest, sign * qty);
     if (!reverse) await updateArticleEmplacement(mvt.article_id, dest);
