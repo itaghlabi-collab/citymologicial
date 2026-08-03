@@ -1,6 +1,6 @@
 /**
- * SuiviReceptions.jsx — Check-list de récupération (cases cochées).
- * Visibilité uniquement : n'écrit pas dans purchase_orders / stock / finance.
+ * SuiviReceptions.jsx — Check-list de récupération des Ordres d'achat (Validé).
+ * Visibilité uniquement : n'écrit pas dans OA métier / stock / finance.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -136,7 +136,7 @@ function DetailChecklist({ item, canEdit, userName, onSaved, onBack }) {
       // qty non saisie : auto 0 / qty_ordered pour compatibilité statut (donnée technique invisible).
       const qty = technicalQty(line, checked);
       await upsertLineRetrieval({
-        purchaseOrderId: item.id,
+        acquisitionOrderId: item.id,
         lineId: line.line_id,
         qtyRetrieved: qty.qtyRetrieved,
         qtyOrdered: qty.qtyOrdered,
@@ -181,7 +181,7 @@ function DetailChecklist({ item, canEdit, userName, onSaved, onBack }) {
     try {
       const qty = technicalQty(line, nextDone);
       await upsertLineRetrieval({
-        purchaseOrderId: item.id,
+        acquisitionOrderId: item.id,
         lineId: line.line_id,
         qtyRetrieved: qty.qtyRetrieved,
         qtyOrdered: qty.qtyOrdered,
@@ -409,8 +409,8 @@ export default function SuiviReceptions() {
       setRole(r);
     } catch (e) {
       const msg = e?.message || String(e);
-      if (/purchase_order_retrievals|does not exist|42P01|schema cache/i.test(msg)) {
-        setError('Table de suivi absente. Exécutez supabase/RUN_SUIVI_RECEPTIONS_BC.sql dans Supabase SQL Editor.');
+      if (/purchase_acquisition_order_retrievals|does not exist|42P01|schema cache/i.test(msg)) {
+        setError('Table de suivi absente. Exécutez supabase/RUN_SUIVI_RECEPTIONS_OA.sql dans Supabase SQL Editor.');
       } else {
         setError(msg);
       }
@@ -463,7 +463,7 @@ export default function SuiviReceptions() {
       <div className="page-header flex-between" style={{ flexWrap: 'wrap', gap: 10 }}>
         <div>
           <h1 className="page-title">SUIVI DES RÉCEPTIONS</h1>
-          <p className="page-subtitle">Check-list de récupération — confirmation visuelle uniquement (sans impact stock / finance).</p>
+          <p className="page-subtitle">Check-list de récupération des ordres d'achat validés — visibilité uniquement.</p>
         </div>
       </div>
 
@@ -485,7 +485,7 @@ export default function SuiviReceptions() {
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
           <div style={{ flex: 1, minWidth: 180, position: 'relative' }}>
             <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Référence, fournisseur, projet…" style={{ ...INPUT_STYLE, paddingLeft: 32 }} />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Réf. OA, fournisseur, projet…" style={{ ...INPUT_STYLE, paddingLeft: 32 }} />
           </div>
           <select value={filterStatut} onChange={(e) => setFilterStatut(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 200 }}>
             <option value="">Tous</option>
@@ -518,18 +518,17 @@ export default function SuiviReceptions() {
           <Loader2 size={18} className="cin-spin" /> Chargement…
         </div>
       ) : filtered.length === 0 ? (
-        <EmptyState icon={ClipboardCheck} title="Aucune demande à afficher" text="Aucun élément ne correspond aux filtres." />
+        <EmptyState icon={ClipboardCheck} title="Aucun ordre à afficher" text="Aucun ordre d'achat Validé ne correspond aux filtres." />
       ) : (
         <div className="card" style={{ padding: 0, overflow: 'auto' }}>
           <table className="data-table">
             <thead>
               <tr>
-                <th>Référence</th>
+                <th>Référence OA</th>
                 <th>Titre</th>
-                <th>Demandeur</th>
                 <th>Fournisseur</th>
                 <th>Projet</th>
-                <th>Date validation</th>
+                <th>Date OA</th>
                 <th>Statut récupération</th>
                 <th>Lignes récupérées</th>
                 <th>Dernière récupération</th>
@@ -540,12 +539,11 @@ export default function SuiviReceptions() {
             <tbody>
               {filtered.map((r) => (
                 <tr key={r.id}>
-                  <td data-label="Réf."><strong style={{ color: 'var(--red)' }}>{r.ref}</strong></td>
+                  <td data-label="Réf. OA"><strong style={{ color: 'var(--red)' }}>{r.ref}</strong></td>
                   <td data-label="Titre">{r.titre || '—'}</td>
-                  <td data-label="Demandeur">{r.demandeur || '—'}</td>
                   <td data-label="Fournisseur">{r.fournisseur}</td>
                   <td data-label="Projet">{r.projet}</td>
-                  <td data-label="Date">{r.date_validation || r.date_commande || '—'}</td>
+                  <td data-label="Date OA">{r.date_validation || r.date_commande || '—'}</td>
                   <td data-label="Statut">
                     <span className={`badge ${RETRIEVAL_STATUS_BADGE[r.statut_recuperation] || 'badge-grey'}`} style={{ fontSize: '0.72rem' }}>
                       {r.statut_recuperation}
