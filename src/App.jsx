@@ -172,6 +172,7 @@ const NAV = [
     items: [
       { id: 'demandes-achat',     label: "Demandes d'achat",     icon: ClipboardList },
       { id: 'bons-commande',      label: 'Bon de commande',      icon: ShoppingCart },
+      { id: 'suivi-receptions',   label: 'Suivi des réceptions', icon: ClipboardCheck },
       { id: 'fournisseurs',       label: 'Fournisseurs',         icon: UserCog },
       { id: 'categories-fournisseurs', label: 'Catégories fournisseurs', icon: Tag },
       { id: 'ordres-achat',       label: "Ordre d'achat",        icon: FileCheck },
@@ -248,6 +249,7 @@ const MODULE_LABELS = {
   'ordres-paiement':   'Ordre de paiement',
   'demandes-achat':    "Demandes d'achat",
   'bons-commande':     'Bon de commande',
+  'suivi-receptions':  'Suivi des réceptions',
   fournisseurs:        'Fournisseurs',
   'categories-fournisseurs': 'Catégories fournisseurs',
   'ordres-achat':      "Ordre d'achat",
@@ -340,6 +342,7 @@ function PageContent({
     /* Achats */
     case 'demandes-achat':      return <Achats activeTab="demandes-achat" onNavigate={onNavigate} />;
     case 'bons-commande':       return <Achats activeTab="bons-commande" onNavigate={onNavigate} />;
+    case 'suivi-receptions':    return <Achats activeTab="suivi-receptions" onNavigate={onNavigate} />;
     case 'fournisseurs':        return <Achats activeTab="fournisseurs" onNavigate={onNavigate} />;
     case 'categories-fournisseurs': return <Achats activeTab="categories-fournisseurs" onNavigate={onNavigate} />;
     case 'comparaison-devis':   return <Achats activeTab="demandes-achat" onNavigate={onNavigate} />;

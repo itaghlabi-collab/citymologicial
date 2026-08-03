@@ -111,6 +111,11 @@ export async function canAccessRoute(user, routeId) {
   if (access.estAdmin) return true;
   if (access.legacy) return true;
 
+  // Nouvelle rubrique visibilité : même accès que Bon de commande (sans modifier les droits DB existants)
+  if (routeId === 'suivi-receptions') {
+    return hasAccess(access, 'suivi-receptions', 'voir') || hasAccess(access, 'bons-commande', 'voir');
+  }
+
   return hasAccess(access, routeId, 'voir');
 }
 
@@ -144,6 +149,10 @@ export async function getAccessibleRouteIds(user) {
 
   if (canAccessExecutiveCalendar(user) && !allowed.includes('agenda-direction')) {
     allowed.push('agenda-direction');
+  }
+
+  if (allowed.includes('bons-commande') && !allowed.includes('suivi-receptions')) {
+    allowed.push('suivi-receptions');
   }
 
   return allowed;

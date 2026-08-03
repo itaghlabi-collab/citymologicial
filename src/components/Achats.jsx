@@ -8,6 +8,7 @@ import BonsCommande     from './achats/BonsCommande.jsx';
 import Fournisseurs     from './achats/Fournisseurs.jsx';
 import CategoriesFournisseurs from './achats/CategoriesFournisseurs.jsx';
 import OrdresAchat      from './achats/OrdresAchat.jsx';
+import SuiviReceptions from './achats/SuiviReceptions.jsx';
 
 export default function Achats({ activeTab, onNavigate }) {
   const tab = activeTab || 'demandes-achat';
@@ -27,6 +28,7 @@ export default function Achats({ activeTab, onNavigate }) {
       )}
       {tab === 'categories-fournisseurs' && <CategoriesFournisseurs />}
       {tab === 'ordres-achat'      && <OrdresAchat />}
+      {tab === 'suivi-receptions'  && <SuiviReceptions />}
     </div>
   );
 }
