@@ -22,12 +22,14 @@ import {
 } from '../../services/achats/purchaseWorkflowRoles';
 import {
   INPUT_STYLE, SELECT_STYLE,
-  KpiCard, EmptyState, SectionTitle, FField,
+  KpiCard, EmptyState, SectionTitle, FField, Modal,
 } from './shared.jsx';
 
-const WRAP_TEXT = {
-  overflowWrap: 'anywhere',
-  wordBreak: 'break-word',
+/** Textes longs : coupe uniquement entre mots (jamais lettre à lettre). */
+const SOFT_WRAP = {
+  overflowWrap: 'break-word',
+  wordBreak: 'normal',
+  whiteSpace: 'normal',
   minWidth: 0,
 };
 
@@ -91,7 +93,7 @@ function MetaRow({ label, children }) {
   return (
     <div style={{ display: 'grid', gridTemplateColumns: 'minmax(88px, 34%) 1fr', gap: 8, alignItems: 'start' }}>
       <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.02em' }}>{label}</div>
-      <div style={{ fontSize: '0.88rem', color: 'var(--text)', ...WRAP_TEXT }}>{children}</div>
+      <div style={{ fontSize: '0.88rem', color: 'var(--text)', ...SOFT_WRAP }}>{children}</div>
     </div>
   );
 }
@@ -244,8 +246,8 @@ function DetailChecklist({ item, canEdit, userName, onSaved, onBack }) {
       </button>
 
       <div className="page-header" style={{ marginBottom: 16 }}>
-        <h1 className="page-title" style={WRAP_TEXT}>{item.ref}</h1>
-        <p className="page-subtitle" style={WRAP_TEXT}>
+        <h1 className="page-title" style={SOFT_WRAP}>{item.ref}</h1>
+        <p className="page-subtitle" style={SOFT_WRAP}>
           {item.titre && item.titre !== item.ref ? `${item.titre} · ` : ''}
           {item.fournisseur} · {item.date_validation || item.date_commande || '—'} ·{' '}
           <span className={`badge ${RETRIEVAL_STATUS_BADGE[item.statut_recuperation] || 'badge-grey'}`}>
@@ -255,8 +257,8 @@ function DetailChecklist({ item, canEdit, userName, onSaved, onBack }) {
         </p>
       </div>
 
-      {error && <div className="card" style={{ padding: 12, marginBottom: 12, color: 'var(--red)', ...WRAP_TEXT }}>{error}</div>}
-      {success && <div className="card" style={{ padding: 12, marginBottom: 12, color: 'var(--green, #1a7f4b)', ...WRAP_TEXT }}>{success}</div>}
+      {error && <div className="card" style={{ padding: 12, marginBottom: 12, color: 'var(--red)', ...SOFT_WRAP }}>{error}</div>}
+      {success && <div className="card" style={{ padding: 12, marginBottom: 12, color: 'var(--green, #1a7f4b)', ...SOFT_WRAP }}>{success}</div>}
 
       {!canEdit && (
         <div className="card" style={{ padding: 12, marginBottom: 12, fontSize: '0.84rem', color: 'var(--text-2)' }}>
@@ -300,12 +302,12 @@ function DetailChecklist({ item, canEdit, userName, onSaved, onBack }) {
                     </button>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-                        <div style={{ fontWeight: 700, fontSize: '0.95rem', ...WRAP_TEXT }}>{line.designation}</div>
+                        <div style={{ fontWeight: 700, fontSize: '0.95rem', ...SOFT_WRAP }}>{line.designation}</div>
                         <span className={`badge ${RETRIEVAL_STATUS_BADGE[line.statut_ligne] || 'badge-grey'}`} style={{ fontSize: '0.7rem' }}>
                           {line.statut_ligne || (line.done ? RETRIEVAL_STATUS.RECUPERE : RETRIEVAL_STATUS.A_RECUPERER)}
                         </span>
                       </div>
-                      <div style={{ fontSize: '0.82rem', color: 'var(--text-3)', marginTop: 6, ...WRAP_TEXT }}>
+                      <div style={{ fontSize: '0.82rem', color: 'var(--text-3)', marginTop: 6, ...SOFT_WRAP }}>
                         {qtyLabel || 'Récupéré'}
                         {line.retrieved_by ? ` · Confirmé par ${line.retrieved_by}` : ''}
                         {line.retrieved_at ? ` · ${line.retrieved_at}` : ''}
@@ -352,7 +354,7 @@ function DetailChecklist({ item, canEdit, userName, onSaved, onBack }) {
                   )}
 
                   {!canEdit && line.observation && (
-                    <div style={{ fontSize: '0.8rem', color: 'var(--text-2)', marginTop: 8, ...WRAP_TEXT }}>
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-2)', marginTop: 8, ...SOFT_WRAP }}>
                       Observation : {line.observation}
                     </div>
                   )}
@@ -384,15 +386,15 @@ function DetailChecklist({ item, canEdit, userName, onSaved, onBack }) {
                 {historyRows.map((h) => (
                   <tr key={h.id}>
                     <td data-label="Date">{h.date}</td>
-                    <td data-label="Ligne" style={WRAP_TEXT}>{h.ligne}</td>
+                    <td data-label="Ligne" style={SOFT_WRAP}>{h.ligne}</td>
                     <td data-label="Ancien">{h.ancien}</td>
                     <td data-label="Nouveau">
                       <span className={`badge ${RETRIEVAL_STATUS_BADGE[h.nouveau] || 'badge-grey'}`} style={{ fontSize: '0.7rem' }}>
                         {h.nouveau}
                       </span>
                     </td>
-                    <td data-label="Utilisateur" style={WRAP_TEXT}>{h.utilisateur}</td>
-                    <td data-label="Observation" style={WRAP_TEXT}>{h.observation || '—'}</td>
+                    <td data-label="Utilisateur" style={SOFT_WRAP}>{h.utilisateur}</td>
+                    <td data-label="Observation" style={SOFT_WRAP}>{h.observation || '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -410,6 +412,7 @@ export default function SuiviReceptions() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [actionError, setActionError] = useState('');
   const [role, setRole] = useState(PURCHASE_ROLES.OTHER);
   const [detailId, setDetailId] = useState(null);
   const [search, setSearch] = useState('');
@@ -418,6 +421,8 @@ export default function SuiviReceptions() {
   const [filterProjet, setFilterProjet] = useState('');
   const [dateFrom, setDateFrom] = useState('');
   const [dateTo, setDateTo] = useState('');
+  const [confirmItem, setConfirmItem] = useState(null);
+  const [bulkBusyId, setBulkBusyId] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -465,6 +470,95 @@ export default function SuiviReceptions() {
 
   const detail = detailId ? rows.find((r) => r.id === detailId) : null;
   const editable = canEditChecklist(role);
+
+  async function confirmMarkAllRetrieved() {
+    if (!confirmItem || bulkBusyId) return;
+    const item = confirmItem;
+    const pending = (item.lines || []).filter((l) => !l.done);
+    if (!pending.length) {
+      setConfirmItem(null);
+      return;
+    }
+    setBulkBusyId(item.id);
+    setActionError('');
+    const date = todayISO();
+    try {
+      // Réutilise upsertLineRetrieval ligne par ligne (même logique check-list).
+      for (const line of pending) {
+        const qty = technicalQty(line, true);
+        await upsertLineRetrieval({
+          acquisitionOrderId: item.id,
+          lineId: line.line_id,
+          qtyRetrieved: qty.qtyRetrieved,
+          qtyOrdered: qty.qtyOrdered,
+          retrievedBy: userName,
+          observation: line.observation || '',
+          retrievedAt: date,
+        });
+      }
+      setConfirmItem(null);
+      await load();
+    } catch (e) {
+      setActionError(e?.message || 'Enregistrement impossible. Réessayez.');
+      // Ne ferme pas la modal : statut UI non modifié tant que load() n'a pas réussi.
+    } finally {
+      setBulkBusyId('');
+    }
+  }
+
+  function renderQuickRetrieve(item, { mobile = false } = {}) {
+    const done = item.statut_recuperation === RETRIEVAL_STATUS.RECUPERE;
+    const busy = bulkBusyId === item.id;
+    if (!editable) return null;
+    if (done) {
+      return (
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          disabled
+          title="Déjà récupéré"
+          style={{
+            color: 'var(--green, #1a7f4b)',
+            minHeight: mobile ? 42 : 36,
+            width: mobile ? '100%' : undefined,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+            opacity: 1,
+            cursor: 'default',
+          }}
+        >
+          <CheckSquare size={16} /> {mobile ? 'Récupéré' : null}
+        </button>
+      );
+    }
+    return (
+      <button
+        type="button"
+        className={mobile ? 'btn btn-ghost btn-sm' : 'btn btn-ghost btn-sm'}
+        disabled={!!bulkBusyId}
+        title="Marquer comme récupéré"
+        onClick={(e) => {
+          e.stopPropagation();
+          setActionError('');
+          setConfirmItem(item);
+        }}
+        style={{
+          minHeight: mobile ? 42 : 36,
+          width: mobile ? '100%' : undefined,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 6,
+          border: mobile ? '1px solid var(--border)' : undefined,
+        }}
+      >
+        {busy ? <Loader2 size={16} className="cin-spin" /> : <Square size={16} />}
+        {mobile ? 'Marquer comme récupéré' : null}
+      </button>
+    );
+  }
 
   if (detail) {
     return (
@@ -518,9 +612,69 @@ export default function SuiviReceptions() {
           font-weight: 700;
           font-size: 0.95rem;
           color: var(--text);
-          overflow-wrap: anywhere;
-          word-break: break-word;
+          overflow-wrap: break-word;
+          word-break: normal;
+          white-space: normal;
         }
+        .suivi-receptions-page .suivi-desktop-scroll {
+          overflow-x: auto;
+          max-width: 100%;
+          -webkit-overflow-scrolling: touch;
+        }
+        .suivi-receptions-page .suivi-oa-table {
+          width: 100%;
+          min-width: 1445px;
+          border-collapse: collapse;
+          table-layout: fixed;
+        }
+        .suivi-receptions-page .suivi-oa-table th,
+        .suivi-receptions-page .suivi-oa-table td {
+          vertical-align: middle;
+          padding: 10px 12px;
+          overflow-wrap: break-word;
+          word-break: normal;
+          white-space: normal;
+        }
+        .suivi-receptions-page .suivi-oa-table th { white-space: nowrap; }
+        .suivi-receptions-page .suivi-col-ref { min-width: 145px; width: 145px; white-space: nowrap !important; }
+        .suivi-receptions-page .suivi-col-titre { min-width: 190px; width: 22%; }
+        .suivi-receptions-page .suivi-col-fourn { min-width: 170px; width: 16%; }
+        .suivi-receptions-page .suivi-col-projet { min-width: 190px; width: 18%; }
+        .suivi-receptions-page .suivi-col-date { min-width: 115px; width: 115px; white-space: nowrap !important; }
+        .suivi-receptions-page .suivi-col-statut { min-width: 155px; width: 155px; white-space: nowrap !important; }
+        .suivi-receptions-page .suivi-col-avanc { min-width: 170px; width: 170px; }
+        .suivi-receptions-page .suivi-col-maj { min-width: 160px; width: 160px; white-space: nowrap !important; }
+        .suivi-receptions-page .suivi-col-actions { min-width: 150px; width: 150px; white-space: nowrap !important; }
+        .suivi-receptions-page .suivi-actions-row {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+        }
+        .suivi-receptions-page .suivi-actions-row .btn {
+          min-width: 36px;
+          min-height: 36px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+        }
+        .suivi-receptions-page .suivi-oa-card-actions {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+        .suivi-receptions-page .suivi-ref-link {
+          background: none;
+          border: none;
+          padding: 0;
+          cursor: pointer;
+          color: var(--red);
+          font-weight: 700;
+          font-family: inherit;
+          font-size: inherit;
+          text-align: left;
+          white-space: nowrap;
+        }
+        .suivi-receptions-page .suivi-ref-link:hover { text-decoration: underline; }
         @media (max-width: 1024px) {
           .suivi-receptions-page .suivi-kpi-grid {
             grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
@@ -582,6 +736,7 @@ export default function SuiviReceptions() {
           }
           .suivi-receptions-page .suivi-line-save { width: 100%; }
           .suivi-receptions-page .suivi-line-save .btn { min-height: 42px; }
+          .suivi-receptions-page .suivi-oa-card-actions .btn { width: 100%; min-height: 42px; }
         }
         @media (min-width: 1025px) {
           .suivi-receptions-page .suivi-kpi-grid {
@@ -593,14 +748,20 @@ export default function SuiviReceptions() {
       <div className="page-header flex-between" style={{ flexWrap: 'wrap', gap: 10 }}>
         <div style={{ minWidth: 0, flex: 1 }}>
           <h1 className="page-title">SUIVI DES RÉCEPTIONS</h1>
-          <p className="page-subtitle" style={WRAP_TEXT}>Check-list de récupération des ordres d'achat validés — visibilité uniquement.</p>
+          <p className="page-subtitle" style={SOFT_WRAP}>Check-list de récupération des ordres d'achat validés — visibilité uniquement.</p>
         </div>
       </div>
 
       {error && (
         <div className="card" style={{ padding: 12, marginBottom: 12, color: 'var(--red)', display: 'flex', gap: 8, alignItems: 'flex-start' }}>
           <AlertTriangle size={16} style={{ marginTop: 2, flexShrink: 0 }} />
-          <span style={WRAP_TEXT}>{error}</span>
+          <span style={SOFT_WRAP}>{error}</span>
+        </div>
+      )}
+      {actionError && !confirmItem && (
+        <div className="card" style={{ padding: 12, marginBottom: 12, color: 'var(--red)', display: 'flex', gap: 8, alignItems: 'flex-start' }}>
+          <AlertTriangle size={16} style={{ marginTop: 2, flexShrink: 0 }} />
+          <span style={SOFT_WRAP}>{actionError}</span>
         </div>
       )}
 
@@ -663,41 +824,55 @@ export default function SuiviReceptions() {
         <EmptyState icon={ClipboardCheck} title="Aucun ordre à afficher" text="Aucun ordre d'achat Validé ne correspond aux filtres." />
       ) : (
         <>
-          <div className="card suivi-desktop-table" style={{ padding: 0, overflow: 'auto' }}>
-            <div className="table-wrap">
-              <table className="data-table">
+          <div className="card suivi-desktop-table" style={{ padding: 0 }}>
+            <div className="suivi-desktop-scroll">
+              <table className="data-table suivi-oa-table">
                 <thead>
                   <tr>
-                    <th>Référence OA</th>
-                    <th>Titre</th>
-                    <th>Fournisseur</th>
-                    <th>Projet</th>
-                    <th>Date OA</th>
-                    <th>Statut récupération</th>
-                    <th>Avancement</th>
-                    <th>Dernière récupération</th>
-                    <th>Actions</th>
+                    <th className="suivi-col-ref">Référence OA</th>
+                    <th className="suivi-col-titre">Titre</th>
+                    <th className="suivi-col-fourn">Fournisseur</th>
+                    <th className="suivi-col-projet">Projet</th>
+                    <th className="suivi-col-date">Date OA</th>
+                    <th className="suivi-col-statut">Statut récupération</th>
+                    <th className="suivi-col-avanc">Avancement</th>
+                    <th className="suivi-col-maj">Dernière récupération</th>
+                    <th className="suivi-col-actions">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filtered.map((r) => (
                     <tr key={r.id}>
-                      <td data-label="Réf. OA"><strong style={{ color: 'var(--red)' }}>{r.ref}</strong></td>
-                      <td data-label="Titre" style={WRAP_TEXT}>{r.titre || '—'}</td>
-                      <td data-label="Fournisseur" style={WRAP_TEXT}>{r.fournisseur}</td>
-                      <td data-label="Projet" style={WRAP_TEXT}>{r.projet}</td>
-                      <td data-label="Date OA">{r.date_validation || r.date_commande || '—'}</td>
-                      <td data-label="Statut">
-                        <span className={`badge ${RETRIEVAL_STATUS_BADGE[r.statut_recuperation] || 'badge-grey'}`} style={{ fontSize: '0.72rem' }}>
+                      <td className="suivi-col-ref" data-label="Réf. OA">
+                        <button type="button" className="suivi-ref-link" onClick={() => setDetailId(r.id)} title="Voir le détail">
+                          {r.ref}
+                        </button>
+                      </td>
+                      <td className="suivi-col-titre" data-label="Titre" style={SOFT_WRAP}>{r.titre || '—'}</td>
+                      <td className="suivi-col-fourn" data-label="Fournisseur" style={SOFT_WRAP}>{r.fournisseur}</td>
+                      <td className="suivi-col-projet" data-label="Projet" style={SOFT_WRAP}>{r.projet}</td>
+                      <td className="suivi-col-date" data-label="Date OA">{r.date_validation || r.date_commande || '—'}</td>
+                      <td className="suivi-col-statut" data-label="Statut">
+                        <span className={`badge ${RETRIEVAL_STATUS_BADGE[r.statut_recuperation] || 'badge-grey'}`} style={{ fontSize: '0.72rem', whiteSpace: 'nowrap' }}>
                           {r.statut_recuperation}
                         </span>
                       </td>
-                      <td data-label="Avancement">{r.avancement_label || `${r.lines_checked || 0} / ${r.lines_total || 0}`}</td>
-                      <td data-label="Dernière récup.">{r.derniere_recuperation || '—'}</td>
-                      <td data-label="Actions">
-                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDetailId(r.id)} title="Ouvrir la check-list">
-                          <Eye size={14} />
-                        </button>
+                      <td className="suivi-col-avanc" data-label="Avancement" style={SOFT_WRAP}>
+                        {r.avancement_label || `${r.lines_checked || 0} / ${r.lines_total || 0}`}
+                      </td>
+                      <td className="suivi-col-maj" data-label="Dernière récup.">{r.derniere_recuperation || '—'}</td>
+                      <td className="suivi-col-actions" data-label="Actions">
+                        <div className="suivi-actions-row">
+                          {renderQuickRetrieve(r)}
+                          <button
+                            type="button"
+                            className="btn btn-ghost btn-sm"
+                            onClick={() => setDetailId(r.id)}
+                            title="Voir le détail"
+                          >
+                            <Eye size={15} />
+                          </button>
+                        </div>
                       </td>
                     </tr>
                   ))}
@@ -710,8 +885,10 @@ export default function SuiviReceptions() {
             {filtered.map((r) => (
               <div key={r.id} className="suivi-oa-card">
                 <div className="suivi-oa-card-head">
-                  <strong style={{ color: 'var(--red)', fontSize: '0.95rem', ...WRAP_TEXT }}>{r.ref}</strong>
-                  <span className={`badge ${RETRIEVAL_STATUS_BADGE[r.statut_recuperation] || 'badge-grey'}`} style={{ fontSize: '0.72rem', flexShrink: 0 }}>
+                  <button type="button" className="suivi-ref-link" onClick={() => setDetailId(r.id)} style={{ whiteSpace: 'normal', ...SOFT_WRAP }}>
+                    {r.ref}
+                  </button>
+                  <span className={`badge ${RETRIEVAL_STATUS_BADGE[r.statut_recuperation] || 'badge-grey'}`} style={{ fontSize: '0.72rem', flexShrink: 0, whiteSpace: 'nowrap' }}>
                     {r.statut_recuperation}
                   </span>
                 </div>
@@ -725,19 +902,67 @@ export default function SuiviReceptions() {
                     <MetaRow label="Dernière récup.">{r.derniere_recuperation}</MetaRow>
                   )}
                 </div>
-                <button
-                  type="button"
-                  className="btn btn-primary btn-sm"
-                  onClick={() => setDetailId(r.id)}
-                  style={{ width: '100%', minHeight: 42, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
-                >
-                  Voir le détail <ChevronRight size={16} />
-                </button>
+                <div className="suivi-oa-card-actions">
+                  {renderQuickRetrieve(r, { mobile: true })}
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    onClick={() => setDetailId(r.id)}
+                    style={{ width: '100%', minHeight: 42, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+                  >
+                    Voir le détail <ChevronRight size={16} />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
         </>
       )}
+
+      <Modal
+        open={!!confirmItem}
+        onClose={() => {
+          if (bulkBusyId) return;
+          setConfirmItem(null);
+          setActionError('');
+        }}
+        title="Confirmer la récupération"
+        width={480}
+      >
+        <p style={{ margin: '0 0 12px', fontSize: '0.92rem', lineHeight: 1.45, ...SOFT_WRAP }}>
+          Confirmer la récupération complète de cet ordre d&apos;achat ?
+          Toutes les lignes seront marquées comme récupérées à la date du jour.
+        </p>
+        {confirmItem && (
+          <p style={{ margin: '0 0 16px', fontSize: '0.84rem', color: 'var(--text-2)', ...SOFT_WRAP }}>
+            <strong style={{ color: 'var(--red)' }}>{confirmItem.ref}</strong>
+            {confirmItem.titre ? ` — ${confirmItem.titre}` : ''}
+          </p>
+        )}
+        {actionError && (
+          <div style={{ marginBottom: 12, color: 'var(--red)', fontSize: '0.84rem', ...SOFT_WRAP }}>{actionError}</div>
+        )}
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, justifyContent: 'flex-end' }}>
+          <button
+            type="button"
+            className="btn btn-ghost btn-sm"
+            disabled={!!bulkBusyId}
+            onClick={() => { setConfirmItem(null); setActionError(''); }}
+          >
+            Annuler
+          </button>
+          <button
+            type="button"
+            className="btn btn-primary btn-sm"
+            disabled={!!bulkBusyId}
+            onClick={confirmMarkAllRetrieved}
+            style={{ minWidth: 180, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+          >
+            {bulkBusyId ? <Loader2 size={14} className="cin-spin" /> : null}
+            Confirmer la récupération
+          </button>
+        </div>
+      </Modal>
     </div>
   );
 }
