@@ -88,6 +88,7 @@ FROM (
     ('CHANTIER ONDA',                'Chantier'),
     ('CHANTIER LOGIPARC',            'Chantier'),
     ('CHANTIER VILLA POLO',          'Chantier'),
+    ('CHANTIER AERONAUTICA RACINE',  'Chantier'),
     ('CHANTIER VILLA BENSOUDA',      'Chantier'),
     ('CHANTIER VILLA BOUSKOURA',     'Chantier'),
     ('CHANTIER MEDAFRICA BELVEDER',  'Chantier'),
