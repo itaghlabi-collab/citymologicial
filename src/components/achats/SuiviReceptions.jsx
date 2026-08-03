@@ -618,33 +618,70 @@ export default function SuiviReceptions() {
         }
         .suivi-receptions-page .suivi-desktop-scroll {
           overflow-x: auto;
+          overflow-y: visible;
+          width: 100%;
           max-width: 100%;
           -webkit-overflow-scrolling: touch;
         }
         .suivi-receptions-page .suivi-oa-table {
-          width: 100%;
-          min-width: 1445px;
+          width: max-content;
+          min-width: 100%;
           border-collapse: collapse;
-          table-layout: fixed;
+          table-layout: auto !important;
         }
         .suivi-receptions-page .suivi-oa-table th,
         .suivi-receptions-page .suivi-oa-table td {
           vertical-align: middle;
-          padding: 10px 12px;
+          padding: 12px 14px;
+          box-sizing: border-box;
           overflow-wrap: break-word;
           word-break: normal;
+          hyphens: none;
+        }
+        .suivi-receptions-page .suivi-oa-table th {
+          white-space: nowrap;
+          font-size: 0.72rem;
+          letter-spacing: 0.02em;
+        }
+        .suivi-receptions-page .suivi-col-ref {
+          min-width: 150px;
+          white-space: nowrap !important;
+        }
+        .suivi-receptions-page .suivi-col-titre {
+          min-width: 200px;
+          max-width: 280px;
           white-space: normal;
         }
-        .suivi-receptions-page .suivi-oa-table th { white-space: nowrap; }
-        .suivi-receptions-page .suivi-col-ref { min-width: 145px; width: 145px; white-space: nowrap !important; }
-        .suivi-receptions-page .suivi-col-titre { min-width: 190px; width: 22%; }
-        .suivi-receptions-page .suivi-col-fourn { min-width: 170px; width: 16%; }
-        .suivi-receptions-page .suivi-col-projet { min-width: 190px; width: 18%; }
-        .suivi-receptions-page .suivi-col-date { min-width: 115px; width: 115px; white-space: nowrap !important; }
-        .suivi-receptions-page .suivi-col-statut { min-width: 155px; width: 155px; white-space: nowrap !important; }
-        .suivi-receptions-page .suivi-col-avanc { min-width: 170px; width: 170px; }
-        .suivi-receptions-page .suivi-col-maj { min-width: 160px; width: 160px; white-space: nowrap !important; }
-        .suivi-receptions-page .suivi-col-actions { min-width: 150px; width: 150px; white-space: nowrap !important; }
+        .suivi-receptions-page .suivi-col-fourn {
+          min-width: 170px;
+          max-width: 220px;
+          white-space: normal;
+        }
+        .suivi-receptions-page .suivi-col-projet {
+          min-width: 190px;
+          max-width: 260px;
+          white-space: normal;
+        }
+        .suivi-receptions-page .suivi-col-date {
+          min-width: 120px;
+          white-space: nowrap !important;
+        }
+        .suivi-receptions-page .suivi-col-statut {
+          min-width: 130px;
+          white-space: nowrap !important;
+        }
+        .suivi-receptions-page .suivi-col-avanc {
+          min-width: 170px;
+          white-space: nowrap !important;
+        }
+        .suivi-receptions-page .suivi-col-maj {
+          min-width: 150px;
+          white-space: nowrap !important;
+        }
+        .suivi-receptions-page .suivi-col-actions {
+          min-width: 110px;
+          white-space: nowrap !important;
+        }
         .suivi-receptions-page .suivi-actions-row {
           display: inline-flex;
           align-items: center;
@@ -834,9 +871,9 @@ export default function SuiviReceptions() {
                     <th className="suivi-col-fourn">Fournisseur</th>
                     <th className="suivi-col-projet">Projet</th>
                     <th className="suivi-col-date">Date OA</th>
-                    <th className="suivi-col-statut">Statut récupération</th>
+                    <th className="suivi-col-statut" title="Statut récupération">Statut</th>
                     <th className="suivi-col-avanc">Avancement</th>
-                    <th className="suivi-col-maj">Dernière récupération</th>
+                    <th className="suivi-col-maj" title="Dernière récupération">Dernière récup.</th>
                     <th className="suivi-col-actions">Actions</th>
                   </tr>
                 </thead>
