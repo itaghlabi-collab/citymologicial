@@ -4,7 +4,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ClipboardCheck, Eye, Search, Loader2, ChevronLeft, Package,
+  ClipboardCheck, Eye, Search, Loader2, ChevronLeft, ChevronRight, Package,
   CheckSquare, Square, AlertTriangle,
 } from 'lucide-react';
 import { useAuth } from '../../hooks/useAuth';
@@ -24,6 +24,12 @@ import {
   INPUT_STYLE, SELECT_STYLE,
   KpiCard, EmptyState, SectionTitle, FField,
 } from './shared.jsx';
+
+const WRAP_TEXT = {
+  overflowWrap: 'anywhere',
+  wordBreak: 'break-word',
+  minWidth: 0,
+};
 
 function canEditChecklist(role) {
   return role === PURCHASE_ROLES.MAGASINIER
@@ -79,6 +85,15 @@ function technicalQty(line, checked) {
     qtyRetrieved: checked ? ordered : 0,
     qtyOrdered: ordered,
   };
+}
+
+function MetaRow({ label, children }) {
+  return (
+    <div style={{ display: 'grid', gridTemplateColumns: 'minmax(88px, 34%) 1fr', gap: 8, alignItems: 'start' }}>
+      <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.02em' }}>{label}</div>
+      <div style={{ fontSize: '0.88rem', color: 'var(--text)', ...WRAP_TEXT }}>{children}</div>
+    </div>
+  );
 }
 
 function DetailChecklist({ item, canEdit, userName, onSaved, onBack }) {
@@ -218,14 +233,19 @@ function DetailChecklist({ item, canEdit, userName, onSaved, onBack }) {
   const historyRows = [...history, ...persistedHistory];
 
   return (
-    <div className="animate-fade-in">
-      <button type="button" className="btn btn-ghost btn-sm" onClick={onBack} style={{ marginBottom: 12, display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-        <ChevronLeft size={14} /> Retour à la liste
+    <div className="animate-fade-in suivi-receptions-page">
+      <button
+        type="button"
+        className="btn btn-ghost btn-sm suivi-back-btn"
+        onClick={onBack}
+        style={{ marginBottom: 12, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+      >
+        <ChevronLeft size={16} /> Retour à la liste
       </button>
 
       <div className="page-header" style={{ marginBottom: 16 }}>
-        <h1 className="page-title">{item.ref}</h1>
-        <p className="page-subtitle">
+        <h1 className="page-title" style={WRAP_TEXT}>{item.ref}</h1>
+        <p className="page-subtitle" style={WRAP_TEXT}>
           {item.titre && item.titre !== item.ref ? `${item.titre} · ` : ''}
           {item.fournisseur} · {item.date_validation || item.date_commande || '—'} ·{' '}
           <span className={`badge ${RETRIEVAL_STATUS_BADGE[item.statut_recuperation] || 'badge-grey'}`}>
@@ -235,8 +255,8 @@ function DetailChecklist({ item, canEdit, userName, onSaved, onBack }) {
         </p>
       </div>
 
-      {error && <div className="card" style={{ padding: 12, marginBottom: 12, color: 'var(--red)' }}>{error}</div>}
-      {success && <div className="card" style={{ padding: 12, marginBottom: 12, color: 'var(--green, #1a7f4b)' }}>{success}</div>}
+      {error && <div className="card" style={{ padding: 12, marginBottom: 12, color: 'var(--red)', ...WRAP_TEXT }}>{error}</div>}
+      {success && <div className="card" style={{ padding: 12, marginBottom: 12, color: 'var(--green, #1a7f4b)', ...WRAP_TEXT }}>{success}</div>}
 
       {!canEdit && (
         <div className="card" style={{ padding: 12, marginBottom: 12, fontSize: '0.84rem', color: 'var(--text-2)' }}>
@@ -244,7 +264,7 @@ function DetailChecklist({ item, canEdit, userName, onSaved, onBack }) {
         </div>
       )}
 
-      <div className="card" style={{ padding: 20 }}>
+      <div className="card suivi-detail-card" style={{ padding: 20 }}>
         <SectionTitle icon={<ClipboardCheck size={12} />}>Check-list de récupération</SectionTitle>
         {(item.lines || []).length === 0 ? (
           <EmptyState icon={Package} title="Aucune ligne" text="Aucune ligne à récupérer pour cette demande." />
@@ -259,6 +279,7 @@ function DetailChecklist({ item, canEdit, userName, onSaved, onBack }) {
               return (
                 <div
                   key={line.line_id}
+                  className="suivi-line-card"
                   style={{
                     border: '1px solid var(--border)',
                     borderRadius: 8,
@@ -266,74 +287,75 @@ function DetailChecklist({ item, canEdit, userName, onSaved, onBack }) {
                     background: line.done ? 'rgba(34, 160, 90, 0.06)' : 'var(--surface)',
                   }}
                 >
-                  <div style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
+                  <div className="suivi-line-head" style={{ display: 'flex', gap: 12, alignItems: 'flex-start' }}>
                     <button
                       type="button"
                       className="btn btn-ghost btn-sm"
                       disabled={!canEdit || busyId === line.line_id}
                       onClick={() => toggleDone(line)}
                       title={line.done ? 'Marquer non récupéré' : 'Marquer récupéré'}
-                      style={{ padding: 4, marginTop: 2 }}
+                      style={{ padding: 6, marginTop: 0, flexShrink: 0, minWidth: 36, minHeight: 36 }}
                     >
-                      <Icon size={20} style={{ color: line.done ? 'var(--green, #1a7f4b)' : 'var(--text-3)' }} />
+                      <Icon size={22} style={{ color: line.done ? 'var(--green, #1a7f4b)' : 'var(--text-3)' }} />
                     </button>
                     <div style={{ flex: 1, minWidth: 0 }}>
                       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, alignItems: 'center' }}>
-                        <div style={{ fontWeight: 700, fontSize: '0.95rem' }}>{line.designation}</div>
+                        <div style={{ fontWeight: 700, fontSize: '0.95rem', ...WRAP_TEXT }}>{line.designation}</div>
                         <span className={`badge ${RETRIEVAL_STATUS_BADGE[line.statut_ligne] || 'badge-grey'}`} style={{ fontSize: '0.7rem' }}>
                           {line.statut_ligne || (line.done ? RETRIEVAL_STATUS.RECUPERE : RETRIEVAL_STATUS.A_RECUPERER)}
                         </span>
                       </div>
-                      <div style={{ fontSize: '0.82rem', color: 'var(--text-3)', marginTop: 2 }}>
+                      <div style={{ fontSize: '0.82rem', color: 'var(--text-3)', marginTop: 6, ...WRAP_TEXT }}>
                         {qtyLabel || 'Récupéré'}
                         {line.retrieved_by ? ` · Confirmé par ${line.retrieved_by}` : ''}
                         {line.retrieved_at ? ` · ${line.retrieved_at}` : ''}
                       </div>
-
-                      {canEdit && (
-                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginTop: 12 }}>
-                          <FField label="Date de récupération">
-                            <input
-                              type="date"
-                              value={d.date || ''}
-                              onChange={(e) => setDrafts((p) => ({
-                                ...p,
-                                [line.line_id]: { ...d, date: e.target.value },
-                              }))}
-                              style={INPUT_STYLE}
-                            />
-                          </FField>
-                          <FField label="Observation">
-                            <input
-                              value={d.observation || ''}
-                              onChange={(e) => setDrafts((p) => ({
-                                ...p,
-                                [line.line_id]: { ...d, observation: e.target.value },
-                              }))}
-                              style={INPUT_STYLE}
-                              placeholder="Facultatif"
-                            />
-                          </FField>
-                          <div style={{ display: 'flex', alignItems: 'flex-end' }}>
-                            <button
-                              type="button"
-                              className="btn btn-primary btn-sm"
-                              disabled={busyId === line.line_id}
-                              onClick={() => saveLine(line)}
-                            >
-                              {busyId === line.line_id ? '…' : 'Enregistrer'}
-                            </button>
-                          </div>
-                        </div>
-                      )}
-
-                      {!canEdit && line.observation && (
-                        <div style={{ fontSize: '0.8rem', color: 'var(--text-2)', marginTop: 8 }}>
-                          Observation : {line.observation}
-                        </div>
-                      )}
                     </div>
                   </div>
+
+                  {canEdit && (
+                    <div className="suivi-line-fields" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(140px, 1fr))', gap: 10, marginTop: 12 }}>
+                      <FField label="Date de récupération">
+                        <input
+                          type="date"
+                          value={d.date || ''}
+                          onChange={(e) => setDrafts((p) => ({
+                            ...p,
+                            [line.line_id]: { ...d, date: e.target.value },
+                          }))}
+                          style={{ ...INPUT_STYLE, width: '100%', maxWidth: '100%', boxSizing: 'border-box' }}
+                        />
+                      </FField>
+                      <FField label="Observation">
+                        <input
+                          value={d.observation || ''}
+                          onChange={(e) => setDrafts((p) => ({
+                            ...p,
+                            [line.line_id]: { ...d, observation: e.target.value },
+                          }))}
+                          style={{ ...INPUT_STYLE, width: '100%', maxWidth: '100%', boxSizing: 'border-box' }}
+                          placeholder="Facultatif"
+                        />
+                      </FField>
+                      <div className="suivi-line-save" style={{ display: 'flex', alignItems: 'flex-end' }}>
+                        <button
+                          type="button"
+                          className="btn btn-primary btn-sm"
+                          disabled={busyId === line.line_id}
+                          onClick={() => saveLine(line)}
+                          style={{ width: '100%' }}
+                        >
+                          {busyId === line.line_id ? '…' : 'Enregistrer'}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {!canEdit && line.observation && (
+                    <div style={{ fontSize: '0.8rem', color: 'var(--text-2)', marginTop: 8, ...WRAP_TEXT }}>
+                      Observation : {line.observation}
+                    </div>
+                  )}
                 </div>
               );
             })}
@@ -341,12 +363,12 @@ function DetailChecklist({ item, canEdit, userName, onSaved, onBack }) {
         )}
       </div>
 
-      <div className="card" style={{ padding: 20, marginTop: 16 }}>
+      <div className="card suivi-detail-card" style={{ padding: 20, marginTop: 16 }}>
         <SectionTitle icon={<ClipboardCheck size={12} />}>Historique</SectionTitle>
         {historyRows.length === 0 ? (
           <div style={{ fontSize: '0.84rem', color: 'var(--text-3)' }}>Aucun historique pour le moment.</div>
         ) : (
-          <div className="card" style={{ padding: 0, overflow: 'auto' }}>
+          <div className="table-wrap" style={{ padding: 0 }}>
             <table className="data-table">
               <thead>
                 <tr>
@@ -362,15 +384,15 @@ function DetailChecklist({ item, canEdit, userName, onSaved, onBack }) {
                 {historyRows.map((h) => (
                   <tr key={h.id}>
                     <td data-label="Date">{h.date}</td>
-                    <td data-label="Ligne">{h.ligne}</td>
+                    <td data-label="Ligne" style={WRAP_TEXT}>{h.ligne}</td>
                     <td data-label="Ancien">{h.ancien}</td>
                     <td data-label="Nouveau">
                       <span className={`badge ${RETRIEVAL_STATUS_BADGE[h.nouveau] || 'badge-grey'}`} style={{ fontSize: '0.7rem' }}>
                         {h.nouveau}
                       </span>
                     </td>
-                    <td data-label="Utilisateur">{h.utilisateur}</td>
-                    <td data-label="Observation">{h.observation || '—'}</td>
+                    <td data-label="Utilisateur" style={WRAP_TEXT}>{h.utilisateur}</td>
+                    <td data-label="Observation" style={WRAP_TEXT}>{h.observation || '—'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -459,33 +481,146 @@ export default function SuiviReceptions() {
   }
 
   return (
-    <div className="animate-fade-in">
+    <div className="animate-fade-in suivi-receptions-page">
+      <style>{`
+        .suivi-receptions-page { max-width: 100%; overflow-x: hidden; box-sizing: border-box; }
+        .suivi-receptions-page *, .suivi-receptions-page *::before, .suivi-receptions-page *::after { box-sizing: border-box; }
+        .suivi-receptions-page .suivi-kpi-grid { margin-bottom: 16px; }
+        .suivi-receptions-page .suivi-filters { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+        .suivi-receptions-page .suivi-filters-search { flex: 1; min-width: 180px; position: relative; }
+        .suivi-receptions-page .suivi-filters-search input,
+        .suivi-receptions-page .suivi-filters select,
+        .suivi-receptions-page .suivi-filters input[type="date"] { width: 100%; max-width: 100%; }
+        .suivi-receptions-page .suivi-mobile-list { display: none; }
+        .suivi-receptions-page .suivi-desktop-table { display: block; }
+        .suivi-receptions-page .suivi-oa-card {
+          background: var(--surface);
+          border: 1px solid var(--border);
+          border-radius: var(--radius, 10px);
+          box-shadow: var(--shadow);
+          padding: 14px;
+          display: flex;
+          flex-direction: column;
+          gap: 12px;
+        }
+        .suivi-receptions-page .suivi-oa-card-head {
+          display: flex;
+          align-items: flex-start;
+          justify-content: space-between;
+          gap: 10px;
+        }
+        .suivi-receptions-page .suivi-oa-card-body {
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+        .suivi-receptions-page .suivi-oa-card-title {
+          font-weight: 700;
+          font-size: 0.95rem;
+          color: var(--text);
+          overflow-wrap: anywhere;
+          word-break: break-word;
+        }
+        @media (max-width: 1024px) {
+          .suivi-receptions-page .suivi-kpi-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+            gap: 12px;
+          }
+        }
+        @media (max-width: 768px) {
+          .suivi-receptions-page .suivi-kpi-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+            gap: 10px;
+            margin-bottom: 12px;
+          }
+          .suivi-receptions-page .suivi-kpi-grid .stat-card {
+            padding: 12px 10px;
+            gap: 8px;
+            min-width: 0;
+          }
+          .suivi-receptions-page .suivi-kpi-grid .stat-icon {
+            width: 34px;
+            height: 34px;
+            border-radius: 8px;
+            flex-shrink: 0;
+          }
+          .suivi-receptions-page .suivi-kpi-grid .stat-icon svg { width: 15px; height: 15px; }
+          .suivi-receptions-page .suivi-kpi-grid .stat-value { font-size: 1.25rem; }
+          .suivi-receptions-page .suivi-kpi-grid .stat-label { font-size: 0.7rem; line-height: 1.2; }
+          .suivi-receptions-page .suivi-filters-card { padding: 12px !important; margin-bottom: 12px !important; }
+          .suivi-receptions-page .suivi-filters {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 8px;
+            align-items: stretch;
+          }
+          .suivi-receptions-page .suivi-filters-search { grid-column: 1 / -1; min-width: 0; }
+          .suivi-receptions-page .suivi-filters-projet { grid-column: 1 / -1; }
+          .suivi-receptions-page .suivi-filters-reset { grid-column: 1 / -1; }
+          .suivi-receptions-page .suivi-filters-reset .btn { width: 100%; min-height: 40px; }
+          .suivi-receptions-page .suivi-filters select,
+          .suivi-receptions-page .suivi-filters input[type="date"] {
+            max-width: none !important;
+            min-height: 40px;
+          }
+          .suivi-receptions-page .suivi-desktop-table { display: none !important; }
+          .suivi-receptions-page .suivi-mobile-list {
+            display: flex !important;
+            flex-direction: column;
+            gap: 10px;
+          }
+          .suivi-receptions-page .suivi-back-btn {
+            width: 100%;
+            justify-content: center;
+            min-height: 42px;
+          }
+          .suivi-receptions-page .suivi-detail-card { padding: 14px !important; }
+          .suivi-receptions-page .suivi-line-card { padding: 12px !important; }
+          .suivi-receptions-page .suivi-line-fields {
+            grid-template-columns: 1fr !important;
+            gap: 8px !important;
+          }
+          .suivi-receptions-page .suivi-line-save { width: 100%; }
+          .suivi-receptions-page .suivi-line-save .btn { min-height: 42px; }
+        }
+        @media (min-width: 1025px) {
+          .suivi-receptions-page .suivi-kpi-grid {
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+          }
+        }
+      `}</style>
+
       <div className="page-header flex-between" style={{ flexWrap: 'wrap', gap: 10 }}>
-        <div>
+        <div style={{ minWidth: 0, flex: 1 }}>
           <h1 className="page-title">SUIVI DES RÉCEPTIONS</h1>
-          <p className="page-subtitle">Check-list de récupération des ordres d'achat validés — visibilité uniquement.</p>
+          <p className="page-subtitle" style={WRAP_TEXT}>Check-list de récupération des ordres d'achat validés — visibilité uniquement.</p>
         </div>
       </div>
 
       {error && (
         <div className="card" style={{ padding: 12, marginBottom: 12, color: 'var(--red)', display: 'flex', gap: 8, alignItems: 'flex-start' }}>
           <AlertTriangle size={16} style={{ marginTop: 2, flexShrink: 0 }} />
-          <span>{error}</span>
+          <span style={WRAP_TEXT}>{error}</span>
         </div>
       )}
 
-      <div className="stat-grid" style={{ marginBottom: 16 }}>
+      <div className="stat-grid suivi-kpi-grid">
         <KpiCard icon={<Package size={17} />} label="À récupérer" value={kpis.a_recuperer} color="orange" />
         <KpiCard icon={<ClipboardCheck size={17} />} label="Partiellement récupérés" value={kpis.partiel} color="blue" />
         <KpiCard icon={<CheckSquare size={17} />} label="Récupérés" value={kpis.recupere} color="green" />
         <KpiCard icon={<Square size={17} />} label="Lignes restant à récupérer" value={kpis.articles_restants} color="red" />
       </div>
 
-      <div className="card" style={{ padding: '14px 16px', marginBottom: 16 }}>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
-          <div style={{ flex: 1, minWidth: 180, position: 'relative' }}>
-            <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
-            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Réf. OA, fournisseur, projet…" style={{ ...INPUT_STYLE, paddingLeft: 32 }} />
+      <div className="card suivi-filters-card" style={{ padding: '14px 16px', marginBottom: 16 }}>
+        <div className="suivi-filters">
+          <div className="suivi-filters-search">
+            <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)', pointerEvents: 'none' }} />
+            <input
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              placeholder="Réf. OA, fournisseur, projet…"
+              style={{ ...INPUT_STYLE, paddingLeft: 32, width: '100%', maxWidth: '100%' }}
+            />
           </div>
           <select value={filterStatut} onChange={(e) => setFilterStatut(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 200 }}>
             <option value="">Tous</option>
@@ -497,19 +632,26 @@ export default function SuiviReceptions() {
             <option value="">Fournisseur</option>
             {fournisseurs.map((f) => <option key={f} value={f}>{f}</option>)}
           </select>
-          <select value={filterProjet} onChange={(e) => setFilterProjet(e.target.value)} style={{ ...SELECT_STYLE, maxWidth: 180 }}>
+          <select
+            className="suivi-filters-projet"
+            value={filterProjet}
+            onChange={(e) => setFilterProjet(e.target.value)}
+            style={{ ...SELECT_STYLE, maxWidth: 180 }}
+          >
             <option value="">Projet</option>
             {projets.map((p) => <option key={p} value={p}>{p}</option>)}
           </select>
-          <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={{ ...INPUT_STYLE, maxWidth: 150 }} title="Du" />
-          <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={{ ...INPUT_STYLE, maxWidth: 150 }} title="Au" />
-          <button
-            type="button"
-            className="btn btn-ghost btn-sm"
-            onClick={() => { setSearch(''); setFilterStatut(''); setFilterFourn(''); setFilterProjet(''); setDateFrom(''); setDateTo(''); }}
-          >
-            Réinitialiser
-          </button>
+          <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} style={{ ...INPUT_STYLE, maxWidth: 150 }} title="Du" aria-label="Date début" />
+          <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} style={{ ...INPUT_STYLE, maxWidth: 150 }} title="Au" aria-label="Date fin" />
+          <div className="suivi-filters-reset">
+            <button
+              type="button"
+              className="btn btn-ghost btn-sm"
+              onClick={() => { setSearch(''); setFilterStatut(''); setFilterFourn(''); setFilterProjet(''); setDateFrom(''); setDateTo(''); }}
+            >
+              Réinitialiser
+            </button>
+          </div>
         </div>
       </div>
 
@@ -520,48 +662,81 @@ export default function SuiviReceptions() {
       ) : filtered.length === 0 ? (
         <EmptyState icon={ClipboardCheck} title="Aucun ordre à afficher" text="Aucun ordre d'achat Validé ne correspond aux filtres." />
       ) : (
-        <div className="card" style={{ padding: 0, overflow: 'auto' }}>
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Référence OA</th>
-                <th>Titre</th>
-                <th>Fournisseur</th>
-                <th>Projet</th>
-                <th>Date OA</th>
-                <th>Statut récupération</th>
-                <th>Lignes récupérées</th>
-                <th>Dernière récupération</th>
-                <th>Confirmé par</th>
-                <th>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((r) => (
-                <tr key={r.id}>
-                  <td data-label="Réf. OA"><strong style={{ color: 'var(--red)' }}>{r.ref}</strong></td>
-                  <td data-label="Titre">{r.titre || '—'}</td>
-                  <td data-label="Fournisseur">{r.fournisseur}</td>
-                  <td data-label="Projet">{r.projet}</td>
-                  <td data-label="Date OA">{r.date_validation || r.date_commande || '—'}</td>
-                  <td data-label="Statut">
-                    <span className={`badge ${RETRIEVAL_STATUS_BADGE[r.statut_recuperation] || 'badge-grey'}`} style={{ fontSize: '0.72rem' }}>
-                      {r.statut_recuperation}
-                    </span>
-                  </td>
-                  <td data-label="Avancement">{r.avancement_label || `${r.lines_checked || 0} / ${r.lines_total || 0}`}</td>
-                  <td data-label="Dernière récup.">{r.derniere_recuperation || '—'}</td>
-                  <td data-label="Confirmé par">{r.confirme_par || '—'}</td>
-                  <td data-label="Actions">
-                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDetailId(r.id)} title="Ouvrir la check-list">
-                      <Eye size={14} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <>
+          <div className="card suivi-desktop-table" style={{ padding: 0, overflow: 'auto' }}>
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Référence OA</th>
+                    <th>Titre</th>
+                    <th>Fournisseur</th>
+                    <th>Projet</th>
+                    <th>Date OA</th>
+                    <th>Statut récupération</th>
+                    <th>Avancement</th>
+                    <th>Dernière récupération</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((r) => (
+                    <tr key={r.id}>
+                      <td data-label="Réf. OA"><strong style={{ color: 'var(--red)' }}>{r.ref}</strong></td>
+                      <td data-label="Titre" style={WRAP_TEXT}>{r.titre || '—'}</td>
+                      <td data-label="Fournisseur" style={WRAP_TEXT}>{r.fournisseur}</td>
+                      <td data-label="Projet" style={WRAP_TEXT}>{r.projet}</td>
+                      <td data-label="Date OA">{r.date_validation || r.date_commande || '—'}</td>
+                      <td data-label="Statut">
+                        <span className={`badge ${RETRIEVAL_STATUS_BADGE[r.statut_recuperation] || 'badge-grey'}`} style={{ fontSize: '0.72rem' }}>
+                          {r.statut_recuperation}
+                        </span>
+                      </td>
+                      <td data-label="Avancement">{r.avancement_label || `${r.lines_checked || 0} / ${r.lines_total || 0}`}</td>
+                      <td data-label="Dernière récup.">{r.derniere_recuperation || '—'}</td>
+                      <td data-label="Actions">
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => setDetailId(r.id)} title="Ouvrir la check-list">
+                          <Eye size={14} />
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="suivi-mobile-list">
+            {filtered.map((r) => (
+              <div key={r.id} className="suivi-oa-card">
+                <div className="suivi-oa-card-head">
+                  <strong style={{ color: 'var(--red)', fontSize: '0.95rem', ...WRAP_TEXT }}>{r.ref}</strong>
+                  <span className={`badge ${RETRIEVAL_STATUS_BADGE[r.statut_recuperation] || 'badge-grey'}`} style={{ fontSize: '0.72rem', flexShrink: 0 }}>
+                    {r.statut_recuperation}
+                  </span>
+                </div>
+                <div className="suivi-oa-card-title">{r.titre || '—'}</div>
+                <div className="suivi-oa-card-body">
+                  <MetaRow label="Fournisseur">{r.fournisseur || '—'}</MetaRow>
+                  <MetaRow label="Projet">{r.projet || '—'}</MetaRow>
+                  <MetaRow label="Date OA">{r.date_validation || r.date_commande || '—'}</MetaRow>
+                  <MetaRow label="Avancement">{r.avancement_label || `${r.lines_checked || 0} / ${r.lines_total || 0}`}</MetaRow>
+                  {r.derniere_recuperation && r.derniere_recuperation !== '—' && (
+                    <MetaRow label="Dernière récup.">{r.derniere_recuperation}</MetaRow>
+                  )}
+                </div>
+                <button
+                  type="button"
+                  className="btn btn-primary btn-sm"
+                  onClick={() => setDetailId(r.id)}
+                  style={{ width: '100%', minHeight: 42, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 8 }}
+                >
+                  Voir le détail <ChevronRight size={16} />
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
       )}
     </div>
   );
