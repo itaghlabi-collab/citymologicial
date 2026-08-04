@@ -119,7 +119,8 @@ export default function PwaUpdateBanner() {
 
     const syncWaitingFromRegistration = (registration) => {
       if (!registration || cancelled) return;
-      if (registration.waiting) {
+      // MAJ = nouveau SW en waiting + ancien encore contrôleur
+      if (registration.waiting && navigator.serviceWorker.controller) {
         offerWaiting(registration.waiting);
       }
     };
@@ -145,7 +146,8 @@ export default function PwaUpdateBanner() {
       const installing = registration.installing;
       if (!installing) return;
       installing.addEventListener('statechange', () => {
-        if (installing.state === 'installed') {
+        // Bannière uniquement s’il y a déjà un SW actif (sinon 1er install, pas une MAJ)
+        if (installing.state === 'installed' && navigator.serviceWorker.controller) {
           offerWaiting(registration.waiting || installing);
         }
       });

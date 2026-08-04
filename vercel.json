@@ -8,7 +8,7 @@
     { "source": "/api/admin/users/:id/email", "destination": "/api/admin-user-email?id=:id" },
     { "source": "/api/backups", "destination": "/api/backups-proxy" },
     { "source": "/api/backups/:path*", "destination": "/api/backups-proxy?path=:path*" },
-    { "source": "/((?!api/|assets/|sounds/).*)", "destination": "/index.html" }
+    { "source": "/((?!api/|assets/|sounds/|sw\\.js|sw\\.mjs|manifest\\.webmanifest|icons/).*)", "destination": "/index.html" }
   ],
   "headers": [
     {

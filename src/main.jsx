@@ -17,7 +17,14 @@ if (import.meta.env.PROD) {
   if (previousBuild && previousBuild !== BUILD_ID) {
     localStorage.setItem(BUILD_STORAGE_KEY, BUILD_ID);
     localStorage.removeItem('citymo_notif_sound_rev');
-    window.location.reload();
+    // Ne pas recharger ici : un reload silencieux empêche PwaUpdateBanner
+    // d’afficher « Une nouvelle version… » quand un SW est en waiting.
+    // Invalider le snooze pour re-proposer la mise à jour après un nouveau build.
+    try {
+      sessionStorage.removeItem('citymo_pwa_update_snooze_until');
+    } catch {
+      /* ignore */
+    }
   } else if (!previousBuild) {
     localStorage.setItem(BUILD_STORAGE_KEY, BUILD_ID);
   }

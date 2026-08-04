@@ -163,6 +163,12 @@ function isSameOriginStaticAsset({ request, url }) {
   if (url.origin !== self.location.origin) return false
   if (isForbiddenUrl(url)) return false
 
+  // Ne jamais CacheFirst le SW lui-même (sinon mises à jour / bannière bloquées)
+  const path = url.pathname.toLowerCase()
+  if (path === '/sw.js' || path.endsWith('/sw.js') || path === '/sw.mjs' || path.endsWith('/sw.mjs')) {
+    return false
+  }
+
   const dest = request.destination
   if (dest === 'script' || dest === 'style' || dest === 'font' || dest === 'image') {
     return true
