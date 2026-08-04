@@ -7,9 +7,7 @@ import {
 } from 'lucide-react';
 import { generateMovementRef } from '../../services/inventaire/stockMovements';
 import { generateMouvementPdf } from '../../services/inventaire/mouvementPdf';
-import { listEmployees, employeeFullName, filterChefsChantierEmployees } from '../../services/rh/employees';
-import { useAuth } from '../../hooks/useAuth';
-import { resolveCurrentPurchaseRole, PURCHASE_ROLES } from '../../services/achats/purchaseWorkflowRoles';
+import { listEmployees, employeeFullName, isChefChantierPoste } from '../../services/rh/employees';
 import { useArticleScanner } from '../../hooks/useArticleScanner';
 import { addOrIncrementMovementLine } from '../../services/inventaire/articleScanWorkflow';
 import ArticleScanBar from './ArticleScanBar.jsx';
@@ -74,6 +72,16 @@ function emplacementOptions(current) {
   return base;
 }
 
+/** Réception : uniquement chefs de chantier + chauffeurs (poste RH). */
+function isReceptionPoste(poste) {
+  if (isChefChantierPoste(poste)) return true;
+  const p = String(poste || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+  return p.includes('chauffeur');
+}
+
 function BonDocumentHeader({ form, onFieldChange }) {
   return (
     <div className="devis-doc-header card bm-doc-header" style={{ padding: 0, overflow: 'visible', marginBottom: 16 }}>
@@ -125,7 +133,6 @@ export default function BonMouvementForm({
   onSave,
   saving = false,
 }) {
-  const { user } = useAuth();
   const isEdit = !!bon?.ref;
   const [form, setForm] = useState(() => {
     if (!bon) return EMPTY_BON();
@@ -138,7 +145,6 @@ export default function BonMouvementForm({
     };
   });
   const [employees, setEmployees] = useState([]);
-  const [isMagasinierSession, setIsMagasinierSession] = useState(false);
   const [error, setError] = useState('');
   const [pdfLoading, setPdfLoading] = useState(false);
 
@@ -174,18 +180,6 @@ export default function BonMouvementForm({
     }
   }, [isEdit]);
 
-  useEffect(() => {
-    let active = true;
-    resolveCurrentPurchaseRole(user)
-      .then((role) => {
-        if (active) setIsMagasinierSession(role === PURCHASE_ROLES.MAGASINIER);
-      })
-      .catch(() => {
-        if (active) setIsMagasinierSession(false);
-      });
-    return () => { active = false; };
-  }, [user]);
-
   const totalLignes = form.lignes.length;
   const totalQte = useMemo(
     () => form.lignes.reduce((s, l) => s + (Number(l.quantite) || 0), 0),
@@ -197,20 +191,19 @@ export default function BonMouvementForm({
     .map((e) => ({ id: e.id, name: employeeFullName(e) }))
     .filter((e) => e.name);
 
-  /** Session magasinier : réception = chefs de chantier uniquement. */
+  /** Utilisateur réception : chefs de chantier + chauffeurs uniquement. */
   const receptionOptions = useMemo(() => {
-    if (!isMagasinierSession) return employeeOptions;
-    const chefs = filterChefsChantierEmployees(employees)
-      .filter((e) => e.statut !== 'Inactif')
+    const filtered = employees
+      .filter((e) => e.statut !== 'Inactif' && isReceptionPoste(e.poste))
       .map((e) => ({ id: e.id, name: employeeFullName(e) }))
       .filter((e) => e.name);
     const selected = form.receptionnaire;
-    if (selected && !chefs.some((c) => c.name === selected)) {
+    if (selected && !filtered.some((c) => c.name === selected)) {
       const keep = employeeOptions.find((e) => e.name === selected);
-      if (keep) return [keep, ...chefs];
+      if (keep) return [keep, ...filtered];
     }
-    return chefs;
-  }, [isMagasinierSession, employees, employeeOptions, form.receptionnaire]);
+    return filtered;
+  }, [employees, employeeOptions, form.receptionnaire]);
 
   function updateLigne(idx, patch) {
     setForm((p) => ({
