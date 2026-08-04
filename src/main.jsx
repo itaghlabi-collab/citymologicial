@@ -7,6 +7,7 @@ import { ToastProvider } from './utils/toast';
 import PwaUpdateBanner from './pwa/PwaUpdateBanner';
 import PwaInstallBanner from './pwa/PwaInstallBanner';
 import PwaSafeBoundary from './pwa/PwaSafeBoundary';
+import { clearSnooze, markUpdateAvailable } from './pwa/updateSignal';
 import './index.css';
 
 const BUILD_ID = import.meta.env.VITE_BUILD_ID || 'dev';
@@ -15,16 +16,11 @@ const BUILD_STORAGE_KEY = 'citymo_build_id';
 if (import.meta.env.PROD) {
   const previousBuild = localStorage.getItem(BUILD_STORAGE_KEY);
   if (previousBuild && previousBuild !== BUILD_ID) {
+    // Signale à PwaUpdateBanner qu’une MAJ est disponible (même sans SW waiting).
+    markUpdateAvailable(BUILD_ID);
+    clearSnooze();
     localStorage.setItem(BUILD_STORAGE_KEY, BUILD_ID);
     localStorage.removeItem('citymo_notif_sound_rev');
-    // Ne pas recharger ici : un reload silencieux empêche PwaUpdateBanner
-    // d’afficher « Une nouvelle version… » quand un SW est en waiting.
-    // Invalider le snooze pour re-proposer la mise à jour après un nouveau build.
-    try {
-      sessionStorage.removeItem('citymo_pwa_update_snooze_until');
-    } catch {
-      /* ignore */
-    }
   } else if (!previousBuild) {
     localStorage.setItem(BUILD_STORAGE_KEY, BUILD_ID);
   }

@@ -1,12 +1,17 @@
 import { useEffect, useRef, useState } from 'react';
 import './pwa-update.css';
+import {
+  clearSnooze,
+  clearUpdateAvailable,
+  hasUpdateAvailable,
+  isSnoozed,
+  writeSnooze,
+} from './updateSignal';
 
-const IDLE_MS = 1200;
-/** Même si l’utilisateur est « occupé », on propose quand même après ce délai. */
-const MAX_DEFER_MS = 8_000;
-const UPDATE_POLL_MS = 30_000;
-const SNOOZE_KEY = 'citymo_pwa_update_snooze_until';
-const SNOOZE_MS = 30 * 60 * 1000; // 30 min après « Plus tard »
+const IDLE_MS = 800;
+/** Affichage forcé même si l’utilisateur reste actif. */
+const MAX_DEFER_MS = 2_500;
+const UPDATE_POLL_MS = 15_000;
 
 function isEditableField(el) {
   if (!el || el === document.body || el === document.documentElement) return false;
@@ -17,50 +22,24 @@ function isEditableField(el) {
 }
 
 function isUserBusy() {
-  // Uniquement dialog HTML ouvert — pas tous les [aria-modal] (souvent laissés dans le DOM)
   if (document.querySelector('dialog[open]')) return true;
   const active = document.activeElement;
   if (isEditableField(active)) return true;
   return false;
 }
 
-function readSnoozeUntil() {
-  try {
-    const raw = sessionStorage.getItem(SNOOZE_KEY);
-    const n = raw ? Number(raw) : 0;
-    return Number.isFinite(n) ? n : 0;
-  } catch {
-    return 0;
-  }
-}
-
-function writeSnooze() {
-  try {
-    sessionStorage.setItem(SNOOZE_KEY, String(Date.now() + SNOOZE_MS));
-  } catch {
-    /* ignore */
-  }
-}
-
-function clearSnooze() {
-  try {
-    sessionStorage.removeItem(SNOOZE_KEY);
-  } catch {
-    /* ignore */
-  }
-}
-
 /**
  * Bannière de mise à jour PWA.
- * - Pas de skipWaiting / clientsClaim / reload automatiques.
- * - Affichage forcé au plus tard après MAX_DEFER_MS (timer unique, non reset par l’activité).
- * - « Plus tard » = snooze 30 min (session), pas un dismiss définitif.
+ * Déclenchée si :
+ * - un nouveau service worker est en waiting, OU
+ * - un nouveau BUILD_ID a été détecté (sessionStorage via main.jsx).
  */
 export default function PwaUpdateBanner() {
   const [visible, setVisible] = useState(false);
   const [updating, setUpdating] = useState(false);
   const registrationRef = useRef(null);
   const waitingRef = useRef(null);
+  const updatePendingRef = useRef(false);
   const reloadingRef = useRef(false);
   const ignoreActivityRef = useRef(false);
   const lastActivityRef = useRef(Date.now());
@@ -73,7 +52,7 @@ export default function PwaUpdateBanner() {
 
     let cancelled = false;
 
-    const isSnoozed = () => Date.now() < readSnoozeUntil();
+    const hasPending = () => Boolean(waitingRef.current) || updatePendingRef.current || hasUpdateAvailable();
 
     const canOfferSoft = () => {
       if (reloadingRef.current || isSnoozed()) return false;
@@ -83,49 +62,52 @@ export default function PwaUpdateBanner() {
     };
 
     const showBanner = () => {
-      if (cancelled || !waitingRef.current || reloadingRef.current) return;
-      if (isSnoozed()) return;
+      if (cancelled || reloadingRef.current || isSnoozed()) return;
+      if (!hasPending()) return;
       setVisible(true);
     };
 
     const showIfReady = ({ force = false } = {}) => {
-      if (cancelled || !waitingRef.current || reloadingRef.current) return;
-      if (isSnoozed()) return;
+      if (cancelled || reloadingRef.current || isSnoozed()) return;
+      if (!hasPending()) return;
       if (!force && !canOfferSoft()) return;
       showBanner();
     };
 
     const scheduleOffer = () => {
-      if (!waitingRef.current || reloadingRef.current || isSnoozed()) return;
+      if (reloadingRef.current || isSnoozed() || !hasPending()) return;
 
-      // Timer forcé : une seule fois (ne pas le clear à chaque clic — sinon la bannière
-      // ne s’affiche jamais tant que l’utilisateur reste actif).
       if (!firstOfferAtRef.current) {
         firstOfferAtRef.current = Date.now();
         if (forceTimerRef.current) clearTimeout(forceTimerRef.current);
+        // Affiche rapidement même pendant l’activité
         forceTimerRef.current = setTimeout(() => showIfReady({ force: true }), MAX_DEFER_MS);
       }
 
-      // Soft : après courte inactivité
       if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
       idleTimerRef.current = setTimeout(() => showIfReady({ force: false }), IDLE_MS);
+    };
+
+    const markUpdatePending = () => {
+      updatePendingRef.current = true;
+      scheduleOffer();
     };
 
     const offerWaiting = (sw) => {
       if (!sw || reloadingRef.current) return;
       waitingRef.current = sw;
-      scheduleOffer();
+      markUpdatePending();
     };
 
     const syncWaitingFromRegistration = (registration) => {
       if (!registration || cancelled) return;
-      // MAJ = nouveau SW en waiting + ancien encore contrôleur
       if (registration.waiting && navigator.serviceWorker.controller) {
         offerWaiting(registration.waiting);
       }
     };
 
     const checkForUpdates = () => {
+      if (hasUpdateAvailable()) markUpdatePending();
       const registration = registrationRef.current;
       if (!registration) return;
       syncWaitingFromRegistration(registration);
@@ -135,8 +117,7 @@ export default function PwaUpdateBanner() {
     const markActivity = () => {
       if (ignoreActivityRef.current) return;
       lastActivityRef.current = Date.now();
-      // Ne reschedule que le délai soft — le force timer reste intact
-      if (waitingRef.current && !isSnoozed()) {
+      if (hasPending() && !isSnoozed()) {
         if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
         idleTimerRef.current = setTimeout(() => showIfReady({ force: false }), IDLE_MS);
       }
@@ -146,7 +127,6 @@ export default function PwaUpdateBanner() {
       const installing = registration.installing;
       if (!installing) return;
       installing.addEventListener('statechange', () => {
-        // Bannière uniquement s’il y a déjà un SW actif (sinon 1er install, pas une MAJ)
         if (installing.state === 'installed' && navigator.serviceWorker.controller) {
           offerWaiting(registration.waiting || installing);
         }
@@ -170,7 +150,11 @@ export default function PwaUpdateBanner() {
 
     const pollId = window.setInterval(checkForUpdates, UPDATE_POLL_MS);
 
-    // sw.js buildé par vite-plugin-pwa = script classique (bundle), pas ES module
+    // Nouveau build déjà détecté au boot (main.jsx)
+    if (hasUpdateAvailable()) {
+      markUpdatePending();
+    }
+
     const bindRegistration = (registration) => {
       if (cancelled || !registration) return;
       registrationRef.current = registration;
@@ -218,35 +202,32 @@ export default function PwaUpdateBanner() {
   };
 
   const handleUpdate = async () => {
-    const waiting = waitingRef.current || registrationRef.current?.waiting;
-    if (!waiting || reloadingRef.current) return;
+    if (reloadingRef.current) return;
 
     ignoreActivityRef.current = true;
     clearSnooze();
+    clearUpdateAvailable();
     if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
     if (forceTimerRef.current) clearTimeout(forceTimerRef.current);
     setUpdating(true);
 
+    const waiting = waitingRef.current || registrationRef.current?.waiting;
+
     try {
-      await new Promise((resolve, reject) => {
-        const timeout = setTimeout(() => reject(new Error('timeout')), 15000);
+      if (waiting) {
+        await new Promise((resolve) => {
+          const timeout = setTimeout(resolve, 1500);
 
-        const onControllerChange = () => {
-          clearTimeout(timeout);
-          navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
-          resolve();
-        };
+          const onControllerChange = () => {
+            clearTimeout(timeout);
+            navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
+            resolve();
+          };
 
-        navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
-        waiting.postMessage({ type: 'SKIP_WAITING' });
-
-        window.setTimeout(() => {
-          if (reloadingRef.current) return;
-          clearTimeout(timeout);
-          navigator.serviceWorker.removeEventListener('controllerchange', onControllerChange);
-          resolve();
-        }, 1200);
-      });
+          navigator.serviceWorker.addEventListener('controllerchange', onControllerChange);
+          waiting.postMessage({ type: 'SKIP_WAITING' });
+        });
+      }
 
       if (reloadingRef.current) return;
       reloadingRef.current = true;
