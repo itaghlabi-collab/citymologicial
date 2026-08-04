@@ -7,7 +7,9 @@ import {
 } from 'lucide-react';
 import { generateMovementRef } from '../../services/inventaire/stockMovements';
 import { generateMouvementPdf } from '../../services/inventaire/mouvementPdf';
-import { listEmployees, employeeFullName } from '../../services/rh/employees';
+import { listEmployees, employeeFullName, filterChefsChantierEmployees } from '../../services/rh/employees';
+import { useAuth } from '../../hooks/useAuth';
+import { resolveCurrentPurchaseRole, PURCHASE_ROLES } from '../../services/achats/purchaseWorkflowRoles';
 import { useArticleScanner } from '../../hooks/useArticleScanner';
 import { addOrIncrementMovementLine } from '../../services/inventaire/articleScanWorkflow';
 import ArticleScanBar from './ArticleScanBar.jsx';
@@ -123,6 +125,7 @@ export default function BonMouvementForm({
   onSave,
   saving = false,
 }) {
+  const { user } = useAuth();
   const isEdit = !!bon?.ref;
   const [form, setForm] = useState(() => {
     if (!bon) return EMPTY_BON();
@@ -135,6 +138,7 @@ export default function BonMouvementForm({
     };
   });
   const [employees, setEmployees] = useState([]);
+  const [isMagasinierSession, setIsMagasinierSession] = useState(false);
   const [error, setError] = useState('');
   const [pdfLoading, setPdfLoading] = useState(false);
 
@@ -170,6 +174,18 @@ export default function BonMouvementForm({
     }
   }, [isEdit]);
 
+  useEffect(() => {
+    let active = true;
+    resolveCurrentPurchaseRole(user)
+      .then((role) => {
+        if (active) setIsMagasinierSession(role === PURCHASE_ROLES.MAGASINIER);
+      })
+      .catch(() => {
+        if (active) setIsMagasinierSession(false);
+      });
+    return () => { active = false; };
+  }, [user]);
+
   const totalLignes = form.lignes.length;
   const totalQte = useMemo(
     () => form.lignes.reduce((s, l) => s + (Number(l.quantite) || 0), 0),
@@ -180,6 +196,21 @@ export default function BonMouvementForm({
     .filter((e) => e.statut !== 'Inactif')
     .map((e) => ({ id: e.id, name: employeeFullName(e) }))
     .filter((e) => e.name);
+
+  /** Session magasinier : réception = chefs de chantier uniquement. */
+  const receptionOptions = useMemo(() => {
+    if (!isMagasinierSession) return employeeOptions;
+    const chefs = filterChefsChantierEmployees(employees)
+      .filter((e) => e.statut !== 'Inactif')
+      .map((e) => ({ id: e.id, name: employeeFullName(e) }))
+      .filter((e) => e.name);
+    const selected = form.receptionnaire;
+    if (selected && !chefs.some((c) => c.name === selected)) {
+      const keep = employeeOptions.find((e) => e.name === selected);
+      if (keep) return [keep, ...chefs];
+    }
+    return chefs;
+  }, [isMagasinierSession, employees, employeeOptions, form.receptionnaire]);
 
   function updateLigne(idx, patch) {
     setForm((p) => ({
@@ -305,7 +336,7 @@ export default function BonMouvementForm({
             <Label>Utilisateur réception (optionnel)</Label>
             <select value={form.receptionnaire} onChange={(e) => setField('receptionnaire', e.target.value)} style={IS(false)}>
               <option value="">Sélectionner l&apos;utilisateur réception</option>
-              {employeeOptions.map((e) => <option key={`r-${e.id}`} value={e.name}>{e.name}</option>)}
+              {receptionOptions.map((e) => <option key={`r-${e.id}`} value={e.name}>{e.name}</option>)}
             </select>
           </div>
           <div style={{ gridColumn: '1 / -1' }}>
