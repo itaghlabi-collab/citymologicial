@@ -13,7 +13,7 @@ import {
 import { moneyLineHt, moneyFormatMAD, moneyRound2 } from '../../utils/decimalMoney';
 import Big from 'big.js';
 
-const UNITES = ['unite', 'm2', 'ml', 'm3', 'm', 'forfait', 'heure', 'jour', 'pack', 'U'];
+const UNITES = ['unite', 'm2', 'ml', 'm3', 'm', 'forfait', 'heure', 'jour', 'pack', 'U', 'kg'];
 
 const EMPTY_DRAFT = () => ({
   mode: 'article',
