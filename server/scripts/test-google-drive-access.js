@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Test accès Google Drive — OAuth (Mon Drive) ou Service Account (Shared Drive).
+ * Test accès Google Drive — NON DESTRUCTIF (aucun files.create / files.delete).
+ * OAuth (Mon Drive) ou Service Account (Shared Drive).
  * Usage : cd server && node scripts/test-google-drive-access.js
  */
 require('dotenv').config();
@@ -12,7 +13,7 @@ const {
   getDriveRootFolderId,
   getDriveAuthStatus,
 } = require('../services/backup/googleDriveConfig');
-const { AUTH_MODES } = require('../services/backup/googleDriveAuth');
+const { AUTH_MODES, getRefreshTokenSource } = require('../services/backup/googleDriveAuth');
 
 async function main() {
   const auth = getDriveAuthStatus();
@@ -21,10 +22,12 @@ async function main() {
   console.log('[drive-test] mode auth:', auth.mode, `(forcé: ${auth.forced_mode})`);
   console.log('[drive-test] oauth configuré:', auth.oauth_configured);
   console.log('[drive-test] service account configuré:', auth.service_account_configured);
+  console.log('[drive-test] refresh token source:', getRefreshTokenSource());
   if (auth.mode === AUTH_MODES.SERVICE_ACCOUNT) {
     console.log('[drive-test] compte de service:', getServiceAccountEmail() || '(inconnu)');
   }
   console.log('[drive-test] dossier cible:', folderId);
+  console.log('[drive-test] mode probe: read-only (pas de création / suppression)');
 
   const ctx = await loadDriveContext();
   if (auth.mode === AUTH_MODES.OAUTH) {
@@ -35,7 +38,8 @@ async function main() {
   if (ctx.sharedDriveId) console.log('[drive-test] shared drive id:', ctx.sharedDriveId);
 
   const result = await validateGoogleDriveForBackup();
-  console.log('[drive-test] probe upload OK', result);
+  console.log('[drive-test] probe read-only OK', result);
+  console.log('[drive-test] deleted_file:', result.deleted_file === true ? 'OUI (interdit)' : 'NON');
 }
 
 main().catch((err) => {

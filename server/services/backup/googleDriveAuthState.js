@@ -258,10 +258,14 @@ async function markReconnectNotified() {
 /** Vue client — jamais de tokens. */
 async function getDriveStatePublic() {
   const state = await readState();
+  const envRefresh = Boolean(process.env.GOOGLE_OAUTH_REFRESH_TOKEN?.trim());
+  const dbRefresh = Boolean(state?.oauth_refresh_token?.trim());
+  /** Priorité runtime : env → database → missing (aligné sur resolveRefreshToken). */
+  const oauth_refresh_source = envRefresh ? 'env' : (dbRefresh ? 'database' : 'missing');
   const oauthEnv = Boolean(
     process.env.GOOGLE_OAUTH_CLIENT_ID?.trim()
     && process.env.GOOGLE_OAUTH_CLIENT_SECRET?.trim()
-    && (process.env.GOOGLE_OAUTH_REFRESH_TOKEN?.trim() || state?.oauth_refresh_token),
+    && (envRefresh || dbRefresh),
   );
 
   return {
@@ -279,12 +283,8 @@ async function getDriveStatePublic() {
     shared_drive_id: state?.shared_drive_id || null,
     oauth_client_configured: Boolean(process.env.GOOGLE_OAUTH_CLIENT_ID?.trim()),
     oauth_secret_configured: Boolean(process.env.GOOGLE_OAUTH_CLIENT_SECRET?.trim()),
-    oauth_refresh_configured: Boolean(
-      process.env.GOOGLE_OAUTH_REFRESH_TOKEN?.trim() || state?.oauth_refresh_token,
-    ),
-    oauth_refresh_source: state?.oauth_refresh_token
-      ? (tableMissing === true ? 'memory' : 'database')
-      : (process.env.GOOGLE_OAUTH_REFRESH_TOKEN?.trim() ? 'env' : 'none'),
+    oauth_refresh_configured: envRefresh || dbRefresh,
+    oauth_refresh_source,
   };
 }
 

@@ -65,14 +65,19 @@ async function validateGoogleDriveForBackup() {
   }
 }
 
-/** Test connexion seul (pas de sauvegarde complète). */
+/** Test connexion seul (pas de sauvegarde). Non destructif. */
 async function testGoogleDriveConnection() {
   await warmOAuthTokenCache();
+  const { getRefreshTokenSource } = require('./googleDriveAuth');
   if (await isDriveReconnectRequired()) {
     return {
       ok: false,
       status: 'reconnect_required',
+      oauth_refresh_source: getRefreshTokenSource(),
       userMessage: 'Google Drive déconnecté — reconnexion nécessaire',
+      destructive: false,
+      created_file: false,
+      deleted_file: false,
     };
   }
   try {
@@ -82,7 +87,13 @@ async function testGoogleDriveConnection() {
       status: 'active',
       authMode: result.authMode,
       folderId: result.folderId,
-      userMessage: 'Connexion Google Drive OK',
+      folderName: result.folderName || null,
+      oauth_refresh_source: getRefreshTokenSource(),
+      capabilities: result.capabilities || null,
+      userMessage: 'Connexion Google Drive OK (test lecture seule)',
+      destructive: false,
+      created_file: false,
+      deleted_file: false,
     };
   } catch (err) {
     const classified = classifyDriveError(err);
@@ -90,7 +101,11 @@ async function testGoogleDriveConnection() {
       ok: false,
       status: classified.reconnectRequired ? 'reconnect_required' : 'error',
       code: classified.code,
+      oauth_refresh_source: getRefreshTokenSource(),
       userMessage: classified.userMessage,
+      destructive: false,
+      created_file: false,
+      deleted_file: false,
     };
   }
 }

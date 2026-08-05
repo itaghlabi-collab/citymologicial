@@ -5,6 +5,10 @@
  * MODE 2            : Service Account   → Drive partagé (Shared Drive) uniquement
  *
  * Détection auto (BACKUP_GOOGLE_DRIVE_AUTH_MODE=auto) : OAuth si configuré, sinon Service Account.
+ *
+ * Priorité Refresh Token OAuth :
+ *   1. GOOGLE_OAUTH_REFRESH_TOKEN (Railway / env)
+ *   2. erp_backup_drive_state.oauth_refresh_token (fallback temporaire)
  */
 const { google } = require('googleapis');
 const { JWT, OAuth2Client } = require('google-auth-library');
@@ -19,18 +23,49 @@ const DRIVE_SCOPES = ['https://www.googleapis.com/auth/drive'];
 let driveClient = null;
 let resolvedAuthMode = null;
 
-/** Refresh token : env OU état DB (après reconnexion OAuth). */
+/** Refresh token DB (fallback) — cache mémoire, jamais loggé en clair. */
 let cachedDbRefreshToken = null;
 let cachedDbRefreshAt = 0;
+
+/** Dernière source résolue : env | database | missing */
+let lastResolvedRefreshSource = 'missing';
+
+/**
+ * Token avec lequel le driveClient actuel a été construit.
+ * Comparaison mémoire uniquement — jamais loggé.
+ */
+let clientBuiltWithRefreshToken = null;
 
 function getEnvRefreshToken() {
   return process.env.GOOGLE_OAUTH_REFRESH_TOKEN?.trim() || null;
 }
 
-async function resolveRefreshToken() {
-  const fromEnv = getEnvRefreshToken();
-  if (Date.now() - cachedDbRefreshAt < 60_000 && cachedDbRefreshToken) {
-    return cachedDbRefreshToken || fromEnv;
+/**
+ * Invalide uniquement les caches techniques en mémoire.
+ * Aucune donnée persistante (SQL / Drive / Railway) n'est modifiée.
+ */
+function invalidateDriveMemoryCaches() {
+  driveClient = null;
+  resolvedAuthMode = null;
+  clientBuiltWithRefreshToken = null;
+  try {
+    const { resetDriveContext } = require('./googleDriveContext');
+    resetDriveContext();
+  } catch {
+    /* context module peut ne pas être chargé */
+  }
+}
+
+function ensureClientMatchesToken(token) {
+  if (!token) return;
+  if (clientBuiltWithRefreshToken && clientBuiltWithRefreshToken !== token) {
+    invalidateDriveMemoryCaches();
+  }
+}
+
+async function loadDbRefreshToken() {
+  if (Date.now() - cachedDbRefreshAt < 60_000 && cachedDbRefreshToken !== null) {
+    return cachedDbRefreshToken;
   }
   try {
     const { getStoredRefreshToken } = require('./googleDriveAuthState');
@@ -38,8 +73,41 @@ async function resolveRefreshToken() {
     cachedDbRefreshAt = Date.now();
   } catch {
     cachedDbRefreshToken = null;
+    cachedDbRefreshAt = Date.now();
   }
-  return cachedDbRefreshToken || fromEnv;
+  return cachedDbRefreshToken;
+}
+
+/**
+ * Priorité : Railway (env) → DB (fallback) → erreur claire.
+ * Ne log jamais le token.
+ */
+async function resolveRefreshToken() {
+  const fromEnv = getEnvRefreshToken();
+  if (fromEnv) {
+    lastResolvedRefreshSource = 'env';
+    ensureClientMatchesToken(fromEnv);
+    return fromEnv;
+  }
+
+  const fromDb = await loadDbRefreshToken();
+  if (fromDb) {
+    lastResolvedRefreshSource = 'database';
+    ensureClientMatchesToken(fromDb);
+    return fromDb;
+  }
+
+  lastResolvedRefreshSource = 'missing';
+  throw new Error('Google Drive refresh token non configuré');
+}
+
+/** Source actuelle sans exposer le secret : env | database | missing */
+function getRefreshTokenSource() {
+  if (getEnvRefreshToken()) return 'env';
+  if (cachedDbRefreshToken) return 'database';
+  if (lastResolvedRefreshSource === 'database') return 'database';
+  if (lastResolvedRefreshSource === 'env') return 'env';
+  return lastResolvedRefreshSource || 'missing';
 }
 
 function isOAuthConfigured() {
@@ -90,16 +158,16 @@ function getAuthMode() {
 }
 
 function resetDriveAuth() {
-  driveClient = null;
-  resolvedAuthMode = null;
+  invalidateDriveMemoryCaches();
   cachedDbRefreshToken = null;
   cachedDbRefreshAt = 0;
+  lastResolvedRefreshSource = 'missing';
 }
 
 function createOAuthClient(refreshToken) {
   const token = (refreshToken || getEnvRefreshToken() || cachedDbRefreshToken || '').trim();
   if (!token) {
-    throw new Error('GOOGLE_OAUTH_REFRESH_TOKEN manquant (env ou reconnexion).');
+    throw new Error('Google Drive refresh token non configuré');
   }
   const client = new OAuth2Client(
     process.env.GOOGLE_OAUTH_CLIENT_ID.trim(),
@@ -123,7 +191,7 @@ function createServiceAccountClient() {
 
 /**
  * Client Drive API v3 authentifié selon le mode détecté.
- * Préférer getDriveAsync() pour OAuth (token DB).
+ * Préférer getDriveAsync() pour OAuth (résolution env prioritaire).
  */
 function getDrive() {
   if (driveClient) return driveClient;
@@ -135,19 +203,26 @@ function getDrive() {
     );
   }
 
-  const auth = mode === AUTH_MODES.OAUTH
-    ? createOAuthClient()
-    : createServiceAccountClient();
+  let auth;
+  if (mode === AUTH_MODES.OAUTH) {
+    const token = getEnvRefreshToken() || cachedDbRefreshToken;
+    auth = createOAuthClient(token);
+    clientBuiltWithRefreshToken = token;
+    lastResolvedRefreshSource = getEnvRefreshToken() ? 'env' : (token ? 'database' : 'missing');
+  } else {
+    auth = createServiceAccountClient();
+  }
 
   console.info(`[DRIVE] auth mode: ${mode}${mode === AUTH_MODES.OAUTH ? ' (Mon Drive utilisateur)' : ' (Shared Drive)'}`);
+  if (mode === AUTH_MODES.OAUTH) {
+    console.info(`[DRIVE] refresh token source: ${lastResolvedRefreshSource}`);
+  }
 
   driveClient = google.drive({ version: 'v3', auth });
   return driveClient;
 }
 
 async function getDriveAsync() {
-  if (driveClient) return driveClient;
-
   const mode = getAuthMode();
   if (!mode) {
     throw new Error(
@@ -158,23 +233,35 @@ async function getDriveAsync() {
   let auth;
   if (mode === AUTH_MODES.OAUTH) {
     const refreshToken = await resolveRefreshToken();
-    if (refreshToken) {
-      cachedDbRefreshToken = refreshToken;
-      cachedDbRefreshAt = Date.now();
+    if (driveClient && clientBuiltWithRefreshToken === refreshToken) {
+      return driveClient;
+    }
+    if (driveClient && clientBuiltWithRefreshToken !== refreshToken) {
+      invalidateDriveMemoryCaches();
     }
     auth = createOAuthClient(refreshToken);
+    clientBuiltWithRefreshToken = refreshToken;
   } else {
+    if (driveClient) return driveClient;
     auth = createServiceAccountClient();
   }
 
   console.info(`[DRIVE] auth mode: ${mode}${mode === AUTH_MODES.OAUTH ? ' (Mon Drive utilisateur)' : ' (Shared Drive)'}`);
+  if (mode === AUTH_MODES.OAUTH) {
+    console.info(`[DRIVE] refresh token source: ${getRefreshTokenSource()}`);
+  }
+
   driveClient = google.drive({ version: 'v3', auth });
   return driveClient;
 }
 
-/** Précharge le token DB pour que isOAuthConfigured / getDrive sync fonctionnent. */
+/** Précharge le token (env prioritaire, sinon DB) pour isOAuthConfigured sync. */
 async function warmOAuthTokenCache() {
-  await resolveRefreshToken();
+  try {
+    await resolveRefreshToken();
+  } catch {
+    /* missing — laisse isOAuthConfigured à false si rien */
+  }
 }
 
 /** Flags API Shared Drive — uniquement en mode Service Account. */
@@ -205,10 +292,13 @@ module.exports = {
   getDriveAsync,
   warmOAuthTokenCache,
   resetDriveAuth,
+  invalidateDriveMemoryCaches,
   getSharedDriveApiFlags,
   isOAuthConfigured,
   isServiceAccountConfigured,
   isOAuthMode,
   isServiceAccountMode,
   resolveRefreshToken,
+  getRefreshTokenSource,
+  getEnvRefreshToken,
 };

@@ -1,7 +1,7 @@
 /**
  * Contexte Google Drive — adapté au mode d'authentification (OAuth vs Service Account).
  */
-const { Readable } = require('stream');
+const { OAuth2Client } = require('google-auth-library');
 const {
   getDriveRootFolderId,
   getServiceAccountEmail,
@@ -14,6 +14,8 @@ const {
   getSharedDriveApiFlags,
   isOAuthMode,
   isServiceAccountMode,
+  resolveRefreshToken,
+  getRefreshTokenSource,
   AUTH_MODES,
 } = require('./googleDriveAuth');
 
@@ -233,7 +235,11 @@ async function assertSharedDriveRequired() {
 }
 
 /**
- * Test upload + suppression — adapté au mode auth.
+ * Test Drive non destructif :
+ * - échange Refresh Token → Access Token (via getAccessToken / files.get)
+ * - files.get sur le dossier configuré
+ * - aucune création de fichier
+ * - aucun files.delete
  */
 async function probeDriveWriteAccess() {
   const ctx = isServiceAccountMode()
@@ -242,44 +248,67 @@ async function probeDriveWriteAccess() {
 
   const drive = await getDriveAsync();
   const apiFlags = getSharedDriveApiFlags();
-  const probeName = `.citymo-probe-${Date.now()}.txt`;
-  const body = Buffer.from('citymo-drive-probe-ok', 'utf8');
 
-  console.info('[DRIVE] probe upload start', { mode: ctx.authMode, folder: ctx.rootFolderId });
+  console.info('[DRIVE] probe read-only start', {
+    mode: ctx.authMode,
+    folder: ctx.rootFolderId,
+    refresh_source: isOAuthMode() ? getRefreshTokenSource() : null,
+  });
 
-  let fileId;
   try {
-    const created = await drive.files.create({
-      requestBody: {
-        name: probeName,
-        parents: [ctx.rootFolderId],
-      },
-      media: {
-        mimeType: 'text/plain',
-        body: Readable.from(body),
-      },
-      fields: 'id, size',
+    if (isOAuthMode()) {
+      const refreshToken = await resolveRefreshToken();
+      const client = new OAuth2Client(
+        process.env.GOOGLE_OAUTH_CLIENT_ID.trim(),
+        process.env.GOOGLE_OAUTH_CLIENT_SECRET.trim(),
+      );
+      client.setCredentials({ refresh_token: refreshToken });
+      const tokenRes = await client.getAccessToken();
+      const access = typeof tokenRes === 'string' ? tokenRes : tokenRes?.token;
+      if (!access) {
+        throw new Error('Échange Refresh Token → Access Token échoué (token vide).');
+      }
+      console.info('[DRIVE] probe OAuth access token OK (non exposé)', {
+        refresh_source: getRefreshTokenSource(),
+      });
+    }
+
+    const folder = await drive.files.get({
+      fileId: ctx.rootFolderId,
+      fields: 'id,name,mimeType,capabilities,driveId,trashed',
       ...apiFlags,
     });
-    fileId = created.data.id;
-    console.info(`[DRIVE] probe upload success: ${fileId}`);
+
+    if (folder.data?.trashed) {
+      throw new Error(`Dossier Drive ${ctx.rootFolderId} est dans la corbeille.`);
+    }
+
+    const caps = folder.data.capabilities || {};
+    console.info('[DRIVE] probe folder OK', {
+      id: folder.data.id,
+      name: folder.data.name,
+      canAddChildren: caps.canAddChildren,
+      canEdit: caps.canEdit,
+    });
+
+    return {
+      ok: true,
+      authMode: ctx.authMode,
+      folderId: folder.data.id || ctx.rootFolderId,
+      folderName: folder.data.name || null,
+      sharedDriveId: ctx.sharedDriveId || folder.data.driveId || null,
+      capabilities: {
+        canAddChildren: Boolean(caps.canAddChildren),
+        canEdit: Boolean(caps.canEdit),
+        canListChildren: Boolean(caps.canListChildren),
+      },
+      destructive: false,
+      created_file: false,
+      deleted_file: false,
+    };
   } catch (err) {
     throw new Error(formatDriveApiError(err, ctx));
   }
-
-  try {
-    await drive.files.delete({ fileId, ...apiFlags });
-    console.info('[DRIVE] probe cleanup ok');
-  } catch (err) {
-    console.warn('[DRIVE] probe cleanup failed (non bloquant):', err.message);
-  }
-
-  return {
-    ok: true,
-    authMode: ctx.authMode,
-    folderId: ctx.rootFolderId,
-    sharedDriveId: ctx.sharedDriveId || null,
-  };
 }
 
 function normalizeSharedDriveId(raw) {
