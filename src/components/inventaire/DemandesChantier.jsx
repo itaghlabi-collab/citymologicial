@@ -1272,21 +1272,15 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                             {embedded ? (
                               avail === 'ok' ? 'Disponible' : avail === 'partial' ? 'Partiel' : 'Non disponible'
                             ) : (
-                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                                <button type="button" className="btn btn-ghost btn-sm" disabled={locked}
-                                  title="Tout préparé : remplit Préparé = quantité demandée"
-                                  aria-pressed={avail === 'ok'}
-                                  style={{ padding: '2px 6px', background: avail === 'ok' ? '#E8F5E9' : undefined, outline: avail === 'ok' ? '2px solid #43A047' : undefined }}
+                              <div style={{ display: 'flex', flexWrap: 'nowrap', gap: 4, alignItems: 'center' }}>
+                                <button type="button" className="btn btn-ghost btn-sm" disabled={locked} title="Disponible"
+                                  style={{ padding: '2px 6px', minWidth: 28, background: avail === 'ok' ? '#E8F5E9' : undefined }}
                                   onClick={() => setLineAvailability(l, 'ok')}>✅</button>
-                                <button type="button" className="btn btn-ghost btn-sm" disabled={locked}
-                                  title="Partiellement préparé"
-                                  aria-pressed={avail === 'partial'}
-                                  style={{ padding: '2px 6px', background: avail === 'partial' ? '#FFF8E1' : undefined, outline: avail === 'partial' ? '2px solid #FB8C00' : undefined }}
+                                <button type="button" className="btn btn-ghost btn-sm" disabled={locked} title="Partiellement"
+                                  style={{ padding: '2px 6px', minWidth: 28, background: avail === 'partial' ? '#FFF8E1' : undefined }}
                                   onClick={() => setLineAvailability(l, 'partial')}>🟡</button>
-                                <button type="button" className="btn btn-ghost btn-sm" disabled={locked}
-                                  title="Non préparé : Préparé = 0 (à acheter)"
-                                  aria-pressed={avail === 'none'}
-                                  style={{ padding: '2px 6px', background: avail === 'none' ? '#FFEBEE' : undefined, outline: avail === 'none' ? '2px solid #E53935' : undefined }}
+                                <button type="button" className="btn btn-ghost btn-sm" disabled={locked} title="Non disponible"
+                                  style={{ padding: '2px 6px', minWidth: 28, background: avail === 'none' ? '#FFEBEE' : undefined }}
                                   onClick={() => setLineAvailability(l, 'none')}>❌</button>
                               </div>
                             )}
@@ -1298,13 +1292,27 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                               <input
                                 type="number"
                                 min="0"
-                                value={l.quantite_preparee ?? ''}
+                                step="1"
+                                inputMode="numeric"
+                                value={l.quantite_preparee === '' || l.quantite_preparee === null || l.quantite_preparee === undefined
+                                  ? ''
+                                  : l.quantite_preparee}
                                 onChange={(e) => {
-                                  const prep = Number(e.target.value) || 0;
+                                  const raw = e.target.value;
                                   const demandee = Number(l.quantite_demandee) || 0;
-                                  updateDetailLine(l.id, {
+                                  if (raw === '') {
+                                    updateDetailLine(l, {
+                                      quantite_preparee: '',
+                                      disponible: false,
+                                      rupture: true,
+                                    });
+                                    return;
+                                  }
+                                  const prep = Math.max(0, Number(raw));
+                                  if (Number.isNaN(prep)) return;
+                                  updateDetailLine(l, {
                                     quantite_preparee: prep,
-                                    disponible: prep >= demandee,
+                                    disponible: prep >= demandee && prep > 0,
                                     rupture: prep <= 0,
                                   });
                                 }}
@@ -1377,13 +1385,27 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                                 <input
                                   type="number"
                                   min="0"
-                                  value={l.quantite_preparee ?? ''}
+                                  step="1"
+                                  inputMode="numeric"
+                                  value={l.quantite_preparee === '' || l.quantite_preparee === null || l.quantite_preparee === undefined
+                                    ? ''
+                                    : l.quantite_preparee}
                                   onChange={(e) => {
-                                    const prep = Number(e.target.value) || 0;
+                                    const raw = e.target.value;
                                     const demandee = Number(l.quantite_demandee) || 0;
-                                    updateDetailLine(l.id, {
+                                    if (raw === '') {
+                                      updateDetailLine(l, {
+                                        quantite_preparee: '',
+                                        disponible: false,
+                                        rupture: true,
+                                      });
+                                      return;
+                                    }
+                                    const prep = Math.max(0, Number(raw));
+                                    if (Number.isNaN(prep)) return;
+                                    updateDetailLine(l, {
                                       quantite_preparee: prep,
-                                      disponible: prep >= demandee,
+                                      disponible: prep >= demandee && prep > 0,
                                       rupture: prep <= 0,
                                     });
                                   }}
@@ -1405,22 +1427,16 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                         </dl>
                         {!embedded && (
                           <>
-                            <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-                              <button type="button" className="btn btn-ghost btn-sm" disabled={locked}
-                                title="Tout préparé : remplit Préparé = quantité demandée"
-                                aria-pressed={avail === 'ok'}
-                                style={{ background: avail === 'ok' ? '#E8F5E9' : undefined, outline: avail === 'ok' ? '2px solid #43A047' : undefined }}
-                                onClick={() => setLineAvailability(l, 'ok')}>✅ Disponible (tout préparer)</button>
-                              <button type="button" className="btn btn-ghost btn-sm" disabled={locked}
-                                title="Partiellement préparé"
-                                aria-pressed={avail === 'partial'}
-                                style={{ background: avail === 'partial' ? '#FFF8E1' : undefined, outline: avail === 'partial' ? '2px solid #FB8C00' : undefined }}
-                                onClick={() => setLineAvailability(l, 'partial')}>🟡 Partiel</button>
-                              <button type="button" className="btn btn-ghost btn-sm" disabled={locked}
-                                title="Non préparé : Préparé = 0"
-                                aria-pressed={avail === 'none'}
-                                style={{ background: avail === 'none' ? '#FFEBEE' : undefined, outline: avail === 'none' ? '2px solid #E53935' : undefined }}
-                                onClick={() => setLineAvailability(l, 'none')}>❌ Non dispo</button>
+                            <div style={{ display: 'flex', gap: 4, marginTop: 8, flexWrap: 'nowrap', alignItems: 'center' }}>
+                              <button type="button" className="btn btn-ghost btn-sm" disabled={locked} title="Disponible"
+                                style={{ padding: '2px 6px', minWidth: 28, background: avail === 'ok' ? '#E8F5E9' : undefined }}
+                                onClick={() => setLineAvailability(l, 'ok')}>✅</button>
+                              <button type="button" className="btn btn-ghost btn-sm" disabled={locked} title="Partiellement"
+                                style={{ padding: '2px 6px', minWidth: 28, background: avail === 'partial' ? '#FFF8E1' : undefined }}
+                                onClick={() => setLineAvailability(l, 'partial')}>🟡</button>
+                              <button type="button" className="btn btn-ghost btn-sm" disabled={locked} title="Non disponible"
+                                style={{ padding: '2px 6px', minWidth: 28, background: avail === 'none' ? '#FFEBEE' : undefined }}
+                                onClick={() => setLineAvailability(l, 'none')}>❌</button>
                             </div>
                             <dl className="inv-dc-field" style={{ marginTop: 8 }}>
                               <dt>Associer au catalogue</dt>
