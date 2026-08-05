@@ -193,12 +193,25 @@ async function getProfileRole(userId) {
 export async function generateSiteRequestRef() {
   const year = new Date().getFullYear();
   const prefix = `DC-${year}-`;
-  const { count, error } = await getSupabase()
+  const { data, error } = await getSupabase()
     .from(TABLE)
-    .select('*', { count: 'exact', head: true })
+    .select('ref_demande')
     .like('ref_demande', `${prefix}%`);
   if (error) throw error;
-  return `${prefix}${String((count || 0) + 1).padStart(6, '0')}`;
+  let max = 0;
+  (data || []).forEach((r) => {
+    const m = String(r.ref_demande || '').match(/-(\d+)$/);
+    if (m) max = Math.max(max, parseInt(m[1], 10));
+  });
+  return `${prefix}${String(max + 1).padStart(6, '0')}`;
+}
+
+function isDuplicateRefError(error) {
+  const msg = String(error?.message || error?.details || '');
+  const code = String(error?.code || '');
+  return code === '23505'
+    || /site_material_requests_ref_demande_key/i.test(msg)
+    || (/duplicate key/i.test(msg) && /ref_demande/i.test(msg));
 }
 
 async function logHistory(requestId, action, details, actorId, actorName, actorRole, ipAddress) {
@@ -321,9 +334,9 @@ export async function createSiteMaterialRequest(form, lines = [], { ipAddress } 
   const actorName = await getProfileName(user.id);
   const actorRole = await getProfileRole(user.id);
   const stockArticles = await listStockArticles().catch(() => []);
-  const ref = form.ref || await generateSiteRequestRef();
   const montant = estimateMontant(lines, stockArticles);
-  const row = {
+
+  const buildRow = (ref) => ({
     ref_demande: ref,
     project_id: form.project_id || null,
     project_ref: form.project_ref || null,
@@ -342,23 +355,42 @@ export async function createSiteMaterialRequest(form, lines = [], { ipAddress } 
     requested_by: user.id,
     requested_by_name: actorName,
     updated_at: new Date().toISOString(),
-  };
-  const { data, error } = await getSupabase().from(TABLE).insert([row]).select().single();
-  if (error) {
-    if (/origine/i.test(String(error.message || ''))) {
+  });
+
+  let data = null;
+  let lastError = null;
+  const preferredRef = (form.ref || '').trim();
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const ref = attempt === 0 && preferredRef
+      ? preferredRef
+      : await generateSiteRequestRef();
+    const row = buildRow(ref);
+    const result = await getSupabase().from(TABLE).insert([row]).select().single();
+    if (!result.error) {
+      data = result.data;
+      break;
+    }
+    lastError = result.error;
+    if (/origine/i.test(String(result.error.message || ''))) {
       const { origine, ...rest } = row;
       const retry = await getSupabase().from(TABLE).insert([rest]).select().single();
-      if (retry.error) throw retry.error;
-      const savedLines = await replaceLines(retry.data.id, lines, stockArticles);
-      await logHistory(retry.data.id, 'creation', 'Demande créée', user.id, actorName, actorRole, ipAddress);
-      return normalizeRequest(
-        { ...retry.data, origine: form.origine === 'manuelle' ? 'manuelle' : 'catalogue' },
-        enrichLinesWithStock(savedLines, stockArticles),
-        await loadHistory(retry.data.id),
-      );
+      if (!retry.error) {
+        const savedLines = await replaceLines(retry.data.id, lines, stockArticles);
+        await logHistory(retry.data.id, 'creation', 'Demande créée', user.id, actorName, actorRole, ipAddress);
+        return normalizeRequest(
+          { ...retry.data, origine: form.origine === 'manuelle' ? 'manuelle' : 'catalogue' },
+          enrichLinesWithStock(savedLines, stockArticles),
+          await loadHistory(retry.data.id),
+        );
+      }
+      lastError = retry.error;
+      if (!isDuplicateRefError(retry.error)) throw retry.error;
+      continue;
     }
-    throw error;
+    if (!isDuplicateRefError(result.error)) throw result.error;
   }
+  if (!data) throw lastError || new Error('Impossible de générer une référence unique.');
+
   const savedLines = await replaceLines(data.id, lines, stockArticles);
   await logHistory(data.id, 'creation', 'Demande créée', user.id, actorName, actorRole, ipAddress);
   return normalizeRequest(data, enrichLinesWithStock(savedLines, stockArticles), await loadHistory(data.id));
