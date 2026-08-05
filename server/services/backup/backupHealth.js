@@ -300,13 +300,57 @@ async function getBackupHealthDashboard() {
 
 function buildSuggestedActions({ overall, reconnect, supabaseOk, schedules, lastBackup, recentErrors }) {
   const actions = [];
-  if (!supabaseOk) actions.push({ priority: 'high', label: 'Vérifier la connexion Supabase / service_role sur Railway' });
-  if (reconnect) actions.push({ priority: 'high', label: 'Reconnecter Google Drive' });
-  if (!schedules.length) actions.push({ priority: 'medium', label: 'Créer une planification quotidienne' });
-  if (lastBackup?.statut === 'erreur') actions.push({ priority: 'high', label: 'Relancer une sauvegarde manuelle' });
-  if (lastBackup?.statut === 'succes_partiel') actions.push({ priority: 'medium', label: 'Corriger Drive puis relancer pour une copie complète' });
-  if (recentErrors.length >= 3) actions.push({ priority: 'medium', label: 'Nettoyer les tentatives échouées sans fichier' });
-  if (overall === 'ok' && !actions.length) actions.push({ priority: 'low', label: 'Aucune action — système sain' });
+  if (!supabaseOk) {
+    actions.push({
+      id: 'check_supabase',
+      priority: 'high',
+      label: 'Vérifier la connexion Supabase / service_role sur Railway',
+      actionable: false,
+    });
+  }
+  if (reconnect) {
+    actions.push({
+      id: 'reconnect_drive',
+      priority: 'high',
+      label: 'Reconnecter Google Drive',
+      actionable: true,
+    });
+  }
+  if (!schedules.length) {
+    actions.push({
+      id: 'create_schedule',
+      priority: 'medium',
+      label: 'Créer une planification quotidienne',
+      actionable: false,
+    });
+  }
+  if (lastBackup?.statut === 'erreur') {
+    actions.push({
+      id: 'run_manual_backup',
+      priority: 'high',
+      label: 'Relancer une sauvegarde manuelle',
+      actionable: false,
+    });
+  }
+  if (lastBackup?.statut === 'succes_partiel') {
+    actions.push({
+      id: 'fix_drive_rerun',
+      priority: 'medium',
+      label: 'Corriger Drive puis relancer pour une copie complète',
+      actionable: false,
+    });
+  }
+  if (recentErrors.length >= 3) {
+    actions.push({
+      id: 'cleanup_failed',
+      priority: 'medium',
+      label: 'Nettoyer les tentatives échouées sans fichier',
+      actionable: true,
+    });
+  }
+  if (overall === 'ok' && !actions.length) {
+    actions.push({ id: 'none', priority: 'low', label: 'Aucune action — système sain', actionable: false });
+  }
   return actions;
 }
 

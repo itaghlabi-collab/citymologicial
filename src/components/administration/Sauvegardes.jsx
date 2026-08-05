@@ -183,7 +183,7 @@ function HealthCard({ icon, title, level, label, summary, details = [], footer }
   );
 }
 
-function BackupHealthDashboard({ canManage, onDriveAction }) {
+function BackupHealthDashboard({ canManage, onDriveAction, onCleanupFailed, onOpenNewBackup }) {
   const [health, setHealth] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -213,6 +213,28 @@ function BackupHealthDashboard({ canManage, onDriveAction }) {
     setBusy(kind);
     try {
       await onDriveAction(kind);
+      await load(true);
+    } finally {
+      setBusy('');
+    }
+  }
+
+  async function runSuggestedAction(action) {
+    if (!canManage || !action) return;
+    const id = action.id
+      || (/Nettoyer les tentatives/i.test(action.label || '') ? 'cleanup_failed' : null)
+      || (/Reconnecter Google Drive/i.test(action.label || '') ? 'reconnect_drive' : null)
+      || (/Relancer une sauvegarde manuelle/i.test(action.label || '') ? 'run_manual_backup' : null);
+    if (!id || !['cleanup_failed', 'reconnect_drive', 'run_manual_backup'].includes(id)) return;
+    setBusy(id);
+    try {
+      if (id === 'reconnect_drive') {
+        await onDriveAction?.('reconnect');
+      } else if (id === 'cleanup_failed') {
+        await onCleanupFailed?.();
+      } else if (id === 'run_manual_backup') {
+        onOpenNewBackup?.();
+      }
       await load(true);
     } finally {
       setBusy('');
@@ -270,17 +292,46 @@ function BackupHealthDashboard({ canManage, onDriveAction }) {
                 Indicateur global : {overall?.label}
               </div>
             </div>
-            {(health.actions_suggested || []).filter((a) => a.priority !== 'low').slice(0, 2).map((a) => (
-              <span
-                key={a.label}
-                style={{
-                  fontSize: '0.75rem', fontWeight: 600, color: oc.fg,
-                  background: '#fff', borderRadius: 6, padding: '6px 10px', border: `1px solid ${oc.border}`,
-                }}
-              >
-                → {a.label}
-              </span>
-            ))}
+            {(health.actions_suggested || []).filter((a) => a.priority !== 'low').slice(0, 2).map((a) => {
+              const actionId = a.id
+                || (/Nettoyer les tentatives/i.test(a.label || '') ? 'cleanup_failed' : null)
+                || (/Reconnecter Google Drive/i.test(a.label || '') ? 'reconnect_drive' : null)
+                || (/Relancer une sauvegarde manuelle/i.test(a.label || '') ? 'run_manual_backup' : null);
+              const clickable = Boolean(
+                canManage
+                && (a.actionable || ['cleanup_failed', 'reconnect_drive', 'run_manual_backup'].includes(actionId)),
+              );
+              const commonStyle = {
+                fontSize: '0.75rem',
+                fontWeight: 600,
+                color: oc.fg,
+                background: '#fff',
+                borderRadius: 6,
+                padding: '6px 10px',
+                border: `1px solid ${oc.border}`,
+                cursor: clickable ? 'pointer' : 'default',
+                opacity: busy === actionId ? 0.6 : 1,
+              };
+              if (!clickable) {
+                return (
+                  <span key={actionId || a.label} style={commonStyle}>
+                    → {a.label}
+                  </span>
+                );
+              }
+              return (
+                <button
+                  key={actionId || a.label}
+                  type="button"
+                  disabled={!!busy}
+                  onClick={() => runSuggestedAction({ ...a, id: actionId })}
+                  style={{ ...commonStyle, fontFamily: 'inherit' }}
+                  title={a.label}
+                >
+                  → {busy === actionId ? '…' : a.label}
+                </button>
+              );
+            })}
           </div>
 
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: 12 }}>
@@ -580,7 +631,12 @@ export default function Sauvegardes({ backups = [], setBackups, reload, canManag
         <KpiCard icon={<Loader2 size={17} />} label="En cours" value={enCours} color="orange" />
       </div>
 
-      <BackupHealthDashboard canManage={canManage} onDriveAction={handleDriveAction} />
+      <BackupHealthDashboard
+        canManage={canManage}
+        onDriveAction={handleDriveAction}
+        onCleanupFailed={handleCleanupFailed}
+        onOpenNewBackup={() => setShowModal(true)}
+      />
 
       <div style={{ marginBottom: 20 }}>
         <div style={{ fontSize: '0.68rem', fontWeight: 800, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 12 }}>
