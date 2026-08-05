@@ -369,7 +369,11 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
     setError('');
     try {
       const updated = await updateSiteMaterialRequestHeader(detail.id, detailRecap);
-      setDetail(updated);
+      // Ne pas écraser les quantités préparées saisies localement (pas encore validées)
+      setDetail((prev) => ({
+        ...updated,
+        lines: prev?.lines?.length ? prev.lines : updated.lines,
+      }));
       syncDetailRecap(updated);
       await load();
     } catch (err) {
@@ -470,17 +474,33 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
 
   const rowHandlers = { openDetail, openEdit, handlePdf, handleDelete };
 
-  function updateDetailLine(lineId, patch) {
-    setDetail((prev) => ({
-      ...prev,
-      lines: prev.lines.map((l) => (l.id === lineId ? { ...l, ...patch } : l)),
-    }));
+  function lineMatchKey(line) {
+    if (line?.id != null && String(line.id) !== '') return `id:${line.id}`;
+    return `row:${line.category_id || ''}::${line.article_name || ''}::${line.line_order ?? ''}`;
   }
 
+  function updateDetailLine(lineRef, patch) {
+    const key = typeof lineRef === 'object' && lineRef
+      ? lineMatchKey(lineRef)
+      : `id:${lineRef}`;
+    setDetail((prev) => {
+      if (!prev) return prev;
+      return {
+        ...prev,
+        lines: (prev.lines || []).map((l) => {
+          const sameId = lineRef != null && l.id != null && String(l.id) === String(typeof lineRef === 'object' ? lineRef.id : lineRef);
+          const sameKey = lineMatchKey(l) === key;
+          return (sameId || sameKey) ? { ...l, ...patch } : l;
+        }),
+      };
+    });
+  }
+
+  /** Vert = tout préparé (préparé = demandé). Jaune = partiel. Rouge = rien préparé. */
   function setLineAvailability(line, status) {
     const demandee = Number(line.quantite_demandee) || 0;
     if (status === 'ok') {
-      updateDetailLine(line.id, {
+      updateDetailLine(line, {
         disponible: true,
         rupture: false,
         quantite_preparee: demandee,
@@ -488,15 +508,18 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
       return;
     }
     if (status === 'partial') {
-      const prep = Math.min(Number(line.quantite_preparee) || 0, demandee);
-      updateDetailLine(line.id, {
+      const current = Number(line.quantite_preparee) || 0;
+      const prep = current > 0 && current < demandee
+        ? current
+        : Math.max(1, Math.floor(demandee / 2) || 1);
+      updateDetailLine(line, {
         disponible: false,
         rupture: false,
-        quantite_preparee: prep > 0 && prep < demandee ? prep : Math.max(1, Math.floor(demandee / 2)),
+        quantite_preparee: Math.min(prep, demandee),
       });
       return;
     }
-    updateDetailLine(line.id, {
+    updateDetailLine(line, {
       disponible: false,
       rupture: true,
       quantite_preparee: 0,
@@ -506,7 +529,7 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
   function associateLineToArticle(line, articleId) {
     const art = stockArticles.find((a) => String(a.id) === String(articleId));
     if (!art) {
-      updateDetailLine(line.id, { article_id: null });
+      updateDetailLine(line, { article_id: null });
       return;
     }
     const enriched = enrichLinesWithStock([{
@@ -514,7 +537,7 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
       article_id: art.id,
       article_name: line.article_name || art.nom || art.designation,
     }], stockArticles)[0];
-    updateDetailLine(line.id, {
+    updateDetailLine(line, {
       article_id: art.id,
       stock_actuel: enriched.stock_actuel,
       disponible: enriched.disponible,
@@ -1250,14 +1273,20 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                               avail === 'ok' ? 'Disponible' : avail === 'partial' ? 'Partiel' : 'Non disponible'
                             ) : (
                               <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                                <button type="button" className="btn btn-ghost btn-sm" disabled={locked} title="Disponible"
-                                  style={{ padding: '2px 6px', background: avail === 'ok' ? '#E8F5E9' : undefined }}
+                                <button type="button" className="btn btn-ghost btn-sm" disabled={locked}
+                                  title="Tout préparé : remplit Préparé = quantité demandée"
+                                  aria-pressed={avail === 'ok'}
+                                  style={{ padding: '2px 6px', background: avail === 'ok' ? '#E8F5E9' : undefined, outline: avail === 'ok' ? '2px solid #43A047' : undefined }}
                                   onClick={() => setLineAvailability(l, 'ok')}>✅</button>
-                                <button type="button" className="btn btn-ghost btn-sm" disabled={locked} title="Partiellement"
-                                  style={{ padding: '2px 6px', background: avail === 'partial' ? '#FFF8E1' : undefined }}
+                                <button type="button" className="btn btn-ghost btn-sm" disabled={locked}
+                                  title="Partiellement préparé"
+                                  aria-pressed={avail === 'partial'}
+                                  style={{ padding: '2px 6px', background: avail === 'partial' ? '#FFF8E1' : undefined, outline: avail === 'partial' ? '2px solid #FB8C00' : undefined }}
                                   onClick={() => setLineAvailability(l, 'partial')}>🟡</button>
-                                <button type="button" className="btn btn-ghost btn-sm" disabled={locked} title="Non disponible"
-                                  style={{ padding: '2px 6px', background: avail === 'none' ? '#FFEBEE' : undefined }}
+                                <button type="button" className="btn btn-ghost btn-sm" disabled={locked}
+                                  title="Non préparé : Préparé = 0 (à acheter)"
+                                  aria-pressed={avail === 'none'}
+                                  style={{ padding: '2px 6px', background: avail === 'none' ? '#FFEBEE' : undefined, outline: avail === 'none' ? '2px solid #E53935' : undefined }}
                                   onClick={() => setLineAvailability(l, 'none')}>❌</button>
                               </div>
                             )}
@@ -1378,13 +1407,19 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                           <>
                             <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
                               <button type="button" className="btn btn-ghost btn-sm" disabled={locked}
-                                style={{ background: avail === 'ok' ? '#E8F5E9' : undefined }}
-                                onClick={() => setLineAvailability(l, 'ok')}>✅ Disponible</button>
+                                title="Tout préparé : remplit Préparé = quantité demandée"
+                                aria-pressed={avail === 'ok'}
+                                style={{ background: avail === 'ok' ? '#E8F5E9' : undefined, outline: avail === 'ok' ? '2px solid #43A047' : undefined }}
+                                onClick={() => setLineAvailability(l, 'ok')}>✅ Disponible (tout préparer)</button>
                               <button type="button" className="btn btn-ghost btn-sm" disabled={locked}
-                                style={{ background: avail === 'partial' ? '#FFF8E1' : undefined }}
+                                title="Partiellement préparé"
+                                aria-pressed={avail === 'partial'}
+                                style={{ background: avail === 'partial' ? '#FFF8E1' : undefined, outline: avail === 'partial' ? '2px solid #FB8C00' : undefined }}
                                 onClick={() => setLineAvailability(l, 'partial')}>🟡 Partiel</button>
                               <button type="button" className="btn btn-ghost btn-sm" disabled={locked}
-                                style={{ background: avail === 'none' ? '#FFEBEE' : undefined }}
+                                title="Non préparé : Préparé = 0"
+                                aria-pressed={avail === 'none'}
+                                style={{ background: avail === 'none' ? '#FFEBEE' : undefined, outline: avail === 'none' ? '2px solid #E53935' : undefined }}
                                 onClick={() => setLineAvailability(l, 'none')}>❌ Non dispo</button>
                             </div>
                             <dl className="inv-dc-field" style={{ marginTop: 8 }}>
