@@ -264,15 +264,16 @@ async function warmOAuthTokenCache() {
   }
 }
 
-/** Flags API Shared Drive — uniquement en mode Service Account. */
+/**
+ * Flags Drive API — toujours supportsAllDrives.
+ * Nécessaire aussi en OAuth si le dossier cible est dans un Drive partagé
+ * (sinon list/create échouent alors que files.get « Connexion active » passe).
+ */
 function getSharedDriveApiFlags() {
-  if (getAuthMode() === AUTH_MODES.SERVICE_ACCOUNT) {
-    return {
-      supportsAllDrives: true,
-      includeItemsFromAllDrives: true,
-    };
-  }
-  return {};
+  return {
+    supportsAllDrives: true,
+    includeItemsFromAllDrives: true,
+  };
 }
 
 function isOAuthMode() {

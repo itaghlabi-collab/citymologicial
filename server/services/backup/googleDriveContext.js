@@ -192,11 +192,9 @@ async function loadDriveContext() {
 }
 
 function getListOptsForContext(ctx) {
-  if (isOAuthMode()) {
-    return {};
-  }
   const opts = getSharedDriveApiFlags();
-  if (ctx?.sharedDriveId) {
+  // Service Account sur Shared Drive : corpora=drive accélère les listes
+  if (!isOAuthMode() && ctx?.sharedDriveId) {
     opts.corpora = 'drive';
     opts.driveId = ctx.sharedDriveId;
   }
@@ -290,6 +288,13 @@ async function probeDriveWriteAccess() {
       canAddChildren: caps.canAddChildren,
       canEdit: caps.canEdit,
     });
+
+    if (caps.canAddChildren === false) {
+      throw new Error(
+        `Pas de droit d'écriture sur le dossier Drive « ${folder.data.name || ctx.rootFolderId} ». `
+        + 'Partagez-le en Éditeur avec le compte Google reconnecté, puis relancez.',
+      );
+    }
 
     return {
       ok: true,

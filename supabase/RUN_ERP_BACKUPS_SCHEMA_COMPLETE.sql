@@ -24,3 +24,9 @@ COMMENT ON COLUMN public.erp_backups.drive_synced IS 'Copie Google Drive réussi
 COMMENT ON COLUMN public.erp_backups.drive_folder_id IS 'ID dossier Drive pour cette sauvegarde (BCK-YYYY-NNNN)';
 COMMENT ON COLUMN public.erp_backups.drive_sync_error IS 'Dernière erreur sync Drive';
 COMMENT ON COLUMN public.erp_backups.progress_at IS 'Dernière activité du job (export DB, copie fichiers, etc.)';
+
+-- Statut succes_partiel (CHECK erp_backups)
+ALTER TABLE public.erp_backups DROP CONSTRAINT IF EXISTS erp_backups_statut_check;
+ALTER TABLE public.erp_backups
+  ADD CONSTRAINT erp_backups_statut_check
+  CHECK (statut IN ('succes', 'succes_partiel', 'en_cours', 'erreur', 'planifie'));

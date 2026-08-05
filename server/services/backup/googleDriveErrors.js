@@ -80,12 +80,19 @@ function classifyDriveError(err) {
     };
   }
 
+  const safeDetail = raw
+    .replace(/Bearer\s+[\w.-]+/gi, 'Bearer ***')
+    .replace(/refresh_token[=:]\s*[^\s&]+/gi, 'refresh_token=***')
+    .replace(/client_secret[=:]\s*[^\s&]+/gi, 'client_secret=***')
+    .slice(0, 180);
   return {
     code: CODES.UNKNOWN,
     reconnectRequired: false,
     retryable: true,
-    userMessage: 'Erreur Google Drive',
-    detailSafe: raw.slice(0, 240),
+    userMessage: safeDetail
+      ? `Erreur Google Drive — ${safeDetail}`
+      : 'Erreur Google Drive',
+    detailSafe: safeDetail,
   };
 }
 

@@ -166,17 +166,17 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
           if (!marked.alreadyNotified) {
             await notifyDriveReconnectRequired({ classified, backupRef: row.ref });
           }
-          driveValidationError = classified.userMessage;
-          driveUploadAllowed = false;
-          // Continuer la sauvegarde Storage même si Drive était « required »
-          console.warn('[backup] invalid_grant — poursuite Storage sans Drive');
-        } else if (isDriveRequired()) {
+          // Sauvegarde complète exigée : pas de succès sans Drive
           throw err;
-        } else {
-          driveValidationError = err.message?.replace(/^\[Google Drive\]\s*/, '') || String(err.message || err);
-          driveUploadAllowed = false;
-          console.warn('[backup] Google Drive ignoré:', driveValidationError);
         }
+        if (isDriveRequired()) {
+          throw err;
+        }
+        driveValidationError = classified.userMessage
+          || err.message?.replace(/^\[Google Drive\]\s*/, '')
+          || String(err.message || err);
+        driveUploadAllowed = false;
+        console.warn('[backup] Google Drive ignoré (non requis):', driveValidationError);
       }
     }
 
@@ -379,112 +379,44 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
         const classified = classifyDriveError(err);
         driveSyncError = classified.reconnectRequired
           ? classified.userMessage
-          : err.message;
+          : (classified.detailSafe || classified.userMessage || err.message);
         if (classified.reconnectRequired) {
           const marked = await markDriveReconnectRequired(err);
           if (!marked.alreadyNotified) {
             await notifyDriveReconnectRequired({ classified, backupRef: row.ref });
           }
-        } else if (isDriveRequired()) {
-          throw new Error(`[Google Drive] ${err.message}`);
+        }
+        if (isDriveRequired()) {
+          throw new Error(`[Google Drive] ${driveSyncError || err.message}`);
         }
       }
     }
 
-    // Drive required mais sync KO (ex. reconnexion) → succès partiel si Storage OK
-    if (isDriveRequired() && driveEnabled && !driveSynced && mainFilePath) {
-      steps.integrity = Boolean(integrityReport);
-      const userMsg = driveSyncError || driveValidationError
-        || 'Sauvegarde créée dans Storage, mais copie Google Drive impossible : reconnexion requise.';
-      const updated = await pipeline.run('finalizeBackupRow:succes_partiel', () => finalizeBackupRow(row.id, {
-        statut: 'succes_partiel',
-        file_path: mainFilePath,
-        taille_bytes: totalSize,
-        drive_synced: false,
-        drive_folder_id: driveFolderId,
-        drive_sync_error: driveSyncError || driveValidationError,
-        user_message: userMsg,
-        error_code: 'invalid_grant',
-        schedule_period_key: schedulePeriodKey || null,
-        steps_json: steps,
-        description: `Succès partiel — ${userMsg}`,
-        error_message: null,
-      }));
-      await notifyBackupPartialOrFail({
-        title: 'Sauvegarde partielle',
-        message: userMsg,
-        backupId: row.id,
-        dedupeKey: `partial-${algiersDateKey()}`,
-      });
-      logger.backupDone(backupPrefix, {
-        type: typeKey,
-        bytes: totalSize,
-        drive_synced: false,
-        partial: true,
-      });
-      return updated;
-    }
-
+    // Drive requis : pas de succès sans sync complète
     if (isDriveRequired() && driveEnabled && !driveSynced) {
-      throw new Error(`[Google Drive] ${driveSyncError || 'Dossier Drive vide — archives absentes'}`);
+      throw new Error(
+        `[Google Drive] ${driveSyncError || driveValidationError || 'Copie Google Drive incomplète — sauvegarde complète refusée'}`,
+      );
     }
 
     steps.integrity = true;
     steps.drive = driveSynced;
 
-    // Copie Storage partielle (timeouts fichiers) → Succès partiel, pas Erreur
+    // Copie fichiers incomplète → échec (sauvegarde complète exigée)
     const copySummary = manifest?.copy_summary || integrityReport?.copy_summary;
-    const filesPartial = Boolean(integrityReport?.partial)
-      || Boolean(copySummary?.failed > 0);
-    if (filesPartial && mainFilePath) {
+    const storageSoft = (integrityReport?.soft_issues || []).some((s) =>
+      String(s).includes('[Storage]') || String(s).includes('[Supabase]'),
+    );
+    const filesPartial = storageSoft
+      || Boolean(copySummary?.failed > 0)
+      || Boolean(integrityReport?.files_failed > 0);
+    if (filesPartial) {
       const failed = copySummary?.failed ?? integrityReport?.files_failed ?? 0;
       const copied = copySummary?.copied ?? integrityReport?.files_copied ?? 0;
       const listed = copySummary?.total_listed ?? integrityReport?.files_listed ?? 0;
-      const failedList = (copySummary?.failed_files || [])
-        .slice(0, 10)
-        .map((f) => `${f.bucket}/${f.path}`)
-        .join(', ');
-      const throughput = copySummary?.throughput_bps
-        ? `${(copySummary.throughput_bps / 1024).toFixed(1)} Ko/s`
-        : '—';
-      const userMsg = [
-        `Copie Storage partielle : ${copied}/${listed} fichier(s) OK, ${failed} échoué(s).`,
-        failedList ? `Échoués : ${failedList}.` : null,
-        copySummary?.elapsed_ms != null
-          ? `Temps copie ~${Math.round(copySummary.elapsed_ms / 1000)}s, débit ${throughput}.`
-          : null,
-        'Les archives DB / manifeste sont valides ; relancer pour reprendre les fichiers manquants.',
-      ].filter(Boolean).join(' ');
-
-      const updated = await pipeline.run('finalizeBackupRow:succes_partiel:files', () => finalizeBackupRow(row.id, {
-        statut: 'succes_partiel',
-        file_path: mainFilePath,
-        taille_bytes: totalSize,
-        drive_synced: driveSynced,
-        drive_folder_id: driveFolderId,
-        drive_sync_error: driveSyncError || driveValidationError,
-        user_message: userMsg,
-        error_code: 'storage_copy_partial',
-        schedule_period_key: schedulePeriodKey || null,
-        steps_json: steps,
-        description: `Succès partiel — ${copied}/${listed} fichiers, ${failed} échec(s)`,
-        error_message: null,
-      }));
-      await notifyBackupPartialOrFail({
-        title: 'Sauvegarde partielle (fichiers)',
-        message: userMsg,
-        backupId: row.id,
-        dedupeKey: `partial-files-${algiersDateKey()}`,
-      });
-      logger.backupDone(backupPrefix, {
-        type: typeKey,
-        bytes: totalSize,
-        drive_synced: driveSynced,
-        partial: true,
-        copy_summary: copySummary,
-        integrity: integrityReport,
-      });
-      return updated;
+      throw new Error(
+        `[Storage] Copie fichiers incomplète : ${copied}/${listed} OK, ${failed} échoué(s) — sauvegarde complète refusée`,
+      );
     }
 
     const updated = await pipeline.run('finalizeBackupRow:succes', () => finalizeBackupRow(row.id, {
@@ -532,39 +464,22 @@ async function executeBackupJob(row, { typeKey, planification, description, acto
       }
     }
 
-    const driveOnlyFailure = mainFilePath && (
-      classified.reconnectRequired
-      || (!isDriveRequired() && (failMsg.includes('[Google Drive]') || failMsg.includes('DRIVE]')))
-    );
-
-    if (driveOnlyFailure) {
-      const userMsg = sanitized.userMessage;
-      await safeFinalizeBackupRow(row.id, {
-        statut: 'succes_partiel',
-        file_path: mainFilePath || null,
-        taille_bytes: totalSize || null,
-        error_message: null,
-        user_message: userMsg,
-        error_code: sanitized.code,
-        drive_synced: false,
-        drive_sync_error: userMsg,
-        drive_folder_id: getCachedBackupFolderId(backupPrefix),
-        schedule_period_key: schedulePeriodKey || null,
-        description: `Succès partiel — ${userMsg}`,
-      }, failMsg);
-      return null;
-    }
+    // Drive requis : échec = erreur (jamais succès partiel)
+    // Conserve file_path si Storage a écrit, pour diagnostic / retry
 
     const driveOnlyMsg = err?.domain === DOMAINS.DRIVE
       ? err.message.replace(`[${DOMAINS.DRIVE}] `, '')
       : null;
     await safeFinalizeBackupRow(row.id, {
       statut: 'erreur',
+      file_path: mainFilePath || null,
+      taille_bytes: totalSize || null,
       error_message: sanitized.technical || failMsg,
       user_message: sanitized.userMessage,
       error_code: sanitized.code,
       drive_synced: false,
       drive_sync_error: driveOnlyMsg || (err?.domain === DOMAINS.DRIVE ? failMsg : null),
+      drive_folder_id: getCachedBackupFolderId(backupPrefix),
       schedule_period_key: schedulePeriodKey || null,
     }, failMsg);
     await logBackupAction({

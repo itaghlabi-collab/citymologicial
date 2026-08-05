@@ -109,14 +109,14 @@ async function assertBackupIntegrity(ctx) {
       const sample = fileErrors.slice(0, 5)
         .map((e) => `${e.bucket || ''}/${e.path || ''}: ${e.error}`)
         .join('; ');
-      softIssues.push(
-        `[${DOMAINS.STORAGE}] ${copyErrors} fichier(s) non copié(s) (sauvegarde poursuivie) — ${sample}`,
+      hardIssues.push(
+        `[${DOMAINS.STORAGE}] ${copyErrors} fichier(s) non copié(s) — sauvegarde complète refusée — ${sample}`,
       );
     }
 
     if (manifest?.mode === 'full' && listed > 0 && copied !== listed) {
-      softIssues.push(
-        `[${DOMAINS.STORAGE}] Copie physique partielle : ${copied}/${listed} fichier(s) — ${listed - copied} échoué(s)`,
+      hardIssues.push(
+        `[${DOMAINS.STORAGE}] Copie physique incomplète : ${copied}/${listed} fichier(s) — sauvegarde complète refusée`,
       );
     }
 
@@ -152,7 +152,6 @@ async function assertBackupIntegrity(ctx) {
         const driveTree = await listBackupTree(backupPrefix);
         const driveFileCopies = driveTree.filter((f) => f.relPath.startsWith('files/'));
         if (driveFileCopies.length !== expectedCopied) {
-          // Écart Drive vs fichiers réellement copiés = hard ; les sources non copiés sont déjà soft
           hardIssues.push(
             `[${DOMAINS.DRIVE}] Copie Drive incomplète : ${driveFileCopies.length}/${expectedCopied} fichier(s) sous files/`,
           );

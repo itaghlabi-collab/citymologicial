@@ -49,7 +49,7 @@ function apiFlags() {
 }
 
 async function findChildFolder(parentId, name) {
-  const drive = getDrive();
+  const drive = await getDriveAsync();
   const listOpts = await getDriveListOpts();
   const q = [
     `name='${escapeDriveQuery(name)}'`,
@@ -63,7 +63,7 @@ async function findChildFolder(parentId, name) {
 }
 
 async function findFileInFolder(parentId, name) {
-  const drive = getDrive();
+  const drive = await getDriveAsync();
   const listOpts = await getDriveListOpts();
   const q = [
     `name='${escapeDriveQuery(name)}'`,
@@ -85,7 +85,7 @@ async function getOrCreateFolder(parentId, name) {
     return existing;
   }
 
-  const drive = getDrive();
+  const drive = await getDriveAsync();
   const created = await drive.files.create({
     requestBody: {
       name,

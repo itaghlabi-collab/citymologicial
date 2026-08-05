@@ -10,14 +10,13 @@ const {
   findChildFolder,
   getOrCreateFolder,
   findFileInFolder,
-  getDrive,
 } = require('./googleDriveStorageProvider');
+const { getDriveAsync, getSharedDriveApiFlags } = require('./googleDriveAuth');
 const {
   loadDriveContext,
   getDriveListOpts,
   formatDriveApiError,
 } = require('./googleDriveContext');
-const { getSharedDriveApiFlags } = require('./googleDriveAuth');
 
 /** backupRef → folderId Google Drive (conservé pour tout le job). */
 const backupFolderCache = new Map();
@@ -103,7 +102,7 @@ async function uploadBufferToBackup(backupRef, relativePath, buffer, contentType
   logDrive(`source size: ${buffer.length}`);
   logDrive(`target parent: ${parentId}`);
 
-  const drive = getDrive();
+  const drive = await getDriveAsync();
   const apiFlags = getSharedDriveApiFlags();
   const existingId = await findFileInFolder(parentId, fileName);
   const media = {
@@ -172,7 +171,7 @@ async function uploadFromSupabasePath(storagePath, contentType) {
  */
 async function listBackupFolderFiles(backupRef) {
   const folderId = await ensureBackupFolder(backupRef);
-  const drive = getDrive();
+  const drive = await getDriveAsync();
   const listOpts = await getDriveListOpts();
   const q = `'${folderId}' in parents and trashed=false`;
 

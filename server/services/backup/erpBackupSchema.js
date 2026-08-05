@@ -112,23 +112,73 @@ function buildFinalizePayload(fields, schema) {
   };
 }
 
+/** null = inconnu, true/false = contrainte CHECK connue */
+let supportsSuccesPartiel = null;
+
+function isStatutCheckViolation(error, statut) {
+  if (!error?.message || !statut) return false;
+  const msg = error.message.toLowerCase();
+  return msg.includes('check')
+    && (msg.includes('erp_backups') || msg.includes('statut') || msg.includes('violates'));
+}
+
+function withPartialFallbackFields(fields) {
+  const note = fields.user_message
+    || fields.drive_sync_error
+    || 'Copie Google Drive incomplète — Storage OK';
+  const desc = fields.description && String(fields.description).includes('Succès partiel')
+    ? fields.description
+    : `Succès partiel — ${note}`;
+  return {
+    ...fields,
+    statut: 'succes',
+    description: desc,
+    user_message: fields.user_message || note,
+  };
+}
+
 async function updateErpBackupRow(id, fields) {
   const schema = await loadErpBackupSchema();
-  const { payload, virtual } = buildFinalizePayload(fields, schema);
+  let attemptFields = fields;
+
+  // Si la prod n'a pas encore élargi le CHECK, écrire "succes" + message partiel.
+  if (fields.statut === 'succes_partiel' && supportsSuccesPartiel === false) {
+    attemptFields = withPartialFallbackFields(fields);
+  }
+
   const sb = getSupabaseAdmin();
 
-  const { data, error } = await sb
-    .from('erp_backups')
-    .update(payload)
-    .eq('id', id)
-    .select('*')
-    .single();
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    const { payload, virtual } = buildFinalizePayload(attemptFields, schema);
+    const { data, error } = await sb
+      .from('erp_backups')
+      .update(payload)
+      .eq('id', id)
+      .select('*')
+      .single();
 
-  if (error) {
+    if (!error) {
+      if (attemptFields.statut === 'succes_partiel') supportsSuccesPartiel = true;
+      return virtual ? { ...data, ...virtual } : data;
+    }
+
+    if (
+      attempt === 0
+      && fields.statut === 'succes_partiel'
+      && isStatutCheckViolation(error, 'succes_partiel')
+    ) {
+      supportsSuccesPartiel = false;
+      console.warn(
+        '[backup:schema] CHECK statut sans succes_partiel — fallback statut=succes (exécuter RUN_ERP_BACKUPS_STATUT_PARTIEL.sql)',
+      );
+      attemptFields = withPartialFallbackFields(fields);
+      continue;
+    }
+
     throw backupSqlError(`Mise à jour sauvegarde : ${error.message}`);
   }
 
-  return virtual ? { ...data, ...virtual } : data;
+  throw backupSqlError('Mise à jour sauvegarde : échec inattendu');
 }
 
 async function buildInsertPayload(base) {
