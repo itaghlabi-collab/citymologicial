@@ -6,7 +6,7 @@ const {
   isGoogleDriveEnabled,
   resetResolvedDriveRootFolderId,
 } = require('./googleDriveConfig');
-const { getDrive, getSharedDriveApiFlags, resetDriveAuth } = require('./googleDriveAuth');
+const { getDriveAsync, getSharedDriveApiFlags, resetDriveAuth } = require('./googleDriveAuth');
 const {
   loadDriveContext,
   getDriveListOpts,
@@ -125,7 +125,7 @@ async function upload(filePath, buffer, contentType = 'application/gzip') {
 
   await assertRootFolderAccessible();
 
-  const drive = getDrive();
+  const drive = await getDriveAsync();
   const flags = apiFlags();
   const { parentId, fileName } = await resolvePathFolderIds(filePath);
   const existingId = await findFileInFolder(parentId, fileName);
@@ -167,7 +167,7 @@ async function upload(filePath, buffer, contentType = 'application/gzip') {
 }
 
 async function download(filePath) {
-  const drive = getDrive();
+  const drive = await getDriveAsync();
   const flags = apiFlags();
   const { parentId, fileName } = await resolvePathFolderIds(filePath);
   const fileId = await findFileInFolder(parentId, fileName);
@@ -181,7 +181,7 @@ async function download(filePath) {
 }
 
 async function getSignedUrl(filePath) {
-  const drive = getDrive();
+  const drive = await getDriveAsync();
   const flags = apiFlags();
   const { parentId, fileName } = await resolvePathFolderIds(filePath);
   const fileId = await findFileInFolder(parentId, fileName);
@@ -198,7 +198,7 @@ async function getSignedUrl(filePath) {
 async function getBackupFolderLink(backupRef) {
   await assertRootFolderAccessible();
 
-  const drive = getDrive();
+  const drive = await getDriveAsync();
   const flags = apiFlags();
   const rootId = getDriveRootFolderId();
   let folderId = await findChildFolder(rootId, backupRef);
@@ -213,7 +213,7 @@ async function getBackupFolderLink(backupRef) {
 }
 
 async function remove(filePath) {
-  const drive = getDrive();
+  const drive = await getDriveAsync();
   const flags = apiFlags();
   const { parentId, fileName } = await resolvePathFolderIds(filePath);
   const fileId = await findFileInFolder(parentId, fileName);
@@ -227,7 +227,7 @@ async function removeBackupFolder(backupRef) {
   const folderId = await findChildFolder(rootId, backupRef);
   if (!folderId) return;
 
-  const drive = getDrive();
+  const drive = await getDriveAsync();
   const listOpts = await getDriveListOpts();
   const flags = apiFlags();
 
@@ -251,7 +251,7 @@ async function listBackupTree(backupRef) {
   const folderId = await findChildFolder(rootId, backupRef);
   if (!folderId) return [];
 
-  const drive = getDrive();
+  const drive = await getDriveAsync();
   const listOpts = await getDriveListOpts();
   const files = [];
 
@@ -293,7 +293,7 @@ async function listBackupFiles(backupRef) {
   const folderId = await findChildFolder(rootId, backupRef);
   if (!folderId) return [];
 
-  const drive = getDrive();
+  const drive = await getDriveAsync();
   const listOpts = await getDriveListOpts();
   const res = await drive.files.list({
     q: `'${folderId}' in parents and trashed=false and mimeType!='application/vnd.google-apps.folder'`,
@@ -318,7 +318,7 @@ async function verifyDriveBackupFiles(backupRef, expectedPaths) {
 }
 
 async function list(prefix) {
-  const drive = getDrive();
+  const drive = await getDriveAsync();
   const listOpts = await getDriveListOpts();
   const rootId = getDriveRootFolderId();
   const folderId = prefix ? (await findChildFolder(rootId, prefix) || rootId) : rootId;
@@ -346,7 +346,6 @@ module.exports = {
   removeBackupFolder,
   assertRootFolderAccessible,
   resetDriveClient,
-  getDrive,
   getDriveRootFolderId,
   findChildFolder,
   getOrCreateFolder,

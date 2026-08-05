@@ -4,7 +4,7 @@
  * Aucun secret n'est renvoyé aux clients.
  */
 const { getSupabaseAdmin } = require('../../lib/supabaseAdmin');
-const { classifyDriveError } = require('./googleDriveErrors');
+const { classifyDriveError, extractGoogleErrorCode } = require('./googleDriveErrors');
 
 const ROW_ID = 1;
 const TABLE = 'erp_backup_drive_state';
@@ -230,23 +230,41 @@ async function markDriveDisconnected() {
   });
 }
 
+/**
+ * Enregistre le refresh token ERP sans activer la connexion.
+ * status = active uniquement via markDriveActive après Access Token + dossier OK.
+ */
 async function storeOAuthRefreshToken(refreshToken, meta = {}) {
   const now = new Date().toISOString();
   return upsertState({
-    status: 'active',
+    status: meta.status || 'pending_validation',
     oauth_refresh_token: refreshToken,
-    last_error_code: null,
-    last_error_user_message: null,
-    error: null,
+    last_error_code: meta.last_error_code ?? null,
+    last_error_user_message: meta.last_error_user_message ?? null,
+    error: meta.error ?? null,
     last_check_at: now,
-    last_success_at: now,
-    last_upload_at: now,
     connected_account: meta.account || null,
     folder_id: meta.folderId || null,
     shared_drive_id: meta.sharedDriveId || null,
     auth_mode: meta.authMode || 'oauth',
     notify_reconnect_sent_at: null,
   });
+}
+
+/** Échec OAuth / probe — ne jamais afficher Connexion active. */
+async function markDriveOAuthError(err, { keepToken = true } = {}) {
+  const classified = classifyDriveError(err);
+  const patch = {
+    status: 'error',
+    last_error_code: classified.code || extractGoogleErrorCode(err) || 'drive_unknown',
+    last_error_user_message: classified.userMessage,
+    error: classified.userMessage,
+    last_check_at: new Date().toISOString(),
+  };
+  if (!keepToken) {
+    patch.oauth_refresh_token = null;
+  }
+  return upsertState(patch);
 }
 
 async function markReconnectNotified() {
@@ -260,8 +278,19 @@ async function getDriveStatePublic() {
   const state = await readState();
   const envRefresh = Boolean(process.env.GOOGLE_OAUTH_REFRESH_TOKEN?.trim());
   const dbRefresh = Boolean(state?.oauth_refresh_token?.trim());
-  /** Priorité runtime : env → database → missing (aligné sur resolveRefreshToken). */
-  const oauth_refresh_source = envRefresh ? 'env' : (dbRefresh ? 'database' : 'missing');
+  /** Aligné sur resolveRefreshToken : DB d’abord, ENV seulement si DB vide. */
+  let oauth_refresh_source = 'missing';
+  if (dbRefresh) oauth_refresh_source = 'database_validated';
+  else if (envRefresh) oauth_refresh_source = 'env_fallback';
+
+  try {
+    const { getRefreshTokenSource } = require('./googleDriveAuth');
+    const runtime = getRefreshTokenSource();
+    if (runtime && runtime !== 'missing') oauth_refresh_source = runtime;
+  } catch {
+    /* auth pas encore chargé */
+  }
+
   const oauthEnv = Boolean(
     process.env.GOOGLE_OAUTH_CLIENT_ID?.trim()
     && process.env.GOOGLE_OAUTH_CLIENT_SECRET?.trim()
@@ -297,6 +326,7 @@ module.exports = {
   markDriveActive,
   markDriveDisconnected,
   storeOAuthRefreshToken,
+  markDriveOAuthError,
   markReconnectNotified,
   getDriveStatePublic,
 };

@@ -3,6 +3,7 @@
  */
 const CODES = {
   INVALID_GRANT: 'invalid_grant',
+  UNAUTHORIZED_CLIENT: 'unauthorized_client',
   REVOKED: 'auth_revoked',
   EXPIRED: 'auth_expired',
   MISCONFIGURED: 'oauth_misconfigured',
@@ -21,10 +22,38 @@ function extractGoogleErrorCode(err) {
   return m ? m[0].toLowerCase() : null;
 }
 
+/**
+ * Log sécurisé : HTTP status + error + error_description, jamais de secrets.
+ */
+function logGoogleApiError(err, step = 'unknown') {
+  const data = err?.response?.data;
+  const payload = {
+    step,
+    httpStatus: err?.response?.status || null,
+    googleError: typeof data?.error === 'string'
+      ? data.error
+      : (data?.error?.message || data?.error || extractGoogleErrorCode(err) || null),
+    googleErrorDescription: data?.error_description || null,
+    message: String(err?.message || '').slice(0, 240),
+  };
+  console.error('[DRIVE] google_api_error', payload);
+  return payload;
+}
+
 function classifyDriveError(err) {
   const raw = String(err?.message || err || '');
   const lower = raw.toLowerCase();
   const gCode = extractGoogleErrorCode(err);
+
+  if (gCode === 'unauthorized_client' || lower.includes('unauthorized_client')) {
+    return {
+      code: CODES.UNAUTHORIZED_CLIENT,
+      reconnectRequired: true,
+      retryable: false,
+      userMessage: 'Refresh Token incompatible avec le Client OAuth configuré',
+      detailSafe: 'unauthorized_client — le refresh token ne correspond pas au GOOGLE_OAUTH_CLIENT_ID/SECRET ERP.',
+    };
+  }
 
   if (gCode === 'invalid_grant' || lower.includes('invalid_grant')) {
     const revoked = lower.includes('revoked') || lower.includes('expired or revoked');
@@ -97,8 +126,9 @@ function classifyDriveError(err) {
 }
 
 function isInvalidGrantError(err) {
-  return classifyDriveError(err).reconnectRequired
-    && [CODES.INVALID_GRANT, CODES.REVOKED, CODES.MISCONFIGURED].includes(classifyDriveError(err).code);
+  const c = classifyDriveError(err);
+  return c.reconnectRequired
+    && [CODES.INVALID_GRANT, CODES.REVOKED, CODES.MISCONFIGURED, CODES.UNAUTHORIZED_CLIENT].includes(c.code);
 }
 
 module.exports = {
@@ -106,4 +136,5 @@ module.exports = {
   classifyDriveError,
   extractGoogleErrorCode,
   isInvalidGrantError,
+  logGoogleApiError,
 };

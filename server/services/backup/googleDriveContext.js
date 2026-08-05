@@ -8,7 +8,6 @@ const {
   setResolvedDriveRootFolderId,
 } = require('./googleDriveConfig');
 const {
-  getDrive,
   getDriveAsync,
   getAuthMode,
   getSharedDriveApiFlags,
@@ -82,13 +81,24 @@ function isServiceAccountQuotaError(message) {
 }
 
 function formatDriveApiError(err, context = {}) {
+  const { logGoogleApiError } = require('./googleDriveErrors');
+  logGoogleApiError(err, context.step || 'drive_api');
+
   const raw = String(err?.message || err || 'erreur inconnue');
   const mode = context.authMode || getAuthMode();
+  const httpStatus = err?.response?.status;
+  const gErr = err?.response?.data?.error;
+  const gCode = typeof gErr === 'string' ? gErr : (gErr?.message || null);
+  const gDesc = err?.response?.data?.error_description;
 
   const { classifyDriveError } = require('./googleDriveErrors');
   const classified = classifyDriveError(err);
   if (classified.reconnectRequired) {
-    return `${classified.userMessage} (${classified.detailSafe})`;
+    const bits = [classified.userMessage, classified.detailSafe];
+    if (httpStatus) bits.push(`HTTP ${httpStatus}`);
+    if (gCode) bits.push(String(gCode));
+    if (gDesc) bits.push(String(gDesc).slice(0, 120));
+    return bits.filter(Boolean).join(' — ');
   }
 
   if (isServiceAccountQuotaError(raw)) {
@@ -114,6 +124,12 @@ function formatDriveApiError(err, context = {}) {
     }
     const email = getServiceAccountEmail();
     return `Dossier Drive inaccessible (ID ${context.rootFolderId}). Partagez-le avec ${email}. Détail : ${raw}`;
+  }
+
+  if (httpStatus || gCode) {
+    return [raw, httpStatus && `HTTP ${httpStatus}`, gCode, gDesc && String(gDesc).slice(0, 120)]
+      .filter(Boolean)
+      .join(' — ');
   }
 
   return raw;
@@ -312,7 +328,9 @@ async function probeDriveWriteAccess() {
       deleted_file: false,
     };
   } catch (err) {
-    throw new Error(formatDriveApiError(err, ctx));
+    const { logGoogleApiError } = require('./googleDriveErrors');
+    logGoogleApiError(err, 'probeDriveWriteAccess');
+    throw new Error(formatDriveApiError(err, { ...ctx, step: 'probeDriveWriteAccess' }));
   }
 }
 

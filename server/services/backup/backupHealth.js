@@ -80,6 +80,13 @@ async function getBackupHealthDashboard() {
     driveLevel = LEVEL.ERROR;
     driveSummary = driveState.last_error_user_message
       || 'Google Drive déconnecté — reconnexion nécessaire';
+  } else if (driveState.status === 'error') {
+    driveLevel = LEVEL.ERROR;
+    driveSummary = driveState.last_error_user_message
+      || 'Erreur OAuth Google Drive';
+  } else if (driveState.status === 'pending_validation') {
+    driveLevel = LEVEL.WARN;
+    driveSummary = 'Validation OAuth en cours…';
   } else if (driveState.status === 'active' && driveEnabled) {
     driveLevel = LEVEL.OK;
     driveSummary = 'Connexion active';
@@ -240,6 +247,7 @@ async function getBackupHealthDashboard() {
       last_success_label: fmtFr(driveState.last_success_at),
       last_error_user_message: driveState.last_error_user_message || null,
       oauth_redirect_configured: Boolean(getRedirectUri()),
+      oauth_refresh_source: driveState.oauth_refresh_source || null,
     },
     scheduler: {
       level: schedulerLevel,

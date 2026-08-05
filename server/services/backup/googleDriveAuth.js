@@ -6,9 +6,13 @@
  *
  * Détection auto (BACKUP_GOOGLE_DRIVE_AUTH_MODE=auto) : OAuth si configuré, sinon Service Account.
  *
- * Priorité Refresh Token OAuth :
- *   1. GOOGLE_OAUTH_REFRESH_TOKEN (Railway / env)
- *   2. erp_backup_drive_state.oauth_refresh_token (fallback temporaire)
+ * Priorité Refresh Token OAuth (unique pour toute la chaîne) :
+ *   1. erp_backup_drive_state.oauth_refresh_token (connexion ERP validée / reconnect)
+ *   2. GOOGLE_OAUTH_REFRESH_TOKEN (Railway) — fallback initial uniquement si DB vide
+ *   3. erreur claire
+ *
+ * Sources diagnostic (jamais de secret) :
+ *   database_validated | env_fallback | missing
  */
 const { google } = require('googleapis');
 const { JWT, OAuth2Client } = require('google-auth-library');
@@ -18,17 +22,23 @@ const AUTH_MODES = {
   SERVICE_ACCOUNT: 'service_account',
 };
 
+const REFRESH_SOURCES = {
+  DATABASE_VALIDATED: 'database_validated',
+  ENV_FALLBACK: 'env_fallback',
+  MISSING: 'missing',
+};
+
 const DRIVE_SCOPES = ['https://www.googleapis.com/auth/drive'];
 
 let driveClient = null;
 let resolvedAuthMode = null;
 
-/** Refresh token DB (fallback) — cache mémoire, jamais loggé en clair. */
+/** Refresh token DB — cache mémoire, jamais loggé en clair. */
 let cachedDbRefreshToken = null;
 let cachedDbRefreshAt = 0;
 
-/** Dernière source résolue : env | database | missing */
-let lastResolvedRefreshSource = 'missing';
+/** Dernière source résolue : database_validated | env_fallback | missing */
+let lastResolvedRefreshSource = REFRESH_SOURCES.MISSING;
 
 /**
  * Token avec lequel le driveClient actuel a été construit.
@@ -54,12 +64,32 @@ function invalidateDriveMemoryCaches() {
   } catch {
     /* context module peut ne pas être chargé */
   }
+  try {
+    const { resetBackupFolderCache } = require('./googleDriveBackupUploader');
+    resetBackupFolderCache();
+  } catch {
+    /* optionnel */
+  }
 }
 
 function ensureClientMatchesToken(token) {
   if (!token) return;
   if (clientBuiltWithRefreshToken && clientBuiltWithRefreshToken !== token) {
     invalidateDriveMemoryCaches();
+  }
+}
+
+/**
+ * Injecte le refresh token DB en cache mémoire (après callback reconnect).
+ * N’écrit rien en persistance.
+ */
+function seedDbRefreshTokenCache(token) {
+  const t = token?.trim() || null;
+  cachedDbRefreshToken = t;
+  cachedDbRefreshAt = Date.now();
+  if (t) {
+    lastResolvedRefreshSource = REFRESH_SOURCES.DATABASE_VALIDATED;
+    ensureClientMatchesToken(t);
   }
 }
 
@@ -79,51 +109,51 @@ async function loadDbRefreshToken() {
 }
 
 /**
- * Priorité : Railway (env) → DB (fallback) → erreur claire.
+ * Priorité : DB (ERP) → ENV Railway (fallback si DB vide) → erreur claire.
+ * Seule fonction de sélection du refresh token pour toute la chaîne.
  * Ne log jamais le token.
  */
 async function resolveRefreshToken() {
-  const fromEnv = getEnvRefreshToken();
-  if (fromEnv) {
-    lastResolvedRefreshSource = 'env';
-    ensureClientMatchesToken(fromEnv);
-    return fromEnv;
-  }
-
   const fromDb = await loadDbRefreshToken();
   if (fromDb) {
-    lastResolvedRefreshSource = 'database';
+    lastResolvedRefreshSource = REFRESH_SOURCES.DATABASE_VALIDATED;
     ensureClientMatchesToken(fromDb);
     return fromDb;
   }
 
-  lastResolvedRefreshSource = 'missing';
-  throw new Error('Google Drive refresh token non configuré');
+  const fromEnv = getEnvRefreshToken();
+  if (fromEnv) {
+    lastResolvedRefreshSource = REFRESH_SOURCES.ENV_FALLBACK;
+    ensureClientMatchesToken(fromEnv);
+    return fromEnv;
+  }
+
+  lastResolvedRefreshSource = REFRESH_SOURCES.MISSING;
+  throw new Error(
+    'Google Drive refresh token non configuré — reconnectez Google Drive dans l’ERP '
+    + '(ou définissez GOOGLE_OAUTH_REFRESH_TOKEN en fallback initial).',
+  );
 }
 
-/** Source actuelle sans exposer le secret : env | database | missing */
+/** Source actuelle sans exposer le secret. */
 function getRefreshTokenSource() {
-  if (getEnvRefreshToken()) return 'env';
-  if (cachedDbRefreshToken) return 'database';
-  if (lastResolvedRefreshSource === 'database') return 'database';
-  if (lastResolvedRefreshSource === 'env') return 'env';
-  return lastResolvedRefreshSource || 'missing';
+  return lastResolvedRefreshSource || REFRESH_SOURCES.MISSING;
 }
 
 function isOAuthConfigured() {
   return Boolean(
     process.env.GOOGLE_OAUTH_CLIENT_ID?.trim()
     && process.env.GOOGLE_OAUTH_CLIENT_SECRET?.trim()
-    && (getEnvRefreshToken() || cachedDbRefreshToken)
+    && (cachedDbRefreshToken || getEnvRefreshToken())
   );
 }
 
-/** Version sync pour detectAuthMode — env ou cache DB. */
+/** Version sync pour detectAuthMode — cache DB ou env. */
 function isOAuthConfiguredSync() {
   return Boolean(
     process.env.GOOGLE_OAUTH_CLIENT_ID?.trim()
     && process.env.GOOGLE_OAUTH_CLIENT_SECRET?.trim()
-    && (getEnvRefreshToken() || cachedDbRefreshToken)
+    && (cachedDbRefreshToken || getEnvRefreshToken())
   );
 }
 
@@ -161,11 +191,11 @@ function resetDriveAuth() {
   invalidateDriveMemoryCaches();
   cachedDbRefreshToken = null;
   cachedDbRefreshAt = 0;
-  lastResolvedRefreshSource = 'missing';
+  lastResolvedRefreshSource = REFRESH_SOURCES.MISSING;
 }
 
 function createOAuthClient(refreshToken) {
-  const token = (refreshToken || getEnvRefreshToken() || cachedDbRefreshToken || '').trim();
+  const token = (refreshToken || '').trim();
   if (!token) {
     throw new Error('Google Drive refresh token non configuré');
   }
@@ -190,8 +220,8 @@ function createServiceAccountClient() {
 }
 
 /**
- * Client Drive API v3 authentifié selon le mode détecté.
- * Préférer getDriveAsync() pour OAuth (résolution env prioritaire).
+ * Client Drive API v3 — préférer getDriveAsync() (résolution DB prioritaire).
+ * Sync : utilise le cache DB s’il a été warmé, sinon ENV fallback.
  */
 function getDrive() {
   if (driveClient) return driveClient;
@@ -205,10 +235,15 @@ function getDrive() {
 
   let auth;
   if (mode === AUTH_MODES.OAUTH) {
-    const token = getEnvRefreshToken() || cachedDbRefreshToken;
+    const token = cachedDbRefreshToken || getEnvRefreshToken();
+    if (!token) {
+      throw new Error('Google Drive refresh token non configuré — appelez getDriveAsync() / warmOAuthTokenCache().');
+    }
     auth = createOAuthClient(token);
     clientBuiltWithRefreshToken = token;
-    lastResolvedRefreshSource = getEnvRefreshToken() ? 'env' : (token ? 'database' : 'missing');
+    lastResolvedRefreshSource = cachedDbRefreshToken
+      ? REFRESH_SOURCES.DATABASE_VALIDATED
+      : REFRESH_SOURCES.ENV_FALLBACK;
   } else {
     auth = createServiceAccountClient();
   }
@@ -255,7 +290,7 @@ async function getDriveAsync() {
   return driveClient;
 }
 
-/** Précharge le token (env prioritaire, sinon DB) pour isOAuthConfigured sync. */
+/** Précharge le token (DB prioritaire) pour isOAuthConfigured sync. */
 async function warmOAuthTokenCache() {
   try {
     await resolveRefreshToken();
@@ -266,8 +301,7 @@ async function warmOAuthTokenCache() {
 
 /**
  * Flags Drive API — toujours supportsAllDrives.
- * Nécessaire aussi en OAuth si le dossier cible est dans un Drive partagé
- * (sinon list/create échouent alors que files.get « Connexion active » passe).
+ * Nécessaire aussi en OAuth si le dossier cible est dans un Drive partagé.
  */
 function getSharedDriveApiFlags() {
   return {
@@ -284,8 +318,17 @@ function isServiceAccountMode() {
   return getAuthMode() === AUTH_MODES.SERVICE_ACCOUNT;
 }
 
+/** Préfixe client_id pour logs (jamais la valeur complète). */
+function getOAuthClientIdPrefix() {
+  const id = process.env.GOOGLE_OAUTH_CLIENT_ID?.trim() || '';
+  if (!id) return null;
+  const head = id.split('-')[0] || id.slice(0, 11);
+  return `${head}…`;
+}
+
 module.exports = {
   AUTH_MODES,
+  REFRESH_SOURCES,
   DRIVE_SCOPES,
   detectAuthMode,
   getAuthMode,
@@ -294,6 +337,7 @@ module.exports = {
   warmOAuthTokenCache,
   resetDriveAuth,
   invalidateDriveMemoryCaches,
+  seedDbRefreshTokenCache,
   getSharedDriveApiFlags,
   isOAuthConfigured,
   isServiceAccountConfigured,
@@ -302,4 +346,6 @@ module.exports = {
   resolveRefreshToken,
   getRefreshTokenSource,
   getEnvRefreshToken,
+  getOAuthClientIdPrefix,
+  createOAuthClient,
 };

@@ -58,10 +58,19 @@ async function validateGoogleDriveForBackup() {
     };
   } catch (err) {
     const classified = classifyDriveError(err);
+    const { logGoogleApiError } = require('./googleDriveErrors');
+    logGoogleApiError(err, 'validateGoogleDriveForBackup');
     if (classified.reconnectRequired) {
       await markDriveReconnectRequired(err);
+    } else if (classified.code === 'unauthorized_client' || classified.code === 'oauth_misconfigured') {
+      const { markDriveOAuthError } = require('./googleDriveAuthState');
+      await markDriveOAuthError(err, { keepToken: true });
     }
-    throw backupDriveError(formatDriveApiError(err, { rootFolderId: folderId, authMode }));
+    throw backupDriveError(formatDriveApiError(err, {
+      rootFolderId: folderId,
+      authMode,
+      step: 'validateGoogleDriveForBackup',
+    }));
   }
 }
 

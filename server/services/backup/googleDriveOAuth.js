@@ -2,10 +2,22 @@
  * OAuth Google Drive — démarrage / callback reconnexion.
  */
 const { OAuth2Client } = require('google-auth-library');
-const { DRIVE_SCOPES, resetDriveAuth } = require('./googleDriveAuth');
-const { resetDriveContext } = require('./googleDriveContext');
-const { storeOAuthRefreshToken, markDriveDisconnected, getDriveStatePublic } = require('./googleDriveAuthState');
-const { probeDriveWriteAccess } = require('./googleDriveContext');
+const {
+  DRIVE_SCOPES,
+  resetDriveAuth,
+  seedDbRefreshTokenCache,
+  invalidateDriveMemoryCaches,
+  getOAuthClientIdPrefix,
+} = require('./googleDriveAuth');
+const { resetDriveContext, probeDriveWriteAccess } = require('./googleDriveContext');
+const {
+  storeOAuthRefreshToken,
+  markDriveDisconnected,
+  markDriveActive,
+  markDriveOAuthError,
+  getDriveStatePublic,
+} = require('./googleDriveAuthState');
+const { classifyDriveError, logGoogleApiError } = require('./googleDriveErrors');
 
 function getRedirectUri() {
   const explicit = process.env.BACKUP_OAUTH_REDIRECT_URI?.trim()
@@ -42,6 +54,10 @@ function buildOAuthConsentUrl(state) {
   });
 }
 
+/**
+ * Callback ERP : stocke le token, invalide caches, valide Access Token + dossier,
+ * puis seulement status=active.
+ */
 async function handleOAuthCallback(code) {
   const { client } = createOAuth2ForConsent();
   const { tokens } = await client.getToken(code);
@@ -52,20 +68,42 @@ async function handleOAuthCallback(code) {
     );
   }
 
+  // 1) Invalider tous les caches mémoire (ancien client / token Playground en cache)
   resetDriveAuth();
   resetDriveContext();
-  await storeOAuthRefreshToken(tokens.refresh_token);
+  invalidateDriveMemoryCaches();
 
-  // Probe sans exposer le token
+  // 2) Enregistrer le token ERP en DB SANS status active
+  await storeOAuthRefreshToken(tokens.refresh_token, { status: 'pending_validation' });
+
+  // 3) Forcer la résolution runtime sur ce token (DB prioritaire)
+  seedDbRefreshTokenCache(tokens.refresh_token);
+  invalidateDriveMemoryCaches();
+  seedDbRefreshTokenCache(tokens.refresh_token);
+
+  console.info('[drive:oauth] reconnect token stored', {
+    client_id_prefix: getOAuthClientIdPrefix(),
+    oauth_refresh_source: 'database_validated',
+  });
+
+  // 4) Validation réelle : Access Token + lecture dossier
   try {
     const probe = await probeDriveWriteAccess();
-    await storeOAuthRefreshToken(tokens.refresh_token, {
+    await markDriveActive({
       folderId: probe.folderId,
+      sharedDriveId: probe.sharedDriveId || null,
+      authMode: probe.authMode || 'oauth',
       account: null,
     });
   } catch (err) {
-    // Token stocké mais probe KO — laisser status active quand même si token OK
-    console.warn('[drive:oauth] probe après reconnect:', err.message);
+    logGoogleApiError(err, 'oauth_callback_probe');
+    const classified = classifyDriveError(err);
+    await markDriveOAuthError(err, { keepToken: true });
+    console.warn('[drive:oauth] probe après reconnect KO — status=error', {
+      code: classified.code,
+      userMessage: classified.userMessage,
+    });
+    throw new Error(classified.userMessage || err.message);
   }
 
   return getDriveStatePublic();
