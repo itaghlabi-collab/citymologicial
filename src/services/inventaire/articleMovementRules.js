@@ -84,10 +84,13 @@ export function filterArticlesForMovementType(articles, typeMouvement) {
 
 /**
  * Lève une erreur VALIDATION si Sortie + Matériel/Outil.
+ * @param {{ allowSiteRequestDeliverySortie?: boolean }} [options]
+ *   Exception stricte : livraison demande chantier uniquement.
  */
-export function assertMovementAllowedForArticle(articleOrType, typeMouvement) {
+export function assertMovementAllowedForArticle(articleOrType, typeMouvement, options = {}) {
   const type = String(typeMouvement || '').trim();
   if (type !== 'Sortie' && type !== 'Rebut') return;
+  if (options.allowSiteRequestDeliverySortie) return;
   const normalized = normalizeArticleType(articleOrType);
   if (!normalized) return; // type inconnu : ne bloque pas (données historiques)
   if (!articleAllowsStandardSortie(normalized)) {

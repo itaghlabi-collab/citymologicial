@@ -460,7 +460,9 @@ async function assertBonArticlesAllowMovement(bon) {
       err.code = 'VALIDATION';
       throw err;
     }
-    assertMovementAllowedForArticle(art, type);
+    assertMovementAllowedForArticle(art, type, {
+      allowSiteRequestDeliverySortie: !!bon.allow_site_request_delivery_sortie,
+    });
   }
 }
 

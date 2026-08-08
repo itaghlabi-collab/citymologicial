@@ -725,6 +725,8 @@ export async function deliverSiteMaterialRequest(id, {
       note: req.observation || '',
       statut: 'Validé',
       lignes: lignesBon,
+      // Exception locale : sortie Matériel/Outil autorisée uniquement pour livraison demande chantier
+      allow_site_request_delivery_sortie: true,
     });
     movementRef = bon.ref;
   }
