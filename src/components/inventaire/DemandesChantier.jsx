@@ -36,6 +36,10 @@ import {
   siteRequestLivraisonValue,
   getSiteRequestMissingLines,
   qtyMissingOnLine,
+  persistSiteRequestPreparationLines,
+  applySiteRequestAvailabilityStatus,
+  applySiteRequestLinePreparation,
+  siteRequestLineAvailabilityStatus,
 } from '../../services/inventaire/siteMaterialRequests';
 import {
   createPurchaseRequestFromSiteRuptures,
@@ -143,6 +147,9 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
   const [detailRecap, setDetailRecap] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [lines, setLines] = useState(() => buildInitialLines());
+  const detailRef = useRef(null);
+  const persistPromiseRef = useRef(null);
+  detailRef.current = detail;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -389,6 +396,9 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
 
   async function handleStatutChange(id, nextStatut, currentStatut) {
     if (!id || nextStatut === currentStatut) return;
+    if (persistPromiseRef.current) {
+      await persistPromiseRef.current.catch(() => {});
+    }
     if (nextStatut === 'livree') {
       const ok = window.confirm(
         'Marquer comme livrée ? Un bon de sortie stock sera généré si des articles catalogue sont liés.',
@@ -406,6 +416,9 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
 
   async function handleLivraisonChange(id, nextLiv, currentStatut) {
     if (!id) return;
+    if (persistPromiseRef.current) {
+      await persistPromiseRef.current.catch(() => {});
+    }
     const current = siteRequestLivraisonValue(currentStatut);
     if (nextLiv === current) return;
     if (nextLiv === 'livree') {
@@ -463,6 +476,10 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
     setSaving(true);
     setError('');
     try {
+      // Attendre toute persistance en cours, puis toujours lire la DB (jamais le state React).
+      if (persistPromiseRef.current) {
+        await persistPromiseRef.current.catch(() => {});
+      }
       const full = await getSiteMaterialRequest(id);
       await generateSiteRequestPdf(full);
     } catch (err) {
@@ -479,57 +496,85 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
     return `row:${line.category_id || ''}::${line.article_name || ''}::${line.line_order ?? ''}`;
   }
 
-  function updateDetailLine(lineRef, patch) {
+  function patchDetailLines(lineRef, patch) {
     const key = typeof lineRef === 'object' && lineRef
       ? lineMatchKey(lineRef)
       : `id:${lineRef}`;
-    setDetail((prev) => {
-      if (!prev) return prev;
-      return {
-        ...prev,
-        lines: (prev.lines || []).map((l) => {
-          const sameId = lineRef != null && l.id != null && String(l.id) === String(typeof lineRef === 'object' ? lineRef.id : lineRef);
-          const sameKey = lineMatchKey(l) === key;
-          return (sameId || sameKey) ? { ...l, ...patch } : l;
-        }),
-      };
+    const prevLines = detailRef.current?.lines || [];
+    return prevLines.map((l) => {
+      const sameId = lineRef != null && l.id != null && String(l.id) === String(typeof lineRef === 'object' ? lineRef.id : lineRef);
+      const sameKey = lineMatchKey(l) === key;
+      return (sameId || sameKey) ? applySiteRequestLinePreparation({ ...l, ...patch }) : l;
     });
   }
 
-  /** Vert = tout préparé (préparé = demandé). Jaune = partiel. Rouge = rien préparé. */
-  function setLineAvailability(line, status) {
-    const demandee = Number(line.quantite_demandee) || 0;
-    if (status === 'ok') {
-      updateDetailLine(line, {
-        disponible: true,
-        rupture: false,
-        quantite_preparee: demandee,
-      });
-      return;
-    }
-    if (status === 'partial') {
-      const current = Number(line.quantite_preparee) || 0;
-      const prep = current > 0 && current < demandee
-        ? current
-        : Math.max(1, Math.floor(demandee / 2) || 1);
-      updateDetailLine(line, {
-        disponible: false,
-        rupture: false,
-        quantite_preparee: Math.min(prep, demandee),
-      });
-      return;
-    }
-    updateDetailLine(line, {
-      disponible: false,
-      rupture: true,
-      quantite_preparee: 0,
+  async function persistAndReloadLines(_nextLines) {
+    const id = detailRef.current?.id;
+    if (!id) return null;
+    const prev = persistPromiseRef.current;
+    const run = (async () => {
+      if (prev) await prev.catch(() => {});
+      setSaving(true);
+      setError('');
+      try {
+        // Dernier état (detailRef mis à jour sync) — sinon fallback nextLines.
+        const linesToSave = detailRef.current?.lines || _nextLines || [];
+        const updated = await persistSiteRequestPreparationLines(id, linesToSave);
+        if (detailRef.current?.id === id) {
+          setDetail(updated);
+          syncDetailRecap(updated);
+        }
+        await load();
+        return updated;
+      } catch (err) {
+        setError(err.message || 'Erreur de sauvegarde de la préparation.');
+        try {
+          const fresh = await getSiteMaterialRequest(id);
+          if (fresh && detailRef.current?.id === id) {
+            setDetail(fresh);
+            syncDetailRecap(fresh);
+          }
+        } catch { /* ignore */ }
+        throw err;
+      } finally {
+        setSaving(false);
+      }
+    })();
+    persistPromiseRef.current = run;
+    return run;
+  }
+
+  function updateDetailLine(lineRef, patch, { persist = false } = {}) {
+    const nextLines = patchDetailLines(lineRef, patch);
+    setDetail((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev, lines: nextLines };
+      detailRef.current = next;
+      return next;
     });
+    if (persist) {
+      return persistAndReloadLines(nextLines);
+    }
+    return null;
+  }
+
+  /** Vert = tout préparé (préparé = demandé). Jaune = partiel. Rouge = rien préparé. */
+  async function setLineAvailability(line, status) {
+    const patched = applySiteRequestAvailabilityStatus(line, status);
+    const nextLines = patchDetailLines(line, patched);
+    setDetail((prev) => {
+      if (!prev) return prev;
+      const next = { ...prev, lines: nextLines };
+      detailRef.current = next;
+      return next;
+    });
+    await persistAndReloadLines(nextLines);
   }
 
   function associateLineToArticle(line, articleId) {
     const art = stockArticles.find((a) => String(a.id) === String(articleId));
     if (!art) {
-      updateDetailLine(line, { article_id: null });
+      updateDetailLine(line, { article_id: null }, { persist: true });
       return;
     }
     const enriched = enrichLinesWithStock([{
@@ -543,21 +588,31 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
       disponible: enriched.disponible,
       rupture: enriched.rupture,
       stock_status: enriched.stock_status,
-    });
+    }, { persist: true });
   }
 
   function lineAvailabilityStatus(line) {
-    const demandee = Number(line.quantite_demandee) || 0;
-    const prep = Number(line.quantite_preparee) || 0;
-    if (line.rupture || prep <= 0) return 'none';
-    if (line.disponible && prep >= demandee) return 'ok';
-    if (prep > 0 && prep < demandee) return 'partial';
-    if (prep >= demandee) return 'ok';
-    return 'partial';
+    return siteRequestLineAvailabilityStatus(line);
   }
 
   function qtyToBuy(line) {
     return qtyMissingOnLine(line);
+  }
+
+  function handlePreparedQtyInput(line, raw) {
+    if (raw === '') {
+      // Saisie intermédiaire : state local seulement, persist au blur
+      updateDetailLine(line, { quantite_preparee: '' });
+      return;
+    }
+    const prep = Math.max(0, Number(raw));
+    if (Number.isNaN(prep)) return;
+    updateDetailLine(line, { quantite_preparee: prep }, { persist: true });
+  }
+
+  function handlePreparedQtyBlur(line, raw) {
+    if (raw !== '' && raw != null) return;
+    updateDetailLine(line, { quantite_preparee: 0 }, { persist: true });
   }
 
   const missingLines = useMemo(
@@ -573,9 +628,6 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
     && !embedded
     && ['soumise', 'en_preparation', 'preparation_partielle', 'en_attente_dg', 'validee_dg'].includes(detail.statut)
     && !['prete', 'livree', 'annulee'].includes(detail.statut);
-
-  const detailRef = useRef(detail);
-  detailRef.current = detail;
 
   const {
     handleScan: handlePrepScan,
@@ -597,7 +649,7 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
       const line = matchRequestLineByArticle(active, article);
       if (!line) return;
       const updated = incrementPreparedLine(line);
-      updateDetailLine(line.id, { quantite_preparee: updated.quantite_preparee });
+      updateDetailLine(line, { quantite_preparee: updated.quantite_preparee }, { persist: true });
     },
   });
 
@@ -1273,13 +1325,13 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                               avail === 'ok' ? 'Disponible' : avail === 'partial' ? 'Partiel' : 'Non disponible'
                             ) : (
                               <div style={{ display: 'flex', flexWrap: 'nowrap', gap: 4, alignItems: 'center' }}>
-                                <button type="button" className="btn btn-ghost btn-sm" disabled={locked} title="Disponible"
+                                <button type="button" className="btn btn-ghost btn-sm" disabled={locked || saving} title="Disponible"
                                   style={{ padding: '2px 6px', minWidth: 28, background: avail === 'ok' ? '#E8F5E9' : undefined }}
                                   onClick={() => setLineAvailability(l, 'ok')}>✅</button>
-                                <button type="button" className="btn btn-ghost btn-sm" disabled={locked} title="Partiellement"
+                                <button type="button" className="btn btn-ghost btn-sm" disabled={locked || saving} title="Partiellement"
                                   style={{ padding: '2px 6px', minWidth: 28, background: avail === 'partial' ? '#FFF8E1' : undefined }}
                                   onClick={() => setLineAvailability(l, 'partial')}>🟡</button>
-                                <button type="button" className="btn btn-ghost btn-sm" disabled={locked} title="Non disponible"
+                                <button type="button" className="btn btn-ghost btn-sm" disabled={locked || saving} title="Non disponible"
                                   style={{ padding: '2px 6px', minWidth: 28, background: avail === 'none' ? '#FFEBEE' : undefined }}
                                   onClick={() => setLineAvailability(l, 'none')}>❌</button>
                               </div>
@@ -1297,27 +1349,10 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                                 value={l.quantite_preparee === '' || l.quantite_preparee === null || l.quantite_preparee === undefined
                                   ? ''
                                   : l.quantite_preparee}
-                                onChange={(e) => {
-                                  const raw = e.target.value;
-                                  const demandee = Number(l.quantite_demandee) || 0;
-                                  if (raw === '') {
-                                    updateDetailLine(l, {
-                                      quantite_preparee: '',
-                                      disponible: false,
-                                      rupture: true,
-                                    });
-                                    return;
-                                  }
-                                  const prep = Math.max(0, Number(raw));
-                                  if (Number.isNaN(prep)) return;
-                                  updateDetailLine(l, {
-                                    quantite_preparee: prep,
-                                    disponible: prep >= demandee && prep > 0,
-                                    rupture: prep <= 0,
-                                  });
-                                }}
+                                onChange={(e) => handlePreparedQtyInput(l, e.target.value)}
+                                onBlur={(e) => handlePreparedQtyBlur(l, e.target.value)}
                                 style={{ ...INPUT_STYLE, padding: '4px 8px', width: 70 }}
-                                disabled={locked}
+                                disabled={locked || saving}
                               />
                             )}
                           </td>
@@ -1390,28 +1425,11 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                                   value={l.quantite_preparee === '' || l.quantite_preparee === null || l.quantite_preparee === undefined
                                     ? ''
                                     : l.quantite_preparee}
-                                  onChange={(e) => {
-                                    const raw = e.target.value;
-                                    const demandee = Number(l.quantite_demandee) || 0;
-                                    if (raw === '') {
-                                      updateDetailLine(l, {
-                                        quantite_preparee: '',
-                                        disponible: false,
-                                        rupture: true,
-                                      });
-                                      return;
-                                    }
-                                    const prep = Math.max(0, Number(raw));
-                                    if (Number.isNaN(prep)) return;
-                                    updateDetailLine(l, {
-                                      quantite_preparee: prep,
-                                      disponible: prep >= demandee && prep > 0,
-                                      rupture: prep <= 0,
-                                    });
-                                  }}
+                                  onChange={(e) => handlePreparedQtyInput(l, e.target.value)}
+                                  onBlur={(e) => handlePreparedQtyBlur(l, e.target.value)}
                                   className="inv-dc-line-input"
                                   style={INPUT_STYLE}
-                                  disabled={locked}
+                                  disabled={locked || saving}
                                 />
                               )}
                             </dd>
@@ -1428,13 +1446,13 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                         {!embedded && (
                           <>
                             <div style={{ display: 'flex', gap: 4, marginTop: 8, flexWrap: 'nowrap', alignItems: 'center' }}>
-                              <button type="button" className="btn btn-ghost btn-sm" disabled={locked} title="Disponible"
+                              <button type="button" className="btn btn-ghost btn-sm" disabled={locked || saving} title="Disponible"
                                 style={{ padding: '2px 6px', minWidth: 28, background: avail === 'ok' ? '#E8F5E9' : undefined }}
                                 onClick={() => setLineAvailability(l, 'ok')}>✅</button>
-                              <button type="button" className="btn btn-ghost btn-sm" disabled={locked} title="Partiellement"
+                              <button type="button" className="btn btn-ghost btn-sm" disabled={locked || saving} title="Partiellement"
                                 style={{ padding: '2px 6px', minWidth: 28, background: avail === 'partial' ? '#FFF8E1' : undefined }}
                                 onClick={() => setLineAvailability(l, 'partial')}>🟡</button>
-                              <button type="button" className="btn btn-ghost btn-sm" disabled={locked} title="Non disponible"
+                              <button type="button" className="btn btn-ghost btn-sm" disabled={locked || saving} title="Non disponible"
                                 style={{ padding: '2px 6px', minWidth: 28, background: avail === 'none' ? '#FFEBEE' : undefined }}
                                 onClick={() => setLineAvailability(l, 'none')}>❌</button>
                             </div>

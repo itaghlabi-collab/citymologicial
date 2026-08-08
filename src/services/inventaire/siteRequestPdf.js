@@ -5,6 +5,7 @@ import { jsPDF } from 'jspdf';
 import { loadCompanyLogoFit } from '../finance/pdfShared';
 import { setupPdfUnicodeFont, setPdfFont } from '../finance/pdfUnicode';
 import { SITE_REQUEST_CATEGORIES, siteRequestStatutLabel } from '../../constants/siteMaterialRequests';
+import { applySiteRequestLinePreparation } from './siteMaterialRequests';
 
 const LOGO_URL = 'https://i.ibb.co/N6SbC06M/logopng.png';
 const ICON_URL = 'https://i.ibb.co/S79nbLdm/icone.png';
@@ -289,7 +290,7 @@ function drawLineRow(doc, line, y) {
     doc.text(fmtQty(q), COL_X[i + 1] + COL_W[i + 1] / 2, midY, { align: 'center' });
   });
 
-  const stock = line.stock_actuel ?? line.disponible_apres;
+  const stock = line.stock_actuel ?? line.disponible_apres ?? line.stock_available;
   doc.text(stock != null ? fmtQty(stock) : '—', COL_X[4] + COL_W[4] / 2, midY, { align: 'center' });
 
   const obs = line.remarque_magasinier || line.remarque || '';
@@ -488,7 +489,9 @@ export async function generateSiteRequestPdf(request) {
   let y = drawHeader(doc, request, logoMeta);
   y = drawChantierMeta(doc, request, y);
 
-  const activeLines = (request.lines || []).filter((l) => Number(l.quantite_demandee) > 0);
+  const activeLines = (request.lines || [])
+    .filter((l) => Number(l.quantite_demandee) > 0)
+    .map((l) => applySiteRequestLinePreparation(l));
 
   SITE_REQUEST_CATEGORIES.forEach((cat) => {
     const catLines = activeLines.filter((l) => l.category_id === cat.id);

@@ -40,9 +40,15 @@ export function incrementPreparedLine(line, delta = 1) {
   const demanded = Number(line.quantite_demandee) || 0;
   const current = Number(line.quantite_preparee) || 0;
   const next = Math.min(demanded || current + delta, current + delta);
+  const preparee = demanded > 0 ? Math.min(next, demanded) : next;
+  // Aligné sur computeSiteRequestLinePreparation (import différé évite cycle éventuel)
+  const missing = Math.max(0, demanded - preparee);
   return {
     ...line,
-    quantite_preparee: demanded > 0 ? Math.min(next, demanded) : next,
+    quantite_preparee: preparee,
+    quantite_manquante: missing,
+    disponible: demanded > 0 && preparee >= demanded,
+    rupture: preparee <= 0,
   };
 }
 

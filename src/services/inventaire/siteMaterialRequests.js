@@ -51,24 +51,109 @@ export function computeLineStockInfo(line, stockArticle, reserved = 0) {
   };
 }
 
+/**
+ * Source unique de vérité pour la préparation d'une ligne demande chantier.
+ * — prepared_qty plafonné à requested_qty, jamais négatif
+ * — missing_qty = max(requested − prepared, 0)
+ * — disponible / rupture dérivés de la préparation (pas du stock courant)
+ */
+export function computeSiteRequestLinePreparation(line) {
+  const requested_qty = Math.max(0, Number(line?.quantite_demandee) || 0);
+  const rawPrep = line?.quantite_preparee;
+  const parsedPrep = (rawPrep === '' || rawPrep === null || rawPrep === undefined)
+    ? 0
+    : Math.max(0, Number(rawPrep) || 0);
+  const prepared_qty = requested_qty > 0 ? Math.min(parsedPrep, requested_qty) : parsedPrep;
+  const missing_qty = Math.max(0, requested_qty - prepared_qty);
+  const delivered_qty = Math.max(0, Number(line?.quantite_livree) || 0);
+  const stock_available = Number(line?.stock_actuel ?? line?.disponible_apres ?? 0) || 0;
+  const disponible = requested_qty > 0 && prepared_qty >= requested_qty;
+  const rupture = prepared_qty <= 0;
+  return {
+    requested_qty,
+    prepared_qty,
+    missing_qty,
+    delivered_qty,
+    stock_available,
+    disponible,
+    rupture,
+    quantite_demandee: requested_qty,
+    quantite_preparee: prepared_qty,
+    quantite_manquante: missing_qty,
+    quantite_livree: delivered_qty,
+  };
+}
+
+/** Applique la source unique sur une ligne (champs FR + flags magasin). */
+export function applySiteRequestLinePreparation(line) {
+  if (!line) return line;
+  // Champ vide = saisie UI en cours ; ne pas forcer 0 tant que non persisté.
+  if (line.quantite_preparee === '') {
+    const requested_qty = Math.max(0, Number(line.quantite_demandee) || 0);
+    return {
+      ...line,
+      quantite_demandee: requested_qty,
+      quantite_preparee: '',
+      quantite_manquante: requested_qty,
+      disponible: false,
+      rupture: true,
+    };
+  }
+  const c = computeSiteRequestLinePreparation(line);
+  return {
+    ...line,
+    quantite_demandee: c.requested_qty,
+    quantite_preparee: c.prepared_qty,
+    quantite_manquante: c.missing_qty,
+    quantite_livree: c.delivered_qty,
+    disponible: c.disponible,
+    rupture: c.rupture,
+  };
+}
+
+/** Vert / jaune / rouge → quantités + flags via la source unique. */
+export function applySiteRequestAvailabilityStatus(line, status) {
+  const demandee = Math.max(0, Number(line?.quantite_demandee) || 0);
+  let preparee = 0;
+  if (status === 'ok') {
+    preparee = demandee;
+  } else if (status === 'partial') {
+    const current = Number(line?.quantite_preparee) || 0;
+    preparee = current > 0 && current < demandee
+      ? current
+      : Math.max(1, Math.floor(demandee / 2) || 1);
+    preparee = Math.min(preparee, demandee);
+  } else {
+    preparee = 0;
+  }
+  return applySiteRequestLinePreparation({ ...line, quantite_preparee: preparee });
+}
+
+/** Statut UI disponibilité dérivé uniquement des quantités. */
+export function siteRequestLineAvailabilityStatus(line) {
+  const { requested_qty, prepared_qty } = computeSiteRequestLinePreparation(line);
+  if (prepared_qty <= 0) return 'none';
+  if (requested_qty > 0 && prepared_qty >= requested_qty) return 'ok';
+  return 'partial';
+}
+
 export function enrichLinesWithStock(lines, stockArticles = []) {
   return (lines || []).map((line) => {
-    if (!(Number(line.quantite_demandee) > 0)) return line;
+    if (!(Number(line.quantite_demandee) > 0)) return applySiteRequestLinePreparation(line);
     const stockArt = line.article_id
       ? stockArticles.find((a) => String(a.id) === String(line.article_id))
       : matchStockArticle(line.article_name, stockArticles);
     const info = computeLineStockInfo(line, stockArt);
-    return {
+    // Stock → stock_* uniquement. disponible / rupture = préparation (source unique).
+    return applySiteRequestLinePreparation({
       ...line,
       article_id: info.article_id,
       stock_actuel: info.stock_actuel,
       stock_reserve: info.stock_reserve,
-      disponible: info.disponible,
-      rupture: info.rupture,
       stock_status: info.stock_status,
       disponible_apres: info.disponible_apres,
       prix_unitaire: Number(stockArt?.prix_unitaire ?? stockArt?.prix_achat ?? 0),
-    };
+    });
   });
 }
 
@@ -264,26 +349,29 @@ function toLineRows(requestId, lines, stockArticles) {
   const enriched = enrichLinesWithStock(mergeDuplicateSiteRequestLines(lines), stockArticles);
   return enriched
     .filter((l) => Number(l.quantite_demandee) > 0 || l.is_custom)
-    .map((l, idx) => ({
-      request_id: requestId,
-      category_id: l.category_id,
-      article_name: l.article_name,
-      article_id: l.article_id || null,
-      quantite_demandee: Number(l.quantite_demandee) || 0,
-      quantite_preparee: Number(l.quantite_preparee) || 0,
-      quantite_livree: Number(l.quantite_livree) || 0,
-      unite: l.unite || 'u',
-      remarque: l.remarque || null,
-      remarque_magasinier: l.remarque_magasinier || null,
-      date_souhaitee: l.date_souhaitee || null,
-      stock_actuel: Number(l.stock_actuel) || 0,
-      stock_reserve: Number(l.stock_reserve) || 0,
-      disponible: !!l.disponible,
-      rupture: !!l.rupture,
-      replaced_by: l.replaced_by || null,
-      is_custom: !!l.is_custom,
-      line_order: l.line_order ?? idx,
-    }));
+    .map((l, idx) => {
+      const prep = computeSiteRequestLinePreparation(l);
+      return {
+        request_id: requestId,
+        category_id: l.category_id,
+        article_name: l.article_name,
+        article_id: l.article_id || null,
+        quantite_demandee: prep.requested_qty,
+        quantite_preparee: prep.prepared_qty,
+        quantite_livree: prep.delivered_qty,
+        unite: l.unite || 'u',
+        remarque: l.remarque || null,
+        remarque_magasinier: l.remarque_magasinier || null,
+        date_souhaitee: l.date_souhaitee || null,
+        stock_actuel: Number(l.stock_actuel) || 0,
+        stock_reserve: Number(l.stock_reserve) || 0,
+        disponible: prep.disponible,
+        rupture: prep.rupture,
+        replaced_by: l.replaced_by || null,
+        is_custom: !!l.is_custom,
+        line_order: l.line_order ?? idx,
+      };
+    });
 }
 
 async function replaceLines(requestId, lines, stockArticles) {
@@ -515,8 +603,8 @@ export async function prepareSiteMaterialRequest(id, lineUpdates = [], {
     const upd = lineUpdates.find((u) => u.id === line.id || (
       u.article_name === line.article_name && u.category_id === line.category_id
     ));
-    if (!upd) return line;
-    return {
+    if (!upd) return applySiteRequestLinePreparation(line);
+    return applySiteRequestLinePreparation({
       ...line,
       quantite_preparee: upd.quantite_preparee ?? line.quantite_preparee,
       remarque_magasinier: upd.remarque_magasinier ?? line.remarque_magasinier,
@@ -525,7 +613,7 @@ export async function prepareSiteMaterialRequest(id, lineUpdates = [], {
       disponible: upd.disponible ?? line.disponible,
       article_id: upd.article_id !== undefined ? upd.article_id : line.article_id,
       article_name: upd.article_name ?? line.article_name,
-    };
+    });
   });
 
   await replaceLines(id, lines, stockArticles);
@@ -676,9 +764,9 @@ export async function cancelSiteMaterialRequest(id, reason = '', { ipAddress } =
   return normalizeRequest(data, enrichLinesWithStock(await loadLines(id)), await loadHistory(id));
 }
 
-/** Quantité manquante = demandé − préparé (à acheter / reste commande). */
+/** Quantité manquante = demandé − préparé (source unique). */
 export function qtyMissingOnLine(line) {
-  return Math.max(0, (Number(line?.quantite_demandee) || 0) - (Number(line?.quantite_preparee) || 0));
+  return computeSiteRequestLinePreparation(line).missing_qty;
 }
 
 /**
@@ -688,11 +776,33 @@ export function qtyMissingOnLine(line) {
 export function getSiteRequestMissingLines(siteRequest) {
   return (siteRequest?.lines || [])
     .filter((l) => Number(l.quantite_demandee) > 0)
-    .map((l) => ({
-      ...l,
-      quantite_manquante: qtyMissingOnLine(l),
-    }))
+    .map((l) => {
+      const prep = computeSiteRequestLinePreparation(l);
+      return {
+        ...applySiteRequestLinePreparation(l),
+        quantite_manquante: prep.missing_qty,
+      };
+    })
     .filter((l) => l.quantite_manquante > 0);
+}
+
+/**
+ * Persiste les quantités préparées / flags magasin sans changer le statut métier.
+ * Recharge ensuite la demande depuis la DB (source de vérité).
+ */
+export async function persistSiteRequestPreparationLines(id, lines) {
+  await requireUser();
+  const existing = await getSiteMaterialRequest(id);
+  if (!existing) throw new Error('Demande introuvable.');
+  if (['livree', 'annulee'].includes(existing.statut)) {
+    throw new Error('Demande clôturée — modification impossible.');
+  }
+  const stockArticles = await listStockArticles().catch(() => []);
+  const normalized = (lines || []).map((l) => applySiteRequestLinePreparation(
+    l?.quantite_preparee === '' ? { ...l, quantite_preparee: 0 } : l,
+  ));
+  await replaceLines(id, normalized, stockArticles);
+  return getSiteMaterialRequest(id);
 }
 
 /**
