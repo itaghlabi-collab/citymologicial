@@ -1525,10 +1525,29 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                   </button>
                 )}
                 {!embedded && ['prete', 'validee_dg'].includes(detail.statut) && (
-                  <button type="button" className="btn btn-primary btn-sm" disabled={saving} onClick={() => runAction(async (id) => {
-                    await prepareSiteMaterialRequest(id, detail.lines);
-                    return deliverSiteMaterialRequest(id);
-                  })}
+                  <button
+                    type="button"
+                    className="btn btn-primary btn-sm"
+                    disabled={saving}
+                    onClick={async () => {
+                      const id = detail.id;
+                      setSaving(true);
+                      setError('');
+                      try {
+                        if (persistPromiseRef.current) {
+                          await persistPromiseRef.current.catch(() => {});
+                        }
+                        await prepareSiteMaterialRequest(id, detailRef.current?.lines || detail.lines);
+                        const delivered = await deliverSiteMaterialRequest(id);
+                        await generateSiteRequestPdf(delivered || await getSiteMaterialRequest(id));
+                        closeDetail();
+                        await load();
+                      } catch (err) {
+                        setError(err.message || 'Erreur lors de la livraison.');
+                      } finally {
+                        setSaving(false);
+                      }
+                    }}
                   >
                     <Truck size={14} /> Livrer & générer bon de sortie
                   </button>

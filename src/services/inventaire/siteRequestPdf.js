@@ -83,24 +83,6 @@ function fmtDate(d) {
   }
 }
 
-function fmtDateOnly(d) {
-  if (!d) return '—';
-  try {
-    return new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' });
-  } catch {
-    return '—';
-  }
-}
-
-function fmtTimeOnly(d) {
-  if (!d) return '—';
-  try {
-    return new Date(d).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
-  } catch {
-    return '—';
-  }
-}
-
 function fmtQty(n) {
   const v = Number(n);
   if (Number.isNaN(v)) return '0';
@@ -197,7 +179,7 @@ function drawHeader(doc, request, logoMeta) {
 }
 
 function drawChantierMeta(doc, request, startY) {
-  const boxH = 28;
+  const boxH = 26;
   drawBorderedBox(doc, M, startY, CONTENT_W, boxH, GREY_BG);
   drawRedAccent(doc, M, startY, boxH);
 
@@ -209,7 +191,6 @@ function drawChantierMeta(doc, request, startY) {
     ['Chef de projet', request.chef_projet || '—'],
     ['Chef de chantier', request.chef_chantier || '—'],
     ['Magasinier', request.prepared_by_name || '—'],
-    ['Validation DG', request.validated_dg_name || (request.requires_dg ? 'En attente' : '—')],
     ['Bon de sortie', request.movement_ref || '—'],
   ];
 
@@ -217,7 +198,7 @@ function drawChantierMeta(doc, request, startY) {
     const col = i % 2;
     const row = Math.floor(i / 2);
     const x = M + 5 + col * colW;
-    const y = startY + 6 + row * 6.5;
+    const y = startY + 6 + row * 5.5;
 
     setPdfFont(doc, 'bold');
     doc.setFontSize(6);
@@ -234,8 +215,8 @@ function drawChantierMeta(doc, request, startY) {
   return startY + boxH + 4;
 }
 
-/** Colonnes : Désignation | Demandée | Préparée | Livrée | Stock | Observations */
-const COL_W = [52, 18, 18, 18, 20, CONTENT_W - 126];
+/** Colonnes : Désignation | Demandée | Préparée | Livrée | Observations (sans STOCK) */
+const COL_W = [70, 22, 22, 22, CONTENT_W - 136];
 const COL_X = [M];
 for (let i = 1; i < COL_W.length; i++) COL_X[i] = COL_X[i - 1] + COL_W[i - 1];
 
@@ -252,7 +233,7 @@ function drawTableHeader(doc, y) {
   doc.setFontSize(6);
   doc.setTextColor(...TEXT);
   const mid = y + 4.8;
-  const headers = ['DÉSIGNATION', 'QTÉ DEM.', 'QTÉ PRÉP.', 'QTÉ LIV.', 'STOCK', 'OBSERVATIONS'];
+  const headers = ['DÉSIGNATION', 'QTÉ DEM.', 'QTÉ PRÉP.', 'QTÉ LIV.', 'OBSERVATIONS'];
   headers.forEach((h, i) => {
     const tx = i === 0 ? COL_X[i] + 3 : COL_X[i] + COL_W[i] / 2;
     const align = i === 0 ? 'left' : 'center';
@@ -266,11 +247,21 @@ function measureLineRow(doc, line) {
   doc.setFontSize(7);
   const nameLines = doc.splitTextToSize(line.article_name || '—', COL_W[0] - 5);
   const obs = line.remarque_magasinier || line.remarque || '';
-  const obsLines = obs ? doc.splitTextToSize(obs, COL_W[5] - 4) : [''];
+  const obsLines = obs ? doc.splitTextToSize(obs, COL_W[4] - 4) : [''];
   return Math.max(nameLines.length * 3.2, obsLines.length * 3, 5.5) + 2;
 }
 
-function drawLineRow(doc, line, y) {
+function qtyLivreeForPdf(line, request) {
+  const prep = Number(line.quantite_preparee) || 0;
+  const liv = Number(line.quantite_livree) || 0;
+  // Demande livrée : QTÉ LIV. = quantités préparées / livrées (même articles)
+  if (request?.statut === 'livree') {
+    return liv > 0 ? liv : prep;
+  }
+  return liv;
+}
+
+function drawLineRow(doc, line, y, request) {
   const rowH = measureLineRow(doc, line);
   COL_W.forEach((w, i) => drawBorderedBox(doc, COL_X[i], y, w, rowH, i % 2 === 0 ? WHITE : GREY_BG));
 
@@ -286,21 +277,19 @@ function drawLineRow(doc, line, y) {
     ty += 3.2;
   });
 
-  [line.quantite_demandee, line.quantite_preparee, line.quantite_livree].forEach((q, i) => {
+  const qLiv = qtyLivreeForPdf(line, request);
+  [line.quantite_demandee, line.quantite_preparee, qLiv].forEach((q, i) => {
     doc.text(fmtQty(q), COL_X[i + 1] + COL_W[i + 1] / 2, midY, { align: 'center' });
   });
-
-  const stock = line.stock_actuel ?? line.disponible_apres ?? line.stock_available;
-  doc.text(stock != null ? fmtQty(stock) : '—', COL_X[4] + COL_W[4] / 2, midY, { align: 'center' });
 
   const obs = line.remarque_magasinier || line.remarque || '';
   if (obs) {
     doc.setFontSize(6);
     doc.setTextColor(...MUTED);
-    const obsLines = doc.splitTextToSize(obs, COL_W[5] - 4);
+    const obsLines = doc.splitTextToSize(obs, COL_W[4] - 4);
     let oy = y + 3;
     obsLines.forEach((ln) => {
-      doc.text(ln, COL_X[5] + 2, oy);
+      doc.text(ln, COL_X[4] + 2, oy);
       oy += 2.8;
     });
   }
@@ -308,7 +297,7 @@ function drawLineRow(doc, line, y) {
   return y + rowH;
 }
 
-function drawCategorySection(doc, catLabel, lines, y, ensureSpace) {
+function drawCategorySection(doc, catLabel, lines, y, ensureSpace, request) {
   const catHdrH = 6;
   if (ensureSpace(catHdrH + 10)) y = M;
 
@@ -327,7 +316,7 @@ function drawCategorySection(doc, catLabel, lines, y, ensureSpace) {
   lines.forEach((line) => {
     const rowH = measureLineRow(doc, line);
     if (ensureSpace(rowH)) y = M;
-    y = drawLineRow(doc, line, y);
+    y = drawLineRow(doc, line, y, request);
   });
 
   return y + 2;
@@ -356,94 +345,24 @@ function drawTextBlock(doc, label, value, startY, ensureSpace) {
   return startY + blockH + 3;
 }
 
-function drawHistoryTable(doc, history, startY, ensureSpace) {
-  const hdrH = 7;
-  const histCols = [22, 14, 38, CONTENT_W - 74];
-  const histX = [M];
-  for (let i = 1; i < histCols.length; i++) histX[i] = histX[i - 1] + histCols[i - 1];
-
-  if (ensureSpace(hdrH + 12)) startY = M;
-
-  setPdfFont(doc, 'bold');
-  doc.setFontSize(8);
-  doc.setTextColor(...TEXT);
-  doc.text('Historique des validations', M, startY);
-  startY += 5;
-
-  doc.setFillColor(...TABLE_HDR_BG);
-  doc.rect(M, startY, CONTENT_W, hdrH, 'F');
-  drawRedAccent(doc, M, startY, hdrH);
-  doc.setDrawColor(...BORDER);
-  doc.rect(M, startY, CONTENT_W, hdrH);
-
-  setPdfFont(doc, 'bold');
-  doc.setFontSize(6);
-  doc.setTextColor(...TEXT);
-  const mid = startY + 4.8;
-  ['DATE', 'HEURE', 'UTILISATEUR', 'ACTION RÉALISÉE'].forEach((h, i) => {
-    doc.text(h, histX[i] + (i < 2 ? histCols[i] / 2 : 2), mid, { align: i < 2 ? 'center' : 'left' });
-  });
-  startY += hdrH;
-
-  const rows = history?.length ? history : [{ action: '—', actor_name: '—', created_at: null }];
-
-  rows.forEach((h, idx) => {
-    const actionLines = doc.splitTextToSize(h.action || '—', histCols[3] - 4);
-    const rowH = Math.max(6, actionLines.length * 3 + 2);
-    if (ensureSpace(rowH)) startY = M;
-
-    histCols.forEach((w, i) => drawBorderedBox(doc, histX[i], startY, w, rowH, idx % 2 === 0 ? WHITE : GREY_BG));
-
-    const ry = startY + rowH / 2 + 1;
-    setPdfFont(doc, 'normal');
-    doc.setFontSize(6.5);
-    doc.setTextColor(...TEXT);
-    doc.text(fmtDateOnly(h.created_at), histX[0] + histCols[0] / 2, ry, { align: 'center' });
-    doc.text(fmtTimeOnly(h.created_at), histX[1] + histCols[1] / 2, ry, { align: 'center' });
-    doc.text(h.actor_name || 'Système', histX[2] + 2, ry);
-    let ay = startY + 3.5;
-    actionLines.forEach((ln) => {
-      doc.text(ln, histX[3] + 2, ay);
-      ay += 3;
-    });
-    startY += rowH;
-  });
-
-  return startY + 3;
-}
-
-function drawSignatures(doc, startY, iconMeta, ensureSpace) {
+function drawSignatures(doc, startY, _iconMeta, ensureSpace) {
   const needed = SIGN_H + 4;
   if (ensureSpace(needed)) startY = M;
 
-  const labels = ['Chef de chantier', 'Chef de projet', 'Magasinier', 'Validation DG', 'Cachet CITYMO'];
-  const gap = 2;
+  const labels = ['Chef de chantier', 'Magasinier'];
+  const gap = 8;
   const sigW = (CONTENT_W - gap * (labels.length - 1)) / labels.length;
 
   labels.forEach((label, i) => {
     const x = M + i * (sigW + gap);
     drawBorderedBox(doc, x, startY, sigW, SIGN_H, WHITE);
     setPdfFont(doc, 'bold');
-    doc.setFontSize(5.5);
+    doc.setFontSize(6.5);
     doc.setTextColor(...MUTED);
-    doc.text(label, x + sigW / 2, startY + 4, { align: 'center' });
+    doc.text(label, x + sigW / 2, startY + 5, { align: 'center' });
     doc.setDrawColor(...BORDER);
     doc.setLineWidth(0.2);
-    doc.line(x + 2, startY + SIGN_H - 5, x + sigW - 2, startY + SIGN_H - 5);
-
-    if (label === 'Cachet CITYMO' && iconMeta?.dataUrl) {
-      try {
-        const sz = containImage(iconMeta.width, iconMeta.height, sigW - 6, SIGN_H - 10);
-        doc.addImage(
-          iconMeta.dataUrl,
-          imgFmt(iconMeta.dataUrl),
-          x + (sigW - sz.width) / 2,
-          startY + 6,
-          sz.width,
-          sz.height,
-        );
-      } catch { /* skip */ }
-    }
+    doc.line(x + 4, startY + SIGN_H - 5, x + sigW - 4, startY + SIGN_H - 5);
   });
 
   return startY + SIGN_H + 3;
@@ -496,11 +415,10 @@ export async function generateSiteRequestPdf(request) {
   SITE_REQUEST_CATEGORIES.forEach((cat) => {
     const catLines = activeLines.filter((l) => l.category_id === cat.id);
     if (!catLines.length) return;
-    y = drawCategorySection(doc, cat.label, catLines, y, ensureSpace);
+    y = drawCategorySection(doc, cat.label, catLines, y, ensureSpace, request);
   });
 
   y = drawTextBlock(doc, 'Observations générales', request.observation, y, ensureSpace);
-  y = drawHistoryTable(doc, request.history, y, ensureSpace);
   y = drawSignatures(doc, y, iconMeta, ensureSpace);
 
   const totalPages = doc.getNumberOfPages();
