@@ -550,7 +550,7 @@ export default function Sauvegardes({ backups = [], setBackups, reload, canManag
 
   async function handleCleanupFailed() {
     if (!canManage) return;
-    if (!window.confirm('Nettoyer les tentatives échouées sans fichier valide ?\nLes sauvegardes réussies seront conservées.')) return;
+    if (!window.confirm('Nettoyer les tentatives échouées ?\nLes sauvegardes réussies seront conservées.')) return;
     try {
       const r = await cleanupFailedBackups();
       alert(`Nettoyage : ${r.deleted} entrée(s) supprimée(s) / ${r.scanned} erreur(s) scannée(s).`);
