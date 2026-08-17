@@ -13,6 +13,7 @@ import {
   KpiCard, EmptyState, Modal, SectionTitle, formatMAD, StockAlert,
   BADGE_CURRENT_STATE,
   FILTER_SANS_EMPLACEMENT, formatEmplacementDisplay, filterVisibleEmplacements, isSansEmplacement,
+  matchesStockSearch,
 } from './shared.jsx';
 import StockOpsActions from './StockOpsActions';
 import StockDirectMovementModal from './StockDirectMovementModal';
@@ -448,10 +449,7 @@ export default function Stocks({
 
   const filtered = useMemo(() => stockRows.filter((x) => {
     const cat = (categories || []).find((c) => String(c.id) === String(x.categorie_id));
-    const q = search.toLowerCase();
-    const bc = getArticleBarcodeValue(x).toLowerCase();
-    const matchQ = !q || x.code?.toLowerCase().includes(q) || x.designation?.toLowerCase().includes(q)
-      || (cat?.nom || '').toLowerCase().includes(q) || bc.includes(q);
+    const matchQ = matchesStockSearch(x, search, `${cat?.nom || ''} ${getArticleBarcodeValue(x)}`);
     const matchCat = !filterCat || String(x.categorie_id) === String(filterCat);
 
     const emp = String(x.emplacement || '').trim();

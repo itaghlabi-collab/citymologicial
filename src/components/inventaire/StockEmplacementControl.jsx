@@ -8,6 +8,7 @@ import {
 } from 'lucide-react';
 import {
   INPUT_STYLE, SELECT_STYLE, EmptyState, SectionTitle, formatMAD, KpiCard,
+  matchesStockSearch,
 } from './shared.jsx';
 
 function fmtMvtDate(m) {
@@ -29,10 +30,7 @@ export default function StockEmplacementControl({
   const filteredArticles = useMemo(() => {
     const rows = controlView?.articles || [];
     return rows.filter((x) => {
-      const q = search.toLowerCase();
-      const matchQ = !q
-        || String(x.code || '').toLowerCase().includes(q)
-        || String(x.designation || '').toLowerCase().includes(q);
+      const matchQ = matchesStockSearch(x, search);
       const matchCat = !filterCat || String(x.categorie_id) === String(filterCat);
       const qty = Number(x.stock_actuel) || 0;
       let matchVis = true;

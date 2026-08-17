@@ -103,6 +103,31 @@ export function filterVisibleEmplacements(list) {
   return [...new Set((list || []).map((e) => String(e || '').trim()).filter((e) => e && !isDeprecatedEmplacement(e)))]
     .sort((a, b) => a.localeCompare(b, 'fr'));
 }
+
+/** Recherche Stocks : ignore casse, accents, tirets et espaces multiples. */
+export function normalizeStockSearchText(value) {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[\u2010-\u2015\u2212]/g, '-')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+export function matchesStockSearch(article, query, extra = '') {
+  const q = normalizeStockSearchText(query);
+  if (!q) return true;
+  const hay = normalizeStockSearchText([
+    article?.code,
+    article?.designation,
+    article?.nom,
+    extra,
+  ].filter(Boolean).join(' '));
+  if (hay.includes(q)) return true;
+  return q.split(' ').every((token) => token && hay.includes(token));
+}
 export const UNITES         = ['U', 'kg', 'g', 't', 'm', 'm²', 'm³', 'ml', 'cm', 'l', 'cl', 'sac', 'rouleau', 'boîte', 'palette', 'lot', 'pièce'];
 export const TYPES_MOUVEMENT = ['Entrée', 'Sortie', 'Transfert', 'Retour', 'Rebut'];
 export const STATUTS_MOUVEMENT = ['Brouillon', 'Validé', 'En cours', 'Terminé', 'Annulé'];
