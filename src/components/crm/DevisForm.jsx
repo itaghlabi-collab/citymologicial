@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ChevronLeft, Trash2, Copy, AlertCircle,
-  FileText, GripVertical, X, Download, Pencil, ClipboardCheck,
+  FileText, GripVertical, X, Download, Pencil, ClipboardCheck, Check,
 } from 'lucide-react';
 import { listClients } from '../../services/crm/clients';
 import { listArticles, getArticleById } from '../../services/crm/articles';
@@ -78,6 +78,36 @@ function ligneSousTotalHt(l) {
   });
 }
 
+/** Affiche une valeur numérique avec virgule FR (pour les champs éditables). */
+function formatFrDecimalInput(value) {
+  if (value === null || value === undefined || value === '') return '';
+  return String(value).replace('.', ',');
+}
+
+/**
+ * Parse saisie FR/EN : "13,5" / "13.5" → number.
+ * Retourne null si vide ou invalide.
+ */
+function parseFrDecimal(raw) {
+  if (raw === null || raw === undefined) return null;
+  const s = String(raw).trim().replace(/\s/g, '').replace(',', '.');
+  if (!s || s === '.' || s === '-' || s === '-.') return null;
+  const n = Number(s);
+  return Number.isFinite(n) ? n : null;
+}
+
+/** Filtre la frappe : chiffres + une seule virgule ou un seul point. */
+function sanitizeFrDecimalTyping(raw) {
+  let s = String(raw ?? '').replace(/[^\d.,]/g, '');
+  const sepIdx = Math.max(s.indexOf(','), s.indexOf('.'));
+  if (sepIdx >= 0) {
+    const head = s.slice(0, sepIdx + 1);
+    const tail = s.slice(sepIdx + 1).replace(/[.,]/g, '');
+    s = head + tail;
+  }
+  return s;
+}
+
 function genRef() {
   const d = new Date();
   return `DV-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}-${String(Math.floor(Math.random() * 9000) + 1000)}`;
@@ -108,10 +138,10 @@ const EMPTY_DRAFT = () => ({
   article_id: '',
   designation: '',
   description: '',
-  quantite: 1,
+  quantite: '1',
   unite: 'unite',
-  prix_ht: 0,
-  remise: 0,
+  prix_ht: '0',
+  remise: '0',
   tva: 20,
 });
 
@@ -157,10 +187,10 @@ function draftToLigne(draft, articles = []) {
     article_id: draft.mode === 'hors_catalogue' ? '' : draft.article_id,
     designation: draft.designation.trim(),
     description,
-    quantite: Number(draft.quantite) || 1,
+    quantite: parseFrDecimal(draft.quantite) ?? 1,
     unite: draft.unite || 'unite',
-    prix_ht: Number(draft.prix_ht) || 0,
-    remise: Number(draft.remise) || 0,
+    prix_ht: parseFrDecimal(draft.prix_ht) ?? 0,
+    remise: parseFrDecimal(draft.remise) ?? 0,
     tva: Number(draft.tva) ?? 20,
   });
 }
@@ -179,10 +209,10 @@ function ligneToDraft(ligne, articles = []) {
     article_id: ligne.article_id || '',
     designation: ligne.designation || '',
     description: resolveLigneDescription(ligne, articles),
-    quantite: ligne.quantite ?? 1,
+    quantite: formatFrDecimalInput(ligne.quantite ?? 1),
     unite: ligne.unite || 'unite',
-    prix_ht: ligne.prix_ht ?? 0,
-    remise: ligne.remise ?? 0,
+    prix_ht: formatFrDecimalInput(ligne.prix_ht ?? 0),
+    remise: formatFrDecimalInput(ligne.remise ?? 0),
     tva: ligne.tva ?? 20,
   };
 }
@@ -194,10 +224,10 @@ function draftCommitSignature(draft) {
     article_id: draft?.article_id || '',
     designation: draft?.designation?.trim() || '',
     description: draft?.description?.trim() || '',
-    quantite: Number(draft?.quantite) || 0,
+    quantite: parseFrDecimal(draft?.quantite) ?? 0,
     unite: draft?.unite || '',
-    prix_ht: Number(draft?.prix_ht) || 0,
-    remise: Number(draft?.remise) || 0,
+    prix_ht: parseFrDecimal(draft?.prix_ht) ?? 0,
+    remise: parseFrDecimal(draft?.remise) ?? 0,
     tva: Number(draft?.tva) || 0,
   });
 }
@@ -490,6 +520,191 @@ function LigneDescriptionText({ description }) {
   );
 }
 
+/* ── Ligne en édition inline (même emplacement dans le tableau) ── */
+function DevisLineInlineEdit({
+  draft, setDraft, lineNum, idx, drag, error, onOk, onCancel,
+}) {
+  function setF(k, v) { setDraft((p) => ({ ...p, [k]: v })); }
+  function setDecimal(k, raw) { setF(k, sanitizeFrDecimalTyping(raw)); }
+
+  const dragProps = {
+    style: { ...rowDragStyle(drag.isDragging, drag.isOver), background: '#FFF8F0' },
+    onDragOver: (e) => { e.preventDefault(); drag.onDragOver(idx); },
+    onDrop: (e) => { e.preventDefault(); drag.onDrop(idx); },
+  };
+  const handleProps = {
+    onDragStart: (e) => drag.onDragStart(e, idx),
+    onDragEnd: drag.onDragEnd,
+  };
+
+  const actions = (
+    <div style={{ display: 'flex', gap: 4, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
+      <button type="button" className="btn btn-primary btn-sm" onClick={onOk} title="OK" style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontWeight: 800 }}>
+        <Check size={13} /> OK
+      </button>
+      <button type="button" className="btn btn-ghost btn-sm" onClick={onCancel} title="Annuler" style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+        <X size={13} /> Annuler
+      </button>
+    </div>
+  );
+
+  if (draft.mode === 'titre' || draft.mode === 'sous_titre') {
+    return (
+      <tr {...dragProps}>
+        <td colSpan={8} style={{ padding: '10px 14px', background: '#FFF8F0', borderTop: '2px solid var(--red)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+            <DragHandle {...handleProps} />
+            <input
+              autoFocus
+              value={draft.designation}
+              onChange={(e) => setF('designation', e.target.value)}
+              placeholder={draft.mode === 'titre' ? 'Titre de section' : 'Sous-titre'}
+              style={{ ...IS(false), flex: 1, minWidth: 180, fontFamily: 'var(--font-head)', fontWeight: 700 }}
+            />
+            {actions}
+          </div>
+          {error && <div style={{ color: 'var(--red)', fontSize: '0.78rem', marginTop: 6 }}>{error}</div>}
+        </td>
+      </tr>
+    );
+  }
+
+  const previewHt = moneyLineHt({
+    qty: parseFrDecimal(draft.quantite) ?? 0,
+    unitPriceHt: parseFrDecimal(draft.prix_ht) ?? 0,
+    remisePct: parseFrDecimal(draft.remise) ?? 0,
+  });
+
+  return (
+    <tr {...dragProps}>
+      <td style={{ padding: '8px 6px', width: 28, verticalAlign: 'top' }}><DragHandle {...handleProps} /></td>
+      <td style={{ padding: '8px 8px', width: 36, fontWeight: 700, color: 'var(--text-3)', fontSize: '0.82rem', verticalAlign: 'top' }}>{lineNum}</td>
+      <td style={{ padding: '8px', minWidth: 200, verticalAlign: 'top' }}>
+        <input
+          autoFocus
+          value={draft.designation}
+          onChange={(e) => setF('designation', e.target.value)}
+          placeholder="Désignation"
+          style={{ ...IS(false), marginBottom: 6, fontWeight: 700 }}
+        />
+        <textarea
+          rows={2}
+          value={draft.description}
+          onChange={(e) => setF('description', e.target.value)}
+          placeholder="Description…"
+          style={{ ...IS(false), resize: 'vertical', minHeight: 48, fontSize: '0.82rem' }}
+        />
+        {error && <div style={{ color: 'var(--red)', fontSize: '0.78rem', marginTop: 6 }}>{error}</div>}
+      </td>
+      <td style={{ padding: '8px 4px', verticalAlign: 'top' }}>
+        <input
+          inputMode="decimal"
+          value={draft.quantite}
+          onChange={(e) => setDecimal('quantite', e.target.value)}
+          style={{ ...IS(false), textAlign: 'center', minWidth: 52 }}
+        />
+      </td>
+      <td style={{ padding: '8px 4px', verticalAlign: 'top' }}>
+        <select value={draft.unite} onChange={(e) => setF('unite', e.target.value)} style={{ ...IS(false), minWidth: 64 }}>
+          {UNITES.map((u) => <option key={u} value={u}>{u}</option>)}
+        </select>
+      </td>
+      <td style={{ padding: '8px 4px', verticalAlign: 'top' }}>
+        <input
+          inputMode="decimal"
+          value={draft.prix_ht}
+          onChange={(e) => setDecimal('prix_ht', e.target.value)}
+          style={{ ...IS(false), textAlign: 'right', minWidth: 72 }}
+        />
+        <div style={{ marginTop: 6 }}>
+          <Label>Remise %</Label>
+          <input
+            inputMode="decimal"
+            value={draft.remise}
+            onChange={(e) => setDecimal('remise', e.target.value)}
+            style={IS(false)}
+          />
+        </div>
+        <div style={{ marginTop: 6 }}>
+          <Label>TVA %</Label>
+          <select value={draft.tva} onChange={(e) => setF('tva', e.target.value)} style={IS(false)}>
+            {TVA_TAUX.map((t) => <option key={t} value={t}>{t}%</option>)}
+          </select>
+        </div>
+      </td>
+      <td style={{ padding: '8px', textAlign: 'right', verticalAlign: 'top', fontFamily: 'var(--font-head)', fontWeight: 700 }}>
+        {fmtMAD(previewHt)}
+      </td>
+      <td style={{ padding: '8px', verticalAlign: 'top' }}>{actions}</td>
+    </tr>
+  );
+}
+
+function DevisLineCardInlineEdit({ draft, setDraft, lineNum, error, onOk, onCancel }) {
+  function setF(k, v) { setDraft((p) => ({ ...p, [k]: v })); }
+  function setDecimal(k, raw) { setF(k, sanitizeFrDecimalTyping(raw)); }
+
+  if (draft.mode === 'titre' || draft.mode === 'sous_titre') {
+    return (
+      <div className="devis-line-card" style={{ background: '#FFF8F0', border: '1.5px solid var(--red)' }}>
+        <input
+          autoFocus
+          value={draft.designation}
+          onChange={(e) => setF('designation', e.target.value)}
+          placeholder={draft.mode === 'titre' ? 'Titre' : 'Sous-titre'}
+          style={{ ...IS(false), marginBottom: 10, fontFamily: 'var(--font-head)', fontWeight: 700 }}
+        />
+        {error && <div style={{ color: 'var(--red)', fontSize: '0.78rem', marginBottom: 8 }}>{error}</div>}
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button type="button" className="btn btn-primary btn-sm" onClick={onOk}>OK</button>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={onCancel}>Annuler</button>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="devis-line-card" style={{ background: '#FFF8F0', border: '1.5px solid #FFCC80' }}>
+      <div style={{ fontWeight: 800, color: 'var(--text-3)', fontSize: '0.8rem', marginBottom: 8 }}>#{lineNum} — Modifier</div>
+      <Label>Désignation</Label>
+      <input value={draft.designation} onChange={(e) => setF('designation', e.target.value)} style={{ ...IS(false), marginBottom: 8 }} />
+      <Label>Description</Label>
+      <textarea rows={2} value={draft.description} onChange={(e) => setF('description', e.target.value)} style={{ ...IS(false), marginBottom: 8, resize: 'vertical' }} />
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+        <div>
+          <Label>Quantité</Label>
+          <input inputMode="decimal" value={draft.quantite} onChange={(e) => setDecimal('quantite', e.target.value)} style={IS(false)} />
+        </div>
+        <div>
+          <Label>Unité</Label>
+          <select value={draft.unite} onChange={(e) => setF('unite', e.target.value)} style={IS(false)}>
+            {UNITES.map((u) => <option key={u} value={u}>{u}</option>)}
+          </select>
+        </div>
+        <div>
+          <Label>PU HT</Label>
+          <input inputMode="decimal" value={draft.prix_ht} onChange={(e) => setDecimal('prix_ht', e.target.value)} style={IS(false)} />
+        </div>
+        <div>
+          <Label>Remise %</Label>
+          <input inputMode="decimal" value={draft.remise} onChange={(e) => setDecimal('remise', e.target.value)} style={IS(false)} />
+        </div>
+        <div>
+          <Label>TVA %</Label>
+          <select value={draft.tva} onChange={(e) => setF('tva', e.target.value)} style={IS(false)}>
+            {TVA_TAUX.map((t) => <option key={t} value={t}>{t}%</option>)}
+          </select>
+        </div>
+      </div>
+      {error && <div style={{ color: 'var(--red)', fontSize: '0.78rem', marginBottom: 8 }}>{error}</div>}
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button type="button" className="btn btn-primary btn-sm" onClick={onOk}>OK</button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onCancel}>Annuler</button>
+      </div>
+    </div>
+  );
+}
+
 /* ── Ligne affichée (lecture seule) ── */
 function DevisLineDisplay({ ligne, lineNum, idx, articles, onDelete, onDuplicate, onEdit, drag }) {
   const dragProps = {
@@ -635,12 +850,13 @@ function DevisLineCard({ ligne, lineNum, idx, articles, onDelete, onDuplicate, o
 }
 
 /* ── Composer ajout ligne ── */
-function LigneComposer({ draft, setDraft, categories, articles, onArticleSelect, onOk, onClear, onAddTitre, onAddSousTitre, editingIdx, draftError }) {
+function LigneComposer({ draft, setDraft, categories, articles, onArticleSelect, onOk, onClear, onAddTitre, onAddSousTitre, draftError }) {
   const catArticles = draft.categorie_id
     ? articles.filter((a) => String(a.categorie_id) === String(draft.categorie_id))
     : [];
 
   function setF(k, v) { setDraft((p) => ({ ...p, [k]: v })); }
+  function setDecimal(k, raw) { setF(k, sanitizeFrDecimalTyping(raw)); }
 
   function onCategorieChange(catId) {
     setDraft((p) => ({ ...p, categorie_id: catId, article_id: '', designation: '', description: '' }));
@@ -654,15 +870,13 @@ function LigneComposer({ draft, setDraft, categories, articles, onArticleSelect,
   const isSousTitre = draft.mode === 'sous_titre';
   const isHorsCatalogue = draft.mode === 'hors_catalogue';
 
-  const composerTitle = editingIdx != null
-    ? 'Modifier la ligne'
-    : isTitre
-      ? 'Ajouter un titre'
-      : isSousTitre
-        ? 'Ajouter un sous-titre'
-        : isHorsCatalogue
-          ? 'Ajouter un article hors catalogue'
-          : 'Ajouter une ligne';
+  const composerTitle = isTitre
+    ? 'Ajouter un titre'
+    : isSousTitre
+      ? 'Ajouter un sous-titre'
+      : isHorsCatalogue
+        ? 'Ajouter un article hors catalogue'
+        : 'Ajouter une ligne';
 
   return (
     <div className="devis-composer" style={{ marginTop: 16, padding: '18px 20px', background: '#F8F9FA', borderRadius: 10, border: '1.5px solid var(--border)' }}>
@@ -756,17 +970,10 @@ function LigneComposer({ draft, setDraft, categories, articles, onArticleSelect,
             <div>
               <Label>Quantité</Label>
               <input
-                type="number"
-                min="0"
-                step="1"
-                inputMode="numeric"
+                inputMode="decimal"
                 value={draft.quantite}
-                onChange={(e) => {
-                  const raw = e.target.value;
-                  if (raw === '') { setF('quantite', ''); return; }
-                  const n = Math.max(0, Math.round(Number(raw)));
-                  setF('quantite', Number.isFinite(n) ? String(n) : '');
-                }}
+                onChange={(e) => setDecimal('quantite', e.target.value)}
+                placeholder="Ex. 13,5"
                 style={IS(false)}
               />
             </div>
@@ -779,23 +986,21 @@ function LigneComposer({ draft, setDraft, categories, articles, onArticleSelect,
             <div>
               <Label><span style={{ whiteSpace: 'nowrap', letterSpacing: '0.04em' }}>PRIX.U.HT.</span></Label>
               <input
-                type="number"
-                min="0"
-                step="1"
-                inputMode="numeric"
+                inputMode="decimal"
                 value={draft.prix_ht}
-                onChange={(e) => {
-                  const raw = e.target.value;
-                  if (raw === '') { setF('prix_ht', ''); return; }
-                  const n = Math.max(0, Math.round(Number(raw)));
-                  setF('prix_ht', Number.isFinite(n) ? String(n) : '');
-                }}
+                onChange={(e) => setDecimal('prix_ht', e.target.value)}
+                placeholder="Ex. 300,50"
                 style={IS(false)}
               />
             </div>
             <div>
               <Label>Remise %</Label>
-              <input type="number" min="0" max="100" value={draft.remise} onChange={(e) => setF('remise', e.target.value)} style={IS(false)} />
+              <input
+                inputMode="decimal"
+                value={draft.remise}
+                onChange={(e) => setDecimal('remise', e.target.value)}
+                style={IS(false)}
+              />
             </div>
             <div>
               <Label>TVA %</Label>
@@ -866,6 +1071,8 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
   const [overIdx, setOverIdx] = useState(null);
   const [draft, setDraft] = useState(EMPTY_DRAFT);
   const [editingIdx, setEditingIdx] = useState(null);
+  const [editDraft, setEditDraft] = useState(null);
+  const [editError, setEditError] = useState('');
   const [draftError, setDraftError] = useState('');
   const [saveToast, setSaveToast] = useState('');
   const lastDraftCommitRef = useRef({ key: '', at: 0 });
@@ -911,7 +1118,13 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
 
   function deleteLigne(idx) {
     setForm((p) => ({ ...p, lignes: p.lignes.filter((_, i) => i !== idx) }));
-    if (editingIdx === idx) { setEditingIdx(null); setDraft(EMPTY_DRAFT()); }
+    if (editingIdx === idx) {
+      setEditingIdx(null);
+      setEditDraft(null);
+      setEditError('');
+    } else if (editingIdx != null && editingIdx > idx) {
+      setEditingIdx(editingIdx - 1);
+    }
   }
 
   function duplicateLigne(idx) {
@@ -920,12 +1133,21 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
       ls.splice(idx + 1, 0, { ...ls[idx], _id: Date.now() + Math.random() });
       return { ...p, lignes: ls };
     });
+    if (editingIdx != null && editingIdx > idx) {
+      setEditingIdx(editingIdx + 1);
+    }
+  }
+
+  function cancelInlineEdit() {
+    setEditingIdx(null);
+    setEditDraft(null);
+    setEditError('');
   }
 
   function startEditLine(idx) {
-    setDraft(ligneToDraft(form.lignes[idx], articles));
+    setEditDraft(ligneToDraft(form.lignes[idx], articles));
     setEditingIdx(idx);
-    setDraftError('');
+    setEditError('');
     const ligne = form.lignes[idx];
     if (ligne?.article_id) {
       getArticleById(ligne.article_id).then((fresh) => {
@@ -937,8 +1159,8 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
           next[i] = fresh;
           return next;
         });
-        setDraft((p) => {
-          if (String(p.article_id) !== String(fresh.id)) return p;
+        setEditDraft((p) => {
+          if (!p || String(p.article_id) !== String(fresh.id)) return p;
           const desc = p.description?.trim() || fresh.description?.trim() || '';
           return desc === (p.description || '') ? p : { ...p, description: desc };
         });
@@ -961,8 +1183,8 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
         designation: art.nom || '',
         description: art.description || '',
         unite: art.unite || 'unite',
-        prix_ht: art.prix_ht ?? art.prix ?? 0,
-        remise: art.remise ?? 0,
+        prix_ht: formatFrDecimalInput(art.prix_ht ?? art.prix ?? 0),
+        remise: formatFrDecimalInput(art.remise ?? 0),
         tva: art.tva ?? 20,
       }));
     } else {
@@ -984,8 +1206,8 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
           ...p,
           description: fresh.description?.trim() ? fresh.description : p.description,
           unite: fresh.unite || p.unite,
-          prix_ht: fresh.prix_ht ?? p.prix_ht,
-          remise: fresh.remise ?? p.remise,
+          prix_ht: formatFrDecimalInput(fresh.prix_ht ?? p.prix_ht),
+          remise: formatFrDecimalInput(fresh.remise ?? p.remise),
           tva: fresh.tva ?? p.tva,
         };
       });
@@ -996,7 +1218,6 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
 
   function resetDraft() {
     setDraft(EMPTY_DRAFT());
-    setEditingIdx(null);
     setDraftError('');
   }
 
@@ -1005,43 +1226,51 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
     setDraftError('');
   }
 
-  function validateDraft() {
-    if (draft.mode === 'titre') {
-      if (!draft.designation?.trim()) return 'Titre requis';
+  function validateDraftFields(d) {
+    if (d.mode === 'titre') {
+      if (!d.designation?.trim()) return 'Titre requis';
       return '';
     }
-    if (draft.mode === 'sous_titre') {
-      if (!draft.designation?.trim()) return 'Sous-titre requis';
+    if (d.mode === 'sous_titre') {
+      if (!d.designation?.trim()) return 'Sous-titre requis';
       return '';
     }
-    if (Number(draft.quantite) <= 0) return 'Quantité invalide';
+    const qty = parseFrDecimal(d.quantite);
+    if (qty == null || qty <= 0) return 'Quantité invalide';
+    const prix = parseFrDecimal(d.prix_ht);
+    if (prix == null || prix < 0) return 'Prix unitaire invalide';
+    const remise = parseFrDecimal(d.remise);
+    if (remise == null || remise < 0 || remise > 100) return 'Remise invalide (0–100)';
     return '';
   }
 
+  function commitInlineEdit() {
+    if (editingIdx == null || !editDraft) return;
+    const err = validateDraftFields(editDraft);
+    if (err) { setEditError(err); return; }
+    const ligne = enrichLignesDescriptions([draftToLigne(editDraft, articles)], articles)[0];
+    setForm((p) => {
+      const ls = [...p.lignes];
+      ls[editingIdx] = { ...ligne, _id: ls[editingIdx]._id };
+      return { ...p, lignes: ls };
+    });
+    cancelInlineEdit();
+  }
+
   function commitDraft() {
-    const err = validateDraft();
+    const err = validateDraftFields(draft);
     if (err) { setDraftError(err); return; }
-    if (editingIdx == null) {
-      const key = draftCommitSignature(draft);
-      const now = Date.now();
-      if (
-        lastDraftCommitRef.current.key === key
-        && (now - lastDraftCommitRef.current.at) < DRAFT_COMMIT_DEDUP_MS
-      ) {
-        return;
-      }
-      lastDraftCommitRef.current = { key, at: now };
+    const key = draftCommitSignature(draft);
+    const now = Date.now();
+    if (
+      lastDraftCommitRef.current.key === key
+      && (now - lastDraftCommitRef.current.at) < DRAFT_COMMIT_DEDUP_MS
+    ) {
+      return;
     }
+    lastDraftCommitRef.current = { key, at: now };
     const ligne = enrichLignesDescriptions([draftToLigne(draft, articles)], articles)[0];
-    if (editingIdx != null) {
-      setForm((p) => {
-        const ls = [...p.lignes];
-        ls[editingIdx] = { ...ligne, _id: ls[editingIdx]._id };
-        return { ...p, lignes: ls };
-      });
-    } else {
-      setForm((p) => ({ ...p, lignes: [...p.lignes, ligne] }));
-    }
+    setForm((p) => ({ ...p, lignes: [...p.lignes, ligne] }));
     resetDraft();
   }
 
@@ -1328,6 +1557,25 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
                       <tbody>
                         {form.lignes.map((ligne, idx) => {
                           const lineNum = ligne.type === 'article' ? ++articleLineNum : null;
+                          if (editingIdx === idx && editDraft) {
+                            return (
+                              <DevisLineInlineEdit
+                                key={ligne._id}
+                                draft={editDraft}
+                                setDraft={setEditDraft}
+                                lineNum={lineNum}
+                                idx={idx}
+                                error={editError}
+                                onOk={commitInlineEdit}
+                                onCancel={cancelInlineEdit}
+                                drag={{
+                                  ...dragHandlers,
+                                  isDragging: dragHandlers.isDragging(idx),
+                                  isOver: dragHandlers.isOver(idx),
+                                }}
+                              />
+                            );
+                          }
                           return (
                             <DevisLineDisplay
                               key={ligne._id}
@@ -1355,6 +1603,19 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
                       let n = 0;
                       return form.lignes.map((ligne, idx) => {
                         const lineNum = ligne.type === 'article' ? ++n : null;
+                        if (editingIdx === idx && editDraft) {
+                          return (
+                            <DevisLineCardInlineEdit
+                              key={ligne._id}
+                              draft={editDraft}
+                              setDraft={setEditDraft}
+                              lineNum={lineNum}
+                              error={editError}
+                              onOk={commitInlineEdit}
+                              onCancel={cancelInlineEdit}
+                            />
+                          );
+                        }
                         return (
                           <DevisLineCard
                             key={ligne._id}
@@ -1401,7 +1662,6 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
                 onClear={resetDraft}
                 onAddTitre={() => handleDraftModeChange('titre')}
                 onAddSousTitre={() => handleDraftModeChange('sous_titre')}
-                editingIdx={editingIdx}
                 draftError={draftError}
               />
             </div>
