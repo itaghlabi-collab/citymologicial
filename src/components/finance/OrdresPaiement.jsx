@@ -317,7 +317,6 @@ export default function OrdresPaiement({ categories = [] }) {
   }
 
   async function handleExecuter(ordre) {
-    if (!window.confirm(`Valider le paiement de ${ordre.ref} — ${formatMAD(ordre.montant)} ?`)) return;
     await markPaid(ordre.id);
   }
 
