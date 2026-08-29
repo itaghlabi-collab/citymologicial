@@ -43,6 +43,23 @@ function fmtCommercial(v) {
   return String(v).trim().toUpperCase();
 }
 
+/** Reste affiché en liste : facture d'acompte → reste à facturer sur devis ; sinon reste à payer. */
+function factureResteListe(f) {
+  if (f.facture_type === 'acompte' && f.devis_reste_apres != null) {
+    return {
+      kind: 'devis',
+      amount: Number(f.devis_reste_apres) || 0,
+      solde: false,
+    };
+  }
+  const amount = Number(f.reste_a_payer || 0);
+  return {
+    kind: 'facture',
+    amount,
+    solde: amount <= 0,
+  };
+}
+
 /** Affichage liste uniquement — ne modifie pas les données stockées */
 function displayFactureTitre(titre) {
   if (!titre) return '—';
@@ -551,6 +568,7 @@ export default function Factures() {
                   const clientNom = f.client_nom || f.client?.nom || '—';
                   const overdue   = isOverdue(f.date_echeance, f.statut);
                   const titreAffiche = displayFactureTitre(f.titre);
+                  const resteInfo = factureResteListe(f);
                   const restePct  = f.total_ttc > 0 ? Math.round((Number(f.reste_a_payer || 0) / Number(f.total_ttc)) * 100) : 0;
                   return (
                     <tr key={f.id ?? i}>
@@ -624,16 +642,21 @@ export default function Factures() {
 
                       {/* Reste */}
                       <td data-label="Reste" className="crm-col-money" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                        {Number(f.reste_a_payer || 0) <= 0 ? (
+                        {resteInfo.solde && resteInfo.kind !== 'devis' ? (
                           <span style={{ color: '#388E3C', fontWeight: 700, fontSize: '0.82rem' }}>Solde</span>
                         ) : (
                           <div>
-                            <span style={{ fontWeight: 700, color: overdue ? 'var(--red)' : 'var(--text)' }}>
-                              {fmtMAD(f.reste_a_payer)}
+                            <span style={{ fontWeight: 700, color: resteInfo.kind === 'devis' ? '#1976D2' : (overdue ? 'var(--red)' : 'var(--text)') }}>
+                              {fmtMAD(resteInfo.amount)}
                             </span>
-                            <div style={{ marginTop: 2, height: 3, background: 'var(--border)', borderRadius: 2, overflow: 'hidden', width: 60 }}>
-                              <div style={{ height: '100%', width: restePct + '%', background: overdue ? 'var(--red)' : '#1976D2', borderRadius: 2 }} />
-                            </div>
+                            {resteInfo.kind === 'devis' && (
+                              <div style={{ fontSize: '0.68rem', color: 'var(--text-3)', marginTop: 2 }}>sur devis</div>
+                            )}
+                            {resteInfo.kind === 'facture' && (
+                              <div style={{ marginTop: 2, height: 3, background: 'var(--border)', borderRadius: 2, overflow: 'hidden', width: 60 }}>
+                                <div style={{ height: '100%', width: restePct + '%', background: overdue ? 'var(--red)' : '#1976D2', borderRadius: 2 }} />
+                              </div>
+                            )}
                           </div>
                         )}
                       </td>
@@ -705,6 +728,7 @@ export default function Factures() {
               const overdue = isOverdue(f.date_echeance, f.statut);
               const dueSoon = !overdue && isDueSoon(f.date_echeance, f.statut);
               const titreAffiche = displayFactureTitre(f.titre);
+              const resteInfo = factureResteListe(f);
               return (
                 <div key={f.id ?? i} className="crm-doc-card">
                   <div className="crm-doc-head">
@@ -740,7 +764,9 @@ export default function Factures() {
                     <div>
                       <span className="crm-doc-amount">{fmtMAD(f.total_ttc)}</span>
                       <span className="crm-doc-amount-sub">
-                        Reste {Number(f.reste_a_payer || 0) <= 0 ? 'soldé' : fmtMAD(f.reste_a_payer)}
+                        Reste {resteInfo.kind === 'devis'
+                          ? `${fmtMAD(resteInfo.amount)} sur devis`
+                          : (resteInfo.solde ? 'soldé' : fmtMAD(resteInfo.amount))}
                       </span>
                     </div>
                     <div className="crm-doc-actions">
