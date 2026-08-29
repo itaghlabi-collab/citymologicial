@@ -49,10 +49,33 @@ function computeTotals(lignes = []) {
   };
 }
 
+function isAcompteFacture(formOrRow) {
+  const t = formOrRow?.facture_type || formOrRow?.type || '';
+  return t === 'acompte';
+}
+
 function computeAcompte(form, total_ttc) {
+  // Facture d'acompte : le montant est déjà le total TTC — ne pas recompter acompte_montant.
+  if (isAcompteFacture(form)) return 0;
   const raw = Number(form.acompte_montant) || 0;
   if (form.acompte_type === 'pct') return Math.round(total_ttc * (raw / 100) * 100) / 100;
   return raw;
+}
+
+/** Corrige l'affichage Payé / Reste des factures acompte (bug pct + montant TTC). */
+function sanitizeAcomptePayeFields(facture, paiements = []) {
+  if (!isAcompteFacture(facture)) return facture;
+  const totalTtc = Number(facture.total_ttc) || 0;
+  const paidPaiements = (paiements || []).reduce((s, p) => s + (Number(p.montant) || 0), 0);
+  let totalPaye = Number(facture.total_paye) || 0;
+  if (totalPaye > totalTtc + 0.01) {
+    totalPaye = paidPaiements > 0
+      ? paidPaiements
+      : (facture.statut === 'payee' || facture.statut === 'payée' ? totalTtc : 0);
+  }
+  totalPaye = Math.min(Math.max(0, totalPaye), totalTtc);
+  const reste = Math.max(0, Math.round((totalTtc - totalPaye) * 100) / 100);
+  return { ...facture, total_paye: totalPaye, reste_a_payer: reste };
 }
 
 function computePaiements(form, total_ttc) {
@@ -101,7 +124,7 @@ export function normalizeCrmFacture(row, lignes = [], paiements = []) {
   const c = row.clients;
   const clientNom = clientDisplayName(c) || c?.nom || '';
   const devisRef = row.crm_devis?.reference || '';
-  return {
+  const base = {
     id: row.id,
     numero: row.numero || '',
     titre: row.titre || '',
@@ -145,6 +168,7 @@ export function normalizeCrmFacture(row, lignes = [], paiements = []) {
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
+  return sanitizeAcomptePayeFields(base, paiements);
 }
 
 function toFactureRow(form, totals, payeInfo) {
@@ -299,7 +323,7 @@ export async function createCrmFactureAcompte(form) {
     devis_id: form.devis_id,
     devise: form.devise || 'MAD',
     acompte_montant: acompteTTC,
-    acompte_type: form.mode === 'pct' ? 'pct' : 'fixe',
+    acompte_type: 'fixe',
     pourcentage_acompte: form.mode === 'pct' ? pct : null,
     devis_reste_apres: resteApres,
     total_ht: acompteHT,
@@ -376,6 +400,33 @@ async function fetchPaiements(factureId) {
   return data || [];
 }
 
+async function repairCorruptedAcomptePayeInDb(rows) {
+  for (const row of rows || []) {
+    if (row.type !== 'acompte') continue;
+    const totalTtc = Number(row.total_ttc) || 0;
+    const totalPaye = Number(row.total_paye) || 0;
+    const needsFix = totalPaye > totalTtc + 0.01 || row.acompte_type === 'pct';
+    if (!needsFix) continue;
+    const fixedPaye = row.statut === 'payee' ? totalTtc : 0;
+    const fixedReste = Math.max(0, Math.round((totalTtc - fixedPaye) * 100) / 100);
+    const { error } = await getSupabase()
+      .from(TABLE)
+      .update({
+        total_paye: fixedPaye,
+        reste_a_payer: fixedReste,
+        acompte_type: 'fixe',
+      })
+      .eq('id', row.id);
+    if (error) {
+      console.warn('[CITYMO] repair acompte paye', error, { id: row.id });
+      continue;
+    }
+    row.total_paye = fixedPaye;
+    row.reste_a_payer = fixedReste;
+    row.acompte_type = 'fixe';
+  }
+}
+
 export async function listCrmFactures() {
   await getAuthUserId();
   const { data, error } = await getSupabase()
@@ -386,6 +437,7 @@ export async function listCrmFactures() {
     console.error('[CITYMO] crmFactures list', error);
     throw error;
   }
+  await repairCorruptedAcomptePayeInDb(data);
   return (data || []).map((row) => normalizeCrmFacture(row, [], []));
 }
 
@@ -509,7 +561,7 @@ export async function markCrmFacturePaid(id, options = {}) {
 
   const totalTtc = Number(facture.total_ttc) || 0;
   const dejaPaye = (facture.paiements || []).reduce((s, p) => s + (Number(p.montant) || 0), 0)
-    + (Number(facture.acompte_montant) || 0);
+    + (isAcompteFacture(facture) ? 0 : (Number(facture.acompte_montant) || 0));
   const reste = Math.max(0, Math.round((totalTtc - dejaPaye) * 100) / 100);
   const today = new Date().toISOString().slice(0, 10);
 
