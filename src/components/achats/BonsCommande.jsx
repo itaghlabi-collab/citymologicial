@@ -24,6 +24,7 @@ import {
   formatMAD, genId,
 } from './shared.jsx';
 import BCLignesSection from './BCLignesSection';
+import SupplierSearch from './SupplierSearch';
 
 const EMPTY_LIGNE = {
   designation: '', description: '', categorie_id: '', article_id: '',
@@ -68,13 +69,15 @@ function BCForm({ initial, onSave, onCancel, fournisseurs, suppliersLoading, sav
 
   const { subtotal_ht: sousTotal, total_vat: montantTVA, total_ttc: totalTTC } = computeLineTotals(form.lignes);
 
-  function handleSupplierChange(supplierId) {
-    const s = fournActifs.find((f) => f.id === supplierId);
+  function handleSupplierChange({ supplier_id, fournisseur }) {
     setForm((p) => ({
       ...p,
-      supplier_id: supplierId || '',
-      fournisseur: s ? (s.raison_sociale || s.company_name || '') : '',
+      supplier_id: supplier_id || '',
+      fournisseur: fournisseur || '',
     }));
+    if (supplier_id || fournisseur?.trim()) {
+      setErrors((e) => ({ ...e, fournisseur: undefined }));
+    }
   }
 
   function handleSubmit(ev, statut) {
@@ -96,23 +99,15 @@ function BCForm({ initial, onSave, onCancel, fournisseurs, suppliersLoading, sav
       <SectionTitle icon={<ShoppingCart size={12} />}>Informations générales</SectionTitle>
       <FRow>
         <FField label="Fournisseur" required>
-          {suppliersLoading ? (
-            <div style={{ fontSize: '0.8rem', color: 'var(--text-3)', display: 'flex', alignItems: 'center', gap: 6 }}>
-              <Loader2 size={14} className="spin" /> Chargement des fournisseurs...
-            </div>
-          ) : fournActifs.length > 0 ? (
-            <select
-              value={form.supplier_id || ''}
-              onChange={(e) => handleSupplierChange(e.target.value)}
-              style={{ ...SELECT_STYLE, borderColor: errors.fournisseur ? 'var(--red)' : 'var(--border)' }}
-            >
-              <option value="">— Sélectionner un fournisseur —</option>
-              {fournActifs.map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.raison_sociale || f.company_name}{f.ville || f.city ? ` — ${f.ville || f.city}` : ''}
-                </option>
-              ))}
-            </select>
+          {fournActifs.length > 0 ? (
+            <SupplierSearch
+              suppliers={fournActifs}
+              supplierId={form.supplier_id}
+              value={form.fournisseur}
+              onChange={handleSupplierChange}
+              loading={suppliersLoading}
+              error={!!errors.fournisseur}
+            />
           ) : (
             <div>
               <input
