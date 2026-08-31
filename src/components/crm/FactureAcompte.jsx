@@ -7,6 +7,7 @@ import {
 import { listCrmDevis } from '../../services/crm/crmDevis';
 import { generateCrmAcompteNumero } from '../../services/crm/crmFactures';
 import { clientDisplayName } from '../../services/crm/clients';
+import { formatFrDecimalInput, parseFrDecimal, parseFrDecimalOrZero, sanitizeFrDecimalTyping } from '../../utils/crm/frDecimalInput';
 
 /* ── Helpers ── */
 function fmtMAD(v) {
@@ -143,7 +144,7 @@ export default function FactureAcompte({ onBack, onCreated, createAcompte, fetch
   const resteAvantCet     = devisSummary?.resteAFacturer ?? Math.max(0, devisTTC - totalAcomptesExist);
 
   /* Computed acompte amounts */
-  const valeurNum = Number(valeur) || 0;
+  const valeurNum = parseFrDecimalOrZero(valeur);
   const acompteTTC = mode === 'pct'
     ? devisTTC * (valeurNum / 100)
     : valeurNum;
@@ -377,12 +378,10 @@ export default function FactureAcompte({ onBack, onCreated, createAcompte, fetch
                 </Label>
                 <div style={{ position: 'relative' }}>
                   <input
-                    type="number"
-                    min="0"
-                    step={mode === 'pct' ? '1' : '0.01'}
+                    inputMode="decimal"
                     max={mode === 'pct' ? '100' : undefined}
-                    value={valeur}
-                    onChange={e => { setValeur(e.target.value); setErrors(p => ({ ...p, valeur: '' })); }}
+                    value={formatFrDecimalInput(valeur)}
+                    onChange={e => { setValeur(sanitizeFrDecimalTyping(e.target.value)); setErrors(p => ({ ...p, valeur: '' })); }}
                     placeholder={mode === 'pct' ? 'Ex : 30' : 'Ex : 15000'}
                     style={{ ...IS(!!errors.valeur), paddingRight: 48 }}
                     disabled={!devisId}
@@ -404,9 +403,9 @@ export default function FactureAcompte({ onBack, onCreated, createAcompte, fetch
                       type="button"
                       onClick={() => setValeur(String(pct))}
                       style={{
-                        padding: '5px 14px', border: '1.5px solid ' + (Number(valeur) === pct ? 'var(--red)' : 'var(--border)'),
-                        borderRadius: 6, background: Number(valeur) === pct ? '#FFEBEE' : '#fff',
-                        color: Number(valeur) === pct ? 'var(--red)' : 'var(--text-2)',
+                        padding: '5px 14px', border: '1.5px solid ' + (parseFrDecimalOrZero(valeur) === pct ? 'var(--red)' : 'var(--border)'),
+                        borderRadius: 6, background: parseFrDecimalOrZero(valeur) === pct ? '#FFEBEE' : '#fff',
+                        color: parseFrDecimalOrZero(valeur) === pct ? 'var(--red)' : 'var(--text-2)',
                         cursor: 'pointer', fontWeight: 700, fontSize: '0.8rem',
                         transition: 'all 0.12s',
                       }}

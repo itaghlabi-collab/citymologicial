@@ -19,6 +19,7 @@ import {
 import { generateProformaPdf } from '../../services/crm/proformaPdf';
 import Big from 'big.js';
 import { moneyLineHt, moneyLineTtc, moneyComputeDocumentTotals, moneyToNumber, moneyFormatMAD } from '../../utils/decimalMoney';
+import { formatFrDecimalInput, parseFrDecimalOrZero, sanitizeFrDecimalTyping } from '../../utils/crm/frDecimalInput';
 import { hydrateDocLigneFromSource } from '../../utils/crm/docLigneHydrate';
 
 function fmtMAD(v) {
@@ -89,10 +90,14 @@ function Spinner() {
 function LigneRow({ ligne, categories, articles, onChange, onDelete, onDuplicate }) {
   const [showDesc, setShowDesc] = useState(false);
   const catArticles = articles.filter(a => !ligne.categorie_id || String(a.categorie_id) === String(ligne.categorie_id));
-  const stHT = moneyLineHt({ qty: ligne.quantite, unitPriceHt: ligne.prix_ht, remisePct: ligne.remise });
-  const stTTC = moneyLineTtc({ qty: ligne.quantite, unitPriceHt: ligne.prix_ht, tvaPct: ligne.tva, remisePct: ligne.remise });
+  const qty = parseFrDecimalOrZero(ligne.quantite);
+  const prix = parseFrDecimalOrZero(ligne.prix_ht);
+  const remise = parseFrDecimalOrZero(ligne.remise);
+  const stHT = moneyLineHt({ qty, unitPriceHt: prix, remisePct: remise });
+  const stTTC = moneyLineTtc({ qty, unitPriceHt: prix, tvaPct: ligne.tva, remisePct: remise });
 
   function set(k, v) { onChange({ ...ligne, [k]: v }); }
+  function setDecimal(k, raw) { set(k, sanitizeFrDecimalTyping(raw)); }
 
   function onArticleChange(articleId) {
     const art = articles.find(a => String(a.id) === String(articleId));
@@ -103,8 +108,8 @@ function LigneRow({ ligne, categories, articles, onChange, onDelete, onDuplicate
         designation: art.nom || art.designation || '',
         description: art.description || '',
         unite: art.unite || 'unite',
-        prix_ht: art.prix_ht ?? art.prix ?? 0,
-        remise: art.remise ?? 0,
+        prix_ht: formatFrDecimalInput(art.prix_ht ?? art.prix ?? 0),
+        remise: formatFrDecimalInput(art.remise ?? 0),
         tva: art.tva ?? 20,
       });
     } else {
@@ -162,7 +167,12 @@ function LigneRow({ ligne, categories, articles, onChange, onDelete, onDuplicate
         </div>
       </td>
       <td style={{ padding: '6px 5px', width: 70 }}>
-        <input type="number" min="0" step="0.01" value={ligne.quantite} onChange={e => set('quantite', e.target.value)} style={{ ...IS(false), textAlign: 'center', fontSize: '0.85rem' }} />
+        <input
+          inputMode="decimal"
+          value={formatFrDecimalInput(ligne.quantite ?? '')}
+          onChange={(e) => setDecimal('quantite', e.target.value)}
+          style={{ ...IS(false), textAlign: 'center', fontSize: '0.85rem' }}
+        />
       </td>
       <td style={{ padding: '6px 5px', width: 80 }}>
         <select value={ligne.unite} onChange={e => set('unite', e.target.value)} style={{ ...IS(false), fontSize: '0.82rem' }}>
@@ -170,10 +180,20 @@ function LigneRow({ ligne, categories, articles, onChange, onDelete, onDuplicate
         </select>
       </td>
       <td style={{ padding: '6px 5px', width: 105 }}>
-        <input type="number" min="0" step="0.01" value={ligne.prix_ht} onChange={e => set('prix_ht', e.target.value)} style={{ ...IS(false), textAlign: 'right', fontSize: '0.85rem' }} />
+        <input
+          inputMode="decimal"
+          value={formatFrDecimalInput(ligne.prix_ht ?? '')}
+          onChange={(e) => setDecimal('prix_ht', e.target.value)}
+          style={{ ...IS(false), textAlign: 'right', fontSize: '0.85rem' }}
+        />
       </td>
       <td style={{ padding: '6px 5px', width: 65 }}>
-        <input type="number" min="0" max="100" step="1" value={ligne.remise} onChange={e => set('remise', e.target.value)} style={{ ...IS(false), textAlign: 'center', fontSize: '0.85rem' }} />
+        <input
+          inputMode="decimal"
+          value={formatFrDecimalInput(ligne.remise ?? '')}
+          onChange={(e) => setDecimal('remise', e.target.value)}
+          style={{ ...IS(false), textAlign: 'center', fontSize: '0.85rem' }}
+        />
       </td>
       <td style={{ padding: '6px 5px', width: 72 }}>
         <select value={ligne.tva} onChange={e => set('tva', e.target.value)} style={{ ...IS(false), fontSize: '0.82rem' }}>

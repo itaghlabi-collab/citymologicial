@@ -4,6 +4,7 @@
 import { getSupabase } from '../../lib/supabase';
 import { clientDisplayName } from './clients';
 import { moneyLineHt, moneyComputeDocumentTotals, moneyToNumber } from '../../utils/decimalMoney';
+import { parseFrDecimal, parseFrDecimalOrZero } from '../../utils/crm/frDecimalInput';
 
 const TABLE = 'crm_devis';
 const LIGNES = 'crm_devis_lignes';
@@ -42,10 +43,10 @@ function computeTotals(lignes = []) {
 
 export function normalizeLigne(row) {
   if (!row) return null;
-  const quantite = Number(row.quantite ?? 1);
-  const remise = Number(row.remise ?? 0);
-  let prix_ht = Number(row.prix_ht ?? row.prix ?? 0);
-  const totalStored = Number(row.total_ht ?? 0);
+  const quantite = parseFrDecimal(row.quantite) ?? 1;
+  const remise = parseFrDecimalOrZero(row.remise);
+  let prix_ht = parseFrDecimal(row.prix_ht ?? row.prix) ?? 0;
+  const totalStored = parseFrDecimalOrZero(row.total_ht);
   if ((!prix_ht || Number.isNaN(prix_ht)) && totalStored > 0 && quantite > 0 && (row.type || 'article') === 'article') {
     const factor = 1 - (remise / 100);
     prix_ht = totalStored / (quantite * (factor > 0 ? factor : 1));
@@ -155,10 +156,10 @@ function toLigneRow(ligne, devisId, ordre) {
     description: ligne.description?.trim() || null,
     article_id: isEphemeral ? null : (ligne.article_id || null),
     categorie_id: ligne.categorie_id || null,
-    quantite: Number(ligne.quantite) || 0,
+    quantite: parseFrDecimalOrZero(ligne.quantite),
     unite: ligne.unite || 'unite',
-    prix_ht: Number(ligne.prix_ht) || 0,
-    remise: Number(ligne.remise) || 0,
+    prix_ht: parseFrDecimalOrZero(ligne.prix_ht),
+    remise: parseFrDecimalOrZero(ligne.remise),
     tva: Number(ligne.tva) ?? 20,
     total_ht,
   };

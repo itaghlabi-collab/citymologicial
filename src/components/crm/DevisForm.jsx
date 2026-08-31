@@ -17,6 +17,7 @@ import { TYPE_PROJET_VALUES, TYPE_PROJET_LABEL } from '../../constants/commercia
 import { useAuth } from '../../hooks/useAuth';
 import Big from 'big.js';
 import { moneyLineHt, moneyLineTtc, moneyComputeDocumentTotals, moneyToNumber, moneyFormatMAD } from '../../utils/decimalMoney';
+import { formatFrDecimalInput, parseFrDecimal, sanitizeFrDecimalTyping } from '../../utils/crm/frDecimalInput';
 
 const CITYMO_LOGO = 'https://i.ibb.co/N6SbC06M/logopng.png';
 const CITYMO_COMPANY = {
@@ -79,35 +80,6 @@ function ligneSousTotalHt(l) {
 }
 
 /** Affiche une valeur numérique avec virgule FR (pour les champs éditables). */
-function formatFrDecimalInput(value) {
-  if (value === null || value === undefined || value === '') return '';
-  return String(value).replace('.', ',');
-}
-
-/**
- * Parse saisie FR/EN : "13,5" / "13.5" → number.
- * Retourne null si vide ou invalide.
- */
-function parseFrDecimal(raw) {
-  if (raw === null || raw === undefined) return null;
-  const s = String(raw).trim().replace(/\s/g, '').replace(',', '.');
-  if (!s || s === '.' || s === '-' || s === '-.') return null;
-  const n = Number(s);
-  return Number.isFinite(n) ? n : null;
-}
-
-/** Filtre la frappe : chiffres + une seule virgule ou un seul point. */
-function sanitizeFrDecimalTyping(raw) {
-  let s = String(raw ?? '').replace(/[^\d.,]/g, '');
-  const sepIdx = Math.max(s.indexOf(','), s.indexOf('.'));
-  if (sepIdx >= 0) {
-    const head = s.slice(0, sepIdx + 1);
-    const tail = s.slice(sepIdx + 1).replace(/[.,]/g, '');
-    s = head + tail;
-  }
-  return s;
-}
-
 function genRef() {
   const d = new Date();
   return `DV-${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, '0')}-${String(Math.floor(Math.random() * 9000) + 1000)}`;

@@ -13,6 +13,7 @@ import { generateFacturePdf } from '../../services/crm/facturePdf';
 import Big from 'big.js';
 import { moneyLineHt, moneyLineTtc, moneyComputeDocumentTotals, moneyToNumber, moneyFormatMAD } from '../../utils/decimalMoney';
 import { hydrateDocLigneFromSource } from '../../utils/crm/docLigneHydrate';
+import { formatFrDecimalInput, parseFrDecimal, parseFrDecimalOrZero, sanitizeFrDecimalTyping } from '../../utils/crm/frDecimalInput';
 
 /* ── Helpers ── */
 function fmtMAD(v) {
@@ -97,15 +98,28 @@ function Spinner() {
 function LigneRow({ ligne, categories, articles, onChange, onDelete, onDuplicate }) {
   const [showDesc, setShowDesc] = useState(false);
   const catArticles = articles.filter(a => !ligne.categorie_id || String(a.categorie_id) === String(ligne.categorie_id));
-  const stHT = moneyLineHt({ qty: ligne.quantite, unitPriceHt: ligne.prix_ht, remisePct: ligne.remise });
-  const stTTC = moneyLineTtc({ qty: ligne.quantite, unitPriceHt: ligne.prix_ht, tvaPct: ligne.tva, remisePct: ligne.remise });
+  const qty = parseFrDecimalOrZero(ligne.quantite);
+  const prix = parseFrDecimalOrZero(ligne.prix_ht);
+  const remise = parseFrDecimalOrZero(ligne.remise);
+  const stHT = moneyLineHt({ qty, unitPriceHt: prix, remisePct: remise });
+  const stTTC = moneyLineTtc({ qty, unitPriceHt: prix, tvaPct: ligne.tva, remisePct: remise });
 
   function set(k, v) { onChange({ ...ligne, [k]: v }); }
+  function setDecimal(k, raw) { set(k, sanitizeFrDecimalTyping(raw)); }
 
   function onArticleChange(articleId) {
     const art = articles.find(a => String(a.id) === String(articleId));
     if (art) {
-      onChange({ ...ligne, article_id: articleId, designation: art.nom || '', description: art.description || '', unite: art.unite || 'unite', prix_ht: art.prix_ht ?? art.prix ?? 0, remise: art.remise ?? 0, tva: art.tva ?? 20 });
+      onChange({
+        ...ligne,
+        article_id: articleId,
+        designation: art.nom || '',
+        description: art.description || '',
+        unite: art.unite || 'unite',
+        prix_ht: formatFrDecimalInput(art.prix_ht ?? art.prix ?? 0),
+        remise: formatFrDecimalInput(art.remise ?? 0),
+        tva: art.tva ?? 20,
+      });
     } else {
       set('article_id', articleId);
     }
@@ -162,17 +176,9 @@ function LigneRow({ ligne, categories, articles, onChange, onDelete, onDuplicate
       </td>
       <td style={{ padding: '6px 5px', width: 70 }}>
         <input
-          type="number"
-          min="0"
-          step="1"
-          inputMode="numeric"
-          value={ligne.quantite}
-          onChange={(e) => {
-            const raw = e.target.value;
-            if (raw === '') { set('quantite', ''); return; }
-            const n = Math.max(0, Math.round(Number(raw)));
-            set('quantite', Number.isFinite(n) ? String(n) : '');
-          }}
+          inputMode="decimal"
+          value={formatFrDecimalInput(ligne.quantite ?? '')}
+          onChange={(e) => setDecimal('quantite', e.target.value)}
           style={{ ...IS(false), textAlign: 'center', fontSize: '0.85rem' }}
         />
       </td>
@@ -183,22 +189,19 @@ function LigneRow({ ligne, categories, articles, onChange, onDelete, onDuplicate
       </td>
       <td style={{ padding: '6px 5px', width: 105 }}>
         <input
-          type="number"
-          min="0"
-          step="1"
-          inputMode="numeric"
-          value={ligne.prix_ht}
-          onChange={(e) => {
-            const raw = e.target.value;
-            if (raw === '') { set('prix_ht', ''); return; }
-            const n = Math.max(0, Math.round(Number(raw)));
-            set('prix_ht', Number.isFinite(n) ? String(n) : '');
-          }}
+          inputMode="decimal"
+          value={formatFrDecimalInput(ligne.prix_ht ?? '')}
+          onChange={(e) => setDecimal('prix_ht', e.target.value)}
           style={{ ...IS(false), textAlign: 'right', fontSize: '0.85rem' }}
         />
       </td>
       <td style={{ padding: '6px 5px', width: 65 }}>
-        <input type="number" min="0" max="100" step="1" value={ligne.remise} onChange={e => set('remise', e.target.value)} style={{ ...IS(false), textAlign: 'center', fontSize: '0.85rem' }} />
+        <input
+          inputMode="decimal"
+          value={formatFrDecimalInput(ligne.remise ?? '')}
+          onChange={(e) => setDecimal('remise', e.target.value)}
+          style={{ ...IS(false), textAlign: 'center', fontSize: '0.85rem' }}
+        />
       </td>
       <td style={{ padding: '6px 5px', width: 72 }}>
         <select value={ligne.tva} onChange={e => set('tva', e.target.value)} style={{ ...IS(false), fontSize: '0.82rem' }}>
@@ -333,8 +336,9 @@ export default function FactureForm({ facture, onBack, onSaved, saving = false }
 
   /* Paiements */
   function addPaiement() {
-    if (!newPaiement.montant || Number(newPaiement.montant) <= 0) return;
-    const p = { ...newPaiement, id: Date.now(), montant: Number(newPaiement.montant) };
+    const montant = parseFrDecimal(newPaiement.montant);
+    if (montant == null || montant <= 0) return;
+    const p = { ...newPaiement, id: Date.now(), montant };
     setForm(prev => ({ ...prev, paiements: [...prev.paiements, p] }));
     setNewPaiement({ montant: '', date: today(), mode: 'virement', reference: '' });
     setShowPaiementForm(false);
@@ -369,9 +373,9 @@ export default function FactureForm({ facture, onBack, onSaved, saving = false }
     new Big(0),
   ));
   const acompteMontant = form.acompte_type === 'pct'
-    ? totalTTC * (Number(form.acompte_montant) / 100)
-    : Number(form.acompte_montant) || 0;
-  const totalPaye   = form.paiements.reduce((s, p) => s + Number(p.montant), 0);
+    ? totalTTC * ((parseFrDecimalOrZero(form.acompte_montant)) / 100)
+    : parseFrDecimalOrZero(form.acompte_montant);
+  const totalPaye   = form.paiements.reduce((s, p) => s + parseFrDecimalOrZero(p.montant), 0);
   const resteAPayer = Math.max(0, totalTTC - totalPaye - acompteMontant);
 
   /* Auto statut selon règlements (sauf annulation / brouillon forcé) */
@@ -387,8 +391,8 @@ export default function FactureForm({ facture, onBack, onSaved, saving = false }
   function ensurePaidPaiements(payload) {
     if (payload.statut !== 'payee') return payload;
     const ttc = Number(payload.total_ttc) || 0;
-    const paye = (payload.paiements || []).reduce((s, p) => s + Number(p.montant || 0), 0)
-      + (Number(payload.acompte_montant) || 0);
+    const paye = (payload.paiements || []).reduce((s, p) => s + parseFrDecimalOrZero(p.montant), 0)
+      + parseFrDecimalOrZero(payload.acompte_montant);
     const reste = Math.max(0, Math.round((ttc - paye) * 100) / 100);
     if (reste <= 0) {
       return { ...payload, total_paye: ttc, reste_a_payer: 0 };
@@ -649,9 +653,13 @@ export default function FactureForm({ facture, onBack, onSaved, saving = false }
                 </div>
                 <div className="form-group">
                   <Label>Montant acompte</Label>
-                  <input type="number" min="0" step="0.01" value={form.acompte_montant} onChange={e => setField('acompte_montant', e.target.value)}
+                  <input
+                    inputMode="decimal"
+                    value={formatFrDecimalInput(form.acompte_montant ?? '')}
+                    onChange={e => setField('acompte_montant', sanitizeFrDecimalTyping(e.target.value))}
                     placeholder={form.acompte_type === 'pct' ? 'Ex: 30 (%)' : 'Ex: 5000'}
-                    style={IS(false)} />
+                    style={IS(false)}
+                  />
                 </div>
                 {acompteMontant > 0 && (
                   <div style={{ gridColumn: '1 / -1', background: '#F3E5F5', borderRadius: 6, padding: '8px 12px', fontSize: '0.82rem', color: '#6A1B9A' }}>
@@ -677,7 +685,13 @@ export default function FactureForm({ facture, onBack, onSaved, saving = false }
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 10 }}>
                     <div className="form-group">
                       <Label>Montant (MAD)</Label>
-                      <input type="number" min="0" step="0.01" value={newPaiement.montant} onChange={e => setNewPaiement(p => ({ ...p, montant: e.target.value }))} placeholder="0.00" style={IS(false)} />
+                      <input
+                        inputMode="decimal"
+                        value={formatFrDecimalInput(newPaiement.montant ?? '')}
+                        onChange={e => setNewPaiement(p => ({ ...p, montant: sanitizeFrDecimalTyping(e.target.value) }))}
+                        placeholder="0,00"
+                        style={IS(false)}
+                      />
                     </div>
                     <div className="form-group">
                       <Label>Date</Label>

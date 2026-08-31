@@ -8,6 +8,7 @@ import { listArticles } from './articles';
 import { syncFacturePaymentsToCash } from '../finance/financeSync';
 import { moneyLineHt, moneyLineTtc, moneyComputeDocumentTotals, moneyToNumber } from '../../utils/decimalMoney';
 import { hydrateDocLigneFromSource } from '../../utils/crm/docLigneHydrate';
+import { parseFrDecimal, parseFrDecimalOrZero } from '../../utils/crm/frDecimalInput';
 
 const TABLE = 'crm_factures';
 const LIGNES = 'crm_facture_lignes';
@@ -57,7 +58,7 @@ function isAcompteFacture(formOrRow) {
 function computeAcompte(form, total_ttc) {
   // Facture d'acompte : le montant est déjà le total TTC — ne pas recompter acompte_montant.
   if (isAcompteFacture(form)) return 0;
-  const raw = Number(form.acompte_montant) || 0;
+  const raw = parseFrDecimalOrZero(form.acompte_montant);
   if (form.acompte_type === 'pct') return Math.round(total_ttc * (raw / 100) * 100) / 100;
   return raw;
 }
@@ -80,7 +81,7 @@ function sanitizeAcomptePayeFields(facture, paiements = []) {
 
 function computePaiements(form, total_ttc) {
   const paiements = form.paiements || [];
-  const totalPaiements = paiements.reduce((s, p) => s + Number(p.montant || 0), 0);
+  const totalPaiements = paiements.reduce((s, p) => s + parseFrDecimalOrZero(p.montant), 0);
   const acompte = computeAcompte(form, total_ttc);
   const total_paye = Math.round((totalPaiements + acompte) * 100) / 100;
   const reste_a_payer = Math.max(0, Math.round((total_ttc - total_paye) * 100) / 100);
@@ -99,10 +100,10 @@ export function normalizeLigne(row) {
     description: row.description || '',
     article_id: row.article_id ? String(row.article_id) : '',
     categorie_id: row.categorie_id ? String(row.categorie_id) : '',
-    quantite: Number(row.quantite ?? 1),
+    quantite: parseFrDecimal(row.quantite) ?? 1,
     unite: row.unite || 'unite',
-    prix_ht: Number(row.prix_ht ?? 0),
-    remise: Number(row.remise ?? 0),
+    prix_ht: parseFrDecimalOrZero(row.prix_ht),
+    remise: parseFrDecimalOrZero(row.remise),
     tva: Number(row.tva ?? 20),
     total_ht: Number(row.total_ht ?? ligneTotalHt(row)),
   };
@@ -213,10 +214,10 @@ function toLigneRow(ligne, factureId, ordre) {
     description: ligne.description?.trim() || null,
     article_id: ligne.article_id || null,
     categorie_id: ligne.categorie_id || null,
-    quantite: Number(ligne.quantite) || 0,
+    quantite: parseFrDecimalOrZero(ligne.quantite),
     unite: ligne.unite || 'unite',
-    prix_ht: Number(ligne.prix_ht) || 0,
-    remise: Number(ligne.remise) || 0,
+    prix_ht: parseFrDecimalOrZero(ligne.prix_ht),
+    remise: parseFrDecimalOrZero(ligne.remise),
     tva: Number(ligne.tva) ?? 20,
     total_ht: ligneTotalHt(ligne),
   };
@@ -225,7 +226,7 @@ function toLigneRow(ligne, factureId, ordre) {
 function toPaiementRow(p, factureId) {
   return {
     facture_id: factureId,
-    montant: Number(p.montant) || 0,
+    montant: parseFrDecimalOrZero(p.montant),
     date_paiement: p.date || p.date_paiement || new Date().toISOString().slice(0, 10),
     mode: p.mode || 'virement',
     reference: p.reference?.trim() || null,

@@ -8,6 +8,7 @@ import { clientDisplayName } from './clients';
 import { getCrmDevisById } from './crmDevis';
 import { moneyLineHt, moneyComputeDocumentTotals, moneyToNumber } from '../../utils/decimalMoney';
 import { hydrateDocLigneFromSource } from '../../utils/crm/docLigneHydrate';
+import { parseFrDecimal, parseFrDecimalOrZero } from '../../utils/crm/frDecimalInput';
 import { listArticles } from './articles';
 
 const TABLE = 'crm_proformas';
@@ -130,10 +131,10 @@ export function normalizeProformaLigne(row) {
     description: row.description || '',
     article_id: row.article_id ? String(row.article_id) : '',
     categorie_id: row.categorie_id ? String(row.categorie_id) : '',
-    quantite: Number(row.quantite ?? 1),
+    quantite: parseFrDecimal(row.quantite) ?? 1,
     unite: row.unite || 'unite',
     prix_ht: resolveLignePrixHt(row),
-    remise: Number(row.remise ?? 0),
+    remise: parseFrDecimalOrZero(row.remise),
     tva: Number(row.tva ?? 20),
     total_ht: Number(row.total_ht ?? ligneTotalHt({ ...row, prix_ht: resolveLignePrixHt(row) })),
   };
@@ -224,10 +225,10 @@ function toLigneRow(ligne, proformaId, ordre) {
     description: ligne.description?.trim() || null,
     article_id: ligne.article_id || null,
     categorie_id: ligne.categorie_id || null,
-    quantite: Number(ligne.quantite) || 1,
+    quantite: parseFrDecimal(ligne.quantite) ?? 1,
     unite: ligne.unite || 'unite',
     prix_ht: resolveLignePrixHt(ligne),
-    remise: moneyToNumber(ligne.remise) || 0,
+    remise: parseFrDecimalOrZero(ligne.remise),
     tva: ligne.tva == null || ligne.tva === '' ? 20 : moneyToNumber(ligne.tva),
     total_ht: moneyToNumber(ligne.total_ht) || ligneTotalHt({ ...ligne, prix_ht: resolveLignePrixHt(ligne) }),
   };
