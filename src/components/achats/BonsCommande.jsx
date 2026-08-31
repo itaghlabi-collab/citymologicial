@@ -97,32 +97,25 @@ function BCForm({ initial, onSave, onCancel, fournisseurs, suppliersLoading, sav
   return (
     <form>
       <SectionTitle icon={<ShoppingCart size={12} />}>Informations générales</SectionTitle>
-      <FRow>
+      <div style={{ marginBottom: 14 }}>
         <FField label="Fournisseur" required>
-          {fournActifs.length > 0 ? (
-            <SupplierSearch
-              suppliers={fournActifs}
-              supplierId={form.supplier_id}
-              value={form.fournisseur}
-              onChange={handleSupplierChange}
-              loading={suppliersLoading}
-              error={!!errors.fournisseur}
-            />
-          ) : (
-            <div>
-              <input
-                value={form.fournisseur}
-                onChange={(e) => set('fournisseur', e.target.value)}
-                placeholder="Nom du fournisseur..."
-                style={{ ...INPUT_STYLE, borderColor: errors.fournisseur ? 'var(--red)' : 'var(--border)' }}
-              />
-              <div style={{ fontSize: '0.72rem', color: 'var(--orange)', marginTop: 4 }}>
-                Aucun fournisseur actif — ajoutez-en dans la rubrique Fournisseurs.
-              </div>
+          <SupplierSearch
+            suppliers={fournActifs}
+            supplierId={form.supplier_id}
+            value={form.fournisseur}
+            onChange={handleSupplierChange}
+            loading={suppliersLoading}
+            error={!!errors.fournisseur}
+          />
+          {!suppliersLoading && fournActifs.length === 0 && (
+            <div style={{ fontSize: '0.72rem', color: 'var(--orange)', marginTop: 4 }}>
+              Aucun fournisseur actif — ajoutez-en dans la rubrique Fournisseurs.
             </div>
           )}
           {errors.fournisseur && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.fournisseur}</div>}
         </FField>
+      </div>
+      <FRow>
         <FField label="Date"><input type="date" value={form.date} onChange={(e) => set('date', e.target.value)} style={INPUT_STYLE} /></FField>
         <FField label="Date livraison prévue"><input type="date" value={form.date_livraison} onChange={(e) => set('date_livraison', e.target.value)} style={INPUT_STYLE} /></FField>
         <FField label="Devise">
