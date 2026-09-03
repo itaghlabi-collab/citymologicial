@@ -10,7 +10,6 @@ import {
 } from '../../constants/fabrication';
 import {
   FabBadge, FabEmpty, FabProgress, fmtDate, fmtDateTime, planFile,
-  FAB_INPUT, FAB_SELECT,
 } from './shared';
 
 const MODES = {
@@ -19,6 +18,7 @@ const MODES = {
     subtitle: 'Boîte de réception des plans transmis par les chefs de projet',
     defaultStatut: 'plan_recu',
     empty: 'Aucun plan reçu',
+    emptyHint: 'Ouvrez un projet → Transmettre à Fabrication (plan + désignation).',
     icon: Inbox,
   },
   suivi: {
@@ -26,6 +26,7 @@ const MODES = {
     subtitle: 'Ateliers en cours — avancement et retards',
     defaultStatut: '',
     empty: 'Aucune production en cours',
+    emptyHint: 'Les plans affectés à un atelier apparaissent ici.',
     icon: Hammer,
   },
   termine: {
@@ -33,6 +34,7 @@ const MODES = {
     subtitle: 'Fabrications clôturées',
     defaultStatut: 'termine',
     empty: 'Aucune production terminée',
+    emptyHint: 'Les fabrications à 100 % / statut Terminé s’affichent ici.',
     icon: CheckCircle2,
   },
 };
@@ -94,7 +96,7 @@ export default function FabricationList({
 
   return (
     <div className="fab-page animate-fade-in">
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+      <div className="page-header">
         <div>
           <h1 className="page-title">{cfg.title}</h1>
           <p className="page-subtitle">{cfg.subtitle}</p>
@@ -110,27 +112,27 @@ export default function FabricationList({
         </div>
       ) : null}
 
-      <div className="card" style={{ padding: 14, marginBottom: 14 }}>
+      <div className="card fab-filters-card">
         <div className="fab-toolbar" style={{ marginBottom: 0 }}>
           <div className="fab-search">
-            <Search size={15} />
+            <Search size={15} className="fab-search-icon" aria-hidden />
             <input
-              style={FAB_INPUT}
+              className="fab-search-input"
               placeholder="Recherche projet / désignation"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
-          <select className="fab-filter" style={FAB_SELECT} value={projet} onChange={(e) => setProjet(e.target.value)}>
+          <select className="fab-filter" value={projet} onChange={(e) => setProjet(e.target.value)}>
             <option value="">Projet</option>
             {projets.map((n) => <option key={n} value={n}>{n}</option>)}
           </select>
-          <select className="fab-filter" style={FAB_SELECT} value={atelier} onChange={(e) => setAtelier(e.target.value)}>
+          <select className="fab-filter" value={atelier} onChange={(e) => setAtelier(e.target.value)}>
             <option value="">Atelier</option>
             {FAB_ATELIERS.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
           </select>
           {mode !== 'termine' ? (
-            <select className="fab-filter" style={FAB_SELECT} value={statut} onChange={(e) => setStatut(e.target.value)}>
+            <select className="fab-filter" value={statut} onChange={(e) => setStatut(e.target.value)}>
               <option value="">Statut</option>
               {FAB_STATUTS.filter((s) => (
                 mode !== 'suivi' || s.value === 'a_lancer' || s.value === 'en_fabrication' || s.value === 'bloque'
@@ -138,12 +140,12 @@ export default function FabricationList({
             </select>
           ) : null}
           {mode === 'inbox' ? (
-            <select className="fab-filter" style={FAB_SELECT} value={priorite} onChange={(e) => setPriorite(e.target.value)}>
+            <select className="fab-filter" value={priorite} onChange={(e) => setPriorite(e.target.value)}>
               <option value="">Priorité</option>
               {FAB_PRIORITES.map((p) => <option key={p.value} value={p.value}>{p.label}</option>)}
             </select>
           ) : null}
-          <input type="date" className="fab-filter" style={FAB_INPUT} value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+          <input type="date" className="fab-filter" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
         </div>
       </div>
 
@@ -151,7 +153,12 @@ export default function FabricationList({
         {loading ? (
           <div style={{ padding: 40, textAlign: 'center' }}><Loader2 size={22} /></div>
         ) : rows.length === 0 ? (
-          <FabEmpty icon={<Icon size={22} />} title={cfg.empty} sub="Les données affichées proviennent uniquement des plans transmis." />
+          <FabEmpty
+            icon={<Icon size={22} />}
+            title={cfg.empty}
+            sub="Les données affichées proviennent uniquement des plans transmis."
+            hint={cfg.emptyHint}
+          />
         ) : (
           <>
             <div className="table-wrap fab-table-desktop">

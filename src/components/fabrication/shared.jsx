@@ -74,7 +74,7 @@ export function FabModal({ open, onClose, title, children, width }) {
   );
 }
 
-export function FabEmpty({ icon, title, sub }) {
+export function FabEmpty({ icon, title, sub, hint }) {
   return (
     <div style={{ textAlign: 'center', padding: '52px 24px', color: 'var(--text-3)' }}>
       <div style={{
@@ -85,6 +85,7 @@ export function FabEmpty({ icon, title, sub }) {
       </div>
       <div style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '1rem', color: 'var(--text-2)', marginBottom: 6 }}>{title}</div>
       <div style={{ fontSize: '0.84rem' }}>{sub}</div>
+      {hint ? <div className="fab-empty-hint">{hint}</div> : null}
     </div>
   );
 }

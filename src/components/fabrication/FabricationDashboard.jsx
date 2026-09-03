@@ -87,7 +87,7 @@ export default function FabricationDashboard({ records, loading, error, onReload
 
   return (
     <div className="fab-page animate-fade-in">
-      <div className="page-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: 12, flexWrap: 'wrap' }}>
+      <div className="page-header">
         <div>
           <h1 className="page-title">Fabrication</h1>
           <p className="page-subtitle">Tableau de bord ateliers — données réelles</p>
@@ -103,28 +103,30 @@ export default function FabricationDashboard({ records, loading, error, onReload
         </div>
       ) : null}
 
-      <div className="fab-toolbar">
-        <select className="fab-filter" style={{ ...selectStyle }} value={projet} onChange={(e) => setProjet(e.target.value)}>
-          <option value="">Tous les projets</option>
-          {projets.map((n) => <option key={n} value={n}>{n}</option>)}
-        </select>
-        <select className="fab-filter" style={selectStyle} value={atelier} onChange={(e) => setAtelier(e.target.value)}>
-          <option value="">Tous les ateliers</option>
-          {FAB_ATELIERS.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
-        </select>
-        <select className="fab-filter" style={selectStyle} value={statut} onChange={(e) => setStatut(e.target.value)}>
-          <option value="">Tous les statuts</option>
-          {FAB_STATUTS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-        </select>
-        <select className="fab-filter" style={selectStyle} value={chef} onChange={(e) => setChef(e.target.value)}>
-          <option value="">Tous les chefs d’atelier</option>
-          {chefs.map((n) => <option key={n} value={n}>{n}</option>)}
-        </select>
-        <input type="date" className="fab-filter" style={selectStyle} value={from} onChange={(e) => setFrom(e.target.value)} />
-        <input type="date" className="fab-filter" style={selectStyle} value={to} onChange={(e) => setTo(e.target.value)} />
+      <div className="card fab-filters-card">
+        <div className="fab-toolbar" style={{ marginBottom: 0 }}>
+          <select className="fab-filter" value={projet} onChange={(e) => setProjet(e.target.value)}>
+            <option value="">Tous les projets</option>
+            {projets.map((n) => <option key={n} value={n}>{n}</option>)}
+          </select>
+          <select className="fab-filter" value={atelier} onChange={(e) => setAtelier(e.target.value)}>
+            <option value="">Tous les ateliers</option>
+            {FAB_ATELIERS.map((a) => <option key={a.value} value={a.value}>{a.label}</option>)}
+          </select>
+          <select className="fab-filter" value={statut} onChange={(e) => setStatut(e.target.value)}>
+            <option value="">Tous les statuts</option>
+            {FAB_STATUTS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+          </select>
+          <select className="fab-filter" value={chef} onChange={(e) => setChef(e.target.value)}>
+            <option value="">Tous les chefs d’atelier</option>
+            {chefs.map((n) => <option key={n} value={n}>{n}</option>)}
+          </select>
+          <input type="date" className="fab-filter" value={from} onChange={(e) => setFrom(e.target.value)} />
+          <input type="date" className="fab-filter" value={to} onChange={(e) => setTo(e.target.value)} />
+        </div>
       </div>
 
-      <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', marginBottom: 20 }}>
+      <div className="stat-grid fab-kpi-grid" style={{ marginBottom: 20 }}>
         <FabKpiCard icon={<Inbox size={17} />} label="Plans reçus" value={loading ? '…' : kpis.recus} color="blue" />
         <FabKpiCard icon={<Play size={17} />} label="À lancer" value={loading ? '…' : kpis.aLancer} color="grey" />
         <FabKpiCard icon={<Hammer size={17} />} label="En fabrication" value={loading ? '…' : kpis.enFab} color="orange" />
@@ -188,8 +190,3 @@ export default function FabricationDashboard({ records, loading, error, onReload
     </div>
   );
 }
-
-const selectStyle = {
-  width: '100%', padding: '8px 11px', border: '1.5px solid var(--border)',
-  borderRadius: 6, fontSize: '0.86rem', background: '#fff', fontFamily: 'var(--font-body)',
-};
