@@ -1,0 +1,149 @@
+.fab-page { min-width: 0; }
+.fab-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: flex-end;
+  margin-bottom: 16px;
+}
+.fab-toolbar .fab-search {
+  position: relative;
+  flex: 1 1 220px;
+  min-width: 180px;
+}
+.fab-toolbar .fab-search svg {
+  position: absolute;
+  left: 10px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-3);
+  pointer-events: none;
+}
+.fab-toolbar .fab-search input {
+  padding-left: 34px;
+}
+.fab-filter {
+  min-width: 150px;
+  flex: 0 1 160px;
+}
+.fab-watch-list { display: flex; flex-direction: column; gap: 10px; }
+.fab-watch-item {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 12px 14px;
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.fab-watch-item.is-late,
+.fab-watch-item.is-blocked { border-color: #ffcdd2; background: var(--red-light); }
+.fab-watch-item.is-soon { border-color: #ffe0b2; background: #fff8e1; }
+.fab-watch-dot { font-size: 1.1rem; line-height: 1; }
+.fab-watch-title { font-weight: 700; font-size: 0.92rem; color: var(--text); }
+.fab-watch-meta { font-size: 0.8rem; color: var(--text-2); margin-top: 2px; }
+.fab-atelier-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 12px;
+}
+.fab-atelier-card {
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  padding: 16px;
+  background: var(--surface);
+}
+.fab-atelier-card h3 {
+  font-family: var(--font-head);
+  font-size: 1.05rem;
+  font-weight: 800;
+  margin: 0 0 12px;
+}
+.fab-atelier-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  font-size: 0.8rem;
+}
+.fab-atelier-stats strong { display: block; font-size: 1.05rem; }
+.fab-progress { display: flex; align-items: center; gap: 8px; min-width: 110px; }
+.fab-progress-track {
+  flex: 1;
+  height: 8px;
+  border-radius: 99px;
+  background: var(--surface-2);
+  overflow: hidden;
+}
+.fab-progress-fill {
+  height: 100%;
+  background: var(--red);
+  border-radius: 99px;
+}
+.fab-progress-label { font-size: 0.75rem; font-weight: 700; color: var(--text-2); white-space: nowrap; }
+.fab-table-desktop { display: block; }
+.fab-cards-mobile { display: none; }
+.fab-card {
+  border: 1.5px solid var(--border);
+  border-radius: 12px;
+  padding: 14px;
+  background: var(--surface);
+  margin-bottom: 10px;
+}
+.fab-card-title {
+  font-family: var(--font-head);
+  font-weight: 800;
+  font-size: 1.05rem;
+  margin: 0 0 4px;
+}
+.fab-card-sub { font-size: 0.86rem; color: var(--text-2); margin-bottom: 8px; }
+.fab-card-meta { font-size: 0.8rem; color: var(--text-2); margin: 4px 0; }
+.fab-card-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+.fab-modal-overlay {
+  position: fixed; inset: 0; z-index: 2000; background: rgba(0,0,0,0.45);
+  display: flex; align-items: center; justify-content: center; padding: 16px;
+}
+.fab-modal-box {
+  background: #fff; border-radius: 12px; width: 100%;
+  max-height: 92vh; overflow-y: auto; box-shadow: var(--shadow-lg);
+}
+.fab-modal-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px; border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; background: #fff; z-index: 1;
+}
+.fab-modal-title { font-family: var(--font-head); font-weight: 800; font-size: 1.05rem; }
+.fab-modal-body { padding: 20px; }
+.fab-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.fab-form-grid .fab-span-2 { grid-column: 1 / -1; }
+.fab-photo-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.fab-photo-row img {
+  width: 72px; height: 72px; object-fit: cover; border-radius: 8px; border: 1px solid var(--border);
+}
+.fab-history { font-size: 0.82rem; }
+.fab-history-row {
+  display: grid;
+  grid-template-columns: 140px 1fr;
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.fab-avancement-pills { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.fab-avancement-pills button.is-on {
+  background: var(--red);
+  color: #fff;
+  border-color: var(--red);
+}
+
+@media (max-width: 768px) {
+  .fab-table-desktop { display: none !important; }
+  .fab-cards-mobile { display: block; }
+  .fab-form-grid { grid-template-columns: 1fr; }
+  .fab-form-grid .fab-span-2 { grid-column: 1; }
+  .fab-watch-item { grid-template-columns: 28px 1fr; }
+  .fab-history-row { grid-template-columns: 1fr; }
+}

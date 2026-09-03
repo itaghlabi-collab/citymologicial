@@ -38,6 +38,7 @@ import ComptesRendus from './components/commercial/ComptesRendus';
 import DepensesCom from './components/commercial/Depenses';
 import PropositionsMarketing from './components/commercial/PropositionsMarketing';
 import Projets from './components/Projets';
+import Fabrication from './components/Fabrication';
 import Logistique from './components/Logistique';
 import Achats from './components/Achats';
 import Finance from './components/Finance';
@@ -58,7 +59,7 @@ import {
   NotebookPen, Receipt, Lightbulb,
   Contact, ShoppingBag, Tag, FileText, ScrollText, PackageCheck,
   Truck, Wrench, History,
-  FolderOpen, AlertCircle, ClipboardCheck,
+  FolderOpen, AlertCircle, ClipboardCheck, Factory, Inbox, Hammer, CheckCircle2,
   MessageSquare,
   FolderClosed, Share2, Link, Trash2,
   ListFilter, TrendingDown, CreditCard, PiggyBank, Wallet, BarChart2,
@@ -145,6 +146,15 @@ const NAV = [
       { id: 'demandes-engins',    label: "Location d'engins", icon: Truck },
       { id: 'sav-projets',        label: 'SAV',                  icon: AlertCircle     },
       { id: 'cr-sav',             label: 'Comptes rendus SAV',   icon: ClipboardCheck  },
+    ],
+  },
+  {
+    section: 'Fabrication',
+    items: [
+      { id: 'fabrication',            label: 'Tableau de bord',       icon: Factory },
+      { id: 'fabrication-plans',      label: 'Plans à fabriquer',     icon: Inbox },
+      { id: 'fabrication-suivi',      label: 'Suivi de production',   icon: Hammer },
+      { id: 'fabrication-terminee',   label: 'Production terminée',   icon: CheckCircle2 },
     ],
   },
   {
@@ -237,6 +247,10 @@ const MODULE_LABELS = {
   'demandes-engins':   "Location d'engins",
   'sav-projets':       'Service Apres-Vente',
   'cr-sav':            'Comptes rendus SAV',
+  fabrication:         'Fabrication',
+  'fabrication-plans': 'Plans à fabriquer',
+  'fabrication-suivi': 'Suivi de production',
+  'fabrication-terminee': 'Production terminée',
   'mes-documents':     'Mes documents',
   'docs-partages':     'Documents partages',
   'liens-publics':     'Liens publics',
@@ -324,6 +338,11 @@ function PageContent({
     case 'demandes-engins':     return <Projets activeTab="demandes-engins" />;
     case 'sav-projets':         return <Projets activeTab="sav-projets" />;
     case 'cr-sav':              return <Projets activeTab="cr-sav" />;
+    /* Fabrication */
+    case 'fabrication':         return <Fabrication activeTab="fabrication" />;
+    case 'fabrication-plans':   return <Fabrication activeTab="fabrication-plans" />;
+    case 'fabrication-suivi':   return <Fabrication activeTab="fabrication-suivi" />;
+    case 'fabrication-terminee': return <Fabrication activeTab="fabrication-terminee" />;
     /* SAV legacy */
     case 'sav':                 return <SAV />;
     /* Documents */

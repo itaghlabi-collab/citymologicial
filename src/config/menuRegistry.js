@@ -114,6 +114,17 @@ export const ERP_RUBRIQUES = Object.freeze([
     ],
   },
   {
+    code: 'fabrication',
+    label: 'Fabrication',
+    departmentIds: [5],
+    submodules: [
+      { code: 'fabrication', label: 'Tableau de bord' },
+      { code: 'fabrication-plans', label: 'Plans à fabriquer' },
+      { code: 'fabrication-suivi', label: 'Suivi de production' },
+      { code: 'fabrication-terminee', label: 'Production terminée' },
+    ],
+  },
+  {
     code: 'documents',
     label: 'Documents',
     departmentIds: [7],

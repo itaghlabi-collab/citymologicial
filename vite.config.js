@@ -37,8 +37,9 @@ function mobileUrlPlugin() {
   }
 }
 
-async function devPlugins() {
+async function devPlugins(useHttps) {
   const plugins = [mobileUrlPlugin()]
+  if (!useHttps) return plugins
   try {
     const { default: basicSsl } = await import('@vitejs/plugin-basic-ssl')
     plugins.unshift(basicSsl())
@@ -52,6 +53,11 @@ async function devPlugins() {
 export default defineConfig(async ({ mode }) => {
   const fileEnv = loadEnv(mode, process.cwd(), '')
   const trim = (v) => (v == null ? '' : String(v).trim())
+  // CITYMO_DEV_HTTP=1 → HTTP local (évite ERR_CERT_AUTHORITY_INVALID dans Cursor / certains navigateurs)
+  const useHttps = !(
+    trim(process.env.CITYMO_DEV_HTTP || fileEnv.CITYMO_DEV_HTTP) === '1'
+    || trim(process.env.CITYMO_DEV_HTTP || fileEnv.CITYMO_DEV_HTTP).toLowerCase() === 'true'
+  )
 
   const viteSupabaseUrl = trim(process.env.VITE_SUPABASE_URL || fileEnv.VITE_SUPABASE_URL)
   const viteSupabaseAnonKey = trim(process.env.VITE_SUPABASE_ANON_KEY || fileEnv.VITE_SUPABASE_ANON_KEY)
@@ -97,7 +103,7 @@ export default defineConfig(async ({ mode }) => {
     }),
   ]
   if (mode !== 'production') {
-    plugins.push(...(await devPlugins()))
+    plugins.push(...(await devPlugins(useHttps)))
   }
 
   return {
@@ -109,7 +115,7 @@ export default defineConfig(async ({ mode }) => {
       'import.meta.env.VITE_BUILD_ID': JSON.stringify(buildId),
     },
     server: mode === 'production' ? undefined : {
-      https: true,
+      https: useHttps,
       host: '0.0.0.0',
       port: 5173,
       strictPort: true,
@@ -128,7 +134,7 @@ export default defineConfig(async ({ mode }) => {
       },
     },
     preview: mode === 'production' ? undefined : {
-      https: true,
+      https: useHttps,
       host: '0.0.0.0',
       port: 5173,
       strictPort: true,

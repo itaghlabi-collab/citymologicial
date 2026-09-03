@@ -9,11 +9,13 @@ import {
   X, ChevronLeft, RefreshCw, AlertCircle, CheckCircle, FileText,
   User, Calendar, MapPin, TrendingUp, BarChart3, Clock,
   AlertTriangle, Settings, Archive, ChevronDown, DollarSign,
-  HardHat, Users, ClipboardList, Layers, Gauge, Wrench, Loader2,
+  HardHat, Users, ClipboardList, Layers, Gauge, Wrench, Loader2, Factory,
 } from 'lucide-react';
 import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import CrmOverflowMenu from '../crm/CrmOverflowMenu';
 import { useProjects } from '../../hooks/useProjects';
+import { useAuth } from '../../hooks/useAuth';
+import { can } from '../../services/admin/permissions';
 import { listClients, clientDisplayName } from '../../services/crm/clients';
 import { TYPE_PROJET_VALUES, TYPE_PROJET_LABEL } from '../../constants/commercial';
 import { PROJECT_INTERVENTION_TYPES, normalizeTypesIntervention, formatTypesInterventionLabel } from '../../constants/projects';
@@ -29,6 +31,8 @@ import { recruitmentStatutBadge, recruitmentStatutLabel } from '../../constants/
 import { listAssignmentsByProject, listSubcontractors, saveProjectSubcontractorAssignments, removeSubcontractorFromProject, subcontractorFullName } from '../../services/rh/subcontractors';
 import { listPlanningResponsableEmployees, employeeSelectLabel, findEmployeeByStoredLabel, filterChefsProjet, filterChefsChantierEmployees, withSelectedEmployee } from '../../services/rh/employees';
 import { listCrmDevis, crmDevisSelectLabel, findCrmDevisByReference } from '../../services/crm/crmDevis';
+import TransmettrePlanModal from '../fabrication/TransmettrePlanModal';
+import { transmitFabricationPlan } from '../../services/fabrication/fabricationPlans';
 
 // ── Shared primitives ───────────────────────────────────────────────────────
 
@@ -931,7 +935,7 @@ function ProjectEquipeTab({ projet, compact = false }) {
 
 // ── Page Détail Projet ───────────────────────────────────────────────────────
 
-function DetailProjet({ projet, onBack, onEdit, onCreateSAV, initialTab = 'general' }) {
+function DetailProjet({ projet, onBack, onEdit, onCreateSAV, onTransmitFabrication, canTransmitFabrication, initialTab = 'general' }) {
   const [activeTab, setActiveTab] = useState(initialTab);
 
   const tabs = [
@@ -977,6 +981,11 @@ function DetailProjet({ projet, onBack, onEdit, onCreateSAV, initialTab = 'gener
                 <Wrench size={13} /> Demande SAV
               </button>
             )}
+            {canTransmitFabrication && (
+              <button type="button" className="btn btn-secondary btn-sm" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => onTransmitFabrication(projet)}>
+                <Factory size={13} /> Transmettre à Fabrication
+              </button>
+            )}
           </div>
           <div className={`pj-detail-actions-mobile${onCreateSAV ? '' : ' pj-detail-actions-mobile--2'}`} aria-label="Actions projet">
             <button type="button" className="pj-detail-action-btn" onClick={onEdit}>
@@ -995,6 +1004,12 @@ function DetailProjet({ projet, onBack, onEdit, onCreateSAV, initialTab = 'gener
               <button type="button" className="pj-detail-action-btn pj-detail-action-btn--primary" onClick={() => onCreateSAV(projet)}>
                 <Wrench size={15} />
                 <span>SAV</span>
+              </button>
+            )}
+            {canTransmitFabrication && (
+              <button type="button" className="pj-detail-action-btn" onClick={() => onTransmitFabrication(projet)}>
+                <Factory size={15} />
+                <span>Fabrication</span>
               </button>
             )}
           </div>
@@ -1138,6 +1153,7 @@ function DetailProjet({ projet, onBack, onEdit, onCreateSAV, initialTab = 'gener
 // ── Module principal ProjetsList ─────────────────────────────────────────────
 
 export default function ProjetsList({ onCreateSAV }) {
+  const { user } = useAuth();
   const {
     records: projets,
     loading,
@@ -1167,6 +1183,19 @@ export default function ProjetsList({ onCreateSAV }) {
   const [detailInitialTab, setDetailInitialTab] = useState('general');
   const [showFilters, setShowFilters] = useState(false);
   const [pdfLoadingId, setPdfLoadingId] = useState(null);
+  const [transmitProjet, setTransmitProjet] = useState(null);
+  const [transmitSaving, setTransmitSaving] = useState(false);
+  const [canTransmitFabrication, setCanTransmitFabrication] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      if (!user) return;
+      const ok = await can(user, 'fabrication-plans', 'creer');
+      if (alive) setCanTransmitFabrication(ok);
+    })();
+    return () => { alive = false; };
+  }, [user]);
 
   useEffect(() => {
     if (!configured) return;
@@ -1241,17 +1270,45 @@ export default function ProjetsList({ onCreateSAV }) {
   const termines = kpi.termines;
   const enRetard = kpi.enRetard;
   const budgetTotal = kpi.budgetTotal;
+  const handleTransmitFabrication = useCallback(async (payload) => {
+    setTransmitSaving(true);
+    try {
+      await transmitFabricationPlan(payload);
+      alert('Plan transmis à Fabrication.');
+      return { success: true };
+    } catch (err) {
+      return { success: false, error: err.message || 'Erreur transmission.' };
+    } finally {
+      setTransmitSaving(false);
+    }
+  }, []);
+
   const budgetConso = kpi.budgetConso;
+
+  const transmitModal = (
+    <TransmettrePlanModal
+      open={Boolean(transmitProjet)}
+      projet={transmitProjet}
+      saving={transmitSaving}
+      onClose={() => setTransmitProjet(null)}
+      onSubmit={handleTransmitFabrication}
+    />
+  );
 
   if (detailProjet) {
     return (
-      <DetailProjet
-        projet={detailProjet}
-        initialTab={detailInitialTab}
-        onBack={() => { setDetailProjet(null); setDetailInitialTab('general'); }}
-        onEdit={() => { openEdit(detailProjet); setDetailProjet(null); }}
-        onCreateSAV={onCreateSAV}
-      />
+      <>
+        <DetailProjet
+          projet={detailProjet}
+          initialTab={detailInitialTab}
+          onBack={() => { setDetailProjet(null); setDetailInitialTab('general'); }}
+          onEdit={() => { openEdit(detailProjet); setDetailProjet(null); }}
+          onCreateSAV={onCreateSAV}
+          canTransmitFabrication={canTransmitFabrication}
+          onTransmitFabrication={() => setTransmitProjet(detailProjet)}
+        />
+        {transmitModal}
+      </>
     );
   }
 

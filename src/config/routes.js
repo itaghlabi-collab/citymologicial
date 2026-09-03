@@ -60,6 +60,12 @@ export const ROUTES = {
   SAV_PROJETS:        'sav-projets',
   CR_SAV:             'cr-sav',
 
+  // Fabrication
+  FABRICATION:        'fabrication',
+  FABRICATION_PLANS:  'fabrication-plans',
+  FABRICATION_SUIVI:  'fabrication-suivi',
+  FABRICATION_TERMINEE: 'fabrication-terminee',
+
   // Documents
   MES_DOCUMENTS:      'mes-documents',
   DOCS_PARTAGES:      'docs-partages',
