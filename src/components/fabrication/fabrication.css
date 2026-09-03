@@ -219,7 +219,9 @@
     grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
     gap: 8px;
   }
-}
+  .fab-page .page-title {
+    font-size: 1.35rem;
+  }
   .fab-page .page-header {
     margin-bottom: 14px;
   }
