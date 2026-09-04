@@ -7,10 +7,11 @@ import {
   notifyAchatsUsers,
   notifyFinanceUsers,
   notifyInventaireUsers,
+  notifyTargeted,
   NOTIFICATION_TYPES,
   NOTIFICATION_PRIORITIES,
 } from './notifications';
-import { NOTIFICATION_SUBMODULES } from './notificationTargeting';
+import { NOTIFICATION_DEPARTMENTS, NOTIFICATION_SUBMODULES } from './notificationTargeting';
 import { getSupabase } from '../../lib/supabase';
 import { PURCHASE_ASSIGNEE } from '../../constants/purchaseWorkflow';
 import { resolveAssigneeProfile } from './notificationRecipients';
@@ -60,14 +61,17 @@ async function findChargeeAchatsUserIds(request) {
 }
 
 async function notifyChargeeAchats(payload, request = null) {
-  const ids = await findChargeeAchatsUserIds(request);
-  if (ids.length) {
-    return Promise.all(ids.map((userId) => notifyUser(userId, {
-      ...payload,
-      submoduleCode: NOTIFICATION_SUBMODULES.DEMANDES_ACHAT,
-    })));
-  }
-  return notifyAchatsUsers(payload);
+  const assigneeIds = await findChargeeAchatsUserIds(request);
+  // Toujours cibler le service Achats (département + rubrique Demandes d'achat),
+  // y compris les utilisateurs avec exceptions Admin — pas seulement Laila.
+  return notifyTargeted({
+    userIds: assigneeIds,
+    departmentId: NOTIFICATION_DEPARTMENTS.ACHATS,
+    submoduleCode: NOTIFICATION_SUBMODULES.DEMANDES_ACHAT,
+  }, {
+    ...payload,
+    submoduleCode: NOTIFICATION_SUBMODULES.DEMANDES_ACHAT,
+  });
 }
 
 async function notifyDg(payload) {

@@ -7,6 +7,11 @@ import { SUPER_ADMIN_EMAIL } from '../rh/isSuperAdmin';
 
 const DG_EMAILS = new Set([DG_EMAIL.toLowerCase(), 'selim.moumni@gmail.com', SUPER_ADMIN_EMAIL.toLowerCase()]);
 
+/** Comptes traités comme Chargée d'achats (voir toutes les DA + workflow Achats). */
+const CHARGEE_ACHATS_EMAILS = new Set([
+  'l.timsih@citymo.ma',
+]);
+
 export const PURCHASE_ROLES = {
   DG: 'dg',
   CHARGEE_ACHATS: 'chargee_achats',
@@ -24,21 +29,42 @@ function normRole(role) {
 }
 
 export function detectPurchaseRoleFromProfile(profile, user) {
-  const email = (user?.email || profile?.email || '').toLowerCase();
+  const email = (user?.email || profile?.email || '').toLowerCase().trim();
   if (DG_EMAILS.has(email)) return PURCHASE_ROLES.DG;
+  if (CHARGEE_ACHATS_EMAILS.has(email)) return PURCHASE_ROLES.CHARGEE_ACHATS;
 
   const role = normRole(profile?.role);
   const nom = norm(profile?.nom);
 
   if (role.includes('dg') || role.includes('directeur')) return PURCHASE_ROLES.DG;
-  if (role.includes('achat') || nom.includes('laila') && nom.includes('wotfi')) return PURCHASE_ROLES.CHARGEE_ACHATS;
-  if (role.includes('chef_projet') || role.includes('chef') && role.includes('projet')) return PURCHASE_ROLES.CHEF_PROJET;
+  if (
+    role.includes('achat')
+    || (nom.includes('laila') && nom.includes('wotfi'))
+    || nom.includes('timsih')
+  ) {
+    return PURCHASE_ROLES.CHARGEE_ACHATS;
+  }
+  if (role.includes('chef_projet') || (role.includes('chef') && role.includes('projet'))) return PURCHASE_ROLES.CHEF_PROJET;
   if (role.includes('magasin') || role.includes('inventaire') || role.includes('depot') || role.includes('logistique')) {
     return PURCHASE_ROLES.MAGASINIER;
   }
   if (role.includes('super_admin') || role === 'super_admin') return PURCHASE_ROLES.DG;
 
   return PURCHASE_ROLES.OTHER;
+}
+
+/** Accès Admin Achats (DA + BC) → mêmes droits workflow que chargée d'achats. */
+async function hasAchatsBuyerAccess(user) {
+  try {
+    const { can } = await import('../admin/permissions');
+    const [hasDa, hasBc] = await Promise.all([
+      can(user, 'demandes-achat', 'modifier'),
+      can(user, 'bons-commande', 'voir'),
+    ]);
+    return Boolean(hasDa && hasBc);
+  } catch {
+    return false;
+  }
 }
 
 export async function resolveCurrentPurchaseRole(user) {
@@ -49,7 +75,12 @@ export async function resolveCurrentPurchaseRole(user) {
       .select('id, email, role, nom')
       .eq('id', user.id)
       .maybeSingle();
-    return detectPurchaseRoleFromProfile(data, user);
+    const detected = detectPurchaseRoleFromProfile(data, user);
+    if (detected === PURCHASE_ROLES.DG || detected === PURCHASE_ROLES.CHARGEE_ACHATS) {
+      return detected;
+    }
+    if (await hasAchatsBuyerAccess(user)) return PURCHASE_ROLES.CHARGEE_ACHATS;
+    return detected;
   } catch {
     return detectPurchaseRoleFromProfile(null, user);
   }
