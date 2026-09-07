@@ -3,6 +3,9 @@
  *
  * Le reliquat suit la Feuille de caisse (mouvements Espèces uniquement),
  * pas l’ensemble du journal finance (virements exclus).
+ *
+ * force_ouverture = true : le solde_initial stocké du mois est utilisé tel quel
+ * (pas de report du mois précédent). Utile pour une amorce / nouveau départ.
  */
 import { getSupabase } from '../../lib/supabase';
 import { requireSupabaseUserId } from '../supabase/requireUser';
@@ -21,17 +24,22 @@ export function normalizeBalance(row) {
     solde_initial: Number(row.solde_initial) || 0,
     alimentation: Number(row.alimentation) || 0,
     notes: row.notes || '',
+    force_ouverture: Boolean(row.force_ouverture),
   };
 }
 
 export function toBalanceRow(form) {
-  return {
+  const row = {
     annee: Number(form.annee),
     mois: Number(form.mois),
     solde_initial: Number(form.solde_initial) || 0,
     alimentation: Number(form.alimentation) || 0,
     notes: form.notes || null,
   };
+  if (form.force_ouverture !== undefined) {
+    row.force_ouverture = Boolean(form.force_ouverture);
+  }
+  return row;
 }
 
 export function prevYearMonth(annee, mois) {
@@ -93,6 +101,7 @@ function monthHasCashSheetActivity(balance, cashTxs) {
  * Chaîne pure : ouverture du mois courant = clôture du dernier mois de previousMonthsAsc.
  * previousMonthsAsc : [{ balance, transactions }] du plus ancien au mois N-1.
  * `transactions` = déjà filtrées Feuille de caisse (espèces).
+ * Si un mois a force_ouverture, son solde_initial stocké reprend la chaîne à cet endroit.
  * Retourne null si la chaîne est vide (utiliser alors le solde_initial stocké du mois courant).
  */
 export function computeEffectiveOpeningFromChain(previousMonthsAsc) {
@@ -101,6 +110,9 @@ export function computeEffectiveOpeningFromChain(previousMonthsAsc) {
 
   let opening = Number(chain[0]?.balance?.solde_initial) || 0;
   for (const month of chain) {
+    if (month.balance?.force_ouverture) {
+      opening = Number(month.balance.solde_initial) || 0;
+    }
     // Même formule feuille de caisse : reliquat + entrées espèces − sorties (pas de pot alimentation séparé).
     opening = computeCashTotals(month.transactions || [], {
       solde_initial: opening,
@@ -113,13 +125,19 @@ export function computeEffectiveOpeningFromChain(previousMonthsAsc) {
 /**
  * Solde initial / reliquat du mois (annee, mois) =
  * solde final Feuille de caisse du mois précédent (espèces),
- * recalculé dynamiquement sur toute la chaîne.
+ * recalculé dynamiquement sur toute la chaîne —
+ * sauf si force_ouverture sur le mois courant.
  * Aucune écriture journal créée.
  */
 export async function resolveEffectiveSoldeInitial(annee, mois) {
   const y0 = Number(annee);
   const m0 = Number(mois);
   if (!y0 || !m0) return 0;
+
+  const currentBalance = await getCashMonthlyBalance(y0, m0);
+  if (currentBalance?.force_ouverture) {
+    return Number(currentBalance.solde_initial) || 0;
+  }
 
   const chainDesc = [];
   let cursor = { annee: y0, mois: m0 };
@@ -140,7 +158,6 @@ export async function resolveEffectiveSoldeInitial(annee, mois) {
   const fromChain = computeEffectiveOpeningFromChain(chainAsc);
   if (fromChain !== null) return fromChain;
 
-  const currentBalance = await getCashMonthlyBalance(y0, m0);
   return Number(currentBalance?.solde_initial) || 0;
 }
 
@@ -151,13 +168,18 @@ export async function getPreviousMonthClosing(annee, mois) {
 
 /**
  * Balance d'affichage / calcul : solde_initial = reliquat effectif (feuille de caisse).
- * Conserve alimentation / notes / id stockés. N'écrit rien en base.
+ * Conserve alimentation / notes / id / force_ouverture stockés. N'écrit rien en base.
  */
 export async function resolveEffectiveBalance(annee, mois, storedBalance = undefined) {
   const stored = storedBalance === undefined
     ? await getCashMonthlyBalance(annee, mois)
     : storedBalance;
   const solde_initial = await resolveEffectiveSoldeInitial(annee, mois);
+  const storedInitial = Number(stored?.solde_initial) || 0;
+  let solde_initial_source = 'stocke';
+  if (stored?.force_ouverture) solde_initial_source = 'force';
+  else if (!stored || solde_initial !== storedInitial) solde_initial_source = 'reliquat';
+
   return {
     id: stored?.id || null,
     annee: Number(annee),
@@ -165,9 +187,8 @@ export async function resolveEffectiveBalance(annee, mois, storedBalance = undef
     solde_initial,
     alimentation: Number(stored?.alimentation) || 0,
     notes: stored?.notes || '',
-    solde_initial_stored: Number(stored?.solde_initial) || 0,
-    solde_initial_source: !stored || solde_initial !== (Number(stored?.solde_initial) || 0)
-      ? 'reliquat'
-      : 'stocke',
+    force_ouverture: Boolean(stored?.force_ouverture),
+    solde_initial_stored: storedInitial,
+    solde_initial_source,
   };
 }

@@ -118,7 +118,12 @@ export default function FeuilleCaisse() {
   const [showModal, setShowModal] = useState(false);
   const [editTx, setEditTx] = useState(null);
   const [showBalance, setShowBalance] = useState(false);
-  const [balForm, setBalForm] = useState({ solde_initial: '', alimentation: '', notes: '' });
+  const [balForm, setBalForm] = useState({
+    solde_initial: '',
+    alimentation: '',
+    notes: '',
+    force_ouverture: false,
+  });
   const [validating, setValidating] = useState(false);
   const [unlocking, setUnlocking] = useState(false);
   const [backfilling, setBackfilling] = useState(false);
@@ -348,9 +353,11 @@ export default function FeuilleCaisse() {
 
   function openBalanceModal() {
     setBalForm({
-      solde_initial: balance?.solde_initial ?? '',
+      // Éditer la valeur stockée (amorce), pas le reliquat chaîné affiché.
+      solde_initial: balance?.solde_initial_stored ?? balance?.solde_initial ?? '',
       alimentation: balance?.alimentation ?? 0,
       notes: balance?.notes ?? '',
+      force_ouverture: Boolean(balance?.force_ouverture),
     });
     setShowBalance(true);
   }
@@ -374,6 +381,7 @@ export default function FeuilleCaisse() {
       // Conservé en base si historique, mais plus saisi à part (même nature que les entrées).
       alimentation: Number(balForm.alimentation) || Number(balance?.alimentation) || 0,
       notes: balForm.notes,
+      force_ouverture: Boolean(balForm.force_ouverture),
     });
     if (res.success) setShowBalance(false);
   }
@@ -511,7 +519,9 @@ export default function FeuilleCaisse() {
             label="Reliquat"
             value={formatMAD(totals.soldeInitial)}
             color="grey"
-            sub="reporté du mois précédent (hors alimentations)"
+            sub={balance?.force_ouverture
+              ? 'ouverture forcée (sans report du mois précédent)'
+              : 'reporté du mois précédent (hors alimentations)'}
           />
           <KpiCard
             icon={<Plus size={17} />}
@@ -630,12 +640,25 @@ export default function FeuilleCaisse() {
       <Modal open={showBalance} onClose={() => setShowBalance(false)} title="Paramètres du mois" width={480}>
         <form onSubmit={handleSaveBalance}>
           <p style={{ fontSize: '0.82rem', color: 'var(--text-3)', margin: '0 0 12px' }}>
-            Le <strong>reliquat</strong> est le solde final du mois précédent (automatique).
-            Les alimentations s’enregistrent via « + Alimentation caisse » (entrées du journal) — ce n’est pas un second solde.
+            Par défaut, le <strong>reliquat</strong> est le solde final du mois précédent (automatique).
+            Cochez « ouverture forcée » pour démarrer ce mois sur le montant saisi, sans report.
+            Les alimentations s’enregistrent via « + Alimentation caisse ».
           </p>
           <FField label="Reliquat (amorce / correction exceptionnelle)">
             <input type="number" step="0.01" value={balForm.solde_initial} onChange={(e) => setBalForm((p) => ({ ...p, solde_initial: e.target.value }))} style={INPUT_STYLE} />
           </FField>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: 8, marginBottom: 12, fontSize: '0.85rem', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={Boolean(balForm.force_ouverture)}
+              onChange={(e) => setBalForm((p) => ({ ...p, force_ouverture: e.target.checked }))}
+              style={{ marginTop: 3 }}
+            />
+            <span>
+              <strong>Ouverture forcée</strong> — ignorer le report du mois précédent
+              (ex. nouveau départ juillet à 0).
+            </span>
+          </label>
           <FField label="Notes">
             <textarea value={balForm.notes} onChange={(e) => setBalForm((p) => ({ ...p, notes: e.target.value }))} style={{ ...INPUT_STYLE, minHeight: 64 }} />
           </FField>
