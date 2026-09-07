@@ -306,45 +306,41 @@ export default function Factures() {
     });
   }
 
-  /** Champs toujours éditables en liste pour les archives importées. */
+  /** Affichage identique aux factures normales (texte plat) — édition via crayon / modal. */
   function renderArchiveEditableCell(f, field) {
-    const value = field === 'titre' ? (f.titre || '') : (f.commercial || '');
+    const isTitre = field === 'titre';
+    const display = isTitre
+      ? displayFactureTitre(f.titre)
+      : fmtCommercial(f.commercial);
     return (
-      <input
-        type="text"
-        defaultValue={value}
-        key={`${f.archive_id}-${field}-${value}`}
-        placeholder={field === 'titre' ? 'Saisir le titre…' : 'Saisir le commercial…'}
-        disabled={archiveFieldSaving}
-        onBlur={(e) => {
-          const next = e.target.value.trim();
-          const prev = String(value || '').trim();
-          if (next === prev) return;
-          if (field === 'titre') {
-            saveArchiveMeta(f.archive_id, { titre: next, commercial: f.commercial || '' });
-          } else {
-            saveArchiveMeta(f.archive_id, { titre: f.titre || '', commercial: next });
-          }
-        }}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') e.currentTarget.blur();
-        }}
-        title="Modifiable — quittez le champ pour enregistrer"
+      <button
+        type="button"
+        title="Modifier titre / commercial"
+        onClick={() => openArchiveMetaEdit(f)}
         style={{
+          background: 'none',
+          border: 'none',
+          borderRadius: 0,
+          padding: 0,
+          margin: 0,
+          cursor: 'pointer',
+          textAlign: 'left',
           width: '100%',
-          minWidth: field === 'titre' ? 140 : 100,
           maxWidth: '100%',
-          padding: '6px 8px',
-          border: '1.5px solid var(--border)',
-          borderRadius: 6,
-          fontSize: '0.82rem',
-          fontFamily: 'var(--font-body)',
-          fontWeight: field === 'titre' ? 600 : 500,
-          background: '#fff',
-          color: 'var(--text)',
-          boxSizing: 'border-box',
+          fontWeight: isTitre ? 600 : 500,
+          fontSize: 'inherit',
+          fontFamily: 'inherit',
+          color: display === '—' ? 'var(--text-3)' : (isTitre ? 'var(--text)' : 'var(--text-2)'),
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          display: 'block',
+          boxShadow: 'none',
+          outline: 'none',
         }}
-      />
+      >
+        {display}
+      </button>
     );
   }
 
@@ -917,19 +913,33 @@ export default function Factures() {
                     <StatutBadge statut={f.statut} />
                   </div>
                   {f.__isImportedArchive ? (
-                    <div style={{ marginBottom: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                      <div>
-                        <div style={{ fontSize: '0.68rem', color: 'var(--text-3)', marginBottom: 4 }}>Titre</div>
-                        {renderArchiveEditableCell(f, 'titre')}
-                      </div>
-                      <div>
-                        <div style={{ fontSize: '0.68rem', color: 'var(--text-3)', marginBottom: 4 }}>Commercial</div>
-                        {renderArchiveEditableCell(f, 'commercial')}
-                      </div>
-                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => openArchiveMetaEdit(f)} style={{ alignSelf: 'flex-start' }}>
-                        <Edit2 size={13} /> Modifier titre / commercial
+                    <>
+                      <button
+                        type="button"
+                        title="Modifier titre / commercial"
+                        onClick={() => openArchiveMetaEdit(f)}
+                        className="crm-doc-title"
+                        style={{
+                          background: 'none',
+                          border: 'none',
+                          borderRadius: 0,
+                          padding: 0,
+                          width: '100%',
+                          textAlign: 'left',
+                          boxShadow: 'none',
+                          cursor: 'pointer',
+                          fontWeight: 600,
+                          color: 'var(--text)',
+                        }}
+                      >
+                        {titreAffiche !== '—' ? titreAffiche : 'Titre à renseigner'}
                       </button>
-                    </div>
+                      <div className="crm-doc-meta" style={{ marginTop: 4 }}>
+                        <span className="crm-doc-meta-line" style={{ color: 'var(--text-2)' }}>
+                          {fmtCommercial(f.commercial) !== '—' ? fmtCommercial(f.commercial) : 'Commercial à renseigner'}
+                        </span>
+                      </div>
+                    </>
                   ) : (
                     <button
                       type="button"
