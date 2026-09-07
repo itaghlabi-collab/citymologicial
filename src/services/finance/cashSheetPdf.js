@@ -111,7 +111,7 @@ function drawSummaryBox(doc, totals) {
   doc.roundedRect(boxX, boxY, boxW, boxH, 2, 2, 'FD');
 
   const rows = [
-    ['Solde initial', formatPdfMAD(totals.soldeInitial)],
+    ['Solde initial / Reliquat', formatPdfMAD(totals.soldeInitial)],
     ['Total entrées', formatPdfMAD(totals.totalEntrees)],
     ['Total sorties', formatPdfMAD(totals.totalSorties)],
     ['Solde caisse du mois', formatPdfMAD(totals.soldeMois)],

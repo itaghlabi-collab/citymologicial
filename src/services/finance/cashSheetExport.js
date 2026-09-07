@@ -12,7 +12,7 @@ export function exportCashSheetExcel({ year, month, transactions, totals }) {
   const rows = [
     ['Feuille de caisse', `${month}/${year}`],
     [],
-    ['Solde initial', totals.soldeInitial],
+    ['Solde initial / Reliquat', totals.soldeInitial],
     ['Alimentation caisse', totals.alimentation],
     ['Total entrées', totals.totalEntrees],
     ['Total sorties', totals.totalSorties],

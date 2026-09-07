@@ -348,6 +348,7 @@ export default function FeuilleCaisse() {
 
   function openBalanceModal() {
     setBalForm({
+      // Prefill avec le reliquat effectif (solde final du mois précédent).
       solde_initial: balance?.solde_initial ?? '',
       alimentation: balance?.alimentation ?? '',
       notes: balance?.notes ?? '',
@@ -505,11 +506,11 @@ export default function FeuilleCaisse() {
         </div>
       ) : viewMode === 'month' ? (
         <div className="stat-grid finance-kpi-grid finance-kpi-strip">
-          <KpiCard icon={<Wallet size={17} />} label="Solde initial" value={formatMAD(totals.soldeInitial)} color="grey" />
+          <KpiCard icon={<Wallet size={17} />} label="Solde initial / Reliquat" value={formatMAD(totals.soldeInitial)} color="grey" sub="solde final du mois précédent" />
           <KpiCard icon={<Plus size={17} />} label="Alimentation" value={formatMAD(totals.alimentation)} color="purple" />
           <KpiCard icon={<Plus size={17} />} label="Total entrées" value={formatMAD(totals.totalEntrees)} color="green" />
           <KpiCard icon={<TrendingDown size={17} />} label="Total sorties" value={formatMAD(totals.totalSorties)} color="red" />
-          <KpiCard icon={<Wallet size={17} />} label="Solde caisse du mois" value={formatMAD(totals.soldeMois)} color="blue" sub="solde_initial + alimentation + entrées − sorties" />
+          <KpiCard icon={<Wallet size={17} />} label="Solde caisse du mois" value={formatMAD(totals.soldeMois)} color="blue" sub="reliquat + alimentation + entrées − sorties" />
         </div>
       ) : null}
 
@@ -611,11 +612,15 @@ export default function FeuilleCaisse() {
 
       <Modal open={showBalance} onClose={() => setShowBalance(false)} title="Paramètres du mois" width={480}>
         <form onSubmit={handleSaveBalance}>
+          <p style={{ fontSize: '0.82rem', color: 'var(--text-3)', margin: '0 0 12px' }}>
+            En fonctionnement normal, le solde initial est le reliquat du mois précédent (calcul automatique).
+            Ce formulaire sert à initialiser ou corriger exceptionnellement l’amorce historique.
+          </p>
           <FRow>
-            <FField label="Solde caisse mois précédent">
+            <FField label="Solde initial / Reliquat">
               <input type="number" step="0.01" value={balForm.solde_initial} onChange={(e) => setBalForm((p) => ({ ...p, solde_initial: e.target.value }))} style={INPUT_STYLE} />
             </FField>
-            <FField label="Alimentation caisse">
+            <FField label="Alimentation (paramètre mois)">
               <input type="number" step="0.01" value={balForm.alimentation} onChange={(e) => setBalForm((p) => ({ ...p, alimentation: e.target.value }))} style={INPUT_STYLE} />
             </FField>
           </FRow>
