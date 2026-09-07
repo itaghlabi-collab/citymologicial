@@ -49,7 +49,8 @@ function Badge({ type, children }) {
     brouillon:  { cls: 'badge-grey',   label: 'Brouillon'  },
     en_cours:   { cls: 'badge-orange', label: 'En cours'   },
     en_pause:   { cls: 'badge-blue',   label: 'En pause'   },
-    termine:    { cls: 'badge-green',  label: 'Terminé'    },
+    termine:    { cls: 'badge-green',  label: 'Clôturé'    },
+    cloture:    { cls: 'badge-green',  label: 'Clôturé'    },
     annule:     { cls: 'badge-red',    label: 'Annulé'     },
     planifie:   { cls: 'badge-blue',   label: 'Planifié'   },
     suspendu:   { cls: 'badge-red',    label: 'Suspendu'   },
@@ -154,7 +155,7 @@ const STATUTS_PROJET = [
   { value: 'brouillon', label: 'Brouillon' },
   { value: 'en_cours',  label: 'En cours'  },
   { value: 'en_pause',  label: 'En pause'  },
-  { value: 'termine',   label: 'Terminé'   },
+  { value: 'termine',   label: 'Clôturé'   },
   { value: 'annule',    label: 'Annulé'    },
 ];
 
@@ -935,7 +936,12 @@ function ProjectEquipeTab({ projet, compact = false }) {
 
 // ── Page Détail Projet ───────────────────────────────────────────────────────
 
-function DetailProjet({ projet, onBack, onEdit, onCreateSAV, onTransmitFabrication, canTransmitFabrication, initialTab = 'general' }) {
+function canCloturerProjet(p) {
+  if (!p) return false;
+  return !['termine', 'cloture', 'annule'].includes(String(p.statut || '').toLowerCase());
+}
+
+function DetailProjet({ projet, onBack, onEdit, onCloturer, onCreateSAV, onTransmitFabrication, canTransmitFabrication, initialTab = 'general' }) {
   const [activeTab, setActiveTab] = useState(initialTab);
 
   const tabs = [
@@ -973,6 +979,17 @@ function DetailProjet({ projet, onBack, onEdit, onCreateSAV, onTransmitFabricati
             <button className="btn btn-secondary btn-sm" type="button" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={onEdit}>
               <Edit2 size={13} /> Modifier
             </button>
+            {canCloturerProjet(projet) && onCloturer && (
+              <button
+                type="button"
+                className="btn btn-primary btn-sm"
+                style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+                onClick={() => onCloturer(projet)}
+                title="Marquer le projet comme clôturé"
+              >
+                <CheckCircle size={13} /> Clôturer
+              </button>
+            )}
             <button className="btn btn-ghost btn-sm" type="button" style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }} onClick={() => generateProjectRecapPdf(projet).catch((e) => alert(e.message || 'Erreur PDF'))}>
               <Download size={13} /> PDF récap
             </button>
@@ -992,6 +1009,12 @@ function DetailProjet({ projet, onBack, onEdit, onCreateSAV, onTransmitFabricati
               <Edit2 size={15} />
               <span>Modifier</span>
             </button>
+            {canCloturerProjet(projet) && onCloturer && (
+              <button type="button" className="pj-detail-action-btn pj-detail-action-btn--primary" onClick={() => onCloturer(projet)}>
+                <CheckCircle size={15} />
+                <span>Clôturer</span>
+              </button>
+            )}
             <button
               type="button"
               className="pj-detail-action-btn"
@@ -1223,6 +1246,24 @@ export default function ProjetsList({ onCreateSAV }) {
     if (!result.success) alert(result.error || 'Erreur suppression.');
   }, [remove]);
 
+  const handleCloturer = useCallback(async (p) => {
+    if (!p?.id || !canCloturerProjet(p)) return;
+    if (!window.confirm(`Clôturer le projet « ${p.nom || p.ref} » ?\nLe statut passera à Clôturé (avancement 100 %).`)) return;
+    const result = await update(p.id, {
+      ...p,
+      statut: 'termine',
+      avancement: 100,
+    });
+    if (!result.success) {
+      alert(result.error || 'Erreur clôture.');
+      return;
+    }
+    if (detailProjet?.id === p.id) {
+      const full = await fetchOne(p.id).catch(() => ({ ...p, statut: 'termine', avancement: 100 }));
+      setDetailProjet(full);
+    }
+  }, [update, detailProjet?.id, fetchOne]);
+
   const openDetail = useCallback(async (p, tab = 'general') => {
     try {
       const full = await fetchOne(p.id);
@@ -1303,6 +1344,7 @@ export default function ProjetsList({ onCreateSAV }) {
           initialTab={detailInitialTab}
           onBack={() => { setDetailProjet(null); setDetailInitialTab('general'); }}
           onEdit={() => { openEdit(detailProjet); setDetailProjet(null); }}
+          onCloturer={handleCloturer}
           onCreateSAV={onCreateSAV}
           canTransmitFabrication={canTransmitFabrication}
           onTransmitFabrication={() => setTransmitProjet(detailProjet)}
@@ -1355,7 +1397,7 @@ export default function ProjetsList({ onCreateSAV }) {
       <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', marginBottom: 20 }}>
         <KpiCard icon={<FolderOpen size={17} />}  label="Total projets"    value={total}                                           color="grey"  />
         <KpiCard icon={<Layers size={17} />}       label="En cours"         value={enCours}                                         color="blue"  />
-        <KpiCard icon={<CheckCircle size={17} />}  label="Terminés"         value={termines}                                        color="green" />
+        <KpiCard icon={<CheckCircle size={17} />}  label="Clôturés"         value={termines}                                        color="green" />
         <KpiCard icon={<AlertTriangle size={17} />}label="En retard"        value={enRetard}                                        color="red"   />
         <KpiCard icon={<DollarSign size={17} />}   label="Budget total"     value={budgetTotal.toLocaleString('fr-MA') + ' MAD'}   color="green" />
         <KpiCard icon={<TrendingUp size={17} />}   label="Budget consommé"  value={budgetConso.toLocaleString('fr-MA') + ' MAD'}   color="orange"/>
@@ -1462,6 +1504,17 @@ export default function ProjetsList({ onCreateSAV }) {
                           <button className="btn btn-secondary btn-sm" title="Voir" onClick={() => openDetail(p)}><Eye size={13} /></button>
                           <button className="btn btn-ghost btn-sm" title="Équipe / affectation ouvriers" onClick={() => openDetail(p, 'equipe')} style={{ color: '#1565C0' }}><Users size={13} /></button>
                           <button className="btn btn-ghost btn-sm" title="Modifier" onClick={() => openEdit(p)}><Edit2 size={13} /></button>
+                          {canCloturerProjet(p) && (
+                            <button
+                              type="button"
+                              className="btn btn-ghost btn-sm"
+                              title="Clôturer le projet"
+                              onClick={() => handleCloturer(p)}
+                              style={{ color: '#2E7D32' }}
+                            >
+                              <CheckCircle size={13} />
+                            </button>
+                          )}
                           <button className="btn btn-ghost btn-sm" title="PDF récap" disabled={pdfLoadingId === p.id} onClick={() => handlePdf(p)} style={{ color: 'var(--text-3)' }}><Download size={13} /></button>
                           <button className="btn btn-ghost btn-sm" title="Supprimer" onClick={() => handleDelete(p.id)} style={{ color: 'var(--red)' }}><Trash2 size={13} /></button>
                         </div>
@@ -1502,6 +1555,9 @@ export default function ProjetsList({ onCreateSAV }) {
                       items={[
                         { id: 'equipe', icon: Users, label: 'Équipe', onClick: () => openDetail(p, 'equipe') },
                         { id: 'edit', icon: Edit2, label: 'Modifier', onClick: () => openEdit(p) },
+                        ...(canCloturerProjet(p)
+                          ? [{ id: 'cloturer', icon: CheckCircle, label: 'Clôturer', onClick: () => handleCloturer(p) }]
+                          : []),
                         { id: 'pdf', icon: Download, label: 'PDF', onClick: () => handlePdf(p), disabled: pdfLoadingId === p.id },
                         { divider: true },
                         { id: 'delete', icon: Trash2, label: 'Supprimer', onClick: () => handleDelete(p.id), danger: true },
