@@ -36,10 +36,10 @@ export function archiveToDevisRow(archive) {
     id: `archive-${archive.id}`,
     archive_id: archive.id,
     reference: archive.reference || archive.file_name?.match(/PR-\d{4}-\d{2}-\d+/i)?.[0] || '—',
-    titre: archive.intitule || archive.file_name,
+    titre: archive.intitule || '',
     client_nom: archive.client_nom,
     client_id: archive.client_id,
-    commercial: '—',
+    commercial: archive.commercial || '',
     total_ht: amounts.total_ht,
     total_tva: amounts.total_tva,
     total_ttc: amounts.total_ttc,
@@ -58,11 +58,11 @@ export function archiveToFactureRow(archive) {
     id: `archive-${archive.id}`,
     archive_id: archive.id,
     numero: archive.reference || archive.file_name?.match(/FAC-\d{4}-\d{3,}/i)?.[0] || '—',
-    titre: '',
+    titre: archive.intitule || '',
     client_nom: archive.client_nom,
     client_id: archive.client_id,
     devis_reference: archive.devis_reference,
-    commercial: '—',
+    commercial: archive.commercial || '',
     total_ht: amounts.total_ht,
     total_tva: amounts.total_tva,
     total_ttc: amounts.total_ttc,
@@ -106,16 +106,16 @@ export async function downloadArchivePdf(archive) {
 
 export function archiveMatchesDevisFilters(archive, { search = '', statut = '', commercial = '' } = {}) {
   if (statut && statut !== 'archive_importee') return false;
-  if (commercial) return false;
+  if (commercial && String(archive.commercial || '').trim() !== String(commercial).trim()) return false;
   const q = search.trim().toLowerCase();
   if (!q) return true;
-  const hay = [archive.reference, archive.client_nom, archive.intitule, archive.file_name].join(' ').toLowerCase();
+  const hay = [archive.reference, archive.client_nom, archive.intitule, archive.commercial, archive.file_name].join(' ').toLowerCase();
   return hay.includes(q);
 }
 
 export function archiveMatchesFactureFilters(archive, filters = {}) {
   if (filters.statut && filters.statut !== 'archive_importee') return false;
-  if (filters.commercial) return false;
+  if (filters.commercial && String(archive.commercial || '').trim() !== String(filters.commercial).trim()) return false;
   if (filters.client_id && String(archive.client_id) !== String(filters.client_id)) return false;
   if (filters.date && archive.date_document !== filters.date) return false;
   if (filters.montant_min) {
@@ -124,6 +124,6 @@ export function archiveMatchesFactureFilters(archive, filters = {}) {
   }
   const q = (filters.search || '').trim().toLowerCase();
   if (!q) return true;
-  const hay = [archive.reference, archive.client_nom, archive.intitule, archive.file_name].join(' ').toLowerCase();
+  const hay = [archive.reference, archive.client_nom, archive.intitule, archive.commercial, archive.file_name].join(' ').toLowerCase();
   return hay.includes(q);
 }

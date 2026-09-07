@@ -57,6 +57,7 @@ export function normalizeCrmArchive(row, client = null) {
     date_echeance: row.date_echeance,
     devis_reference: row.devis_reference,
     intitule: row.intitule,
+    commercial: row.commercial || '',
     client_id: row.client_id,
     client_nom: c ? clientDisplayName(c) : (row.client_detected_name || 'Client à associer manuellement'),
     client_detected_name: row.client_detected_name,

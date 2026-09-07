@@ -13,7 +13,7 @@ import FactureForm from './FactureForm';
 import FactureAcompte from './FactureAcompte';
 import Proformas from './Proformas';
 import CrmDocTabs from './CrmDocTabs';
-import { listImportedCrmArchives, repairImportedArchivesInBackground } from '../../services/crm/crmArchives';
+import { listImportedCrmArchives, repairImportedArchivesInBackground, updateCrmArchive } from '../../services/crm/crmArchives';
 import {
   archiveToFactureRow,
   archiveMatchesFactureFilters,
@@ -208,6 +208,9 @@ export default function Factures() {
   const [pdfLoadingId, setPdfLoadingId] = useState(null);
   const [clientsList, setClientsList] = useState([]);
   const [importedArchives, setImportedArchives] = useState([]);
+  /** Édition inline titre / commercial sur une archive importée. */
+  const [archiveFieldEdit, setArchiveFieldEdit] = useState(null); // { id, field: 'titre'|'commercial', value }
+  const [archiveFieldSaving, setArchiveFieldSaving] = useState(false);
 
   /* Filters */
   const [search, setSearch]           = useState('');
@@ -254,7 +257,105 @@ export default function Factures() {
   }, [configured, factures.length]);
 
   /* Derived */
-  const commerciaux = [...new Set(factures.map(f => f.commercial).filter(Boolean))];
+  const commerciaux = [...new Set([
+    ...factures.map((f) => f.commercial).filter(Boolean),
+    ...importedArchives.map((a) => a.commercial).filter(Boolean),
+  ])];
+
+  async function saveArchiveField(archiveId, field, rawValue) {
+    const value = String(rawValue || '').trim();
+    const patch = field === 'titre'
+      ? { intitule: value || null }
+      : { commercial: value || null };
+    setArchiveFieldSaving(true);
+    try {
+      const updated = await updateCrmArchive(archiveId, patch);
+      setImportedArchives((prev) => prev.map((a) => (a.id === archiveId ? { ...a, ...updated } : a)));
+      setArchiveFieldEdit(null);
+      showToast(field === 'titre' ? 'Titre enregistré.' : 'Commercial enregistré.');
+    } catch (err) {
+      const msg = err?.message || '';
+      if (/commercial|column|schema cache/i.test(msg)) {
+        showToast('Colonne commercial absente — exécutez supabase/RUN_CRM_ARCHIVES_COMMERCIAL.sql', 'error');
+      } else {
+        showToast(msg || 'Erreur enregistrement.', 'error');
+      }
+    } finally {
+      setArchiveFieldSaving(false);
+    }
+  }
+
+  function startArchiveFieldEdit(f, field) {
+    if (!f?.__isImportedArchive || !f.archive_id) return;
+    setArchiveFieldEdit({
+      id: f.archive_id,
+      field,
+      value: field === 'titre' ? (f.titre || '') : (f.commercial || ''),
+    });
+  }
+
+  function renderArchiveEditableCell(f, field, displayValue) {
+    const editing = archiveFieldEdit?.id === f.archive_id && archiveFieldEdit?.field === field;
+    if (editing) {
+      return (
+        <input
+          autoFocus
+          disabled={archiveFieldSaving}
+          value={archiveFieldEdit.value}
+          placeholder={field === 'titre' ? 'Titre de la facture…' : 'Nom du commercial…'}
+          onChange={(e) => setArchiveFieldEdit((p) => (p ? { ...p, value: e.target.value } : p))}
+          onBlur={() => {
+            if (!archiveFieldEdit) return;
+            saveArchiveField(archiveFieldEdit.id, archiveFieldEdit.field, archiveFieldEdit.value);
+          }}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault();
+              e.currentTarget.blur();
+            }
+            if (e.key === 'Escape') {
+              e.preventDefault();
+              setArchiveFieldEdit(null);
+            }
+          }}
+          style={{
+            width: '100%',
+            maxWidth: field === 'titre' ? 220 : 140,
+            padding: '6px 8px',
+            border: '1.5px solid var(--red)',
+            borderRadius: 6,
+            fontSize: '0.84rem',
+            fontFamily: 'var(--font-body)',
+            boxSizing: 'border-box',
+          }}
+        />
+      );
+    }
+    return (
+      <button
+        type="button"
+        title="Cliquer pour modifier"
+        onClick={() => startArchiveFieldEdit(f, field)}
+        style={{
+          background: 'none',
+          border: '1px dashed var(--border)',
+          borderRadius: 6,
+          padding: '4px 8px',
+          cursor: 'pointer',
+          textAlign: 'left',
+          width: '100%',
+          maxWidth: '100%',
+          fontWeight: field === 'titre' ? 600 : 500,
+          color: displayValue === '—' ? 'var(--text-3)' : 'var(--text)',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+        }}
+      >
+        {displayValue}
+      </button>
+    );
+  }
 
   /* Filter + sort */
   const archiveRows = importedArchives
@@ -588,23 +689,27 @@ export default function Factures() {
 
                       {/* Titre */}
                       <td data-label="Titre" className="crm-col-title">
-                        <button
-                          type="button"
-                          title={f.titre || 'Ouvrir le PDF'}
-                          disabled={pdfLoadingId === f.id}
-                          onClick={() => handlePdfInTab(f)}
-                          style={pdfOpenButtonStyle(pdfLoadingId === f.id, {
-                            fontWeight: 600,
-                            color: 'var(--text)',
-                            display: 'block',
-                            maxWidth: '100%',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                          })}
-                        >
-                          {titreAffiche}
-                        </button>
+                        {f.__isImportedArchive ? (
+                          renderArchiveEditableCell(f, 'titre', titreAffiche)
+                        ) : (
+                          <button
+                            type="button"
+                            title={f.titre || 'Ouvrir le PDF'}
+                            disabled={pdfLoadingId === f.id}
+                            onClick={() => handlePdfInTab(f)}
+                            style={pdfOpenButtonStyle(pdfLoadingId === f.id, {
+                              fontWeight: 600,
+                              color: 'var(--text)',
+                              display: 'block',
+                              maxWidth: '100%',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                            })}
+                          >
+                            {titreAffiche}
+                          </button>
+                        )}
                       </td>
 
                       {/* Devis lié */}
@@ -623,7 +728,9 @@ export default function Factures() {
 
                       {/* Commercial */}
                       <td data-label="Commercial" className="crm-col-commercial" title={fmtCommercial(f.commercial)} style={{ color: 'var(--text-2)' }}>
-                        {fmtCommercial(f.commercial)}
+                        {f.__isImportedArchive
+                          ? renderArchiveEditableCell(f, 'commercial', fmtCommercial(f.commercial))
+                          : fmtCommercial(f.commercial)}
                       </td>
 
                       {/* Total TTC */}
@@ -744,16 +851,25 @@ export default function Factures() {
                     </button>
                     <StatutBadge statut={f.statut} />
                   </div>
-                  <button
-                    type="button"
-                    title="Ouvrir le PDF"
-                    disabled={pdfLoadingId === f.id}
-                    onClick={() => handlePdfInTab(f)}
-                    className="crm-doc-title"
-                    style={pdfOpenButtonStyle(pdfLoadingId === f.id, { width: '100%', textAlign: 'left' })}
-                  >
-                    {titreAffiche !== '—' ? titreAffiche : clientNom}
-                  </button>
+                  {f.__isImportedArchive ? (
+                    <div style={{ marginBottom: 8 }}>
+                      <div style={{ fontSize: '0.68rem', color: 'var(--text-3)', marginBottom: 4 }}>Titre</div>
+                      {renderArchiveEditableCell(f, 'titre', titreAffiche)}
+                      <div style={{ fontSize: '0.68rem', color: 'var(--text-3)', margin: '8px 0 4px' }}>Commercial</div>
+                      {renderArchiveEditableCell(f, 'commercial', fmtCommercial(f.commercial))}
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      title="Ouvrir le PDF"
+                      disabled={pdfLoadingId === f.id}
+                      onClick={() => handlePdfInTab(f)}
+                      className="crm-doc-title"
+                      style={pdfOpenButtonStyle(pdfLoadingId === f.id, { width: '100%', textAlign: 'left' })}
+                    >
+                      {titreAffiche !== '—' ? titreAffiche : clientNom}
+                    </button>
+                  )}
                   <div className="crm-doc-meta">
                     <span className="crm-doc-meta-line">{clientNom}</span>
                     <span className="crm-doc-meta-line">{fmtDate(f.date_emission)}</span>
