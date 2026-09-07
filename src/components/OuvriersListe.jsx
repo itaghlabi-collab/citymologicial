@@ -28,6 +28,10 @@ import CINGuidedCamera from './cin/CINGuidedCamera';
 import { generateWorkerPdf } from '../services/rh/workerPdf';
 import { workerTarifJournalier } from '../services/rh/workers';
 import { exportWorkersExcel } from '../services/rh/workersExcelExport';
+import { listProjects } from '../services/projects/projects';
+import { personNamesMatch } from '../services/rh/attendance';
+import { useAuth } from '../hooks/useAuth';
+import { isSuperAdmin } from '../services/rh/isSuperAdmin';
 
 /* Exported for compatibility — starts empty, populated from API */
 export const SEED_WORKERS = [];
@@ -87,10 +91,44 @@ function formFromWorker(worker) {
   return {
     ...EMPTY_FORM,
     ...worker,
+    project_id: worker.project_id ? String(worker.project_id) : '',
     tarif: daily ? String(daily) : '',
     tarif_unite: 'jour',
     experience: String(experienceToStars(worker.experience)),
   };
+}
+
+/** Projets ouverts visibles pour le formulaire ouvrier (filtrés chef de chantier si applicable). */
+function filterProjectsForWorkerForm(projects, user) {
+  const open = (projects || []).filter((p) => {
+    const st = String(p.statut || '').toLowerCase();
+    return !['termine', 'cloture', 'annule'].includes(st);
+  });
+  if (!user) return open;
+
+  const role = String(user.role || '').toLowerCase().replace(/\s+/g, '_');
+  const isPrivileged = isSuperAdmin(user)
+    || role.includes('rh')
+    || role.includes('admin')
+    || role === 'dg'
+    || role.includes('directeur');
+
+  if (isPrivileged) return open;
+
+  const mine = open.filter((p) => {
+    const chef = p.chef_chantier || '';
+    return chef && personNamesMatch(chef, user.nom || '');
+  });
+  // Chef de chantier : uniquement ses chantiers. Sinon (autre rôle) : tous les ouverts.
+  const looksLikeChefChantier = (role.includes('chef') && role.includes('chantier'))
+    || role.includes('conducteur');
+  if (looksLikeChefChantier) return mine;
+  return mine.length ? mine : open;
+}
+
+function projectOptionLabel(p) {
+  if (!p) return '';
+  return p.ref ? `${p.ref} — ${p.nom}` : (p.nom || 'Projet');
 }
 /* ── Input style ── */
 function IS(err, extra = {}) {
@@ -1287,9 +1325,12 @@ function OuvrierDetail({ worker, onBack, onEdit, onDownloadPdf, pdfLoading }) {
    OUVRIER FORM MODAL
    ══════════════════════════════════════════════════════ */
 function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExisting }) {
+  const { user } = useAuth();
   const isEdit = !!worker;
   const [form, setForm] = useState(() => formFromWorker(worker));
   const [errors, setErrors] = useState({});
+  const [projectOptions, setProjectOptions] = useState([]);
+  const [projectsLoading, setProjectsLoading] = useState(true);
   const [showScanner, setShowScanner] = useState(false);
   const [scannerStream, setScannerStream] = useState(null);
   const [scannerMode, setScannerMode] = useState('full');
@@ -1328,7 +1369,37 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
     { id: 'equipements', label: 'Equipements' },
   ];
 
+  useEffect(() => {
+    let alive = true;
+    setProjectsLoading(true);
+    listProjects()
+      .then((rows) => {
+        if (!alive) return;
+        const filtered = filterProjectsForWorkerForm(rows, user);
+        // Garder le projet déjà lié même s’il est clôturé / hors filtre chef
+        if (form.project_id && !filtered.some((p) => String(p.id) === String(form.project_id))) {
+          const current = (rows || []).find((p) => String(p.id) === String(form.project_id));
+          if (current) filtered.unshift(current);
+        }
+        setProjectOptions(filtered);
+      })
+      .catch(() => { if (alive) setProjectOptions([]); })
+      .finally(() => { if (alive) setProjectsLoading(false); });
+    return () => { alive = false; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- recharger si user change ; project_id initial suffit
+  }, [user?.id, user?.nom, user?.role, worker?.id]);
+
   function set(k, v) { setForm(p => ({ ...p, [k]: v })); }
+
+  function setLinkedProject(projectId) {
+    const p = projectOptions.find((x) => String(x.id) === String(projectId));
+    setForm((prev) => ({
+      ...prev,
+      project_id: projectId || '',
+      projet_nom: p ? projectOptionLabel(p) : '',
+      chantier: p?.nom || '',
+    }));
+  }
 
   function flashOcrToast(message, type = 'success', ms = 7000) {
     const msg = getReadableMessage(message, type === 'error'
@@ -1729,6 +1800,7 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
     if (!form.prenom.trim()) e.prenom = 'Requis';
     if (!form.nom.trim())    e.nom    = 'Requis';
     if (!form.cin.trim())    e.cin    = 'Requis';
+    if (!form.project_id) e.project_id = 'Sélectionnez un chantier';
     if (!form.tarif || isNaN(Number(form.tarif))) e.tarif = 'Montant valide requis';
     return e;
   }
@@ -1736,7 +1808,12 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
   async function handleSubmit(ev) {
     ev.preventDefault();
     const errs = validate();
-    if (Object.keys(errs).length) { setErrors(errs); setFormTab('identite'); return; }
+    if (Object.keys(errs).length) {
+      setErrors(errs);
+      if (errs.prenom || errs.nom || errs.cin) setFormTab('identite');
+      else if (errs.project_id || errs.tarif) setFormTab('chantier');
+      return;
+    }
     const dup = findDuplicateWorker();
     if (dup) {
       setDuplicateHit(dup);
@@ -1991,6 +2068,24 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
               {/* ── TAB: CHANTIER ── */}
               {formTab === 'chantier' && (
                 <div className="ouv-fields-grid">
+                  <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                    <Label required>Projet lié</Label>
+                    <select
+                      value={form.project_id || ''}
+                      onChange={(e) => setLinkedProject(e.target.value)}
+                      style={IS(errors.project_id)}
+                      disabled={projectsLoading}
+                    >
+                      <option value="">{projectsLoading ? 'Chargement…' : 'Choisir un chantier…'}</option>
+                      {projectOptions.map((p) => (
+                        <option key={p.id} value={String(p.id)}>{projectOptionLabel(p)}</option>
+                      ))}
+                    </select>
+                    {errors.project_id && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.project_id}</span>}
+                    <p style={{ margin: '6px 0 0', fontSize: '0.75rem', color: 'var(--text-3)' }}>
+                      Uniquement les chantiers du chef de chantier — l’ouvrier apparaîtra en Présence sur ce projet.
+                    </p>
+                  </div>
                   <div className="form-group">
                     <Label required>Fonction</Label>
                     <select value={form.fonction} onChange={e => set('fonction', e.target.value)} style={IS(false)}>

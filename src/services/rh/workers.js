@@ -167,6 +167,11 @@ export function toWorkerRow(form, meta = {}) {
     taille_vetement: emptyToNull(form.taille_vetement),
     taille_gants: emptyToNull(form.taille_gants),
     casque: emptyToNull(form.casque),
+    project_id: form.project_id || null,
+    chantier: emptyToNull(
+      (form.projet_nom || form.chantier || '').trim()
+      || null,
+    ),
     ...meta,
   };
 }
@@ -275,6 +280,14 @@ export async function createWorker(form) {
   if (error) throw error;
 
   await syncWorkerMedia(data.id, form);
+  if (form.project_id) {
+    try {
+      const { ensureWorkerAssignedToProject } = await import('./workerProjectAssignments');
+      await ensureWorkerAssignedToProject(form.project_id, data.id);
+    } catch (assignErr) {
+      console.warn('[CITYMO] affectation projet à la création ouvrier', assignErr);
+    }
+  }
   const { data: fresh, error: reloadErr } = await getSupabase()
     .from(TABLE)
     .select(WORKER_SELECT)
@@ -306,6 +319,14 @@ export async function updateWorker(id, form) {
   if (error) throw error;
 
   await syncWorkerMedia(id, form, existing);
+  if (form.project_id) {
+    try {
+      const { ensureWorkerAssignedToProject } = await import('./workerProjectAssignments');
+      await ensureWorkerAssignedToProject(form.project_id, id);
+    } catch (assignErr) {
+      console.warn('[CITYMO] affectation projet à la MAJ ouvrier', assignErr);
+    }
+  }
   const { data: fresh, error: reloadErr } = await getSupabase()
     .from(TABLE)
     .select(WORKER_SELECT)
