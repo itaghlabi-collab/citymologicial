@@ -22,11 +22,27 @@ export function formatSupabaseError(error, fallback = 'Une erreur est survenue.'
   if (code === '42703' || message.includes('created_by')) {
     return 'Schéma congés incomplet — exécutez supabase/migrations/20260525200000_leaves_rls_super_admin.sql';
   }
-  if (code === '42P01' || message.includes('attendance')) {
+  if (
+    (code === '42P01' && /attendance/i.test(message))
+    || /Could not find the table ['"]public\.attendance['"]/i.test(message)
+    || /relation ['"]public\.attendance['"] does not exist/i.test(message)
+  ) {
     return 'Table présence absente — exécutez supabase/RUN_PRESENCE_COMPLET.sql dans Supabase (SQL Editor).';
   }
-  if (code === '42P01' || message.includes('workers')) {
+  if (
+    /workers\.project_id|column ['"]?project_id['"]? .*workers|Could not find the ['"]project_id['"] column of ['"]workers['"]/i.test(message)
+  ) {
+    return 'Colonne projet ouvrier absente — exécutez supabase/RUN_PRESENCE_COMPLET.sql dans Supabase (SQL Editor).';
+  }
+  if (
+    (code === '42P01' && /\bworkers\b/i.test(message))
+    || /Could not find the table ['"]public\.workers['"]/i.test(message)
+    || /relation ['"]public\.workers['"] does not exist/i.test(message)
+  ) {
     return 'Table ouvriers absente — exécutez supabase/migrations/20260525300000_workers_schema.sql';
+  }
+  if (/workers_experience|experience.*check|violates check constraint.*experience/i.test(message)) {
+    return 'Niveau d’expérience invalide — réessayez ou contactez l’admin (contrainte experience).';
   }
   if (message.includes('attendance_statut_check') || message.includes('demi_journee')) {
     return 'Statuts présence incomplets — exécutez supabase/RUN_ATTENDANCE_NOW.sql dans Supabase (SQL Editor).';

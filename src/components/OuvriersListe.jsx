@@ -1801,7 +1801,7 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
     if (!form.nom.trim())    e.nom    = 'Requis';
     if (!form.cin.trim())    e.cin    = 'Requis';
     if (!form.project_id) e.project_id = 'Sélectionnez un chantier';
-    if (!form.tarif || isNaN(Number(form.tarif))) e.tarif = 'Montant valide requis';
+    if (!form.tarif || isNaN(Number(form.tarif)) || Number(form.tarif) <= 0) e.tarif = 'Montant valide requis';
     return e;
   }
 
@@ -1814,6 +1814,7 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
       else if (errs.project_id || errs.tarif) setFormTab('chantier');
       return;
     }
+    setErrors({});
     const dup = findDuplicateWorker();
     if (dup) {
       setDuplicateHit(dup);

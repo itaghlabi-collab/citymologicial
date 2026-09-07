@@ -34,6 +34,24 @@ function emptyToNull(v) {
   return v;
 }
 
+/** UI stars (1–5) → valeurs DB historiques (contrainte CHECK éventuelle). */
+function experienceToDb(value) {
+  const raw = String(value ?? '').trim();
+  if (['debutant', 'intermediaire', 'confirme', 'expert'].includes(raw)) return raw;
+  const n = Number(raw);
+  if (n <= 1) return 'debutant';
+  if (n === 2) return 'intermediaire';
+  if (n === 3) return 'confirme';
+  if (n >= 4) return 'expert';
+  return 'intermediaire';
+}
+
+function isMissingProjectIdColumnError(error) {
+  const msg = error?.message || '';
+  return /project_id/i.test(msg)
+    && (/workers/i.test(msg) || /schema cache/i.test(msg) || error?.code === 'PGRST204' || error?.code === '42703');
+}
+
 export const WORKER_HOURS_PER_DAY = 8;
 
 function round2(n) {
@@ -147,7 +165,7 @@ export function toWorkerRow(form, meta = {}) {
     fonction: emptyToNull(form.fonction),
     tarif: Number(form.tarif) || 0,
     tarif_unite: form.tarif_unite || 'jour',
-    experience: form.experience || '3',
+    experience: experienceToDb(form.experience),
     date_naissance: emptyToNull(form.date_naissance),
     lieu_naissance: emptyToNull(form.ville_naissance?.trim()),
     adresse: emptyToNull(form.adresse?.trim()),
@@ -245,10 +263,17 @@ async function syncWorkerMedia(workerId, form, existingRow = {}) {
 }
 
 export async function listWorkers() {
-  const { data, error } = await getSupabase()
+  let { data, error } = await getSupabase()
     .from(TABLE)
     .select(WORKER_SELECT)
     .order('created_at', { ascending: false });
+
+  if (error && /projects|project_id|relationship/i.test(error.message || '')) {
+    ({ data, error } = await getSupabase()
+      .from(TABLE)
+      .select('*')
+      .order('created_at', { ascending: false }));
+  }
 
   if (error) throw error;
 
@@ -267,17 +292,70 @@ export async function listWorkers() {
   return Promise.all(normalized.map(enrichWorkerMedia));
 }
 
-export async function createWorker(form) {
-  const userId = await getAuthUserId();
-  const row = toWorkerRow(form, { created_by: userId });
-
-  const { data, error } = await getSupabase()
+async function insertWorkerRow(row) {
+  let { data, error } = await getSupabase()
     .from(TABLE)
     .insert([row])
     .select()
     .single();
 
+  if (error && isMissingProjectIdColumnError(error) && row.project_id != null) {
+    const fallback = { ...row };
+    delete fallback.project_id;
+    ({ data, error } = await getSupabase()
+      .from(TABLE)
+      .insert([fallback])
+      .select()
+      .single());
+  }
   if (error) throw error;
+  return data;
+}
+
+async function updateWorkerRow(id, row) {
+  let { data, error } = await getSupabase()
+    .from(TABLE)
+    .update(row)
+    .eq('id', id)
+    .select()
+    .single();
+
+  if (error && isMissingProjectIdColumnError(error) && row.project_id != null) {
+    const fallback = { ...row };
+    delete fallback.project_id;
+    ({ data, error } = await getSupabase()
+      .from(TABLE)
+      .update(fallback)
+      .eq('id', id)
+      .select()
+      .single());
+  }
+  if (error) throw error;
+  return data;
+}
+
+async function reloadWorker(id) {
+  let { data, error } = await getSupabase()
+    .from(TABLE)
+    .select(WORKER_SELECT)
+    .eq('id', id)
+    .single();
+
+  if (error && /projects|project_id|relationship/i.test(error.message || '')) {
+    ({ data, error } = await getSupabase()
+      .from(TABLE)
+      .select('*')
+      .eq('id', id)
+      .single());
+  }
+  if (error) throw error;
+  return data;
+}
+
+export async function createWorker(form) {
+  const userId = await getAuthUserId();
+  const row = toWorkerRow(form, { created_by: userId });
+  const data = await insertWorkerRow(row);
 
   await syncWorkerMedia(data.id, form);
   if (form.project_id) {
@@ -288,13 +366,7 @@ export async function createWorker(form) {
       console.warn('[CITYMO] affectation projet à la création ouvrier', assignErr);
     }
   }
-  const { data: fresh, error: reloadErr } = await getSupabase()
-    .from(TABLE)
-    .select(WORKER_SELECT)
-    .eq('id', data.id)
-    .single();
-
-  if (reloadErr) throw reloadErr;
+  const fresh = await reloadWorker(data.id);
   return enrichWorkerMedia(normalizeWorker(fresh));
 }
 
@@ -303,21 +375,13 @@ export async function updateWorker(id, form) {
 
   const { data: existing, error: fetchErr } = await getSupabase()
     .from(TABLE)
-    .select(WORKER_SELECT)
+    .select('*')
     .eq('id', id)
     .single();
 
   if (fetchErr) throw fetchErr;
 
-  const { data, error } = await getSupabase()
-    .from(TABLE)
-    .update(toWorkerRow(form))
-    .eq('id', id)
-    .select()
-    .single();
-
-  if (error) throw error;
-
+  await updateWorkerRow(id, toWorkerRow(form));
   await syncWorkerMedia(id, form, existing);
   if (form.project_id) {
     try {
@@ -327,13 +391,7 @@ export async function updateWorker(id, form) {
       console.warn('[CITYMO] affectation projet à la MAJ ouvrier', assignErr);
     }
   }
-  const { data: fresh, error: reloadErr } = await getSupabase()
-    .from(TABLE)
-    .select(WORKER_SELECT)
-    .eq('id', id)
-    .single();
-
-  if (reloadErr) throw reloadErr;
+  const fresh = await reloadWorker(id);
   return enrichWorkerMedia(normalizeWorker(fresh));
 }
 
