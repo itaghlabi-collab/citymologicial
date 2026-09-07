@@ -125,7 +125,6 @@ function SiteRequestDocumentHeader({ form }) {
 
 function RequestSummary({ lines, form }) {
   const active = lines.filter((l) => Number(l.quantite_demandee) > 0);
-  const totalQty = active.reduce((s, l) => s + (Number(l.quantite_demandee) || 0), 0);
   return (
     <div className="card" style={{ padding: '18px 20px' }}>
       <div style={{
@@ -137,7 +136,6 @@ function RequestSummary({ lines, form }) {
       </div>
       {[
         ['Articles demandés', active.length],
-        ['Quantité totale', totalQty],
         ['Priorité', form.priorite || 'Normale'],
         ['Projet', form.project_name || '—'],
       ].map(([label, val]) => (

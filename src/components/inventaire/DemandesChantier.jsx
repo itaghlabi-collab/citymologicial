@@ -774,7 +774,6 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                   {!embedded && <th>Projet</th>}
                   <th>Client</th>
                   <th>Nb articles</th>
-                  <th>Qté totale</th>
                   <th>Magasinier</th>
                   <th>Date souhaitée</th>
                   <th>Préparation</th>
@@ -799,7 +798,6 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                     {!embedded && <td data-label="Projet">{r.project_name || '—'}</td>}
                     <td data-label="Client">{r.client_name || '—'}</td>
                     <td data-label="Nb articles">{r.distinct_articles}</td>
-                    <td data-label="Qté totale">{r.total_articles}</td>
                     <td data-label="Magasinier">{r.prepared_by_name || '—'}</td>
                     <td data-label="Date souhaitée">{fmtDate(r.date_souhaitee)}</td>
                     <td data-label="Préparation">
@@ -934,13 +932,9 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                       <dd>{r.distinct_articles ?? '—'}</dd>
                     </div>
                     <div className="inv-dc-field">
-                      <dt>Qté totale</dt>
-                      <dd>{r.total_articles ?? '—'}</dd>
+                      <dt>Date souhaitée</dt>
+                      <dd>{fmtDate(r.date_souhaitee)}</dd>
                     </div>
-                  </div>
-                  <div className="inv-dc-field">
-                    <dt>Date souhaitée</dt>
-                    <dd>{fmtDate(r.date_souhaitee)}</dd>
                   </div>
                   <div className="inv-dc-field-grid">
                     <div className="inv-dc-field">
@@ -1296,8 +1290,9 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                   <table style={{ fontSize: '0.82rem' }}>
                     <thead>
                       <tr>
-                        <th>Article</th>
-                        <th>Demandé</th>
+                        <th>Désignation</th>
+                        <th>Quantité</th>
+                        <th>Unité</th>
                         <th>Disponibilité</th>
                         <th>Préparé</th>
                         <th>À acheter</th>
@@ -1319,7 +1314,8 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                               <span className="badge badge-orange" style={{ marginLeft: 6, fontSize: '0.65rem' }}>Hors catalogue</span>
                             )}
                           </td>
-                          <td>{l.quantite_demandee} {l.unite || 'u'}</td>
+                          <td>{l.quantite_demandee}</td>
+                          <td>{l.unite || 'u'}</td>
                           <td>
                             {embedded ? (
                               avail === 'ok' ? 'Disponible' : avail === 'partial' ? 'Partiel' : 'Non disponible'
@@ -1408,8 +1404,12 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                         </div>
                         <dl className="inv-dc-line-metrics">
                           <div className="inv-dc-field">
-                            <dt>Demandé</dt>
+                            <dt>Quantité</dt>
                             <dd>{l.quantite_demandee}</dd>
+                          </div>
+                          <div className="inv-dc-field">
+                            <dt>Unité</dt>
+                            <dd>{l.unite || 'u'}</dd>
                           </div>
                           <div className="inv-dc-field">
                             <dt>Préparé</dt>

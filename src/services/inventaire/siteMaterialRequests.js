@@ -208,7 +208,6 @@ function normalizeRequest(row, lines = [], history = []) {
   if (!row) return null;
   const mergedLines = mergeDuplicateSiteRequestLines(lines);
   const activeLines = mergedLines.filter((l) => Number(l.quantite_demandee) > 0 || l.is_custom);
-  const totalArticles = activeLines.reduce((s, l) => s + (Number(l.quantite_demandee) || 0), 0);
   const distinctArticles = activeLines.length;
   const fixName = (n) => collapseDuplicatedFirstName(n) || '';
   return {
@@ -245,7 +244,7 @@ function normalizeRequest(row, lines = [], history = []) {
       ...h,
       actor_name: fixName(h.actor_name),
     })),
-    total_articles: totalArticles,
+    // Nb de lignes / désignations — ne jamais sommer les quantités (unités hétérogènes).
     distinct_articles: distinctArticles,
     created_at: row.created_at,
     updated_at: row.updated_at,
