@@ -601,18 +601,27 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
 
   function handlePreparedQtyInput(line, raw) {
     if (raw === '') {
-      // Saisie intermédiaire : state local seulement, persist au blur
+      // Saisie en cours : local uniquement (pas de persist — sinon input désactivé / écrasé).
       updateDetailLine(line, { quantite_preparee: '' });
       return;
     }
-    const prep = Math.max(0, Number(raw));
-    if (Number.isNaN(prep)) return;
-    updateDetailLine(line, { quantite_preparee: prep }, { persist: true });
+    const prep = Number(raw);
+    if (Number.isNaN(prep) || prep < 0) return;
+    // Local seulement : la sauvegarde se fait au blur (sinon chaque chiffre rebloque le champ).
+    updateDetailLine(line, { quantite_preparee: prep });
   }
 
   function handlePreparedQtyBlur(line, raw) {
-    if (raw !== '' && raw != null) return;
-    updateDetailLine(line, { quantite_preparee: 0 }, { persist: true });
+    const demandee = Math.max(0, Number(line?.quantite_demandee) || 0);
+    if (raw === '' || raw == null) {
+      updateDetailLine(line, { quantite_preparee: 0 }, { persist: true });
+      return;
+    }
+    let prep = Math.max(0, Number(raw));
+    if (Number.isNaN(prep)) prep = 0;
+    // Plafond = quantité demandée (le reste part en « à acheter »).
+    if (demandee > 0) prep = Math.min(prep, demandee);
+    updateDetailLine(line, { quantite_preparee: prep }, { persist: true });
   }
 
   const missingLines = useMemo(
@@ -1348,7 +1357,8 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                                 onChange={(e) => handlePreparedQtyInput(l, e.target.value)}
                                 onBlur={(e) => handlePreparedQtyBlur(l, e.target.value)}
                                 style={{ ...INPUT_STYLE, padding: '4px 8px', width: 70 }}
-                                disabled={locked || saving}
+                                disabled={locked}
+                                title="Saisir la quantité préparée (ex. 100). Le reste part en achat."
                               />
                             )}
                           </td>
@@ -1429,7 +1439,8 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                                   onBlur={(e) => handlePreparedQtyBlur(l, e.target.value)}
                                   className="inv-dc-line-input"
                                   style={INPUT_STYLE}
-                                  disabled={locked || saving}
+                                  disabled={locked}
+                                  title="Saisir la quantité préparée (ex. 100). Le reste part en achat."
                                 />
                               )}
                             </dd>

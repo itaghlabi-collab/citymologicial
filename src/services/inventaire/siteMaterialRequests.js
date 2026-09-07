@@ -119,9 +119,15 @@ export function applySiteRequestAvailabilityStatus(line, status) {
     preparee = demandee;
   } else if (status === 'partial') {
     const current = Number(line?.quantite_preparee) || 0;
-    preparee = current > 0 && current < demandee
-      ? current
-      : Math.max(1, Math.floor(demandee / 2) || 1);
+    // Partiel = laisser / garder une valeur < demandé pour saisie libre.
+    // Ne pas imposer « moitié » si déjà 0 : l’utilisateur tape la qté (ex. 100).
+    if (current > 0 && current < demandee) {
+      preparee = current;
+    } else if (current >= demandee && demandee > 0) {
+      preparee = Math.max(1, Math.floor(demandee / 2) || 1);
+    } else {
+      preparee = 0;
+    }
     preparee = Math.min(preparee, demandee);
   } else {
     preparee = 0;
