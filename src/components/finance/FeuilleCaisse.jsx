@@ -348,9 +348,8 @@ export default function FeuilleCaisse() {
 
   function openBalanceModal() {
     setBalForm({
-      // Prefill avec le reliquat effectif (solde final du mois précédent).
       solde_initial: balance?.solde_initial ?? '',
-      alimentation: balance?.alimentation ?? '',
+      alimentation: balance?.alimentation ?? 0,
       notes: balance?.notes ?? '',
     });
     setShowBalance(true);
@@ -372,7 +371,8 @@ export default function FeuilleCaisse() {
     e.preventDefault();
     const res = await saveBalance({
       solde_initial: parseFloat(balForm.solde_initial) || 0,
-      alimentation: parseFloat(balForm.alimentation) || 0,
+      // Conservé en base si historique, mais plus saisi à part (même nature que les entrées).
+      alimentation: Number(balForm.alimentation) || Number(balance?.alimentation) || 0,
       notes: balForm.notes,
     });
     if (res.success) setShowBalance(false);
@@ -506,11 +506,28 @@ export default function FeuilleCaisse() {
         </div>
       ) : viewMode === 'month' ? (
         <div className="stat-grid finance-kpi-grid finance-kpi-strip">
-          <KpiCard icon={<Wallet size={17} />} label="Solde initial / Reliquat" value={formatMAD(totals.soldeInitial)} color="grey" sub="solde final du mois précédent" />
-          <KpiCard icon={<Plus size={17} />} label="Alimentation" value={formatMAD(totals.alimentation)} color="purple" />
-          <KpiCard icon={<Plus size={17} />} label="Total entrées" value={formatMAD(totals.totalEntrees)} color="green" />
-          <KpiCard icon={<TrendingDown size={17} />} label="Total sorties" value={formatMAD(totals.totalSorties)} color="red" />
-          <KpiCard icon={<Wallet size={17} />} label="Solde caisse du mois" value={formatMAD(totals.soldeMois)} color="blue" sub="reliquat + alimentation + entrées − sorties" />
+          <KpiCard
+            icon={<Wallet size={17} />}
+            label="Reliquat"
+            value={formatMAD(totals.soldeInitial)}
+            color="grey"
+            sub="reporté du mois précédent (hors alimentations)"
+          />
+          <KpiCard
+            icon={<Plus size={17} />}
+            label="Alimentations / Entrées"
+            value={formatMAD(totals.totalEntrees)}
+            color="green"
+            sub="toutes les entrées de caisse du mois"
+          />
+          <KpiCard icon={<TrendingDown size={17} />} label="Sorties" value={formatMAD(totals.totalSorties)} color="red" />
+          <KpiCard
+            icon={<Wallet size={17} />}
+            label="Solde caisse du mois"
+            value={formatMAD(totals.soldeMois)}
+            color="blue"
+            sub="reliquat + entrées − sorties"
+          />
         </div>
       ) : null}
 
@@ -613,17 +630,12 @@ export default function FeuilleCaisse() {
       <Modal open={showBalance} onClose={() => setShowBalance(false)} title="Paramètres du mois" width={480}>
         <form onSubmit={handleSaveBalance}>
           <p style={{ fontSize: '0.82rem', color: 'var(--text-3)', margin: '0 0 12px' }}>
-            En fonctionnement normal, le solde initial est le reliquat du mois précédent (calcul automatique).
-            Ce formulaire sert à initialiser ou corriger exceptionnellement l’amorce historique.
+            Le <strong>reliquat</strong> est le solde final du mois précédent (automatique).
+            Les alimentations s’enregistrent via « + Alimentation caisse » (entrées du journal) — ce n’est pas un second solde.
           </p>
-          <FRow>
-            <FField label="Solde initial / Reliquat">
-              <input type="number" step="0.01" value={balForm.solde_initial} onChange={(e) => setBalForm((p) => ({ ...p, solde_initial: e.target.value }))} style={INPUT_STYLE} />
-            </FField>
-            <FField label="Alimentation (paramètre mois)">
-              <input type="number" step="0.01" value={balForm.alimentation} onChange={(e) => setBalForm((p) => ({ ...p, alimentation: e.target.value }))} style={INPUT_STYLE} />
-            </FField>
-          </FRow>
+          <FField label="Reliquat (amorce / correction exceptionnelle)">
+            <input type="number" step="0.01" value={balForm.solde_initial} onChange={(e) => setBalForm((p) => ({ ...p, solde_initial: e.target.value }))} style={INPUT_STYLE} />
+          </FField>
           <FField label="Notes">
             <textarea value={balForm.notes} onChange={(e) => setBalForm((p) => ({ ...p, notes: e.target.value }))} style={{ ...INPUT_STYLE, minHeight: 64 }} />
           </FField>

@@ -101,9 +101,10 @@ export function computeEffectiveOpeningFromChain(previousMonthsAsc) {
 
   let opening = Number(chain[0]?.balance?.solde_initial) || 0;
   for (const month of chain) {
+    // Même formule feuille de caisse : reliquat + entrées espèces − sorties (pas de pot alimentation séparé).
     opening = computeCashTotals(month.transactions || [], {
       solde_initial: opening,
-      alimentation: Number(month.balance?.alimentation) || 0,
+      alimentation: 0,
     }).soldeMois;
   }
   return opening;

@@ -177,7 +177,6 @@ export async function deleteFinanceTransaction(id) {
 
 export function computeCashTotals(transactions, balanceRow) {
   const soldeInitial = Number(balanceRow?.solde_initial) || 0;
-  const alimentation = Number(balanceRow?.alimentation) || 0;
   let totalEntrees = 0;
   let totalSorties = 0;
   (transactions || []).forEach((t) => {
@@ -185,8 +184,15 @@ export function computeCashTotals(transactions, balanceRow) {
     if (t.sens === 'entree') totalEntrees += t.montant || 0;
     else totalSorties += t.montant || 0;
   });
-  const soldeMois = soldeInitial + alimentation + totalEntrees - totalSorties;
-  return { soldeInitial, alimentation, totalEntrees, totalSorties, soldeMois };
+  // Alimentations = entrées du journal. Pas de 2e pot « alimentation » mensuel.
+  const soldeMois = soldeInitial + totalEntrees - totalSorties;
+  return {
+    soldeInitial,
+    alimentation: totalEntrees,
+    totalEntrees,
+    totalSorties,
+    soldeMois,
+  };
 }
 
 export async function syncChargeToTransaction(charge) {

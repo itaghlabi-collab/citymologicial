@@ -2,7 +2,8 @@
  * cashDayTotals.js — Soldes journaliers dérivés du journal mensuel
  */
 export function computeDailyCashTotals(monthRecords, balance, selectedDateIso) {
-  const monthOpening = (Number(balance?.solde_initial) || 0) + (Number(balance?.alimentation) || 0);
+  // Ouverture = reliquat uniquement (les alimentations sont des entrées datées du journal).
+  const monthOpening = Number(balance?.solde_initial) || 0;
   const active = (monthRecords || []).filter((t) => t.statut !== 'Annulé');
   const sorted = [...active].sort((a, b) => String(a.date).localeCompare(String(b.date)));
 
