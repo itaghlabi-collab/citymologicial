@@ -208,8 +208,8 @@ export default function Factures() {
   const [pdfLoadingId, setPdfLoadingId] = useState(null);
   const [clientsList, setClientsList] = useState([]);
   const [importedArchives, setImportedArchives] = useState([]);
-  /** Édition inline titre / commercial sur une archive importée. */
-  const [archiveFieldEdit, setArchiveFieldEdit] = useState(null); // { id, field: 'titre'|'commercial', value }
+  /** Édition titre / commercial sur une archive importée (modal ou blur champ). */
+  const [archiveFieldEdit, setArchiveFieldEdit] = useState(null); // { id, numero, titre, commercial }
   const [archiveFieldSaving, setArchiveFieldSaving] = useState(false);
 
   /* Filters */
@@ -262,98 +262,89 @@ export default function Factures() {
     ...importedArchives.map((a) => a.commercial).filter(Boolean),
   ])];
 
-  async function saveArchiveField(archiveId, field, rawValue) {
-    const value = String(rawValue || '').trim();
-    const patch = field === 'titre'
-      ? { intitule: value || null }
-      : { commercial: value || null };
+  async function saveArchiveMeta(archiveId, { titre, commercial }) {
+    const patch = {
+      intitule: String(titre || '').trim() || null,
+      commercial: String(commercial || '').trim() || null,
+    };
     setArchiveFieldSaving(true);
     try {
       const updated = await updateCrmArchive(archiveId, patch);
       setImportedArchives((prev) => prev.map((a) => (a.id === archiveId ? { ...a, ...updated } : a)));
       setArchiveFieldEdit(null);
-      showToast(field === 'titre' ? 'Titre enregistré.' : 'Commercial enregistré.');
+      showToast('Titre et commercial enregistrés.');
+      return true;
     } catch (err) {
       const msg = err?.message || '';
       if (/commercial|column|schema cache/i.test(msg)) {
-        showToast('Colonne commercial absente — exécutez supabase/RUN_CRM_ARCHIVES_COMMERCIAL.sql', 'error');
-      } else {
-        showToast(msg || 'Erreur enregistrement.', 'error');
+        // Fallback : sauver au moins le titre si la colonne commercial n'existe pas encore
+        try {
+          const updated = await updateCrmArchive(archiveId, { intitule: patch.intitule });
+          setImportedArchives((prev) => prev.map((a) => (a.id === archiveId ? { ...a, ...updated } : a)));
+          setArchiveFieldEdit(null);
+          showToast('Titre enregistré. Pour le commercial : exécutez supabase/RUN_CRM_ARCHIVES_COMMERCIAL.sql', 'error');
+          return true;
+        } catch (err2) {
+          showToast(err2?.message || msg || 'Erreur enregistrement.', 'error');
+          return false;
+        }
       }
+      showToast(msg || 'Erreur enregistrement.', 'error');
+      return false;
     } finally {
       setArchiveFieldSaving(false);
     }
   }
 
-  function startArchiveFieldEdit(f, field) {
+  function openArchiveMetaEdit(f) {
     if (!f?.__isImportedArchive || !f.archive_id) return;
     setArchiveFieldEdit({
       id: f.archive_id,
-      field,
-      value: field === 'titre' ? (f.titre || '') : (f.commercial || ''),
+      numero: f.numero || '',
+      titre: f.titre || '',
+      commercial: f.commercial || '',
     });
   }
 
-  function renderArchiveEditableCell(f, field, displayValue) {
-    const editing = archiveFieldEdit?.id === f.archive_id && archiveFieldEdit?.field === field;
-    if (editing) {
-      return (
-        <input
-          autoFocus
-          disabled={archiveFieldSaving}
-          value={archiveFieldEdit.value}
-          placeholder={field === 'titre' ? 'Titre de la facture…' : 'Nom du commercial…'}
-          onChange={(e) => setArchiveFieldEdit((p) => (p ? { ...p, value: e.target.value } : p))}
-          onBlur={() => {
-            if (!archiveFieldEdit) return;
-            saveArchiveField(archiveFieldEdit.id, archiveFieldEdit.field, archiveFieldEdit.value);
-          }}
-          onKeyDown={(e) => {
-            if (e.key === 'Enter') {
-              e.preventDefault();
-              e.currentTarget.blur();
-            }
-            if (e.key === 'Escape') {
-              e.preventDefault();
-              setArchiveFieldEdit(null);
-            }
-          }}
-          style={{
-            width: '100%',
-            maxWidth: field === 'titre' ? 220 : 140,
-            padding: '6px 8px',
-            border: '1.5px solid var(--red)',
-            borderRadius: 6,
-            fontSize: '0.84rem',
-            fontFamily: 'var(--font-body)',
-            boxSizing: 'border-box',
-          }}
-        />
-      );
-    }
+  /** Champs toujours éditables en liste pour les archives importées. */
+  function renderArchiveEditableCell(f, field) {
+    const value = field === 'titre' ? (f.titre || '') : (f.commercial || '');
     return (
-      <button
-        type="button"
-        title="Cliquer pour modifier"
-        onClick={() => startArchiveFieldEdit(f, field)}
-        style={{
-          background: 'none',
-          border: '1px dashed var(--border)',
-          borderRadius: 6,
-          padding: '4px 8px',
-          cursor: 'pointer',
-          textAlign: 'left',
-          width: '100%',
-          maxWidth: '100%',
-          fontWeight: field === 'titre' ? 600 : 500,
-          color: displayValue === '—' ? 'var(--text-3)' : 'var(--text)',
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
+      <input
+        type="text"
+        defaultValue={value}
+        key={`${f.archive_id}-${field}-${value}`}
+        placeholder={field === 'titre' ? 'Saisir le titre…' : 'Saisir le commercial…'}
+        disabled={archiveFieldSaving}
+        onBlur={(e) => {
+          const next = e.target.value.trim();
+          const prev = String(value || '').trim();
+          if (next === prev) return;
+          if (field === 'titre') {
+            saveArchiveMeta(f.archive_id, { titre: next, commercial: f.commercial || '' });
+          } else {
+            saveArchiveMeta(f.archive_id, { titre: f.titre || '', commercial: next });
+          }
         }}
-      >
-        {displayValue}
-      </button>
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') e.currentTarget.blur();
+        }}
+        title="Modifiable — quittez le champ pour enregistrer"
+        style={{
+          width: '100%',
+          minWidth: field === 'titre' ? 140 : 100,
+          maxWidth: '100%',
+          padding: '6px 8px',
+          border: '1.5px solid var(--border)',
+          borderRadius: 6,
+          fontSize: '0.82rem',
+          fontFamily: 'var(--font-body)',
+          fontWeight: field === 'titre' ? 600 : 500,
+          background: '#fff',
+          color: 'var(--text)',
+          boxSizing: 'border-box',
+        }}
+      />
     );
   }
 
@@ -526,6 +517,75 @@ export default function Factures() {
     <div className="animate-fade-in crm-module crm-module--factures">
       <Toast toast={toast} />
 
+      {archiveFieldEdit && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: 'fixed', inset: 0, zIndex: 9999,
+            background: 'rgba(0,0,0,0.45)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            padding: 16,
+          }}
+          onClick={() => !archiveFieldSaving && setArchiveFieldEdit(null)}
+        >
+          <div
+            className="card"
+            style={{ width: '100%', maxWidth: 420, padding: 20 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 14 }}>
+              <h2 style={{ margin: 0, fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.05rem' }}>
+                Compléter l’archive
+              </h2>
+              <button type="button" className="btn btn-ghost btn-sm" onClick={() => setArchiveFieldEdit(null)} disabled={archiveFieldSaving}>
+                <X size={16} />
+              </button>
+            </div>
+            <p style={{ margin: '0 0 14px', fontSize: '0.82rem', color: 'var(--text-3)' }}>
+              {archiveFieldEdit.numero || 'Archive importée'} — titre et commercial
+            </p>
+            <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: 800, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 5 }}>
+              Titre
+            </label>
+            <input
+              autoFocus
+              value={archiveFieldEdit.titre}
+              onChange={(e) => setArchiveFieldEdit((p) => (p ? { ...p, titre: e.target.value } : p))}
+              placeholder="Ex : Travaux villa…"
+              disabled={archiveFieldSaving}
+              style={{ width: '100%', padding: '8px 10px', border: '1.5px solid var(--border)', borderRadius: 6, marginBottom: 12, boxSizing: 'border-box', fontFamily: 'var(--font-body)' }}
+            />
+            <label style={{ display: 'block', fontSize: '0.7rem', fontWeight: 800, color: 'var(--text-3)', textTransform: 'uppercase', marginBottom: 5 }}>
+              Commercial
+            </label>
+            <input
+              value={archiveFieldEdit.commercial}
+              onChange={(e) => setArchiveFieldEdit((p) => (p ? { ...p, commercial: e.target.value } : p))}
+              placeholder="Nom du commercial"
+              disabled={archiveFieldSaving}
+              style={{ width: '100%', padding: '8px 10px', border: '1.5px solid var(--border)', borderRadius: 6, marginBottom: 16, boxSizing: 'border-box', fontFamily: 'var(--font-body)' }}
+            />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button type="button" className="btn btn-ghost" disabled={archiveFieldSaving} onClick={() => setArchiveFieldEdit(null)}>
+                Annuler
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                disabled={archiveFieldSaving}
+                onClick={() => saveArchiveMeta(archiveFieldEdit.id, {
+                  titre: archiveFieldEdit.titre,
+                  commercial: archiveFieldEdit.commercial,
+                })}
+              >
+                {archiveFieldSaving ? 'Enregistrement…' : 'Enregistrer'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Page header */}
       <div className="page-header" style={{ marginBottom: 12 }}>
         <div>
@@ -690,7 +750,7 @@ export default function Factures() {
                       {/* Titre */}
                       <td data-label="Titre" className="crm-col-title">
                         {f.__isImportedArchive ? (
-                          renderArchiveEditableCell(f, 'titre', titreAffiche)
+                          renderArchiveEditableCell(f, 'titre')
                         ) : (
                           <button
                             type="button"
@@ -729,7 +789,7 @@ export default function Factures() {
                       {/* Commercial */}
                       <td data-label="Commercial" className="crm-col-commercial" title={fmtCommercial(f.commercial)} style={{ color: 'var(--text-2)' }}>
                         {f.__isImportedArchive
-                          ? renderArchiveEditableCell(f, 'commercial', fmtCommercial(f.commercial))
+                          ? renderArchiveEditableCell(f, 'commercial')
                           : fmtCommercial(f.commercial)}
                       </td>
 
@@ -782,13 +842,18 @@ export default function Factures() {
                       <td className="crm-col-actions" data-label="Actions">
                         {f.__isImportedArchive ? (
                           <div style={{ display: 'flex', gap: 3, flexWrap: 'nowrap', justifyContent: 'flex-end', alignItems: 'center' }}>
-                            <button type="button" className="btn btn-secondary btn-sm" title="Voir" aria-label="Voir"
+                            <button type="button" className="btn btn-secondary btn-sm" title="Voir PDF" aria-label="Voir"
                               onClick={() => openArchivePdf(f.__archive).catch((e) => showToast(e.message, 'error'))}>
                               <Eye size={13} />
+                            </button>
+                            <button type="button" className="btn btn-ghost btn-sm" title="Modifier titre / commercial" aria-label="Modifier"
+                              onClick={() => openArchiveMetaEdit(f)}>
+                              <Edit2 size={13} />
                             </button>
                             <CrmOverflowMenu
                               title="Actions"
                               items={[
+                                { icon: Edit2, label: 'Modifier titre / commercial', onClick: () => openArchiveMetaEdit(f) },
                                 { icon: Download, label: 'Télécharger PDF', onClick: () => downloadArchivePdf(f.__archive).catch((e) => showToast(e.message, 'error')) },
                               ]}
                             />
@@ -852,11 +917,18 @@ export default function Factures() {
                     <StatutBadge statut={f.statut} />
                   </div>
                   {f.__isImportedArchive ? (
-                    <div style={{ marginBottom: 8 }}>
-                      <div style={{ fontSize: '0.68rem', color: 'var(--text-3)', marginBottom: 4 }}>Titre</div>
-                      {renderArchiveEditableCell(f, 'titre', titreAffiche)}
-                      <div style={{ fontSize: '0.68rem', color: 'var(--text-3)', margin: '8px 0 4px' }}>Commercial</div>
-                      {renderArchiveEditableCell(f, 'commercial', fmtCommercial(f.commercial))}
+                    <div style={{ marginBottom: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      <div>
+                        <div style={{ fontSize: '0.68rem', color: 'var(--text-3)', marginBottom: 4 }}>Titre</div>
+                        {renderArchiveEditableCell(f, 'titre')}
+                      </div>
+                      <div>
+                        <div style={{ fontSize: '0.68rem', color: 'var(--text-3)', marginBottom: 4 }}>Commercial</div>
+                        {renderArchiveEditableCell(f, 'commercial')}
+                      </div>
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => openArchiveMetaEdit(f)} style={{ alignSelf: 'flex-start' }}>
+                        <Edit2 size={13} /> Modifier titre / commercial
+                      </button>
                     </div>
                   ) : (
                     <button
@@ -890,6 +962,8 @@ export default function Factures() {
                         <>
                           <button type="button" title="Voir PDF" aria-label="Voir" onClick={() => openArchivePdf(f.__archive).catch((e) => showToast(e.message, 'error'))}
                             className="btn btn-ghost btn-sm crm-icon-btn"><Eye size={14} /></button>
+                          <button type="button" title="Modifier titre / commercial" aria-label="Modifier" onClick={() => openArchiveMetaEdit(f)}
+                            className="btn btn-ghost btn-sm crm-icon-btn"><Edit2 size={14} /></button>
                           <button type="button" title="Telecharger" aria-label="Télécharger PDF" onClick={() => downloadArchivePdf(f.__archive).catch((e) => showToast(e.message, 'error'))}
                             className="btn btn-ghost btn-sm crm-icon-btn"><Download size={14} /></button>
                         </>
