@@ -3,7 +3,7 @@ import {
   Upload, Camera, ScanLine, User, FileText, Shield,
   Phone, MapPin, CheckCircle, Clock, AlertCircle,
   ChevronLeft, RefreshCw, ArrowUpDown, Package,
-  Loader, Star
+  Loader, Star, FileSpreadsheet,
 } from 'lucide-react';
 
 import { useState, useEffect, useRef, useCallback, useId } from 'react';
@@ -27,6 +27,7 @@ import CINManualCropModal from './cin/CINManualCropModal';
 import CINGuidedCamera from './cin/CINGuidedCamera';
 import { generateWorkerPdf } from '../services/rh/workerPdf';
 import { workerTarifJournalier } from '../services/rh/workers';
+import { exportWorkersExcel } from '../services/rh/workersExcelExport';
 
 /* Exported for compatibility — starts empty, populated from API */
 export const SEED_WORKERS = [];
@@ -2227,6 +2228,20 @@ export default function OuvriersListe({ onWorkersChange }) {
     }
   }
 
+  function handleExportExcel() {
+    try {
+      if (!workers?.length) {
+        notify('error', 'Aucun ouvrier à exporter.');
+        return;
+      }
+      const { filename, count } = exportWorkersExcel(workers);
+      notify('success', `Excel exporté — ${count} ouvrier(s) · ${filename}`);
+    } catch (err) {
+      console.error('[CITYMO] Excel ouvriers', err);
+      notify('error', 'Erreur lors de l\'export Excel.');
+    }
+  }
+
   useEffect(() => {
     if (onWorkersChange) onWorkersChange(workers);
   }, [workers, onWorkersChange]);
@@ -2343,6 +2358,16 @@ export default function OuvriersListe({ onWorkersChange }) {
           <p className="page-subtitle"><span className="finance-sub-hide-mobile">Gestion du personnel de chantier externe — </span>{nTotal} ouvrier{nTotal > 1 ? 's' : ''}</p>
         </div>
         <div className="finance-page-actions finance-page-actions--solo">
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={handleExportExcel}
+            disabled={loading || !workers?.length}
+            style={{ display: 'flex', alignItems: 'center', gap: 6 }}
+            title="Exporter tous les ouvriers en Excel"
+          >
+            <FileSpreadsheet size={15} /> Excel
+          </button>
           <button className="btn btn-primary" onClick={openAdd} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
             <Plus size={15} /> Ajouter un ouvrier
           </button>
