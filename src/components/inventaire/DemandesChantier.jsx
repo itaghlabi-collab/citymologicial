@@ -19,7 +19,6 @@ import {
 } from '../../constants/siteMaterialRequests';
 import {
   listSiteMaterialRequests,
-  purgeEmptyDraftSiteRequests,
   getSiteMaterialRequest,
   createSiteMaterialRequest,
   updateSiteMaterialRequest,
@@ -187,10 +186,6 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
       setRequests(rows || []);
       setProjects(projs || []);
       setStockArticles(arts || []);
-      // Nettoyage léger en arrière-plan (ne bloque pas l’affichage).
-      purgeEmptyDraftSiteRequests({
-        projectId: embeddedProjectId || undefined,
-      }).catch(() => []);
     } catch (err) {
       setError(err.message || 'Erreur de chargement.');
     } finally {

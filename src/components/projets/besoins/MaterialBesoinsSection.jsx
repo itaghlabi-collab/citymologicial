@@ -50,9 +50,14 @@ export default function MaterialBesoinsSection({ projet }) {
     setLoading(true);
     setError('');
     try {
-      const repair = await repairOrphanMaterialBesoinsToDepot({ projectId }).catch(() => null);
-      if (repair?.failures?.length) {
-        console.warn('[CITYMO] repair BM→DC', repair.failures);
+      // Repair BM→DC une seule fois par projet / session (évite de ralentir à chaque ouverture).
+      const repairKey = `citymo_bm_repair_${projectId}`;
+      if (typeof sessionStorage !== 'undefined' && !sessionStorage.getItem(repairKey)) {
+        const repair = await repairOrphanMaterialBesoinsToDepot({ projectId }).catch(() => null);
+        if (repair?.failures?.length) {
+          console.warn('[CITYMO] repair BM→DC', repair.failures);
+        }
+        try { sessionStorage.setItem(repairKey, '1'); } catch { /* ignore */ }
       }
       setItems(await listProjectMaterialBesoins(projectId));
     } catch (err) {
