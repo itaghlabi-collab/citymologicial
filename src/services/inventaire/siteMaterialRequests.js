@@ -448,6 +448,7 @@ export async function createSiteMaterialRequest(form, lines = [], { ipAddress } 
     requested_by: user.id,
     requested_by_name: actorName,
     updated_at: new Date().toISOString(),
+    ...(form.material_need_id ? { material_need_id: form.material_need_id } : {}),
   });
 
   let data = null;
@@ -464,6 +465,15 @@ export async function createSiteMaterialRequest(form, lines = [], { ipAddress } 
       break;
     }
     lastError = result.error;
+    if (/material_need_id/i.test(String(result.error.message || ''))) {
+      const { material_need_id, ...rest } = row;
+      const retry = await getSupabase().from(TABLE).insert([rest]).select().single();
+      if (!retry.error) {
+        data = retry.data;
+        break;
+      }
+      lastError = retry.error;
+    }
     if (/origine/i.test(String(result.error.message || ''))) {
       const { origine, ...rest } = row;
       const retry = await getSupabase().from(TABLE).insert([rest]).select().single();
