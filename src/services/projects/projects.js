@@ -118,6 +118,7 @@ export async function generateProjectRef() {
 }
 
 const SELECT_FOR_LINK = 'id, nom, ref, client_nom, statut, created_at';
+const SELECT_FOR_WORKER_LINK = 'id, nom, ref, statut, responsable, chef_chantier, created_at';
 
 async function fetchProjectsViaSelectApi() {
   try {
@@ -180,11 +181,55 @@ export async function listProjectsForSelect() {
   return [];
 }
 
+/**
+ * Liste projets pour « Projet lié » (ouvriers) — avec chef_chantier / responsable.
+ * Passe par RPC SECURITY DEFINER si RLS module projets bloque le rôle chef.
+ */
+export async function listProjectsForWorkerLink() {
+  const sb = getSupabase();
+
+  const { data: rpcData, error: rpcError } = await sb.rpc('list_projects_for_worker_link');
+  if (!rpcError && Array.isArray(rpcData)) {
+    return rpcData.map(normalizeProject);
+  }
+  if (rpcError) {
+    const msg = String(rpcError.message || '').toLowerCase();
+    const rpcMissing = rpcError.code === 'PGRST202'
+      || rpcError.code === '42883'
+      || msg.includes('list_projects_for_worker_link');
+    if (!rpcMissing) {
+      console.warn('[CITYMO] list_projects_for_worker_link', rpcError.message);
+    }
+  }
+
+  // Fallback : select léger (sans jointure clients — souvent bloquée en RLS).
+  try {
+    const { data, error } = await sb
+      .from(TABLE)
+      .select(SELECT_FOR_WORKER_LINK)
+      .order('created_at', { ascending: false });
+    if (error) throw error;
+    if (data?.length) return data.map(normalizeProject);
+  } catch (directErr) {
+    console.warn('[CITYMO] projects worker-link direct', directErr);
+  }
+
+  // Dernier recours : liste Achats (sans chefs) — mieux que vide pour RH privilégié.
+  try {
+    const rows = await listProjectsForSelect();
+    if (rows.length) return rows;
+  } catch (_) { /* ignore */ }
+
+  return [];
+}
+
 export async function listProjects(options = {}) {
   const columns = options.forSelect
     ? SELECT_FOR_LINK
-    : options.light
-      ? 'id, nom, ref, responsable, budget_estime, statut, created_at'
+    : options.forWorkerLink
+      ? SELECT_FOR_WORKER_LINK
+      : options.light
+      ? 'id, nom, ref, responsable, chef_chantier, budget_estime, statut, created_at'
       : SELECT;
   const { data, error } = await getSupabase()
     .from(TABLE)

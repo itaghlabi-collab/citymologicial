@@ -28,8 +28,8 @@ import CINGuidedCamera from './cin/CINGuidedCamera';
 import { generateWorkerPdf } from '../services/rh/workerPdf';
 import { workerTarifJournalier } from '../services/rh/workers';
 import { exportWorkersExcel } from '../services/rh/workersExcelExport';
-import { listProjects } from '../services/projects/projects';
-import { personNamesMatch } from '../services/rh/attendance';
+import { listProjectsForWorkerLink } from '../services/projects/projects';
+import { personNamesMatch, extractPersonNameFromStoredLabel } from '../services/rh/attendance';
 import { useAuth } from '../hooks/useAuth';
 import { isSuperAdmin } from '../services/rh/isSuperAdmin';
 
@@ -98,11 +98,28 @@ function formFromWorker(worker) {
   };
 }
 
+/** Alias de nom session (ordre prénom/nom, label projet « NOM — POSTE »). */
+function userNameAliases(user) {
+  const raw = String(user?.nom || '').trim();
+  if (!raw) return [];
+  const aliases = [raw];
+  const base = extractPersonNameFromStoredLabel(raw) || raw;
+  if (base && !aliases.includes(base)) aliases.push(base);
+  const parts = base.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    const reversed = [...parts].reverse().join(' ');
+    if (!aliases.includes(reversed)) aliases.push(reversed);
+  }
+  return aliases;
+}
+
 /** Projet affecté à l’utilisateur (chef de chantier OU chef de projet / responsable). */
-function projectAssignedToUser(p, userNom) {
-  if (!p || !userNom) return false;
+function projectAssignedToUser(p, user) {
+  if (!p || !user) return false;
+  const aliases = userNameAliases(user);
+  if (!aliases.length) return false;
   const fields = [p.chef_chantier, p.chef_projet, p.responsable];
-  return fields.some((f) => f && personNamesMatch(f, userNom));
+  return aliases.some((alias) => fields.some((f) => f && personNamesMatch(f, alias)));
 }
 
 /** Projets visibles pour le formulaire ouvrier.
@@ -125,7 +142,7 @@ function filterProjectsForWorkerForm(projects, user) {
 
   if (isPrivileged) return open;
 
-  return open.filter((p) => projectAssignedToUser(p, user.nom || ''));
+  return open.filter((p) => projectAssignedToUser(p, user));
 }
 
 function projectOptionLabel(p) {
@@ -1374,7 +1391,7 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
   useEffect(() => {
     let alive = true;
     setProjectsLoading(true);
-    listProjects()
+    listProjectsForWorkerLink()
       .then((rows) => {
         if (!alive) return;
         const filtered = filterProjectsForWorkerForm(rows, user);
@@ -1395,7 +1412,10 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
           }));
         }
       })
-      .catch(() => { if (alive) setProjectOptions([]); })
+      .catch((err) => {
+        console.warn('[CITYMO] projets ouvrier', err);
+        if (alive) setProjectOptions([]);
+      })
       .finally(() => { if (alive) setProjectsLoading(false); });
     return () => { alive = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps -- recharger si user change ; project_id initial suffit
@@ -2089,14 +2109,16 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
                       style={IS(errors.project_id)}
                       disabled={projectsLoading}
                     >
-                      <option value="">{projectsLoading ? 'Chargement…' : 'Choisir un chantier…'}</option>
+                      <option value="">{projectsLoading ? 'Chargement…' : (projectOptions.length ? 'Choisir un chantier…' : 'Aucun chantier affecté')}</option>
                       {projectOptions.map((p) => (
                         <option key={p.id} value={String(p.id)}>{projectOptionLabel(p)}</option>
                       ))}
                     </select>
                     {errors.project_id && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.project_id}</span>}
                     <p style={{ margin: '6px 0 0', fontSize: '0.75rem', color: 'var(--text-3)' }}>
-                      Uniquement vos chantiers affectés — l’ouvrier apparaîtra en Présence sur ce projet.
+                      {projectOptions.length
+                        ? 'Uniquement vos chantiers affectés — l’ouvrier apparaîtra en Présence sur ce projet.'
+                        : 'Aucun chantier lié à votre nom dans Projets (chef de chantier / chef de projet). Vérifiez l’affectation ou le script Supabase list_projects_for_worker_link.'}
                     </p>
                   </div>
                   <div className="form-group">
