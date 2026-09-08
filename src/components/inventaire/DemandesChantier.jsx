@@ -61,14 +61,8 @@ import {
 } from '../../services/inventaire/articleScanWorkflow';
 import { KpiCard, INPUT_STYLE, SELECT_STYLE } from './shared.jsx';
 
-import {
-  listMaterialBesoinsForDemandesChantier,
-} from '../../services/projects/projectMaterialBesoins';
-import MaterialBesoinDetailModal from '../projets/besoins/MaterialBesoinDetailModal.jsx';
-import { generateMaterialBesoinPdf } from '../../services/projects/projectMaterialBesoinPdf';
-
 function SiteRequestOrigineBadge({ req, style }) {
-  if (req?.source_type === 'material_besoin' || isMaterialBesoinSiteRequest(req)) {
+  if (isMaterialBesoinSiteRequest(req)) {
     return (
       <span className="badge badge-purple" style={{ fontSize: '0.68rem', ...style }}>
         Besoin matériaux
@@ -84,11 +78,6 @@ function SiteRequestOrigineBadge({ req, style }) {
   }
   return null;
 }
-
-function isBesoinMateriauxRow(r) {
-  return r?.source_type === 'material_besoin' || String(r?.id || '').startsWith('bm:');
-}
-
 
 const EMPTY_FORM = {
   project_id: '', project_ref: '', project_name: '', client_name: '',
@@ -123,12 +112,6 @@ function livBadgeClass(statut) {
 }
 
 function getRowActions(r, handlers, { embedded = false } = {}) {
-  if (isBesoinMateriauxRow(r)) {
-    return [
-      { key: 'view', label: 'Voir', icon: Eye, onClick: () => handlers.openDetail(r) },
-      { key: 'pdf', label: 'Télécharger PDF', icon: Download, onClick: () => handlers.handlePdf(r) },
-    ];
-  }
   const actions = [
     { key: 'view', label: 'Voir', icon: Eye, onClick: () => handlers.openDetail(r.id) },
     { key: 'pdf', label: 'Télécharger PDF', icon: Download, onClick: () => handlers.handlePdf(r.id) },
@@ -180,7 +163,6 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
   const [showCreateMode, setShowCreateMode] = useState(false);
   const [editId, setEditId] = useState(null);
   const [detail, setDetail] = useState(null);
-  const [bmDetail, setBmDetail] = useState(null);
   const [linkedDa, setLinkedDa] = useState(null);
   const [detailRecap, setDetailRecap] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
@@ -196,28 +178,21 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
       await purgeEmptyDraftSiteRequests({
         projectId: embeddedProjectId || undefined,
       }).catch(() => []);
-      const [rows, bmRows, projs, arts] = await Promise.all([
+      // Backfill : BM sans DC → crée de vraies DC (même workflow magasin).
+      const { repairOrphanMaterialBesoinsToDepot } = await import('../../services/projects/projectMaterialBesoins');
+      await repairOrphanMaterialBesoinsToDepot({
+        projectId: embeddedProjectId || null,
+      }).catch(() => null);
+      const [rows, projs, arts] = await Promise.all([
         listSiteMaterialRequests({
           statut: statutFilter,
           priorite: prioriteFilter,
           projectId: embeddedProjectId || undefined,
         }),
-        listMaterialBesoinsForDemandesChantier({
-          projectId: embeddedProjectId || undefined,
-        }).catch(() => []),
         embedded ? Promise.resolve(projet ? [projet] : []) : listProjects(),
         listStockArticles(),
       ]);
-      // DC créées par l’ancien pont BM→DC : on affiche le BM, pas le doublon DC.
-      const dcOnly = (rows || []).filter((r) => !r.material_need_id && !r.from_material_besoin);
-      const bmFiltered = (bmRows || []).filter((r) => {
-        if (prioriteFilter && r.priorite !== prioriteFilter) return false;
-        if (!statutFilter) return true;
-        if (statutFilter === 'soumise') return ['soumise', 'soumis'].includes(r.statut);
-        if (statutFilter === 'brouillon') return r.statut === 'brouillon';
-        return false; // autres statuts DC : BM non concernés
-      });
-      setRequests([...bmFiltered, ...dcOnly]);
+      setRequests(rows || []);
       setProjects(projs || []);
       setStockArticles(arts || []);
     } catch (err) {
@@ -330,12 +305,7 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
     });
   }
 
-  async function openDetail(idOrRow) {
-    if (idOrRow && typeof idOrRow === 'object' && isBesoinMateriauxRow(idOrRow)) {
-      setBmDetail(idOrRow._besoin || idOrRow);
-      return;
-    }
-    const id = idOrRow;
+  async function openDetail(id) {
     setSaving(true);
     try {
       const req = await getSiteMaterialRequest(id);
@@ -352,7 +322,6 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
 
   function closeDetail() {
     setDetail(null);
-    setBmDetail(null);
     setLinkedDa(null);
     setDetailRecap(null);
   }
@@ -531,19 +500,14 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
     }
   }
 
-  async function handlePdf(idOrRow) {
+  async function handlePdf(id) {
     setSaving(true);
     setError('');
     try {
-      if (idOrRow && typeof idOrRow === 'object' && isBesoinMateriauxRow(idOrRow)) {
-        await generateMaterialBesoinPdf(idOrRow._besoin || idOrRow, projet);
-        return;
-      }
-      // Attendre toute persistance en cours, puis toujours lire la DB (jamais le state React).
       if (persistPromiseRef.current) {
         await persistPromiseRef.current.catch(() => {});
       }
-      const full = await getSiteMaterialRequest(idOrRow);
+      const full = await getSiteMaterialRequest(id);
       await generateSiteRequestPdf(full);
     } catch (err) {
       setError(err.message || 'Erreur lors de la génération du PDF.');
@@ -871,18 +835,12 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                     <td data-label="Magasinier">{r.prepared_by_name || '—'}</td>
                     <td data-label="Date souhaitée">{fmtDate(r.date_souhaitee)}</td>
                     <td data-label="Préparation">
-                      {isBesoinMateriauxRow(r) ? (
-                        <span className="badge badge-grey">—</span>
-                      ) : (
-                        <span className={`badge ${prepBadgeClass(r.statut)}`}>
-                          {siteRequestPreparationStatut(r.statut)}
-                        </span>
-                      )}
+                      <span className={`badge ${prepBadgeClass(r.statut)}`}>
+                        {siteRequestPreparationStatut(r.statut)}
+                      </span>
                     </td>
                     <td data-label="Livraison">
-                      {isBesoinMateriauxRow(r) ? (
-                        <span className="badge badge-grey">—</span>
-                      ) : !embedded ? (
+                      {!embedded ? (
                         <select
                           value={siteRequestLivraisonValue(r.statut)}
                           onChange={(e) => handleLivraisonChange(r.id, e.target.value, r.statut)}
@@ -911,11 +869,7 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                     </td>
                     <td data-label="Statut">
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-start' }}>
-                        {isBesoinMateriauxRow(r) || embedded ? (
-                          <span className="badge" style={{ background: `${siteRequestStatutColor(r.statut)}22`, color: siteRequestStatutColor(r.statut) }}>
-                            {r.statutLabel}
-                          </span>
-                        ) : (
+                        {!embedded ? (
                           <select
                             value={r.statut || ''}
                             onChange={(e) => handleStatutChange(r.id, e.target.value, r.statut)}
@@ -936,8 +890,12 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                               <option key={s.value} value={s.value}>{s.label}</option>
                             ))}
                           </select>
+                        ) : (
+                          <span className="badge" style={{ background: `${siteRequestStatutColor(r.statut)}22`, color: siteRequestStatutColor(r.statut) }}>
+                            {r.statutLabel}
+                          </span>
                         )}
-                        {!embedded && !isBesoinMateriauxRow(r) && getSiteRequestMissingLines(r).length > 0 && (
+                        {!embedded && getSiteRequestMissingLines(r).length > 0 && (
                           <button
                             type="button"
                             className="btn btn-ghost btn-sm"
@@ -1660,14 +1618,6 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
         onClose={() => setShowCreateMode(false)}
         onSelectCatalogue={openCreateCatalogue}
         onSelectManual={openCreateManual}
-      />
-
-      <MaterialBesoinDetailModal
-        open={!!bmDetail}
-        onClose={() => setBmDetail(null)}
-        item={bmDetail}
-        projet={projet}
-        onPdf={(n) => generateMaterialBesoinPdf(n, projet)}
       />
     </div>
   );
