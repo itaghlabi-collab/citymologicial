@@ -34,7 +34,7 @@ function demandeurLabel(user, projet) {
   return fromUser || projet?.chef_projet || projet?.chef_chantier || '';
 }
 
-export default function MaterialBesoinsSection({ projet }) {
+export default function MaterialBesoinsSection({ projet, onTransmitted }) {
   const { user } = useAuth();
   const projectId = projet?.id;
   const [loading, setLoading] = useState(false);
@@ -81,6 +81,7 @@ export default function MaterialBesoinsSection({ projet }) {
       setFormOpen(false);
       setEditItem(null);
       await load();
+      onTransmitted?.();
     } catch (err) {
       setError(err.message);
     } finally {
@@ -135,7 +136,7 @@ export default function MaterialBesoinsSection({ projet }) {
           <Layers size={14} /> Besoins matériaux
         </div>
         <div style={{ fontSize: '0.8rem', color: 'var(--text-3)', marginTop: 4 }}>
-          À l’enregistrement, une vraie demande chantier (DC) est créée pour le magasin — même traitement que les DC manuelles.
+          Fiches BM du chantier. La DC liée est pour le magasin (Inventaire) — elle n’apparaît pas dans le tableau « besoin matériel » ci-dessous.
         </div>
       </div>
 

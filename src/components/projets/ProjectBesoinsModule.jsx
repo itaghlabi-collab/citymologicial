@@ -68,6 +68,7 @@ export default function ProjectBesoinsModule({ projet }) {
   const [formOpen, setFormOpen] = useState(false);
   const [editNeed, setEditNeed] = useState(null);
   const [detailNeed, setDetailNeed] = useState(null);
+  const [dcListKey, setDcListKey] = useState(0);
 
   const load = useCallback(async () => {
     if (!projectId) return;
@@ -312,9 +313,9 @@ export default function ProjectBesoinsModule({ projet }) {
         >
           <Info size={16} style={{ flexShrink: 0, marginTop: 1 }} />
           <div>
-            <strong>Workflow matériel</strong> — les besoins matériel créés ici sont des demandes chantier
-            transmises au magasinier (<em>Inventaire &amp; Dépôt → Demandes chantier</em>).
-            En cas de rupture de stock, une demande d&apos;achat est générée automatiquement.
+            <strong>Workflow matériel</strong> — « Besoins matériaux » (haut) et « Ajouter un besoin matériel » (bas)
+            sont séparés : une fiche BM ne se reaffiche pas dans le tableau du bas.
+            Le magasin traite les DC dans <em>Inventaire &amp; Dépôt → Demandes chantier</em>.
           </div>
         </div>
 
@@ -326,7 +327,10 @@ export default function ProjectBesoinsModule({ projet }) {
           <Package size={14} /> Besoins matériel / matériaux
         </div>
 
-        <MaterialBesoinsSection projet={projet} />
+        <MaterialBesoinsSection
+          projet={projet}
+          onTransmitted={() => setDcListKey((k) => k + 1)}
+        />
 
         <div style={{
           margin: '20px 0 12px', paddingTop: 16, borderTop: '1px dashed var(--border)',
@@ -336,7 +340,7 @@ export default function ProjectBesoinsModule({ projet }) {
           Demandes chantier — catalogue stock &amp; magasinier
         </div>
 
-        <DemandesChantier projet={projet} embedded />
+        <DemandesChantier key={dcListKey} projet={projet} embedded />
       </div>
     </div>
   );

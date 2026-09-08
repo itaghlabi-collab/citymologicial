@@ -183,7 +183,11 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
         embedded ? Promise.resolve(projet ? [projet] : []) : listProjects(),
         listStockArticles(),
       ]);
-      setRequests(rows || []);
+      setRequests(
+        // Sur le projet : le bas = demandes manuelles / catalogue seulement.
+        // Les DC issues d’un BM restent visibles via la fiche BM (haut), pas en double ici.
+        (rows || []).filter((r) => !embedded || !isMaterialBesoinSiteRequest(r)),
+      );
       setProjects(projs || []);
       setStockArticles(arts || []);
     } catch (err) {
