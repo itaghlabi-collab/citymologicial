@@ -175,14 +175,6 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
     setLoading(true);
     setError('');
     try {
-      await purgeEmptyDraftSiteRequests({
-        projectId: embeddedProjectId || undefined,
-      }).catch(() => []);
-      // Backfill : BM sans DC → crée de vraies DC (même workflow magasin).
-      const { repairOrphanMaterialBesoinsToDepot } = await import('../../services/projects/projectMaterialBesoins');
-      await repairOrphanMaterialBesoinsToDepot({
-        projectId: embeddedProjectId || null,
-      }).catch(() => null);
       const [rows, projs, arts] = await Promise.all([
         listSiteMaterialRequests({
           statut: statutFilter,
@@ -195,6 +187,10 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
       setRequests(rows || []);
       setProjects(projs || []);
       setStockArticles(arts || []);
+      // Nettoyage léger en arrière-plan (ne bloque pas l’affichage).
+      purgeEmptyDraftSiteRequests({
+        projectId: embeddedProjectId || undefined,
+      }).catch(() => []);
     } catch (err) {
       setError(err.message || 'Erreur de chargement.');
     } finally {
@@ -535,36 +531,60 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
     });
   }
 
-  async function persistAndReloadLines(_nextLines) {
+  async function persistAndReloadLines(_nextLines, { refreshList = false } = {}) {
     const id = detailRef.current?.id;
     if (!id) return null;
     const prev = persistPromiseRef.current;
     const run = (async () => {
       if (prev) await prev.catch(() => {});
-      setSaving(true);
       setError('');
       try {
-        // Dernier état (detailRef mis à jour sync) — sinon fallback nextLines.
-        const linesToSave = detailRef.current?.lines || _nextLines || [];
+        const linesToSave = (detailRef.current?.lines || _nextLines || []).map((l) => {
+          // Ne pas persister le marqueur UI ni une qté « en cours de saisie ».
+          const { _partial_intent, ...rest } = l;
+          if (rest.quantite_preparee === '') {
+            return { ...rest, quantite_preparee: 0 };
+          }
+          return rest;
+        });
         const updated = await persistSiteRequestPreparationLines(id, linesToSave);
         if (detailRef.current?.id === id) {
-          setDetail(updated);
-          syncDetailRecap(updated);
+          // Fusionner : conserver une saisie locale en cours ('' / _partial_intent).
+          const localLines = detailRef.current.lines || [];
+          const mergedLines = (updated.lines || []).map((serverLine) => {
+            const local = localLines.find((l) => String(l.id) === String(serverLine.id));
+            if (!local) return serverLine;
+            if (local.quantite_preparee === '' || local._partial_intent) {
+              return {
+                ...serverLine,
+                quantite_preparee: local.quantite_preparee,
+                _partial_intent: local._partial_intent,
+              };
+            }
+            // Si l’utilisateur a tapé après le départ de la sauvegarde, garder le local plus récent.
+            if (Number(local.quantite_preparee) !== Number(serverLine.quantite_preparee)
+              && document.activeElement?.closest?.('input[type="number"]')) {
+              return { ...serverLine, quantite_preparee: local.quantite_preparee };
+            }
+            return serverLine;
+          });
+          const next = { ...updated, lines: mergedLines };
+          detailRef.current = next;
+          setDetail(next);
+          syncDetailRecap(next);
         }
-        await load();
+        if (refreshList) {
+          // Mise à jour légère de la ligne dans la liste, sans recharger toute la page.
+          setRequests((prevRows) => prevRows.map((r) => (
+            String(r.id) === String(id)
+              ? { ...r, ...updated, lines: updated.lines, statutLabel: updated.statutLabel }
+              : r
+          )));
+        }
         return updated;
       } catch (err) {
         setError(err.message || 'Erreur de sauvegarde de la préparation.');
-        try {
-          const fresh = await getSiteMaterialRequest(id);
-          if (fresh && detailRef.current?.id === id) {
-            setDetail(fresh);
-            syncDetailRecap(fresh);
-          }
-        } catch { /* ignore */ }
         throw err;
-      } finally {
-        setSaving(false);
       }
     })();
     persistPromiseRef.current = run;
@@ -580,13 +600,13 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
       return next;
     });
     if (persist) {
-      return persistAndReloadLines(nextLines);
+      return persistAndReloadLines(nextLines, { refreshList: true });
     }
     return null;
   }
 
-  /** Vert = tout préparé (préparé = demandé). Jaune = partiel. Rouge = rien préparé. */
-  async function setLineAvailability(line, status) {
+  /** Vert = tout préparé. Jaune = partiel (saisie qté). Rouge = rien. */
+  function setLineAvailability(line, status) {
     const patched = applySiteRequestAvailabilityStatus(line, status);
     const nextLines = patchDetailLines(line, patched);
     setDetail((prev) => {
@@ -595,7 +615,11 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
       detailRef.current = next;
       return next;
     });
-    await persistAndReloadLines(nextLines);
+    // Jaune avec champ vide : pas de persist immédiat (évite d’écraser la saisie).
+    if (status === 'partial' && (patched.quantite_preparee === '' || patched._partial_intent)) {
+      return;
+    }
+    persistAndReloadLines(nextLines, { refreshList: true }).catch(() => {});
   }
 
   function associateLineToArticle(line, articleId) {
@@ -628,27 +652,24 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
 
   function handlePreparedQtyInput(line, raw) {
     if (raw === '') {
-      // Saisie en cours : local uniquement (pas de persist — sinon input désactivé / écrasé).
-      updateDetailLine(line, { quantite_preparee: '' });
+      updateDetailLine(line, { quantite_preparee: '', _partial_intent: true });
       return;
     }
     const prep = Number(raw);
     if (Number.isNaN(prep) || prep < 0) return;
-    // Local seulement : la sauvegarde se fait au blur (sinon chaque chiffre rebloque le champ).
-    updateDetailLine(line, { quantite_preparee: prep });
+    updateDetailLine(line, { quantite_preparee: prep, _partial_intent: false });
   }
 
   function handlePreparedQtyBlur(line, raw) {
     const demandee = Math.max(0, Number(line?.quantite_demandee) || 0);
     if (raw === '' || raw == null) {
-      updateDetailLine(line, { quantite_preparee: 0 }, { persist: true });
+      updateDetailLine(line, { quantite_preparee: 0, _partial_intent: false }, { persist: true });
       return;
     }
     let prep = Math.max(0, Number(raw));
     if (Number.isNaN(prep)) prep = 0;
-    // Plafond = quantité demandée (le reste part en « à acheter »).
     if (demandee > 0) prep = Math.min(prep, demandee);
-    updateDetailLine(line, { quantite_preparee: prep }, { persist: true });
+    updateDetailLine(line, { quantite_preparee: prep, _partial_intent: false }, { persist: true });
   }
 
   const missingLines = useMemo(
@@ -1351,13 +1372,13 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                               avail === 'ok' ? 'Disponible' : avail === 'partial' ? 'Partiel' : 'Non disponible'
                             ) : (
                               <div style={{ display: 'flex', flexWrap: 'nowrap', gap: 4, alignItems: 'center' }}>
-                                <button type="button" className="btn btn-ghost btn-sm" disabled={locked || saving} title="Disponible"
+                                <button type="button" className="btn btn-ghost btn-sm" disabled={locked} title="Disponible"
                                   style={{ padding: '2px 6px', minWidth: 28, background: avail === 'ok' ? '#E8F5E9' : undefined }}
                                   onClick={() => setLineAvailability(l, 'ok')}>✅</button>
-                                <button type="button" className="btn btn-ghost btn-sm" disabled={locked || saving} title="Partiellement"
+                                <button type="button" className="btn btn-ghost btn-sm" disabled={locked} title="Partiellement"
                                   style={{ padding: '2px 6px', minWidth: 28, background: avail === 'partial' ? '#FFF8E1' : undefined }}
                                   onClick={() => setLineAvailability(l, 'partial')}>🟡</button>
-                                <button type="button" className="btn btn-ghost btn-sm" disabled={locked || saving} title="Non disponible"
+                                <button type="button" className="btn btn-ghost btn-sm" disabled={locked} title="Non disponible"
                                   style={{ padding: '2px 6px', minWidth: 28, background: avail === 'none' ? '#FFEBEE' : undefined }}
                                   onClick={() => setLineAvailability(l, 'none')}>❌</button>
                               </div>
@@ -1478,13 +1499,13 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                         {!embedded && (
                           <>
                             <div style={{ display: 'flex', gap: 4, marginTop: 8, flexWrap: 'nowrap', alignItems: 'center' }}>
-                              <button type="button" className="btn btn-ghost btn-sm" disabled={locked || saving} title="Disponible"
+                              <button type="button" className="btn btn-ghost btn-sm" disabled={locked} title="Disponible"
                                 style={{ padding: '2px 6px', minWidth: 28, background: avail === 'ok' ? '#E8F5E9' : undefined }}
                                 onClick={() => setLineAvailability(l, 'ok')}>✅</button>
-                              <button type="button" className="btn btn-ghost btn-sm" disabled={locked || saving} title="Partiellement"
+                              <button type="button" className="btn btn-ghost btn-sm" disabled={locked} title="Partiellement"
                                 style={{ padding: '2px 6px', minWidth: 28, background: avail === 'partial' ? '#FFF8E1' : undefined }}
                                 onClick={() => setLineAvailability(l, 'partial')}>🟡</button>
-                              <button type="button" className="btn btn-ghost btn-sm" disabled={locked || saving} title="Non disponible"
+                              <button type="button" className="btn btn-ghost btn-sm" disabled={locked} title="Non disponible"
                                 style={{ padding: '2px 6px', minWidth: 28, background: avail === 'none' ? '#FFEBEE' : undefined }}
                                 onClick={() => setLineAvailability(l, 'none')}>❌</button>
                             </div>

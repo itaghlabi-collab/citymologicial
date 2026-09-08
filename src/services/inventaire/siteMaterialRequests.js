@@ -114,29 +114,48 @@ export function applySiteRequestLinePreparation(line) {
 /** Vert / jaune / rouge → quantités + flags via la source unique. */
 export function applySiteRequestAvailabilityStatus(line, status) {
   const demandee = Math.max(0, Number(line?.quantite_demandee) || 0);
-  let preparee = 0;
   if (status === 'ok') {
-    preparee = demandee;
-  } else if (status === 'partial') {
-    const current = Number(line?.quantite_preparee) || 0;
-    // Partiel = laisser / garder une valeur < demandé pour saisie libre.
-    // Ne pas imposer « moitié » si déjà 0 : l’utilisateur tape la qté (ex. 100).
-    if (current > 0 && current < demandee) {
-      preparee = current;
-    } else if (current >= demandee && demandee > 0) {
-      preparee = Math.max(1, Math.floor(demandee / 2) || 1);
-    } else {
-      preparee = 0;
-    }
-    preparee = Math.min(preparee, demandee);
-  } else {
-    preparee = 0;
+    return applySiteRequestLinePreparation({
+      ...line,
+      quantite_preparee: demandee,
+      _partial_intent: false,
+    });
   }
-  return applySiteRequestLinePreparation({ ...line, quantite_preparee: preparee });
+  if (status === 'none') {
+    return applySiteRequestLinePreparation({
+      ...line,
+      quantite_preparee: 0,
+      _partial_intent: false,
+    });
+  }
+  // Partiel : garder une qté déjà partielle, sinon champ vide pour saisie (sans écraser).
+  const current = Number(line?.quantite_preparee);
+  const hasPartial = Number.isFinite(current) && current > 0 && current < demandee;
+  if (hasPartial) {
+    return applySiteRequestLinePreparation({
+      ...line,
+      quantite_preparee: current,
+      _partial_intent: false,
+    });
+  }
+  if (Number.isFinite(current) && demandee > 0 && current >= demandee) {
+    const half = Math.max(1, Math.floor(demandee / 2) || 1);
+    return applySiteRequestLinePreparation({
+      ...line,
+      quantite_preparee: half,
+      _partial_intent: false,
+    });
+  }
+  // 0 → laisser la saisie : '' local, badge jaune actif, pas de force à 0 persistée tout de suite.
+  return {
+    ...applySiteRequestLinePreparation({ ...line, quantite_preparee: '' }),
+    _partial_intent: true,
+  };
 }
 
 /** Statut UI disponibilité dérivé uniquement des quantités. */
 export function siteRequestLineAvailabilityStatus(line) {
+  if (line?.quantite_preparee === '' || line?._partial_intent) return 'partial';
   const { requested_qty, prepared_qty } = computeSiteRequestLinePreparation(line);
   if (prepared_qty <= 0) return 'none';
   if (requested_qty > 0 && prepared_qty >= requested_qty) return 'ok';
@@ -405,13 +424,33 @@ export async function listSiteMaterialRequests(filters = {}) {
   if (filters.chefProjet) q = q.ilike('chef_projet', `%${filters.chefProjet}%`);
   const { data, error } = await q;
   if (error) throw error;
+  const rows = data || [];
+  if (!rows.length) return [];
+
   const stockArticles = await listStockArticles().catch(() => []);
-  const results = [];
-  for (const row of data || []) {
-    const lines = await loadLines(row.id);
-    results.push(normalizeRequest(row, enrichLinesWithStock(lines, stockArticles)));
+  const ids = rows.map((r) => r.id);
+  const linesByRequest = new Map();
+  // Batch par paquets (limite .in PostgREST) — évite le N+1 qui ralentit la liste.
+  const chunkSize = 80;
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    const chunk = ids.slice(i, i + chunkSize);
+    const { data: lines, error: linesErr } = await getSupabase()
+      .from(LINES)
+      .select('*')
+      .in('request_id', chunk)
+      .order('line_order', { ascending: true });
+    if (linesErr) throw linesErr;
+    for (const line of lines || []) {
+      const key = String(line.request_id);
+      if (!linesByRequest.has(key)) linesByRequest.set(key, []);
+      linesByRequest.get(key).push(line);
+    }
   }
-  return results;
+
+  return rows.map((row) => normalizeRequest(
+    row,
+    enrichLinesWithStock(linesByRequest.get(String(row.id)) || [], stockArticles),
+  ));
 }
 
 export async function getSiteMaterialRequest(id) {
