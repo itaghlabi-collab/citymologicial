@@ -5,8 +5,8 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { formatSupabaseError } from '../services/supabase/formatError';
 import { listWorkers } from '../services/rh/workers';
-import { listChefsChantier } from '../services/rh/employees';
-import { listProjects } from '../services/projects/projects';
+import { listProjectsForWorkerLink } from '../services/projects/projects';
+import { listChefsChantierForPresence } from '../services/rh/employees';
 import {
   listAttendance,
   createAttendance,
@@ -46,9 +46,9 @@ export function useAttendance() {
       const [rows, workerRows, projectRows, chefRows] = await Promise.all([
         listAttendance(),
         listWorkers(),
-        listProjects().catch(() => []),
-        listChefsChantier().catch((err) => {
-          console.warn('[CITYMO] listChefsChantier', err);
+        listProjectsForWorkerLink().catch(() => []),
+        listChefsChantierForPresence().catch((err) => {
+          console.warn('[CITYMO] listChefsChantierForPresence', err);
           return [];
         }),
       ]);

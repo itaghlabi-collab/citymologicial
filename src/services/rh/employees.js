@@ -352,6 +352,27 @@ export async function listChefsChantier() {
   return rows.map(mapChefChantierRow);
 }
 
+/**
+ * Liste chefs pour Présence — RPC SECURITY DEFINER si RLS employés bloque le rôle chef.
+ */
+export async function listChefsChantierForPresence() {
+  const sb = getSupabase();
+  const { data: rpcData, error: rpcError } = await sb.rpc('list_chefs_chantier_for_presence');
+  if (!rpcError && Array.isArray(rpcData)) {
+    return rpcData.map(mapChefChantierRow);
+  }
+  if (rpcError) {
+    const msg = String(rpcError.message || '').toLowerCase();
+    const rpcMissing = rpcError.code === 'PGRST202'
+      || rpcError.code === '42883'
+      || msg.includes('list_chefs_chantier_for_presence');
+    if (!rpcMissing) {
+      console.warn('[CITYMO] list_chefs_chantier_for_presence', rpcError.message);
+    }
+  }
+  return listChefsChantier();
+}
+
 export async function listEmployees() {
   const { data, error } = await getSupabase()
     .from(TABLE)

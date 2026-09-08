@@ -1,9 +1,11 @@
 import { ClockIcon, Plus, X, Filter, CheckCircle, XCircle, CalendarOff, Pencil, Loader2, Search, Users, HardHat, Download, Eye, Printer, Building2, Upload } from 'lucide-react';
-import { useState, useRef, useMemo } from 'react';
+import { useState, useRef, useMemo, useEffect } from 'react';
 import { useAttendance } from '../hooks/useAttendance';
+import { useAuth } from '../hooks/useAuth';
+import { isSuperAdmin } from '../services/rh/isSuperAdmin';
 import { generateAttendanceWeeklyPdf } from '../services/rh/attendanceSheetPdf';
 import { syncPayrollAfterAttendanceChange } from '../services/rh/workerPayroll';
-import { computeAttendanceWorkMetrics, STANDARD_SHIFT_START, STANDARD_SHIFT_END, groupAttendanceSummariesByProjectWeek, collectAttendanceWeeks, fmtWeekRange, weekStartMonday, filterProjectOptionsForChef, personNamesMatch, collectAttendancePdfSummaries } from '../services/rh/attendance';
+import { computeAttendanceWorkMetrics, STANDARD_SHIFT_START, STANDARD_SHIFT_END, groupAttendanceSummariesByProjectWeek, collectAttendanceWeeks, fmtWeekRange, weekStartMonday, filterProjectOptionsForChef, personNamesMatch, extractPersonNameFromStoredLabel, collectAttendancePdfSummaries } from '../services/rh/attendance';
 import AttendanceDetailModal from './rh/AttendanceDetailModal';
 import AttendanceExcelImportWizard from './rh/AttendanceExcelImportWizard';
 
@@ -64,11 +66,43 @@ const EMPTY_FORM = {
   date: today(), heureEntree: STANDARD_SHIFT_START, heureSortie: STANDARD_SHIFT_END, statut: 'Present', notes: '',
 };
 
-const PRESENCE_WORKER_FILTER = { junctionOnly: true };
+const PRESENCE_WORKER_FILTER = { junctionOnly: false };
+
+function userNameAliases(user) {
+  const raw = String(user?.nom || '').trim();
+  if (!raw) return [];
+  const aliases = [raw];
+  const base = extractPersonNameFromStoredLabel(raw) || raw;
+  if (base && !aliases.includes(base)) aliases.push(base);
+  const parts = base.split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    const reversed = [...parts].reverse().join(' ');
+    if (!aliases.includes(reversed)) aliases.push(reversed);
+  }
+  return aliases;
+}
 
 function matchChefChantierEmployee(chefsChantier, name) {
   if (!(name || '').trim()) return null;
   return (chefsChantier || []).find((c) => personNamesMatch(c.label, name)) || null;
+}
+
+function matchSessionChef(chefsChantier, user) {
+  for (const alias of userNameAliases(user)) {
+    const hit = matchChefChantierEmployee(chefsChantier, alias);
+    if (hit) return hit;
+  }
+  return null;
+}
+
+function isPresencePrivileged(user) {
+  if (!user) return false;
+  if (isSuperAdmin(user)) return true;
+  const role = String(user.role || '').toLowerCase().replace(/\s+/g, '_');
+  return role.includes('rh')
+    || role.includes('admin')
+    || role === 'dg'
+    || role.includes('directeur');
 }
 
 function applyProjectChefChantier(next, projectId, projects, chefsChantier) {
@@ -197,6 +231,7 @@ function WorkerChecklist({ workers, selectedIds, onChange, error, disabled, empt
 }
 
 export default function Presence() {
+  const { user } = useAuth();
   const {
     records,
     workers,
@@ -217,6 +252,17 @@ export default function Presence() {
     computeAttendanceStats,
     filterWorkersForProject,
   } = useAttendance();
+
+  const privileged = isPresencePrivileged(user);
+  const sessionChef = useMemo(
+    () => matchSessionChef(chefsChantier, user),
+    [chefsChantier, user],
+  );
+  const chefSelectOptions = useMemo(() => {
+    if (privileged) return chefsChantier;
+    if (sessionChef) return [sessionChef];
+    return chefsChantier;
+  }, [privileged, sessionChef, chefsChantier]);
 
   const [filterOuvrier, setFilterOuvrier] = useState('');
   const [filterProjectId, setFilterProjectId] = useState('');
@@ -286,7 +332,12 @@ export default function Presence() {
 
   function openCreate() {
     setEditId(null);
-    setForm(EMPTY_FORM);
+    const chef = sessionChef || (!privileged && chefsChantier.length === 1 ? chefsChantier[0] : null);
+    setForm({
+      ...EMPTY_FORM,
+      chefChantierId: chef?.id || '',
+      chefChantierNom: chef?.label || '',
+    });
     setErrors({});
     setShowModal(true);
   }
@@ -393,6 +444,14 @@ export default function Presence() {
     () => filterProjectOptionsForChef(projectOptions, projects, form.chefChantierId, chefsChantier),
     [projectOptions, projects, form.chefChantierId, chefsChantier],
   );
+
+  // Nouveau formulaire : si un seul chantier du chef → le pré-sélectionner
+  useEffect(() => {
+    if (!showModal || editId || !form.chefChantierId || form.projectId) return;
+    if (modalProjectOptions.length !== 1) return;
+    setF('projectId', modalProjectOptions[0].id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- setF stable via form state
+  }, [showModal, editId, form.chefChantierId, form.projectId, modalProjectOptions]);
 
   const modalWorkerOptions = useMemo(
     () => {
@@ -864,14 +923,24 @@ export default function Presence() {
                   <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <HardHat size={14} /> Chef de chantier
                   </label>
-                  <select value={form.chefChantierId} onChange={e => setF('chefChantierId', e.target.value)} style={INPUT_S(errors.chefChantierId)}>
-                    <option value="">Qui saisit la présence ?</option>
-                    {chefsChantier.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+                  <select
+                    value={form.chefChantierId}
+                    onChange={e => setF('chefChantierId', e.target.value)}
+                    style={INPUT_S(errors.chefChantierId)}
+                    disabled={!privileged && Boolean(sessionChef)}
+                  >
+                    {!form.chefChantierId && <option value="">Qui saisit la présence ?</option>}
+                    {chefSelectOptions.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
                   </select>
                   {errors.chefChantierId && <div style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.chefChantierId}</div>}
-                  {chefsChantier.length === 0 && (
+                  {!privileged && sessionChef && (
                     <div style={{ fontSize: '0.75rem', color: 'var(--text-3)', marginTop: 4 }}>
-                      Liste vide : vérifiez le poste « Chef de chantier » en RH ou rechargez la page.
+                      Session connectée — {sessionChef.label}
+                    </div>
+                  )}
+                  {chefSelectOptions.length === 0 && (
+                    <div style={{ fontSize: '0.75rem', color: 'var(--text-3)', marginTop: 4 }}>
+                      Liste vide : exécutez le script Supabase présence chefs, ou vérifiez le poste « Chef de chantier » en RH.
                     </div>
                   )}
                   {form.chefChantierId && modalProjectOptions.length === 0 && (
