@@ -408,67 +408,35 @@ export async function submitProjectMaterialBesoin(id, projet = null) {
 }
 
 /**
- * Crée les DC manquantes pour les BM soumis/transmis (1 BM = 1 DC réelle).
+ * Nettoie uniquement les liens BM↔DC invalides.
+ * Ne crée plus de DC automatiquement (évite de faire réapparaître d’anciennes fiches BM
+ * comme de nouvelles DC dans Inventaire → Demandes chantier).
  */
 export async function repairOrphanMaterialBesoinsToDepot({ projectId = null } = {}) {
   await requireUser();
-  const { purgeEmptyDraftSiteRequests } = await import('../inventaire/siteMaterialRequests');
-  await purgeEmptyDraftSiteRequests({ projectId }).catch(() => []);
 
   let q = getSupabase()
     .from(TABLE)
     .select('*')
-    .in('statut', ['soumis', 'transmis', 'brouillon'])
     .order('created_at', { ascending: true });
   if (projectId) q = q.eq('project_id', projectId);
   const { data, error } = await q;
   if (error) throw error;
 
-  const repaired = [];
-  const failures = [];
   const skippedUnlinked = [];
-
   for (const row of data || []) {
-    try {
-      const lines = await loadLines(row.id);
-      let need = enrichMaterialBesoinRow(row, lines);
-      if (need.site_request_id) {
-        const beforeId = need.site_request_id;
-        need = await clearInvalidMaterialBesoinSiteRequestLink(need);
-        if (!need.site_request_id && beforeId) {
-          skippedUnlinked.push({ needId: need.id, ref: need.ref_besoin, detachedRequestId: beforeId });
-        }
-      }
-      if (need.site_request_id) continue;
-      if (!need.lines?.length) continue;
-
-      let projet = { id: need.project_id };
-      const { data: proj } = await getSupabase()
-        .from('projects')
-        .select('id, nom, ref, responsable, chef_chantier, client_nom')
-        .eq('id', need.project_id)
-        .maybeSingle();
-      if (proj) {
-        projet = {
-          ...proj,
-          chef_projet: proj.responsable || '',
-          client: proj.client_nom || '',
-        };
-      }
-      const req = await createSiteRequestFromMaterialBesoin(need, projet);
-      repaired.push({
-        needId: need.id,
-        ref: need.ref_besoin,
-        requestId: req.id,
-        requestRef: req.ref || req.ref_demande,
-      });
-    } catch (err) {
-      failures.push({ needId: row.id, ref: row.ref_besoin, error: err.message || String(err) });
+    if (!row.site_request_id) continue;
+    const lines = await loadLines(row.id);
+    const need = enrichMaterialBesoinRow(row, lines);
+    const beforeId = need.site_request_id;
+    const cleared = await clearInvalidMaterialBesoinSiteRequestLink(need);
+    if (!cleared.site_request_id && beforeId) {
+      skippedUnlinked.push({ needId: need.id, ref: need.ref_besoin, detachedRequestId: beforeId });
     }
   }
   return {
-    repaired,
-    failures,
+    repaired: [],
+    failures: [],
     skippedUnlinked,
     scanned: (data || []).length,
   };
