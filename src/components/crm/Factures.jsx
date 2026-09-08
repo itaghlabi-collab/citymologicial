@@ -105,7 +105,7 @@ const STATUT_CFG = {
   impayee:             { label: 'Impayée',          cls: 'badge-red',    icon: XCircle },
   en_retard:           { label: 'En retard',        cls: 'badge-red',    icon: AlertCircle },
   annulee:             { label: 'Annulée',          cls: 'badge-grey',   icon: Ban },
-  archive_importee:    { label: 'payée', cls: 'badge-orange', icon: FileText },
+  archive_importee:    { label: 'payée', cls: 'badge-green', icon: FileText },
 };
 function StatutBadge({ statut }) {
   const cfg = STATUT_CFG[statut] || { label: statut, cls: 'badge-grey' };
