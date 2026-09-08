@@ -98,7 +98,17 @@ function formFromWorker(worker) {
   };
 }
 
-/** Projets ouverts visibles pour le formulaire ouvrier (filtrés chef de chantier si applicable). */
+/** Projet affecté à l’utilisateur (chef de chantier OU chef de projet / responsable). */
+function projectAssignedToUser(p, userNom) {
+  if (!p || !userNom) return false;
+  const fields = [p.chef_chantier, p.chef_projet, p.responsable];
+  return fields.some((f) => f && personNamesMatch(f, userNom));
+}
+
+/** Projets visibles pour le formulaire ouvrier.
+ * RH / admin / DG : tous les projets ouverts.
+ * Sinon (chef chantier, etc.) : uniquement les chantiers où son nom est affecté — rien d’autre.
+ */
 function filterProjectsForWorkerForm(projects, user) {
   const open = (projects || []).filter((p) => {
     const st = String(p.statut || '').toLowerCase();
@@ -115,15 +125,7 @@ function filterProjectsForWorkerForm(projects, user) {
 
   if (isPrivileged) return open;
 
-  const mine = open.filter((p) => {
-    const chef = p.chef_chantier || '';
-    return chef && personNamesMatch(chef, user.nom || '');
-  });
-  // Chef de chantier : uniquement ses chantiers. Sinon (autre rôle) : tous les ouverts.
-  const looksLikeChefChantier = (role.includes('chef') && role.includes('chantier'))
-    || role.includes('conducteur');
-  if (looksLikeChefChantier) return mine;
-  return mine.length ? mine : open;
+  return open.filter((p) => projectAssignedToUser(p, user.nom || ''));
 }
 
 function projectOptionLabel(p) {
@@ -1382,6 +1384,16 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
           if (current) filtered.unshift(current);
         }
         setProjectOptions(filtered);
+        // Nouveau ouvrier + un seul chantier affecté → pré-sélection automatique
+        if (!isEdit && !form.project_id && filtered.length === 1) {
+          const only = filtered[0];
+          setForm((prev) => ({
+            ...prev,
+            project_id: String(only.id),
+            projet_nom: projectOptionLabel(only),
+            chantier: only.nom || '',
+          }));
+        }
       })
       .catch(() => { if (alive) setProjectOptions([]); })
       .finally(() => { if (alive) setProjectsLoading(false); });
@@ -2084,7 +2096,7 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
                     </select>
                     {errors.project_id && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.project_id}</span>}
                     <p style={{ margin: '6px 0 0', fontSize: '0.75rem', color: 'var(--text-3)' }}>
-                      Uniquement les chantiers du chef de chantier — l’ouvrier apparaîtra en Présence sur ce projet.
+                      Uniquement vos chantiers affectés — l’ouvrier apparaîtra en Présence sur ce projet.
                     </p>
                   </div>
                   <div className="form-group">
