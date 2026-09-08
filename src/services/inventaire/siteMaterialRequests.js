@@ -231,6 +231,9 @@ function normalizeRequest(row, lines = [], history = []) {
     observation: row.observation || '',
     statut: row.statut || 'brouillon',
     statutLabel: siteRequestStatutLabel(row.statut),
+    material_need_id: row.material_need_id || null,
+    from_material_besoin: !!row.material_need_id
+      || /^Issu du besoin matériaux\b/i.test(String(row.observation || '')),
     origine: row.origine === 'manuelle'
       || (row.origine == null && activeLines.length > 0 && activeLines.every((l) => l.is_custom))
       ? 'manuelle'

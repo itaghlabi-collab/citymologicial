@@ -14,9 +14,16 @@ export function siteRequestOrigineLabel(origine) {
 
 export function isManualSiteRequest(req) {
   if (!req) return false;
+  if (req.from_material_besoin || req.material_need_id) return false;
   if (req.origine === 'manuelle') return true;
   const lines = (req.lines || []).filter((l) => Number(l.quantite_demandee) > 0 || l.is_custom);
   return lines.length > 0 && lines.every((l) => l.is_custom);
+}
+
+export function isMaterialBesoinSiteRequest(req) {
+  if (!req) return false;
+  return !!(req.from_material_besoin || req.material_need_id)
+    || /^Issu du besoin matériaux\b/i.test(String(req.observation || ''));
 }
 
 export const SITE_REQUEST_STATUTS = [

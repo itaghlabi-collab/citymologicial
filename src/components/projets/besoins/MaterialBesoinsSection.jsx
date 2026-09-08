@@ -15,7 +15,6 @@ import {
   updateProjectMaterialBesoin,
   deleteProjectMaterialBesoin,
   getProjectMaterialBesoin,
-  repairOrphanMaterialBesoinsToDepot,
 } from '../../../services/projects/projectMaterialBesoins';
 import { generateMaterialBesoinPdf } from '../../../services/projects/projectMaterialBesoinPdf';
 import MaterialBesoinFormModal from './MaterialBesoinFormModal';
@@ -50,10 +49,6 @@ export default function MaterialBesoinsSection({ projet }) {
     setLoading(true);
     setError('');
     try {
-      const repair = await repairOrphanMaterialBesoinsToDepot({ projectId }).catch(() => null);
-      if (repair?.failures?.length) {
-        console.warn('[CITYMO] repair BM→DC', repair.failures);
-      }
       setItems(await listProjectMaterialBesoins(projectId));
     } catch (err) {
       setError(err.message || 'Erreur de chargement.');
@@ -130,7 +125,7 @@ export default function MaterialBesoinsSection({ projet }) {
           <Layers size={14} /> Besoins matériaux
         </div>
         <div style={{ fontSize: '0.8rem', color: 'var(--text-3)', marginTop: 4 }}>
-          Dès l’enregistrement, une demande chantier est créée pour le magasinier (comme « besoin matériel »).
+          Fiche BM uniquement — aucune DC dédiée. Le même BM apparaît aussi dans Demandes chantier.
         </div>
       </div>
 
@@ -165,14 +160,13 @@ export default function MaterialBesoinsSection({ projet }) {
                 <th>Qté globale</th>
                 <th>Priorité</th>
                 <th>Statut</th>
-                <th>Demande chantier</th>
                 <th>Actions</th>
               </tr>
             </thead>
             <tbody>
               {items.length === 0 ? (
                 <tr>
-                  <td colSpan={9} style={{ color: 'var(--text-3)', textAlign: 'center', padding: 24 }}>
+                  <td colSpan={8} style={{ color: 'var(--text-3)', textAlign: 'center', padding: 24 }}>
                     Aucune fiche — cliquez sur « Ajouter un besoin matériaux » pour déclarer les matériaux du chantier.
                   </td>
                 </tr>
@@ -188,9 +182,6 @@ export default function MaterialBesoinsSection({ projet }) {
                   </td>
                   <td data-label="Statut">
                     <span className={`badge ${item.statutBadge}`}>{item.statutLabel}</span>
-                  </td>
-                  <td data-label="Demande chantier" style={{ fontSize: '0.82rem' }}>
-                    {item.site_request_ref || '—'}
                   </td>
                   <td data-label="Actions">
                     <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>

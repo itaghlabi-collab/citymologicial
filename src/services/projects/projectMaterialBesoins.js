@@ -145,7 +145,7 @@ export async function getProjectMaterialBesoin(id) {
   return enrichMaterialBesoinRow(data, lines);
 }
 
-export async function createProjectMaterialBesoin(projectId, form, projet, { submit = false } = {}) {
+export async function createProjectMaterialBesoin(projectId, form, projet) {
   const user = await requireUser();
   const demandeurName = form.demandeur_name?.trim()
     || await getProfileName(user.id)
@@ -165,15 +165,15 @@ export async function createProjectMaterialBesoin(projectId, form, projet, { sub
     demandeur_user_id: user.id,
     demandeur_name: demandeurName,
     observation: form.observation?.trim() || null,
-    statut: 'brouillon',
+    // BM seul — pas de DC dédiée. Visible ensuite dans Demandes chantier.
+    statut: 'soumis',
     created_by: user.id,
   };
 
   const { data, error } = await getSupabase().from(TABLE).insert([payload]).select().single();
   if (error) throw error;
   await replaceLines(data.id, form.lines);
-  // Comme « besoin matériel » : transmission auto au magasin dès la création.
-  return transmitMaterialBesoinToDepot(await getProjectMaterialBesoin(data.id), projet);
+  return getProjectMaterialBesoin(data.id);
 }
 
 export async function updateProjectMaterialBesoin(id, form, { submit = false } = {}) {
@@ -190,15 +190,66 @@ export async function updateProjectMaterialBesoin(id, form, { submit = false } =
     observation: form.observation?.trim() || null,
   };
   if (form.demandeur_name?.trim()) patch.demandeur_name = form.demandeur_name.trim();
+  if (submit || existing.statut === 'brouillon') patch.statut = 'soumis';
 
   const { error } = await getSupabase().from(TABLE).update(patch).eq('id', id);
   if (error) throw error;
   await replaceLines(id, form.lines);
-  let need = await getProjectMaterialBesoin(id);
-  if (!need.site_request_id || submit) {
-    need = await transmitMaterialBesoinToDepot(need);
-  }
-  return need;
+  return getProjectMaterialBesoin(id);
+}
+
+/**
+ * Liste les BM pour affichage dans Demandes chantier (sans créer de DC).
+ */
+export async function listMaterialBesoinsForDemandesChantier({ projectId = null } = {}) {
+  await requireUser();
+  let q = getSupabase()
+    .from(TABLE)
+    .select('*')
+    .order('created_at', { ascending: false });
+  if (projectId) q = q.eq('project_id', projectId);
+  const { data, error } = await q;
+  if (error) throw error;
+
+  const rows = data || [];
+  return Promise.all(rows.map(async (row) => {
+    const lines = await loadLines(row.id);
+    const need = enrichMaterialBesoinRow(row, lines);
+    return materialBesoinToDemandesChantierRow(need);
+  }));
+}
+
+/** Adapte un BM au format ligne de la liste Demandes chantier. */
+export function materialBesoinToDemandesChantierRow(need) {
+  const dateSouhaitee = (need.lines || [])
+    .map((l) => l.date_souhaitee)
+    .filter(Boolean)
+    .sort()[0] || need.date_besoin || '';
+  return {
+    id: `bm:${need.id}`,
+    source_type: 'material_besoin',
+    material_besoin_id: need.id,
+    material_need_id: need.id,
+    from_material_besoin: true,
+    ref: need.ref_besoin || '',
+    project_id: need.project_id,
+    project_ref: need.project_ref || '',
+    project_name: need.project_name || '',
+    client_name: need.client_name || '',
+    chef_projet: '',
+    chef_chantier: '',
+    date_demande: need.date_besoin || '',
+    date_souhaitee: dateSouhaitee,
+    priorite: need.priorite || 'Normale',
+    observation: need.observation || '',
+    statut: need.statut === 'brouillon' ? 'brouillon' : 'soumise',
+    statutLabel: need.statutLabel || materialBesoinStatutLabel(need.statut),
+    origine: 'besoin_materiaux',
+    prepared_by_name: '',
+    distinct_articles: need.line_count || (need.lines || []).length,
+    lines: need.lines || [],
+    _besoin: need,
+  };
 }
 
 /** Mappe une fiche BM → lignes demande chantier (articles hors catalogue). */
@@ -219,42 +270,22 @@ function mapBesoinLinesToSiteRequestLines(need) {
 }
 
 /**
- * Retrouve une DC déjà liée à ce BM (évite les doublons).
- * Priorité : material_need_id → observation contenant la ref BM.
+ * Retrouve une DC déjà créée depuis CE BM uniquement.
+ * Jamais de matching flou sur observation / projet : une DC manuelle
+ * (Ajouter un besoin matériel) ne doit pas être rattachée à un BM.
  */
 async function findExistingSiteRequestForMaterialBesoin(need) {
+  if (!need?.id) return null;
   const sb = getSupabase();
-  const candidates = [];
+  const { data, error } = await sb
+    .from('site_material_requests')
+    .select('id, ref_demande, statut, observation, material_need_id, created_at')
+    .eq('material_need_id', need.id)
+    .neq('statut', 'annulee')
+    .order('created_at', { ascending: true });
+  if (error || !data?.length) return null;
 
-  if (need.id) {
-    const { data, error } = await sb
-      .from('site_material_requests')
-      .select('id, ref_demande, statut, observation, created_at')
-      .eq('material_need_id', need.id)
-      .neq('statut', 'annulee')
-      .order('created_at', { ascending: true });
-    if (!error && data?.length) candidates.push(...data);
-  }
-
-  if (need.ref_besoin && need.project_id) {
-    const { data, error } = await sb
-      .from('site_material_requests')
-      .select('id, ref_demande, statut, observation, created_at')
-      .eq('project_id', need.project_id)
-      .ilike('observation', `%${need.ref_besoin}%`)
-      .neq('statut', 'annulee')
-      .order('created_at', { ascending: true });
-    if (!error && data?.length) {
-      for (const row of data) {
-        if (!candidates.some((c) => String(c.id) === String(row.id))) candidates.push(row);
-      }
-    }
-  }
-
-  if (!candidates.length) return null;
-
-  // Préférer une DC avec au moins une ligne ; sinon la plus ancienne non vide de contenu.
-  for (const row of candidates) {
+  for (const row of data) {
     const { data: lines } = await sb
       .from('site_material_request_lines')
       .select('id, quantite_demandee, article_name')
@@ -265,7 +296,48 @@ async function findExistingSiteRequestForMaterialBesoin(need) {
     );
     if (hasContent) return row;
   }
-  return null;
+  return data[0] || null;
+}
+
+/** Lien BM↔DC valide seulement si la DC a été créée depuis CE BM. */
+async function isValidMaterialBesoinSiteRequestLink(need, siteRequestId) {
+  if (!need?.id || !siteRequestId) return false;
+  const { data, error } = await getSupabase()
+    .from('site_material_requests')
+    .select('id, material_need_id, observation')
+    .eq('id', siteRequestId)
+    .maybeSingle();
+  if (error) {
+    // Colonne absente (migration non jouée) : on conserve le lien existant.
+    if (/material_need_id|column/i.test(String(error.message || ''))) return true;
+    return false;
+  }
+  if (!data) return false;
+  if (data.material_need_id != null) {
+    return String(data.material_need_id) === String(need.id);
+  }
+  const obs = String(data.observation || '');
+  if (need.ref_besoin && obs.includes(`Issu du besoin matériaux ${need.ref_besoin}`)) {
+    return true;
+  }
+  // DC manuelle indépendante (ex. DC-00019) : ne jamais la considérer liée à un BM.
+  return false;
+}
+
+async function clearInvalidMaterialBesoinSiteRequestLink(need) {
+  if (!need?.id || !need.site_request_id) return need;
+  const ok = await isValidMaterialBesoinSiteRequestLink(need, need.site_request_id);
+  if (ok) return need;
+  const { error } = await getSupabase()
+    .from(TABLE)
+    .update({
+      site_request_id: null,
+      site_request_ref: null,
+      updated_at: new Date().toISOString(),
+    })
+    .eq('id', need.id);
+  if (error && !/site_request_id|column/i.test(error.message || '')) throw error;
+  return getProjectMaterialBesoin(need.id);
 }
 
 async function linkMaterialBesoinToSiteRequest(needId, siteRequest) {
@@ -354,82 +426,63 @@ export async function createSiteRequestFromMaterialBesoin(need, projet = null) {
 
 async function transmitMaterialBesoinToDepot(need, projet = null) {
   if (!need) throw new Error('Fiche introuvable.');
-  if (need.site_request_id) {
-    if (need.statut !== 'transmis') {
-      await getSupabase().from(TABLE).update({ statut: 'transmis' }).eq('id', need.id);
-      return getProjectMaterialBesoin(need.id);
+  // Détache un lien erroné vers une DC manuelle indépendante (ex. BM-003 ↔ DC-00019).
+  let fresh = await clearInvalidMaterialBesoinSiteRequestLink(need);
+  if (fresh.site_request_id) {
+    if (fresh.statut !== 'transmis') {
+      await getSupabase().from(TABLE).update({ statut: 'transmis' }).eq('id', fresh.id);
+      return getProjectMaterialBesoin(fresh.id);
     }
-    return need;
+    return fresh;
   }
-  await createSiteRequestFromMaterialBesoin(need, projet);
-  return getProjectMaterialBesoin(need.id);
+  await createSiteRequestFromMaterialBesoin(fresh, projet);
+  return getProjectMaterialBesoin(fresh.id);
 }
 
-export async function submitProjectMaterialBesoin(id, projet = null) {
+export async function submitProjectMaterialBesoin(id) {
   await requireUser();
   const item = await getProjectMaterialBesoin(id);
   if (!item) throw new Error('Fiche introuvable.');
-  if (!['brouillon', 'soumis'].includes(item.statut) && !item.site_request_id) {
-    throw new Error('Cette fiche ne peut plus être soumise au dépôt.');
+  if (!['brouillon', 'soumis', 'transmis'].includes(item.statut)) {
+    throw new Error('Cette fiche ne peut plus être soumise.');
   }
   if (item.statut === 'brouillon') {
     const { error } = await getSupabase().from(TABLE).update({ statut: 'soumis' }).eq('id', id);
     if (error) throw error;
   }
-  const fresh = await getProjectMaterialBesoin(id);
-  return transmitMaterialBesoinToDepot(fresh, projet);
+  return getProjectMaterialBesoin(id);
 }
 
 /**
- * Répare les BM soumis sans demande chantier liée.
+ * Nettoie les liens BM↔DC erronés. Ne crée plus de DC (BM s’affiche tel quel dans Demandes chantier).
  */
 export async function repairOrphanMaterialBesoinsToDepot({ projectId = null } = {}) {
   await requireUser();
-  const { purgeEmptyDraftSiteRequests } = await import('../inventaire/siteMaterialRequests');
-  await purgeEmptyDraftSiteRequests({ projectId }).catch(() => []);
-
   let q = getSupabase()
     .from(TABLE)
     .select('*')
-    .in('statut', ['soumis', 'transmis'])
     .order('created_at', { ascending: true });
-  // site_request_id peut être absent avant migration — filtre côté JS
   if (projectId) q = q.eq('project_id', projectId);
   const { data, error } = await q;
   if (error) throw error;
 
-  const orphans = (data || []).filter((row) => !row.site_request_id);
-  const repaired = [];
-  const failures = [];
-  for (const row of orphans) {
-    try {
-      const lines = await loadLines(row.id);
-      const need = enrichMaterialBesoinRow(row, lines);
-      let projet = { id: row.project_id };
-      const { data: proj } = await getSupabase()
-        .from('projects')
-        .select('id, nom, ref, responsable, chef_chantier, client_nom')
-        .eq('id', row.project_id)
-        .maybeSingle();
-      if (proj) {
-        projet = {
-          ...proj,
-          chef_projet: proj.responsable || '',
-          client: proj.client_nom || '',
-        };
-      }
-      const req = await createSiteRequestFromMaterialBesoin(need, projet);
-      repaired.push({
-        needId: row.id,
-        ref: row.ref_besoin,
-        requestId: req.id,
-        requestRef: req.ref || req.ref_demande,
-      });
-    } catch (err) {
-      failures.push({ needId: row.id, ref: row.ref_besoin, error: err.message || String(err) });
+  const skippedUnlinked = [];
+  for (const row of data || []) {
+    if (!row.site_request_id) continue;
+    const lines = await loadLines(row.id);
+    const need = enrichMaterialBesoinRow(row, lines);
+    const beforeId = need.site_request_id;
+    const cleared = await clearInvalidMaterialBesoinSiteRequestLink(need);
+    if (!cleared.site_request_id && beforeId) {
+      skippedUnlinked.push({ needId: need.id, ref: need.ref_besoin, detachedRequestId: beforeId });
     }
   }
-  return { repaired, failures, scanned: orphans.length };
+  return {
+    repaired: [],
+    failures: [],
+    skippedUnlinked,
+    scanned: skippedUnlinked.length,
+  };
 }
 
 export async function deleteProjectMaterialBesoin(id) {
