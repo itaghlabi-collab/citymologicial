@@ -219,17 +219,97 @@ function mapBesoinLinesToSiteRequestLines(need) {
 }
 
 /**
+ * Retrouve une DC déjà liée à ce BM (évite les doublons).
+ * Priorité : material_need_id → observation contenant la ref BM.
+ */
+async function findExistingSiteRequestForMaterialBesoin(need) {
+  const sb = getSupabase();
+  const candidates = [];
+
+  if (need.id) {
+    const { data, error } = await sb
+      .from('site_material_requests')
+      .select('id, ref_demande, statut, observation, created_at')
+      .eq('material_need_id', need.id)
+      .neq('statut', 'annulee')
+      .order('created_at', { ascending: true });
+    if (!error && data?.length) candidates.push(...data);
+  }
+
+  if (need.ref_besoin && need.project_id) {
+    const { data, error } = await sb
+      .from('site_material_requests')
+      .select('id, ref_demande, statut, observation, created_at')
+      .eq('project_id', need.project_id)
+      .ilike('observation', `%${need.ref_besoin}%`)
+      .neq('statut', 'annulee')
+      .order('created_at', { ascending: true });
+    if (!error && data?.length) {
+      for (const row of data) {
+        if (!candidates.some((c) => String(c.id) === String(row.id))) candidates.push(row);
+      }
+    }
+  }
+
+  if (!candidates.length) return null;
+
+  // Préférer une DC avec au moins une ligne ; sinon la plus ancienne non vide de contenu.
+  for (const row of candidates) {
+    const { data: lines } = await sb
+      .from('site_material_request_lines')
+      .select('id, quantite_demandee, article_name')
+      .eq('request_id', row.id)
+      .limit(20);
+    const hasContent = (lines || []).some(
+      (l) => Number(l.quantite_demandee) > 0 || String(l.article_name || '').trim(),
+    );
+    if (hasContent) return row;
+  }
+  return null;
+}
+
+async function linkMaterialBesoinToSiteRequest(needId, siteRequest) {
+  const linkPatch = {
+    site_request_id: siteRequest.id,
+    site_request_ref: siteRequest.ref_demande || '',
+    statut: 'transmis',
+    updated_at: new Date().toISOString(),
+  };
+  const { error: linkErr } = await getSupabase().from(TABLE).update(linkPatch).eq('id', needId);
+  if (linkErr && !/site_request_id|column/i.test(linkErr.message || '')) {
+    throw linkErr;
+  }
+  return {
+    id: siteRequest.id,
+    ref: siteRequest.ref_demande || '',
+    ref_demande: siteRequest.ref_demande || '',
+  };
+}
+
+/**
  * Crée + soumet une demande chantier (DC) depuis un besoin matériaux (BM).
- * Idempotent si site_request_id déjà renseigné.
+ * Idempotent : 1 BM = 1 DC (réutilise si déjà existante).
  */
 export async function createSiteRequestFromMaterialBesoin(need, projet = null) {
   if (!need?.id) throw new Error('Besoin matériaux introuvable.');
+
   if (need.site_request_id) {
     return {
       id: need.site_request_id,
       ref: need.site_request_ref || '',
       ref_demande: need.site_request_ref || '',
     };
+  }
+
+  const existing = await findExistingSiteRequestForMaterialBesoin(need);
+  if (existing) {
+    const { submitSiteMaterialRequest } = await import('../inventaire/siteMaterialRequests');
+    if (existing.statut === 'brouillon') {
+      try {
+        await submitSiteMaterialRequest(existing.id);
+      } catch (_) { /* déjà soumise ou lignes invalides */ }
+    }
+    return linkMaterialBesoinToSiteRequest(need.id, existing);
   }
 
   const lines = mapBesoinLinesToSiteRequestLines(need);
@@ -266,23 +346,10 @@ export async function createSiteRequestFromMaterialBesoin(need, projet = null) {
   const created = await createSiteMaterialRequest(form, lines);
   const submitted = await submitSiteMaterialRequest(created.id);
 
-  const linkPatch = {
-    site_request_id: submitted.id,
-    site_request_ref: submitted.ref_demande || submitted.ref || created.ref_demande || '',
-    statut: 'transmis',
-    updated_at: new Date().toISOString(),
-  };
-  const { error: linkErr } = await getSupabase().from(TABLE).update(linkPatch).eq('id', need.id);
-  // Colonne absente tant que le SQL n'est pas joué : on garde au moins la DC créée.
-  if (linkErr && !/site_request_id|column/i.test(linkErr.message || '')) {
-    throw linkErr;
-  }
-
-  return {
+  return linkMaterialBesoinToSiteRequest(need.id, {
     id: submitted.id,
-    ref: submitted.ref_demande || submitted.ref || '',
-    ref_demande: submitted.ref_demande || submitted.ref || '',
-  };
+    ref_demande: submitted.ref_demande || submitted.ref || created.ref_demande || '',
+  });
 }
 
 async function transmitMaterialBesoinToDepot(need, projet = null) {
@@ -318,6 +385,9 @@ export async function submitProjectMaterialBesoin(id, projet = null) {
  */
 export async function repairOrphanMaterialBesoinsToDepot({ projectId = null } = {}) {
   await requireUser();
+  const { purgeEmptyDraftSiteRequests } = await import('../inventaire/siteMaterialRequests');
+  await purgeEmptyDraftSiteRequests({ projectId }).catch(() => []);
+
   let q = getSupabase()
     .from(TABLE)
     .select('*')

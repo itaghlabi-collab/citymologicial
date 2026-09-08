@@ -478,13 +478,18 @@ export async function createSiteMaterialRequest(form, lines = [], { ipAddress } 
       const { origine, ...rest } = row;
       const retry = await getSupabase().from(TABLE).insert([rest]).select().single();
       if (!retry.error) {
-        const savedLines = await replaceLines(retry.data.id, lines, stockArticles);
-        await logHistory(retry.data.id, 'creation', 'Demande créée', user.id, actorName, actorRole, ipAddress);
-        return normalizeRequest(
-          { ...retry.data, origine: form.origine === 'manuelle' ? 'manuelle' : 'catalogue' },
-          enrichLinesWithStock(savedLines, stockArticles),
-          await loadHistory(retry.data.id),
-        );
+        try {
+          const savedLines = await replaceLines(retry.data.id, lines, stockArticles);
+          await logHistory(retry.data.id, 'creation', 'Demande créée', user.id, actorName, actorRole, ipAddress);
+          return normalizeRequest(
+            { ...retry.data, origine: form.origine === 'manuelle' ? 'manuelle' : 'catalogue' },
+            enrichLinesWithStock(savedLines, stockArticles),
+            await loadHistory(retry.data.id),
+          );
+        } catch (lineErr) {
+          await getSupabase().from(TABLE).delete().eq('id', retry.data.id);
+          throw lineErr;
+        }
       }
       lastError = retry.error;
       if (!isDuplicateRefError(retry.error)) throw retry.error;
@@ -494,9 +499,18 @@ export async function createSiteMaterialRequest(form, lines = [], { ipAddress } 
   }
   if (!data) throw lastError || new Error('Impossible de générer une référence unique.');
 
-  const savedLines = await replaceLines(data.id, lines, stockArticles);
-  await logHistory(data.id, 'creation', 'Demande créée', user.id, actorName, actorRole, ipAddress);
-  return normalizeRequest(data, enrichLinesWithStock(savedLines, stockArticles), await loadHistory(data.id));
+  try {
+    const savedLines = await replaceLines(data.id, lines, stockArticles);
+    if (!savedLines.length && (lines || []).some((l) => Number(l.quantite_demandee) > 0 || l.is_custom)) {
+      throw new Error('Impossible d’enregistrer les lignes de la demande.');
+    }
+    await logHistory(data.id, 'creation', 'Demande créée', user.id, actorName, actorRole, ipAddress);
+    return normalizeRequest(data, enrichLinesWithStock(savedLines, stockArticles), await loadHistory(data.id));
+  } catch (err) {
+    // Évite les DC fantômes (brouillon 0 article) si les lignes échouent.
+    await getSupabase().from(TABLE).delete().eq('id', data.id);
+    throw err;
+  }
 }
 
 export async function updateSiteMaterialRequest(id, form, lines = [], { ipAddress } = {}) {
@@ -897,4 +911,30 @@ export async function deleteSiteMaterialRequest(id) {
   }
   const { error } = await getSupabase().from(TABLE).delete().eq('id', id);
   if (error) throw error;
+}
+
+/**
+ * Supprime les DC brouillon sans lignes (fantômes créés lors d’échecs d’insert lignes).
+ */
+export async function purgeEmptyDraftSiteRequests({ projectId = null } = {}) {
+  await requireUser();
+  let q = getSupabase()
+    .from(TABLE)
+    .select('id, ref_demande')
+    .eq('statut', 'brouillon');
+  if (projectId) q = q.eq('project_id', projectId);
+  const { data, error } = await q;
+  if (error) throw error;
+
+  const deleted = [];
+  for (const row of data || []) {
+    const lines = await loadLines(row.id);
+    const hasContent = (lines || []).some(
+      (l) => Number(l.quantite_demandee) > 0 || l.is_custom || String(l.article_name || '').trim(),
+    );
+    if (hasContent) continue;
+    const { error: delErr } = await getSupabase().from(TABLE).delete().eq('id', row.id);
+    if (!delErr) deleted.push(row.ref_demande || row.id);
+  }
+  return deleted;
 }

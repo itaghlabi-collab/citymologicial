@@ -18,6 +18,7 @@ import {
 } from '../../constants/siteMaterialRequests';
 import {
   listSiteMaterialRequests,
+  purgeEmptyDraftSiteRequests,
   getSiteMaterialRequest,
   createSiteMaterialRequest,
   updateSiteMaterialRequest,
@@ -155,6 +156,9 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
     setLoading(true);
     setError('');
     try {
+      await purgeEmptyDraftSiteRequests({
+        projectId: embeddedProjectId || undefined,
+      }).catch(() => []);
       const [rows, projs, arts] = await Promise.all([
         listSiteMaterialRequests({
           statut: statutFilter,
