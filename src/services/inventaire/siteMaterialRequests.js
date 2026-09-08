@@ -358,7 +358,7 @@ function toLineRows(requestId, lines, stockArticles) {
       const prep = computeSiteRequestLinePreparation(l);
       return {
         request_id: requestId,
-        category_id: l.category_id,
+        category_id: l.category_id || 'autres',
         article_name: l.article_name,
         article_id: l.article_id || null,
         quantite_demandee: prep.requested_qty,

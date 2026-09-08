@@ -165,18 +165,15 @@ export async function createProjectMaterialBesoin(projectId, form, projet, { sub
     demandeur_user_id: user.id,
     demandeur_name: demandeurName,
     observation: form.observation?.trim() || null,
-    statut: submit ? 'soumis' : 'brouillon',
+    statut: 'brouillon',
     created_by: user.id,
   };
 
   const { data, error } = await getSupabase().from(TABLE).insert([payload]).select().single();
   if (error) throw error;
   await replaceLines(data.id, form.lines);
-  let need = await getProjectMaterialBesoin(data.id);
-  if (submit) {
-    need = await transmitMaterialBesoinToDepot(need, projet);
-  }
-  return need;
+  // Comme « besoin matériel » : transmission auto au magasin dès la création.
+  return transmitMaterialBesoinToDepot(await getProjectMaterialBesoin(data.id), projet);
 }
 
 export async function updateProjectMaterialBesoin(id, form, { submit = false } = {}) {
@@ -191,7 +188,6 @@ export async function updateProjectMaterialBesoin(id, form, { submit = false } =
     date_besoin: form.date_besoin || existing.date_besoin,
     priorite: form.priorite || existing.priorite,
     observation: form.observation?.trim() || null,
-    statut: submit ? 'soumis' : existing.statut,
   };
   if (form.demandeur_name?.trim()) patch.demandeur_name = form.demandeur_name.trim();
 
@@ -199,7 +195,7 @@ export async function updateProjectMaterialBesoin(id, form, { submit = false } =
   if (error) throw error;
   await replaceLines(id, form.lines);
   let need = await getProjectMaterialBesoin(id);
-  if (submit && !need.site_request_id) {
+  if (!need.site_request_id || submit) {
     need = await transmitMaterialBesoinToDepot(need);
   }
   return need;
@@ -210,6 +206,7 @@ function mapBesoinLinesToSiteRequestLines(need) {
   return (need.lines || [])
     .filter((l) => String(l.designation || '').trim())
     .map((l, idx) => ({
+      category_id: 'autres',
       article_name: String(l.designation).trim(),
       quantite_demandee: Number(l.quantite) || 0,
       unite: l.unite || 'unité',

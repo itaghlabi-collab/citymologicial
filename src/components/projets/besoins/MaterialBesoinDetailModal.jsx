@@ -1,8 +1,8 @@
 /**
  * MaterialBesoinDetailModal.jsx — Détail fiche besoins matériaux
  */
-import { X, Download, Edit2, Trash2, Send } from 'lucide-react';
-import { canEditMaterialBesoin, canSubmitMaterialBesoin } from '../../../constants/projectMaterialBesoins';
+import { X, Download, Edit2, Trash2 } from 'lucide-react';
+import { canEditMaterialBesoin } from '../../../constants/projectMaterialBesoins';
 
 function fmtDate(d) {
   if (!d) return '—';
@@ -10,7 +10,7 @@ function fmtDate(d) {
 }
 
 export default function MaterialBesoinDetailModal({
-  open, onClose, item, projet, onPdf, onEdit, onDelete, onSubmit,
+  open, onClose, item, projet, onPdf, onEdit, onDelete,
 }) {
   if (!open || !item) return null;
 
@@ -73,9 +73,6 @@ export default function MaterialBesoinDetailModal({
 
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => onPdf?.(item)}><Download size={13} /> PDF</button>
-            {canSubmitMaterialBesoin(item) && (
-              <button type="button" className="btn btn-primary btn-sm" onClick={() => onSubmit?.(item)}><Send size={13} /> Soumettre</button>
-            )}
             {canEditMaterialBesoin(item) && (
               <button type="button" className="btn btn-secondary btn-sm" onClick={() => onEdit?.(item)}><Edit2 size={13} /> Modifier</button>
             )}

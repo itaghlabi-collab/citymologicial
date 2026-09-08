@@ -40,11 +40,7 @@ export function canDeleteMaterialBesoin(item) {
   return Boolean(item?.id);
 }
 
-export function canSubmitMaterialBesoin(item) {
-  if (!item) return false;
-  if (item.statut === 'brouillon') return true;
-  // Réparer les BM soumis avant le pont BM→DC
-  if (item.statut === 'soumis' && !item.site_request_id) return true;
+export function canSubmitMaterialBesoin() {
   return false;
 }
 

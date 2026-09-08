@@ -95,7 +95,10 @@ export default function MaterialBesoinFormModal({
           <button type="button" className="rh-emp-modal-close" onClick={onClose}><X size={20} /></button>
         </header>
 
-        <form onSubmit={(e) => handleSubmit(e, false)} style={{ padding: '20px 22px' }}>
+        <form onSubmit={(e) => handleSubmit(e, true)} style={{ padding: '20px 22px' }}>
+          <p style={{ fontSize: '0.8rem', color: 'var(--text-3)', margin: '0 0 12px' }}>
+            L’enregistrement crée automatiquement la demande chantier pour le magasinier.
+          </p>
           <div style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--red)', textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 12 }}>
             Informations générales
           </div>
@@ -190,11 +193,8 @@ export default function MaterialBesoinFormModal({
 
           <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
             <button type="button" className="btn btn-secondary" onClick={onClose} disabled={saving}>Annuler</button>
-            <button type="submit" className="btn btn-secondary" disabled={saving}>
-              {saving ? <Loader2 size={14} className="cin-spin" /> : null} Enregistrer brouillon
-            </button>
-            <button type="button" className="btn btn-primary" disabled={saving} onClick={(e) => handleSubmit(e, true)}>
-              {saving ? <Loader2 size={14} className="cin-spin" /> : null} Soumettre
+            <button type="submit" className="btn btn-primary" disabled={saving}>
+              {saving ? <Loader2 size={14} className="cin-spin" /> : null} Enregistrer
             </button>
           </div>
         </form>

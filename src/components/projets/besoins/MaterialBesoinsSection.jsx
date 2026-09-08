@@ -3,18 +3,16 @@
  */
 import { useState, useEffect, useCallback } from 'react';
 import {
-  Plus, Eye, Edit2, Trash2, Download, Send, Loader2, RefreshCw, AlertCircle, Layers,
+  Plus, Eye, Edit2, Trash2, Download, Loader2, RefreshCw, AlertCircle, Layers,
 } from 'lucide-react';
 import { useAuth } from '../../../hooks/useAuth';
 import {
   canEditMaterialBesoin,
-  canSubmitMaterialBesoin,
 } from '../../../constants/projectMaterialBesoins';
 import {
   listProjectMaterialBesoins,
   createProjectMaterialBesoin,
   updateProjectMaterialBesoin,
-  submitProjectMaterialBesoin,
   deleteProjectMaterialBesoin,
   getProjectMaterialBesoin,
   repairOrphanMaterialBesoinsToDepot,
@@ -66,14 +64,14 @@ export default function MaterialBesoinsSection({ projet }) {
 
   useEffect(() => { load(); }, [load]);
 
-  async function handleSave(form, submit = false) {
+  async function handleSave(form) {
     setSaving(true);
     setError('');
     try {
       if (editItem?.id) {
-        await updateProjectMaterialBesoin(editItem.id, form, { submit });
+        await updateProjectMaterialBesoin(editItem.id, form, { submit: true });
       } else {
-        await createProjectMaterialBesoin(projectId, form, projet, { submit });
+        await createProjectMaterialBesoin(projectId, form, projet);
       }
       setFormOpen(false);
       setEditItem(null);
@@ -107,11 +105,6 @@ export default function MaterialBesoinsSection({ projet }) {
         case 'pdf':
           await generateMaterialBesoinPdf(item, projet);
           break;
-        case 'submit':
-          await submitProjectMaterialBesoin(item.id, projet);
-          if (detailItem?.id === item.id) setDetailItem(await getProjectMaterialBesoin(item.id));
-          await load();
-          break;
         case 'delete':
           if (!window.confirm('Supprimer cette fiche de besoin matériaux ?')) return;
           await deleteProjectMaterialBesoin(item.id);
@@ -137,7 +130,7 @@ export default function MaterialBesoinsSection({ projet }) {
           <Layers size={14} /> Besoins matériaux
         </div>
         <div style={{ fontSize: '0.8rem', color: 'var(--text-3)', marginTop: 4 }}>
-          À la soumission, une demande chantier est créée pour le magasinier (Inventaire → Demandes chantier).
+          Dès l’enregistrement, une demande chantier est créée pour le magasinier (comme « besoin matériel »).
         </div>
       </div>
 
@@ -205,9 +198,6 @@ export default function MaterialBesoinsSection({ projet }) {
                       {canEditMaterialBesoin(item) && (
                         <button type="button" className="btn btn-ghost btn-sm" title="Modifier" onClick={() => handleAction('edit', item)}><Edit2 size={13} /></button>
                       )}
-                      {canSubmitMaterialBesoin(item) && (
-                        <button type="button" className="btn btn-primary btn-sm" title="Soumettre au dépôt" onClick={() => handleAction('submit', item)}><Send size={13} /></button>
-                      )}
                       <button type="button" className="btn btn-ghost btn-sm" title="PDF" onClick={() => handleAction('pdf', item)}><Download size={13} /></button>
                       <button type="button" className="btn btn-ghost btn-sm" title="Supprimer" style={{ color: 'var(--red)' }} onClick={() => handleAction('delete', item)}><Trash2 size={13} /></button>
                     </div>
@@ -237,7 +227,6 @@ export default function MaterialBesoinsSection({ projet }) {
         onPdf={(n) => generateMaterialBesoinPdf(n, projet)}
         onEdit={(n) => { setDetailItem(null); setEditItem(n); setFormOpen(true); }}
         onDelete={(n) => handleAction('delete', n)}
-        onSubmit={(n) => handleAction('submit', n)}
       />
     </div>
   );
