@@ -455,20 +455,33 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
 
   async function handleCreateDaFromMissing(request = detail) {
     if (!request) return;
-    const missing = getSiteRequestMissingLines(request);
-    if (!missing.length) {
-      setError('Aucun article manquant — tout est préparé.');
-      return;
-    }
     setSaving(true);
     setError('');
     try {
-      const da = await createPurchaseRequestFromSiteRuptures(request, { refresh: true });
+      // Flush la qté préparée saisie (souvent pas encore persistée si pas de blur)
+      // avant de calculer le reste à acheter / créer la DA.
+      if (persistPromiseRef.current) {
+        await persistPromiseRef.current.catch(() => {});
+      }
+      let source = request;
+      if (detailRef.current?.id === request.id) {
+        const persisted = await persistAndReloadLines(detailRef.current.lines || request.lines || [], {
+          refreshList: true,
+        });
+        if (persisted) source = persisted;
+        else source = detailRef.current || request;
+      }
+      const missing = getSiteRequestMissingLines(source);
+      if (!missing.length) {
+        setError('Aucun article manquant — tout est préparé.');
+        return;
+      }
+      const da = await createPurchaseRequestFromSiteRuptures(source, { refresh: true });
       if (!da) {
         setError('Impossible de créer la demande d\'achat.');
         return;
       }
-      if (detail?.id === request.id) setLinkedDa(da);
+      if (detailRef.current?.id === source.id) setLinkedDa(da);
       const ref = da.ref || da.ref_demande || '';
       const go = window.confirm(
         `Demande d'achat ${ref || ''} prête (reste de commande).\n\nOuvrir le module Achats ?`,
