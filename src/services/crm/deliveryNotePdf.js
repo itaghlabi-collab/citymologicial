@@ -446,9 +446,12 @@ export async function generateDeliveryNotePdf(bl) {
     });
   }
 
-  ensureSpace(SIGN_BLOCK_H + 4);
-  y += 6;
-  y = drawSignatureBlock(y);
+  /* Cases Livré / Reçu / Cachet : toujours collées en bas de page (au-dessus du pied) */
+  const signGap = 4;
+  if (y + signGap > MAX_Y - SIGN_BLOCK_H) {
+    newPage();
+  }
+  drawSignatureBlock(MAX_Y - SIGN_BLOCK_H);
 
   const totalPages = doc.internal.getNumberOfPages();
   for (let p = 1; p <= totalPages; p++) {
