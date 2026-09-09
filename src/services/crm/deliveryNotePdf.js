@@ -19,7 +19,6 @@ const PAGE_H = 297;
 const M = 12;
 const CONTENT_W = PAGE_W - M * 2;
 const FOOTER_H = 26;
-const MAX_Y = PAGE_H - FOOTER_H;
 const BODY_TOP = M;
 const BODY_BOTTOM = PAGE_H - FOOTER_H;
 
@@ -27,6 +26,14 @@ const CLIENT_W = 58;
 const LOGO_MAX_W = 42;
 const LOGO_MAX_H = 20;
 const SIGN_BLOCK_H = 38;
+/** QR pied de page — les cases signature s’arrêtent avant (pas de chevauchement). */
+const QR_FOOTER_MAX = 18;
+const QR_CLEAR_GAP = 3;
+const FOOTER_LINE_Y = PAGE_H - FOOTER_H + 4;
+const QR_TOP_Y = FOOTER_LINE_Y - QR_FOOTER_MAX + 1;
+const SIGN_BOTTOM_Y = QR_TOP_Y - QR_CLEAR_GAP;
+const SIGN_Y = SIGN_BOTTOM_Y - SIGN_BLOCK_H;
+const SIGN_WIDTH = CONTENT_W - QR_FOOTER_MAX - 4;
 
 const COMPANY = {
   address: '228 Bd Mohammed V, Casablanca 20000',
@@ -191,11 +198,11 @@ export async function generateDeliveryNotePdf(bl) {
   };
 
   const drawFooter = (pageNum, totalPages) => {
-    const lineY = PAGE_H - FOOTER_H + 4;
+    const lineY = FOOTER_LINE_Y;
     doc.setDrawColor(...RED);
     doc.setLineWidth(0.7);
     const qrSize = qrMeta
-      ? containImage(qrMeta.width, qrMeta.height, 18, 18)
+      ? containImage(qrMeta.width, qrMeta.height, QR_FOOTER_MAX, QR_FOOTER_MAX)
       : { width: 0, height: 0 };
     const lineEnd = qrMeta ? PAGE_W - M - qrSize.width - 2 : PAGE_W - M;
     doc.line(M, lineY, lineEnd, lineY);
@@ -289,7 +296,8 @@ export async function generateDeliveryNotePdf(bl) {
   };
 
   const drawSignatureBlock = (startY) => {
-    const colW = CONTENT_W / 3;
+    const blockW = SIGN_WIDTH;
+    const colW = blockW / 3;
     const labels = ['Livré par', 'Reçu par', 'Cachet / Signature client'];
     labels.forEach((label, i) => {
       const x = M + i * colW;
@@ -422,7 +430,7 @@ export async function generateDeliveryNotePdf(bl) {
   };
 
   const ensureSpace = (needed) => {
-    if (y + needed > MAX_Y) newPage();
+    if (y + needed > SIGN_Y) newPage();
   };
 
   const ensureTableHeader = () => {
@@ -446,12 +454,12 @@ export async function generateDeliveryNotePdf(bl) {
     });
   }
 
-  /* Cases Livré / Reçu / Cachet : toujours collées en bas de page (au-dessus du pied) */
+  /* Cases Livré / Reçu / Cachet : en bas, avant le QR (sans chevauchement) */
   const signGap = 4;
-  if (y + signGap > MAX_Y - SIGN_BLOCK_H) {
+  if (y + signGap > SIGN_Y) {
     newPage();
   }
-  drawSignatureBlock(MAX_Y - SIGN_BLOCK_H);
+  drawSignatureBlock(SIGN_Y);
 
   const totalPages = doc.internal.getNumberOfPages();
   for (let p = 1; p <= totalPages; p++) {
