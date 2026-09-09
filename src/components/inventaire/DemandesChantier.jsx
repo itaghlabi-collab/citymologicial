@@ -538,8 +538,8 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
       if (prev) await prev.catch(() => {});
       setError('');
       try {
+        // Toujours le dernier état UI (après la file) — évite d’écraser une qté tapée pendant un autre persist.
         const linesToSave = (detailRef.current?.lines || _nextLines || []).map((l) => {
-          // Ne pas persister le marqueur UI ni une qté « en cours de saisie ».
           const { _partial_intent, ...rest } = l;
           if (rest.quantite_preparee === '') {
             return { ...rest, quantite_preparee: 0 };
@@ -547,40 +547,51 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
           return rest;
         });
         const updated = await persistSiteRequestPreparationLines(id, linesToSave);
-        if (detailRef.current?.id === id) {
-          // Fusionner : conserver une saisie locale en cours ('' / _partial_intent).
-          const localLines = detailRef.current.lines || [];
-          const mergedLines = (updated.lines || []).map((serverLine) => {
-            const local = localLines.find((l) => String(l.id) === String(serverLine.id));
-            if (!local) return serverLine;
-            if (local.quantite_preparee === '' || local._partial_intent) {
-              return {
-                ...serverLine,
-                quantite_preparee: local.quantite_preparee,
-                _partial_intent: local._partial_intent,
-              };
-            }
-            // Si l’utilisateur a tapé après le départ de la sauvegarde, garder le local plus récent.
-            if (Number(local.quantite_preparee) !== Number(serverLine.quantite_preparee)
-              && document.activeElement?.closest?.('input[type="number"]')) {
-              return { ...serverLine, quantite_preparee: local.quantite_preparee };
-            }
-            return serverLine;
-          });
-          const next = { ...updated, lines: mergedLines };
-          detailRef.current = next;
-          setDetail(next);
-          syncDetailRecap(next);
-        }
+        if (detailRef.current?.id !== id) return updated;
+
+        const localLines = detailRef.current.lines || [];
+        const mergedLines = (updated.lines || []).map((serverLine) => {
+          const local = localLines.find((l) => String(l.id) === String(serverLine.id))
+            || localLines.find((l) => (
+              String(l.article_name || '') === String(serverLine.article_name || '')
+              && String(l.category_id || '') === String(serverLine.category_id || '')
+              && Number(l.line_order) === Number(serverLine.line_order)
+            ));
+          if (!local) return serverLine;
+          // Saisie en cours (champ vide / intent partiel) : ne pas écraser.
+          if (local.quantite_preparee === '' || local._partial_intent) {
+            return {
+              ...serverLine,
+              quantite_preparee: local.quantite_preparee,
+              _partial_intent: local._partial_intent,
+            };
+          }
+          // Si le local a une qté différente plus récente que le snapshot serveur, garder le local.
+          // (ex. tapé pendant qu’un autre clic vert/jaune/rouge sauvegardait encore)
+          if (Number(local.quantite_preparee) !== Number(serverLine.quantite_preparee)) {
+            return {
+              ...serverLine,
+              quantite_preparee: local.quantite_preparee,
+              disponible: Number(local.quantite_preparee) >= (Number(local.quantite_demandee) || 0)
+                && Number(local.quantite_demandee) > 0,
+              rupture: Number(local.quantite_preparee) <= 0,
+            };
+          }
+          return serverLine;
+        });
+        const next = { ...updated, lines: mergedLines };
+        detailRef.current = next;
+        setDetail(next);
+        syncDetailRecap(next);
+
         if (refreshList) {
-          // Mise à jour légère de la ligne dans la liste, sans recharger toute la page.
           setRequests((prevRows) => prevRows.map((r) => (
             String(r.id) === String(id)
-              ? { ...r, ...updated, lines: updated.lines, statutLabel: updated.statutLabel }
+              ? { ...r, ...next, lines: next.lines, statutLabel: next.statutLabel }
               : r
           )));
         }
-        return updated;
+        return next;
       } catch (err) {
         setError(err.message || 'Erreur de sauvegarde de la préparation.');
         throw err;
@@ -668,6 +679,7 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
     let prep = Math.max(0, Number(raw));
     if (Number.isNaN(prep)) prep = 0;
     if (demandee > 0) prep = Math.min(prep, demandee);
+    // Persister la valeur du champ (raw), pas un état React potentiellement déjà écrasé.
     updateDetailLine(line, { quantite_preparee: prep, _partial_intent: false }, { persist: true });
   }
 
