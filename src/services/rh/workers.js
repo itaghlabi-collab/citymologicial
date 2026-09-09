@@ -204,6 +204,36 @@ async function getAuthUserId() {
   return user.id;
 }
 
+/** Âge autorisé ouvriers externes : 18–60 ans inclus. */
+function assertWorkerAgeAllowed(dateNaissance) {
+  if (!dateNaissance) {
+    const err = new Error('La date de naissance est obligatoire (âge entre 18 et 60 ans).');
+    err.code = 'AGE_REQUIRED';
+    throw err;
+  }
+  const raw = String(dateNaissance).slice(0, 10);
+  const born = new Date(`${raw}T12:00:00`);
+  if (Number.isNaN(born.getTime())) {
+    const err = new Error('Date de naissance invalide.');
+    err.code = 'AGE_INVALID';
+    throw err;
+  }
+  const today = new Date();
+  let age = today.getFullYear() - born.getFullYear();
+  const m = today.getMonth() - born.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < born.getDate())) age -= 1;
+  if (age < 18 || age > 60) {
+    const err = new Error(
+      age < 18
+        ? `Âge refusé (${age} ans) : moins de 18 ans non accepté.`
+        : `Âge refusé (${age} ans) : plus de 60 ans non accepté.`,
+    );
+    err.code = 'AGE_REJECTED';
+    err.age = age;
+    throw err;
+  }
+}
+
 async function upsertWorkerDocument(workerId, docType, storagePath, mimeType) {
   const { data: existing } = await getSupabase()
     .from(DOCS_TABLE)
@@ -354,6 +384,7 @@ async function reloadWorker(id) {
 
 export async function createWorker(form) {
   const userId = await getAuthUserId();
+  assertWorkerAgeAllowed(form.date_naissance);
   const row = toWorkerRow(form, { created_by: userId });
   const data = await insertWorkerRow(row);
 
@@ -372,6 +403,7 @@ export async function createWorker(form) {
 
 export async function updateWorker(id, form) {
   await getAuthUserId();
+  assertWorkerAgeAllowed(form.date_naissance);
 
   const { data: existing, error: fetchErr } = await getSupabase()
     .from(TABLE)

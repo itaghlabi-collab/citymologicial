@@ -3,7 +3,7 @@ import {
   Upload, Camera, ScanLine, User, FileText, Shield,
   Phone, MapPin, CheckCircle, Clock, AlertCircle,
   ChevronLeft, RefreshCw, ArrowUpDown, Package,
-  Loader, Star, FileSpreadsheet,
+  Loader, FileSpreadsheet,
 } from 'lucide-react';
 
 import { useState, useEffect, useRef, useCallback, useId } from 'react';
@@ -28,6 +28,7 @@ import CINGuidedCamera from './cin/CINGuidedCamera';
 import { generateWorkerPdf } from '../services/rh/workerPdf';
 import { workerTarifJournalier } from '../services/rh/workers';
 import { exportWorkersExcel } from '../services/rh/workersExcelExport';
+import { notifyWorkerAgeRejected } from '../services/notifications/notificationEvents';
 import { listProjectsForWorkerLink } from '../services/projects/projects';
 import { personNamesMatch, extractPersonNameFromStoredLabel } from '../services/rh/attendance';
 import { useAuth } from '../hooks/useAuth';
@@ -72,17 +73,36 @@ function fmtTarifJour(n) { return Number(n).toLocaleString('fr-MA', { minimumFra
 function fmtDate(d) { if (!d) return '—'; try { return new Date(d).toLocaleDateString('fr-MA', { day: '2-digit', month: '2-digit', year: 'numeric' }); } catch { return d; } }
 function initials(w) { return ((w.prenom?.[0] || '') + (w.nom?.[0] || '')).toUpperCase() || '?'; }
 
-/** Niveau d'expérience : 1–5 (rétrocompat debutant…expert) */
+/** Âge civil à partir d'une date ISO YYYY-MM-DD. */
+function ageFromBirthDate(iso) {
+  if (!iso) return null;
+  const raw = String(iso).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
+  const born = new Date(`${raw}T12:00:00`);
+  if (Number.isNaN(born.getTime())) return null;
+  const today = new Date();
+  let age = today.getFullYear() - born.getFullYear();
+  const m = today.getMonth() - born.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < born.getDate())) age -= 1;
+  return age;
+}
+
+/** Âge autorisé ouvriers externes : 18–60 ans inclus. */
+function workerAgeRejectionReason(dateNaissance) {
+  if (!dateNaissance) return 'La date de naissance est obligatoire.';
+  const age = ageFromBirthDate(dateNaissance);
+  if (age == null) return 'Date de naissance invalide.';
+  if (age < 18) return `Âge refusé (${age} ans) : moins de 18 ans non accepté.`;
+  if (age > 60) return `Âge refusé (${age} ans) : plus de 60 ans non accepté.`;
+  return null;
+}
+
+/** Niveau d'expérience : 1–5 (rétrocompat debutant…expert) — conservé pour lecture DB existante */
 function experienceToStars(exp) {
   const n = Number(exp);
   if (n >= 1 && n <= 5) return n;
   const map = { debutant: 1, intermediaire: 2, confirme: 3, expert: 4 };
   return map[exp] || 3;
-}
-
-function formatExperienceStars(exp) {
-  const n = experienceToStars(exp);
-  return `${'★'.repeat(n)}${'☆'.repeat(5 - n)} (${n}/5)`;
 }
 
 function formFromWorker(worker) {
@@ -1251,30 +1271,29 @@ function OuvrierDetail({ worker, onBack, onEdit, onDownloadPdf, pdfLoading }) {
           <div className="card" style={{ padding: '20px 22px' }}>
             <STitle><User size={14} /> Informations personnelles</STitle>
             {[
-              ['Nom complet', worker.prenom + ' ' + worker.nom],
-              ['Telephone', worker.telephone],
-              ['CIN', worker.cin],
-            ].map(([k, v]) => v ? (
+              ['Nom complet', `${worker.prenom || ''} ${worker.nom || ''}`.trim() || '—'],
+              ['Date de naissance', fmtDate(worker.date_naissance)],
+              ['Telephone', worker.telephone || '—'],
+              ['CIN', worker.cin || '—'],
+            ].map(([k, v]) => (
               <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.83rem', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
                 <span style={{ color: 'var(--text-3)' }}>{k}</span>
                 <span style={{ fontWeight: 600 }}>{v}</span>
               </div>
-            ) : null)}
+            ))}
           </div>
           <div className="card" style={{ padding: '20px 22px' }}>
             <STitle><HardHat size={14} /> Infos métier</STitle>
             {[
-              ['Fonction', worker.fonction],
-              ['Experience', formatExperienceStars(worker.experience)],
-              ['Date de première intervention', fmtDate(worker.date_recrutement)],
-              ['Statut', STATUT_CFG[worker.statut]?.label || worker.statut],
+              ['Fonction', worker.fonction || '—'],
+              ['Statut', STATUT_CFG[worker.statut]?.label || worker.statut || '—'],
               ['Tarif journalier', fmtTarifJour(workerTarifJournalier(worker))],
-            ].map(([k, v]) => v ? (
+            ].map(([k, v]) => (
               <div key={k} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.83rem', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
                 <span style={{ color: 'var(--text-3)' }}>{k}</span>
                 <span style={{ fontWeight: 600 }}>{v}</span>
               </div>
-            ) : null)}
+            ))}
           </div>
         </div>
       )}
@@ -1832,6 +1851,8 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
     if (!form.prenom.trim()) e.prenom = 'Requis';
     if (!form.nom.trim())    e.nom    = 'Requis';
     if (!form.cin.trim())    e.cin    = 'Requis';
+    const ageErr = workerAgeRejectionReason(form.date_naissance);
+    if (ageErr) e.date_naissance = ageErr;
     if (!form.project_id) e.project_id = 'Sélectionnez un chantier';
     if (!form.tarif || isNaN(Number(form.tarif)) || Number(form.tarif) <= 0) e.tarif = 'Montant valide requis';
     return e;
@@ -1842,8 +1863,23 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
     const errs = validate();
     if (Object.keys(errs).length) {
       setErrors(errs);
-      if (errs.prenom || errs.nom || errs.cin) setFormTab('identite');
+      if (errs.prenom || errs.nom || errs.cin || errs.date_naissance) setFormTab('identite');
       else if (errs.project_id || errs.tarif) setFormTab('chantier');
+      if (errs.date_naissance) {
+        try {
+          await notifyWorkerAgeRejected({
+            prenom: form.prenom,
+            nom: form.nom,
+            cin: form.cin,
+            date_naissance: form.date_naissance,
+            age: ageFromBirthDate(form.date_naissance),
+            reason: errs.date_naissance,
+          });
+        } catch (err) {
+          console.warn('[CITYMO] notify age ouvrier', err);
+        }
+        window.alert(errs.date_naissance);
+      }
       return;
     }
     setErrors({});
@@ -2056,9 +2092,10 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
                       <input value={form.telephone} onChange={e => set('telephone', e.target.value)} placeholder="+212 600 000 000" style={IS(false)} />
                     </div>
                     <div className="form-group">
-                      <Label>Date de naissance</Label>
-                      <input data-ocr-field="date_naissance" type="date" value={form.date_naissance} onChange={e => set('date_naissance', e.target.value)} style={IS(false, ocrFilled && form.date_naissance ? { borderColor: '#43A047', background: '#F1F8E9' } : {})} />
+                      <Label required>Date de naissance</Label>
+                      <input data-ocr-field="date_naissance" type="date" value={form.date_naissance} onChange={e => set('date_naissance', e.target.value)} style={IS(errors.date_naissance, ocrFilled && form.date_naissance ? { borderColor: '#43A047', background: '#F1F8E9' } : {})} />
                       <OcrConfBadge meta={ocrFieldMeta?.date_naissance} />
+                      {errors.date_naissance && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.date_naissance}</span>}
                     </div>
                     <div className="form-group">
                       <Label>Lieu de naissance</Label>
@@ -2132,31 +2169,6 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
                     <Label required>Tarif journalier (MAD/j)</Label>
                     <input type="number" min="0" step="0.01" value={form.tarif} onChange={e => set('tarif', e.target.value)} placeholder="120.00" style={IS(errors.tarif)} />
                     {errors.tarif && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.tarif}</span>}
-                  </div>
-                  <div className="form-group">
-                    <Label>Niveau d'experience</Label>
-                    <div className="ouv-star-rating" role="group" aria-label="Niveau d'experience de 1 a 5">
-                      {[1, 2, 3, 4, 5].map((n) => {
-                        const active = experienceToStars(form.experience) >= n;
-                        return (
-                          <button
-                            key={n}
-                            type="button"
-                            className={'ouv-star-btn' + (active ? ' active' : '')}
-                            onClick={() => set('experience', String(n))}
-                            aria-label={`${n} etoile${n > 1 ? 's' : ''}`}
-                            aria-pressed={active}
-                          >
-                            <Star size={22} fill={active ? 'currentColor' : 'none'} />
-                          </button>
-                        );
-                      })}
-                      <span className="ouv-star-label">{experienceToStars(form.experience)}/5</span>
-                    </div>
-                  </div>
-                  <div className="form-group">
-                    <Label>Date de première intervention</Label>
-                    <input type="date" value={form.date_recrutement} onChange={e => set('date_recrutement', e.target.value)} style={IS(false)} />
                   </div>
                   <div className="form-group">
                     <Label>Statut</Label>
@@ -2604,7 +2616,11 @@ export default function OuvriersListe({ onWorkersChange }) {
                           <Avatar worker={w} size={34} />
                           <div>
                             <div style={{ fontWeight: 700, color: 'var(--text)', fontSize: '0.88rem' }}>{w.prenom} {w.nom}</div>
-                            {w.date_recrutement && <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>1ère interv. {fmtDate(w.date_recrutement)}</div>}
+                            {w.date_naissance && (
+                              <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>
+                                Né(e) le {fmtDate(w.date_naissance)}
+                              </div>
+                            )}
                           </div>
                         </div>
                       </td>

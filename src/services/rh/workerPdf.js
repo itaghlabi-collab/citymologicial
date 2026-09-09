@@ -35,18 +35,6 @@ const STATUT_LABELS = {
   archive: 'Archivé',
 };
 
-const EXPERIENCE_LABELS = {
-  debutant: '★☆☆☆☆ (1/5)',
-  intermediaire: '★★☆☆☆ (2/5)',
-  confirme: '★★★☆☆ (3/5)',
-  expert: '★★★★☆ (4/5)',
-  '1': '★☆☆☆☆ (1/5)',
-  '2': '★★☆☆☆ (2/5)',
-  '3': '★★★☆☆ (3/5)',
-  '4': '★★★★☆ (4/5)',
-  '5': '★★★★★ (5/5)',
-};
-
 const CIN_PDF_RATIO = CIN_RATIO;
 
 const PAGE_W = 210;
@@ -436,6 +424,7 @@ export async function generateWorkerPdf(worker) {
   const personalRows = [
     ['Prénom', w.prenom],
     ['Nom', w.nom],
+    ['Date de naissance', fmtDate(w.date_naissance)],
     ['N° CIN', w.cin],
     ['Téléphone', w.telephone],
     ['Nationalité', w.nationalite],
@@ -460,8 +449,6 @@ export async function generateWorkerPdf(worker) {
     ['Chantier', w.chantier],
     ['Tarif journalier', fmtMAD(dailyTarif) + '/j'],
     ['Statut', STATUT_LABELS[w.statut] || w.statut],
-    ['Date recrutement', fmtDate(w.date_recrutement)],
-    ['Expérience', EXPERIENCE_LABELS[w.experience] || EXPERIENCE_LABELS[String(w.experience)] || `${w.experience}/5`],
     ['Badge', w.badge],
     ['Pointure', w.pointure],
     ['Taille vêtement', w.taille_vetement],

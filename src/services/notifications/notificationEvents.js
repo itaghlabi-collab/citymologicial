@@ -199,6 +199,40 @@ export async function notifyTaskCompleted(task) {
   return Promise.all([...recipients].map((id) => notifyUser(id, payload)));
 }
 
+/** Tentative d’enregistrement ouvrier hors tranche d’âge 18–60 → alerte RH + DG. */
+export async function notifyWorkerAgeRejected({
+  prenom, nom, cin, date_naissance, age, reason,
+} = {}) {
+  const name = `${prenom || ''} ${nom || ''}`.trim() || 'Ouvrier';
+  const ageLabel = age != null ? `${age} ans` : 'âge inconnu';
+  const payload = {
+    title: 'Alerte âge ouvrier externe',
+    message: `${reason || 'Âge hors plage autorisée (18–60 ans).'} — ${name}${cin ? ` (CIN ${cin})` : ''} · ${ageLabel}${date_naissance ? ` · né(e) le ${date_naissance}` : ''}.`,
+    type: NOTIFICATION_TYPES.SYSTEM,
+    priority: NOTIFICATION_PRIORITIES.URGENT,
+    entityType: 'worker_age_rejected',
+    entityId: null,
+    actionUrl: moduleActionUrl('ouvriers'),
+    submoduleCode: 'ouvriers',
+  };
+  const results = [];
+  try {
+    const rh = await notifyRhUsers(payload);
+    if (Array.isArray(rh)) results.push(...rh);
+    else if (rh) results.push(rh);
+  } catch (err) {
+    console.warn('[CITYMO] notifyWorkerAgeRejected RH', err);
+  }
+  try {
+    const dg = await notifySuperAdmins(payload);
+    if (Array.isArray(dg)) results.push(...dg);
+    else if (dg) results.push(dg);
+  } catch (err) {
+    console.warn('[CITYMO] notifyWorkerAgeRejected DG', err);
+  }
+  return results.filter(Boolean);
+}
+
 /** Feuille de caisse à valider — désactivé (plus de validation journalière). */
 export async function notifyCashReviewPending() {
   return [];
