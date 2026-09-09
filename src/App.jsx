@@ -155,6 +155,7 @@ const NAV = [
       { id: 'fabrication-plans',      label: 'Plans à fabriquer',     icon: Inbox },
       { id: 'fabrication-suivi',      label: 'Suivi de production',   icon: Hammer },
       { id: 'fabrication-terminee',   label: 'Production terminée',   icon: CheckCircle2 },
+      { id: 'fabrication-bons-livraison', label: 'Bon de livraison',  icon: PackageCheck },
     ],
   },
   {
@@ -251,6 +252,7 @@ const MODULE_LABELS = {
   'fabrication-plans': 'Plans à fabriquer',
   'fabrication-suivi': 'Suivi de production',
   'fabrication-terminee': 'Production terminée',
+  'fabrication-bons-livraison': 'Bon de livraison',
   'mes-documents':     'Mes documents',
   'docs-partages':     'Documents partages',
   'liens-publics':     'Liens publics',
@@ -343,6 +345,7 @@ function PageContent({
     case 'fabrication-plans':   return <Fabrication activeTab="fabrication-plans" />;
     case 'fabrication-suivi':   return <Fabrication activeTab="fabrication-suivi" />;
     case 'fabrication-terminee': return <Fabrication activeTab="fabrication-terminee" />;
+    case 'fabrication-bons-livraison': return <Fabrication activeTab="fabrication-bons-livraison" />;
     /* SAV legacy */
     case 'sav':                 return <SAV />;
     /* Documents */

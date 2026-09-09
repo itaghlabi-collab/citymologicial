@@ -122,6 +122,7 @@ export const ERP_RUBRIQUES = Object.freeze([
       { code: 'fabrication-plans', label: 'Plans à fabriquer' },
       { code: 'fabrication-suivi', label: 'Suivi de production' },
       { code: 'fabrication-terminee', label: 'Production terminée' },
+      { code: 'fabrication-bons-livraison', label: 'Bon de livraison' },
     ],
   },
   {

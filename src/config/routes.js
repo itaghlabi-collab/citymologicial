@@ -65,6 +65,7 @@ export const ROUTES = {
   FABRICATION_PLANS:  'fabrication-plans',
   FABRICATION_SUIVI:  'fabrication-suivi',
   FABRICATION_TERMINEE: 'fabrication-terminee',
+  FABRICATION_BONS_LIVRAISON: 'fabrication-bons-livraison',
 
   // Documents
   MES_DOCUMENTS:      'mes-documents',

@@ -8,10 +8,11 @@ import { useFabrication } from '../hooks/useFabrication';
 import './fabrication/fabrication.css';
 import FabricationDashboard from './fabrication/FabricationDashboard';
 import FabricationList from './fabrication/FabricationList';
+import BonsLivraisonFab from './fabrication/BonsLivraisonFab';
 import { AffecterAtelierModal, MajProductionModal, PlanDetailModal } from './fabrication/PlanModals';
 
-export default function Fabrication({ activeTab }) {
-  const tab = activeTab || 'fabrication';
+/** Workflows plans atelier (existant) — inchangé */
+function FabricationPlansRouter({ tab }) {
   const { user } = useAuth();
   const fab = useFabrication();
   const [canAssign, setCanAssign] = useState(false);
@@ -129,4 +130,15 @@ export default function Fabrication({ activeTab }) {
       />
     </>
   );
+}
+
+export default function Fabrication({ activeTab }) {
+  const tab = activeTab || 'fabrication';
+
+  /* Isolé : Bon de livraison Fabrication (≠ CRM bon-livraison) */
+  if (tab === 'fabrication-bons-livraison') {
+    return <BonsLivraisonFab />;
+  }
+
+  return <FabricationPlansRouter tab={tab} />;
 }
