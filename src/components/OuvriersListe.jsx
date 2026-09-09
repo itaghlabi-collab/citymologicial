@@ -274,7 +274,7 @@ function Avatar({ worker, size = 36 }) {
 }
 
 /* ── Photo Upload Block ── */
-function PhotoUpload({ value, onChange, label }) {
+function PhotoUpload({ value, onChange, label, required, error }) {
   const inputRef = useRef(null);
 
   function handleFile(file) {
@@ -286,11 +286,14 @@ function PhotoUpload({ value, onChange, label }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10 }}>
+      <div style={{ fontSize: '0.7rem', fontWeight: 800, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+        {label}{required ? <span style={{ color: 'var(--red)' }}> *</span> : null}
+      </div>
       <div
         onClick={() => inputRef.current?.click()}
         onDragOver={e => e.preventDefault()}
         onDrop={e => { e.preventDefault(); handleFile(e.dataTransfer.files[0]); }}
-        style={{ width: 100, height: 100, borderRadius: '50%', border: '2px dashed ' + (value ? 'var(--red)' : 'var(--border)'), cursor: 'pointer', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)', transition: 'border-color 0.15s', flexShrink: 0 }}
+        style={{ width: 100, height: 100, borderRadius: '50%', border: '2px dashed ' + (error ? 'var(--red)' : value ? 'var(--red)' : 'var(--border)'), cursor: 'pointer', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--bg)', transition: 'border-color 0.15s', flexShrink: 0 }}
       >
         {value
           ? <img src={value} alt="photo" style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
@@ -303,6 +306,7 @@ function PhotoUpload({ value, onChange, label }) {
         </button>
         {value && <button type="button" onClick={() => onChange('')} className="btn btn-ghost btn-sm" style={{ fontSize: '0.72rem', color: 'var(--red)' }}><X size={11} /></button>}
       </div>
+      {error ? <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{error}</span> : null}
       <input ref={inputRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={e => handleFile(e.target.files?.[0])} />
     </div>
   );
@@ -1851,8 +1855,11 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
     if (!form.prenom.trim()) e.prenom = 'Requis';
     if (!form.nom.trim())    e.nom    = 'Requis';
     if (!form.cin.trim())    e.cin    = 'Requis';
+    if (!String(form.telephone || '').trim()) e.telephone = 'Requis';
+    if (!form.photo) e.photo = 'Photo obligatoire';
     const ageErr = workerAgeRejectionReason(form.date_naissance);
     if (ageErr) e.date_naissance = ageErr;
+    if (!String(form.contact_urgence || '').trim()) e.contact_urgence = 'Requis';
     if (!form.project_id) e.project_id = 'Sélectionnez un chantier';
     if (!form.tarif || isNaN(Number(form.tarif)) || Number(form.tarif) <= 0) e.tarif = 'Montant valide requis';
     return e;
@@ -1863,7 +1870,8 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
     const errs = validate();
     if (Object.keys(errs).length) {
       setErrors(errs);
-      if (errs.prenom || errs.nom || errs.cin || errs.date_naissance) setFormTab('identite');
+      if (errs.prenom || errs.nom || errs.cin || errs.date_naissance || errs.telephone || errs.photo) setFormTab('identite');
+      else if (errs.contact_urgence) setFormTab('securite');
       else if (errs.project_id || errs.tarif) setFormTab('chantier');
       if (errs.date_naissance) {
         try {
@@ -2057,7 +2065,7 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
               {formTab === 'identite' && (
                 <div className="ouv-identite-grid">
                   {/* Photo */}
-                  <PhotoUpload value={form.photo} onChange={v => set('photo', v)} label="Photo" />
+                  <PhotoUpload value={form.photo} onChange={v => set('photo', v)} label="Photo" required error={errors.photo} />
 
                   <div className="ouv-fields-grid">
                     <div className="form-group">
@@ -2088,8 +2096,9 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
                       {errors.cin && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.cin}</span>}
                     </div>
                     <div className="form-group">
-                      <Label>Telephone</Label>
-                      <input value={form.telephone} onChange={e => set('telephone', e.target.value)} placeholder="+212 600 000 000" style={IS(false)} />
+                      <Label required>Telephone</Label>
+                      <input value={form.telephone} onChange={e => set('telephone', e.target.value)} placeholder="+212 600 000 000" style={IS(errors.telephone)} />
+                      {errors.telephone && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.telephone}</span>}
                     </div>
                     <div className="form-group">
                       <Label required>Date de naissance</Label>
@@ -2183,8 +2192,9 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
               {formTab === 'securite' && (
                 <div className="ouv-fields-grid">
                   <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-                    <Label>Nom contact urgence</Label>
-                    <input value={form.contact_urgence} onChange={e => set('contact_urgence', e.target.value)} placeholder="Prenom Nom..." style={IS(false)} />
+                    <Label required>Nom contact urgence</Label>
+                    <input value={form.contact_urgence} onChange={e => set('contact_urgence', e.target.value)} placeholder="Prenom Nom..." style={IS(errors.contact_urgence)} />
+                    {errors.contact_urgence && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.contact_urgence}</span>}
                   </div>
                   <div className="form-group">
                     <Label>Telephone urgence</Label>
