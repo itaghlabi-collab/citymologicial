@@ -2,8 +2,9 @@
  * purchaseOrders.js — Bons de commande (Supabase purchase_orders)
  */
 import { getSupabase } from '../../lib/supabase';
-import { moneyLineHt, moneyComputeDocumentTotals, moneyToNumber } from '../../utils/decimalMoney';
+import { moneyLineHt, moneyComputeDocumentTotals, moneyToNumber, moneyRound2 } from '../../utils/decimalMoney';
 import { PURCHASE_ROLES, resolveCurrentPurchaseRole } from './purchaseWorkflowRoles';
+import Big from 'big.js';
 
 const TABLE = 'purchase_orders';
 export const BC_STATUS_PENDING_DG = 'En attente validation DG';
@@ -11,6 +12,53 @@ export const BC_STATUS_VALIDATED = 'Validé';
 
 export function isPurchaseOrderPendingDg(statut) {
   return statut === BC_STATUS_PENDING_DG || statut === 'Envoyé';
+}
+
+/** Remise globale MAD sur le sous-total HT (min 0). */
+export function parseRemiseMad(value) {
+  if (value === null || value === undefined || value === '') return 0;
+  const n = Number(String(value).trim().replace(',', '.'));
+  if (!Number.isFinite(n) || n < 0) return 0;
+  return moneyToNumber(moneyRound2(n));
+}
+
+/**
+ * Remise globale sur le HT : HT net = HT − remise, puis TVA/TTC proportionnels.
+ * (Conserve le ratio TVA du document quand plusieurs taux.)
+ */
+export function applyOrderRemiseMad(totals, remiseMad) {
+  const htBrut = moneyToNumber(moneyRound2(Number(totals?.subtotal_ht) || 0));
+  const vatBrut = moneyToNumber(moneyRound2(Number(totals?.total_vat) || 0));
+  const ttcBrut = moneyToNumber(moneyRound2(Number(totals?.total_ttc) || 0));
+  const remiseRaw = parseRemiseMad(remiseMad);
+  const remise = moneyToNumber(moneyRound2(Math.min(remiseRaw, htBrut)));
+  const htNet = moneyToNumber(moneyRound2(new Big(htBrut).minus(remise)));
+
+  if (htBrut <= 0) {
+    return {
+      subtotal_ht: 0,
+      total_ht: 0,
+      total_vat: 0,
+      total_ttc: 0,
+      remise_mad: 0,
+      subtotal_ht_brut: 0,
+    };
+  }
+
+  const ratio = new Big(htNet).div(htBrut);
+  const total_ttc = moneyToNumber(moneyRound2(new Big(ttcBrut).times(ratio)));
+  const total_vat = moneyToNumber(moneyRound2(new Big(total_ttc).minus(htNet)));
+
+  return {
+    subtotal_ht: htNet,
+    total_ht: htNet,
+    total_vat: total_vat < 0 ? 0 : total_vat,
+    total_ttc,
+    remise_mad: remise,
+    subtotal_ht_brut: htBrut,
+    total_vat_brut: vatBrut,
+    total_ttc_brut: ttcBrut,
+  };
 }
 
 const EMPTY_LIGNE = {
@@ -78,7 +126,10 @@ export function computeLineTotals(lignes) {
 export function normalizePurchaseOrder(row) {
   if (!row) return null;
   const lignes = normalizeLines(row.lines);
-  const totals = computeLineTotals(lignes);
+  const payload = row.payload && typeof row.payload === 'object' ? row.payload : {};
+  const remise_mad = parseRemiseMad(row.remise_mad ?? payload.remise_mad);
+  const lineTotals = computeLineTotals(lignes);
+  const totals = applyOrderRemiseMad(lineTotals, remise_mad);
   return {
     id: row.id,
     ref: row.ref_bc || '',
@@ -97,9 +148,11 @@ export function normalizePurchaseOrder(row) {
     status: row.status || 'Brouillon',
     lignes,
     lines: lignes,
-    subtotal_ht: Number(row.subtotal_ht ?? totals.subtotal_ht),
-    total_vat: Number(row.total_vat ?? totals.total_vat),
-    total_ttc: Number(row.total_ttc ?? totals.total_ttc),
+    payload,
+    remise_mad,
+    subtotal_ht: totals.subtotal_ht,
+    total_vat: totals.total_vat,
+    total_ttc: totals.total_ttc,
     date_creation: row.created_at ? String(row.created_at).slice(0, 10) : '',
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -108,8 +161,11 @@ export function normalizePurchaseOrder(row) {
 
 export function toPurchaseOrderRow(form) {
   const lignes = normalizeLines(form.lignes || form.lines);
-  const totals = computeLineTotals(lignes);
+  const lineTotals = computeLineTotals(lignes);
+  const remise_mad = parseRemiseMad(form.remise_mad ?? form.payload?.remise_mad);
+  const totals = applyOrderRemiseMad(lineTotals, remise_mad);
   const supplierName = (form.fournisseur || form.supplier_name || '').trim();
+  const prevPayload = form.payload && typeof form.payload === 'object' ? form.payload : {};
 
   return {
     ref_bc: form.ref || form.ref_bc || null,
@@ -122,7 +178,8 @@ export function toPurchaseOrderRow(form) {
     status: form.statut || form.status || 'Brouillon',
     subtotal_ht: totals.subtotal_ht,
     total_vat: totals.total_vat,
-    total_ttc: form.total_ttc != null ? Number(form.total_ttc) : totals.total_ttc,
+    total_ttc: totals.total_ttc,
+    payload: { ...prevPayload, remise_mad },
     lines: lignes.map(({
       id, type, ephemeral, categorie_id, article_id, designation, description, qte, unite, prix_ht, remise, tva,
     }) => ({

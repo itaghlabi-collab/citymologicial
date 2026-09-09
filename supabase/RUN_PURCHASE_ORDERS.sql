@@ -59,6 +59,9 @@ ALTER TABLE public.purchase_orders
 ALTER TABLE public.purchase_orders
   ADD COLUMN IF NOT EXISTS lines JSONB NOT NULL DEFAULT '[]'::jsonb;
 
+ALTER TABLE public.purchase_orders
+  ADD COLUMN IF NOT EXISTS payload JSONB NOT NULL DEFAULT '{}'::jsonb;
+
 CREATE INDEX IF NOT EXISTS idx_purchase_orders_status
   ON public.purchase_orders (status);
 

@@ -13,6 +13,8 @@ import {
   sanitizeBCLignes,
   isPurchaseOrderPendingDg,
   BC_STATUS_PENDING_DG,
+  applyOrderRemiseMad,
+  parseRemiseMad,
 } from '../../services/achats/purchaseOrders';
 import { resolveCurrentPurchaseRole, purchasePermissions } from '../../services/achats/purchaseWorkflowRoles';
 import { generatePurchaseOrderPdf } from '../../services/achats/purchaseOrderPdf';
@@ -37,11 +39,13 @@ const EMPTY_FORM = {
   date_livraison: '',
   devise: 'MAD',
   note: '',
+  remise_mad: '',
   lignes: [],
 };
 
 function toFormState(item) {
   if (!item) return EMPTY_FORM;
+  const remise = parseRemiseMad(item.remise_mad ?? item.payload?.remise_mad);
   return {
     supplier_id: item.supplier_id || '',
     fournisseur: item.fournisseur || item.supplier_name || '',
@@ -51,6 +55,8 @@ function toFormState(item) {
     note: item.note || '',
     statut: item.statut || item.status || 'Brouillon',
     ref: item.ref || item.ref_bc || '',
+    payload: item.payload && typeof item.payload === 'object' ? item.payload : {},
+    remise_mad: remise > 0 ? String(remise) : '',
     lignes: sanitizeBCLignes(item.lignes || item.lines || []),
   };
 }
@@ -67,7 +73,13 @@ function BCForm({ initial, onSave, onCancel, fournisseurs, suppliersLoading, sav
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
   const fournActifs = (fournisseurs || []).filter((f) => f.statut === 'Actif' || f.status === 'active');
 
-  const { subtotal_ht: sousTotal, total_vat: montantTVA, total_ttc: totalTTC } = computeLineTotals(form.lignes);
+  const lineTotals = computeLineTotals(form.lignes);
+  const {
+    subtotal_ht_brut: sousTotalBrut,
+    total_vat: montantTVA,
+    total_ttc: totalTTC,
+    remise_mad: remiseMad,
+  } = applyOrderRemiseMad(lineTotals, form.remise_mad);
 
   function handleSupplierChange({ supplier_id, fournisseur }) {
     setForm((p) => ({
@@ -91,7 +103,7 @@ function BCForm({ initial, onSave, onCancel, fournisseurs, suppliersLoading, sav
       return;
     }
     setErrors({});
-    onSave({ ...form, statut: statut || 'Brouillon', total_ttc: totalTTC });
+    onSave({ ...form, statut: statut || 'Brouillon', remise_mad: remiseMad, total_ttc: totalTTC });
   }
 
   return (
@@ -133,14 +145,36 @@ function BCForm({ initial, onSave, onCancel, fournisseurs, suppliersLoading, sav
 
       <SectionTitle icon={<ShoppingCart size={12} />}>Totaux</SectionTitle>
       <div style={{ background: 'var(--surface-2)', borderRadius: 8, padding: '16px 20px', marginBottom: 24 }}>
-        {[['Sous-total HT', sousTotal], ['TVA', montantTVA], ['Total TTC', totalTTC]].map(([l, v], i) => (
-          <div key={l} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: i < 2 ? '1px solid var(--border)' : 'none' }}>
-            <span style={{ fontSize: '0.85rem', fontWeight: i === 2 ? 700 : 500, color: i === 2 ? 'var(--text)' : 'var(--text-2)' }}>{l}</span>
-            <span style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: i === 2 ? '1.05rem' : '0.9rem', color: i === 2 ? 'var(--red)' : 'var(--text)' }}>
-              {moneyFormatMAD(v).replace(' MAD', '')} {form.devise}
-            </span>
-          </div>
-        ))}
+        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
+          <span style={{ fontSize: '0.85rem', fontWeight: 500, color: 'var(--text-2)' }}>Sous-total HT</span>
+          <span style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.9rem' }}>
+            {moneyFormatMAD(sousTotalBrut).replace(' MAD', '')} {form.devise}
+          </span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '6px 0', borderBottom: '1px solid var(--border)', gap: 12 }}>
+          <span style={{ fontSize: '0.85rem', fontWeight: 500, color: 'var(--text-2)' }}>Remise HT (MAD)</span>
+          <input
+            type="number"
+            min="0"
+            step="0.01"
+            value={form.remise_mad}
+            onChange={(e) => set('remise_mad', e.target.value)}
+            placeholder="0"
+            style={{ ...INPUT_STYLE, maxWidth: 140, textAlign: 'right', fontFamily: 'var(--font-head)', fontWeight: 700 }}
+          />
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
+          <span style={{ fontSize: '0.85rem', fontWeight: 500, color: 'var(--text-2)' }}>TVA</span>
+          <span style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.9rem' }}>
+            {moneyFormatMAD(montantTVA).replace(' MAD', '')} {form.devise}
+          </span>
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0' }}>
+          <span style={{ fontSize: '0.85rem', fontWeight: 700, color: 'var(--text)' }}>Total TTC</span>
+          <span style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '1.05rem', color: 'var(--red)' }}>
+            {moneyFormatMAD(totalTTC).replace(' MAD', '')} {form.devise}
+          </span>
+        </div>
       </div>
 
       <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', flexWrap: 'wrap' }}>
@@ -251,7 +285,22 @@ function DetailBC({ item, onBack, onEdit, onDelete, onDupliquer, onPdf, pdfLoadi
         <div className="card bc-detail-synthese">
           <SectionTitle icon={<ShoppingCart size={13} />}>Synthèse</SectionTitle>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {[['Fournisseur', item.fournisseur || '—'], ['Date commande', item.date || '—'], ['Livraison prévue', item.date_livraison || '—'], ['Devise', item.devise || 'MAD'], ['Sous-total HT', formatMAD(item.subtotal_ht)], ['TVA', formatMAD(item.total_vat)], ['Total TTC', formatMAD(item.total_ttc)], ['Statut', <span className={'badge ' + (BADGE_BC[item.statut] || 'badge-grey')}>{item.statut}</span>], ['Créé le', item.date_creation || '—']].map(([l, v]) => (
+            {(() => {
+              const remise = parseRemiseMad(item.remise_mad);
+              const htBrut = Number(item.subtotal_ht || 0) + remise;
+              return [
+                ['Fournisseur', item.fournisseur || '—'],
+                ['Date commande', item.date || '—'],
+                ['Livraison prévue', item.date_livraison || '—'],
+                ['Devise', item.devise || 'MAD'],
+                ['Sous-total HT', formatMAD(htBrut)],
+                ...(remise > 0 ? [['Remise HT', `− ${formatMAD(remise)}`]] : []),
+                ['TVA', formatMAD(item.total_vat)],
+                ['Total TTC', formatMAD(item.total_ttc)],
+                ['Statut', <span className={'badge ' + (BADGE_BC[item.statut] || 'badge-grey')}>{item.statut}</span>],
+                ['Créé le', item.date_creation || '—'],
+              ];
+            })().map(([l, v]) => (
               <div key={l} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: 8, borderBottom: '1px solid var(--border)', fontSize: '0.83rem' }}>
                 <span style={{ color: 'var(--text-3)', fontWeight: 600, fontSize: '0.72rem', textTransform: 'uppercase' }}>{l}</span>
                 <span style={{ fontWeight: 600 }}>{v}</span>

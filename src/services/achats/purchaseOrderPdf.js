@@ -379,8 +379,13 @@ export async function generatePurchaseOrderPdf(bc, supplier = null, options = {}
   };
 
   const drawTotalsBlock = (startY) => {
+    const remiseMad = Number(bc?.remise_mad) || 0;
+    const htBrut = (Number(bc?.subtotal_ht) || 0) + remiseMad;
     const items = [
-      { label: 'Total HT :', value: bc.subtotal_ht, bold: false, fs: 8, red: false },
+      { label: 'Total HT :', value: htBrut, bold: false, fs: 8, red: false },
+      ...(remiseMad > 0
+        ? [{ label: 'Remise HT :', value: -remiseMad, bold: false, fs: 8, red: false }]
+        : []),
       { label: `TVA (${tvaPct}%) :`, value: bc.total_vat, bold: false, fs: 8, red: false },
       { label: 'Total TTC :', value: bc.total_ttc, bold: true, fs: 9, red: true, ttc: true },
     ];
