@@ -2097,7 +2097,18 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
                     </div>
                     <div className="form-group">
                       <Label required>Telephone</Label>
-                      <input value={form.telephone} onChange={e => set('telephone', e.target.value)} placeholder="+212 600 000 000" style={IS(errors.telephone)} />
+                      <input
+                        value={form.telephone}
+                        onChange={(e) => {
+                          const v = e.target.value;
+                          set('telephone', v);
+                          if (String(v || '').trim()) {
+                            setErrors((prev) => (prev.telephone ? { ...prev, telephone: undefined } : prev));
+                          }
+                        }}
+                        placeholder="+212 600 000 000"
+                        style={IS(errors.telephone)}
+                      />
                       {errors.telephone && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.telephone}</span>}
                     </div>
                     <div className="form-group">
