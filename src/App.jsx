@@ -23,6 +23,7 @@ import HeuresSupp from './components/HeuresSupp';
 import PaiementHebdo from './components/PaiementHebdo';
 import SituationSousTraitants from './components/SituationSousTraitants';
 import SousTraitants from './components/SousTraitants';
+import PresenceSousTraitants from './components/PresenceSousTraitants';
 import CorpsMetierPage from './components/exploitation/corpsMetier/CorpsMetierPage';
 import Clients from './components/crm/Clients';
 import Articles from './components/crm/Articles';
@@ -54,7 +55,7 @@ import { parseSousTraitantPath } from './services/rh/sousTraitantRoutes';
 import {
   LayoutDashboard, CheckSquare, CalendarDays, CalendarClock,
   Building2, Users, CalendarOff,
-  HardHat, ClockIcon, Banknote, BarChart3, Handshake, BookUser,
+  HardHat, ClockIcon, Banknote, BarChart3, Handshake, BookUser, UserCheck,
   UserSquare, FileEdit, CalendarRange, Megaphone,
   NotebookPen, Receipt, Lightbulb,
   Contact, ShoppingBag, Tag, FileText, ScrollText, PackageCheck,
@@ -104,6 +105,7 @@ const NAV = [
     section: 'Sous-traitants',
     items: [
       { id: 'sous-traitants',     label: 'Sous-traitants',       icon: Handshake },
+      { id: 'presence-sous-traitants', label: 'Présence sous-traitants', icon: UserCheck },
       { id: 'annuaire-corps-metier', label: 'Annuaire Corps de métier', icon: BookUser },
       { id: 'situation-sous-traitants', label: 'Situation sous-traitants', icon: ClipboardList },
     ],
@@ -227,6 +229,7 @@ const MODULE_LABELS = {
   'paiement-hebdo':    'Paiement hebdo. ouvriers',
   'situation-sous-traitants': 'Situation sous-traitants',
   'sous-traitants':    'Sous-traitants',
+  'presence-sous-traitants': 'Présence sous-traitants',
   'annuaire-corps-metier': 'Annuaire Corps de métier',
   prospects:           'Prospects',
   'devis-attente':     'Devis en attente',
@@ -315,6 +318,7 @@ function PageContent({
       />
     );
     case 'sous-traitants':      return <SousTraitants />;
+    case 'presence-sous-traitants': return <PresenceSousTraitants />;
     case 'annuaire-corps-metier': return <CorpsMetierPage />;
     /* Commercial / Marketing */
     case 'prospects':           return <Prospects />;
