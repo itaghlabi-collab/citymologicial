@@ -63,6 +63,7 @@ const EMPTY_FORM = {
   sexe: '', date_expiration: '', autorite: '',
   experience: '3', date_recrutement: '', statut: 'actif', disponibilite: 'oui',
   project_id: '', projet_nom: '', chantier: '', chantier_legacy: '',
+  extra_project_ids: [],
   contact_urgence: '', tel_urgence: '', relation_urgence: '',
   pointure: '', taille_vetement: '', taille_gants: '', casque: '', badge: '',
   photo: '', cin_recto: '', cin_verso: '',
@@ -108,10 +109,14 @@ function experienceToStars(exp) {
 function formFromWorker(worker) {
   if (!worker) return { ...EMPTY_FORM };
   const daily = workerTarifJournalier(worker);
+  const primary = worker.project_id ? String(worker.project_id) : '';
+  const assigned = (worker.assigned_project_ids || []).map(String).filter(Boolean);
+  const extras = assigned.filter((id) => id !== primary);
   return {
     ...EMPTY_FORM,
     ...worker,
-    project_id: worker.project_id ? String(worker.project_id) : '',
+    project_id: primary,
+    extra_project_ids: extras,
     tarif: daily ? String(daily) : '',
     tarif_unite: 'jour',
     experience: String(experienceToStars(worker.experience)),
@@ -1418,11 +1423,16 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
       .then((rows) => {
         if (!alive) return;
         const filtered = filterProjectsForWorkerForm(rows, user);
-        // Garder le projet déjà lié même s’il est clôturé / hors filtre chef
-        if (form.project_id && !filtered.some((p) => String(p.id) === String(form.project_id))) {
-          const current = (rows || []).find((p) => String(p.id) === String(form.project_id));
+        // Garder le projet déjà lié + extras même s’ils sont hors filtre chef
+        const keepIds = new Set([
+          form.project_id,
+          ...(form.extra_project_ids || []),
+        ].filter(Boolean).map(String));
+        keepIds.forEach((kid) => {
+          if (filtered.some((p) => String(p.id) === kid)) return;
+          const current = (rows || []).find((p) => String(p.id) === kid);
           if (current) filtered.unshift(current);
-        }
+        });
         setProjectOptions(filtered);
         // Nouveau ouvrier + un seul chantier affecté → pré-sélection automatique
         if (!isEdit && !form.project_id && filtered.length === 1) {
@@ -1448,12 +1458,28 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
 
   function setLinkedProject(projectId) {
     const p = projectOptions.find((x) => String(x.id) === String(projectId));
+    const pid = projectId ? String(projectId) : '';
     setForm((prev) => ({
       ...prev,
-      project_id: projectId || '',
+      project_id: pid,
       projet_nom: p ? projectOptionLabel(p) : '',
       chantier: p?.nom || '',
+      // Le principal ne doit pas rester aussi dans les extras
+      extra_project_ids: (prev.extra_project_ids || [])
+        .map(String)
+        .filter((id) => id && id !== pid),
     }));
+  }
+
+  function toggleExtraProject(projectId) {
+    const pid = String(projectId || '');
+    if (!pid || pid === String(form.project_id || '')) return;
+    setForm((prev) => {
+      const cur = new Set((prev.extra_project_ids || []).map(String));
+      if (cur.has(pid)) cur.delete(pid);
+      else cur.add(pid);
+      return { ...prev, extra_project_ids: [...cur] };
+    });
   }
 
   function flashOcrToast(message, type = 'success', ms = 7000) {
@@ -1901,6 +1927,8 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
       tarif: Number(form.tarif),
       tarif_unite: 'jour',
       experience: String(experienceToStars(form.experience)),
+      extra_project_ids: (form.extra_project_ids || []).map(String).filter(Boolean),
+      _controllable_project_ids: (projectOptions || []).map((p) => String(p.id)),
       _ocr_meta: lastOcrMetaRef.current,
     }, isEdit);
     if (result?.success) onClose();
@@ -2174,10 +2202,50 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
                     {errors.project_id && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.project_id}</span>}
                     <p style={{ margin: '6px 0 0', fontSize: '0.75rem', color: 'var(--text-3)' }}>
                       {projectOptions.length
-                        ? 'Uniquement vos chantiers affectés — l’ouvrier apparaîtra en Présence sur ce projet.'
+                        ? 'Projet principal (fiche / affichage). L’ouvrier peut aussi être pointé sur d’autres chantiers ci-dessous.'
                         : 'Aucun chantier lié à votre nom dans Projets (chef de chantier / chef de projet). Vérifiez l’affectation ou le script Supabase list_projects_for_worker_link.'}
                     </p>
                   </div>
+                  {projectOptions.length > 1 && (
+                    <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                      <Label>Aussi présent sur</Label>
+                      <div style={{
+                        display: 'flex', flexDirection: 'column', gap: 6,
+                        maxHeight: 180, overflowY: 'auto',
+                        padding: '10px 12px',
+                        border: '1.5px solid var(--border)', borderRadius: 8,
+                        background: 'var(--surface-2, #fafafa)',
+                      }}>
+                        {projectOptions
+                          .filter((p) => String(p.id) !== String(form.project_id || ''))
+                          .map((p) => {
+                            const pid = String(p.id);
+                            const checked = (form.extra_project_ids || []).map(String).includes(pid);
+                            return (
+                              <label
+                                key={pid}
+                                style={{
+                                  display: 'flex', alignItems: 'center', gap: 8,
+                                  fontSize: '0.84rem', cursor: 'pointer',
+                                  color: 'var(--text)',
+                                }}
+                              >
+                                <input
+                                  type="checkbox"
+                                  checked={checked}
+                                  onChange={() => toggleExtraProject(pid)}
+                                  style={{ width: 15, height: 15, accentColor: 'var(--red)' }}
+                                />
+                                <span>{projectOptionLabel(p)}</span>
+                              </label>
+                            );
+                          })}
+                      </div>
+                      <p style={{ margin: '6px 0 0', fontSize: '0.75rem', color: 'var(--text-3)' }}>
+                        Cochez Villa Polo (ou un autre chantier) pour qu’il apparaisse aussi en Présence sur ce site — sans changer le projet principal.
+                      </p>
+                    </div>
+                  )}
                   <div className="form-group">
                     <Label required>Fonction</Label>
                     <select value={form.fonction} onChange={e => set('fonction', e.target.value)} style={IS(false)}>

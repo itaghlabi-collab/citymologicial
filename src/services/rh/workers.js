@@ -382,6 +382,29 @@ async function reloadWorker(id) {
   return data;
 }
 
+/** Affectations fiche Métier : principal + extras (ne touche pas les autres modules). */
+async function syncWorkerFormProjectLinks(workerId, form) {
+  if (!workerId) return;
+  const primary = form?.project_id ? String(form.project_id) : '';
+  if (Array.isArray(form?.extra_project_ids)) {
+    const desired = [...new Set([
+      primary,
+      ...(form.extra_project_ids || []).map(String),
+    ].filter(Boolean))];
+    if (!desired.length) return;
+    const { saveWorkerLinkedProjects } = await import('./workerProjectAssignments');
+    await saveWorkerLinkedProjects(workerId, desired, {
+      removableProjectIds: Array.isArray(form._controllable_project_ids)
+        ? form._controllable_project_ids
+        : desired,
+    });
+    return;
+  }
+  if (!primary) return;
+  const { ensureWorkerAssignedToProject } = await import('./workerProjectAssignments');
+  await ensureWorkerAssignedToProject(primary, workerId);
+}
+
 export async function createWorker(form) {
   const userId = await getAuthUserId();
   assertWorkerAgeAllowed(form.date_naissance);
@@ -389,13 +412,10 @@ export async function createWorker(form) {
   const data = await insertWorkerRow(row);
 
   await syncWorkerMedia(data.id, form);
-  if (form.project_id) {
-    try {
-      const { ensureWorkerAssignedToProject } = await import('./workerProjectAssignments');
-      await ensureWorkerAssignedToProject(form.project_id, data.id);
-    } catch (assignErr) {
-      console.warn('[CITYMO] affectation projet à la création ouvrier', assignErr);
-    }
+  try {
+    await syncWorkerFormProjectLinks(data.id, form);
+  } catch (assignErr) {
+    console.warn('[CITYMO] affectation projet à la création ouvrier', assignErr);
   }
   const fresh = await reloadWorker(data.id);
   return enrichWorkerMedia(normalizeWorker(fresh));
@@ -415,13 +435,10 @@ export async function updateWorker(id, form) {
 
   await updateWorkerRow(id, toWorkerRow(form));
   await syncWorkerMedia(id, form, existing);
-  if (form.project_id) {
-    try {
-      const { ensureWorkerAssignedToProject } = await import('./workerProjectAssignments');
-      await ensureWorkerAssignedToProject(form.project_id, id);
-    } catch (assignErr) {
-      console.warn('[CITYMO] affectation projet à la MAJ ouvrier', assignErr);
-    }
+  try {
+    await syncWorkerFormProjectLinks(id, form);
+  } catch (assignErr) {
+    console.warn('[CITYMO] affectation projet à la MAJ ouvrier', assignErr);
   }
   const fresh = await reloadWorker(id);
   return enrichWorkerMedia(normalizeWorker(fresh));

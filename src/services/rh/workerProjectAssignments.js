@@ -213,6 +213,61 @@ export async function ensureWorkerAssignedToProject(projectId, workerId) {
   return true;
 }
 
+/**
+ * Sync des chantiers d’un ouvrier (fiche Métier).
+ * - Active tous les projectIds désirés
+ * - Ne clôture que les affectations dont le projet est dans removableProjectIds
+ *   (projets visibles dans le formulaire) — laisse intact le reste (RH / autres modules)
+ */
+export async function saveWorkerLinkedProjects(
+  workerId,
+  projectIds = [],
+  { removableProjectIds = null } = {},
+) {
+  if (!workerId) {
+    const err = new Error('Ouvrier requis.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  await getAuthUserId();
+  const wid = String(workerId);
+  const desired = [...new Set((projectIds || []).map(String).filter(Boolean))];
+  const removable = removableProjectIds == null
+    ? null
+    : new Set((removableProjectIds || []).map(String).filter(Boolean));
+
+  for (const pid of desired) {
+    await ensureWorkerAssignedToProject(pid, wid);
+  }
+
+  const { data: existing, error: listErr } = await getSupabase()
+    .from(TABLE)
+    .select('id, project_id, status')
+    .eq('worker_id', wid)
+    .eq('status', 'active');
+  if (listErr) throw listErr;
+
+  const desiredSet = new Set(desired);
+  const touchedProjects = new Set(desired);
+
+  for (const row of existing || []) {
+    const pid = String(row.project_id);
+    if (desiredSet.has(pid)) continue;
+    if (removable && !removable.has(pid)) continue;
+    const { error } = await getSupabase()
+      .from(TABLE)
+      .update({ status: 'ended' })
+      .eq('id', row.id);
+    if (error) throw error;
+    touchedProjects.add(pid);
+  }
+
+  for (const pid of touchedProjects) {
+    await syncStaffNeedsAfterAssignment(pid);
+  }
+  return true;
+}
+
 export async function removeWorkersFromProject(projectId, workerIds = []) {
   for (const workerId of workerIds) {
     await removeWorkerFromProject(projectId, workerId);
