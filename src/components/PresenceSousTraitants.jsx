@@ -48,11 +48,11 @@ function projectLabel(p) {
 
 function pickSubsForPointage(subs, projectId) {
   const actifs = (subs || []).filter((s) => s.statut !== 'archive' && s.statut !== 'inactif');
-  if (!projectId) return actifs;
-  const assigned = actifs.filter((s) => (
+  if (!projectId) return [];
+  // Uniquement les ST réellement affectés au projet (pas de fallback « tous les actifs »)
+  return actifs.filter((s) => (
     (s.activeAssignments || []).some((a) => String(a.projectId) === String(projectId))
   ));
-  return assigned.length ? assigned : actifs;
 }
 
 function Field({ label, required, children }) {
@@ -178,7 +178,9 @@ function PointageForm({
         </div>
       ) : list.length === 0 ? (
         <div style={{ textAlign: 'center', padding: '20px 12px', color: 'var(--text-3)', fontSize: '0.85rem' }}>
-          Aucun sous-traitant actif à pointer.
+          Aucun sous-traitant affecté à ce projet.
+          <br />
+          Affectez-les depuis Projets → Équipe → Affecter des sous-traitants.
         </div>
       ) : (
         <>
@@ -190,9 +192,8 @@ function PointageForm({
               const st = statuses[s.id];
               const projetHint = projectId
                 ? ((s.activeAssignments || []).find((a) => String(a.projectId) === String(projectId))?.projectName
-                  || s.currentProject
                   || projectLabel(projects.find((p) => String(p.id) === String(projectId))))
-                : (s.currentProject || '—');
+                : '—';
               return (
                 <div
                   key={s.id}
