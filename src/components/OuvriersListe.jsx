@@ -2202,7 +2202,7 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
                     {errors.project_id && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.project_id}</span>}
                     <p style={{ margin: '6px 0 0', fontSize: '0.75rem', color: 'var(--text-3)' }}>
                       {projectOptions.length
-                        ? 'Projet principal (fiche / affichage). L’ouvrier peut aussi être pointé sur d’autres chantiers ci-dessous.'
+                        ? 'Projet principal (fiche). Ajoutez d’autres chantiers ci-dessous pour y pointer — l’historique des jours déjà saisis n’est jamais effacé.'
                         : 'Aucun chantier lié à votre nom dans Projets (chef de chantier / chef de projet). Vérifiez l’affectation ou le script Supabase list_projects_for_worker_link.'}
                     </p>
                   </div>
@@ -2242,7 +2242,8 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
                           })}
                       </div>
                       <p style={{ margin: '6px 0 0', fontSize: '0.75rem', color: 'var(--text-3)' }}>
-                        Cochez Villa Polo (ou un autre chantier) pour qu’il apparaisse aussi en Présence sur ce site — sans changer le projet principal.
+                        Cochez un autre chantier pour pouvoir y pointer aussi. Les journées déjà
+                        pointées sur un ancien chantier restent toujours visibles en Présence.
                       </p>
                     </div>
                   )}

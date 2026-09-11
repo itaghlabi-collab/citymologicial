@@ -3,7 +3,7 @@
  */
 import { getSupabase } from '../../lib/supabase';
 import { WORKER_HOURS_PER_DAY } from './workers';
-import { listWorkersByProject, listActiveWorkerProjectAssignments, buildAssignmentLookup, assignmentKey } from './workerProjectAssignments';
+import { listWorkersByProject, listActiveWorkerProjectAssignments, buildAssignmentLookup } from './workerProjectAssignments';
 
 const TABLE = 'attendance';
 
@@ -137,23 +137,18 @@ export function normalizeAttendance(row) {
   });
 }
 
-/** Présence comptabilisée (nouvelle logique projet → affectation junction). */
-export function isActiveAttendanceRecord(r, assignmentLookup = cachedAssignmentLookup) {
+/** Présence comptabilisée (nouvelle logique projet).
+ * Un pointage déjà enregistré reste visible même si l’ouvrier est ensuite
+ * affecté à un autre chantier — l’affectation active ne bloque que les NOUVEAUX
+ * pointages (assertWorkerAssignedToProject à l’écriture).
+ */
+export function isActiveAttendanceRecord(r, _assignmentLookup = cachedAssignmentLookup) {
   if (!r) return false;
   if (r.validatedNewLogic !== true) return false;
   if (r.isLegacy === true) return false;
   if (r.sourceVersion !== ATTENDANCE_SOURCE_PROJECT) return false;
   if (!r.projectId) return false;
   if (!r.chefChantierId) return false;
-
-  if (assignmentLookup) {
-    const key = assignmentKey(r.workerId, r.projectId);
-    const assignedDate = assignmentLookup.get(key);
-    if (!assignedDate) return false;
-    const attDate = (r.date || '').slice(0, 10);
-    if (attDate && attDate < assignedDate) return false;
-  }
-
   return true;
 }
 

@@ -382,27 +382,22 @@ async function reloadWorker(id) {
   return data;
 }
 
-/** Affectations fiche Métier : principal + extras (ne touche pas les autres modules). */
+/** Affectations fiche Métier : ajoute principal + extras sans retirer les autres.
+ * Ne clôture jamais une affectation ici — sinon l’historique Présence d’un
+ * autre chantier disparaîtrait à tort. Le retrait se fait via Projets / RH.
+ */
 async function syncWorkerFormProjectLinks(workerId, form) {
   if (!workerId) return;
   const primary = form?.project_id ? String(form.project_id) : '';
-  if (Array.isArray(form?.extra_project_ids)) {
-    const desired = [...new Set([
-      primary,
-      ...(form.extra_project_ids || []).map(String),
-    ].filter(Boolean))];
-    if (!desired.length) return;
-    const { saveWorkerLinkedProjects } = await import('./workerProjectAssignments');
-    await saveWorkerLinkedProjects(workerId, desired, {
-      removableProjectIds: Array.isArray(form._controllable_project_ids)
-        ? form._controllable_project_ids
-        : desired,
-    });
-    return;
-  }
-  if (!primary) return;
+  const extras = Array.isArray(form?.extra_project_ids)
+    ? form.extra_project_ids.map(String)
+    : [];
+  const desired = [...new Set([primary, ...extras].filter(Boolean))];
+  if (!desired.length) return;
   const { ensureWorkerAssignedToProject } = await import('./workerProjectAssignments');
-  await ensureWorkerAssignedToProject(primary, workerId);
+  for (const pid of desired) {
+    await ensureWorkerAssignedToProject(pid, workerId);
+  }
 }
 
 export async function createWorker(form) {
