@@ -275,6 +275,60 @@ export function getAttendanceAssignmentLookup() {
   return cachedAssignmentLookup;
 }
 
+/** Secondes travaillées (tri dédoublonnage) — préfère la journée la plus complète. */
+function attendanceWorkedSeconds(row) {
+  const a = String(row?.heure_entree || '').slice(0, 8);
+  const b = String(row?.heure_sortie || '').slice(0, 8);
+  if (!a || !b) return 0;
+  const [ah, am, as = 0] = a.split(':').map(Number);
+  const [bh, bm, bs = 0] = b.split(':').map(Number);
+  if ([ah, am, as, bh, bm, bs].some((n) => Number.isNaN(n))) return 0;
+  const start = ah * 3600 + am * 60 + as;
+  const end = bh * 3600 + bm * 60 + bs;
+  return Math.max(0, end - start);
+}
+
+/**
+ * Supprime les doublons déjà en base (même ouvrier + chantier + date).
+ * Conserve la ligne la plus complète (plus d’heures), puis la plus ancienne.
+ * Ne touche pas aux jours uniques.
+ */
+export async function cleanupDuplicateAttendance(rawRows = []) {
+  const groups = new Map();
+  for (const row of rawRows || []) {
+    if (!row?.id || !row.worker_id || !row.project_id || !row.date) continue;
+    if (row.is_legacy === true) continue;
+    const key = `${row.worker_id}|${row.project_id}|${String(row.date).slice(0, 10)}`;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(row);
+  }
+
+  const toDelete = [];
+  for (const rows of groups.values()) {
+    if (rows.length < 2) continue;
+    rows.sort((a, b) => {
+      const diff = attendanceWorkedSeconds(b) - attendanceWorkedSeconds(a);
+      if (diff !== 0) return diff;
+      return String(a.created_at || '').localeCompare(String(b.created_at || ''))
+        || String(a.id).localeCompare(String(b.id));
+    });
+    for (let i = 1; i < rows.length; i += 1) toDelete.push(rows[i].id);
+  }
+
+  if (!toDelete.length) return 0;
+
+  const { error } = await getSupabase()
+    .from(TABLE)
+    .delete()
+    .in('id', toDelete);
+  if (error) {
+    console.warn('[CITYMO] cleanupDuplicateAttendance', error);
+    throw error;
+  }
+  console.info('[CITYMO] présence doublons supprimés', { count: toDelete.length });
+  return toDelete.length;
+}
+
 async function fetchAttendanceRows(select, { activeOnly = false } = {}) {
   const base = getSupabase()
     .from(TABLE)
@@ -342,6 +396,26 @@ export async function listAttendance(options = {}) {
     console.error('[CITYMO] attendance list', error);
     throw error;
   }
+
+  // Nettoie les doublons historiques (ex. 2× le 11/09) — garde 1 ligne / jour / chantier
+  if (!includeLegacy && (data || []).length) {
+    try {
+      const removed = await cleanupDuplicateAttendance(data);
+      if (removed > 0) {
+        ({ data, error } = await fetchAttendanceRows(ATTENDANCE_SELECT, { activeOnly: true }));
+        if (error) {
+          ({ data, error } = await fetchAttendanceRows(ATTENDANCE_SELECT_FALLBACK, { activeOnly: true }));
+        }
+        if (error) {
+          ({ data, error } = await fetchAttendanceRows(ATTENDANCE_SELECT_MINIMAL, { activeOnly: true }));
+        }
+        if (error) throw error;
+      }
+    } catch (dedupeErr) {
+      console.warn('[CITYMO] listAttendance dedupe', dedupeErr);
+    }
+  }
+
   const rows = (data || []).map(normalizeAttendance);
   return includeLegacy ? rows : filterActiveAttendance(rows, assignmentLookup);
 }
