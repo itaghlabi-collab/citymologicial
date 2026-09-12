@@ -393,7 +393,8 @@ export default function Presence() {
       }
       notify('success', 'Présence modifiée.');
     } else {
-      const payloads = form.workerIds.map((workerId) => ({ ...form, workerId }));
+      const payloads = [...new Set(form.workerIds.map(String))]
+        .map((workerId) => ({ ...form, workerId }));
       const result = await createBulk(payloads);
       if (!result.success) {
         notify('error', result.error || 'Erreur enregistrement.');

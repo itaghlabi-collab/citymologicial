@@ -201,6 +201,59 @@ async function assertWorkerAssignedToProject(workerId, projectId) {
   }
 }
 
+/**
+ * Empêche 2 pointages actifs le même jour pour le même ouvrier sur le même chantier.
+ * Ne modifie / ne recalcule aucune ligne existante — bloque seulement un nouvel insert (ou update conflictuel).
+ */
+async function assertNoDuplicateAttendance({ workerId, projectId, date, excludeId = null }) {
+  if (!workerId || !projectId || !date) return;
+
+  let q = getSupabase()
+    .from(TABLE)
+    .select('id')
+    .eq('worker_id', workerId)
+    .eq('project_id', projectId)
+    .eq('date', String(date).slice(0, 10))
+    .eq('is_legacy', false)
+    .limit(5);
+
+  if (excludeId) q = q.neq('id', excludeId);
+
+  const { data, error } = await q;
+  if (error) {
+    // Si colonne is_legacy absente : retomber sur le contrôle simple
+    if (/is_legacy|column|schema cache/i.test(error.message || '')) {
+      let q2 = getSupabase()
+        .from(TABLE)
+        .select('id')
+        .eq('worker_id', workerId)
+        .eq('project_id', projectId)
+        .eq('date', String(date).slice(0, 10))
+        .limit(5);
+      if (excludeId) q2 = q2.neq('id', excludeId);
+      const retry = await q2;
+      if (retry.error) throw retry.error;
+      if ((retry.data || []).length > 0) {
+        const err = new Error(
+          'Cet ouvrier est déjà pointé sur ce chantier à cette date. Modifiez la ligne existante au lieu d’en créer une autre.',
+        );
+        err.code = 'DUPLICATE_ATTENDANCE';
+        throw err;
+      }
+      return;
+    }
+    throw error;
+  }
+
+  if ((data || []).length > 0) {
+    const err = new Error(
+      'Cet ouvrier est déjà pointé sur ce chantier à cette date. Modifiez la ligne existante au lieu d’en créer une autre.',
+    );
+    err.code = 'DUPLICATE_ATTENDANCE';
+    throw err;
+  }
+}
+
 const ATTENDANCE_SELECT = `
   *,
   workers ( id, prenom, nom, chantier, project_id, projects ( id, nom, ref ) ),
@@ -319,6 +372,11 @@ export async function createAttendance(form) {
   }
 
   await assertWorkerAssignedToProject(row.worker_id, row.project_id);
+  await assertNoDuplicateAttendance({
+    workerId: row.worker_id,
+    projectId: row.project_id,
+    date: row.date,
+  });
 
   let { data, error } = await getSupabase()
     .from(TABLE)
@@ -357,6 +415,12 @@ export async function updateAttendance(id, form) {
   }
 
   await assertWorkerAssignedToProject(row.worker_id, row.project_id);
+  await assertNoDuplicateAttendance({
+    workerId: row.worker_id,
+    projectId: row.project_id,
+    date: row.date,
+    excludeId: id,
+  });
 
   const { data, error } = await getSupabase()
     .from(TABLE)
