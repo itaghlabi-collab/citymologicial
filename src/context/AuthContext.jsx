@@ -1,13 +1,9 @@
 import { createContext, useState, useEffect, useCallback } from 'react';
-import {
-  loginWithCredentials,
-  logout as authLogout,
-  clearLegacyAuthStorage,
-  handleUnauthorized,
-} from '../services/auth';
+import { loginWithCredentials, logout as authLogout, clearLegacyAuthStorage, handleUnauthorized } from '../services/auth';
 import { subscribeToAuthChanges, getSupabaseSessionUser } from '../services/supabase/auth';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { logAuth, logAuthError } from '../utils/authLog';
+import { warmAccessibleRoutes, clearPermissionCache } from '../services/admin/permissions';
 
 export const AuthContext = createContext(null);
 
@@ -44,6 +40,11 @@ export function AuthProvider({ children }) {
       });
       setUser(nextUser);
       finishLoading(setLoading);
+      if (nextUser?.id) {
+        warmAccessibleRoutes(nextUser).catch(() => {});
+      } else {
+        clearPermissionCache();
+      }
     });
 
     const safetyTimer = setTimeout(() => {
@@ -80,6 +81,9 @@ export function AuthProvider({ children }) {
       if (result.success) {
         setUser(result.user);
         finishLoading(setLoading);
+        if (result.user?.id) {
+          warmAccessibleRoutes(result.user).catch(() => {});
+        }
       }
       return result;
     } catch (err) {
@@ -96,6 +100,7 @@ export function AuthProvider({ children }) {
 
   const logout = useCallback(async () => {
     logAuth('AuthContext logout →');
+    clearPermissionCache();
     await authLogout();
     setUser(null);
   }, []);

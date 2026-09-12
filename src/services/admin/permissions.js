@@ -11,6 +11,9 @@ const DEPENSES_FULL_ACCESS_EMAILS = new Set([
   'h.barkaoui@citymo.ma',
 ]);
 
+const ROUTES_STORAGE_KEY = 'citymo_allowed_routes_v1';
+const ROUTES_CACHE_MS = 30 * 60 * 1000;
+
 function hasDepensesFullAccess(user, submoduleCode, actionCode) {
   const email = String(user?.email || '').trim().toLowerCase();
   if (!DEPENSES_FULL_ACCESS_EMAILS.has(email)) return false;
@@ -33,7 +36,45 @@ function permKey(submoduleCode, actionCode) {
   return `${submoduleCode}:${actionCode}`;
 }
 
-async function loadUserAccess(userId) {
+export function readPersistedAccessibleRoutes(userId) {
+  if (!userId || typeof sessionStorage === 'undefined') return undefined;
+  try {
+    const raw = sessionStorage.getItem(ROUTES_STORAGE_KEY);
+    if (!raw) return undefined;
+    const parsed = JSON.parse(raw);
+    if (!parsed || String(parsed.userId) !== String(userId)) return undefined;
+    if (parsed.at && Date.now() - parsed.at > ROUTES_CACHE_MS) return undefined;
+    if (parsed.routes === null) return null;
+    if (Array.isArray(parsed.routes)) return parsed.routes;
+    return undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function persistAccessibleRoutes(userId, routes) {
+  if (!userId || typeof sessionStorage === 'undefined') return;
+  try {
+    sessionStorage.setItem(ROUTES_STORAGE_KEY, JSON.stringify({
+      userId: String(userId),
+      at: Date.now(),
+      routes,
+    }));
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+export function clearPersistedAccessibleRoutes() {
+  if (typeof sessionStorage === 'undefined') return;
+  try {
+    sessionStorage.removeItem(ROUTES_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
+async function loadUserAccess(userId, userHint = null) {
   if (!userId) {
     return { estAdmin: false, legacy: true, rolePerms: {}, exceptions: {} };
   }
@@ -44,6 +85,39 @@ async function loadUserAccess(userId) {
   }
 
   const sb = getSupabase();
+  const hintedRoleId = userHint?.role_id ? String(userHint.role_id) : null;
+
+  // Chemin rapide : role_id déjà sur la session → 1 round-trip parallèle
+  if (hintedRoleId) {
+    const [{ data: role }, { data: rows }, { data: exc }] = await Promise.all([
+      sb.from('erp_roles').select('est_admin, statut').eq('id', hintedRoleId).maybeSingle(),
+      sb.from('role_permissions')
+        .select('submodule_code, module_code, action_code, granted')
+        .eq('role_id', hintedRoleId)
+        .eq('granted', true),
+      sb.from('user_permission_exceptions')
+        .select('submodule_code, action_code, granted')
+        .eq('user_id', userId),
+    ]);
+
+    if (role?.est_admin) {
+      cache = { userId, at: now, estAdmin: true, legacy: false, rolePerms: {}, exceptions: {} };
+      return cache;
+    }
+
+    const rolePerms = {};
+    (rows || []).forEach((r) => {
+      const code = r.submodule_code || r.module_code;
+      if (code) rolePerms[permKey(code, r.action_code)] = true;
+    });
+    const exceptions = {};
+    (exc || []).forEach((r) => {
+      exceptions[permKey(r.submodule_code, r.action_code)] = r.granted;
+    });
+    cache = { userId, at: now, estAdmin: false, legacy: false, rolePerms, exceptions };
+    return cache;
+  }
+
   const { data: profile } = await sb
     .from('profiles')
     .select('role_id, role, erp_roles ( code, est_admin, statut )')
@@ -88,6 +162,7 @@ async function loadUserAccess(userId) {
 
 export function clearPermissionCache() {
   cache = { userId: null, at: 0, estAdmin: false, legacy: true, rolePerms: {}, exceptions: {} };
+  clearPersistedAccessibleRoutes();
 }
 
 function hasAccess(access, submoduleCode, actionCode) {
@@ -107,11 +182,10 @@ export async function canAccessRoute(user, routeId) {
 
   if (hasDepensesFullAccess(user, routeId, 'voir')) return true;
 
-  const access = await loadUserAccess(user.id);
+  const access = await loadUserAccess(user.id, user);
   if (access.estAdmin) return true;
   if (access.legacy) return true;
 
-  // Nouvelle rubrique visibilité : même accès que Bon de commande (sans modifier les droits DB existants)
   if (routeId === 'suivi-receptions') {
     return hasAccess(access, 'suivi-receptions', 'voir') || hasAccess(access, 'bons-commande', 'voir');
   }
@@ -124,7 +198,7 @@ export async function can(user, submoduleCode, actionCode) {
   if (isSuperAdmin(user)) return true;
   if (hasDepensesFullAccess(user, submoduleCode, actionCode)) return true;
 
-  const access = await loadUserAccess(user.id);
+  const access = await loadUserAccess(user.id, user);
   if (access.estAdmin) return true;
   if (access.legacy) return true;
 
@@ -135,7 +209,7 @@ export async function getAccessibleRouteIds(user) {
   if (!user) return [];
   if (isSuperAdmin(user)) return null;
 
-  const access = await loadUserAccess(user.id);
+  const access = await loadUserAccess(user.id, user);
   if (access.estAdmin) return null;
   if (access.legacy) return null;
 
@@ -156,6 +230,19 @@ export async function getAccessibleRouteIds(user) {
   }
 
   return allowed;
+}
+
+/** Précharge + persiste les routes dès que la session user est connue. */
+export async function warmAccessibleRoutes(user) {
+  if (!user?.id) return undefined;
+  try {
+    const routes = await getAccessibleRouteIds(user);
+    persistAccessibleRoutes(user.id, routes);
+    return routes;
+  } catch (err) {
+    console.warn('[CITYMO] warmAccessibleRoutes', err);
+    return undefined;
+  }
 }
 
 export async function getRolePermissionsForUser(userId) {

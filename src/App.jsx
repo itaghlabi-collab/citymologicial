@@ -618,7 +618,7 @@ export default function App() {
   const [collapsed, setCollapsed] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
 
-  const { canShowRoute } = usePermissions(user);
+  const { canShowRoute, ready: permissionsReady, allowedRoutes } = usePermissions(user);
   const mustChangePassword = Boolean(user?.must_change_password);
 
   useEffect(() => {
@@ -661,6 +661,17 @@ export default function App() {
 
   useEffect(() => initNotificationSoundUnlock(), []);
 
+  // Une fois les droits prêts : basculer hors d’une rubrique non autorisée
+  useEffect(() => {
+    if (!permissionsReady || !user) return;
+    if (canShowRoute(module)) return;
+    const navOrder = NAV.flatMap((s) => s.items.map((i) => i.id));
+    const fallback = navOrder.find((id) => canShowRoute(id))
+      || (Array.isArray(allowedRoutes) && allowedRoutes[0])
+      || null;
+    if (fallback && fallback !== module) setModule(fallback);
+  }, [permissionsReady, user, module, canShowRoute, allowedRoutes]);
+
   // While restoring session — même fond login Codia (spinner visible)
   if (loading) {
     return (
@@ -686,6 +697,20 @@ export default function App() {
         user={user}
         onComplete={() => refreshUser?.()}
       />
+    );
+  }
+
+  // Droits pas encore résolus → aucun menu / aucune page métier (anti flash ERP complet)
+  if (!permissionsReady) {
+    return (
+      <div className="login-page">
+        <div className="login-bg-photo" />
+        <div className="login-bg-overlay" />
+        <div className="login-bg-grid" />
+        <div className="login-center">
+          <span className="login-spinner" />
+        </div>
+      </div>
     );
   }
 
@@ -730,14 +755,20 @@ export default function App() {
           mobileMenuOpen={mobileOpen}
         />
         <main className="page-content">
-          <PageContent
-            module={module}
-            onNavigate={setModule}
-            inventaireArticleCode={inventaireArticleCode}
-            onInventaireArticleCodeConsumed={() => setInventaireArticleCode(null)}
-            sousTraitantId={sousTraitantRoute?.id || null}
-            sousTraitantTab={sousTraitantRoute?.tab || 'finance'}
-          />
+          {canShowRoute(module) ? (
+            <PageContent
+              module={module}
+              onNavigate={setModule}
+              inventaireArticleCode={inventaireArticleCode}
+              onInventaireArticleCodeConsumed={() => setInventaireArticleCode(null)}
+              sousTraitantId={sousTraitantRoute?.id || null}
+              sousTraitantTab={sousTraitantRoute?.tab || 'finance'}
+            />
+          ) : (
+            <div style={{ padding: 32, color: 'var(--text-3)', textAlign: 'center' }}>
+              Accès non autorisé à cette rubrique.
+            </div>
+          )}
         </main>
       </div>
     </div>
