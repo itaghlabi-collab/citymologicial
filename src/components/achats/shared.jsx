@@ -136,11 +136,11 @@ export function EmptyState({ icon, title, sub, action, onAction }) {
   );
 }
 
-export function Modal({ open, onClose, title, children, width, contentClassName = '' }) {
+export function Modal({ open, onClose, title, children, width, contentClassName = '', className = '' }) {
   if (!open) return null;
   return (
     <div
-      className="achats-modal-overlay"
+      className={`achats-modal-overlay${className ? ` ${className}` : ''}`}
       role="presentation"
       onClick={(e) => e.target === e.currentTarget && onClose()}
     >

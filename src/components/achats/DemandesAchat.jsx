@@ -1042,7 +1042,11 @@ export default function DemandesAchat() {
           }}
           onRefresh={reload}
         />
-        <Modal open={modalMode !== null} onClose={closeModal} title={
+        <Modal
+          open={modalMode !== null}
+          onClose={closeModal}
+          className="achats-da-uppercase"
+          title={
           editItem
             ? (isGroupedPurchaseRequest(editItem) ? 'Modifier achats groupés' : (superAdmin && editItem.statut !== 'Brouillon' ? 'Modifier la demande (super admin)' : 'Modifier la demande'))
             : (modalMode === 'grouped' ? 'Achats groupés' : "Nouvelle demande d'achat")
@@ -1297,7 +1301,11 @@ export default function DemandesAchat() {
         )}
       </div>
 
-      <Modal open={modalMode !== null} onClose={closeModal} title={
+      <Modal
+        open={modalMode !== null}
+        onClose={closeModal}
+        className="achats-da-uppercase"
+        title={
         editItem
           ? (isGroupedPurchaseRequest(editItem) ? 'Modifier achats groupés' : (superAdmin && editItem.statut !== 'Brouillon' ? 'Modifier la demande (super admin)' : 'Modifier la demande'))
           : (modalMode === 'grouped' ? 'Achats groupés' : "Nouvelle demande d'achat")

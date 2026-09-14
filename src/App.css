@@ -11824,6 +11824,21 @@ tbody tr:last-child td { border-bottom: none; }
   display: none;
 }
 
+/* Demandes d'achat — majuscules affichage uniquement (pas de changement persisté) */
+.achats-module,
+.achats-modal-overlay.achats-da-uppercase {
+  text-transform: uppercase;
+}
+
+.achats-module input,
+.achats-module textarea,
+.achats-module select,
+.achats-modal-overlay.achats-da-uppercase input,
+.achats-modal-overlay.achats-da-uppercase textarea,
+.achats-modal-overlay.achats-da-uppercase select {
+  text-transform: uppercase;
+}
+
 .achats-da-tabs {
   display: flex;
   gap: 8px;
