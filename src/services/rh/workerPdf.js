@@ -564,7 +564,6 @@ export async function generateWorkerPdf(worker) {
 
   const proRows = [
     ['Poste / Fonction', w.fonction],
-    ['Chantier', w.chantier],
     ['Tarif journalier', fmtMAD(dailyTarif) + '/j'],
     ['Statut', STATUT_LABELS[w.statut] || w.statut],
     ['Badge', w.badge],
