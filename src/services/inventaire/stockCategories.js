@@ -7,12 +7,19 @@ import { requireSupabaseUserId } from '../supabase/requireUser';
 const TABLE = 'stock_categories';
 const ARTICLES_TABLE = 'stock_articles';
 
+/** Affichage uniforme ID / Réf. : toujours #1, #2, #3… */
+export function formatStockCategoryRef(cat) {
+  const n = Number(cat?.legacy_id);
+  return Number.isFinite(n) && n > 0 ? `#${n}` : '—';
+}
+
 export function normalizeStockCategory(row) {
   if (!row) return null;
   const active = row.is_active !== false && row.is_active !== 'false';
+  const legacyId = row.legacy_id != null && row.legacy_id !== '' ? Number(row.legacy_id) : null;
   return {
     id: row.id,
-    legacy_id: row.legacy_id ?? null,
+    legacy_id: Number.isFinite(legacyId) && legacyId > 0 ? legacyId : null,
     code: row.code || '',
     name: row.name || row.nom || '',
     nom: row.name || row.nom || '',
@@ -30,6 +37,41 @@ export function normalizeStockCategory(row) {
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
+}
+
+async function nextLegacyId() {
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .select('legacy_id')
+    .not('legacy_id', 'is', null)
+    .order('legacy_id', { ascending: false })
+    .limit(1);
+  if (error) throw error;
+  const max = Number(data?.[0]?.legacy_id) || 0;
+  return max + 1;
+}
+
+/** Attribue un legacy_id manquant (#N) aux catégories créées sans numéro. */
+async function ensureLegacyIds(categories) {
+  const missing = (categories || []).filter((c) => !c.legacy_id);
+  if (!missing.length) return categories;
+
+  missing.sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || ''))
+    || String(a.code || '').localeCompare(String(b.code || '')));
+
+  let next = await nextLegacyId();
+  for (const cat of missing) {
+    const { error } = await getSupabase()
+      .from(TABLE)
+      .update({ legacy_id: next })
+      .eq('id', cat.id)
+      .is('legacy_id', null);
+    if (!error) {
+      cat.legacy_id = next;
+      next += 1;
+    }
+  }
+  return categories;
 }
 
 export function toStockCategoryRow(form) {
@@ -88,15 +130,17 @@ export async function listStockCategories() {
     .order('name', { ascending: true });
   if (error) throw error;
   const normalized = (data || []).map(normalizeStockCategory).filter(Boolean);
+  await ensureLegacyIds(normalized);
   return attachArticleStats(normalized);
 }
 
 export async function createStockCategory(form) {
   const uid = await requireSupabaseUserId();
   const row = toStockCategoryRow(form);
+  const legacy_id = await nextLegacyId();
   const { data, error } = await getSupabase()
     .from(TABLE)
-    .insert([{ ...row, created_by: uid }])
+    .insert([{ ...row, legacy_id, created_by: uid }])
     .select()
     .single();
   if (error) throw error;

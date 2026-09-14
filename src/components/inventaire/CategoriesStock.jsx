@@ -7,6 +7,7 @@ import {
   Eye, Loader2, RefreshCw, FileSpreadsheet, FileText,
 } from 'lucide-react';
 import { useStockCategories } from '../../hooks/useStockCategories';
+import { formatStockCategoryRef } from '../../services/inventaire/stockCategories';
 import {
   INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE,
   DEPARTEMENTS, STOCK_TYPES,
@@ -171,7 +172,7 @@ function DetailCategorie({ item, onBack, onEdit, onToggle }) {
         <div className="card">
           <SectionTitle icon={<Tag size={13} />}>Classification</SectionTitle>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            <DetailRow label="Référence" value={item.legacy_id ? `#${item.legacy_id}` : String(item.id).slice(0, 8)} />
+            <DetailRow label="Référence" value={formatStockCategoryRef(item)} />
             <DetailRow label="Code" value={item.code} />
             <DetailRow label="Département" value={item.department} />
             <DetailRow label="Type stock" value={item.stock_type} />
@@ -448,7 +449,7 @@ export default function CategoriesStock() {
                       <tr key={x.id}>
                         <td>
                           <span style={{ fontFamily: 'var(--font-head)', fontSize: '0.75rem', color: 'var(--text-3)' }}>
-                            {x.legacy_id ? `#${x.legacy_id}` : String(x.id).slice(0, 8)}
+                            {formatStockCategoryRef(x)}
                           </span>
                         </td>
                         <td>
