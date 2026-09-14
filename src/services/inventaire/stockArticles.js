@@ -638,22 +638,81 @@ export async function archiveStockArticle(id) {
   return withStock;
 }
 
-export async function deleteStockArticle(id) {
-  await requireSupabaseUserId();
-
+export async function getStockArticleDeleteImpact(id) {
   const { count: mvtCount, error: mvtErr } = await getSupabase()
     .from(MOVEMENTS)
     .select('id', { count: 'exact', head: true })
     .eq('article_id', id);
   if (mvtErr) throw mvtErr;
-  if (mvtCount > 0) {
-    throw new Error('Impossible de supprimer : des mouvements sont liés à cet article. Archivez-le plutôt.');
-  }
 
   const sums = await sumLevelsByArticle([id]);
-  const qty = sums?.[id] ?? 0;
-  if (qty > 0) {
-    throw new Error('Impossible de supprimer : le stock n\'est pas nul. Archivez l\'article plutôt.');
+  const qty = Number(sums?.[id] ?? 0);
+
+  return {
+    mvtCount: Number(mvtCount) || 0,
+    qty,
+  };
+}
+
+/**
+ * Supprime un article.
+ * @param {string} id
+ * @param {{ force?: boolean }} [options] force=true : autorise même avec mouvements/stock (mouvements conservés pour traçabilité)
+ */
+export async function deleteStockArticle(id, { force = false } = {}) {
+  await requireSupabaseUserId();
+
+  const { mvtCount, qty } = await getStockArticleDeleteImpact(id);
+
+  if (!force) {
+    if (mvtCount > 0) {
+      throw new Error('Impossible de supprimer : des mouvements sont liés à cet article. Archivez-le plutôt.');
+    }
+    if (qty > 0) {
+      throw new Error('Impossible de supprimer : le stock n\'est pas nul. Archivez l\'article plutôt.');
+    }
+  }
+
+  // Figer code/nom sur les mouvements avant suppression (article_id → NULL via FK).
+  if (mvtCount > 0) {
+    const { data: article, error: artErr } = await getSupabase()
+      .from(TABLE)
+      .select('reference, nom')
+      .eq('id', id)
+      .maybeSingle();
+    if (artErr) throw artErr;
+
+    const snapCode = article?.reference || '';
+    const snapName = article?.nom || '';
+
+    const { data: mvts, error: listErr } = await getSupabase()
+      .from(MOVEMENTS)
+      .select('id, payload')
+      .eq('article_id', id);
+    if (listErr) throw listErr;
+
+    for (const m of mvts || []) {
+      const payload = {
+        ...(m.payload && typeof m.payload === 'object' ? m.payload : {}),
+        article_code: snapCode || m.payload?.article_code || '',
+        article_designation: snapName || m.payload?.article_designation || '',
+        article_deleted: true,
+      };
+      const { error: updErr } = await getSupabase()
+        .from(MOVEMENTS)
+        .update({ payload })
+        .eq('id', m.id);
+      if (updErr) throw updErr;
+    }
+  }
+
+  // Niveaux de stock : à retirer (plus d'article). Les mouvements restent.
+  if (force || qty > 0) {
+    const { error: delLvlErr } = await getSupabase()
+      .from(LEVELS)
+      .delete()
+      .eq('article_id', id);
+    if (delLvlErr) throw delLvlErr;
   }
 
   const { error } = await getSupabase().from(TABLE).delete().eq('id', id);

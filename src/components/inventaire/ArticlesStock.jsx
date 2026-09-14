@@ -9,7 +9,7 @@ import {
 } from 'lucide-react';
 import { useStockArticles } from '../../hooks/useStockArticles';
 import { useStockCategories } from '../../hooks/useStockCategories';
-import { generateStockArticleCode, listStockLevelsForArticle } from '../../services/inventaire/stockArticles';
+import { generateStockArticleCode, listStockLevelsForArticle, getStockArticleDeleteImpact } from '../../services/inventaire/stockArticles';
 import { downloadStockArticleLabel, printStockArticleLabel, downloadStockArticleLabelsA4, LABEL_FORMATS } from '../../services/inventaire/stockArticleLabelPdf';
 import BarcodeModal from './BarcodeModal';
 import BarcodeScannerModal from './BarcodeScannerModal';
@@ -616,13 +616,33 @@ export default function ArticlesStock({
 
   async function handleDelete(id) {
     if (!canDelete) return;
-    if (!window.confirm('Supprimer définitivement cet article ? (impossible si mouvements ou stock)')) return;
-    const res = await remove(id);
+    let impact = { mvtCount: 0, qty: 0 };
+    try {
+      impact = await getStockArticleDeleteImpact(id);
+    } catch (err) {
+      window.alert(err?.message || 'Impossible de vérifier les mouvements liés.');
+      return;
+    }
+
+    const hasLinks = impact.mvtCount > 0 || impact.qty > 0;
+    const msg = hasLinks
+      ? `Attention : cet article a ${impact.mvtCount} mouvement(s) et un stock de ${impact.qty}.\n\nL'article et le stock seront supprimés.\nLes mouvements seront CONSERVÉS pour la traçabilité (code/nom figés).\n\nConfirmez-vous la suppression ?`
+      : 'Supprimer définitivement cet article ?';
+
+    if (!window.confirm(msg)) return;
+
+    if (hasLinks && !window.confirm('Dernière confirmation : suppression irréversible. Continuer ?')) {
+      return;
+    }
+
+    const res = await remove(id, { force: true });
     if (res.success) {
       setDetailId(null);
       setHistoryId(null);
       syncArticleRoute(null, { replace: true });
+      return;
     }
+    window.alert(res.error || 'Erreur suppression.');
   }
 
   const openHistory = useCallback((id) => {

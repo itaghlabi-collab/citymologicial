@@ -123,12 +123,12 @@ export function useStockArticles() {
     }
   }
 
-  async function remove(id) {
+  async function remove(id, options = {}) {
     setSaving(true);
     setError(null);
     setSuccess('');
     try {
-      await deleteStockArticle(id);
+      await deleteStockArticle(id, options);
       await load();
       setSuccess('Article supprimé.');
       return { success: true };
