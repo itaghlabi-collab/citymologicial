@@ -283,7 +283,31 @@ export async function listProjectEquipeOverview(projectId, { projectRef = '', pr
     console.warn('[CITYMO] listWorkersByProject', err);
   }
 
-  const workers = rhWorkers.length > 0 ? rhWorkers : wpaWorkers;
+  // Fusion RH (demandes) + WPA (Équipe / Affecter des ouvriers) — dédoublonnage par workerId
+  const merged = new Map();
+  for (const w of wpaWorkers || []) {
+    const wid = String(w.workerId || '');
+    if (!wid) continue;
+    merged.set(wid, {
+      ...w,
+      requestRef: w.requestRef || 'Équipe',
+      source: w.source || 'wpa',
+    });
+  }
+  for (const w of rhWorkers || []) {
+    const wid = String(w.workerId || '');
+    if (!wid) continue;
+    const prev = merged.get(wid);
+    merged.set(wid, prev
+      ? {
+          ...prev,
+          ...w,
+          requestRef: w.requestRef || prev.requestRef || '—',
+          id: w.id || prev.id,
+        }
+      : w);
+  }
+  const workers = [...merged.values()];
 
   const recruitmentByParent = new Map();
   (recruitments || []).forEach((r) => {

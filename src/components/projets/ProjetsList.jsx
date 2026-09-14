@@ -33,6 +33,21 @@ import { listPlanningResponsableEmployees, employeeSelectLabel, findEmployeeBySt
 import { listCrmDevis, crmDevisSelectLabel, findCrmDevisByReference } from '../../services/crm/crmDevis';
 import TransmettrePlanModal from '../fabrication/TransmettrePlanModal';
 import { transmitFabricationPlan } from '../../services/fabrication/fabricationPlans';
+import AssignWorkersModal from './besoins/AssignWorkersModal';
+import { isSuperAdmin } from '../../services/rh/isSuperAdmin';
+import { notifyChefsChantierWorkersAssigned } from '../../services/notifications/notificationEvents';
+
+const HIBA_RH_EMAIL = 'h.barkaoui@citymo.ma';
+
+/** RH / Hiba / super admin — affectation ouvriers depuis Projets → Équipe. */
+function canAssignWorkersFromEquipe(user) {
+  if (!user) return false;
+  if (isSuperAdmin(user)) return true;
+  const email = String(user.email || '').trim().toLowerCase();
+  if (email === HIBA_RH_EMAIL) return true;
+  const role = String(user.role || '').toLowerCase().replace(/\s+/g, '_');
+  return role === 'rh' || role.includes('rh');
+}
 
 // ── Shared primitives ───────────────────────────────────────────────────────
 
@@ -499,6 +514,8 @@ function FormulaireProjet({ initial, onSave, onCancel, saving, clients = [] }) {
 // ── Onglet Équipe projet ─────────────────────────────────────────────────────
 
 function ProjectEquipeTab({ projet, compact = false }) {
+  const { user } = useAuth();
+  const canAssignWorkers = canAssignWorkersFromEquipe(user);
   const projectId = projet?.id ? String(projet.id) : '';
   const metaRef = useRef({ ref: '', nom: '' });
   metaRef.current = { ref: projet?.ref || '', nom: projet?.nom || '' };
@@ -514,6 +531,7 @@ function ProjectEquipeTab({ projet, compact = false }) {
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState(null);
   const [showSubModal, setShowSubModal] = useState(false);
+  const [showWorkersModal, setShowWorkersModal] = useState(false);
   const [selectedSubIds, setSelectedSubIds] = useState(() => new Set());
   const fetchGenRef = useRef(0);
 
@@ -689,6 +707,15 @@ function ProjectEquipeTab({ projet, compact = false }) {
     }
   }
 
+  async function handleWorkersAssigned({ workerCount = 0 } = {}) {
+    try {
+      await notifyChefsChantierWorkersAssigned({ projet, workerCount });
+    } catch (err) {
+      console.warn('[CITYMO] notif chefs chantier après affectation', err);
+    }
+    await handleManualRefresh();
+  }
+
   if (!ready) {
     return (
       <div className={compact ? '' : 'card'} style={{ padding: compact ? '16px 0' : 32, textAlign: 'center', color: 'var(--text-3)' }}>
@@ -747,27 +774,58 @@ function ProjectEquipeTab({ projet, compact = false }) {
         </div>
 
         {/* B. Ouvriers affectés */}
-        <div style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--red)', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: 10 }}>
-          B. Ouvriers affectés
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, flexWrap: 'wrap', gap: 8 }}>
+          <div style={{ fontSize: '0.72rem', fontWeight: 800, color: 'var(--red)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+            B. Ouvriers affectés ({workerAssignments.length})
+          </div>
+          {canAssignWorkers && (
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={() => setShowWorkersModal(true)}
+              disabled={saving}
+              style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            >
+              <Plus size={14} /> Affecter des ouvriers
+            </button>
+          )}
         </div>
-        <div style={{ padding: '10px 12px', background: '#E8F5E9', borderRadius: 8, fontSize: '0.82rem', color: '#2E7D32', marginBottom: 12 }}>
-          Ouvriers issus des demandes RH — lecture seule. Source : affectations validées par le service RH.
+        <div style={{
+          padding: '10px 12px',
+          background: canAssignWorkers ? '#E3F2FD' : '#E8F5E9',
+          borderRadius: 8,
+          fontSize: '0.82rem',
+          color: canAssignWorkers ? '#1565C0' : '#2E7D32',
+          marginBottom: 12,
+        }}>
+          {canAssignWorkers
+            ? 'Affectez les ouvriers ici (comme les sous-traitants). Ils apparaîtront ensuite en Présence. Les demandes RH restent disponibles en parallèle.'
+            : 'Les ouvriers sont affectés par la RH via « Affecter des ouvriers ». Source : affectations projet + demandes RH validées.'}
         </div>
 
         {workerAssignments.length === 0 ? (
           <div style={{ padding: '20px 0', color: 'var(--text-3)', fontSize: '0.85rem', textAlign: 'center', marginBottom: 24 }}>
-            {linkedRequests.length === 0 ? (
+            {canAssignWorkers ? (
               <>
-                Aucune demande RH liée à ce projet.
+                Aucun ouvrier affecté — utilisez <strong>Affecter des ouvriers</strong>.
+                {linkedRequests.length > 0 && (
+                  <div style={{ fontSize: '0.78rem', marginTop: 8 }}>
+                    {linkedRequests.length} demande(s) RH liée(s) également visibles dans <strong>RH → Demandes ressources</strong>.
+                  </div>
+                )}
+              </>
+            ) : linkedRequests.length === 0 ? (
+              <>
+                Aucun ouvrier affecté pour le moment.
                 <div style={{ fontSize: '0.78rem', marginTop: 8 }}>
-                  Déclarez un besoin dans l&apos;onglet <strong>Besoins</strong> pour créer une demande ressources.
+                  La RH affecte les ouvriers dans cet onglet après création de la fiche.
                 </div>
               </>
             ) : (
               <>
                 {linkedRequests.length} demande(s) RH liée(s) — aucun ouvrier affecté pour le moment.
                 <div style={{ fontSize: '0.78rem', marginTop: 8 }}>
-                  Affectez et <strong>validez</strong> les ouvriers dans <strong>RH → Demandes ressources</strong>.
+                  La RH peut affecter ici ou via <strong>RH → Demandes ressources</strong>.
                 </div>
               </>
             )}
@@ -930,6 +988,13 @@ function ProjectEquipeTab({ projet, compact = false }) {
           </button>
         </div>
       </Modal>
+
+      <AssignWorkersModal
+        open={showWorkersModal}
+        onClose={() => setShowWorkersModal(false)}
+        projet={projet}
+        onSaved={handleWorkersAssigned}
+      />
     </>
   );
 }

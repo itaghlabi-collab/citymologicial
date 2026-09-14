@@ -199,6 +199,62 @@ export async function notifyTaskCompleted(task) {
   return Promise.all([...recipients].map((id) => notifyUser(id, payload)));
 }
 
+/** Ouvrier créé sans chantier → RH + super admin (à affecter dans Projets → Équipe). */
+export async function notifyWorkerCreatedPendingAssignment(worker = {}) {
+  const name = `${worker.prenom || ''} ${worker.nom || ''}`.trim() || 'Ouvrier';
+  const fonction = worker.fonction ? ` · ${worker.fonction}` : '';
+  const payload = {
+    title: 'Nouvel ouvrier à affecter',
+    message: `${name}${fonction} a été créé sans chantier. Affectez-le dans Projets → Équipe.`,
+    type: NOTIFICATION_TYPES.SYSTEM,
+    priority: NOTIFICATION_PRIORITIES.HIGH,
+    entityType: 'worker_pending_assignment',
+    entityId: worker.id || null,
+    actionUrl: moduleActionUrl('projets'),
+    submoduleCode: 'ouvriers',
+  };
+  const results = [];
+  try {
+    const rh = await notifyRhUsers(payload);
+    if (Array.isArray(rh)) results.push(...rh);
+    else if (rh) results.push(rh);
+  } catch (err) {
+    console.warn('[CITYMO] notifyWorkerCreatedPendingAssignment RH', err);
+  }
+  try {
+    const admins = await notifySuperAdmins(payload);
+    if (Array.isArray(admins)) results.push(...admins);
+    else if (admins) results.push(admins);
+  } catch (err) {
+    console.warn('[CITYMO] notifyWorkerCreatedPendingAssignment admin', err);
+  }
+  return results.filter(Boolean);
+}
+
+/** Affectation ouvriers depuis Projets → Équipe → notif chef(s) de chantier du projet. */
+export async function notifyChefsChantierWorkersAssigned({
+  projet, workerCount = 0,
+} = {}) {
+  const chefName = (projet?.chef_chantier || '').trim();
+  if (!chefName) return null;
+  const projetLabel = projet?.ref
+    ? `${projet.ref} — ${projet.nom || 'chantier'}`
+    : (projet?.nom || 'votre chantier');
+  const countLabel = workerCount > 0
+    ? `${workerCount} ouvrier(s) affecté(s)`
+    : 'Des ouvriers ont été affectés';
+  return notifyAssignee(chefName, {
+    title: 'Ouvriers affectés au chantier',
+    message: `${countLabel} à ${projetLabel}. Ils sont visibles en Présence.`,
+    type: NOTIFICATION_TYPES.RESOURCE_REQUEST,
+    priority: NOTIFICATION_PRIORITIES.HIGH,
+    entityType: 'project_workers_assigned',
+    entityId: projet?.id || null,
+    actionUrl: moduleActionUrl('presence'),
+    submoduleCode: NOTIFICATION_SUBMODULES.DEMANDES_RESSOURCES,
+  });
+}
+
 /** Tentative d’enregistrement ouvrier hors tranche d’âge 18–60 → alerte RH + DG. */
 export async function notifyWorkerAgeRejected({
   prenom, nom, cin, date_naissance, age, reason,

@@ -28,7 +28,7 @@ import CINGuidedCamera from './cin/CINGuidedCamera';
 import { generateWorkerPdf } from '../services/rh/workerPdf';
 import { workerTarifJournalier } from '../services/rh/workers';
 import { exportWorkersExcel } from '../services/rh/workersExcelExport';
-import { notifyWorkerAgeRejected } from '../services/notifications/notificationEvents';
+import { notifyWorkerAgeRejected, notifyWorkerCreatedPendingAssignment } from '../services/notifications/notificationEvents';
 import { listProjectsForWorkerLink } from '../services/projects/projects';
 import { personNamesMatch, extractPersonNameFromStoredLabel } from '../services/rh/attendance';
 import { useAuth } from '../hooks/useAuth';
@@ -147,6 +147,17 @@ function projectAssignedToUser(p, user) {
   return aliases.some((alias) => fields.some((f) => f && personNamesMatch(f, alias)));
 }
 
+/** RH / admin / DG / super admin — peuvent lier un chantier à la création. */
+function isWorkerFormPrivileged(user) {
+  if (!user) return false;
+  if (isSuperAdmin(user)) return true;
+  const role = String(user.role || '').toLowerCase().replace(/\s+/g, '_');
+  return role.includes('rh')
+    || role.includes('admin')
+    || role === 'dg'
+    || role.includes('directeur');
+}
+
 /** Projets visibles pour le formulaire ouvrier.
  * RH / admin / DG : tous les projets ouverts.
  * Sinon (chef chantier, etc.) : uniquement les chantiers où son nom est affecté — rien d’autre.
@@ -158,14 +169,7 @@ function filterProjectsForWorkerForm(projects, user) {
   });
   if (!user) return open;
 
-  const role = String(user.role || '').toLowerCase().replace(/\s+/g, '_');
-  const isPrivileged = isSuperAdmin(user)
-    || role.includes('rh')
-    || role.includes('admin')
-    || role === 'dg'
-    || role.includes('directeur');
-
-  if (isPrivileged) return open;
+  if (isWorkerFormPrivileged(user)) return open;
 
   return open.filter((p) => projectAssignedToUser(p, user));
 }
@@ -1374,6 +1378,7 @@ function OuvrierDetail({ worker, onBack, onEdit, onDownloadPdf, pdfLoading }) {
 function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExisting }) {
   const { user } = useAuth();
   const isEdit = !!worker;
+  const canLinkProjects = isWorkerFormPrivileged(user);
   const [form, setForm] = useState(() => formFromWorker(worker));
   const [errors, setErrors] = useState({});
   const [projectOptions, setProjectOptions] = useState([]);
@@ -1434,8 +1439,8 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
           if (current) filtered.unshift(current);
         });
         setProjectOptions(filtered);
-        // Nouveau ouvrier + un seul chantier affecté → pré-sélection automatique
-        if (!isEdit && !form.project_id && filtered.length === 1) {
+        // RH / admin uniquement : pré-sélection si un seul chantier (chef crée sans affectation)
+        if (canLinkProjects && !isEdit && !form.project_id && filtered.length === 1) {
           const only = filtered[0];
           setForm((prev) => ({
             ...prev,
@@ -1886,7 +1891,8 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
     const ageErr = workerAgeRejectionReason(form.date_naissance);
     if (ageErr) e.date_naissance = ageErr;
     if (!String(form.contact_urgence || '').trim()) e.contact_urgence = 'Requis';
-    if (!form.project_id) e.project_id = 'Sélectionnez un chantier';
+    // Chef de chantier / non-RH : pas d’affectation à la création (RH dans Projets → Équipe)
+    if (canLinkProjects && !form.project_id) e.project_id = 'Sélectionnez un chantier';
     if (!form.tarif || isNaN(Number(form.tarif)) || Number(form.tarif) <= 0) e.tarif = 'Montant valide requis';
     return e;
   }
@@ -1924,10 +1930,16 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
     }
     const result = await onSave({
       ...form,
+      // Chef chantier : création sans affectation (RH affecte dans Projets → Équipe)
+      ...(!canLinkProjects && !isEdit
+        ? { project_id: '', projet_nom: '', chantier: '', extra_project_ids: [] }
+        : {}),
       tarif: Number(form.tarif),
       tarif_unite: 'jour',
       experience: String(experienceToStars(form.experience)),
-      extra_project_ids: (form.extra_project_ids || []).map(String).filter(Boolean),
+      extra_project_ids: (!canLinkProjects && !isEdit)
+        ? []
+        : (form.extra_project_ids || []).map(String).filter(Boolean),
       _controllable_project_ids: (projectOptions || []).map((p) => String(p.id)),
       _ocr_meta: lastOcrMetaRef.current,
     }, isEdit);
@@ -2186,6 +2198,26 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
               {/* ── TAB: CHANTIER ── */}
               {formTab === 'chantier' && (
                 <div className="ouv-fields-grid">
+                  {!canLinkProjects ? (
+                    <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                      <Label>Projet lié</Label>
+                      <div style={{
+                        padding: '12px 14px', borderRadius: 8, fontSize: '0.84rem',
+                        background: '#E3F2FD', color: '#1565C0', border: '1px solid #90CAF9',
+                      }}>
+                        L&apos;affectation au chantier est réalisée par la RH dans{' '}
+                        <strong>Projets → Équipe → Affecter des ouvriers</strong>.
+                        {isEdit && (form.projet_nom || form.project_id) ? (
+                          <div style={{ marginTop: 8, color: 'var(--text)', fontWeight: 600 }}>
+                            Chantier actuel : {form.projet_nom || form.chantier || '—'}
+                          </div>
+                        ) : (
+                          <div style={{ marginTop: 8 }}>Aucun chantier à la création — notification envoyée à la RH.</div>
+                        )}
+                      </div>
+                    </div>
+                  ) : (
+                    <>
                   <div className="form-group" style={{ gridColumn: '1 / -1' }}>
                     <Label required>Projet lié</Label>
                     <select
@@ -2246,6 +2278,8 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
                         pointées sur un ancien chantier restent toujours visibles en Présence.
                       </p>
                     </div>
+                  )}
+                    </>
                   )}
                   <div className="form-group">
                     <Label required>Fonction</Label>
@@ -2495,6 +2529,16 @@ export default function OuvriersListe({ onWorkersChange }) {
     const result = isEdit ? await update(form.id, form) : await create(form);
     if (result.success) {
       notify('success', isEdit ? 'Ouvrier modifie avec succes.' : 'Ouvrier ajoute avec succes.');
+      if (!isEdit) {
+        const hasAssign = !!(form.project_id || (form.extra_project_ids || []).length);
+        if (!hasAssign) {
+          try {
+            await notifyWorkerCreatedPendingAssignment(result.worker || form);
+          } catch (err) {
+            console.warn('[CITYMO] notif ouvrier sans chantier', err);
+          }
+        }
+      }
     } else {
       notify('error', result.error || 'Erreur enregistrement.');
     }

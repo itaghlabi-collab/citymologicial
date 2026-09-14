@@ -98,8 +98,8 @@ export default function AssignWorkersModal({
   async function handleSave() {
     setSaving(true);
     try {
-      await saveProjectWorkerAssignments(projet.id, [...selected]);
-      onSaved?.();
+      await saveProjectWorkerAssignments(projet.id, [...selected], { notify: true });
+      onSaved?.({ workerIds: [...selected], workerCount: selected.size });
       onClose();
     } catch (err) {
       alert(err.message || 'Erreur affectation.');
