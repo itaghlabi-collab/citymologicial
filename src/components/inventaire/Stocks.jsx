@@ -82,7 +82,7 @@ function StockFiche({
         <button type="button" className="btn btn-ghost btn-sm" onClick={onBack}><ChevronLeft size={15} /> Retour</button>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '0.72rem', color: 'var(--red)' }}>{article.code}</div>
-          <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.05rem', margin: 0 }}>{article.designation}</h2>
+          <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.05rem', margin: 0 }}>{String(article.designation || '').toUpperCase()}</h2>
         </div>
         <span className={`badge ${s.cls}`}>{s.label}</span>
         <span className={`badge ${stateBadge}`}>{article.current_state || 'Disponible'}</span>
@@ -105,7 +105,7 @@ function StockFiche({
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 12, fontSize: '0.84rem' }}>
               {[
                 ['Code', article.code],
-                ['Désignation', article.designation],
+                ['Désignation', String(article.designation || '').toUpperCase()],
                 ['Catégorie', catName],
                 ['Type', article.type],
                 ['Unité', article.unite],
@@ -704,7 +704,7 @@ export default function Stocks({
                   <div className="inv-stock-mobile-icon" aria-hidden><Package size={18} style={{ color: 'var(--red)' }} /></div>
                   <div className="inv-stock-mobile-name">
                     <strong>{x.code}</strong>
-                    <span className="inv-stock-mobile-designation">{x.designation}</span>
+                    <span className="inv-stock-mobile-designation">{String(x.designation || '').toUpperCase()}</span>
                     <span className="inv-stock-mobile-meta">Qté {x.stock_actuel || 0} {x.unite} · {formatEmplacementDisplay(x.emplacement)}</span>
                     <div className="inv-stock-mobile-badges">
                       <span className={`badge ${st.cls}`}>{st.label}</span>
@@ -783,7 +783,7 @@ export default function Stocks({
                             <Barcode size={12} /> {barcode || '—'}
                           </span>
                         </td>
-                        <td><div className="inv-articles-name">{x.designation}</div></td>
+                        <td><div className="inv-articles-name">{String(x.designation || '').toUpperCase()}</div></td>
                         <td>{cat ? <span className="badge badge-blue inv-articles-badge">{cat.nom}</span> : '—'}</td>
                         <td style={{ fontSize: '0.82rem' }}>{x.type || '—'}</td>
                         <td style={{ fontSize: '0.82rem' }}>{formatEmplacementDisplay(x.emplacement)}</td>
@@ -942,7 +942,7 @@ export default function Stocks({
               <tbody>
                 {rebuildReport.divergences.slice(0, 200).map((r) => (
                   <tr key={`${r.article_id}-${r.emplacement}`}>
-                    <td style={{ fontSize: '0.78rem' }}><strong>{r.article_code}</strong><br />{r.article_nom}</td>
+                    <td style={{ fontSize: '0.78rem' }}><strong>{r.article_code}</strong><br />{String(r.article_nom || '').toUpperCase()}</td>
                     <td style={{ fontSize: '0.78rem' }}>{r.emplacement}</td>
                     <td>{r.stock_actuel}</td>
                     <td>{r.stock_recalcule}</td>

@@ -48,6 +48,7 @@ export default function ArticleCatalogForm({
       ...EMPTY,
       ...initial,
       code: initial.code || initial.reference || '',
+      designation: String(initial.designation || initial.nom || '').toUpperCase(),
       barcode_value: initial.barcode_value || initial.code || '',
       // Édition : pas de mouvement stock depuis ce formulaire
       quantite_initiale: '',
@@ -90,10 +91,12 @@ export default function ArticleCatalogForm({
     ev.preventDefault();
     const e = validate();
     if (Object.keys(e).length) { setErrors(e); return; }
+    const designation = String(form.designation || '').trim().toUpperCase();
     if (isEdit) {
       // Édition : identité seule — aucune entrée / ajustement stock
       onSave({
         ...form,
+        designation,
         quantite_initiale: '',
         stock_emplacement: '',
         date_entree_stock: '',
@@ -106,6 +109,7 @@ export default function ArticleCatalogForm({
     }
     onSave({
       ...form,
+      designation,
       stock_emplacement: (form.stock_emplacement || '').trim() || DEFAULT_EMPLACEMENT,
       date_entree_stock: '',
       fournisseur_stock: '',
@@ -140,8 +144,8 @@ export default function ArticleCatalogForm({
         <FField label="Désignation" required>
           <input
             value={form.designation}
-            onChange={(e) => set('designation', e.target.value)}
-            placeholder="Nom de l'article…"
+            onChange={(e) => set('designation', e.target.value.toUpperCase())}
+            placeholder="NOM DE L'ARTICLE…"
             style={{ ...INPUT_STYLE, borderColor: errors.designation ? 'var(--red)' : 'var(--border)' }}
           />
           {errors.designation && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.designation}</div>}

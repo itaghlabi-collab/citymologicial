@@ -112,7 +112,7 @@ export function toStockArticleRow(form) {
   const reference = (form.code || form.reference || '').trim();
   const row = {
     reference,
-    nom: (form.designation || form.nom || '').trim(),
+    nom: (form.designation || form.nom || '').trim().toUpperCase(),
     article_type: (form.type || form.article_type || '').trim() || null,
     category_id: form.categorie_id || form.category_id || null,
     numero_serie: (form.numero_serie || '').trim() || null,

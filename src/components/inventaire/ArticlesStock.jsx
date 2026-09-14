@@ -221,7 +221,7 @@ function DetailArticle({
         </button>
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '0.72rem', color: 'var(--red)', letterSpacing: '0.04em' }}>{article.code}</div>
-          <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.05rem', margin: 0 }}>{article.designation}</h2>
+          <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.05rem', margin: 0 }}>{String(article.designation || '').toUpperCase()}</h2>
         </div>
         <span className={`badge ${catName ? 'badge-blue' : 'badge-grey'}`} style={{ fontSize: '0.72rem' }}>{catName || 'Sans catégorie'}</span>
         <span className={`badge ${stateBadge}`} style={{ fontSize: '0.72rem' }}>{article.current_state || 'Disponible'}</span>
@@ -255,7 +255,7 @@ function DetailArticle({
         </div>
         <div className="inv-article-detail-title-block">
           <span className="inv-article-detail-kicker">Article</span>
-          <h2 className="inv-article-detail-title">{article.designation}</h2>
+          <h2 className="inv-article-detail-title">{String(article.designation || '').toUpperCase()}</h2>
         </div>
         <div className="inv-article-detail-badges">
           {catName && <span className="badge badge-blue">{catName}</span>}
@@ -303,7 +303,7 @@ function DetailArticle({
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(180px, 1fr))', gap: 12, fontSize: '0.84rem' }}>
               {[
                 ['Référence', article.code],
-                ['Nom', article.designation],
+                ['Nom', String(article.designation || '').toUpperCase()],
                 ['Catégorie', catName || '—'],
                 ['Type', article.type],
                 ['N° série', article.numero_serie],
@@ -468,7 +468,7 @@ function MobileArticleRow({
         <div className="inv-stock-mobile-icon" aria-hidden><Package size={18} style={{ color: 'var(--red)' }} /></div>
         <div className="inv-stock-mobile-name">
           <strong>{item.code}</strong>
-          <span className="inv-stock-mobile-designation">{item.designation}</span>
+          <span className="inv-stock-mobile-designation">{String(item.designation || '').toUpperCase()}</span>
           <span className="inv-stock-mobile-meta">
             {catName || '—'} · Qté {item.stock_actuel || 0} {item.unite}
             {item.valeur ? ` · ${formatMAD(item.valeur)}` : ''}
@@ -1113,7 +1113,7 @@ export default function ArticlesStock({
                           </button>
                         </td>
                         <td data-label="Nom">
-                          <div className="inv-articles-name">{x.designation}</div>
+                          <div className="inv-articles-name">{String(x.designation || '').toUpperCase()}</div>
                           {formatEmplacementDisplay(x.emplacement) !== '—' ? (
                             <div className="inv-articles-sub">{formatEmplacementDisplay(x.emplacement)}</div>
                           ) : null}
