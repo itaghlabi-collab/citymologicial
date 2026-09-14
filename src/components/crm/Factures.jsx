@@ -805,7 +805,7 @@ export default function Factures() {
 
                       {/* Reste — si soldé : mot « Solde » à la place des chiffres */}
                       <td data-label="Reste" className="crm-col-money" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                        {(resteInfo.solde || f.statut === 'payee') && resteInfo.kind !== 'devis' ? (
+                        {(resteInfo.solde || f.statut === 'payee' || f.statut === 'archive_importee') && resteInfo.kind !== 'devis' ? (
                           <span style={{ color: '#388E3C', fontWeight: 700, fontSize: '0.82rem' }}>Solde</span>
                         ) : (
                           <div>
@@ -964,7 +964,7 @@ export default function Factures() {
                       <span className="crm-doc-amount-sub">
                         Payé {fmtMAD(f.total_paye || 0)}
                         {' · '}
-                        Reste {(resteInfo.solde || f.statut === 'payee') && resteInfo.kind !== 'devis'
+                        Reste {(resteInfo.solde || f.statut === 'payee' || f.statut === 'archive_importee') && resteInfo.kind !== 'devis'
                           ? 'Solde'
                           : (resteInfo.kind === 'devis'
                             ? `${fmtMAD(resteInfo.amount)} sur devis`

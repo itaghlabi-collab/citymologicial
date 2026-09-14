@@ -66,8 +66,9 @@ export function archiveToFactureRow(archive) {
     total_ht: amounts.total_ht,
     total_tva: amounts.total_tva,
     total_ttc: amounts.total_ttc,
-    total_paye: 0,
-    reste_a_payer: amounts.total_ttc,
+    // Archives importées = déjà réglées → montant payé = TTC, Reste = « Solde »
+    total_paye: amounts.total_ttc,
+    reste_a_payer: 0,
     statut: 'archive_importee',
     date_emission: archive.date_document,
     date_echeance: archive.date_echeance,
