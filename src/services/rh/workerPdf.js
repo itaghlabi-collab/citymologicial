@@ -113,6 +113,122 @@ async function loadImageDataUrl(url) {
   }
 }
 
+/** Lit Orientation EXIF (JPEG) — 1 = normal, 3 = 180°, 6/8 = 90°. */
+function readJpegExifOrientation(arrayBuffer) {
+  try {
+    const view = new DataView(arrayBuffer);
+    if (view.byteLength < 2 || view.getUint16(0, false) !== 0xFFD8) return 1;
+    let offset = 2;
+    while (offset + 4 <= view.byteLength) {
+      const marker = view.getUint16(offset, false);
+      offset += 2;
+      if (marker === 0xFFDA) break;
+      if ((marker & 0xFF00) !== 0xFF00) break;
+      const size = view.getUint16(offset, false);
+      if (size < 2) break;
+      if (marker === 0xFFE1 && offset + size <= view.byteLength) {
+        if (view.getUint32(offset + 2, false) === 0x45786966) {
+          const little = view.getUint16(offset + 10, false) === 0x4949;
+          const base = offset + 8;
+          const ifd0 = base + view.getUint32(base + 4, little);
+          if (ifd0 + 2 > view.byteLength) break;
+          const entries = view.getUint16(ifd0, little);
+          for (let i = 0; i < entries; i += 1) {
+            const entry = ifd0 + 2 + i * 12;
+            if (entry + 12 > view.byteLength) break;
+            if (view.getUint16(entry, little) === 0x0112) {
+              return view.getUint16(entry + 8, little) || 1;
+            }
+          }
+        }
+      }
+      offset += size;
+    }
+  } catch {
+    /* ignore */
+  }
+  return 1;
+}
+
+function dataUrlToArrayBuffer(dataUrl) {
+  const m = String(dataUrl || '').match(/^data:[^;]+;base64,(.+)$/);
+  if (!m) return null;
+  const bin = atob(m[1]);
+  const buf = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i += 1) buf[i] = bin.charCodeAt(i);
+  return buf.buffer;
+}
+
+function drawOrientedImageToCanvas(img, orientation, maxSide = 900) {
+  const srcW = img.naturalWidth || img.width;
+  const srcH = img.naturalHeight || img.height;
+  const scale = Math.min(1, maxSide / Math.max(srcW, srcH, 1));
+  const w = Math.max(1, Math.round(srcW * scale));
+  const h = Math.max(1, Math.round(srcH * scale));
+  const swap = orientation >= 5 && orientation <= 8;
+  const canvas = document.createElement('canvas');
+  canvas.width = swap ? h : w;
+  canvas.height = swap ? w : h;
+  const ctx = canvas.getContext('2d');
+  switch (orientation) {
+    case 2: ctx.translate(w, 0); ctx.scale(-1, 1); break;
+    case 3: ctx.translate(w, h); ctx.rotate(Math.PI); break;
+    case 4: ctx.translate(0, h); ctx.scale(1, -1); break;
+    case 5: ctx.rotate(0.5 * Math.PI); ctx.scale(1, -1); break;
+    case 6: ctx.rotate(0.5 * Math.PI); ctx.translate(0, -h); break;
+    case 7: ctx.rotate(0.5 * Math.PI); ctx.translate(w, -h); ctx.scale(-1, 1); break;
+    case 8: ctx.rotate(-0.5 * Math.PI); ctx.translate(-w, 0); break;
+    default: break;
+  }
+  ctx.drawImage(img, 0, 0, w, h);
+  return canvas;
+}
+
+/**
+ * Normalise l’orientation EXIF de la photo profil pour jsPDF
+ * (le navigateur oriente l’<img>, addImage non).
+ */
+async function prepareProfilePhotoForPdf(dataUrl) {
+  if (!dataUrl) return null;
+  try {
+    // Chemin moderne : bake EXIF via createImageBitmap
+    if (typeof createImageBitmap === 'function') {
+      const blob = await (await fetch(dataUrl)).blob();
+      let bitmap;
+      try {
+        bitmap = await createImageBitmap(blob, { imageOrientation: 'from-image' });
+      } catch {
+        bitmap = await createImageBitmap(blob);
+      }
+      const maxSide = 900;
+      const scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height, 1));
+      const w = Math.max(1, Math.round(bitmap.width * scale));
+      const h = Math.max(1, Math.round(bitmap.height * scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext('2d').drawImage(bitmap, 0, 0, w, h);
+      if (typeof bitmap.close === 'function') bitmap.close();
+      return canvas.toDataURL('image/jpeg', 0.92);
+    }
+
+    // Fallback : lire Orientation EXIF + canvas
+    const buf = dataUrlToArrayBuffer(dataUrl);
+    const orientation = buf ? readJpegExifOrientation(buf) : 1;
+    const img = await new Promise((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = () => reject(new Error('photo load'));
+      el.src = dataUrl;
+    });
+    const canvas = drawOrientedImageToCanvas(img, orientation);
+    return canvas.toDataURL('image/jpeg', 0.92);
+  } catch (err) {
+    console.warn('[PDF ouvrier] orientation photo ignorée', err?.message || err);
+    return dataUrl;
+  }
+}
+
 function imageFormat(dataUrl) {
   if (!dataUrl) return 'JPEG';
   if (dataUrl.includes('image/png')) return 'PNG';
@@ -382,12 +498,14 @@ export async function generateWorkerPdf(worker) {
   const w = await enrichWorkerMedia(worker);
   const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
 
-  const [logoData, photoData, rectoRaw, versoRaw] = await Promise.all([
+  const [logoData, photoRaw, rectoRaw, versoRaw] = await Promise.all([
     loadImageDataUrl(LOGO_URL),
     loadImageDataUrl(w.photo),
     loadImageDataUrl(w.cin_recto),
     loadImageDataUrl(w.cin_verso),
   ]);
+
+  const photoData = photoRaw ? await prepareProfilePhotoForPdf(photoRaw) : null;
 
   const logoRatio = await loadImageAspect(logoData, 2.75);
 
