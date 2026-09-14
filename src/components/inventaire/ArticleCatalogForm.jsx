@@ -1,6 +1,7 @@
 /**
- * Formulaire catalogue article (identité permanente uniquement).
- * Pas de quantité / emplacement / entrée en stock.
+ * Formulaire catalogue article.
+ * Création : quantité initiale + emplacement optionnels (Entrée stock si qty > 0).
+ * Édition : identité uniquement — stock inchangé.
  */
 import { useState, useEffect } from 'react';
 import { Package, Plus, Loader2 } from 'lucide-react';
@@ -8,8 +9,11 @@ import { generateStockArticleCode } from '../../services/inventaire/stockArticle
 import {
   INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE, UNITES,
   TYPES_ARTICLE_STOCK, STATUTS_ARTICLE_STOCK,
+  EMPLACEMENTS_STOCK, filterVisibleEmplacements,
   SectionTitle, FField, FRow,
 } from './shared.jsx';
+
+const DEFAULT_EMPLACEMENT = 'DEPOT LAKHYAYTA';
 
 const EMPTY = {
   code: '',
@@ -22,8 +26,8 @@ const EMPTY = {
   description: '',
   notes: '',
   barcode_value: '',
-  // stock fields intentionally empty — no auto movement
   quantite_initiale: '',
+  stock_emplacement: DEFAULT_EMPLACEMENT,
   valeur: '',
   stock_minimum: '',
   etat: 'Neuf',
@@ -36,6 +40,7 @@ export default function ArticleCatalogForm({
   onSave,
   onCancel,
   saving,
+  emplacementsList,
 }) {
   const [form, setForm] = useState(() => {
     if (!initial) return { ...EMPTY };
@@ -44,13 +49,19 @@ export default function ArticleCatalogForm({
       ...initial,
       code: initial.code || initial.reference || '',
       barcode_value: initial.barcode_value || initial.code || '',
+      // Édition : pas de mouvement stock depuis ce formulaire
       quantite_initiale: '',
+      stock_emplacement: '',
     };
   });
   const [errors, setErrors] = useState({});
   const [codeLoading, setCodeLoading] = useState(false);
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
   const isEdit = !!initial?.id;
+
+  const emplacementOptions = filterVisibleEmplacements(
+    (emplacementsList && emplacementsList.length) ? emplacementsList : EMPLACEMENTS_STOCK,
+  );
 
   useEffect(() => {
     if (isEdit || form.code) return;
@@ -67,6 +78,11 @@ export default function ArticleCatalogForm({
     if (!form.code?.trim()) e.code = 'Requis';
     if (!form.type?.trim()) e.type = 'Requis';
     if (!form.categorie_id) e.categorie_id = 'Requis';
+    if (!isEdit && form.quantite_initiale !== '' && form.quantite_initiale != null) {
+      const qty = Number(form.quantite_initiale);
+      if (Number.isNaN(qty) || qty < 0) e.quantite_initiale = 'Nombre ≥ 0';
+      else if (qty > 0 && !(form.stock_emplacement || '').trim()) e.stock_emplacement = 'Requis';
+    }
     return e;
   }
 
@@ -74,11 +90,23 @@ export default function ArticleCatalogForm({
     ev.preventDefault();
     const e = validate();
     if (Object.keys(e).length) { setErrors(e); return; }
-    // Garantir aucune entrée stock depuis le catalogue
+    if (isEdit) {
+      // Édition : identité seule — aucune entrée / ajustement stock
+      onSave({
+        ...form,
+        quantite_initiale: '',
+        stock_emplacement: '',
+        date_entree_stock: '',
+        fournisseur_stock: '',
+        reference_facture_bl: '',
+        prix_achat_unitaire: '',
+        observation_stock: '',
+      });
+      return;
+    }
     onSave({
       ...form,
-      quantite_initiale: '',
-      stock_emplacement: '',
+      stock_emplacement: (form.stock_emplacement || '').trim() || DEFAULT_EMPLACEMENT,
       date_entree_stock: '',
       fournisseur_stock: '',
       reference_facture_bl: '',
@@ -175,6 +203,39 @@ export default function ArticleCatalogForm({
         </FField>
       </FRow>
 
+      {!isEdit && (
+        <>
+          <SectionTitle>Stock initial (optionnel)</SectionTitle>
+          <FRow>
+            <FField label="Quantité initiale">
+              <input
+                type="number"
+                min="0"
+                step="1"
+                inputMode="numeric"
+                value={form.quantite_initiale}
+                onChange={(e) => set('quantite_initiale', e.target.value)}
+                placeholder="0 = pas d’entrée stock"
+                style={{ ...INPUT_STYLE, borderColor: errors.quantite_initiale ? 'var(--red)' : 'var(--border)' }}
+              />
+              {errors.quantite_initiale && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.quantite_initiale}</div>}
+            </FField>
+            <FField label="Emplacement" required={Number(form.quantite_initiale) > 0}>
+              <select
+                value={form.stock_emplacement || DEFAULT_EMPLACEMENT}
+                onChange={(e) => set('stock_emplacement', e.target.value)}
+                style={{ ...SELECT_STYLE, borderColor: errors.stock_emplacement ? 'var(--red)' : 'var(--border)' }}
+              >
+                {emplacementOptions.map((emp) => (
+                  <option key={emp} value={emp}>{emp}</option>
+                ))}
+              </select>
+              {errors.stock_emplacement && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.stock_emplacement}</div>}
+            </FField>
+          </FRow>
+        </>
+      )}
+
       <SectionTitle>Description & documents</SectionTitle>
       <div style={{ marginBottom: 14 }}>
         <FField label="Description">
@@ -187,7 +248,9 @@ export default function ArticleCatalogForm({
         </FField>
       </div>
       <p style={{ fontSize: '0.78rem', color: 'var(--text-3)', marginBottom: 16 }}>
-        Photo, fiche technique et documents pourront être liés ultérieurement. La quantité et l’emplacement se gèrent dans <strong>Stocks</strong>.
+        {isEdit
+          ? <>Photo, fiche technique et documents pourront être liés ultérieurement. Les mouvements de stock se gèrent dans <strong>Stocks</strong>.</>
+          : <>À la création, vous pouvez saisir une quantité initiale (Entrée automatique). Les mouvements suivants se gèrent dans <strong>Stocks</strong>.</>}
       </p>
 
       <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
