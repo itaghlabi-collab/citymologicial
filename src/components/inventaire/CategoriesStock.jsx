@@ -75,7 +75,6 @@ function CatForm({ initial, onSave, onCancel, saving }) {
             value={form.code}
             onChange={(e) => set('code', e.target.value.toUpperCase())}
             placeholder="Ex: PERFORATEUR"
-            disabled={!!initial?.id}
             style={{ ...INPUT_STYLE, borderColor: errors.code ? 'var(--red)' : 'var(--border)' }}
           />
           {errors.code && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.code}</div>}
