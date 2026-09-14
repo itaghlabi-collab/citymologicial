@@ -1445,6 +1445,12 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                                   <option key={a.id} value={a.id}>{a.nom || a.designation}</option>
                                 ))}
                               </select>
+                              {String(l.remarque || '').trim() !== '' && (
+                                <div style={{ marginBottom: 6, fontSize: '0.78rem', color: 'var(--text-2)' }}>
+                                  <div style={{ fontWeight: 600, marginBottom: 2 }}>Remarque demande</div>
+                                  <div style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{l.remarque}</div>
+                                </div>
+                              )}
                               <input
                                 value={l.remarque_magasinier || ''}
                                 onChange={(e) => updateDetailLine(l.id, { remarque_magasinier: e.target.value })}
@@ -1550,6 +1556,12 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                                 </select>
                               </dd>
                             </dl>
+                            {String(l.remarque || '').trim() !== '' && (
+                              <dl className="inv-dc-field" style={{ marginTop: 8 }}>
+                                <dt>Remarque demande</dt>
+                                <dd style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{l.remarque}</dd>
+                              </dl>
+                            )}
                             <dl className="inv-dc-field" style={{ marginTop: 8 }}>
                               <dt>Remarque magasin</dt>
                               <dd>
