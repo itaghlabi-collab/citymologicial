@@ -703,7 +703,7 @@ export default function Factures() {
                     { label: 'Client',          field: 'client_nom' },
                     { label: 'Commercial',      field: 'commercial' },
                     { label: 'Total TTC',       field: 'total_ttc',       align: 'right' },
-                    { label: 'Payé',            field: 'total_paye',      align: 'right' },
+                    { label: 'Montant payé',    field: 'total_paye',      align: 'right' },
                     { label: 'Reste',           field: 'reste_a_payer',   align: 'right' },
                     { label: 'Émission',        field: 'date_emission' },
                     { label: 'Statut',          field: 'statut' },
@@ -796,16 +796,16 @@ export default function Factures() {
                         </span>
                       </td>
 
-                      {/* Payé */}
-                      <td data-label="Payé" className="crm-col-money" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
+                      {/* Montant payé */}
+                      <td data-label="Montant payé" className="crm-col-money" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
                         <span style={{ fontWeight: 600, color: '#388E3C' }}>
                           {fmtMAD(f.total_paye || 0)}
                         </span>
                       </td>
 
-                      {/* Reste */}
+                      {/* Reste — si soldé : mot « Solde » à la place des chiffres */}
                       <td data-label="Reste" className="crm-col-money" style={{ textAlign: 'right', whiteSpace: 'nowrap' }}>
-                        {resteInfo.solde && resteInfo.kind !== 'devis' ? (
+                        {(resteInfo.solde || f.statut === 'payee') && resteInfo.kind !== 'devis' ? (
                           <span style={{ color: '#388E3C', fontWeight: 700, fontSize: '0.82rem' }}>Solde</span>
                         ) : (
                           <div>
@@ -962,9 +962,13 @@ export default function Factures() {
                     <div>
                       <span className="crm-doc-amount">{fmtMAD(f.total_ttc)}</span>
                       <span className="crm-doc-amount-sub">
-                        Reste {resteInfo.kind === 'devis'
-                          ? `${fmtMAD(resteInfo.amount)} sur devis`
-                          : (resteInfo.solde ? 'soldé' : fmtMAD(resteInfo.amount))}
+                        Payé {fmtMAD(f.total_paye || 0)}
+                        {' · '}
+                        Reste {(resteInfo.solde || f.statut === 'payee') && resteInfo.kind !== 'devis'
+                          ? 'Solde'
+                          : (resteInfo.kind === 'devis'
+                            ? `${fmtMAD(resteInfo.amount)} sur devis`
+                            : fmtMAD(resteInfo.amount))}
                       </span>
                     </div>
                     <div className="crm-doc-actions">
