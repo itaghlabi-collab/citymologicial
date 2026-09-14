@@ -261,7 +261,11 @@ export default function CategoriesStock() {
   async function handleDelete(id) {
     if (!window.confirm('Supprimer cette catégorie ? (impossible si des articles sont liés)')) return;
     const res = await remove(id);
-    if (res.success) setDetailId(null);
+    if (res.success) {
+      setDetailId(null);
+      return;
+    }
+    window.alert(res.error || 'Erreur suppression.');
   }
 
   async function handleToggle(item) {

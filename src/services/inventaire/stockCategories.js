@@ -135,6 +135,9 @@ export async function setStockCategoryActive(id, isActive) {
 export async function deleteStockCategory(id) {
   await requireSupabaseUserId();
 
+  // Source de vérité = category_id uniquement.
+  // L'ancien champ texte `categorie` (nom/code) provoquait des faux blocages
+  // et plantait le filtre PostgREST sur les noms avec espaces (ex: CISAILLE ELECTRIQUE).
   const { count: linkedById, error: byIdErr } = await getSupabase()
     .from(ARTICLES_TABLE)
     .select('id', { count: 'exact', head: true })
@@ -142,27 +145,6 @@ export async function deleteStockCategory(id) {
   if (byIdErr) throw byIdErr;
   if (linkedById > 0) {
     throw new Error('Impossible de supprimer : des articles sont liés à cette catégorie. Désactivez-la plutôt.');
-  }
-
-  const { data: cat, error: catErr } = await getSupabase()
-    .from(TABLE)
-    .select('name, code')
-    .eq('id', id)
-    .single();
-  if (catErr) throw catErr;
-
-  if (cat?.name || cat?.code) {
-    const filters = [];
-    if (cat.name) filters.push(`categorie.ilike.${cat.name}`);
-    if (cat.code) filters.push(`categorie.ilike.${cat.code}`);
-    const { count: linkedByName, error: byNameErr } = await getSupabase()
-      .from(ARTICLES_TABLE)
-      .select('id', { count: 'exact', head: true })
-      .or(filters.join(','));
-    if (byNameErr) throw byNameErr;
-    if (linkedByName > 0) {
-      throw new Error('Impossible de supprimer : des articles référencent cette catégorie. Désactivez-la plutôt.');
-    }
   }
 
   const { error } = await getSupabase().from(TABLE).delete().eq('id', id);
