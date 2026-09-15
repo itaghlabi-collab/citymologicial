@@ -1,19 +1,17 @@
 -- =============================================================================
--- CITYMO — Seed 7 articles plomberie galvanisée (Consommable)
+-- CITYMO — Seed articles PLOMBERIE (Consommable) — TOUT EN UN
 -- Supabase → SQL Editor → coller tout → Run
 -- Idempotent : ré-exécutable sans doublons ni écrasement de quantités existantes
+--
+-- Contenu :
+--   • Galvanisé (manchon, réductions, bouchons, rallonge, té, union)
+--   • Mamelon / coude cuivre
+--   • Raccords cuivre & accessoires (bouchons, réductions, robinets…)
 --
 -- Prérequis (si pas déjà faits) :
 --   RUN_STOCK_CATEGORIES.sql
 --   RUN_STOCK_WAREHOUSES.sql
 --   RUN_STOCK_ARTICLES_LEVELS.sql
---
--- Effet :
---   • Catégorie PLOMBERIE (crée si absente, sinon réutilise name/code/nom)
---   • 7 articles Consommable (insert si désignation absente)
---   • Références ART-2026-XXXX = max existant + 1 (pas de collision)
---   • stock_levels à DEPOT LAKHYAYTA avec qty initiale (si ligne absente)
---   • Mouvement Entrée « Stock initial » (si absent) — aligné createStockArticle
 -- =============================================================================
 
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
@@ -26,7 +24,7 @@ WHERE NOT EXISTS (
   WHERE lower(trim(w.nom)) = 'depot lakhyayta'
 );
 
--- ── 1) Catégorie PLOMBERIE (UPPERCASE comme les 24 seed existantes) ──────────
+-- ── 1) Catégorie PLOMBERIE ───────────────────────────────────────────────────
 INSERT INTO public.stock_categories (
   legacy_id, code, name, nom, description, department, stock_type, is_active, statut
 )
@@ -47,17 +45,28 @@ WHERE NOT EXISTS (
      OR lower(trim(coalesce(c.nom, '')))  = 'plomberie'
 );
 
--- ── 2) Articles + qty cible ──────────────────────────────────────────────────
--- Désignations UPPERCASE ; unité U ; etat Neuf ; statut Active ; emplacement dépôt
+-- ── 2) Articles + qty (désignations UPPERCASE) ───────────────────────────────
 WITH seed(nom, qty) AS (
   VALUES
+    -- Galvanisé / général
     ('MANCHON MÂLE GALVANISÉ 1" 1/2',                    1::numeric),
     ('RÉDUCTION GALVANISÉE 1" 1/2 x 1"',                  1::numeric),
-    ('BOUCHON GALVANISÉ 1"',                             2::numeric),
     ('RALLONGE CONIQUE GALVANISÉE 1" 1/2',               1::numeric),
     ('TÉ GALVANISÉ 1/2" x 1/2" x 1/2"',                  1::numeric),
     ('UNION GALVANISÉE 16 x 16 mm',                      1::numeric),
-    ('RÉDUCTION GALVANISÉE 1" 1/2 x 1" 1/4',             1::numeric)
+    ('RÉDUCTION GALVANISÉE 1" 1/2 x 1" 1/4',             1::numeric),
+    ('MAMELON MÂLE 1/2"',                                3::numeric),
+    ('COUDE MÂLE/FEMELLE EN CUIVRE 1/2"',                1::numeric),
+    -- Raccords en cuivre et accessoires
+    ('BOUCHON EN CUIVRE 3/4"',                           5::numeric),
+    ('BOUCHON GALVANISÉ 1"',                            19::numeric),
+    ('BOUCHON GALVANISÉ 1/2"',                          18::numeric),
+    ('BOUCHON GALVANISÉ 3/4"',                           1::numeric),
+    ('RÉDUCTION EN CUIVRE 1/2" x 3/4"',                   1::numeric),
+    ('MAMELON MÂLE/FEMELLE 1/2" x 1/8"',                 2::numeric),
+    ('ROBINET D''ÉQUERRE 1/2" x 3/8"',                   5::numeric),
+    ('ROBINET D''ÉQUERRE 1/2" x 1/2"',                   1::numeric),
+    ('BOUCHON FEMELLE 1/2"',                             1::numeric)
 ),
 cat AS (
   SELECT c.id
@@ -109,7 +118,7 @@ ins AS (
 )
 SELECT * FROM ins;
 
--- Relier category_id / champs métier si articles déjà présents
+-- Relier category_id / champs métier
 UPDATE public.stock_articles a
 SET
   category_id  = COALESCE(a.category_id, c.id),
@@ -124,11 +133,21 @@ FROM public.stock_categories c
 WHERE lower(trim(a.nom)) IN (
   lower('MANCHON MÂLE GALVANISÉ 1" 1/2'),
   lower('RÉDUCTION GALVANISÉE 1" 1/2 x 1"'),
-  lower('BOUCHON GALVANISÉ 1"'),
   lower('RALLONGE CONIQUE GALVANISÉE 1" 1/2'),
   lower('TÉ GALVANISÉ 1/2" x 1/2" x 1/2"'),
   lower('UNION GALVANISÉE 16 x 16 mm'),
-  lower('RÉDUCTION GALVANISÉE 1" 1/2 x 1" 1/4')
+  lower('RÉDUCTION GALVANISÉE 1" 1/2 x 1" 1/4'),
+  lower('MAMELON MÂLE 1/2"'),
+  lower('COUDE MÂLE/FEMELLE EN CUIVRE 1/2"'),
+  lower('BOUCHON EN CUIVRE 3/4"'),
+  lower('BOUCHON GALVANISÉ 1"'),
+  lower('BOUCHON GALVANISÉ 1/2"'),
+  lower('BOUCHON GALVANISÉ 3/4"'),
+  lower('RÉDUCTION EN CUIVRE 1/2" x 3/4"'),
+  lower('MAMELON MÂLE/FEMELLE 1/2" x 1/8"'),
+  lower('ROBINET D''ÉQUERRE 1/2" x 3/8"'),
+  lower('ROBINET D''ÉQUERRE 1/2" x 1/2"'),
+  lower('BOUCHON FEMELLE 1/2"')
 )
 AND (
   lower(trim(coalesce(c.code, ''))) = 'plomberie'
@@ -136,7 +155,6 @@ AND (
   OR lower(trim(coalesce(c.nom, ''))) = 'plomberie'
 );
 
--- barcode_value = reference (si colonne présente)
 DO $bc$
 BEGIN
   IF EXISTS (
@@ -150,16 +168,26 @@ BEGIN
       AND lower(trim(a.nom)) IN (
         lower('MANCHON MÂLE GALVANISÉ 1" 1/2'),
         lower('RÉDUCTION GALVANISÉE 1" 1/2 x 1"'),
-        lower('BOUCHON GALVANISÉ 1"'),
         lower('RALLONGE CONIQUE GALVANISÉE 1" 1/2'),
         lower('TÉ GALVANISÉ 1/2" x 1/2" x 1/2"'),
         lower('UNION GALVANISÉE 16 x 16 mm'),
-        lower('RÉDUCTION GALVANISÉE 1" 1/2 x 1" 1/4')
+        lower('RÉDUCTION GALVANISÉE 1" 1/2 x 1" 1/4'),
+        lower('MAMELON MÂLE 1/2"'),
+        lower('COUDE MÂLE/FEMELLE EN CUIVRE 1/2"'),
+        lower('BOUCHON EN CUIVRE 3/4"'),
+        lower('BOUCHON GALVANISÉ 1"'),
+        lower('BOUCHON GALVANISÉ 1/2"'),
+        lower('BOUCHON GALVANISÉ 3/4"'),
+        lower('RÉDUCTION EN CUIVRE 1/2" x 3/4"'),
+        lower('MAMELON MÂLE/FEMELLE 1/2" x 1/8"'),
+        lower('ROBINET D''ÉQUERRE 1/2" x 3/8"'),
+        lower('ROBINET D''ÉQUERRE 1/2" x 1/2"'),
+        lower('BOUCHON FEMELLE 1/2"')
       );
   END IF;
 END $bc$;
 
--- ── 3) stock_levels à DEPOT LAKHYAYTA (insert si absente) ────────────────────
+-- ── 3) stock_levels DEPOT LAKHYAYTA (insert si absente) ───────────────────────
 INSERT INTO public.stock_levels (article_id, emplacement, quantite, warehouse_id, project_id)
 SELECT
   a.id,
@@ -171,11 +199,21 @@ FROM (
   VALUES
     ('MANCHON MÂLE GALVANISÉ 1" 1/2',                    1::numeric),
     ('RÉDUCTION GALVANISÉE 1" 1/2 x 1"',                  1::numeric),
-    ('BOUCHON GALVANISÉ 1"',                             2::numeric),
     ('RALLONGE CONIQUE GALVANISÉE 1" 1/2',               1::numeric),
     ('TÉ GALVANISÉ 1/2" x 1/2" x 1/2"',                  1::numeric),
     ('UNION GALVANISÉE 16 x 16 mm',                      1::numeric),
-    ('RÉDUCTION GALVANISÉE 1" 1/2 x 1" 1/4',             1::numeric)
+    ('RÉDUCTION GALVANISÉE 1" 1/2 x 1" 1/4',             1::numeric),
+    ('MAMELON MÂLE 1/2"',                                3::numeric),
+    ('COUDE MÂLE/FEMELLE EN CUIVRE 1/2"',                1::numeric),
+    ('BOUCHON EN CUIVRE 3/4"',                           5::numeric),
+    ('BOUCHON GALVANISÉ 1"',                            19::numeric),
+    ('BOUCHON GALVANISÉ 1/2"',                          18::numeric),
+    ('BOUCHON GALVANISÉ 3/4"',                           1::numeric),
+    ('RÉDUCTION EN CUIVRE 1/2" x 3/4"',                   1::numeric),
+    ('MAMELON MÂLE/FEMELLE 1/2" x 1/8"',                 2::numeric),
+    ('ROBINET D''ÉQUERRE 1/2" x 3/8"',                   5::numeric),
+    ('ROBINET D''ÉQUERRE 1/2" x 1/2"',                   1::numeric),
+    ('BOUCHON FEMELLE 1/2"',                             1::numeric)
 ) AS s(nom, qty)
 JOIN public.stock_articles a
   ON lower(trim(a.nom)) = lower(trim(s.nom))
@@ -187,14 +225,22 @@ WHERE NOT EXISTS (
     AND lower(trim(coalesce(l.emplacement, ''))) = 'depot lakhyayta'
 );
 
--- ── 4) Mouvements Entrée initiaux (traçabilité, comme createStockArticle) ────
--- Ne crée pas de mouvement si un seed ou une Entrée « Stock initial » existe déjà
+-- Si BOUCHON GALVANISÉ 1" existait déjà avec qty 2 (ancien seed), aligner à 19
+UPDATE public.stock_levels l
+SET quantite = 19, updated_at = NOW()
+FROM public.stock_articles a
+WHERE l.article_id = a.id
+  AND lower(trim(a.nom)) = lower('BOUCHON GALVANISÉ 1"')
+  AND lower(trim(coalesce(l.emplacement, ''))) = 'depot lakhyayta'
+  AND COALESCE(l.quantite, 0) < 19;
+
+-- ── 4) Mouvements Entrée initiaux ────────────────────────────────────────────
 INSERT INTO public.stock_movements (
   ref_mouvement, type_mouvement, article_id, warehouse_id,
   quantite, date_mouvement, motif, payload
 )
 SELECT
-  'BM-SEED-GALVA-' || upper(substr(replace(a.id::text, '-', ''), 1, 10)),
+  'BM-SEED-PLOMB-' || upper(substr(replace(a.id::text, '-', ''), 1, 10)),
   'Entree',
   a.id,
   w.id,
@@ -205,7 +251,7 @@ SELECT
     'statut', 'Validé',
     'applied', true,
     'origine', 'Stock initial',
-    'source', 'seed_plomberie_galva',
+    'source', 'seed_plomberie_consommable',
     'action_label', 'Entrée de stock — Stock initial',
     'emplacement_destination', 'DEPOT LAKHYAYTA',
     'article_code', a.reference,
@@ -216,11 +262,21 @@ FROM (
   VALUES
     ('MANCHON MÂLE GALVANISÉ 1" 1/2',                    1::numeric),
     ('RÉDUCTION GALVANISÉE 1" 1/2 x 1"',                  1::numeric),
-    ('BOUCHON GALVANISÉ 1"',                             2::numeric),
     ('RALLONGE CONIQUE GALVANISÉE 1" 1/2',               1::numeric),
     ('TÉ GALVANISÉ 1/2" x 1/2" x 1/2"',                  1::numeric),
     ('UNION GALVANISÉE 16 x 16 mm',                      1::numeric),
-    ('RÉDUCTION GALVANISÉE 1" 1/2 x 1" 1/4',             1::numeric)
+    ('RÉDUCTION GALVANISÉE 1" 1/2 x 1" 1/4',             1::numeric),
+    ('MAMELON MÂLE 1/2"',                                3::numeric),
+    ('COUDE MÂLE/FEMELLE EN CUIVRE 1/2"',                1::numeric),
+    ('BOUCHON EN CUIVRE 3/4"',                           5::numeric),
+    ('BOUCHON GALVANISÉ 1"',                            19::numeric),
+    ('BOUCHON GALVANISÉ 1/2"',                          18::numeric),
+    ('BOUCHON GALVANISÉ 3/4"',                           1::numeric),
+    ('RÉDUCTION EN CUIVRE 1/2" x 3/4"',                   1::numeric),
+    ('MAMELON MÂLE/FEMELLE 1/2" x 1/8"',                 2::numeric),
+    ('ROBINET D''ÉQUERRE 1/2" x 3/8"',                   5::numeric),
+    ('ROBINET D''ÉQUERRE 1/2" x 1/2"',                   1::numeric),
+    ('BOUCHON FEMELLE 1/2"',                             1::numeric)
 ) AS s(nom, qty)
 JOIN public.stock_articles a
   ON lower(trim(a.nom)) = lower(trim(s.nom))
@@ -230,7 +286,7 @@ WHERE NOT EXISTS (
   SELECT 1 FROM public.stock_movements m
   WHERE m.article_id = a.id
     AND (
-      coalesce(m.payload->>'source', '') = 'seed_plomberie_galva'
+      coalesce(m.payload->>'source', '') IN ('seed_plomberie_galva', 'seed_plomberie_consommable')
       OR (
         lower(coalesce(m.type_mouvement, '')) IN ('entree', 'entrée')
         AND coalesce(m.motif, '') = 'Création de l''article'
@@ -244,10 +300,6 @@ SELECT
   a.nom,
   a.article_type,
   a.categorie,
-  a.unite,
-  a.etat,
-  a.statut,
-  a.emplacement,
   COALESCE(l.quantite, 0) AS qty_depot
 FROM public.stock_articles a
 LEFT JOIN public.stock_levels l
@@ -256,27 +308,44 @@ LEFT JOIN public.stock_levels l
 WHERE lower(trim(a.nom)) IN (
   lower('MANCHON MÂLE GALVANISÉ 1" 1/2'),
   lower('RÉDUCTION GALVANISÉE 1" 1/2 x 1"'),
-  lower('BOUCHON GALVANISÉ 1"'),
   lower('RALLONGE CONIQUE GALVANISÉE 1" 1/2'),
   lower('TÉ GALVANISÉ 1/2" x 1/2" x 1/2"'),
   lower('UNION GALVANISÉE 16 x 16 mm'),
-  lower('RÉDUCTION GALVANISÉE 1" 1/2 x 1" 1/4')
+  lower('RÉDUCTION GALVANISÉE 1" 1/2 x 1" 1/4'),
+  lower('MAMELON MÂLE 1/2"'),
+  lower('COUDE MÂLE/FEMELLE EN CUIVRE 1/2"'),
+  lower('BOUCHON EN CUIVRE 3/4"'),
+  lower('BOUCHON GALVANISÉ 1"'),
+  lower('BOUCHON GALVANISÉ 1/2"'),
+  lower('BOUCHON GALVANISÉ 3/4"'),
+  lower('RÉDUCTION EN CUIVRE 1/2" x 3/4"'),
+  lower('MAMELON MÂLE/FEMELLE 1/2" x 1/8"'),
+  lower('ROBINET D''ÉQUERRE 1/2" x 3/8"'),
+  lower('ROBINET D''ÉQUERRE 1/2" x 1/2"'),
+  lower('BOUCHON FEMELLE 1/2"')
 )
 ORDER BY a.nom;
 
-SELECT
-  (SELECT COUNT(*)::int FROM public.stock_categories
-   WHERE lower(trim(coalesce(code, ''))) = 'plomberie'
-      OR lower(trim(coalesce(name, ''))) = 'plomberie') AS cat_plomberie,
-  (SELECT COUNT(*)::int FROM public.stock_articles a
-   WHERE lower(trim(a.nom)) IN (
-     lower('MANCHON MÂLE GALVANISÉ 1" 1/2'),
-     lower('RÉDUCTION GALVANISÉE 1" 1/2 x 1"'),
-     lower('BOUCHON GALVANISÉ 1"'),
-     lower('RALLONGE CONIQUE GALVANISÉE 1" 1/2'),
-     lower('TÉ GALVANISÉ 1/2" x 1/2" x 1/2"'),
-     lower('UNION GALVANISÉE 16 x 16 mm'),
-     lower('RÉDUCTION GALVANISÉE 1" 1/2 x 1" 1/4')
-   )) AS articles_galva;
+SELECT COUNT(*)::int AS articles_plomberie_seed
+FROM public.stock_articles a
+WHERE lower(trim(a.nom)) IN (
+  lower('MANCHON MÂLE GALVANISÉ 1" 1/2'),
+  lower('RÉDUCTION GALVANISÉE 1" 1/2 x 1"'),
+  lower('RALLONGE CONIQUE GALVANISÉE 1" 1/2'),
+  lower('TÉ GALVANISÉ 1/2" x 1/2" x 1/2"'),
+  lower('UNION GALVANISÉE 16 x 16 mm'),
+  lower('RÉDUCTION GALVANISÉE 1" 1/2 x 1" 1/4'),
+  lower('MAMELON MÂLE 1/2"'),
+  lower('COUDE MÂLE/FEMELLE EN CUIVRE 1/2"'),
+  lower('BOUCHON EN CUIVRE 3/4"'),
+  lower('BOUCHON GALVANISÉ 1"'),
+  lower('BOUCHON GALVANISÉ 1/2"'),
+  lower('BOUCHON GALVANISÉ 3/4"'),
+  lower('RÉDUCTION EN CUIVRE 1/2" x 3/4"'),
+  lower('MAMELON MÂLE/FEMELLE 1/2" x 1/8"'),
+  lower('ROBINET D''ÉQUERRE 1/2" x 3/8"'),
+  lower('ROBINET D''ÉQUERRE 1/2" x 1/2"'),
+  lower('BOUCHON FEMELLE 1/2"')
+);
 
 NOTIFY pgrst, 'reload schema';
