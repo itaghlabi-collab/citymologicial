@@ -41,19 +41,28 @@ export function normalizeArticleType(articleOrType) {
   return t;
 }
 
-export function articleAllowsStandardSortie(articleOrType) {
+/**
+ * @param {*} articleOrType
+ * @param {{ allowMaterielSortie?: boolean }} [options]
+ *   Exception : sortie Matériel autorisée (ex. super_admin en Mouvement rapide).
+ *   Les outils restent bloqués hors livraison demande chantier.
+ */
+export function articleAllowsStandardSortie(articleOrType, options = {}) {
   const normalized = normalizeArticleType(articleOrType);
   if (!normalized) return true; // type inconnu : UI permissive ; backend ne bloque que Matériel/Outil connus
   const key = normalized
     .toLowerCase()
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '');
-  return !SORTIE_BLOCKED_TYPES.has(key) && !SORTIE_BLOCKED_TYPES.has(normalized.toLowerCase());
+  const blocked = SORTIE_BLOCKED_TYPES.has(key) || SORTIE_BLOCKED_TYPES.has(normalized.toLowerCase());
+  if (!blocked) return true;
+  if (options.allowMaterielSortie && normalized === ARTICLE_TYPE_MATERIEL) return true;
+  return false;
 }
 
 /** Types de mouvement UI autorisés pour un article. */
-export function allowedMovementTypesForArticle(articleOrType) {
-  if (articleAllowsStandardSortie(articleOrType)) {
+export function allowedMovementTypesForArticle(articleOrType, options = {}) {
+  if (articleAllowsStandardSortie(articleOrType, options)) {
     return ['Entrée', 'Transfert', 'Sortie'];
   }
   return ['Entrée', 'Transfert'];
@@ -68,24 +77,28 @@ export const SORTIE_CLEARED_HINT =
 export const ARTICLE_CLEARED_FOR_SORTIE_HINT =
   'Cet article n’est pas disponible pour une sortie. Sélectionnez un consommable.';
 
+export const ARTICLE_CLEARED_FOR_SORTIE_HINT_WITH_MATERIEL =
+  'Cet article n’est pas disponible pour une sortie. Sélectionnez un consommable ou un matériel.';
+
 /** UI : un article est-il autorisé pour ce type de mouvement ? */
-export function articleAllowedForMovementType(articleOrType, typeMouvement) {
+export function articleAllowedForMovementType(articleOrType, typeMouvement, options = {}) {
   const type = String(typeMouvement || '').trim();
   if (!type) return false;
-  return allowedMovementTypesForArticle(articleOrType).includes(type);
+  return allowedMovementTypesForArticle(articleOrType, options).includes(type);
 }
 
 /** UI : filtre la liste d’articles selon le type de mouvement choisi. */
-export function filterArticlesForMovementType(articles, typeMouvement) {
+export function filterArticlesForMovementType(articles, typeMouvement, options = {}) {
   const type = String(typeMouvement || '').trim();
   if (!type) return [];
-  return (articles || []).filter((a) => articleAllowedForMovementType(a, type));
+  return (articles || []).filter((a) => articleAllowedForMovementType(a, type, options));
 }
 
 /**
  * Lève une erreur VALIDATION si Sortie + Matériel/Outil.
- * @param {{ allowSiteRequestDeliverySortie?: boolean }} [options]
- *   Exception stricte : livraison demande chantier uniquement.
+ * @param {{ allowSiteRequestDeliverySortie?: boolean, allowMaterielSortie?: boolean }} [options]
+ *   allowSiteRequestDeliverySortie : livraison demande chantier (Matériel + Outil).
+ *   allowMaterielSortie : sortie Matériel uniquement (ex. super_admin).
  */
 export function assertMovementAllowedForArticle(articleOrType, typeMouvement, options = {}) {
   const type = String(typeMouvement || '').trim();
@@ -93,7 +106,7 @@ export function assertMovementAllowedForArticle(articleOrType, typeMouvement, op
   if (options.allowSiteRequestDeliverySortie) return;
   const normalized = normalizeArticleType(articleOrType);
   if (!normalized) return; // type inconnu : ne bloque pas (données historiques)
-  if (!articleAllowsStandardSortie(normalized)) {
+  if (!articleAllowsStandardSortie(normalized, options)) {
     const err = new Error(SORTIE_BLOCKED_MESSAGE);
     err.code = 'VALIDATION';
     throw err;

@@ -462,6 +462,7 @@ async function assertBonArticlesAllowMovement(bon) {
     }
     assertMovementAllowedForArticle(art, type, {
       allowSiteRequestDeliverySortie: !!bon.allow_site_request_delivery_sortie,
+      allowMaterielSortie: !!bon.allow_materiel_sortie,
     });
   }
 }
