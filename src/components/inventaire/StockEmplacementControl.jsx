@@ -15,6 +15,14 @@ function fmtMvtDate(m) {
   return m?.date_label || '—';
 }
 
+/** Libellé affiché pour le dernier mouvement (Transfert > label métier > type). */
+function fmtMvtLabel(m) {
+  if (!m) return '—';
+  if (m.operation_label) return m.operation_label;
+  if (m.normalized_type === 'transfer' || m.type_mouvement === 'Transfert') return 'Transfert';
+  return m.label || m.type_mouvement || '—';
+}
+
 export default function StockEmplacementControl({
   controlView,
   loading,
@@ -78,7 +86,7 @@ export default function StockEmplacementControl({
               ['Valeur actuelle', detailRow.valeur_actuelle ? formatMAD(detailRow.valeur_actuelle) : '—'],
               ['État', detailRow.etat_emplacement?.label || '—'],
               ['Dernière opération', detailRow.dernier_mouvement
-                ? `${fmtMvtDate(detailRow.dernier_mouvement)} — ${detailRow.dernier_mouvement.operation_label || detailRow.dernier_mouvement.label}`
+                ? `${fmtMvtDate(detailRow.dernier_mouvement)} — ${fmtMvtLabel(detailRow.dernier_mouvement)}`
                 : '—'],
             ].map(([l, v]) => (
               <div key={l}>
@@ -151,7 +159,7 @@ export default function StockEmplacementControl({
                       <td style={{ fontSize: '0.72rem' }}>{x.derniere_sortie ? fmtMvtDate(x.derniere_sortie) : '—'}</td>
                       <td style={{ fontSize: '0.72rem' }}>
                         {x.dernier_mouvement
-                          ? <>{fmtMvtDate(x.dernier_mouvement)}<br /><span style={{ color: 'var(--text-3)' }}>{x.dernier_mouvement.operation_label || x.dernier_mouvement.label}</span></>
+                          ? <>{fmtMvtDate(x.dernier_mouvement)}<br /><span style={{ color: 'var(--text-3)' }}>{fmtMvtLabel(x.dernier_mouvement)}</span></>
                           : '—'}
                       </td>
                       <td><span className={`badge ${st.cls || 'badge-grey'}`}>{st.label || '—'}</span></td>

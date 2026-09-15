@@ -798,7 +798,7 @@ export default function Stocks({
                         <td><span className={`badge ${st.cls} inv-articles-badge`}>{st.label}</span></td>
                         <td style={{ fontSize: '0.75rem', color: 'var(--text-2)' }}>
                           {x.dernier_mouvement ? (
-                            <>{x.dernier_mouvement.date_label}<br /><span style={{ color: 'var(--text-3)' }}>{x.dernier_mouvement.action}</span></>
+                            <>{x.dernier_mouvement.date_label}<br /><span style={{ color: 'var(--text-3)' }}>{x.dernier_mouvement.action || x.dernier_mouvement.type || '—'}</span></>
                           ) : '—'}
                         </td>
                         <td onClick={(e) => e.stopPropagation()}>

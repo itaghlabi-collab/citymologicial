@@ -75,8 +75,9 @@ export function isMovementStockApplicable(row) {
  */
 export function normalizeMovementKind(row) {
   const p = row?.payload || {};
-  const src = normEmp(p.emplacement_source);
-  const dest = normEmp(p.emplacement_destination);
+  // Payload canonique ; repli top-level si le row a déjà été normalisé (affichage).
+  const src = normEmp(p.emplacement_source || row?.emplacement_source);
+  const dest = normEmp(p.emplacement_destination || row?.emplacement_destination);
   const rawDb = typeFromDb(row?.type_mouvement);
   const key = String(rawDb || '')
     .toLowerCase()
@@ -150,6 +151,39 @@ export function deltaForEmplacement(row, emplacement) {
     delta: inbound - outbound,
     touches: inbound > 0 || outbound > 0,
   };
+}
+
+/**
+ * Libellé d'opération relatif à un emplacement (affichage uniquement).
+ * Transfert source → sortant ; destination → entrant.
+ */
+export function operationLabelForDelta(d) {
+  if (!d) return 'Mouvement';
+  if (d.normalized_type === 'transfer') {
+    if (d.inbound > 0 && d.outbound === 0) return 'Transfert entrant';
+    if (d.outbound > 0 && d.inbound === 0) return 'Transfert sortant';
+    return 'Transfert';
+  }
+  return d.label || d.raw_type || 'Mouvement';
+}
+
+/**
+ * Libellé « Dernier mvt » (affiche Transfert, pas le motif « Autre »).
+ */
+export function displayMovementActionLabel(row) {
+  if (!row) return 'Mouvement';
+  const p = row.payload || {};
+  if (p.source === 'inventory_adjustment') {
+    return p.action_label || 'Ajustement d\'inventaire';
+  }
+  if (p.source === 'article_creation' || p.origine === 'Stock initial') {
+    return p.action_label || 'Entrée de stock — Stock initial';
+  }
+  const kind = normalizeMovementKind(row);
+  if (kind.normalized_type === 'transfer') return 'Transfert';
+  if (kind.raw_type) return kind.raw_type;
+  if (kind.label) return kind.label;
+  return p.action_label || row.motif || 'Mouvement';
 }
 
 function extractProjet(payload = {}) {
@@ -462,6 +496,9 @@ export function buildEmplacementControlView({
     const applicable = isMovementStockApplicable(row);
     const aid = enriched.article_id || '_unknown';
     let solde = balances.get(aid) || 0;
+    const opLabel = operationLabelForDelta(d);
+    // Dernier mvt : libellé court « Transfert » (pas motif) ; entrée/sortie portent le sens.
+    const lastMvtLabel = d.normalized_type === 'transfer' ? 'Transfert' : opLabel;
     if (applicable) {
       solde += d.delta;
       balances.set(aid, solde);
@@ -476,9 +513,14 @@ export function buildEmplacementControlView({
         tot.sortie += d.outbound;
         tot.consomme += d.outbound;
       }
-      if (d.inbound > 0) tot.last_in = enriched;
-      if (d.outbound > 0) tot.last_out = enriched;
-      tot.last_mvt = enriched;
+      // Transfert : source → dernière sortie ; destination → dernière entrée (pour CET emplacement).
+      if (d.inbound > 0) {
+        tot.last_in = { ...enriched, operation_label: opLabel };
+      }
+      if (d.outbound > 0) {
+        tot.last_out = { ...enriched, operation_label: opLabel };
+      }
+      tot.last_mvt = { ...enriched, operation_label: lastMvtLabel };
     }
 
     const inPeriod = isInPeriod(row, period);
@@ -490,11 +532,7 @@ export function buildEmplacementControlView({
       solde_apres: applicable ? solde : null,
       applicable,
       in_period: inPeriod,
-      operation_label: d.inbound > 0 && d.outbound === 0
-        ? (d.normalized_type === 'transfer' ? 'Transfert entrant' : d.label)
-        : (d.outbound > 0 && d.inbound === 0
-          ? (d.normalized_type === 'transfer' ? 'Transfert sortant' : d.label)
-          : d.label),
+      operation_label: opLabel,
     });
   });
 

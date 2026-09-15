@@ -5,6 +5,7 @@ import { getSupabase } from '../../lib/supabase';
 import { requireSupabaseUserId } from '../supabase/requireUser';
 import { buildSeedRows } from './stockArticlesSeed';
 import { listStockCategories } from './stockCategories';
+import { displayMovementActionLabel } from './stockSync';
 
 const DEFAULT_STOCK_EMPLACEMENT = 'DEPOT LAKHYAYTA';
 
@@ -239,12 +240,11 @@ function fmtMvtDate(d) {
 
 function summarizeLastMovement(row) {
   if (!row) return null;
-  const p = row.payload || {};
-  const action = p.action_label || row.motif || row.type_mouvement || 'Mouvement';
   return {
     date: row.date_mouvement || '',
     date_label: fmtMvtDate(row.date_mouvement),
-    action,
+    // Type métier (Transfert / Entrée / …) — jamais le motif « Autre »
+    action: displayMovementActionLabel(row),
     type: row.type_mouvement || '',
     ref: row.ref_mouvement || '',
   };
@@ -743,7 +743,7 @@ export function formatArticleMovementHistory(m) {
     Reforme: 'Réforme',
   }[m.type_mouvement] || m.type_mouvement || '';
 
-  let action = p.action_label || m.motif || typeLabel || 'Mouvement';
+  let action = displayMovementActionLabel(m);
   let observation = p.note || p.ligne_notes || '';
   if (p.source === 'inventory_adjustment') {
     action = 'Ajustement d\'inventaire';
