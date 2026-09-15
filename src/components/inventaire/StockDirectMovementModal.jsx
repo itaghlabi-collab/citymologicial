@@ -14,6 +14,9 @@ import { useAuth } from '../../hooks/useAuth';
 import { isSuperAdmin } from '../../services/rh/isSuperAdmin';
 
 const MOTIF_MISE_A_REBUT = 'Mise au rebut';
+/** Sentinel: régularisation cible 0 sur tous les emplacements avec stock. */
+const EMPLACEMENT_TOUS = '__TOUS_EMPLACEMENTS__';
+const EMPLACEMENT_TOUS_LABEL = 'Tous les emplacements';
 
 const MOTIFS = {
   Entrée: ['Réception directe', 'Retour chantier', 'Stock initial', 'Régularisation positive', 'Article retrouvé', 'Autre'],
@@ -89,13 +92,13 @@ export default function StockDirectMovementModal({
 
   /** Qty at a given emplacement (0 if none) — never fall back to article total. */
   function qtyAtEmplacement(emp) {
-    if (!emp) return 0;
+    if (!emp || emp === EMPLACEMENT_TOUS) return 0;
     const hit = (stockInfo?.levels || []).find((l) => l.emplacement === emp);
     return hit ? Number(hit.quantite) || 0 : 0;
   }
 
   const sourceQty = useMemo(() => {
-    if (!form.emplacement_source) return stockAvant;
+    if (!form.emplacement_source || form.emplacement_source === EMPLACEMENT_TOUS) return stockAvant;
     const hit = (stockInfo?.levels || []).find((l) => l.emplacement === form.emplacement_source);
     // Sortie/Transfert: missing level = 0 at that location (not total).
     if (hit) return Number(hit.quantite) || 0;
@@ -103,9 +106,13 @@ export default function StockDirectMovementModal({
   }, [stockInfo, form.emplacement_source, stockAvant, isRegularisation]);
 
   const regularisationEmp = form.emplacement_source || form.emplacement_destination || '';
+  const isAllEmplacements = isRegularisation && regularisationEmp === EMPLACEMENT_TOUS;
 
-  /** Cible 0 = mise à zéro du stock TOTAL (tous les emplacements), pas d’un seul lieu. */
-  const wipeAllToZero = isRegularisation
+  /**
+   * Wipe all emplacements only when explicit « Tous les emplacements » + cible 0.
+   * Default: cible 0 + emplacement précis → Rebut sur CE lieu uniquement.
+   */
+  const wipeAllToZero = isAllEmplacements
     && form.target_qty !== ''
     && form.target_qty != null
     && !Number.isNaN(Number(form.target_qty))
@@ -133,9 +140,9 @@ export default function StockDirectMovementModal({
     if (Number.isNaN(target) || form.target_qty === '' || form.target_qty == null) return null;
     if (wipeAllToZero) {
       if (stockAvant <= 0) return null;
-      // Cible 0 → Rebut sur tous les emplacements (stock total → 0).
       return 'Rebut';
     }
+    if (isAllEmplacements) return null;
     if (target > baselineQty) return 'Entrée';
     if (target < baselineQty) {
       if (String(form.motif || '').trim() === MOTIF_MISE_A_REBUT) return 'Rebut';
@@ -151,7 +158,10 @@ export default function StockDirectMovementModal({
   function validate() {
     const mType = resolveMovementType();
     if (!article?.id) return 'Article manquant.';
-    if (isRegularisation && !wipeAllToZero && !regularisationEmp) return 'Emplacement requis.';
+    if (isRegularisation && !regularisationEmp) return 'Emplacement requis.';
+    if (isAllEmplacements && !wipeAllToZero) {
+      return '« Tous les emplacements » : indiquez une quantité cible de 0 (mise au rebut), ou choisissez un emplacement.';
+    }
     if (!mType) {
       return isRegularisation
         ? (wipeAllToZero
@@ -220,11 +230,11 @@ export default function StockDirectMovementModal({
     setError('');
     try {
       if (wipeAllToZero) {
-        // Un Rebut par emplacement avec qty > 0 → stock total à 0 (1 confirm).
+        // Explicit « Tous les emplacements » + cible 0 : un Rebut par lieu avec qty > 0.
         const targets = levelsWithStock.length > 0
           ? levelsWithStock
           : [{
-            emplacement: regularisationEmp || (article.emplacement || '').trim() || (emplacements[0] || 'STOCK'),
+            emplacement: (article.emplacement || '').trim() || (emplacements[0] || 'STOCK'),
             quantite: stockAvant,
           }];
         for (const level of targets) {
@@ -267,7 +277,7 @@ export default function StockDirectMovementModal({
     const base = MOTIFS[type] || MOTIFS.Entrée;
     if (!isRegularisation) return base;
     if (wipeAllToZero) {
-      // Cible 0 → motifs de diminution uniquement (Mise au rebut en tête).
+      // Cible 0 tous emplacements → motifs de diminution (Mise au rebut en tête).
       return [MOTIF_MISE_A_REBUT, 'Régularisation négative', 'Inventaire physique', 'Autre'];
     }
     const targetNum = Number(form.target_qty);
@@ -281,8 +291,8 @@ export default function StockDirectMovementModal({
   function setTargetQty(value) {
     const targetNum = Number(value);
     const toZero = value !== '' && !Number.isNaN(targetNum) && targetNum === 0;
-    // Comparer à l'emplacement sélectionné (pas au total wipe), sinon motif bloqué après cible 0.
-    const empBaseline = qtyAtEmplacement(regularisationEmp);
+    // Baseline emplacement (pas le total) — sauf « Tous les emplacements ».
+    const empBaseline = isAllEmplacements ? stockAvant : qtyAtEmplacement(regularisationEmp);
     setForm((p) => {
       let nextMotif = p.motif;
       if (toZero) nextMotif = MOTIF_MISE_A_REBUT;
@@ -316,6 +326,7 @@ export default function StockDirectMovementModal({
       : previewDecrease ? baselineQty - previewQty
         : baselineQty);
   const unite = article.unite || 'U';
+  const showWipeHint = wipeAllToZero;
 
   return (
     <Modal open={open} onClose={() => !saving && onClose?.()} title={titleMap[type] || 'Mouvement'} width={640}>
@@ -330,12 +341,12 @@ export default function StockDirectMovementModal({
           <div style={{ fontWeight: 600 }}>{article.designation}</div>
           <div style={{ fontSize: '0.8rem', color: 'var(--text-3)', marginTop: 4 }}>
             Stock total : <strong>{stockAvant} {unite}</strong>
-            {isRegularisation && !wipeAllToZero && regularisationEmp ? (
+            {isRegularisation && !isAllEmplacements && regularisationEmp ? (
               <>
                 {' · '}Stock à cet emplacement : <strong>{baselineQty} {unite}</strong>
               </>
             ) : null}
-            {wipeAllToZero ? (
+            {showWipeHint ? (
               <>
                 {' · '}
                 <span style={{ color: 'var(--red)' }}>
@@ -366,9 +377,20 @@ export default function StockDirectMovementModal({
 
         <FRow>
           {isRegularisation ? (
-            wipeAllToZero ? (
-              <FField label="Emplacements">
-                <div style={{ fontSize: '0.84rem', color: 'var(--text-2)', padding: '8px 0' }}>
+            <FField label="Emplacement à régulariser" required>
+              <select
+                value={regularisationEmp}
+                onChange={(e) => setRegularisationEmplacement(e.target.value)}
+                style={SELECT_STYLE}
+              >
+                <option value="">— Sélectionner —</option>
+                <option value={EMPLACEMENT_TOUS}>{EMPLACEMENT_TOUS_LABEL}</option>
+                {sourceOptions.map(({ value, qty: q }) => (
+                  <option key={value} value={value}>{q != null ? `${value} (${q})` : `${value} (0)`}</option>
+                ))}
+              </select>
+              {showWipeHint ? (
+                <div style={{ fontSize: '0.84rem', color: 'var(--text-2)', marginTop: 6 }}>
                   Cible 0 : un Rebut sera créé pour chaque emplacement avec stock
                   {levelsWithStock.length > 0 ? (
                     <>
@@ -377,21 +399,12 @@ export default function StockDirectMovementModal({
                   ) : null}
                   .
                 </div>
-              </FField>
-            ) : (
-              <FField label="Emplacement à régulariser" required>
-                <select
-                  value={regularisationEmp}
-                  onChange={(e) => setRegularisationEmplacement(e.target.value)}
-                  style={SELECT_STYLE}
-                >
-                  <option value="">— Sélectionner —</option>
-                  {sourceOptions.map(({ value, qty: q }) => (
-                    <option key={value} value={value}>{q != null ? `${value} (${q})` : `${value} (0)`}</option>
-                  ))}
-                </select>
-              </FField>
-            )
+              ) : isAllEmplacements ? (
+                <div style={{ fontSize: '0.75rem', color: 'var(--text-3)', marginTop: 4 }}>
+                  Pour tout mettre à 0, indiquez la quantité cible 0 (Mise au rebut).
+                </div>
+              ) : null}
+            </FField>
           ) : (
             <>
               {(type === 'Sortie' || type === 'Transfert') && (
