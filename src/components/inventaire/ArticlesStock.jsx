@@ -911,8 +911,19 @@ export default function ArticlesStock({
       {error && (
         <div className="card" style={{ marginBottom: 12, padding: 12, color: 'var(--red)', fontSize: '0.85rem' }}>
           {error}
-          <div style={{ marginTop: 8, fontSize: '0.8rem' }}>
-            Si l&apos;import échoue : exécutez <code>RUN_STOCK_CATEGORIES.sql</code>, puis <code>RUN_STOCK_ARTICLES_LEVELS.sql</code>, puis <code>SEED_STOCK_ARTICLES_43.sql</code> dans Supabase SQL Editor.
+          <div style={{ marginTop: 8, fontSize: '0.8rem', color: 'var(--text-muted, #666)' }}>
+            {/bad request|requête api trop longue|uri too large/i.test(String(error)) ? (
+              <>
+                Ce message apparaît souvent quand une requête PostgREST est trop longue (filtre <code>.in</code>),
+                pas parce que le catalogue est vide. Les articles restent dans <code>stock_articles</code>.
+                Rechargez après déploiement du correctif batching ; pour les quantités mises à 0 par « Mise au rebut »,
+                exécutez <code>RUN_RESTORE_STOCK_AFTER_REBUT.sql</code> dans Supabase.
+              </>
+            ) : (
+              <>
+                Si l&apos;import échoue : exécutez <code>RUN_STOCK_CATEGORIES.sql</code>, puis <code>RUN_STOCK_ARTICLES_LEVELS.sql</code>, puis <code>SEED_STOCK_ARTICLES_43.sql</code> dans Supabase SQL Editor.
+              </>
+            )}
           </div>
         </div>
       )}

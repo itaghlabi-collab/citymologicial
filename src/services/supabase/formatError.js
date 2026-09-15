@@ -180,5 +180,15 @@ export function formatSupabaseError(error, fallback = 'Une erreur est survenue.'
     return 'Colonnes acompte absentes — exécutez supabase/migrations/20260526041000_crm_factures_acompte.sql';
   }
 
+  const msgLower = String(message || '').toLowerCase();
+  if (
+    msgLower === 'bad request'
+    || msgLower.includes('request uri too large')
+    || msgLower.includes('request-uri too large')
+    || msgLower.includes('query string too long')
+  ) {
+    return 'Bad Request (requête API trop longue) — ce n’est pas une preuve que les tables sont vides. Rechargez après déploiement du correctif, ou vérifiez stock_articles / stock_levels dans Supabase.';
+  }
+
   return message;
 }

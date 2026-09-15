@@ -176,34 +176,96 @@ export async function generateStockArticleCode() {
   return `${prefix}${String(max + 1).padStart(4, '0')}`;
 }
 
+/**
+ * PostgREST/Kong renvoie souvent 400 Bad Request si `.in(id, …)` met trop d’UUID
+ * dans l’URL (catalogue enrichi / seeds → centaines d’articles).
+ * On découpe pour rester sous la limite typique (~8 Ko).
+ * En cas de 400 résiduel, on retente automatiquement avec des chunks plus petits.
+ */
+const IN_FILTER_CHUNK = 60;
+const IN_FILTER_CHUNK_MIN = 15;
+const MOVEMENTS_PAGE = 1000;
+
+function isRequestTooLargeError(error) {
+  const status = Number(error?.status || error?.statusCode || 0);
+  const msg = String(error?.message || '').toLowerCase();
+  const details = String(error?.details || error?.hint || '').toLowerCase();
+  return status === 400
+    || msg === 'bad request'
+    || msg.includes('request uri too large')
+    || msg.includes('request-uri too large')
+    || msg.includes('query string too long')
+    || details.includes('uri too large')
+    || details.includes('query string too long');
+}
+
+/** Parcourt les IDs par paquets ; réduit la taille si PostgREST renvoie 400 URI trop longue. */
+async function forEachIdChunk(articleIds, runChunk, initialSize = IN_FILTER_CHUNK) {
+  let size = Math.max(IN_FILTER_CHUNK_MIN, Number(initialSize) || IN_FILTER_CHUNK);
+  let offset = 0;
+  while (offset < articleIds.length) {
+    const chunk = articleIds.slice(offset, offset + size);
+    try {
+      await runChunk(chunk);
+      offset += chunk.length;
+    } catch (error) {
+      if (isRequestTooLargeError(error) && size > IN_FILTER_CHUNK_MIN) {
+        size = Math.max(IN_FILTER_CHUNK_MIN, Math.floor(size / 2));
+        continue;
+      }
+      throw error;
+    }
+  }
+}
+
 async function sumLevelsByArticle(articleIds) {
   const sums = {};
   if (!articleIds.length) return sums;
-  const { data, error } = await getSupabase()
-    .from(LEVELS)
-    .select('article_id, quantite')
-    .in('article_id', articleIds);
-  if (error) {
-    if (error.code === '42P01') return null;
+  try {
+    await forEachIdChunk(articleIds, async (chunk) => {
+      const { data, error } = await getSupabase()
+        .from(LEVELS)
+        .select('article_id, quantite')
+        .in('article_id', chunk);
+      if (error) {
+        if (error.code === '42P01') {
+          const missing = new Error(error.message);
+          missing.code = '42P01';
+          throw missing;
+        }
+        throw error;
+      }
+      (data || []).forEach((l) => {
+        sums[l.article_id] = (sums[l.article_id] || 0) + Number(l.quantite || 0);
+      });
+    });
+  } catch (error) {
+    if (error?.code === '42P01') return null;
     throw error;
   }
-  (data || []).forEach((l) => {
-    sums[l.article_id] = (sums[l.article_id] || 0) + Number(l.quantite || 0);
-  });
   return sums;
 }
 
 async function sumMovementsByArticle(articleIds) {
   const sums = {};
   if (!articleIds.length) return sums;
-  const { data, error } = await getSupabase()
-    .from(MOVEMENTS)
-    .select('article_id, type_mouvement, quantite')
-    .in('article_id', articleIds);
-  if (error) throw error;
-  (data || []).forEach((m) => {
-    if (!m.article_id) return;
-    sums[m.article_id] = (sums[m.article_id] || 0) + movementDelta(m.type_mouvement, m.quantite);
+  await forEachIdChunk(articleIds, async (chunk) => {
+    let from = 0;
+    for (;;) {
+      const { data, error } = await getSupabase()
+        .from(MOVEMENTS)
+        .select('article_id, type_mouvement, quantite')
+        .in('article_id', chunk)
+        .range(from, from + MOVEMENTS_PAGE - 1);
+      if (error) throw error;
+      const rows = data || [];
+      rows.forEach((m) => {
+        if (!m.article_id) return;
+        sums[m.article_id] = (sums[m.article_id] || 0) + movementDelta(m.type_mouvement, m.quantite);
+      });
+      if (rows.length < MOVEMENTS_PAGE) break;
+      from += MOVEMENTS_PAGE;
+    }
   });
   return sums;
 }
@@ -253,20 +315,47 @@ function summarizeLastMovement(row) {
 async function attachLastMovements(articles) {
   if (!articles.length) return articles;
   const ids = articles.map((a) => a.id);
-  const { data, error } = await getSupabase()
-    .from(MOVEMENTS)
-    .select('article_id, date_mouvement, type_mouvement, motif, ref_mouvement, payload, created_at')
-    .in('article_id', ids)
-    .order('date_mouvement', { ascending: false })
-    .order('created_at', { ascending: false });
-  if (error) {
-    if (error.code === '42P01') return articles;
-    throw error;
-  }
   const lastByArticle = new Map();
-  (data || []).forEach((row) => {
-    if (!lastByArticle.has(row.article_id)) lastByArticle.set(row.article_id, row);
-  });
+  try {
+    await forEachIdChunk(ids, async (chunk) => {
+      const pending = new Set(chunk);
+      let from = 0;
+      while (pending.size > 0) {
+        const { data, error } = await getSupabase()
+          .from(MOVEMENTS)
+          .select('article_id, date_mouvement, type_mouvement, motif, ref_mouvement, payload, created_at')
+          .in('article_id', chunk)
+          .order('date_mouvement', { ascending: false })
+          .order('created_at', { ascending: false })
+          .range(from, from + MOVEMENTS_PAGE - 1);
+        if (error) {
+          if (error.code === '42P01') {
+            const missing = new Error(error.message);
+            missing.code = '42P01';
+            throw missing;
+          }
+          throw error;
+        }
+        const rows = data || [];
+        if (!rows.length) break;
+        rows.forEach((row) => {
+          if (!row.article_id || lastByArticle.has(row.article_id)) return;
+          lastByArticle.set(row.article_id, row);
+          pending.delete(row.article_id);
+        });
+        if (rows.length < MOVEMENTS_PAGE) break;
+        from += MOVEMENTS_PAGE;
+      }
+    });
+  } catch (error) {
+    // Ne jamais faire échouer la liste catalogue pour le seul enrichissement « dernier mvt »
+    // (ex. 400 Bad Request / URI trop longue avant chunking, table absente, etc.).
+    if (error?.code === '42P01' || isRequestTooLargeError(error)) {
+      return articles;
+    }
+    console.warn('[CITYMO] attachLastMovements', error);
+    return articles;
+  }
   return articles.map((a) => ({
     ...a,
     dernier_mouvement: summarizeLastMovement(lastByArticle.get(a.id)),
@@ -280,7 +369,13 @@ export async function listStockArticles() {
     .order('nom', { ascending: true });
   if (error) throw error;
   const normalized = (data || []).map((r) => normalizeStockArticle(r)).filter(Boolean);
-  const withStock = await attachStockQuantities(normalized);
+  let withStock = normalized;
+  try {
+    withStock = await attachStockQuantities(normalized);
+  } catch (err) {
+    // Catalogue doit s’afficher même si stock_levels / mouvements échouent (ex. filtre .in trop long).
+    console.warn('[CITYMO] attachStockQuantities', err);
+  }
   return attachLastMovements(withStock);
 }
 
