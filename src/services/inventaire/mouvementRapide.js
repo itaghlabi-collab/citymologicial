@@ -53,6 +53,7 @@ export async function generateMRRef() {
  * @param {string} [form.beneficiaire]
  * @param {string} [form.fournisseur]
  * @param {string} [form.ref_externe]
+ * @param {boolean} [form.allow_materiel_sortie] - sortie Matériel (super_admin)
  */
 export async function saveMouvementRapide(form) {
   const articleId = form.article_id;
@@ -68,7 +69,8 @@ export async function saveMouvementRapide(form) {
     err.code = 'VALIDATION';
     throw err;
   }
-  assertMovementAllowedForArticle(article, form.type_mouvement);
+  const allowMaterielSortie = !!form.allow_materiel_sortie;
+  assertMovementAllowedForArticle(article, form.type_mouvement, { allowMaterielSortie });
 
   const ref = await generateMRRef();
 
@@ -81,6 +83,7 @@ export async function saveMouvementRapide(form) {
     motif: form.motif || '',
     cree_par: form.cree_par || '',
     cout_unitaire: Number(form.cout_unitaire) || Number(article.prix_unitaire) || Number(article.valeur) || 0,
+    allow_materiel_sortie: allowMaterielSortie,
     note: [
       form.note || '',
       form.projet ? `Projet: ${form.projet}` : '',

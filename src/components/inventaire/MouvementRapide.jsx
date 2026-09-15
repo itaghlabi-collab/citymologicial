@@ -28,6 +28,7 @@ import {
   filterArticlesForMovementType,
   articleAllowedForMovementType,
   ARTICLE_CLEARED_FOR_SORTIE_HINT,
+  ARTICLE_CLEARED_FOR_SORTIE_HINT_WITH_MATERIEL,
   SORTIE_CLEARED_HINT,
   ARTICLE_TYPE_CONSOMMABLE,
 } from '../../services/inventaire/articleMovementRules';
@@ -43,6 +44,7 @@ import {
 import StockArticleSearch from './StockArticleSearch.jsx';
 import BonMouvementTraceabilite from './BonMouvementTraceabilite.jsx';
 import { useAuth } from '../../hooks/useAuth';
+import { isSuperAdmin } from '../../services/rh/isSuperAdmin';
 import { formatMAD } from '../finance/shared.jsx';
 
 const MOTIFS_ENTREE = [
@@ -66,22 +68,41 @@ const TYPE_CONFIG = {
 
 const MOVEMENT_TYPES = ['Entrée', 'Transfert', 'Sortie'];
 
-function articleFilterHint(type) {
-  if (type === 'Sortie') return 'Seuls les consommables sont disponibles pour une sortie.';
+function articleFilterHint(type, allowMaterielSortie = false) {
+  if (type === 'Sortie') {
+    return allowMaterielSortie
+      ? 'Consommables et matériels disponibles pour une sortie.'
+      : 'Seuls les consommables sont disponibles pour une sortie.';
+  }
   if (type === 'Transfert' || type === 'Entrée') return 'Consommables, outils et matériels disponibles.';
   return '';
 }
 
-function emptyArticlesMessage(type) {
-  if (type === 'Sortie') return 'Aucun consommable disponible pour une sortie de stock.';
+function emptyArticlesMessage(type, allowMaterielSortie = false) {
+  if (type === 'Sortie') {
+    return allowMaterielSortie
+      ? 'Aucun consommable ou matériel disponible pour une sortie de stock.'
+      : 'Aucun consommable disponible pour une sortie de stock.';
+  }
   if (type === 'Transfert') return 'Aucun article disponible pour un transfert.';
   if (type === 'Entrée') return 'Aucun article disponible pour une entrée en stock.';
   return 'Aucun article disponible.';
 }
 
+function sortieClearedHint(allowMaterielSortie = false) {
+  return allowMaterielSortie
+    ? ARTICLE_CLEARED_FOR_SORTIE_HINT_WITH_MATERIEL
+    : ARTICLE_CLEARED_FOR_SORTIE_HINT;
+}
+
 export default function MouvementRapide({ articles = [], emplacementsList, onArticlesChange, onNavigate }) {
   const { user } = useAuth();
   const sessionName = (user?.nom || '').trim();
+  const allowMaterielSortie = isSuperAdmin(user);
+  const movementOptions = useMemo(
+    () => (allowMaterielSortie ? { allowMaterielSortie: true } : {}),
+    [allowMaterielSortie],
+  );
 
   const [view, setView] = useState('list'); // 'list' | 'form' | 'confirm' | 'detail'
   const [type, setType] = useState('');
@@ -211,8 +232,8 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
   );
 
   const filteredArticles = useMemo(
-    () => filterArticlesForMovementType(articles, type),
-    [articles, type],
+    () => filterArticlesForMovementType(articles, type, movementOptions),
+    [articles, type, movementOptions],
   );
 
   const clearSelectedArticle = useCallback(() => {
@@ -236,13 +257,13 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
         setTypeHint('');
         return null;
       }
-      if (articleAllowedForMovementType(prev, nextType)) {
+      if (articleAllowedForMovementType(prev, nextType, movementOptions)) {
         setTypeHint('');
         return prev;
       }
       setTypeHint(
         nextType === 'Sortie'
-          ? ARTICLE_CLEARED_FOR_SORTIE_HINT
+          ? sortieClearedHint(allowMaterielSortie)
           : 'Cet article n’est pas disponible pour ce type de mouvement.',
       );
       setArticleStock(null);
@@ -252,7 +273,7 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
       }));
       return null;
     });
-  }, []);
+  }, [allowMaterielSortie, movementOptions]);
 
   const handleSelectArticle = useCallback((artId) => {
     if (!artId) {
@@ -261,9 +282,9 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
     }
     const art = filteredArticles.find((a) => String(a.id) === String(artId))
       || articles.find((a) => String(a.id) === String(artId));
-    if (!art || (type && !articleAllowedForMovementType(art, type))) {
+    if (!art || (type && !articleAllowedForMovementType(art, type, movementOptions))) {
       clearSelectedArticle();
-      if (type === 'Sortie') setTypeHint(ARTICLE_CLEARED_FOR_SORTIE_HINT);
+      if (type === 'Sortie') setTypeHint(sortieClearedHint(allowMaterielSortie));
       return;
     }
     setSelectedArticle(art);
@@ -274,7 +295,7 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
     }));
     loadArticleStock(artId);
     setTypeHint('');
-  }, [articles, filteredArticles, type, loadArticleStock, clearSelectedArticle]);
+  }, [articles, filteredArticles, type, loadArticleStock, clearSelectedArticle, movementOptions, allowMaterielSortie]);
 
   const filteredHistorique = useMemo(() => {
     return historique.filter((m) => {
@@ -394,8 +415,8 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
   function validate() {
     if (!type) return 'Sélectionnez un type de mouvement.';
     if (!form.article_id || !selectedArticle) return 'Sélectionnez un article.';
-    if (!articleAllowedForMovementType(selectedArticle, type)) {
-      return type === 'Sortie' ? ARTICLE_CLEARED_FOR_SORTIE_HINT : SORTIE_CLEARED_HINT;
+    if (!articleAllowedForMovementType(selectedArticle, type, movementOptions)) {
+      return type === 'Sortie' ? sortieClearedHint(allowMaterielSortie) : SORTIE_CLEARED_HINT;
     }
     if (!qty || qty <= 0) return 'La quantité doit être supérieure à 0.';
     if (!form.date_creation) return 'La date est requise.';
@@ -426,7 +447,11 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
     setLoading(true);
     setError('');
     try {
-      const saved = await saveMouvementRapide({ ...form, type_mouvement: type });
+      const saved = await saveMouvementRapide({
+        ...form,
+        type_mouvement: type,
+        allow_materiel_sortie: allowMaterielSortie,
+      });
       if (saved?.finance_sync_warning) {
         setSuccess('Mouvement enregistré.');
         setError(`Dépense générale non créée : ${saved.finance_sync_warning}`);
@@ -834,9 +859,9 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
             <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-3)' }}>Sélectionnez d&apos;abord un type de mouvement.</p>
           ) : (
             <>
-              <p style={{ margin: '0 0 10px', fontSize: '0.78rem', color: 'var(--text-3)' }}>{articleFilterHint(type)}</p>
+              <p style={{ margin: '0 0 10px', fontSize: '0.78rem', color: 'var(--text-3)' }}>{articleFilterHint(type, allowMaterielSortie)}</p>
               {filteredArticles.length === 0 ? (
-                <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-3)' }}>{emptyArticlesMessage(type)}</p>
+                <p style={{ margin: 0, fontSize: '0.85rem', color: 'var(--text-3)' }}>{emptyArticlesMessage(type, allowMaterielSortie)}</p>
               ) : (
                 <div style={{ marginBottom: 12 }}>
                   <StockArticleSearch
@@ -845,7 +870,9 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
                     onChange={handleSelectArticle}
                     placeholder="Tapez une lettre pour rechercher…"
                     emptyMessage={type === 'Sortie'
-                      ? 'Aucun consommable ne correspond à cette recherche.'
+                      ? (allowMaterielSortie
+                        ? 'Aucun consommable ou matériel ne correspond à cette recherche.'
+                        : 'Aucun consommable ne correspond à cette recherche.')
                       : undefined}
                   />
                 </div>
