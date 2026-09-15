@@ -7,6 +7,7 @@ import { getSupabase } from '../../lib/supabase';
 import { requireSupabaseUserId } from '../supabase/requireUser';
 import {
   saveStockMovementBon,
+  getStockMovementBon,
   normalizeStockMovement,
   deleteStockMovementBon,
 } from './stockMovements';
@@ -20,14 +21,21 @@ import { cancelDiversExpensesForBon } from './stockDiversExpense';
 
 const TABLE = 'stock_movements';
 const ARTICLES = 'stock_articles';
+const ALREADY_VALIDATED_RE = /déjà validé/i;
 
+/**
+ * Prochaine réf MR-YYYY-##### — lit le max via order desc (évite collision
+ * quand il y a >1000 lignes : le select sans order/limit tronque côté PostgREST).
+ */
 export async function generateMRRef() {
   const y = new Date().getFullYear();
   const prefix = `MR-${y}-`;
   const { data, error } = await getSupabase()
     .from(TABLE)
     .select('ref_mouvement')
-    .ilike('ref_mouvement', `${prefix}%`);
+    .ilike('ref_mouvement', `${prefix}%`)
+    .order('ref_mouvement', { ascending: false })
+    .limit(25);
   if (error) throw error;
   let max = 0;
   (data || []).forEach((r) => {
@@ -35,6 +43,25 @@ export async function generateMRRef() {
     if (m) max = Math.max(max, parseInt(m[1], 10));
   });
   return `${prefix}${String(max + 1).padStart(5, '0')}`;
+}
+
+/** Alloue une réf MR inédite (jamais un bon déjà appliqué / validé). */
+async function allocateFreshMRRef() {
+  let ref = await generateMRRef();
+  for (let i = 0; i < 12; i += 1) {
+    const existing = await getStockMovementBon(ref);
+    if (!existing) return ref;
+    // Collision / trou de numérotation → forcer le suivant numérique
+    const m = String(ref).match(/^(MR-\d+-)(\d+)$/);
+    if (!m) {
+      ref = await generateMRRef();
+      continue;
+    }
+    ref = `${m[1]}${String(parseInt(m[2], 10) + 1).padStart(5, '0')}`;
+  }
+  const err = new Error('Impossible d’allouer une référence de mouvement rapide.');
+  err.code = 'VALIDATION';
+  throw err;
 }
 
 /**
@@ -72,10 +99,7 @@ export async function saveMouvementRapide(form) {
   const allowMaterielSortie = !!form.allow_materiel_sortie;
   assertMovementAllowedForArticle(article, form.type_mouvement, { allowMaterielSortie });
 
-  const ref = await generateMRRef();
-
-  const bon = {
-    ref,
+  const baseBon = {
     type_mouvement: form.type_mouvement,
     emplacement_source: form.emplacement_source || '',
     emplacement_destination: form.emplacement_destination || '',
@@ -100,7 +124,18 @@ export async function saveMouvementRapide(form) {
     }],
   };
 
-  return saveStockMovementBon(bon);
+  // Toujours un NOUVEAU bon (jamais update d’un MR déjà validé) — retry si course/collision.
+  let lastErr;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const ref = await allocateFreshMRRef();
+    try {
+      return await saveStockMovementBon({ ...baseBon, ref });
+    } catch (err) {
+      lastErr = err;
+      if (!ALREADY_VALIDATED_RE.test(err?.message || '')) throw err;
+    }
+  }
+  throw lastErr || new Error('Ce bon est déjà validé et ne peut plus être modifié.');
 }
 
 /**
