@@ -13,12 +13,24 @@ import { saveMouvementRapide, getArticleStockInfo } from '../../services/inventa
 import { useAuth } from '../../hooks/useAuth';
 import { isSuperAdmin } from '../../services/rh/isSuperAdmin';
 
+const MOTIF_MISE_A_REBUT = 'Mise à rebut';
+
 const MOTIFS = {
   Entrée: ['Réception directe', 'Retour chantier', 'Stock initial', 'Régularisation positive', 'Article retrouvé', 'Autre'],
   Sortie: ['Consommation chantier', 'Remise à un ouvrier', 'Utilisation interne', 'Casse', 'Perte', 'Régularisation négative', 'Autre'],
   Transfert: ['Besoin chantier', 'Réorganisation stock', 'Besoin atelier', 'Autre'],
-  Régularisation: ['Régularisation positive', 'Régularisation négative', 'Inventaire physique', 'Autre'],
+  Régularisation: [
+    'Régularisation positive',
+    'Régularisation négative',
+    MOTIF_MISE_A_REBUT,
+    'Inventaire physique',
+    'Autre',
+  ],
 };
+
+function isStockDecreaseType(mType) {
+  return mType === 'Sortie' || mType === 'Rebut';
+}
 
 export default function StockDirectMovementModal({
   open,
@@ -68,6 +80,7 @@ export default function StockDirectMovementModal({
 
   const stockAvant = (stockInfo?.totalStock ?? Number(article?.stock_actuel)) || 0;
   const qty = Number(form.quantite) || 0;
+  const isRegularisation = type === 'Régularisation';
 
   const sourceOptions = useMemo(() => {
     const levels = stockInfo?.levels || [];
@@ -76,37 +89,77 @@ export default function StockDirectMovementModal({
     return all.map((e) => ({ value: e, qty: byEmp.has(e) ? byEmp.get(e) : null }));
   }, [stockInfo, emplacements]);
 
+  /** Qty at a given emplacement (0 if none) — never fall back to article total. */
+  function qtyAtEmplacement(emp) {
+    if (!emp) return 0;
+    const hit = (stockInfo?.levels || []).find((l) => l.emplacement === emp);
+    return hit ? Number(hit.quantite) || 0 : 0;
+  }
+
   const sourceQty = useMemo(() => {
+    if (!form.emplacement_source) return stockAvant;
     const hit = (stockInfo?.levels || []).find((l) => l.emplacement === form.emplacement_source);
-    return hit ? Number(hit.quantite) || 0 : stockAvant;
-  }, [stockInfo, form.emplacement_source, stockAvant]);
+    // Sortie/Transfert: missing level = 0 at that location (not total).
+    if (hit) return Number(hit.quantite) || 0;
+    return isRegularisation ? 0 : stockAvant;
+  }, [stockInfo, form.emplacement_source, stockAvant, isRegularisation]);
+
+  /** Régularisation: target qty is relative to the selected emplacement, not global total. */
+  const regularisationEmp = form.emplacement_source || form.emplacement_destination || '';
+  const baselineQty = isRegularisation ? qtyAtEmplacement(regularisationEmp) : stockAvant;
 
   function set(k, v) { setForm((p) => ({ ...p, [k]: v })); }
+
+  function setRegularisationEmplacement(emp) {
+    // Same location for Entrée (dest) or Sortie (source) — target is qty AT that emplacement.
+    setForm((p) => ({ ...p, emplacement_source: emp, emplacement_destination: emp }));
+  }
 
   function resolveMovementType() {
     if (type !== 'Régularisation') return type;
     const target = Number(form.target_qty);
-    if (Number.isNaN(target)) return null;
-    if (target > stockAvant) return 'Entrée';
-    if (target < stockAvant) return 'Sortie';
+    if (Number.isNaN(target) || form.target_qty === '' || form.target_qty == null) return null;
+    if (target > baselineQty) return 'Entrée';
+    if (target < baselineQty) {
+      // Motif « Mise à rebut » → type_mouvement Rebut (débit source, pas une Sortie).
+      if (String(form.motif || '').trim() === MOTIF_MISE_A_REBUT) return 'Rebut';
+      return 'Sortie';
+    }
     return null;
+  }
+
+  function regularisationDelta() {
+    return Math.abs(Number(form.target_qty) - baselineQty);
   }
 
   function validate() {
     const mType = resolveMovementType();
     if (!article?.id) return 'Article manquant.';
-    if (!mType) return type === 'Régularisation' ? 'Indiquez une nouvelle quantité différente du stock actuel.' : 'Type invalide.';
-    const q = type === 'Régularisation' ? Math.abs(Number(form.target_qty) - stockAvant) : qty;
+    if (isRegularisation && !regularisationEmp) return 'Emplacement requis.';
+    if (!mType) {
+      return isRegularisation
+        ? 'Indiquez une nouvelle quantité différente du stock à cet emplacement.'
+        : 'Type invalide.';
+    }
+    if (isRegularisation && String(form.motif || '').trim() === MOTIF_MISE_A_REBUT && mType !== 'Rebut') {
+      return 'Mise à rebut : indiquez une quantité cible inférieure au stock à cet emplacement.';
+    }
+    const q = isRegularisation ? regularisationDelta() : qty;
     if (!q || q <= 0) return 'Quantité invalide.';
     if (!form.date_creation) return 'Date requise.';
     if (!form.motif) return 'Motif requis.';
     if (!form.cree_par?.trim()) return 'Effectué par requis.';
-    if ((mType === 'Sortie' || mType === 'Transfert') && !form.emplacement_source) return 'Emplacement source requis.';
-    if ((mType === 'Entrée' || mType === 'Transfert') && !form.emplacement_destination) return 'Emplacement destination requis.';
+    if ((isStockDecreaseType(mType) || mType === 'Transfert') && !(isRegularisation ? regularisationEmp : form.emplacement_source)) {
+      return 'Emplacement source requis.';
+    }
+    if ((mType === 'Entrée' || mType === 'Transfert') && !(isRegularisation ? regularisationEmp : form.emplacement_destination)) {
+      return 'Emplacement destination requis.';
+    }
+    // Sortie régularisation : destination de traçabilité = emplacement régularisé (pas de crédit stock).
     if (mType === 'Transfert' && form.emplacement_source === form.emplacement_destination) {
       return 'Source et destination doivent être différentes.';
     }
-    if ((mType === 'Sortie' || mType === 'Transfert') && q > sourceQty) {
+    if ((isStockDecreaseType(mType) || mType === 'Transfert') && q > sourceQty) {
       return `Stock insuffisant (${sourceQty} disponible).`;
     }
     return null;
@@ -117,7 +170,14 @@ export default function StockDirectMovementModal({
     const err = validate();
     if (err) { setError(err); return; }
     const mType = resolveMovementType();
-    const q = type === 'Régularisation' ? Math.abs(Number(form.target_qty) - stockAvant) : qty;
+    const q = isRegularisation ? regularisationDelta() : qty;
+    const empSrc = isRegularisation
+      ? (isStockDecreaseType(mType) ? regularisationEmp : '')
+      : (form.emplacement_source || '');
+    // Sortie : destination requise côté bon (traçabilité). Rebut : source seule.
+    const empDest = isRegularisation
+      ? (mType === 'Entrée' || mType === 'Sortie' ? regularisationEmp : '')
+      : (form.emplacement_destination || '');
     setSaving(true);
     setError('');
     try {
@@ -125,8 +185,8 @@ export default function StockDirectMovementModal({
         type_mouvement: mType,
         article_id: article.id,
         quantite: q,
-        emplacement_source: form.emplacement_source || '',
-        emplacement_destination: form.emplacement_destination || '',
+        emplacement_source: empSrc,
+        emplacement_destination: empDest,
         date_creation: form.date_creation,
         motif: form.motif,
         cree_par: form.cree_par,
@@ -139,7 +199,9 @@ export default function StockDirectMovementModal({
           form.note || '',
           form.prix_achat ? `Prix achat: ${form.prix_achat}` : '',
           form.etat ? `État: ${form.etat}` : '',
-          type === 'Régularisation' ? `Régularisation → ${form.target_qty}` : '',
+          isRegularisation
+            ? `Régularisation ${formatEmplacementDisplay(regularisationEmp) || regularisationEmp} : ${baselineQty} → ${form.target_qty}${mType === 'Rebut' ? ' (mise à rebut)' : ''}`
+            : '',
         ].filter(Boolean).join(' | '),
       });
       onDone?.();
@@ -151,6 +213,28 @@ export default function StockDirectMovementModal({
     }
   }
 
+  // Motif « Mise à rebut » proposé seulement si diminution (ou cible pas encore saisie).
+  const motifs = useMemo(() => {
+    const base = MOTIFS[type] || MOTIFS.Entrée;
+    if (!isRegularisation) return base;
+    const targetNum = Number(form.target_qty);
+    const hasTarget = form.target_qty !== '' && form.target_qty != null && !Number.isNaN(targetNum);
+    if (hasTarget && targetNum > baselineQty) {
+      return base.filter((m) => m !== MOTIF_MISE_A_REBUT);
+    }
+    return base;
+  }, [type, isRegularisation, form.target_qty, baselineQty]);
+
+  function setTargetQty(value) {
+    const targetNum = Number(value);
+    const increasing = value !== '' && !Number.isNaN(targetNum) && targetNum > baselineQty;
+    setForm((p) => ({
+      ...p,
+      target_qty: value,
+      motif: increasing && p.motif === MOTIF_MISE_A_REBUT ? 'Régularisation positive' : p.motif,
+    }));
+  }
+
   if (!article) return null;
 
   const titleMap = {
@@ -160,15 +244,16 @@ export default function StockDirectMovementModal({
     Régularisation: 'Régulariser le stock',
   };
 
-  const previewQty = type === 'Régularisation'
-    ? Math.abs(Number(form.target_qty) - stockAvant) || 0
-    : qty;
+  const previewQty = isRegularisation ? regularisationDelta() || 0 : qty;
   const previewType = resolveMovementType();
-  const stockApres = previewType === 'Entrée' ? stockAvant + previewQty
-    : previewType === 'Sortie' ? stockAvant - previewQty
+  const previewDecrease = isStockDecreaseType(previewType);
+  const stockApresTotal = previewType === 'Entrée' ? stockAvant + previewQty
+    : previewDecrease ? stockAvant - previewQty
     : stockAvant;
-
-  const motifs = MOTIFS[type] || MOTIFS.Entrée;
+  const stockApresEmp = previewType === 'Entrée' ? baselineQty + previewQty
+    : previewDecrease ? baselineQty - previewQty
+    : baselineQty;
+  const unite = article.unite || 'U';
 
   return (
     <Modal open={open} onClose={() => !saving && onClose?.()} title={titleMap[type] || 'Mouvement'} width={640}>
@@ -182,14 +267,19 @@ export default function StockDirectMovementModal({
           <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, color: 'var(--red)' }}>{article.code}</div>
           <div style={{ fontWeight: 600 }}>{article.designation}</div>
           <div style={{ fontSize: '0.8rem', color: 'var(--text-3)', marginTop: 4 }}>
-            Stock actuel : <strong>{stockAvant} {article.unite || 'U'}</strong>
+            Stock total : <strong>{stockAvant} {unite}</strong>
+            {isRegularisation && regularisationEmp ? (
+              <>
+                {' · '}Stock à cet emplacement : <strong>{baselineQty} {unite}</strong>
+              </>
+            ) : null}
           </div>
         </div>
 
         <FRow>
-          {type === 'Régularisation' ? (
-            <FField label="Nouvelle quantité cible" required>
-              <input type="number" min="0" step="0.001" value={form.target_qty} onChange={(e) => set('target_qty', e.target.value)} style={INPUT_STYLE} />
+          {isRegularisation ? (
+            <FField label="Nouvelle quantité cible (à cet emplacement)" required>
+              <input type="number" min="0" step="0.001" value={form.target_qty} onChange={(e) => setTargetQty(e.target.value)} style={INPUT_STYLE} />
             </FField>
           ) : (
             <FField label="Quantité" required>
@@ -205,23 +295,40 @@ export default function StockDirectMovementModal({
         </FRow>
 
         <FRow>
-          {(type === 'Sortie' || type === 'Transfert' || (type === 'Régularisation' && previewType === 'Sortie')) && (
-            <FField label="Emplacement source" required>
-              <select value={form.emplacement_source} onChange={(e) => set('emplacement_source', e.target.value)} style={SELECT_STYLE}>
+          {isRegularisation ? (
+            <FField label="Emplacement à régulariser" required>
+              <select
+                value={regularisationEmp}
+                onChange={(e) => setRegularisationEmplacement(e.target.value)}
+                style={SELECT_STYLE}
+              >
                 <option value="">— Sélectionner —</option>
                 {sourceOptions.map(({ value, qty: q }) => (
-                  <option key={value} value={value}>{q != null ? `${value} (${q})` : value}</option>
+                  <option key={value} value={value}>{q != null ? `${value} (${q})` : `${value} (0)`}</option>
                 ))}
               </select>
             </FField>
-          )}
-          {(type === 'Entrée' || type === 'Transfert' || (type === 'Régularisation' && previewType === 'Entrée') || type === 'Régularisation') && (
-            <FField label="Emplacement destination" required={type !== 'Régularisation' || previewType === 'Entrée'}>
-              <select value={form.emplacement_destination} onChange={(e) => set('emplacement_destination', e.target.value)} style={SELECT_STYLE}>
-                <option value="">— Sélectionner —</option>
-                {emplacements.map((e) => <option key={e} value={e}>{e}</option>)}
-              </select>
-            </FField>
+          ) : (
+            <>
+              {(type === 'Sortie' || type === 'Transfert') && (
+                <FField label="Emplacement source" required>
+                  <select value={form.emplacement_source} onChange={(e) => set('emplacement_source', e.target.value)} style={SELECT_STYLE}>
+                    <option value="">— Sélectionner —</option>
+                    {sourceOptions.map(({ value, qty: q }) => (
+                      <option key={value} value={value}>{q != null ? `${value} (${q})` : value}</option>
+                    ))}
+                  </select>
+                </FField>
+              )}
+              {(type === 'Entrée' || type === 'Transfert') && (
+                <FField label="Emplacement destination" required>
+                  <select value={form.emplacement_destination} onChange={(e) => set('emplacement_destination', e.target.value)} style={SELECT_STYLE}>
+                    <option value="">— Sélectionner —</option>
+                    {emplacements.map((e) => <option key={e} value={e}>{e}</option>)}
+                  </select>
+                </FField>
+              )}
+            </>
           )}
         </FRow>
 
@@ -231,6 +338,11 @@ export default function StockDirectMovementModal({
               <option value="">— Sélectionner —</option>
               {motifs.map((m) => <option key={m} value={m}>{m}</option>)}
             </select>
+            {isRegularisation && form.motif === MOTIF_MISE_A_REBUT ? (
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-3)', marginTop: 4 }}>
+                Crée un mouvement de type Rebut (retrait définitif à cet emplacement).
+              </div>
+            ) : null}
           </FField>
           {(type === 'Sortie' || type === 'Transfert') && (
             <FField label="Projet / chantier">
@@ -266,9 +378,19 @@ export default function StockDirectMovementModal({
 
         {previewQty > 0 && previewType && (
           <div style={{ margin: '14px 0', padding: '12px 14px', borderRadius: 8, background: '#F5F5F5', fontSize: '0.88rem' }}>
-            <div>Stock actuel : <strong>{stockAvant}</strong></div>
-            <div>{previewType} : <strong>{previewType === 'Entrée' ? '+' : '-'}{previewQty}</strong></div>
-            <div>Nouveau stock : <strong>{stockApres}</strong></div>
+            {isRegularisation ? (
+              <>
+                <div>Stock à l&apos;emplacement : <strong>{baselineQty}</strong> → <strong>{stockApresEmp}</strong></div>
+                <div>{previewType} : <strong>{previewType === 'Entrée' ? '+' : '-'}{previewQty}</strong></div>
+                <div>Stock total : <strong>{stockAvant}</strong> → <strong>{stockApresTotal}</strong></div>
+              </>
+            ) : (
+              <>
+                <div>Stock actuel : <strong>{stockAvant}</strong></div>
+                <div>{previewType} : <strong>{previewType === 'Entrée' ? '+' : '-'}{previewQty}</strong></div>
+                <div>Nouveau stock : <strong>{stockApresTotal}</strong></div>
+              </>
+            )}
           </div>
         )}
 

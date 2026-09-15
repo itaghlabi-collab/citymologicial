@@ -40,7 +40,7 @@ export async function generateMRRef() {
 /**
  * Enregistre un mouvement rapide (1 article, validation immédiate).
  * @param {Object} form
- * @param {string} form.type_mouvement - 'Entrée' | 'Sortie' | 'Transfert'
+ * @param {string} form.type_mouvement - 'Entrée' | 'Sortie' | 'Transfert' | 'Rebut'
  * @param {string} form.article_id
  * @param {number} form.quantite
  * @param {string} form.emplacement_source
@@ -53,7 +53,7 @@ export async function generateMRRef() {
  * @param {string} [form.beneficiaire]
  * @param {string} [form.fournisseur]
  * @param {string} [form.ref_externe]
- * @param {boolean} [form.allow_materiel_sortie] - sortie Matériel / Outil (super_admin)
+ * @param {boolean} [form.allow_materiel_sortie] - Sortie / Rebut Matériel / Outil (super_admin)
  */
 export async function saveMouvementRapide(form) {
   const articleId = form.article_id;

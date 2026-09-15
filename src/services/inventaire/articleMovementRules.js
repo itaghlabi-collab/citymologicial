@@ -45,7 +45,7 @@ export function normalizeArticleType(articleOrType) {
 /**
  * @param {*} articleOrType
  * @param {{ allowMaterielSortie?: boolean }} [options]
- *   Exception : sortie Matériel / Outil (outillage) autorisée (ex. super_admin
+ *   Exception : Sortie / Rebut Matériel / Outil autorisés (ex. super_admin
  *   en Mouvement rapide / régularisation). Hors ce flag, outils bloqués sauf
  *   livraison demande chantier (allowSiteRequestDeliverySortie).
  */
@@ -106,7 +106,7 @@ export function filterArticlesForMovementType(articles, typeMouvement, options =
  * Lève une erreur VALIDATION si Sortie + Matériel/Outil.
  * @param {{ allowSiteRequestDeliverySortie?: boolean, allowMaterielSortie?: boolean }} [options]
  *   allowSiteRequestDeliverySortie : livraison demande chantier (Matériel + Outil).
- *   allowMaterielSortie : sortie Matériel + Outil (ex. super_admin régularisation / MR).
+ *   allowMaterielSortie : Sortie / Rebut Matériel + Outil (ex. super_admin régularisation / MR).
  */
 export function assertMovementAllowedForArticle(articleOrType, typeMouvement, options = {}) {
   const type = String(typeMouvement || '').trim();
