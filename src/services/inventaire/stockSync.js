@@ -46,6 +46,40 @@ export function empKey(v) {
   return normEmp(v).toLowerCase();
 }
 
+/** Libellés payload.origine / destination qui ne sont PAS des emplacements physiques. */
+function isMetaEmplacementLabel(value) {
+  const v = String(value || '').trim();
+  if (!v) return true;
+  return /^(stock initial|ajustement)/i.test(v);
+}
+
+/**
+ * Extraction source/destination — même logique que l’historique article
+ * (payload canonique + alias + top-level si déjà normalisé).
+ */
+export function extractMovementEmplacements(row) {
+  let p = row?.payload;
+  if (typeof p === 'string') {
+    try { p = JSON.parse(p); } catch { p = {}; }
+  }
+  if (!p || typeof p !== 'object') p = {};
+  const rawSrc = p.emplacement_source
+    || row?.emplacement_source
+    || p.source_emplacement
+    || p.emplacement_origine
+    || (!isMetaEmplacementLabel(p.origine) ? p.origine : '')
+    || '';
+  const rawDest = p.emplacement_destination
+    || row?.emplacement_destination
+    || p.destination_emplacement
+    || (!isMetaEmplacementLabel(p.destination) ? p.destination : '')
+    || '';
+  return {
+    src: normEmp(rawSrc),
+    dest: normEmp(rawDest),
+  };
+}
+
 function typeFromDb(type) {
   const t = String(type || '');
   if (t === 'Entree') return 'Entrée';
@@ -63,21 +97,13 @@ export function isMovementStockApplicable(row) {
 }
 
 /**
- * Normalise le type métier :
- * source + destination physiques distinctes → transfert interne
- * sauf Sortie / Rebut (destination éventuelle = traçabilité, pas un crédit stock).
- */
-/**
  * Normalise le type métier pour recalcul / ledger.
  * Le type explicite Sortie / Rebut / Transfert / Entrée prime toujours.
  * src+dest → transfert UNIQUEMENT si le type n’est pas une Sortie/Rebut/Entrée explicite
  * (réparation d’anciens mouvements ambigus).
  */
 export function normalizeMovementKind(row) {
-  const p = row?.payload || {};
-  // Payload canonique ; repli top-level si le row a déjà été normalisé (affichage).
-  const src = normEmp(p.emplacement_source || row?.emplacement_source);
-  const dest = normEmp(p.emplacement_destination || row?.emplacement_destination);
+  const { src, dest } = extractMovementEmplacements(row);
   const rawDb = typeFromDb(row?.type_mouvement);
   const key = String(rawDb || '')
     .toLowerCase()
@@ -263,18 +289,38 @@ function movementInstant(row) {
 }
 
 /**
+ * PostgREST plafonne à ~1000 lignes sans .range() — pagine pour ne pas
+ * perdre les transferts récents (sinon le replay emplacement reste faux).
+ */
+async function fetchAllPaged(buildQuery, pageSize = 1000) {
+  const all = [];
+  let from = 0;
+  for (;;) {
+    const { data, error } = await buildQuery().range(from, from + pageSize - 1);
+    if (error) throw error;
+    const chunk = data || [];
+    all.push(...chunk);
+    if (chunk.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
+}
+
+/**
  * Charge toutes les lignes stock_levels.
  */
 export async function listAllStockLevels() {
-  const { data, error } = await getSupabase()
-    .from(LEVELS)
-    .select('id, article_id, emplacement, quantite, warehouse_id, updated_at')
-    .order('emplacement', { ascending: true });
-  if (error) {
-    if (error.code === '42P01') return [];
+  let rows;
+  try {
+    rows = await fetchAllPaged(() => getSupabase()
+      .from(LEVELS)
+      .select('id, article_id, emplacement, quantite, warehouse_id, updated_at')
+      .order('emplacement', { ascending: true }));
+  } catch (error) {
+    if (error?.code === '42P01') return [];
     throw error;
   }
-  return (data || []).map((l) => ({
+  return (rows || []).map((l) => ({
     id: l.id,
     article_id: l.article_id ? String(l.article_id) : '',
     emplacement: normEmp(l.emplacement),
@@ -286,13 +332,11 @@ export async function listAllStockLevels() {
 
 /** Tous les mouvements (pour ledger / contrôle emplacement). */
 export async function listAllStockMovementsRaw() {
-  const { data, error } = await getSupabase()
+  return fetchAllPaged(() => getSupabase()
     .from(MOVEMENTS)
     .select('id, ref_mouvement, type_mouvement, article_id, quantite, date_mouvement, motif, payload, created_at, stock_articles(reference, nom)')
     .order('date_mouvement', { ascending: true })
-    .order('created_at', { ascending: true });
-  if (error) throw error;
-  return data || [];
+    .order('created_at', { ascending: true }));
 }
 
 /**
@@ -554,9 +598,12 @@ export function buildEmplacementControlView({
     };
     const computed = Number(balances.get(aid) || 0);
     const recorded = levelByArticle.has(aid) ? Number(levelByArticle.get(aid)) : null;
-    // Ne jamais afficher 0 si le replay mouvements est > 0
-    const stockActuel = computed !== 0 ? computed : (recorded != null ? recorded : 0);
     const tot = ensureTot(aid);
+    // Replay = source de vérité dès qu’il y a eu un mvt sur cet emplacement
+    // (y compris computed === 0 après un transfert sortant). Sinon repli levels.
+    const stockActuel = tot.mvt_count > 0
+      ? computed
+      : (recorded != null ? recorded : 0);
     const state = getEmplacementStockState(stockActuel, art.stock_minimum);
     const val = (Number(art.valeur) || 0) * stockActuel;
 
@@ -660,17 +707,15 @@ export function buildArticleEmplacementLedger(movements, emplacement, articleId)
 export async function rebuildStockLevelsFromMovements({ dryRun = true } = {}) {
   await requireSupabaseUserId();
 
-  const [{ data: movements, error: mErr }, currentLevels, { data: articles, error: aErr }] = await Promise.all([
-    getSupabase()
+  const [movements, currentLevels, articles] = await Promise.all([
+    fetchAllPaged(() => getSupabase()
       .from(MOVEMENTS)
       .select('id, ref_mouvement, type_mouvement, article_id, quantite, date_mouvement, payload, created_at')
       .order('date_mouvement', { ascending: true })
-      .order('created_at', { ascending: true }),
+      .order('created_at', { ascending: true })),
     listAllStockLevels(),
-    getSupabase().from(ARTICLES).select('id, reference, nom, emplacement'),
+    fetchAllPaged(() => getSupabase().from(ARTICLES).select('id, reference, nom, emplacement')),
   ]);
-  if (mErr) throw mErr;
-  if (aErr) throw aErr;
 
   const applicable = (movements || []).filter(isMovementStockApplicable);
   const skipped = (movements || []).length - applicable.length;

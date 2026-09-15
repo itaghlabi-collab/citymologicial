@@ -5,7 +5,7 @@ import { getSupabase } from '../../lib/supabase';
 import { requireSupabaseUserId } from '../supabase/requireUser';
 import { buildSeedRows } from './stockArticlesSeed';
 import { listStockCategories } from './stockCategories';
-import { displayMovementActionLabel } from './stockSync';
+import { displayMovementActionLabel, extractMovementEmplacements } from './stockSync';
 
 const DEFAULT_STOCK_EMPLACEMENT = 'DEPOT LAKHYAYTA';
 
@@ -758,6 +758,11 @@ export function formatArticleMovementHistory(m) {
     action = 'Entrée de stock — Stock initial';
   }
 
+  const { src, dest } = extractMovementEmplacements(m);
+  const origineDisplay = (p.origine && isMetaOrigineLabel(p.origine))
+    ? String(p.origine).trim()
+    : (src || (p.source === 'article_creation' ? 'Stock initial' : ''));
+
   return {
     id: m.id,
     ref: m.ref_mouvement || '',
@@ -769,13 +774,17 @@ export function formatArticleMovementHistory(m) {
     motif: m.motif || '',
     utilisateur: p.cree_par || p.utilisateur || '—',
     action,
-    origine: p.origine || p.emplacement_source || (p.source === 'article_creation' ? 'Stock initial' : ''),
-    destination: p.emplacement_destination || '',
+    origine: origineDisplay,
+    destination: dest,
     observation,
     warehouse_id: m.warehouse_id,
     payload: p,
     created_at: m.created_at,
   };
+}
+
+function isMetaOrigineLabel(value) {
+  return /^(stock initial|ajustement)/i.test(String(value || '').trim());
 }
 
 export async function patchStockArticle(id, fields = {}) {

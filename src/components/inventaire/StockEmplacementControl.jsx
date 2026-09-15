@@ -23,6 +23,20 @@ function fmtMvtLabel(m) {
   return m.label || m.type_mouvement || '—';
 }
 
+function fmtMvtCell(m) {
+  if (!m) return '—';
+  const date = fmtMvtDate(m);
+  const label = fmtMvtLabel(m);
+  if (date === '—') return label;
+  return (
+    <>
+      {date}
+      <br />
+      <span style={{ color: 'var(--text-3)' }}>{label}</span>
+    </>
+  );
+}
+
 export default function StockEmplacementControl({
   controlView,
   loading,
@@ -155,12 +169,10 @@ export default function StockEmplacementControl({
                       <td style={{ fontFamily: 'var(--font-head)', fontWeight: 800 }}>{x.stock_actuel}</td>
                       <td style={{ color: 'var(--text-3)' }}>{x.unite || '—'}</td>
                       <td style={{ color: 'var(--red)' }}>{x.valeur_actuelle ? formatMAD(x.valeur_actuelle) : '—'}</td>
-                      <td style={{ fontSize: '0.72rem' }}>{x.derniere_entree ? fmtMvtDate(x.derniere_entree) : '—'}</td>
-                      <td style={{ fontSize: '0.72rem' }}>{x.derniere_sortie ? fmtMvtDate(x.derniere_sortie) : '—'}</td>
+                      <td style={{ fontSize: '0.72rem' }}>{x.derniere_entree ? fmtMvtCell(x.derniere_entree) : '—'}</td>
+                      <td style={{ fontSize: '0.72rem' }}>{x.derniere_sortie ? fmtMvtCell(x.derniere_sortie) : '—'}</td>
                       <td style={{ fontSize: '0.72rem' }}>
-                        {x.dernier_mouvement
-                          ? <>{fmtMvtDate(x.dernier_mouvement)}<br /><span style={{ color: 'var(--text-3)' }}>{fmtMvtLabel(x.dernier_mouvement)}</span></>
-                          : '—'}
+                        {x.dernier_mouvement ? fmtMvtCell(x.dernier_mouvement) : '—'}
                       </td>
                       <td><span className={`badge ${st.cls || 'badge-grey'}`}>{st.label || '—'}</span></td>
                       <td onClick={(e) => e.stopPropagation()}>
