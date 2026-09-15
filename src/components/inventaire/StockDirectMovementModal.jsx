@@ -11,6 +11,7 @@ import {
 } from './shared.jsx';
 import { saveMouvementRapide, getArticleStockInfo } from '../../services/inventaire/mouvementRapide';
 import { useAuth } from '../../hooks/useAuth';
+import { isSuperAdmin } from '../../services/rh/isSuperAdmin';
 
 const MOTIFS = {
   Entrée: ['Réception directe', 'Retour chantier', 'Stock initial', 'Régularisation positive', 'Article retrouvé', 'Autre'],
@@ -29,6 +30,7 @@ export default function StockDirectMovementModal({
 }) {
   const { user } = useAuth();
   const sessionName = user?.user_metadata?.full_name || user?.nom || user?.email?.split('@')[0] || '';
+  const allowMaterielSortie = isSuperAdmin(user);
   const emplacements = filterVisibleEmplacements(emplacementsList?.length ? emplacementsList : EMPLACEMENTS_STOCK);
 
   const [form, setForm] = useState({});
@@ -132,6 +134,7 @@ export default function StockDirectMovementModal({
         beneficiaire: form.beneficiaire,
         fournisseur: form.fournisseur,
         ref_externe: form.ref_externe,
+        allow_materiel_sortie: allowMaterielSortie,
         note: [
           form.note || '',
           form.prix_achat ? `Prix achat: ${form.prix_achat}` : '',

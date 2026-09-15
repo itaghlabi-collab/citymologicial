@@ -53,7 +53,7 @@ export async function generateMRRef() {
  * @param {string} [form.beneficiaire]
  * @param {string} [form.fournisseur]
  * @param {string} [form.ref_externe]
- * @param {boolean} [form.allow_materiel_sortie] - sortie Matériel (super_admin)
+ * @param {boolean} [form.allow_materiel_sortie] - sortie Matériel / Outil (super_admin)
  */
 export async function saveMouvementRapide(form) {
   const articleId = form.article_id;
