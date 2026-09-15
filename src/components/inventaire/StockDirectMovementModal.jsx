@@ -13,7 +13,7 @@ import { saveMouvementRapide, getArticleStockInfo } from '../../services/inventa
 import { useAuth } from '../../hooks/useAuth';
 import { isSuperAdmin } from '../../services/rh/isSuperAdmin';
 
-const MOTIF_MISE_A_REBUT = 'Mise à rebut';
+const MOTIF_MISE_A_REBUT = 'Mise au rebut';
 
 const MOTIFS = {
   Entrée: ['Réception directe', 'Retour chantier', 'Stock initial', 'Régularisation positive', 'Article retrouvé', 'Autre'],
@@ -160,7 +160,7 @@ export default function StockDirectMovementModal({
         : 'Type invalide.';
     }
     if (isRegularisation && String(form.motif || '').trim() === MOTIF_MISE_A_REBUT && mType !== 'Rebut') {
-      return 'Mise à rebut : indiquez une quantité cible inférieure au stock.';
+      return 'Mise au rebut : indiquez une quantité cible inférieure au stock.';
     }
     const q = isRegularisation ? regularisationDelta() : qty;
     if (!q || q <= 0) return 'Quantité invalide.';
@@ -233,7 +233,7 @@ export default function StockDirectMovementModal({
             quantite: level.quantite,
             empSrc: level.emplacement,
             empDest: '',
-            noteExtra: `Régularisation mise à 0 (tous emplacements) : ${formatEmplacementDisplay(level.emplacement) || level.emplacement} ${level.quantite} → 0 (mise à rebut)`,
+            noteExtra: `Régularisation mise à 0 (tous emplacements) : ${formatEmplacementDisplay(level.emplacement) || level.emplacement} ${level.quantite} → 0 (mise au rebut)`,
           });
         }
       } else {
@@ -250,7 +250,7 @@ export default function StockDirectMovementModal({
           empSrc,
           empDest,
           noteExtra: isRegularisation
-            ? `Régularisation ${formatEmplacementDisplay(regularisationEmp) || regularisationEmp} : ${baselineQty} → ${form.target_qty}${mType === 'Rebut' ? ' (mise à rebut)' : ''}`
+            ? `Régularisation ${formatEmplacementDisplay(regularisationEmp) || regularisationEmp} : ${baselineQty} → ${form.target_qty}${mType === 'Rebut' ? ' (mise au rebut)' : ''}`
             : '',
         });
       }
@@ -267,7 +267,7 @@ export default function StockDirectMovementModal({
     const base = MOTIFS[type] || MOTIFS.Entrée;
     if (!isRegularisation) return base;
     if (wipeAllToZero) {
-      // Cible 0 → motifs de diminution uniquement (Mise à rebut en tête).
+      // Cible 0 → motifs de diminution uniquement (Mise au rebut en tête).
       return [MOTIF_MISE_A_REBUT, 'Régularisation négative', 'Inventaire physique', 'Autre'];
     }
     const targetNum = Number(form.target_qty);
