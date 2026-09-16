@@ -1,7 +1,7 @@
 /**
  * Depots.jsx — Emplacements de stock ERP CITYMO
  */
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { MapPin, Search, Filter, Eye, ChevronLeft, Plus, Trash2, Loader2 } from 'lucide-react';
 import {
   INPUT_STYLE, SELECT_STYLE, EMPLACEMENTS_STOCK,
@@ -16,8 +16,24 @@ import {
   ensureDiversWarehouse,
   EMPLACEMENT_TYPES,
 } from '../../services/inventaire/stockWarehouses';
+import {
+  listAllStockLevels,
+  expandArticlesByEmplacement,
+  subscribeStockChanged,
+} from '../../services/inventaire/stockSync';
 
 const EMPTY_FORM = { nom: '', type_depot: 'Chantier', adresse: '', responsable: '' };
+
+/** Même source que Stocks : lignes stock_levels (qté ≠ 0) pour un emplacement. */
+function articlesAtEmplacement(stockRows, nom) {
+  const target = String(nom || '').trim().toLowerCase();
+  if (!target) return [];
+  return (stockRows || []).filter((a) => {
+    const emp = String(a.emplacement || '').trim().toLowerCase();
+    const qty = Number(a.stock_actuel) || 0;
+    return emp === target && qty !== 0;
+  });
+}
 
 function MobileDepotRow({ item, count, onView, onDelete, deleting }) {
   return (
@@ -41,10 +57,8 @@ function MobileDepotRow({ item, count, onView, onDelete, deleting }) {
   );
 }
 
-function DetailEmplacement({ emplacement, articles, onBack }) {
-  const articlesHere = (articles || []).filter(
-    (a) => String(a.emplacement || '').trim().toLowerCase() === String(emplacement.nom).trim().toLowerCase(),
-  );
+function DetailEmplacement({ emplacement, stockRows, onBack }) {
+  const articlesHere = articlesAtEmplacement(stockRows, emplacement.nom);
 
   return (
     <div className="animate-fade-in">
@@ -67,15 +81,17 @@ function DetailEmplacement({ emplacement, articles, onBack }) {
                   <th>Code</th>
                   <th>Désignation</th>
                   <th>Type</th>
+                  <th>Qté</th>
                   <th>État</th>
                 </tr>
               </thead>
               <tbody>
                 {articlesHere.map((a) => (
-                  <tr key={a.id}>
+                  <tr key={a._rowKey || `${a.id}-${a.emplacement}`}>
                     <td data-label="Code" style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.82rem', color: 'var(--red)' }}>{a.code}</td>
                     <td data-label="Désignation" style={{ fontWeight: 600 }}>{a.designation}</td>
                     <td data-label="Type" style={{ fontSize: '0.82rem' }}>{a.type || '—'}</td>
+                    <td data-label="Qté" style={{ fontWeight: 700 }}>{a.stock_actuel} {a.unite || ''}</td>
                     <td data-label="État"><span className="badge badge-green" style={{ fontSize: '0.7rem' }}>{a.etat || '—'}</span></td>
                   </tr>
                 ))}
@@ -90,6 +106,7 @@ function DetailEmplacement({ emplacement, articles, onBack }) {
 
 export default function Depots({ articles, onDepotsChange }) {
   const [emplacements, setEmplacements] = useState([]);
+  const [levels, setLevels] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [deletingId, setDeletingId] = useState(null);
@@ -102,6 +119,15 @@ export default function Depots({ articles, onDepotsChange }) {
   const [form, setForm] = useState(EMPTY_FORM);
   const onDepotsChangeRef = useRef(onDepotsChange);
   onDepotsChangeRef.current = onDepotsChange;
+
+  const loadLevels = useCallback(async () => {
+    try {
+      setLevels(await listAllStockLevels());
+    } catch (err) {
+      console.warn('[CITYMO] Depots levels', err);
+      setLevels([]);
+    }
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -123,6 +149,7 @@ export default function Depots({ articles, onDepotsChange }) {
         }));
       setEmplacements(mapped);
       onDepotsChangeRef.current?.(mapped);
+      await loadLevels();
     } catch (err) {
       console.warn('[CITYMO] Depots load', err);
       const fallback = EMPLACEMENTS_STOCK.map((nom, index) => ({
@@ -138,9 +165,17 @@ export default function Depots({ articles, onDepotsChange }) {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [loadLevels]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => subscribeStockChanged(() => { loadLevels(); }), [loadLevels]);
+
+  /** Aligné sur Stocks : article × emplacement via stock_levels. */
+  const stockRows = useMemo(
+    () => expandArticlesByEmplacement(articles || [], levels || []),
+    [articles, levels],
+  );
 
   const filtered = emplacements.filter((x) => {
     const q = search.toLowerCase();
@@ -150,14 +185,19 @@ export default function Depots({ articles, onDepotsChange }) {
 
   const types = [...new Set(emplacements.map((e) => e.type))];
   const totalArticles = (articles || []).length;
-  const avecEmplacement = (articles || []).filter((a) => !isSansEmplacement(a.emplacement)).length;
+  const avecEmplacement = useMemo(
+    () => new Set(
+      stockRows
+        .filter((r) => !isSansEmplacement(r.emplacement) && (Number(r.stock_actuel) || 0) !== 0)
+        .map((r) => r.id),
+    ).size,
+    [stockRows],
+  );
   const chantiers = emplacements.filter((x) => x.type === 'Chantier').length;
   const depotsCount = emplacements.filter((x) => x.type === 'Dépôt').length;
 
   function getArticlesCount(nom) {
-    return (articles || []).filter(
-      (a) => String(a.emplacement || '').trim().toLowerCase() === String(nom).trim().toLowerCase(),
-    ).length;
+    return articlesAtEmplacement(stockRows, nom).length;
   }
 
   function openCreate() {
@@ -225,7 +265,7 @@ export default function Depots({ articles, onDepotsChange }) {
     return (
       <DetailEmplacement
         emplacement={emp}
-        articles={articles}
+        stockRows={stockRows}
         onBack={() => setDetailId(null)}
       />
     );
