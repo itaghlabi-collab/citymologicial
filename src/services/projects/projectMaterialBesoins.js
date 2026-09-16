@@ -195,10 +195,65 @@ export async function updateProjectMaterialBesoin(id, form, { submit = false } =
   if (error) throw error;
   await replaceLines(id, form.lines);
   let need = await getProjectMaterialBesoin(id);
-  if (!need.site_request_id || submit) {
-    need = await transmitMaterialBesoinToDepot(need, null);
+
+  // Pas de DC liée → transmission unique (création idempotente).
+  if (!need.site_request_id) {
+    if (submit) need = await transmitMaterialBesoinToDepot(need, null);
+    return need;
   }
-  return need;
+
+  // DC déjà liée → mettre à jour cette DC (pas de nouvelle demande / pas de doublon).
+  await syncLinkedSiteRequestFromMaterialBesoin(need);
+  return getProjectMaterialBesoin(id);
+}
+
+/**
+ * Aligne la DC liée sur la fiche BM sans créer de nouvelle demande.
+ * Ignore si livrée / annulée (restrictions existantes).
+ */
+async function syncLinkedSiteRequestFromMaterialBesoin(need) {
+  if (!need?.site_request_id) return;
+  const { getSiteMaterialRequest, updateSiteMaterialRequest } = await import('../inventaire/siteMaterialRequests');
+  let dc;
+  try {
+    dc = await getSiteMaterialRequest(need.site_request_id);
+  } catch {
+    return;
+  }
+  if (!dc || ['livree', 'annulee'].includes(dc.statut)) return;
+
+  const lines = mapBesoinLinesToSiteRequestLines(need);
+  if (!lines.length) return;
+
+  const dateSouhaitee = lines
+    .map((l) => l.date_souhaitee)
+    .filter(Boolean)
+    .sort()[0] || need.date_besoin || dc.date_souhaitee || null;
+
+  const observation = [
+    `Issu du besoin matériaux ${need.ref_besoin || ''}`.trim(),
+    need.observation || '',
+  ].filter(Boolean).join('\n');
+
+  try {
+    await updateSiteMaterialRequest(need.site_request_id, {
+      date_demande: need.date_besoin || dc.date_demande,
+      date_souhaitee: dateSouhaitee,
+      priorite: need.priorite === 'Urgente' ? 'Urgente' : 'Normale',
+      observation,
+      origine: 'manuelle',
+      project_id: need.project_id || dc.project_id,
+      project_ref: need.project_ref || dc.project_ref,
+      project_name: need.project_name || dc.project_name,
+      client_name: need.client_name || dc.client_name,
+      chef_projet: dc.chef_projet,
+      chef_chantier: dc.chef_chantier,
+    }, lines);
+  } catch (err) {
+    // Ne bloque pas la sauvegarde BM si la DC n’est plus modifiable côté magasin.
+    if (/clôturée|livrée|modification impossible|annul/i.test(String(err?.message || ''))) return;
+    throw err;
+  }
 }
 
 /** Mappe une fiche BM → lignes demande chantier (articles hors catalogue). */

@@ -12,8 +12,11 @@ export const MATERIAL_BESOIN_LOTS = [
 export const MATERIAL_BESOIN_PRIORITES = ['Normale', 'Urgente'];
 
 export const MATERIAL_BESOIN_UNITES = [
-  'kg', 'tonne', 'm³', 'm²', 'sac', 'pot', 'rouleau', 'litre', 'unité', 'autre',
+  'kg', 'tonne', 'm³', 'm²', 'mètre linéaire (ml)', 'sac', 'pot', 'rouleau', 'litre', 'unité', 'autre',
 ];
+
+/** Chef de projet autorisé à modifier les BM (dont statut transmis) — e-mail exact. */
+export const MATERIAL_BESOIN_EDITOR_EMAIL = 'y.mojab@citymo.ma';
 
 export const MATERIAL_BESOIN_STATUTS = [
   { value: 'brouillon', label: 'Brouillon', badge: 'badge-grey' },
@@ -32,8 +35,23 @@ export function materialBesoinStatutBadge(statut) {
   return MATERIAL_BESOIN_STATUTS.find((s) => s.value === statut)?.badge || 'badge-grey';
 }
 
-export function canEditMaterialBesoin(item) {
-  return item && ['brouillon', 'soumis'].includes(item.statut);
+export function isMaterialBesoinPrivilegedEditor(user) {
+  const email = String(user?.email || '').trim().toLowerCase();
+  return email === MATERIAL_BESOIN_EDITOR_EMAIL;
+}
+
+/**
+ * Édition fiche BM :
+ * - standard : brouillon / soumis
+ * - Yassir Mojab (y.mojab@citymo.ma) : + transmis (sans créer de doublon DC)
+ * Statuts clôturés / refusés / validés restent non modifiables.
+ */
+export function canEditMaterialBesoin(item, user = null) {
+  if (!item) return false;
+  const statut = item.statut;
+  if (['brouillon', 'soumis'].includes(statut)) return true;
+  if (statut === 'transmis' && isMaterialBesoinPrivilegedEditor(user)) return true;
+  return false;
 }
 
 export function canDeleteMaterialBesoin(item) {

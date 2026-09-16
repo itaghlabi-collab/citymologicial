@@ -10,7 +10,7 @@ function fmtDate(d) {
 }
 
 export default function MaterialBesoinDetailModal({
-  open, onClose, item, projet, onPdf, onEdit, onDelete,
+  open, onClose, item, projet, onPdf, onEdit, onDelete, user = null,
 }) {
   if (!open || !item) return null;
 
@@ -73,7 +73,7 @@ export default function MaterialBesoinDetailModal({
 
           <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', justifyContent: 'flex-end' }}>
             <button type="button" className="btn btn-ghost btn-sm" onClick={() => onPdf?.(item)}><Download size={13} /> PDF</button>
-            {canEditMaterialBesoin(item) && (
+            {canEditMaterialBesoin(item, user) && (
               <button type="button" className="btn btn-secondary btn-sm" onClick={() => onEdit?.(item)}><Edit2 size={13} /> Modifier</button>
             )}
             <button type="button" className="btn btn-ghost btn-sm" style={{ color: 'var(--red)' }} onClick={() => onDelete?.(item)}><Trash2 size={13} /> Supprimer</button>

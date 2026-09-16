@@ -191,7 +191,7 @@ export default function MaterialBesoinsSection({ projet, onTransmitted }) {
                   <td data-label="Actions">
                     <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
                       <button type="button" className="btn btn-ghost btn-sm" title="Voir" onClick={() => handleAction('view', item)}><Eye size={13} /></button>
-                      {canEditMaterialBesoin(item) && (
+                      {canEditMaterialBesoin(item, user) && (
                         <button type="button" className="btn btn-ghost btn-sm" title="Modifier" onClick={() => handleAction('edit', item)}><Edit2 size={13} /></button>
                       )}
                       <button type="button" className="btn btn-ghost btn-sm" title="PDF" onClick={() => handleAction('pdf', item)}><Download size={13} /></button>
@@ -220,6 +220,7 @@ export default function MaterialBesoinsSection({ projet, onTransmitted }) {
         onClose={() => setDetailItem(null)}
         item={detailItem}
         projet={projet}
+        user={user}
         onPdf={(n) => generateMaterialBesoinPdf(n, projet)}
         onEdit={(n) => { setDetailItem(null); setEditItem(n); setFormOpen(true); }}
         onDelete={(n) => handleAction('delete', n)}
