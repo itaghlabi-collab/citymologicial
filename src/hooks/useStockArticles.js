@@ -91,11 +91,12 @@ export function useStockArticles() {
     setError(null);
     setSuccess('');
     try {
-      if (id) await updateStockArticle(id, form);
-      else await createStockArticle(form);
+      const article = id
+        ? await updateStockArticle(id, form)
+        : await createStockArticle(form);
       await load();
       setSuccess(id ? 'Article modifié avec succès.' : 'Article créé avec succès.');
-      return { success: true };
+      return { success: true, article };
     } catch (err) {
       const msg = formatSupabaseError(err, 'Erreur enregistrement article.');
       setError(msg);

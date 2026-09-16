@@ -395,7 +395,15 @@ export default function Stocks({
     setCatalogModal(null);
     await refreshAll();
     if (isCreate) {
-      setAfterCreatePrompt({ code: form.code, designation: form.designation });
+      // Quantité finale après création + entrée initiale (pas la valeur saisie seule).
+      const recordedQty = Number(res.article?.stock_actuel) || 0;
+      if (recordedQty === 0) {
+        setAfterCreatePrompt({
+          code: res.article?.code || form.code,
+          designation: res.article?.designation || form.designation,
+          article: res.article || null,
+        });
+      }
     }
   }
 
@@ -507,11 +515,16 @@ export default function Stocks({
     return s > 0 && q <= s;
   });
 
-  // Resolve article after create for entrée prompt
+  // Resolve article after create for entrée prompt (masquer si stock final > 0)
   useEffect(() => {
     if (!afterCreatePrompt?.code || !arts.length) return;
     const art = arts.find((a) => a.code === afterCreatePrompt.code);
-    if (art) setAfterCreatePrompt((p) => (p ? { ...p, article: art } : null));
+    if (!art) return;
+    if ((Number(art.stock_actuel) || 0) > 0) {
+      setAfterCreatePrompt(null);
+      return;
+    }
+    setAfterCreatePrompt((p) => (p ? { ...p, article: art } : null));
   }, [arts, afterCreatePrompt?.code]);
 
   if (detailArt) {
