@@ -17,6 +17,7 @@ import {
   recordStockArticleScan,
 } from '../services/inventaire/stockArticles';
 import { subscribeStockChanged } from '../services/inventaire/stockSync';
+import { invalidateStockReadCaches } from '../services/inventaire/stockReadCache';
 import { formatSupabaseError } from '../services/supabase/formatError';
 
 export function useStockArticles() {
@@ -28,7 +29,8 @@ export function useStockArticles() {
   const [success, setSuccess] = useState('');
   const configured = isSupabaseConfigured();
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (opts = {}) => {
+    const force = opts.force === true;
     if (!configured) {
       setError('Supabase non configuré — vérifiez VITE_SUPABASE_URL et VITE_SUPABASE_ANON_KEY');
       setLoading(false);
@@ -38,22 +40,32 @@ export function useStockArticles() {
       setLoading(true);
       return;
     }
-    setLoading(true);
+    if (!force) setLoading(true);
     setError(null);
     try {
-      const seedRes = await seedStockArticlesIfEmpty().catch((err) => ({ error: err }));
-      if (seedRes?.error) {
-        console.warn('[CITYMO] seedStockArticlesIfEmpty', seedRes.error);
-      } else if (seedRes?.seeded > 0) {
-        setSuccess(`${seedRes.seeded} articles du catalogue importés.`);
-      }
-      const rows = await listStockArticles();
+      const rows = await listStockArticles({
+        force,
+        onCatalogReady: (partial) => {
+          if (Array.isArray(partial)) {
+            setRecords(partial);
+            setLoading(false);
+          }
+        },
+      });
       setRecords(rows);
-      if (seedRes?.error && !rows.length) {
-        setError(formatSupabaseError(
-          seedRes.error,
-          'Import automatique impossible — connectez-vous ou exécutez SEED_STOCK_ARTICLES_43.sql dans Supabase.',
-        ));
+      if (!rows.length) {
+        const seedRes = await seedStockArticlesIfEmpty().catch((err) => ({ error: err }));
+        if (seedRes?.error) {
+          console.warn('[CITYMO] seedStockArticlesIfEmpty', seedRes.error);
+          setError(formatSupabaseError(
+            seedRes.error,
+            'Import automatique impossible — connectez-vous ou exécutez SEED_STOCK_ARTICLES_43.sql dans Supabase.',
+          ));
+        } else if (seedRes?.seeded > 0) {
+          const refreshed = await listStockArticles({ force: true });
+          setRecords(refreshed);
+          setSuccess(`${seedRes.seeded} articles du catalogue importés.`);
+        }
       }
     } catch (err) {
       console.error('[CITYMO] useStockArticles', err);
@@ -67,18 +79,29 @@ export function useStockArticles() {
 
   useEffect(() => {
     if (!configured) return undefined;
-    return subscribeStockChanged(() => { load(); });
+    return subscribeStockChanged(() => { load({ force: true }); });
   }, [configured, load]);
 
   useEffect(() => {
     if (!configured) return undefined;
     const { data: { subscription } } = getSupabase().auth.onAuthStateChange((event) => {
-      if (['SIGNED_IN', 'TOKEN_REFRESHED', 'INITIAL_SESSION', 'SIGNED_OUT'].includes(event)) {
-        load();
+      if (event === 'SIGNED_OUT') {
+        invalidateStockReadCaches();
+      }
+      if (['SIGNED_IN', 'INITIAL_SESSION', 'SIGNED_OUT'].includes(event)) {
+        load({ force: event === 'SIGNED_IN' || event === 'SIGNED_OUT' });
       }
     });
     return () => subscription.unsubscribe();
   }, [configured, load]);
+
+  useEffect(() => {
+    const onVis = () => {
+      if (document.visibilityState === 'visible') load();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    return () => document.removeEventListener('visibilitychange', onVis);
+  }, [load]);
 
   useEffect(() => {
     if (!success) return undefined;
@@ -94,7 +117,7 @@ export function useStockArticles() {
       const article = id
         ? await updateStockArticle(id, form)
         : await createStockArticle(form);
-      await load();
+      await load({ force: true });
       setSuccess(id ? 'Article modifié avec succès.' : 'Article créé avec succès.');
       return { success: true, article };
     } catch (err) {
@@ -112,7 +135,7 @@ export function useStockArticles() {
     setSuccess('');
     try {
       await archiveStockArticle(id);
-      await load();
+      await load({ force: true });
       setSuccess('Article archivé.');
       return { success: true };
     } catch (err) {
@@ -130,7 +153,7 @@ export function useStockArticles() {
     setSuccess('');
     try {
       await deleteStockArticle(id, options);
-      await load();
+      await load({ force: true });
       setSuccess('Article supprimé.');
       return { success: true };
     } catch (err) {
@@ -143,12 +166,7 @@ export function useStockArticles() {
   }
 
   const fetchMovements = useCallback(async (articleId) => {
-    try {
-      return await listMovementsForArticle(articleId);
-    } catch (err) {
-      console.error('[CITYMO] getMovements', err);
-      return [];
-    }
+    return listMovementsForArticle(articleId);
   }, []);
 
   async function importCatalog() {
@@ -157,7 +175,7 @@ export function useStockArticles() {
     setSuccess('');
     try {
       const res = await importStockArticlesCatalog();
-      await load();
+      await load({ force: true });
       if (res.seeded > 0) {
         setSuccess(`${res.seeded} articles importés depuis le catalogue.`);
       } else {
@@ -179,7 +197,7 @@ export function useStockArticles() {
     setSuccess('');
     try {
       const res = await dedupeStockArticles();
-      await load();
+      await load({ force: true });
       if (res.removed > 0) {
         setSuccess(`${res.removed} doublon(s) supprimé(s).`);
       } else {
@@ -218,7 +236,7 @@ export function useStockArticles() {
     error,
     success,
     configured,
-    reload: load,
+    reload: () => load({ force: true }),
     save,
     archive,
     remove,

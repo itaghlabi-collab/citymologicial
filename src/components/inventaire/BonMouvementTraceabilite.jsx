@@ -252,8 +252,8 @@ export default function BonMouvementTraceabilite({ bon, articles = [], onNavigat
     let cancelled = false;
     setLoading(true);
     listAllStockMovementsRaw()
-      .then((rows) => { if (!cancelled) setMovements(rows || []); })
-      .catch(() => { if (!cancelled) setMovements([]); })
+      .then((rows) => { if (!cancelled && Array.isArray(rows)) setMovements(rows); })
+      .catch((err) => { console.error('[CITYMO] BonMouvementTraceabilite', err); })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [bon?.ref]);

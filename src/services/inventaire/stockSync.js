@@ -4,6 +4,7 @@
  */
 import { getSupabase } from '../../lib/supabase';
 import { requireSupabaseUserId } from '../supabase/requireUser';
+import { cachedStockRead, invalidateStockReadCaches } from './stockReadCache';
 
 const LEVELS = 'stock_levels';
 const MOVEMENTS = 'stock_movements';
@@ -24,6 +25,7 @@ function isSansEmplacement(value) {
 export const STOCK_CHANGED_EVENT = 'citymo-stock-changed';
 
 export function notifyStockChanged(detail = {}) {
+  invalidateStockReadCaches();
   try {
     if (typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent(STOCK_CHANGED_EVENT, { detail }));
@@ -292,7 +294,7 @@ function movementInstant(row) {
  * PostgREST plafonne à ~1000 lignes sans .range() — pagine pour ne pas
  * perdre les transferts récents (sinon le replay emplacement reste faux).
  */
-async function fetchAllPaged(buildQuery, pageSize = 1000) {
+export async function fetchAllPaged(buildQuery, pageSize = 1000) {
   const all = [];
   let from = 0;
   for (;;) {
@@ -306,37 +308,39 @@ async function fetchAllPaged(buildQuery, pageSize = 1000) {
   return all;
 }
 
-/**
- * Charge toutes les lignes stock_levels.
- */
-export async function listAllStockLevels() {
-  let rows;
-  try {
-    rows = await fetchAllPaged(() => getSupabase()
-      .from(LEVELS)
-      .select('id, article_id, emplacement, quantite, warehouse_id, updated_at')
-      .order('emplacement', { ascending: true }));
-  } catch (error) {
-    if (error?.code === '42P01') return [];
-    throw error;
-  }
-  return (rows || []).map((l) => ({
+function mapStockLevelRow(l) {
+  return {
     id: l.id,
     article_id: l.article_id ? String(l.article_id) : '',
     emplacement: normEmp(l.emplacement),
     quantite: Number(l.quantite) || 0,
     warehouse_id: l.warehouse_id || null,
     updated_at: l.updated_at,
-  }));
+  };
+}
+
+/**
+ * Charge toutes les lignes stock_levels (paginé). Erreur réelle propagée
+ * (y compris table absente 42P01) — jamais transformée en liste vide silencieuse.
+ */
+export async function listAllStockLevels(options = {}) {
+  return cachedStockRead('levels', options, async () => {
+    const rows = await fetchAllPaged(() => getSupabase()
+      .from(LEVELS)
+      .select('id, article_id, emplacement, quantite, warehouse_id, updated_at')
+      .order('emplacement', { ascending: true })
+      .order('id', { ascending: true }));
+    return (rows || []).map(mapStockLevelRow);
+  });
 }
 
 /** Tous les mouvements (pour ledger / contrôle emplacement). */
-export async function listAllStockMovementsRaw() {
-  return fetchAllPaged(() => getSupabase()
+export async function listAllStockMovementsRaw(options = {}) {
+  return cachedStockRead('movements', options, () => fetchAllPaged(() => getSupabase()
     .from(MOVEMENTS)
     .select('id, ref_mouvement, type_mouvement, article_id, quantite, date_mouvement, motif, payload, created_at, stock_articles(reference, nom)')
     .order('date_mouvement', { ascending: true })
-    .order('created_at', { ascending: true }));
+    .order('created_at', { ascending: true })));
 }
 
 /**
@@ -713,7 +717,7 @@ export async function rebuildStockLevelsFromMovements({ dryRun = true } = {}) {
       .select('id, ref_mouvement, type_mouvement, article_id, quantite, date_mouvement, payload, created_at')
       .order('date_mouvement', { ascending: true })
       .order('created_at', { ascending: true })),
-    listAllStockLevels(),
+    listAllStockLevels({ force: true }),
     fetchAllPaged(() => getSupabase().from(ARTICLES).select('id, reference, nom, emplacement')),
   ]);
 

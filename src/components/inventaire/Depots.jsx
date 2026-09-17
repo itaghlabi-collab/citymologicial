@@ -21,6 +21,7 @@ import {
   expandArticlesByEmplacement,
   subscribeStockChanged,
 } from '../../services/inventaire/stockSync';
+import { formatSupabaseError } from '../../services/supabase/formatError';
 
 const EMPTY_FORM = { nom: '', type_depot: 'Chantier', adresse: '', responsable: '' };
 
@@ -125,7 +126,7 @@ export default function Depots({ articles, onDepotsChange }) {
       setLevels(await listAllStockLevels());
     } catch (err) {
       console.warn('[CITYMO] Depots levels', err);
-      setLevels([]);
+      setError(formatSupabaseError(err, 'Impossible de lire les quantités par emplacement.'));
     }
   }, []);
 

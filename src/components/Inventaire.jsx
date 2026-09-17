@@ -27,24 +27,26 @@ export default function Inventaire({ activeTab, initialArticleCode, onArticleCod
   const [emplacementNoms, setEmplacementNoms] = useState(EMPLACEMENTS_STOCK);
 
   useEffect(() => {
-    listStockArticles()
-      .then((rows) => setArticles(rows || []))
-      .catch(() => {});
+    let cancelled = false;
+    listStockArticles({ includeLastMovements: false })
+      .then((rows) => { if (!cancelled && Array.isArray(rows)) setArticles(rows); })
+      .catch((err) => { console.error('[CITYMO] Inventaire articles', err); });
     listStockCategories()
-      .then((rows) => setCategories(rows || []))
-      .catch(() => {});
+      .then((rows) => { if (!cancelled && Array.isArray(rows)) setCategories(rows); })
+      .catch((err) => { console.error('[CITYMO] Inventaire categories', err); });
     ensureStockWarehousesSeeded(EMPLACEMENTS_STOCK)
       .then((rows) => {
-        if (rows?.length) setEmplacementNoms(filterVisibleEmplacements(rows.map((r) => r.nom)));
+        if (!cancelled && rows?.length) setEmplacementNoms(filterVisibleEmplacements(rows.map((r) => r.nom)));
       })
-      .catch(() => {});
-  }, [tab]);
+      .catch((err) => { console.error('[CITYMO] Inventaire warehouses', err); });
+    return () => { cancelled = true; };
+  }, []);
 
   useEffect(() => {
     return subscribeStockChanged(() => {
-      listStockArticles()
-        .then((rows) => setArticles(rows || []))
-        .catch(() => {});
+      listStockArticles({ force: true, includeLastMovements: false })
+        .then((rows) => { if (Array.isArray(rows)) setArticles(rows); })
+        .catch((err) => { console.error('[CITYMO] Inventaire articles', err); });
     });
   }, []);
 

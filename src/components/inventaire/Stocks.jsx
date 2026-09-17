@@ -36,6 +36,7 @@ import {
 import { can } from '../../services/admin/permissions';
 import { useAuth } from '../../hooks/useAuth';
 import { getArticleBarcodeValue } from '../../services/inventaire/barcodeUtils';
+import { formatSupabaseError } from '../../services/supabase/formatError';
 import { useIsMobile } from '../../hooks/useIsMobile';
 
 function getStatutStock(qte, seuil) {
@@ -207,8 +208,10 @@ export default function Stocks({
 
   const arts = (hookArticles?.length ? hookArticles : articlesProp) || [];
   const [levels, setLevels] = useState([]);
+  const [levelsError, setLevelsError] = useState('');
   const [allMovements, setAllMovements] = useState([]);
   const [movementsLoading, setMovementsLoading] = useState(false);
+  const [movementsError, setMovementsError] = useState('');
   const [rebuildOpen, setRebuildOpen] = useState(false);
   const [rebuildBusy, setRebuildBusy] = useState(false);
   const [rebuildReport, setRebuildReport] = useState(null);
@@ -241,10 +244,11 @@ export default function Stocks({
   const loadLevels = useCallback(async () => {
     try {
       const rows = await listAllStockLevels();
-      setLevels(rows || []);
+      setLevels(rows);
+      setLevelsError('');
     } catch (err) {
       console.error('[CITYMO] Stocks levels', err);
-      setLevels([]);
+      setLevelsError(formatSupabaseError(err, 'Impossible de lire les stocks par emplacement.'));
     }
   }, []);
 
@@ -252,19 +256,27 @@ export default function Stocks({
     setMovementsLoading(true);
     try {
       const rows = await listAllStockMovementsRaw();
-      setAllMovements(rows || []);
+      setAllMovements(rows);
+      setMovementsError('');
     } catch (err) {
       console.error('[CITYMO] Stocks movements', err);
-      setAllMovements([]);
+      setMovementsError(formatSupabaseError(err, 'Impossible de lire l’historique des mouvements.'));
     } finally {
       setMovementsLoading(false);
     }
   }, []);
 
+  const empControl = Boolean(filterEmplacement && filterEmplacement !== FILTER_SANS_EMPLACEMENT);
+
   useEffect(() => {
     loadLevels();
+  }, [loadLevels]);
+
+  useEffect(() => {
+    if (!empControl) return undefined;
     loadMovements();
-  }, [loadLevels, loadMovements]);
+    return undefined;
+  }, [empControl, loadMovements]);
 
   useEffect(() => {
     if (onArticlesChange && hookArticles?.length) onArticlesChange(hookArticles);
@@ -272,8 +284,8 @@ export default function Stocks({
 
   useEffect(() => subscribeStockChanged(() => {
     loadLevels();
-    loadMovements();
-  }), [loadLevels, loadMovements]);
+    if (empControl) loadMovements();
+  }), [loadLevels, loadMovements, empControl]);
 
   const stockRows = useMemo(
     () => expandArticlesByEmplacement(arts, levels),
@@ -352,8 +364,8 @@ export default function Stocks({
         setDetailMovements(mvts || []);
         setDetailLevels(levels || []);
       })
-      .catch(() => {
-        if (!cancelled) { setDetailMovements([]); setDetailLevels([]); }
+      .catch((err) => {
+        console.error('[CITYMO] Stocks article detail', err);
       })
       .finally(() => {
         if (!cancelled) { setDetailMovementsLoading(false); setDetailLevelsLoading(false); }
@@ -362,20 +374,20 @@ export default function Stocks({
   }, [detailId, getMovements]);
 
   const refreshAll = useCallback(async () => {
-    await Promise.all([reload(), loadLevels(), loadMovements()]);
+    await Promise.all([reload(), loadLevels(), empControl ? loadMovements() : Promise.resolve()]);
     if (detailId) {
       const [mvts, lv] = await Promise.all([getMovements(detailId), listStockLevelsForArticle(detailId)]);
       setDetailMovements(mvts || []);
       setDetailLevels(lv || []);
     }
-  }, [reload, loadLevels, loadMovements, detailId, getMovements]);
+  }, [reload, loadLevels, loadMovements, empControl, detailId, getMovements]);
 
   function openHistory(article) {
     setHistoryModal(article);
     setHistoryLoading(true);
     getMovements(article.id)
       .then((rows) => setHistoryRows(rows || []))
-      .catch(() => setHistoryRows([]))
+      .catch((err) => { console.error('[CITYMO] Stocks history', err); })
       .finally(() => setHistoryLoading(false));
   }
 
@@ -605,6 +617,12 @@ export default function Stocks({
           </button>
         </div>
       </div>
+
+      {(levelsError || movementsError) && (
+        <div style={{ background: '#FFF8E1', color: '#E65100', border: '1px solid #FFCC80', borderRadius: 8, padding: '10px 14px', fontSize: '0.84rem', marginBottom: 12 }}>
+          {levelsError || movementsError}
+        </div>
+      )}
 
       {(showFilters || !!filterEmplacement) ? (
         <div className="card finance-toolbar" style={{ marginBottom: 16, padding: '14px 20px' }}>

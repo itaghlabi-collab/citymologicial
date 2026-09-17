@@ -5,7 +5,14 @@ import { getSupabase } from '../../lib/supabase';
 import { requireSupabaseUserId } from '../supabase/requireUser';
 import { buildSeedRows } from './stockArticlesSeed';
 import { listStockCategories } from './stockCategories';
-import { displayMovementActionLabel, extractMovementEmplacements } from './stockSync';
+import {
+  displayMovementActionLabel,
+  extractMovementEmplacements,
+  fetchAllPaged,
+  listAllStockLevels,
+  notifyStockChanged,
+} from './stockSync';
+import { cachedStockRead, peekStockReadCache, setStockReadSessionKey } from './stockReadCache';
 
 const DEFAULT_STOCK_EMPLACEMENT = 'DEPOT LAKHYAYTA';
 
@@ -185,6 +192,20 @@ export async function generateStockArticleCode() {
 const IN_FILTER_CHUNK = 60;
 const IN_FILTER_CHUNK_MIN = 15;
 const MOVEMENTS_PAGE = 1000;
+const LEVELS_PAGE = 1000;
+
+const ARTICLE_LIST_SELECT = [
+  'id', 'reference', 'nom', 'article_type', 'category_id', 'numero_serie', 'unite',
+  'prix_unitaire', 'seuil_alerte', 'etat', 'statut', 'default_warehouse_id',
+  'default_project_id', 'emplacement', 'description', 'notes', 'barcode_value',
+  'last_scanned_at', 'current_state', 'created_at', 'updated_at',
+].join(', ');
+
+const ARTICLE_LIST_SELECT_NO_BARCODE = [
+  'id', 'reference', 'nom', 'article_type', 'category_id', 'numero_serie', 'unite',
+  'prix_unitaire', 'seuil_alerte', 'etat', 'statut', 'default_warehouse_id',
+  'default_project_id', 'emplacement', 'description', 'notes', 'created_at', 'updated_at',
+].join(', ');
 
 function isRequestTooLargeError(error) {
   const status = Number(error?.status || error?.statusCode || 0);
@@ -223,21 +244,28 @@ async function sumLevelsByArticle(articleIds) {
   if (!articleIds.length) return sums;
   try {
     await forEachIdChunk(articleIds, async (chunk) => {
-      const { data, error } = await getSupabase()
-        .from(LEVELS)
-        .select('article_id, quantite')
-        .in('article_id', chunk);
-      if (error) {
-        if (error.code === '42P01') {
-          const missing = new Error(error.message);
-          missing.code = '42P01';
-          throw missing;
+      let from = 0;
+      for (;;) {
+        const { data, error } = await getSupabase()
+          .from(LEVELS)
+          .select('article_id, quantite')
+          .in('article_id', chunk)
+          .range(from, from + LEVELS_PAGE - 1);
+        if (error) {
+          if (error.code === '42P01') {
+            const missing = new Error(error.message);
+            missing.code = '42P01';
+            throw missing;
+          }
+          throw error;
         }
-        throw error;
+        const rows = data || [];
+        rows.forEach((l) => {
+          sums[l.article_id] = (sums[l.article_id] || 0) + Number(l.quantite || 0);
+        });
+        if (rows.length < LEVELS_PAGE) break;
+        from += LEVELS_PAGE;
       }
-      (data || []).forEach((l) => {
-        sums[l.article_id] = (sums[l.article_id] || 0) + Number(l.quantite || 0);
-      });
     });
   } catch (error) {
     if (error?.code === '42P01') return null;
@@ -270,17 +298,32 @@ async function sumMovementsByArticle(articleIds) {
   return sums;
 }
 
+function sumsFromLevelRows(levels) {
+  const sums = {};
+  (levels || []).forEach((l) => {
+    const id = l.article_id;
+    if (!id) return;
+    sums[id] = (sums[id] || 0) + Number(l.quantite || 0);
+  });
+  return sums;
+}
+
 async function attachStockQuantities(articles) {
   if (!articles.length) return articles;
-  const ids = articles.map((a) => a.id);
-  const sums = await sumLevelsByArticle(ids);
-  if (sums === null) {
-    const fromMvts = await sumMovementsByArticle(ids);
-    return articles.map((a) => ({
-      ...a,
-      stock_actuel: Math.max(0, Number(fromMvts[a.id] ?? a.stock_actuel ?? 0)),
-      stock_source: 'movements',
-    }));
+  let sums;
+  try {
+    const levels = await listAllStockLevels();
+    sums = sumsFromLevelRows(levels);
+  } catch (error) {
+    if (error?.code === '42P01') {
+      const fromMvts = await sumMovementsByArticle(articles.map((a) => a.id));
+      return articles.map((a) => ({
+        ...a,
+        stock_actuel: Math.max(0, Number(fromMvts[a.id] ?? a.stock_actuel ?? 0)),
+        stock_source: 'movements',
+      }));
+    }
+    throw error;
   }
   return articles.map((a) => ({
     ...a,
@@ -312,71 +355,148 @@ function summarizeLastMovement(row) {
   };
 }
 
-async function attachLastMovements(articles) {
-  if (!articles.length) return articles;
-  const ids = articles.map((a) => a.id);
-  const lastByArticle = new Map();
-  try {
-    await forEachIdChunk(ids, async (chunk) => {
-      const pending = new Set(chunk);
-      let from = 0;
-      while (pending.size > 0) {
-        const { data, error } = await getSupabase()
-          .from(MOVEMENTS)
-          .select('article_id, date_mouvement, type_mouvement, motif, ref_mouvement, payload, created_at')
-          .in('article_id', chunk)
-          .order('date_mouvement', { ascending: false })
-          .order('created_at', { ascending: false })
-          .range(from, from + MOVEMENTS_PAGE - 1);
-        if (error) {
-          if (error.code === '42P01') {
-            const missing = new Error(error.message);
-            missing.code = '42P01';
-            throw missing;
-          }
-          throw error;
-        }
-        const rows = data || [];
-        if (!rows.length) break;
-        rows.forEach((row) => {
-          if (!row.article_id || lastByArticle.has(row.article_id)) return;
-          lastByArticle.set(row.article_id, row);
-          pending.delete(row.article_id);
-        });
-        if (rows.length < MOVEMENTS_PAGE) break;
-        from += MOVEMENTS_PAGE;
-      }
-    });
-  } catch (error) {
-    // Ne jamais faire échouer la liste catalogue pour le seul enrichissement « dernier mvt »
-    // (ex. 400 Bad Request / URI trop longue avant chunking, table absente, etc.).
-    if (error?.code === '42P01' || isRequestTooLargeError(error)) {
-      return articles;
-    }
-    console.warn('[CITYMO] attachLastMovements', error);
-    return articles;
-  }
+function applyLastMovements(articles, lastByArticle) {
   return articles.map((a) => ({
     ...a,
-    dernier_mouvement: summarizeLastMovement(lastByArticle.get(a.id)),
+    dernier_mouvement: summarizeLastMovement(lastByArticle.get(a.id)) || a.dernier_mouvement || null,
   }));
 }
 
-export async function listStockArticles() {
-  const { data, error } = await getSupabase()
-    .from(TABLE)
-    .select('*')
-    .order('nom', { ascending: true });
-  if (error) throw error;
-  const normalized = (data || []).map((r) => normalizeStockArticle(r)).filter(Boolean);
-  let withStock = normalized;
+async function attachLastMovements(articles) {
+  if (!articles.length) return articles;
+  const lastByArticle = new Map();
+  const pending = new Set(articles.map((a) => a.id));
   try {
-    withStock = await attachStockQuantities(normalized);
-  } catch (err) {
-    // Catalogue doit s’afficher même si stock_levels / mouvements échouent (ex. filtre .in trop long).
-    console.warn('[CITYMO] attachStockQuantities', err);
+    const { data, error } = await getSupabase()
+      .from(MOVEMENTS)
+      .select('article_id, date_mouvement, type_mouvement, motif, ref_mouvement, payload, created_at')
+      .order('date_mouvement', { ascending: false })
+      .order('created_at', { ascending: false })
+      .range(0, MOVEMENTS_PAGE - 1);
+    if (error) {
+      if (error.code === '42P01') return articles;
+      throw error;
+    }
+    (data || []).forEach((row) => {
+      if (!row.article_id || !pending.has(row.article_id) || lastByArticle.has(row.article_id)) return;
+      lastByArticle.set(row.article_id, row);
+      pending.delete(row.article_id);
+    });
+
+    if (pending.size > 0) {
+      await forEachIdChunk([...pending], async (chunk) => {
+        let remaining = chunk.filter((id) => pending.has(id));
+        while (remaining.length) {
+          const { data: rows, error: chunkErr } = await getSupabase()
+            .from(MOVEMENTS)
+            .select('article_id, date_mouvement, type_mouvement, motif, ref_mouvement, payload, created_at')
+            .in('article_id', remaining)
+            .order('date_mouvement', { ascending: false })
+            .order('created_at', { ascending: false })
+            .range(0, MOVEMENTS_PAGE - 1);
+          if (chunkErr) {
+            if (chunkErr.code === '42P01') {
+              const missing = new Error(chunkErr.message);
+              missing.code = '42P01';
+              throw missing;
+            }
+            throw chunkErr;
+          }
+          const page = rows || [];
+          const found = new Set();
+          page.forEach((row) => {
+            if (!row.article_id || lastByArticle.has(row.article_id)) return;
+            lastByArticle.set(row.article_id, row);
+            pending.delete(row.article_id);
+            found.add(row.article_id);
+          });
+          remaining = remaining.filter((id) => !found.has(id));
+          if (page.length < MOVEMENTS_PAGE || found.size === 0) break;
+        }
+      });
+    }
+  } catch (error) {
+    // Enrichissement affichage uniquement — les quantités déjà lues restent valides.
+    if (error?.code === '42P01' || isRequestTooLargeError(error)) {
+      return applyLastMovements(articles, lastByArticle);
+    }
+    console.warn('[CITYMO] attachLastMovements', error);
+    return applyLastMovements(articles, lastByArticle);
   }
-  return attachLastMovements(withStock);
+  return applyLastMovements(articles, lastByArticle);
+}
+
+async function syncStockReadSession() {
+  const { data } = await getSupabase().auth.getSession();
+  setStockReadSessionKey(data?.session?.user?.id || '');
+}
+
+async function fetchAllArticleRows() {
+  try {
+    return await fetchAllPaged(() => getSupabase()
+      .from(TABLE)
+      .select(ARTICLE_LIST_SELECT)
+      .order('nom', { ascending: true })
+      .order('id', { ascending: true }));
+  } catch (error) {
+    if (isMissingBarcodeColumn(error)) {
+      return fetchAllPaged(() => getSupabase()
+        .from(TABLE)
+        .select(ARTICLE_LIST_SELECT_NO_BARCODE)
+        .order('nom', { ascending: true })
+        .order('id', { ascending: true }));
+    }
+    throw error;
+  }
+}
+
+async function fetchArticlesWithStockQuantities() {
+  const rows = await fetchAllArticleRows();
+  const normalized = (rows || []).map((r) => normalizeStockArticle(r)).filter(Boolean);
+  return attachStockQuantities(normalized);
+}
+
+/**
+ * Catalogue + quantités (stock_levels) + dernier mouvement.
+ * includeLastMovements=false pour les écrans qui n’affichent pas la colonne.
+ * onCatalogReady : première liste utilisable (quantités) avant l’enrichissement mvt.
+ */
+export async function listStockArticles(options = {}) {
+  const {
+    force = false,
+    includeLastMovements = true,
+    onCatalogReady,
+  } = options && typeof options === 'object' ? options : {};
+
+  const t0 = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
+  await syncStockReadSession();
+
+  const cachedFull = !force ? peekStockReadCache('articles-full') : null;
+  if (cachedFull) {
+    onCatalogReady?.(cachedFull);
+    return cachedFull;
+  }
+
+  const cachedStock = !force ? peekStockReadCache('articles-stock') : null;
+  if (cachedStock) onCatalogReady?.(cachedStock);
+
+  const withStock = await cachedStockRead('articles-stock', { force }, fetchArticlesWithStockQuantities);
+  onCatalogReady?.(withStock);
+
+  if (!includeLastMovements) {
+    logListTiming(t0, withStock.length, false);
+    return withStock;
+  }
+
+  const withLast = await cachedStockRead('articles-full', { force }, () => attachLastMovements(withStock));
+  logListTiming(t0, withLast.length, true);
+  return withLast;
+}
+
+function logListTiming(t0, count, withLast) {
+  const now = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
+  const ms = Math.round(now - t0);
+  console.info('[CITYMO] listStockArticles', { ms, articles: count, lastMovements: withLast });
 }
 
 /** Détecte les doublons (même référence ou même désignation). */
@@ -687,6 +807,7 @@ export async function createStockArticle(form) {
     await createInitialStockMovement(article, form, targetQty, userName);
   }
   const [withStock] = await attachStockQuantities([article]);
+  notifyStockChanged({ reason: 'article-create' });
   return withStock;
 }
 
@@ -717,6 +838,7 @@ export async function updateStockArticle(id, form) {
   }
 
   const [withStock] = await attachStockQuantities([article]);
+  notifyStockChanged({ reason: 'article-update' });
   return withStock;
 }
 
@@ -730,6 +852,7 @@ export async function archiveStockArticle(id) {
     .single();
   if (error) throw error;
   const [withStock] = await attachStockQuantities([normalizeStockArticle(data)]);
+  notifyStockChanged({ reason: 'article-archive' });
   return withStock;
 }
 
@@ -812,18 +935,18 @@ export async function deleteStockArticle(id, { force = false } = {}) {
 
   const { error } = await getSupabase().from(TABLE).delete().eq('id', id);
   if (error) throw error;
+  notifyStockChanged({ reason: 'article-delete' });
 }
 
 export async function listMovementsForArticle(articleId) {
   if (!articleId) return [];
-  const { data, error } = await getSupabase()
+  const rows = await fetchAllPaged(() => getSupabase()
     .from(MOVEMENTS)
     .select('*')
     .eq('article_id', articleId)
     .order('date_mouvement', { ascending: false })
-    .order('created_at', { ascending: false });
-  if (error) throw error;
-  return (data || []).map(formatArticleMovementHistory);
+    .order('created_at', { ascending: false }));
+  return (rows || []).map(formatArticleMovementHistory);
 }
 
 export function formatArticleMovementHistory(m) {

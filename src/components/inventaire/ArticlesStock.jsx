@@ -668,8 +668,8 @@ export default function ArticlesStock({
       .then((rows) => {
         if (!cancelled) setHistoryRows(rows);
       })
-      .catch(() => {
-        if (!cancelled) setHistoryRows([]);
+      .catch((err) => {
+        console.error('[CITYMO] article history', err);
       })
       .finally(() => {
         setHistoryLoading(false);
@@ -693,9 +693,9 @@ export default function ArticlesStock({
           setDetailMovementsLoading(false);
         }
       })
-      .catch(() => {
+      .catch((err) => {
+        console.error('[CITYMO] article detail movements', err);
         if (!cancelled) {
-          setDetailMovements([]);
           setDetailMovementsLoading(false);
         }
       });
@@ -717,9 +717,9 @@ export default function ArticlesStock({
           setDetailStockLevelsLoading(false);
         }
       })
-      .catch(() => {
+      .catch((err) => {
+        console.error('[CITYMO] article detail levels', err);
         if (!cancelled) {
-          setDetailStockLevels([]);
           setDetailStockLevelsLoading(false);
         }
       });
@@ -738,9 +738,8 @@ export default function ArticlesStock({
       ]);
       setDetailMovements(rows);
       setDetailStockLevels(levels);
-    } catch {
-      setDetailMovements([]);
-      setDetailStockLevels([]);
+    } catch (err) {
+      console.error('[CITYMO] article refreshDetail', err);
     } finally {
       setDetailMovementsLoading(false);
       setDetailStockLevelsLoading(false);
