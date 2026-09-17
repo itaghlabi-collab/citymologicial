@@ -139,22 +139,9 @@ export function unlockNotificationSound() {
   }
 }
 
-/** Bip immédiat (Web Audio) puis WAV en arrière-plan si disponible. */
+/** Son des notifications coupé (muet). */
 export function playNotificationSound() {
-  if (typeof window === 'undefined') return;
-  ensureSoundRevision();
-  unlockNotificationSound();
-
-  const ctx = getAudioContext();
-  if (ctx?.state === 'suspended') {
-    void ctx.resume();
-  }
-
-  playWebAudioChime();
-
-  void playHtmlAudio().catch(() => {
-    playWebAudioChime();
-  });
+  return;
 }
 
 function detachUnlockListeners(listeners) {
