@@ -1,7 +1,7 @@
 /**
  * DemandeAchatDetail.jsx — Tableau de bord demande d'achat (workflow CITYMO)
  */
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import {
   ChevronLeft, ClipboardList, History, FileText, CheckCircle, Send,
   Plus, Loader2, Star, Lock, Package, CreditCard, Eye, Edit2, Trash2, Download,
@@ -576,20 +576,31 @@ export default function DemandeAchatDetail({
   const [showHistory, setShowHistory] = useState(false);
   const [validatingId, setValidatingId] = useState(null);
   const [pdfLoading, setPdfLoading] = useState(false);
+  const roleRef = useRef(null);
+  roleRef.current = role;
 
   const load = useCallback(async () => {
-    if (!requestId) return;
+    if (!requestId) return null;
+    const t0 = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
     setLoading(true);
     setError('');
     try {
       const [data, r] = await Promise.all([
         getPurchaseRequestBundle(requestId),
-        resolveCurrentPurchaseRole(user),
+        roleRef.current ? Promise.resolve(roleRef.current) : resolveCurrentPurchaseRole(user),
       ]);
       setBundle(data);
       setRole(r);
+      console.info('[CITYMO] purchaseRequest', {
+        op: 'open-detail',
+        ms: Math.round((typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()) - t0),
+        id: requestId,
+        quotes: data?.quotes?.length || 0,
+      });
+      return data;
     } catch (err) {
       setError(err.message || 'Erreur chargement');
+      return null;
     } finally {
       setLoading(false);
     }
@@ -607,8 +618,8 @@ export default function DemandeAchatDetail({
     setError('');
     try {
       await fn();
-      await load();
-      if (onRefresh) await onRefresh();
+      const data = await load();
+      if (onRefresh) await onRefresh(data?.request);
     } catch (err) {
       setError(err.message || 'Erreur');
     } finally {

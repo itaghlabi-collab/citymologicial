@@ -7,6 +7,7 @@ import { PURCHASE_ASSIGNEE, normalizePurchaseStatus } from '../../constants/purc
 import { listProjectsForSelect } from '../projects/projects';
 import { isGroupedPurchaseRequest, groupedProjectLabel } from './purchaseGrouped';
 import { getSiteRequestMissingLines } from '../inventaire/siteMaterialRequests';
+import { getSessionUser } from '../supabase/requireUser';
 
 const TABLE = 'purchase_requests';
 const ACHATS_DEPARTMENT_ID = 3;
@@ -164,9 +165,36 @@ export function getPurchaseRequestLineSummary(request) {
   };
 }
 
+function nowMs() {
+  return (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+}
+
+function logPurchaseTiming(op, t0, extra = {}) {
+  console.info('[CITYMO] purchaseRequest', { op, ms: Math.round(nowMs() - t0), ...extra });
+}
+
+/** Pagination PostgREST avec garde-fou (range ignoré = boucle infinie). */
+async function fetchAllPagedSafe(buildQuery, pageSize = 1000) {
+  const all = [];
+  let from = 0;
+  let prevSig = '';
+  for (let page = 0; page < 40; page += 1) {
+    const { data, error } = await buildQuery().range(from, from + pageSize - 1);
+    if (error) throw error;
+    const chunk = data || [];
+    if (!chunk.length) break;
+    const sig = `${chunk[0]?.id || ''}:${chunk.length}`;
+    if (from > 0 && sig === prevSig) break;
+    prevSig = sig;
+    all.push(...chunk);
+    if (chunk.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
+}
+
 async function requireUser() {
-  const { data: { user }, error } = await getSupabase().auth.getUser();
-  if (error || !user) throw new Error('Session requise.');
+  const user = await getSessionUser();
   return user.id;
 }
 
@@ -218,18 +246,32 @@ export async function reconcileMissingPurchaseRequestRefs() {
 }
 
 export async function listPurchaseRequests() {
+  const t0 = nowMs();
+  await requireUser();
+  logPurchaseTiming('list-start', t0);
+  const data = await fetchAllPagedSafe(() => getSupabase()
+    .from(TABLE)
+    .select(PURCHASE_REQUEST_SELECT)
+    .order('created_at', { ascending: false }));
+  const result = (data || []).map(normalizePurchaseRequest);
+  logPurchaseTiming('list', t0, { n: result.length });
+  return result;
+}
+
+export async function getPurchaseRequest(id) {
+  if (!id) return null;
   await requireUser();
   const { data, error } = await getSupabase()
     .from(TABLE)
     .select(PURCHASE_REQUEST_SELECT)
-    .order('created_at', { ascending: false });
+    .eq('id', id)
+    .maybeSingle();
   if (error) throw error;
-  return (data || []).map(normalizePurchaseRequest);
+  return data ? normalizePurchaseRequest(data) : null;
 }
 
 export async function createPurchaseRequest(form) {
-  const { data: { user }, error: authErr } = await getSupabase().auth.getUser();
-  if (authErr || !user) throw new Error('Session requise.');
+  const user = await getSessionUser();
   const uid = user.id;
   const { resolveCreatorAssignee } = await import('./purchaseWorkflow');
   const assignee = await resolveCreatorAssignee();
@@ -484,8 +526,7 @@ export function serializePurchaseAttachments(attachments = []) {
 
 /** Met à jour uniquement les pièces jointes (demande en brouillon). */
 export async function updatePurchaseRequestAttachments(id, attachments) {
-  const { data: { user }, error: authErr } = await getSupabase().auth.getUser();
-  if (authErr || !user) throw new Error('Session requise.');
+  await requireUser();
 
   const { data: existing, error: fetchErr } = await getSupabase()
     .from(TABLE)

@@ -21,6 +21,7 @@ import { resolveCurrentPurchaseRole, purchasePermissions, PURCHASE_ROLES } from 
 import { fetchProfile } from '../supabase/auth';
 import { employeeSelectLabel } from '../rh/employees';
 import { isSuperAdmin } from '../rh/isSuperAdmin';
+import { getSessionUser } from '../supabase/requireUser';
 import {
   notifyPurchaseRequestSubmitted,
   notifyPurchaseQuoteAdded,
@@ -33,8 +34,7 @@ import {
 const TABLE = 'purchase_requests';
 
 async function getAuthContext() {
-  const { data: { user }, error } = await getSupabase().auth.getUser();
-  if (error || !user) throw new Error('Session requise.');
+  const user = await getSessionUser();
   const profile = await fetchProfile(user.id);
   const name = profile?.nom
     || user.user_metadata?.full_name
@@ -758,14 +758,7 @@ export async function closePurchaseRequest(id) {
   return patchRequest(id, { statut: 'Clôturée' }, 'Clôture', 'Demande clôturée', ctx);
 }
 
-export async function getPurchaseRequestBundle(id) {
-  const rawRequest = await fetchRequest(id);
-  const { enrichPurchaseRequestFiles, enrichPurchaseQuotesFiles } = await import('./purchaseStorage');
-  const request = await enrichPurchaseRequestFiles(rawRequest);
-  const [quotes, history] = await Promise.all([
-    listQuotesForRequest(id).then(enrichPurchaseQuotesFiles),
-    import('./purchaseRequestHistory').then((m) => m.listPurchaseRequestHistory(id)),
-  ]);
+async function loadLinkedPurchaseOrders(request) {
   let acquisitionOrder = null;
   let paymentOrder = null;
   let acquisitionOrders = [];
@@ -774,37 +767,59 @@ export async function getPurchaseRequestBundle(id) {
   const groupMeta = request.payload?.group_orders || [];
 
   if (grouped && groupMeta.length) {
-    const { getAcquisitionOrder } = await import('./purchaseAcquisitionOrders');
     const { normalizePaymentOrder } = await import('../finance/paymentOrders');
-    acquisitionOrders = (await Promise.all(
-      groupMeta.map((g) => (g.acquisition_order_id ? getAcquisitionOrder(g.acquisition_order_id) : null)),
-    )).filter(Boolean);
     const opIds = groupMeta.map((g) => g.payment_order_id).filter(Boolean);
-    if (opIds.length) {
-      const { data: opRows } = await getSupabase().from('payment_orders').select('*').in('id', opIds);
-      paymentOrders = (opRows || []).map(normalizePaymentOrder);
-    }
+    const [oaRows, opRows] = await Promise.all([
+      Promise.all(groupMeta.map((g) => (g.acquisition_order_id ? getAcquisitionOrder(g.acquisition_order_id) : null))),
+      opIds.length
+        ? getSupabase().from('payment_orders').select('*').in('id', opIds)
+        : Promise.resolve({ data: [] }),
+    ]);
+    acquisitionOrders = (oaRows || []).filter(Boolean);
+    paymentOrders = (opRows?.data || []).map(normalizePaymentOrder);
     acquisitionOrder = acquisitionOrders[0] || null;
     paymentOrder = paymentOrders[0] || null;
   } else {
-    if (request.acquisition_order_id) {
-      const { getAcquisitionOrder } = await import('./purchaseAcquisitionOrders');
-      acquisitionOrder = await getAcquisitionOrder(request.acquisition_order_id);
-    }
-    if (request.payment_order_id) {
-      const { data } = await getSupabase()
-        .from('payment_orders')
-        .select('*')
-        .eq('id', request.payment_order_id)
-        .maybeSingle();
-      if (data) {
-        const { normalizePaymentOrder } = await import('../finance/paymentOrders');
-        paymentOrder = normalizePaymentOrder(data);
-      }
+    const [oa, opData] = await Promise.all([
+      request.acquisition_order_id
+        ? getAcquisitionOrder(request.acquisition_order_id)
+        : Promise.resolve(null),
+      request.payment_order_id
+        ? getSupabase().from('payment_orders').select('*').eq('id', request.payment_order_id).maybeSingle()
+        : Promise.resolve({ data: null }),
+    ]);
+    acquisitionOrder = oa;
+    if (opData?.data) {
+      const { normalizePaymentOrder } = await import('../finance/paymentOrders');
+      paymentOrder = normalizePaymentOrder(opData.data);
     }
   }
+  return { acquisitionOrder, paymentOrder, acquisitionOrders, paymentOrders };
+}
+
+export async function getPurchaseRequestBundle(id) {
+  const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+  const { enrichPurchaseRequestFiles, enrichPurchaseQuotesFiles } = await import('./purchaseStorage');
+  const [rawRequest, quotesRaw, history] = await Promise.all([
+    fetchRequest(id),
+    listQuotesForRequest(id),
+    import('./purchaseRequestHistory').then((m) => m.listPurchaseRequestHistory(id)),
+  ]);
+  const grouped = isGroupedPurchaseRequest(rawRequest);
+  const [request, quotes, linked] = await Promise.all([
+    enrichPurchaseRequestFiles(rawRequest),
+    enrichPurchaseQuotesFiles(quotesRaw),
+    loadLinkedPurchaseOrders(rawRequest),
+  ]);
+  console.info('[CITYMO] purchaseRequest', {
+    op: 'bundle',
+    ms: Math.round(((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) - t0),
+    id,
+    quotes: quotes.length,
+    history: history.length,
+  });
   return {
-    request, quotes, history, acquisitionOrder, paymentOrder, acquisitionOrders, paymentOrders, isGrouped: grouped,
+    request, quotes, history, ...linked, isGrouped: grouped,
   };
 }
 

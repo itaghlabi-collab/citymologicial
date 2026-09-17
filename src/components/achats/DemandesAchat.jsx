@@ -8,7 +8,7 @@ import {
   BarChart2, Package, CreditCard, CheckCircle, Send, Layers,
 } from 'lucide-react';
 import { usePurchaseRequests } from '../../hooks/usePurchaseRequests';
-import { useSuppliers } from '../../hooks/useSuppliers';
+import { listSuppliers } from '../../services/achats/suppliers';
 import { useAuth } from '../../hooks/useAuth';
 import {
   canEditPurchaseRequest, canDeletePurchaseRequest, normalizePurchaseStatus,
@@ -16,8 +16,8 @@ import {
   getPurchaseStatusBadge, getPurchaseStatusLabel, PURCHASE_DASHBOARD_TABS,
   isPurchaseRequestHistorique,
 } from '../../constants/purchaseWorkflow';
-import { submitPurchaseRequest, getPurchaseRequestBundle, reconcileLegacySoumiseRequests, reconcileLegacyDgValidationRequests, reconcilePurchaseRequestSentStatus } from '../../services/achats/purchaseWorkflow';
-import { projectOptionLabel, purchaseRequestProjectLabel, updatePurchaseRequestTitle, reconcileMissingPurchaseRequestRefs, isGroupedPurchaseRequest } from '../../services/achats/purchaseRequests';
+import { submitPurchaseRequest, reconcileLegacySoumiseRequests, reconcileLegacyDgValidationRequests, reconcilePurchaseRequestSentStatus } from '../../services/achats/purchaseWorkflow';
+import { projectOptionLabel, purchaseRequestProjectLabel, updatePurchaseRequestTitle, reconcileMissingPurchaseRequestRefs, isGroupedPurchaseRequest, getPurchaseRequest } from '../../services/achats/purchaseRequests';
 import { buildGroupedFormPayload } from '../../services/achats/purchaseGrouped';
 import { generatePurchaseRequestPdf } from '../../services/achats/purchaseRequestPdf';
 import { resolveCurrentPurchaseRole, purchasePermissions, canViewPurchaseRequest } from '../../services/achats/purchaseWorkflowRoles';
@@ -830,9 +830,9 @@ function DaMobileCard({
 export default function DemandesAchat() {
   const { user } = useAuth();
   const superAdmin = isSuperAdmin(user);
-  const { records: suppliers } = useSuppliers();
+  const [suppliers, setSuppliers] = useState([]);
   const {
-    records: items, projects, loading, saving, error, configured, reload, reloadOptions, save, remove,
+    records: items, projects, loading, saving, error, configured, reload, reloadOptions, upsertRecord, save, remove,
   } = usePurchaseRequests();
 
   const [search, setSearch] = useState('');
@@ -872,14 +872,23 @@ export default function DemandesAchat() {
   const perms = useMemo(() => purchasePermissions(role), [role]);
 
   useEffect(() => {
-    if (!configured) return;
+    if (!modalMode && !detailId) return undefined;
+    let cancelled = false;
+    listSuppliers({ includeArchived: true })
+      .then((rows) => { if (!cancelled) setSuppliers(rows || []); })
+      .catch((err) => { if (!cancelled) console.warn('[CITYMO] DA suppliers', err); });
+    return () => { cancelled = true; };
+  }, [modalMode, detailId]);
+
+  useEffect(() => {
+    if (!configured || loading) return;
     reconcileMissingPurchaseRequestRefs()
       .then((refs) => { if (refs > 0) reload(); })
       .catch(() => {});
-  }, [configured, reload]);
+  }, [configured, loading, reload]);
 
   useEffect(() => {
-    if (!configured || !perms.canManageQuotes) return;
+    if (!configured || loading || !perms.canManageQuotes) return;
     Promise.all([
       reconcileLegacySoumiseRequests(),
       reconcileLegacyDgValidationRequests(),
@@ -887,7 +896,7 @@ export default function DemandesAchat() {
     ])
       .then(([legacy, dg, sent]) => { if ((legacy || 0) + (dg || 0) + (sent || 0) > 0) reload(); })
       .catch(() => {});
-  }, [configured, perms.canManageQuotes, reload]);
+  }, [configured, loading, perms.canManageQuotes, reload]);
 
   const visibleItems = useMemo(() => {
     if (perms.canViewAll) return items;
@@ -934,8 +943,8 @@ export default function DemandesAchat() {
   async function handlePrintPdf(item) {
     setPdfLoadingId(item.id);
     try {
-      const bundle = await getPurchaseRequestBundle(item.id);
-      await generatePurchaseRequestPdf(bundle.request);
+      const req = await getPurchaseRequest(item.id);
+      await generatePurchaseRequestPdf(req || item);
     } catch (err) {
       window.alert(err.message || 'Erreur génération PDF');
     } finally {
@@ -960,8 +969,8 @@ export default function DemandesAchat() {
     if (!trimmed || trimmed === (item.titre || '').trim()) return;
     setTitleSavingId(item.id);
     try {
-      await updatePurchaseRequestTitle(item.id, trimmed);
-      await reload();
+      const updated = await updatePurchaseRequestTitle(item.id, trimmed);
+      if (updated) upsertRecord(updated);
     } catch (err) {
       window.alert(err.message || 'Erreur mise à jour du titre');
     } finally {
@@ -1010,8 +1019,8 @@ export default function DemandesAchat() {
   async function handleSubmit(id) {
     setSubmittingId(id);
     try {
-      await submitPurchaseRequest(id);
-      await reload();
+      const updated = await submitPurchaseRequest(id);
+      if (updated) upsertRecord(updated);
     } catch (err) {
       window.alert(err.message || 'Erreur soumission');
     } finally {
@@ -1040,7 +1049,7 @@ export default function DemandesAchat() {
             }
             openEditModal(item);
           }}
-          onRefresh={reload}
+          onRefresh={(row) => { if (row?.id) upsertRecord(row); }}
         />
         <Modal
           open={modalMode !== null}

@@ -5,6 +5,7 @@ import { getSupabase } from '../../lib/supabase';
 import { QUOTE_STATUSES } from '../../constants/purchaseWorkflow';
 import Big from 'big.js';
 import { moneyLineHt, moneyLineTtc, moneyToNumber } from '../../utils/decimalMoney';
+import { getSessionUser } from '../supabase/requireUser';
 
 const TABLE = 'purchase_request_quotes';
 
@@ -143,9 +144,7 @@ export function toQuoteRow(form, purchaseRequestId) {
 }
 
 async function requireUser() {
-  const { data: { user }, error } = await getSupabase().auth.getUser();
-  if (error || !user) throw new Error('Session requise.');
-  return user;
+  return getSessionUser();
 }
 
 export async function listQuotesForRequest(purchaseRequestId) {

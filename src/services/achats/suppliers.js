@@ -10,6 +10,7 @@ import {
   setSupplierCategoryLinks,
 } from './supplierCategories';
 import { isMissingAnnuaireSchema } from './supplierAnnuaire';
+import { getSessionUser } from '../supabase/requireUser';
 
 const TABLE = 'purchase_suppliers';
 
@@ -211,9 +212,7 @@ async function syncSupplierCategories(supplierId, form) {
 }
 
 async function requireUser() {
-  const { data: { user }, error } = await getSupabase().auth.getUser();
-  if (error || !user) throw new Error('Session requise.');
-  return user.id;
+  return (await getSessionUser()).id;
 }
 
 async function insertSupplierRow(row) {
