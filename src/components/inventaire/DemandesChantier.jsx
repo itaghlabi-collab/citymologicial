@@ -16,7 +16,19 @@ import {
   siteRequestLivraisonStatut,
   isManualSiteRequest,
   isMaterialBesoinSiteRequest,
+  preparationBonStatutLabel,
+  PREPARATION_BON_STATUT_OPTIONS,
+  preparationBonStatutSelectValue,
 } from '../../constants/siteMaterialRequests';
+import {
+  buildPreparationOffers,
+  isPreparationBon,
+  decodeSourceEmplacement,
+  validatePreparationQuantities,
+  formatPreparationConflictMessage,
+  linesToPreparationPayload,
+} from '../../services/inventaire/siteRequestPreparation';
+import { listAllStockLevels } from '../../services/inventaire/stockSync';
 import {
   listSiteMaterialRequests,
   getSiteMaterialRequest,
@@ -51,6 +63,7 @@ import { buildInitialLines } from './SiteRequestForm.jsx';
 import SiteRequestFormPage from './SiteRequestFormPage.jsx';
 import SiteRequestCreateModeModal from './SiteRequestCreateModeModal.jsx';
 import SiteRequestManualFormPage, { buildManualLines } from './SiteRequestManualFormPage.jsx';
+import SiteRequestPreparationFormPage from './SiteRequestPreparationFormPage.jsx';
 import ArticleScanBar from './ArticleScanBar.jsx';
 import { useArticleScanner } from '../../hooks/useArticleScanner';
 import {
@@ -58,9 +71,16 @@ import {
   incrementPreparedLine,
   isLineFullyPrepared,
 } from '../../services/inventaire/articleScanWorkflow';
-import { KpiCard, INPUT_STYLE, SELECT_STYLE } from './shared.jsx';
+import { KpiCard, INPUT_STYLE, SELECT_STYLE, formatEmplacementDisplay } from './shared.jsx';
 
 function SiteRequestOrigineBadge({ req, style }) {
+  if (isPreparationBon(req)) {
+    return (
+      <span className="badge badge-blue" style={{ fontSize: '0.68rem', ...style }}>
+        Bon de préparation
+      </span>
+    );
+  }
   if (isMaterialBesoinSiteRequest(req)) {
     return (
       <span className="badge badge-purple" style={{ fontSize: '0.68rem', ...style }}>
@@ -122,6 +142,15 @@ function getRowActions(r, handlers, { embedded = false } = {}) {
     actions.push({ key: 'delete', label: 'Supprimer', icon: Trash2, danger: true, onClick: () => handlers.handleDelete(r.id) });
   }
   if (embedded) return actions;
+  if (isPreparationBon(r)) {
+    if (['soumise', 'en_preparation', 'preparation_partielle'].includes(r.statut)) {
+      actions.push({ key: 'ready', label: 'Marquer préparé', icon: CheckCircle, onClick: () => handlers.markPrepared(r.id) });
+    }
+    if (['prete', 'validee_dg'].includes(r.statut)) {
+      actions.push({ key: 'deliver', label: 'Marquer livré', icon: Truck, onClick: () => handlers.markDelivered(r.id) });
+    }
+    return actions;
+  }
   if (r.statut === 'soumise') {
     actions.push({ key: 'prepare', label: 'Préparer', icon: Package, onClick: () => handlers.openDetail(r.id) });
   }
@@ -132,6 +161,25 @@ function getRowActions(r, handlers, { embedded = false } = {}) {
     actions.push({ key: 'deliver', label: 'Livrer', icon: Truck, onClick: () => handlers.openDetail(r.id) });
   }
   return actions;
+}
+
+function StatutSelect({ req, disabled, style, onChange }) {
+  const prep = isPreparationBon(req);
+  const options = prep ? PREPARATION_BON_STATUT_OPTIONS : SITE_REQUEST_STATUTS;
+  const value = prep ? preparationBonStatutSelectValue(req.statut) : (req.statut || '');
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      disabled={disabled}
+      style={style}
+      aria-label="Statut"
+    >
+      {options.map((s) => (
+        <option key={s.value} value={s.value}>{s.label}</option>
+      ))}
+    </select>
+  );
 }
 
 function projectFormFromProjet(projet) {
@@ -168,8 +216,10 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate,
   const [detailRecap, setDetailRecap] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
   const [lines, setLines] = useState(() => buildInitialLines());
+  const [prepOffers, setPrepOffers] = useState([]);
   const detailRef = useRef(null);
   const persistPromiseRef = useRef(null);
+  const saveInFlightRef = useRef(false);
   detailRef.current = detail;
 
   const load = useCallback(async () => {
@@ -200,6 +250,16 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate,
   }, [statutFilter, prioriteFilter, embeddedProjectId, embedded]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (embedded) return undefined;
+    let pendingId = null;
+    try { pendingId = sessionStorage.getItem('citymo_site_request_detail'); } catch { pendingId = null; }
+    if (!pendingId) return undefined;
+    try { sessionStorage.removeItem('citymo_site_request_detail'); } catch { /* ignore */ }
+    openDetail(pendingId);
+    return undefined;
+  }, [embedded]);
 
   useEffect(() => {
     if (Array.isArray(articlesProp) && articlesProp.length) {
@@ -243,8 +303,39 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate,
     pretes: requests.filter((r) => r.statut === 'prete').length,
   }), [requests]);
 
+  async function loadPreparationCatalog({ force = false } = {}) {
+    const [arts, levels] = await Promise.all([
+      listStockArticles({ includeLastMovements: false, force }),
+      listAllStockLevels({ force }),
+    ]);
+    if (Array.isArray(arts)) setStockArticles(arts);
+    const offers = buildPreparationOffers(arts || stockArticles, levels || []);
+    setPrepOffers(offers);
+    return offers;
+  }
+
   function openCreateChooser() {
     setShowCreateMode(true);
+  }
+
+  async function openCreatePreparation() {
+    setEditId(null);
+    setFormMode('preparation');
+    const base = {
+      ...EMPTY_FORM,
+      date_demande: new Date().toISOString().slice(0, 10),
+      origine: 'bon_preparation',
+    };
+    if (embedded && projet) Object.assign(base, projectFormFromProjet(projet));
+    setForm(base);
+    setLines([]);
+    setError('');
+    setView('form');
+    try {
+      await loadPreparationCatalog({ force: true });
+    } catch (err) {
+      setError(err.message || 'Impossible de charger le catalogue stock.');
+    }
   }
 
   function openCreateCatalogue() {
@@ -283,9 +374,10 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate,
     setSaving(true);
     try {
       const req = await getSiteMaterialRequest(id);
-      const manual = isManualSiteRequest(req);
+      const prep = isPreparationBon(req);
+      const manual = !prep && isManualSiteRequest(req);
       setEditId(id);
-      setFormMode(manual ? 'manuelle' : 'catalogue');
+      setFormMode(prep ? 'preparation' : (manual ? 'manuelle' : 'catalogue'));
       setForm({
         ref: req.ref,
         project_id: req.project_id || '',
@@ -298,9 +390,19 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate,
         date_souhaitee: req.date_souhaitee,
         priorite: req.priorite,
         observation: req.observation,
-        origine: manual ? 'manuelle' : 'catalogue',
+        origine: prep ? 'bon_preparation' : (manual ? 'manuelle' : 'catalogue'),
       });
-      setLines(manual ? buildManualLines(req.lines) : buildInitialLines(req.lines));
+      if (prep) {
+        setLines((req.lines || []).filter((l) => Number(l.quantite_demandee) > 0).map((l, idx) => ({
+          ...l,
+          reference: l.reference || '',
+          emplacement_source: l.emplacement_source || decodeSourceEmplacement(l.remarque).emplacement,
+          line_order: idx,
+        })));
+        await loadPreparationCatalog({ force: true }).catch(() => {});
+      } else {
+        setLines(manual ? buildManualLines(req.lines) : buildInitialLines(req.lines));
+      }
       setError('');
       setView('form');
     } catch (err) {
@@ -380,18 +482,32 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate,
   }
 
   async function handleSave(submitAfter = false, linesOverride = null) {
+    if (saveInFlightRef.current) return;
     if (!form.project_id) {
       setError('Sélectionnez un projet.');
       return;
     }
+    saveInFlightRef.current = true;
     setSaving(true);
     setError('');
     try {
+      let linesToSave = linesOverride || lines;
+      const isPrep = formMode === 'preparation' || form.origine === 'bon_preparation';
+      if (isPrep) {
+        const freshOffers = await loadPreparationCatalog({ force: true });
+        linesToSave = linesToPreparationPayload(linesToSave);
+        const conflicts = validatePreparationQuantities(linesToSave, freshOffers);
+        if (conflicts.length) {
+          setError(formatPreparationConflictMessage(conflicts));
+          return;
+        }
+      }
       const payload = {
         ...form,
-        origine: formMode === 'manuelle' ? 'manuelle' : (form.origine || 'catalogue'),
+        origine: isPrep
+          ? 'bon_preparation'
+          : (formMode === 'manuelle' ? 'manuelle' : (form.origine || 'catalogue')),
       };
-      const linesToSave = linesOverride || lines;
       let req;
       if (editId) {
         req = await updateSiteMaterialRequest(editId, payload, linesToSave);
@@ -407,9 +523,13 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate,
       }
       upsertRequestRow(req);
       closeForm();
+      if (isPrep && req?.id) {
+        await openDetail(req.id);
+      }
     } catch (err) {
       setError(err.message);
     } finally {
+      saveInFlightRef.current = false;
       setSaving(false);
     }
   }
@@ -486,6 +606,16 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate,
       return;
     }
     await runActionOn(id, (rid) => setSiteMaterialRequestStatut(rid, nextStatut));
+  }
+
+  function markPrepared(id) {
+    return runActionOn(id, (rid) => markSiteRequestReady(rid));
+  }
+
+  function markDelivered(id) {
+    const current = (detail?.id === id ? detail.statut : null)
+      || requests.find((r) => r.id === id)?.statut;
+    return handleStatutChange(id, 'livree', current);
   }
 
   async function handleLivraisonChange(id, nextLiv, currentStatut) {
@@ -587,7 +717,7 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate,
     }
   }
 
-  const rowHandlers = { openDetail, openEdit, handlePdf, handleDelete };
+  const rowHandlers = { openDetail, openEdit, handlePdf, handleDelete, markPrepared, markDelivered };
 
   function lineMatchKey(line) {
     if (line?.id != null && String(line.id) !== '') return `id:${line.id}`;
@@ -770,6 +900,7 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate,
 
   const canScanPreparation = detail
     && !embedded
+    && !isPreparationBon(detail)
     && ['soumise', 'en_preparation', 'preparation_partielle', 'en_attente_dg', 'validee_dg'].includes(detail.statut)
     && !['prete', 'livree', 'annulee'].includes(detail.statut);
 
@@ -796,6 +927,25 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate,
       updateDetailLine(line, { quantite_preparee: updated.quantite_preparee }, { persist: true });
     },
   });
+
+  if (view === 'form' && formMode === 'preparation') {
+    return (
+      <SiteRequestPreparationFormPage
+        editId={editId}
+        form={form}
+        setForm={setForm}
+        lines={lines}
+        setLines={setLines}
+        projects={projects}
+        offers={prepOffers}
+        saving={saving}
+        error={error}
+        onBack={closeForm}
+        onSave={handleSave}
+        lockProject={embedded && !!projet?.id}
+      />
+    );
+  }
 
   if (view === 'form' && formMode === 'manuelle') {
     return (
@@ -850,8 +1000,8 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate,
             <button type="button" className="btn btn-secondary btn-sm" onClick={load} disabled={loading}>
               <RefreshCw size={14} /> Actualiser
             </button>
-            <button type="button" className="btn btn-primary" onClick={openCreateChooser}>
-              <Plus size={15} /> Nouvelle demande
+            <button type="button" className="btn btn-primary" onClick={openCreatePreparation}>
+              <Plus size={15} /> Créer un bon de préparation
             </button>
           </div>
         </div>
@@ -906,7 +1056,7 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate,
         <div className="card" style={{ padding: embedded ? 28 : 40, textAlign: 'center', color: 'var(--text-3)' }}>
           {embedded
             ? 'Aucun besoin matériel pour ce projet. Cliquez sur « Ajouter un besoin matériel ».'
-            : 'Aucune demande chantier. Créez la première demande de matériel.'}
+            : 'Aucune demande chantier. Créez un bon de préparation pour les articles disponibles.'}
         </div>
       ) : (
         <div className="card inv-dc-list-card" style={{ padding: 0 }}>
@@ -944,11 +1094,11 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate,
                     <td data-label="Date souhaitée">{fmtDate(r.date_souhaitee)}</td>
                     <td data-label="Préparation">
                       <span className={`badge ${prepBadgeClass(r.statut)}`}>
-                        {siteRequestPreparationStatut(r.statut)}
+                        {isPreparationBon(r) ? preparationBonStatutLabel(r.statut) : siteRequestPreparationStatut(r.statut)}
                       </span>
                     </td>
                     <td data-label="Livraison">
-                      {!embedded ? (
+                      {!embedded && !isPreparationBon(r) ? (
                         <select
                           value={siteRequestLivraisonValue(r.statut)}
                           onChange={(e) => handleLivraisonChange(r.id, e.target.value, r.statut)}
@@ -978,10 +1128,10 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate,
                     <td data-label="Statut">
                       <div style={{ display: 'flex', flexDirection: 'column', gap: 6, alignItems: 'flex-start' }}>
                         {!embedded ? (
-                          <select
-                            value={r.statut || ''}
-                            onChange={(e) => handleStatutChange(r.id, e.target.value, r.statut)}
+                          <StatutSelect
+                            req={r}
                             disabled={saving}
+                            onChange={(next) => handleStatutChange(r.id, next, r.statut)}
                             style={{
                               border: '1px solid var(--border)',
                               borderRadius: 999,
@@ -992,18 +1142,13 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate,
                               color: siteRequestStatutColor(r.statut),
                               cursor: saving ? 'wait' : 'pointer',
                             }}
-                            aria-label="Statut"
-                          >
-                            {SITE_REQUEST_STATUTS.map((s) => (
-                              <option key={s.value} value={s.value}>{s.label}</option>
-                            ))}
-                          </select>
+                          />
                         ) : (
                           <span className="badge" style={{ background: `${siteRequestStatutColor(r.statut)}22`, color: siteRequestStatutColor(r.statut) }}>
                             {r.statutLabel}
                           </span>
                         )}
-                        {!embedded && getSiteRequestMissingLines(r).length > 0 && (
+                        {!embedded && !isPreparationBon(r) && getSiteRequestMissingLines(r).length > 0 && (
                           <button
                             type="button"
                             className="btn btn-ghost btn-sm"
@@ -1081,14 +1226,14 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate,
                       <dt>Préparation</dt>
                       <dd>
                         <span className={`badge ${prepBadgeClass(r.statut)}`}>
-                          {siteRequestPreparationStatut(r.statut)}
+                          {isPreparationBon(r) ? preparationBonStatutLabel(r.statut) : siteRequestPreparationStatut(r.statut)}
                         </span>
                       </dd>
                     </div>
                     <div className="inv-dc-field">
                       <dt>Livraison</dt>
                       <dd>
-                        {!embedded ? (
+                        {!embedded && !isPreparationBon(r) ? (
                           <select
                             value={siteRequestLivraisonValue(r.statut)}
                             onChange={(e) => handleLivraisonChange(r.id, e.target.value, r.statut)}
@@ -1111,20 +1256,16 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate,
                     <div className="inv-dc-field">
                       <dt>Statut</dt>
                       <dd>
-                        <select
-                          value={r.statut || ''}
-                          onChange={(e) => handleStatutChange(r.id, e.target.value, r.statut)}
+                        <StatutSelect
+                          req={r}
                           disabled={saving}
+                          onChange={(next) => handleStatutChange(r.id, next, r.statut)}
                           style={{ ...SELECT_STYLE, fontSize: '0.8rem', fontWeight: 700, color: siteRequestStatutColor(r.statut) }}
-                        >
-                          {SITE_REQUEST_STATUTS.map((s) => (
-                            <option key={s.value} value={s.value}>{s.label}</option>
-                          ))}
-                        </select>
+                        />
                       </dd>
                     </div>
                   )}
-                  {!embedded && getSiteRequestMissingLines(r).length > 0 && (
+                  {!embedded && !isPreparationBon(r) && getSiteRequestMissingLines(r).length > 0 && (
                     <button
                       type="button"
                       className="btn btn-secondary btn-sm"
@@ -1202,6 +1343,12 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate,
                     <div className="rh-emp-docs-info-label">Projet</div>
                     <div className="rh-emp-docs-info-value">{detail.project_name || '—'}</div>
                   </div>
+                  {isPreparationBon(detail) && (
+                    <div>
+                      <div className="rh-emp-docs-info-label">Demandeur</div>
+                      <div className="rh-emp-docs-info-value">{detail.requested_by_name || '—'}</div>
+                    </div>
+                  )}
                   <div>
                     <div className="rh-emp-docs-info-label">Client</div>
                     {!embedded && detail.statut !== 'annulee' ? (
@@ -1275,21 +1422,17 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate,
                   <div>
                     <div className="rh-emp-docs-info-label">Statut</div>
                     {!embedded ? (
-                      <select
-                        value={detail.statut || ''}
-                        onChange={(e) => handleStatutChange(detail.id, e.target.value, detail.statut)}
+                      <StatutSelect
+                        req={detail}
                         disabled={saving}
+                        onChange={(next) => handleStatutChange(detail.id, next, detail.statut)}
                         style={{ ...SELECT_STYLE, marginTop: 4, fontWeight: 700, color: siteRequestStatutColor(detail.statut) }}
-                      >
-                        {SITE_REQUEST_STATUTS.map((s) => (
-                          <option key={s.value} value={s.value}>{s.label}</option>
-                        ))}
-                      </select>
+                      />
                     ) : (
                       <div className="rh-emp-docs-info-value">{detail.statutLabel}</div>
                     )}
                   </div>
-                  {!embedded && (
+                  {!embedded && !isPreparationBon(detail) && (
                     <div>
                       <div className="rh-emp-docs-info-label">Livraison</div>
                       <select
@@ -1336,7 +1479,7 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate,
                 )}
               </div>
 
-              {!embedded && missingLines.length > 0 && (
+              {!embedded && !isPreparationBon(detail) && missingLines.length > 0 && (
                 <div
                   style={{
                     marginBottom: 16,
@@ -1400,7 +1543,7 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate,
                 </div>
               )}
 
-              {!embedded && missingLines.length === 0 && linkedDa && (
+              {!embedded && !isPreparationBon(detail) && missingLines.length === 0 && linkedDa && (
                 <div style={{ marginBottom: 16, fontSize: '0.84rem', color: '#1565C0' }}>
                   Demande d&apos;achat liée : <strong>{linkedDa.ref || linkedDa.ref_demande || linkedDa.titre}</strong>
                   {' '}
@@ -1424,6 +1567,58 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate,
                       compact
                     />
                   )}
+                  {isPreparationBon(detail) ? (
+                    <>
+                      <div className="table-wrap inv-dc-lines-desktop" style={{ marginBottom: 16 }}>
+                        <table style={{ fontSize: '0.82rem' }}>
+                          <thead>
+                            <tr>
+                              <th>Référence</th>
+                              <th>Désignation</th>
+                              <th>Unité</th>
+                              <th>Quantité</th>
+                              <th>Source</th>
+                              <th>Destination</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {(detail.lines || []).filter((l) => Number(l.quantite_demandee) > 0).map((l) => {
+                              const src = l.emplacement_source || decodeSourceEmplacement(l.remarque).emplacement;
+                              return (
+                                <tr key={l.id || `${l.article_id}-${src}`}>
+                                  <td style={{ fontWeight: 700 }}>{l.reference || '—'}</td>
+                                  <td>{l.article_name}</td>
+                                  <td>{l.unite || 'U'}</td>
+                                  <td>{l.quantite_demandee}</td>
+                                  <td>{src ? formatEmplacementDisplay(src) : '—'}</td>
+                                  <td>{detail.project_name || '—'}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </div>
+                      <div className="inv-dc-lines-mobile" style={{ marginBottom: 16 }}>
+                        {(detail.lines || []).filter((l) => Number(l.quantite_demandee) > 0).map((l) => {
+                          const src = l.emplacement_source || decodeSourceEmplacement(l.remarque).emplacement;
+                          return (
+                            <div key={l.id || `m-${l.article_id}-${src}`} className="inv-dc-line-card">
+                              <div className="inv-dc-line-name">
+                                {l.reference ? <span style={{ fontWeight: 700, marginRight: 6 }}>{l.reference}</span> : null}
+                                {l.article_name}
+                              </div>
+                              <dl className="inv-dc-line-metrics">
+                                <div className="inv-dc-field"><dt>Quantité</dt><dd>{l.quantite_demandee} {l.unite || 'U'}</dd></div>
+                                <div className="inv-dc-field"><dt>Source</dt><dd>{src ? formatEmplacementDisplay(src) : '—'}</dd></div>
+                                <div className="inv-dc-field"><dt>Destination</dt><dd>{detail.project_name || '—'}</dd></div>
+                              </dl>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </>
+                  ) : (
+                  <>
                 <div className="table-wrap inv-dc-lines-desktop" style={{ marginBottom: 16 }}>
                   <table style={{ fontSize: '0.82rem' }}>
                     <thead>
@@ -1447,7 +1642,13 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate,
                         <tr key={l.id || `${l.category_id}-${l.article_name}`} style={prepared ? { background: '#F1F8E9' } : undefined}>
                           <td>
                             {prepared && <span style={{ color: '#2E7D32', marginRight: 6 }} title="Préparée">✓</span>}
+                            {l.reference ? <span style={{ fontWeight: 700, marginRight: 6 }}>{l.reference}</span> : null}
                             {l.article_name}
+                            {(l.emplacement_source || decodeSourceEmplacement(l.remarque).emplacement) ? (
+                              <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>
+                                Source : {formatEmplacementDisplay(l.emplacement_source || decodeSourceEmplacement(l.remarque).emplacement)}
+                              </div>
+                            ) : null}
                             {l.is_custom && !l.article_id && (
                               <span className="badge badge-orange" style={{ marginLeft: 6, fontSize: '0.65rem' }}>Hors catalogue</span>
                             )}
@@ -1643,6 +1844,8 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate,
                     );
                   })}
                 </div>
+                  </>
+                  )}
                 </>
               )}
 
@@ -1654,6 +1857,21 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate,
 
               <div className="inv-dc-detail-actions" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
                 <button type="button" className="btn btn-secondary btn-sm" onClick={() => handlePdf(detail.id)}><Download size={14} /> Télécharger PDF</button>
+                {isPreparationBon(detail) ? (
+                  <>
+                    {!embedded && ['soumise', 'en_preparation', 'preparation_partielle'].includes(detail.statut) && (
+                      <button type="button" className="btn btn-primary btn-sm" disabled={saving} onClick={() => markPrepared(detail.id)}>
+                        <CheckCircle size={14} /> Marquer préparé
+                      </button>
+                    )}
+                    {!embedded && ['prete', 'validee_dg'].includes(detail.statut) && (
+                      <button type="button" className="btn btn-primary btn-sm" disabled={saving} onClick={() => markDelivered(detail.id)}>
+                        <Truck size={14} /> Marquer livré
+                      </button>
+                    )}
+                  </>
+                ) : (
+                  <>
                 {!embedded && detail.statut === 'soumise' && (
                   <button type="button" className="btn btn-primary btn-sm" disabled={saving} onClick={() => runAction((id) => prepareSiteMaterialRequest(id, detail.lines))}>
                     <Package size={14} /> Prendre en charge
@@ -1703,6 +1921,8 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate,
                   >
                     <Truck size={14} /> Livrer & générer bon de sortie
                   </button>
+                )}
+                  </>
                 )}
                 {!embedded && !['livree', 'annulee'].includes(detail.statut) && (
                   <button type="button" className="btn btn-ghost btn-sm" style={{ color: 'var(--red)' }} disabled={saving} onClick={() => {

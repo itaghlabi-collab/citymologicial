@@ -6,6 +6,7 @@ export const SITE_REQUEST_PRIORITES = ['Normale', 'Urgente', 'Critique'];
 export const SITE_REQUEST_ORIGINES = {
   catalogue: { value: 'catalogue', label: 'Catalogue stock', badge: null },
   manuelle: { value: 'manuelle', label: 'Demande manuelle', badge: 'Demande manuelle' },
+  bon_preparation: { value: 'bon_preparation', label: 'Bon de préparation', badge: 'Bon de préparation' },
 };
 
 export function siteRequestOrigineLabel(origine) {
@@ -148,6 +149,27 @@ export const SITE_REQUEST_CATEGORIES = [
 
 export function siteRequestStatutLabel(statut) {
   return SITE_REQUEST_STATUTS.find((s) => s.value === statut)?.label || statut;
+}
+
+/** Libellés du bon de préparation (valeurs DB inchangées). */
+export function preparationBonStatutLabel(statut) {
+  if (['soumise', 'en_preparation', 'preparation_partielle'].includes(statut)) return 'En cours';
+  if (['prete', 'validee_dg'].includes(statut)) return 'Préparé';
+  if (statut === 'livree') return 'Livré';
+  return siteRequestStatutLabel(statut);
+}
+
+export const PREPARATION_BON_STATUT_OPTIONS = [
+  { value: 'en_preparation', label: 'En cours' },
+  { value: 'prete', label: 'Préparé' },
+  { value: 'livree', label: 'Livré' },
+  { value: 'annulee', label: 'Annulée' },
+];
+
+export function preparationBonStatutSelectValue(statut) {
+  if (['soumise', 'preparation_partielle'].includes(statut)) return 'en_preparation';
+  if (statut === 'validee_dg') return 'prete';
+  return statut || 'en_preparation';
 }
 
 export function siteRequestStatutColor(statut) {

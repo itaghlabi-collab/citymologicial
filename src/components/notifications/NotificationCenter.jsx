@@ -72,6 +72,9 @@ export default function NotificationCenter({ user, onNavigate }) {
     const mod = parseActionUrl(n.actionUrl);
     if (mod && onNavigate) {
       let target = mod;
+      if (mod === 'demandes-chantier' && n.entityId) {
+        try { sessionStorage.setItem('citymo_site_request_detail', n.entityId); } catch { /* ignore */ }
+      }
       if (mod.startsWith('/?') || mod.startsWith('http')) {
         try {
           const url = new URL(mod, window.location.origin);

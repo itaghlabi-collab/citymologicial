@@ -4,8 +4,9 @@
 import { jsPDF } from 'jspdf';
 import { loadCompanyLogoFit } from '../finance/pdfShared';
 import { setupPdfUnicodeFont, setPdfFont } from '../finance/pdfUnicode';
-import { SITE_REQUEST_CATEGORIES, siteRequestStatutLabel } from '../../constants/siteMaterialRequests';
+import { SITE_REQUEST_CATEGORIES, siteRequestStatutLabel, preparationBonStatutLabel } from '../../constants/siteMaterialRequests';
 import { applySiteRequestLinePreparation } from './siteMaterialRequests';
+import { isPreparationBon, decodeSourceEmplacement } from './siteRequestPreparation';
 
 const LOGO_URL = 'https://i.ibb.co/N6SbC06M/logopng.png';
 const ICON_URL = 'https://i.ibb.co/S79nbLdm/icone.png';
@@ -152,14 +153,15 @@ function drawHeader(doc, request, logoMeta) {
   setPdfFont(doc, 'bold');
   doc.setFontSize(17);
   doc.setTextColor(...RED);
-  doc.text('BON DE DEMANDE CHANTIER', rightX + rightW, top + 14, { align: 'right' });
+  const title = isPreparationBon(request) ? 'BON DE PRÉPARATION' : 'BON DE DEMANDE CHANTIER';
+  doc.text(title, rightX + rightW, top + 14, { align: 'right' });
 
   const metaLines = [
     ['Référence', request.ref || '—'],
     ['Date demande', fmtDate(request.date_demande)],
     ['Date souhaitée', fmtDate(request.date_souhaitee)],
     ['Priorité', request.priorite || '—'],
-    ['Statut', siteRequestStatutLabel(request.statut)],
+    ['Statut', isPreparationBon(request) ? preparationBonStatutLabel(request.statut) : siteRequestStatutLabel(request.statut)],
   ];
 
   let ry = top + 22;
@@ -184,15 +186,26 @@ function drawChantierMeta(doc, request, startY) {
   drawRedAccent(doc, M, startY, boxH);
 
   const colW = CONTENT_W / 2;
-  const fields = [
-    ['Projet', request.project_name || '—'],
-    ['Réf. projet', request.project_ref || '—'],
-    ['Client', request.client_name || '—'],
-    ['Chef de projet', request.chef_projet || '—'],
-    ['Chef de chantier', request.chef_chantier || '—'],
-    ['Magasinier', request.prepared_by_name || '—'],
-    ['Bon de sortie', request.movement_ref || '—'],
-  ];
+  const prep = isPreparationBon(request);
+  const fields = prep
+    ? [
+      ['Destination', request.project_name || '—'],
+      ['Réf. projet', request.project_ref || '—'],
+      ['Client', request.client_name || '—'],
+      ['Demandeur', request.requested_by_name || '—'],
+      ['Chef de projet', request.chef_projet || '—'],
+      ['Chef de chantier', request.chef_chantier || '—'],
+      ['Magasinier', request.prepared_by_name || '—'],
+    ]
+    : [
+      ['Projet', request.project_name || '—'],
+      ['Réf. projet', request.project_ref || '—'],
+      ['Client', request.client_name || '—'],
+      ['Chef de projet', request.chef_projet || '—'],
+      ['Chef de chantier', request.chef_chantier || '—'],
+      ['Magasinier', request.prepared_by_name || '—'],
+      ['Bon de sortie', request.movement_ref || '—'],
+    ];
 
   fields.forEach(([label, value], i) => {
     const col = i % 2;
@@ -368,6 +381,58 @@ function drawSignatures(doc, startY, _iconMeta, ensureSpace) {
   return startY + SIGN_H + 3;
 }
 
+function drawPreparationTable(doc, lines, request, startY, ensureSpace) {
+  const dest = request.project_name || '—';
+  const headers = ['RÉF.', 'DÉSIGNATION', 'UNITÉ', 'QTÉ', 'SOURCE', 'DESTINATION'];
+  const widths = [28, 52, 16, 16, 39, CONTENT_W - 151];
+  const xs = [M];
+  for (let i = 1; i < widths.length; i++) xs[i] = xs[i - 1] + widths[i - 1];
+
+  const drawHdr = (y) => {
+    const hdrH = 7;
+    if (ensureSpace(hdrH + 8)) y = M;
+    doc.setFillColor(...TABLE_HDR_BG);
+    doc.rect(M, y, CONTENT_W, hdrH, 'F');
+    drawRedAccent(doc, M, y, hdrH);
+    doc.setDrawColor(...BORDER);
+    doc.setLineWidth(0.2);
+    doc.rect(M, y, CONTENT_W, hdrH);
+    setPdfFont(doc, 'bold');
+    doc.setFontSize(6);
+    doc.setTextColor(...TEXT);
+    headers.forEach((h, i) => {
+      doc.text(h, xs[i] + 2, y + 4.8);
+    });
+    return y + hdrH;
+  };
+
+  let y = drawHdr(startY);
+  (lines || []).forEach((line) => {
+    const src = line.emplacement_source || decodeSourceEmplacement(line.remarque).emplacement || '—';
+    const name = `${line.article_name || '—'}`;
+    const rowH = 8;
+    if (ensureSpace(rowH)) y = drawHdr(M);
+    widths.forEach((w, i) => drawBorderedBox(doc, xs[i], y, w, rowH, i % 2 === 0 ? WHITE : GREY_BG));
+    setPdfFont(doc, 'normal');
+    doc.setFontSize(7);
+    doc.setTextColor(...TEXT);
+    const vals = [
+      line.reference || '—',
+      name,
+      line.unite || 'U',
+      fmtQty(line.quantite_demandee),
+      src,
+      dest,
+    ];
+    vals.forEach((v, i) => {
+      const clipped = doc.splitTextToSize(String(v), widths[i] - 4)[0];
+      doc.text(clipped, xs[i] + 2, y + 5.2);
+    });
+    y += rowH;
+  });
+  return y + 4;
+}
+
 function drawFooter(doc, pageNum, totalPages) {
   const y = PAGE_H - FOOTER_H + 4;
   doc.setDrawColor(...RED);
@@ -412,11 +477,15 @@ export async function generateSiteRequestPdf(request) {
     .filter((l) => Number(l.quantite_demandee) > 0)
     .map((l) => applySiteRequestLinePreparation(l));
 
-  SITE_REQUEST_CATEGORIES.forEach((cat) => {
-    const catLines = activeLines.filter((l) => l.category_id === cat.id);
-    if (!catLines.length) return;
-    y = drawCategorySection(doc, cat.label, catLines, y, ensureSpace, request);
-  });
+  if (isPreparationBon(request)) {
+    y = drawPreparationTable(doc, activeLines, request, y, ensureSpace);
+  } else {
+    SITE_REQUEST_CATEGORIES.forEach((cat) => {
+      const catLines = activeLines.filter((l) => l.category_id === cat.id);
+      if (!catLines.length) return;
+      y = drawCategorySection(doc, cat.label, catLines, y, ensureSpace, request);
+    });
+  }
 
   y = drawTextBlock(doc, 'Observations générales', request.observation, y, ensureSpace);
   y = drawSignatures(doc, y, iconMeta, ensureSpace);
@@ -427,5 +496,5 @@ export async function generateSiteRequestPdf(request) {
     drawFooter(doc, p, totalPages);
   }
 
-  doc.save(`demande-chantier-${(request.ref || 'DC').replace(/\s/g, '-')}.pdf`);
+  doc.save(`${isPreparationBon(request) ? 'bon-preparation' : 'demande-chantier'}-${(request.ref || 'DC').replace(/\s/g, '-')}.pdf`);
 }

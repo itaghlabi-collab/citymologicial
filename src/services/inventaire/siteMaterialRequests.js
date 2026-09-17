@@ -6,10 +6,12 @@ import {
   SITE_REQUEST_DG_THRESHOLD_MAD,
   normalizeSearchText,
   siteRequestStatutLabel,
+  preparationBonStatutLabel,
 } from '../../constants/siteMaterialRequests';
 import { saveStockMovementBon } from './stockMovements';
 import { listStockArticles } from './stockArticles';
 import { formatProfileDisplayName, collapseDuplicatedFirstName } from '../admin/users';
+import { decodeSourceEmplacement, encodeSourceEmplacement, isPreparationBon } from './siteRequestPreparation';
 
 const TABLE = 'site_material_requests';
 const LINES = 'site_material_request_lines';
@@ -164,26 +166,35 @@ export function siteRequestLineAvailabilityStatus(line) {
 
 export function enrichLinesWithStock(lines, stockArticles = []) {
   return (lines || []).map((line) => {
-    if (!(Number(line.quantite_demandee) > 0)) return applySiteRequestLinePreparation(line);
-    const stockArt = line.article_id
-      ? stockArticles.find((a) => String(a.id) === String(line.article_id))
-      : matchStockArticle(line.article_name, stockArticles);
-    const info = computeLineStockInfo(line, stockArt);
+    const decoded = decodeSourceEmplacement(line.remarque, line.emplacement_source);
+    const withSource = {
+      ...line,
+      emplacement_source: decoded.emplacement || line.emplacement_source || '',
+      reference: line.reference || '',
+    };
+    if (!(Number(withSource.quantite_demandee) > 0)) return applySiteRequestLinePreparation(withSource);
+    const stockArt = withSource.article_id
+      ? stockArticles.find((a) => String(a.id) === String(withSource.article_id))
+      : matchStockArticle(withSource.article_name, stockArticles);
+    const info = computeLineStockInfo(withSource, stockArt);
     // Stock → stock_* uniquement. disponible / rupture = préparation (source unique).
     return applySiteRequestLinePreparation({
-      ...line,
+      ...withSource,
       article_id: info.article_id,
       stock_actuel: info.stock_actuel,
       stock_reserve: info.stock_reserve,
       stock_status: info.stock_status,
       disponible_apres: info.disponible_apres,
       prix_unitaire: Number(stockArt?.prix_unitaire ?? stockArt?.prix_achat ?? 0),
+      reference: withSource.reference || stockArt?.reference || stockArt?.code || '',
     });
   });
 }
 
 /** Clé de dédoublonnage article (catégorie + désignation). */
 export function siteRequestLineKey(line) {
+  const emp = String(line?.emplacement_source || '').trim().toLowerCase();
+  if (line?.article_id && emp) return `${line.article_id}|${emp}`;
   const cat = String(line?.category_id || '').trim().toLowerCase();
   const name = String(line?.article_name || '').trim().toLowerCase();
   return `${cat}|${name}`;
@@ -235,6 +246,13 @@ function normalizeRequest(row, lines = [], history = []) {
   const activeLines = mergedLines.filter((l) => Number(l.quantite_demandee) > 0 || l.is_custom);
   const distinctArticles = activeLines.length;
   const fixName = (n) => collapseDuplicatedFirstName(n) || '';
+  const origine = row.origine === 'manuelle'
+    || (row.origine == null && activeLines.length > 0 && activeLines.every((l) => l.is_custom))
+    ? 'manuelle'
+    : row.origine === 'bon_preparation'
+      ? 'bon_preparation'
+      : 'catalogue';
+  const prepBon = isPreparationBon({ origine, lines: mergedLines });
   return {
     id: row.id,
     ref: row.ref_demande || '',
@@ -249,14 +267,11 @@ function normalizeRequest(row, lines = [], history = []) {
     priorite: row.priorite || 'Normale',
     observation: row.observation || '',
     statut: row.statut || 'brouillon',
-    statutLabel: siteRequestStatutLabel(row.statut),
+    statutLabel: prepBon ? preparationBonStatutLabel(row.statut) : siteRequestStatutLabel(row.statut),
     material_need_id: row.material_need_id || null,
     from_material_besoin: !!row.material_need_id
       || /^Issu du besoin matériaux\b/i.test(String(row.observation || '')),
-    origine: row.origine === 'manuelle'
-      || (row.origine == null && activeLines.length > 0 && activeLines.every((l) => l.is_custom))
-      ? 'manuelle'
-      : 'catalogue',
+    origine,
     requires_dg: !!row.requires_dg,
     movement_ref: row.movement_ref || '',
     montant_estime: Number(row.montant_estime) || 0,
@@ -484,7 +499,9 @@ function toLineRows(requestId, lines, stockArticles) {
         quantite_preparee: prep.prepared_qty,
         quantite_livree: prep.delivered_qty,
         unite: l.unite || 'u',
-        remarque: l.remarque || null,
+        remarque: l.emplacement_source
+          ? encodeSourceEmplacement(decodeSourceEmplacement(l.remarque).remarque, l.emplacement_source)
+          : (l.remarque || null),
         remarque_magasinier: l.remarque_magasinier || null,
         date_souhaitee: l.date_souhaitee || null,
         stock_actuel: Number(l.stock_actuel) || 0,
@@ -567,7 +584,11 @@ export async function createSiteMaterialRequest(form, lines = [], { ipAddress } 
     date_souhaitee: form.date_souhaitee || null,
     priorite: form.priorite || 'Normale',
     observation: form.observation || null,
-    origine: form.origine === 'manuelle' ? 'manuelle' : 'catalogue',
+    origine: form.origine === 'manuelle'
+      ? 'manuelle'
+      : form.origine === 'bon_preparation'
+        ? 'bon_preparation'
+        : 'catalogue',
     statut: form.statut || 'brouillon',
     requires_dg: needsDgValidation(form.priorite, montant),
     montant_estime: montant,
@@ -608,7 +629,7 @@ export async function createSiteMaterialRequest(form, lines = [], { ipAddress } 
           const savedLines = await replaceLines(retry.data.id, lines, stockArticles);
           await logHistory(retry.data.id, 'creation', 'Demande créée', user.id, actorName, actorRole, ipAddress);
           return normalizeRequest(
-            { ...retry.data, origine: form.origine === 'manuelle' ? 'manuelle' : 'catalogue' },
+            { ...retry.data, origine: form.origine === 'manuelle' ? 'manuelle' : form.origine === 'bon_preparation' ? 'bon_preparation' : 'catalogue' },
             enrichLinesWithStock(savedLines, stockArticles),
             await loadHistory(retry.data.id),
           );
@@ -661,7 +682,11 @@ export async function updateSiteMaterialRequest(id, form, lines = [], { ipAddres
     date_souhaitee: form.date_souhaitee ?? existing.date_souhaitee,
     priorite: form.priorite ?? existing.priorite,
     observation: form.observation ?? existing.observation,
-    origine: form.origine === 'manuelle' || existing.origine === 'manuelle' ? 'manuelle' : 'catalogue',
+    origine: form.origine === 'manuelle' || existing.origine === 'manuelle'
+      ? 'manuelle'
+      : form.origine === 'bon_preparation' || existing.origine === 'bon_preparation'
+        ? 'bon_preparation'
+        : 'catalogue',
     requires_dg: needsDgValidation(form.priorite ?? existing.priorite, montant),
     montant_estime: montant,
     updated_at: new Date().toISOString(),
@@ -675,7 +700,7 @@ export async function updateSiteMaterialRequest(id, form, lines = [], { ipAddres
       const savedLines = await replaceLines(id, lines, stockArticles);
       await logHistory(id, 'modification', 'Demande modifiée', user.id, actorName, actorRole, ipAddress);
       return normalizeRequest(
-        { ...retry.data, origine: form.origine === 'manuelle' || existing.origine === 'manuelle' ? 'manuelle' : 'catalogue' },
+        { ...retry.data, origine: form.origine === 'manuelle' || existing.origine === 'manuelle' ? 'manuelle' : form.origine === 'bon_preparation' || existing.origine === 'bon_preparation' ? 'bon_preparation' : 'catalogue' },
         enrichLinesWithStock(savedLines, stockArticles),
         await loadHistory(id),
       );
@@ -722,20 +747,40 @@ export async function submitSiteMaterialRequest(id, { ipAddress } = {}) {
   const user = await requireUser();
   const req = await getSiteMaterialRequest(id);
   if (!req) throw new Error('Demande introuvable.');
+  if (req.statut && req.statut !== 'brouillon') {
+    return req;
+  }
   const activeLines = (req.lines || []).filter((l) => Number(l.quantite_demandee) > 0);
   if (!activeLines.length) throw new Error('Ajoutez au moins un article avec une quantité.');
   const actorName = await getProfileName(user.id);
   const actorRole = await getProfileRole(user.id);
+  const prepBon = req.origine === 'bon_preparation' || isPreparationBon(req);
+  const nextStatut = prepBon ? 'en_preparation' : 'soumise';
   const { data, error } = await getSupabase().from(TABLE).update({
-    statut: 'soumise',
+    statut: nextStatut,
     updated_at: new Date().toISOString(),
-  }).eq('id', id).select().single();
-  if (error) throw error;
-  await logHistory(id, 'soumission', 'Demande soumise au magasin', user.id, actorName, actorRole, ipAddress);
+  }).eq('id', id).eq('statut', 'brouillon').select().single();
+  if (error) {
+    if (/0 rows|PGRST116/i.test(String(error.message || error.code || ''))) {
+      return getSiteMaterialRequest(id);
+    }
+    throw error;
+  }
+  await logHistory(id, 'soumission', prepBon
+    ? 'Bon de préparation en cours'
+    : 'Demande soumise au magasin', user.id, actorName, actorRole, ipAddress);
   const result = normalizeRequest(data, req.lines, await loadHistory(id));
-  const { notifySiteRequestSubmitted, notifySiteRequestReceived } = await import('../notifications/notificationEvents');
-  notifySiteRequestSubmitted(result).catch(() => {});
-  notifySiteRequestReceived(result).catch(() => {});
+  const {
+    notifySiteRequestSubmitted,
+    notifySiteRequestReceived,
+    notifyPreparationBonSubmitted,
+  } = await import('../notifications/notificationEvents');
+  if (result.origine === 'bon_preparation' || isPreparationBon(result)) {
+    notifyPreparationBonSubmitted(result).catch(() => {});
+  } else {
+    notifySiteRequestSubmitted(result).catch(() => {});
+    notifySiteRequestReceived(result).catch(() => {});
+  }
   return result;
 }
 
@@ -782,12 +827,14 @@ export async function prepareSiteMaterialRequest(id, lineUpdates = [], {
     notifySiteRequestPurchaseCreated,
   } = await import('../notifications/notificationEvents');
   notifySiteRequestPrepared(result, { partial }).catch(() => {});
-  const { createPurchaseRequestFromSiteRuptures } = await import('../achats/purchaseRequests');
-  createPurchaseRequestFromSiteRuptures(result)
-    .then((purchase) => {
-      if (purchase) notifySiteRequestPurchaseCreated(result, purchase).catch(() => {});
-    })
-    .catch(() => {});
+  if (!isPreparationBon(result)) {
+    const { createPurchaseRequestFromSiteRuptures } = await import('../achats/purchaseRequests');
+    createPurchaseRequestFromSiteRuptures(result)
+      .then((purchase) => {
+        if (purchase) notifySiteRequestPurchaseCreated(result, purchase).catch(() => {});
+      })
+      .catch(() => {});
+  }
   return result;
 }
 
@@ -836,7 +883,15 @@ export async function markSiteRequestReady(id, { ipAddress } = {}) {
     updated_at: new Date().toISOString(),
   }).eq('id', id).select().single();
   if (error) throw error;
-  await logHistory(id, 'prete', 'Matériel prêt pour livraison', user.id, actorName, actorRole, ipAddress);
+  await logHistory(
+    id,
+    'prete',
+    isPreparationBon(req) ? 'Bon de préparation marqué préparé' : 'Matériel prêt pour livraison',
+    user.id,
+    actorName,
+    actorRole,
+    ipAddress,
+  );
   const result = normalizeRequest(data, req.lines, await loadHistory(id));
   const { notifySiteRequestReady } = await import('../notifications/notificationEvents');
   notifySiteRequestReady(result).catch(() => {});
@@ -865,9 +920,12 @@ export async function deliverSiteMaterialRequest(id, {
   let movementRef = req.movement_ref || '';
   if (lignesBon.length) {
     const dest = emplacementDestination || req.project_name || 'Chantier';
+    const prepSource = isPreparationBon(req)
+      ? (req.lines || []).map((l) => l.emplacement_source || decodeSourceEmplacement(l.remarque).emplacement).find(Boolean)
+      : '';
     const bon = await saveStockMovementBon({
       type_mouvement: 'Sortie',
-      emplacement_source: emplacementSource,
+      emplacement_source: prepSource || emplacementSource,
       emplacement_destination: dest,
       date_creation: new Date().toISOString().slice(0, 10),
       cree_par: actorName,

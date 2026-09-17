@@ -445,6 +445,26 @@ export async function notifySiteRequestSubmitted(request) {
   });
 }
 
+/** Bon de préparation (articles disponibles) → magasinier, une fois. */
+export async function notifyPreparationBonSubmitted(request) {
+  if (!request?.id) return;
+  const n = request.distinct_articles || (request.lines || []).filter((l) => Number(l.quantite_demandee) > 0).length;
+  return notifyInventaireUsers({
+    title: 'Bon de préparation à traiter',
+    message: `${request.ref} — ${request.project_name || 'Projet'} · ${n} article(s) · ${request.requested_by_name || 'demandeur'}.`,
+    type: NOTIFICATION_TYPES.SITE_MATERIAL_REQUEST,
+    priority: request.priorite === 'Critique'
+      ? NOTIFICATION_PRIORITIES.URGENT
+      : request.priorite === 'Urgente'
+        ? NOTIFICATION_PRIORITIES.HIGH
+        : NOTIFICATION_PRIORITIES.NORMAL,
+    entityType: 'site_material_request',
+    entityId: request.id,
+    actionUrl: moduleActionUrl('demandes-chantier'),
+    submoduleCode: NOTIFICATION_SUBMODULES.DEMANDES_CHANTIER,
+  });
+}
+
 /** Demande chantier — validation DG. */
 export async function notifySiteRequestDgRequired(request) {
   if (!request?.id) return;
