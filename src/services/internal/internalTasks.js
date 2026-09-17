@@ -2,6 +2,7 @@
  * internalTasks.js — CRUD Tâches organisation interne (Supabase internal_tasks)
  */
 import { getSupabase } from '../../lib/supabase';
+import { getSessionUser } from '../supabase/requireUser';
 import { canManageTaskDgPush, userMatchesAssignee } from '../auth/taskDgPushAccess';
 import { personNamesMatch } from '../notifications/notificationRecipients';
 import {
@@ -99,13 +100,7 @@ export function toInternalTaskRow(form) {
 }
 
 async function getAuthUserId() {
-  const { data: { user }, error } = await getSupabase().auth.getUser();
-  if (error || !user) {
-    const err = new Error('Session requise.');
-    err.code = 'AUTH';
-    throw err;
-  }
-  return user.id;
+  return (await getSessionUser()).id;
 }
 
 async function fetchRelanceCountMap(taskIds) {

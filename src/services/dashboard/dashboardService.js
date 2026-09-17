@@ -42,11 +42,18 @@ export { loadMainDashboardData };
  * @param {{ dateFrom?: string, dateTo?: string }} dateRange
  */
 export async function loadDashboardData(dateRange = {}) {
+  const t0 = (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
   const payload = await loadMainDashboardData(dateRange);
-  return {
+  const result = {
     ...payload,
     alerts: buildDashboardAlerts(payload, dateRange),
   };
+  console.info('[CITYMO] dashboard', {
+    op: 'load',
+    ms: Math.round(((typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now()) - t0),
+    alerts: result.alerts?.length || 0,
+  });
+  return result;
 }
 
 function overlapsRange(start, end, from, to) {

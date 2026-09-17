@@ -2,6 +2,7 @@
  * crmDevis.js — CRM Devis CRUD (Supabase crm_devis / crm_devis_lignes)
  */
 import { getSupabase } from '../../lib/supabase';
+import { getSessionUser } from '../supabase/requireUser';
 import { clientDisplayName } from './clients';
 import { moneyLineHt, moneyComputeDocumentTotals, moneyToNumber } from '../../utils/decimalMoney';
 import { parseFrDecimal, parseFrDecimalOrZero } from '../../utils/crm/frDecimalInput';
@@ -166,13 +167,7 @@ function toLigneRow(ligne, devisId, ordre) {
 }
 
 async function getAuthUserId() {
-  const { data: { user }, error } = await getSupabase().auth.getUser();
-  if (error || !user) {
-    const err = new Error('Session requise.');
-    err.code = 'AUTH';
-    throw err;
-  }
-  return user.id;
+  return (await getSessionUser()).id;
 }
 
 export async function generateCrmDevisReference() {

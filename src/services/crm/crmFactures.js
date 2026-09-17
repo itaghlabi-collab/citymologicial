@@ -2,6 +2,7 @@
  * crmFactures.js — CRM Factures CRUD (Supabase crm_factures / crm_facture_lignes)
  */
 import { getSupabase } from '../../lib/supabase';
+import { getSessionUser } from '../supabase/requireUser';
 import { clientDisplayName } from './clients';
 import { getCrmDevisById } from './crmDevis';
 import { listArticles } from './articles';
@@ -234,13 +235,7 @@ function toPaiementRow(p, factureId) {
 }
 
 async function getAuthUserId() {
-  const { data: { user }, error } = await getSupabase().auth.getUser();
-  if (error || !user) {
-    const err = new Error('Session requise.');
-    err.code = 'AUTH';
-    throw err;
-  }
-  return user.id;
+  return (await getSessionUser()).id;
 }
 
 export async function generateCrmAcompteNumero() {

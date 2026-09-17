@@ -2,6 +2,7 @@
  * prospects.js — CRUD Prospects (Supabase public.prospects)
  */
 import { getSupabase } from '../../lib/supabase';
+import { getSessionUser } from '../supabase/requireUser';
 
 const TABLE = 'prospects';
 
@@ -88,13 +89,7 @@ export function toProspectRow(form) {
 }
 
 async function getAuthUserId() {
-  const { data: { user }, error } = await getSupabase().auth.getUser();
-  if (error || !user) {
-    const err = new Error('Session requise.');
-    err.code = 'AUTH';
-    throw err;
-  }
-  return user.id;
+  return (await getSessionUser()).id;
 }
 
 export async function listProspects() {

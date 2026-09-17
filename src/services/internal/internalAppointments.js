@@ -2,6 +2,7 @@
  * internalAppointments.js — CRUD Rendez-vous organisation interne (Supabase internal_appointments)
  */
 import { getSupabase } from '../../lib/supabase';
+import { getSessionUser } from '../supabase/requireUser';
 
 const TABLE = 'internal_appointments';
 
@@ -69,13 +70,7 @@ export function toInternalAppointmentRow(form) {
 }
 
 async function getAuthUserId() {
-  const { data: { user }, error } = await getSupabase().auth.getUser();
-  if (error || !user) {
-    const err = new Error('Session requise.');
-    err.code = 'AUTH';
-    throw err;
-  }
-  return user.id;
+  return (await getSessionUser()).id;
 }
 
 export async function listInternalAppointments() {

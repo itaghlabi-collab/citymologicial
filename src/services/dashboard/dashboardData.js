@@ -216,6 +216,16 @@ function filterLeavesInRange(leavesRaw, from, to) {
   });
 }
 
+/** Mois précédent le début de période (le graphe ajoute ce mois si la période n’en contient qu’un). */
+function chartRangeStart(from) {
+  const d = new Date(`${from}T00:00:00`);
+  d.setMonth(d.getMonth() - 1);
+  d.setDate(1);
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  return `${y}-${m}-01`;
+}
+
 export async function loadMainDashboardData({ dateFrom, dateTo } = {}) {
   const today = new Date().toISOString().slice(0, 10);
   const from = dateFrom || today.slice(0, 7) + '-01';
@@ -241,19 +251,21 @@ export async function loadMainDashboardData({ dateFrom, dateTo } = {}) {
 
   if (!isSupabaseConfigured()) return empty;
 
+  const facturesPromise = listCrmFactures();
   const results = await Promise.allSettled([
-    loadInternalDashboardData(),
+    loadInternalDashboardData({ facturesPromise }),
     listFinanceCharges(),
     listPaymentOrders(),
-    listFinanceTransactions(),
+    listFinanceTransactions({ dateFrom: chartRangeStart(from), dateTo: to }),
     listProjects(),
     listAttendance(),
     listLeaves(),
     listPurchaseOrders(),
-    listStockArticles(),
+    listStockArticles({ includeLastMovements: false }),
     listWorkerPayroll(),
     listAllSubcontractorPayments(100),
     getPendingCashValidation(),
+    facturesPromise,
   ]);
 
   const val = (i) => (results[i].status === 'fulfilled' ? results[i].value : []);
@@ -274,7 +286,7 @@ export async function loadMainDashboardData({ dateFrom, dateTo } = {}) {
     ? internal.recentFactures
     : [];
 
-  const allFacturesForChart = await listCrmFactures().catch(() => []);
+  const allFacturesForChart = val(12);
 
   const mappedFactures = (allFacturesForChart || []).map((f) => ({
     amount: Number(f.total_ttc) || 0,

@@ -2,6 +2,7 @@
  * purchaseOrders.js — Bons de commande (Supabase purchase_orders)
  */
 import { getSupabase } from '../../lib/supabase';
+import { getSessionUser } from '../supabase/requireUser';
 import { moneyLineHt, moneyComputeDocumentTotals, moneyToNumber, moneyRound2 } from '../../utils/decimalMoney';
 import { PURCHASE_ROLES, resolveCurrentPurchaseRole } from './purchaseWorkflowRoles';
 import Big from 'big.js';
@@ -201,9 +202,7 @@ export function toPurchaseOrderRow(form) {
 }
 
 async function requireUser() {
-  const { data: { user }, error } = await getSupabase().auth.getUser();
-  if (error || !user) throw new Error('Session requise.');
-  return user.id;
+  return (await getSessionUser()).id;
 }
 
 export async function generatePurchaseOrderRef() {

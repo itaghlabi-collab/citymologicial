@@ -94,9 +94,11 @@ export function toTransactionRow(form) {
   };
 }
 
-export async function listFinanceTransactions({ year, month } = {}) {
+export async function listFinanceTransactions({ year, month, dateFrom, dateTo } = {}) {
   let q = getSupabase().from(TABLE).select('*').order('date_operation', { ascending: true });
-  if (year && month) {
+  if (dateFrom && dateTo) {
+    q = q.gte('date_operation', dateFrom).lte('date_operation', dateTo);
+  } else if (year && month) {
     const start = `${year}-${String(month).padStart(2, '0')}-01`;
     const endMonth = month === 12 ? 1 : month + 1;
     const endYear = month === 12 ? year + 1 : year;

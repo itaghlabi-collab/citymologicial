@@ -76,7 +76,7 @@ function mapFactureForDashboard(f) {
   };
 }
 
-export async function loadInternalDashboardData() {
+export async function loadInternalDashboardData({ facturesPromise } = {}) {
   if (!isSupabaseConfigured()) {
     return {
       configured: false,
@@ -102,7 +102,7 @@ export async function loadInternalDashboardData() {
     listInternalAppointments(),
     listProspects(),
     listCrmDevis(),
-    listCrmFactures(),
+    facturesPromise || listCrmFactures(),
   ]);
 
   const val = (i) => (results[i].status === 'fulfilled' ? results[i].value : []);
