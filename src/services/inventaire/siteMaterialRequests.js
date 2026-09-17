@@ -280,26 +280,123 @@ function normalizeRequest(row, lines = [], history = []) {
 }
 
 async function requireUser() {
-  const { data: { user }, error } = await getSupabase().auth.getUser();
+  const sb = getSupabase();
+  const { data: { session } } = await sb.auth.getSession();
+  if (session?.user) return session.user;
+  const { data: { user }, error } = await sb.auth.getUser();
   if (error || !user) throw new Error('Session requise.');
   return user;
 }
 
-async function getProfileName(userId) {
-  if (!userId) return '';
+const PROFILE_ACTOR_TTL_MS = 60_000;
+const profileActorCache = new Map();
+
+function nowMs() {
+  return (typeof performance !== 'undefined' && performance.now) ? performance.now() : Date.now();
+}
+
+function logSiteRequestTiming(op, t0, extra = {}) {
+  console.info('[CITYMO] siteRequest', { op, ms: Math.round(nowMs() - t0), ...extra });
+}
+
+/** Catalogue stock pour DC : quantités seulement, pas la colonne dernier mouvement. */
+function catalogForSiteRequests() {
+  return listStockArticles({ includeLastMovements: false }).catch(() => []);
+}
+
+/** Pagination PostgREST avec garde-fou (range ignoré = boucle infinie). */
+async function fetchAllPagedSafe(buildQuery, pageSize = 1000) {
+  const all = [];
+  let from = 0;
+  let prevSig = '';
+  for (let page = 0; page < 40; page += 1) {
+    const { data, error } = await buildQuery().range(from, from + pageSize - 1);
+    if (error) throw error;
+    const chunk = data || [];
+    if (!chunk.length) break;
+    const sig = `${chunk[0]?.id || ''}:${chunk.length}`;
+    if (from > 0 && sig === prevSig) break;
+    prevSig = sig;
+    all.push(...chunk);
+    if (chunk.length < pageSize) break;
+    from += pageSize;
+  }
+  return all;
+}
+
+async function getProfileActor(userId) {
+  if (!userId) return { name: '', role: '' };
+  const hit = profileActorCache.get(userId);
+  if (hit && (Date.now() - hit.at) < PROFILE_ACTOR_TTL_MS) {
+    return { name: hit.name, role: hit.role };
+  }
   const { data } = await getSupabase()
     .from('profiles')
     .select('nom, prenom, email, role')
     .eq('id', userId)
     .maybeSingle();
-  if (!data) return '';
-  return formatProfileDisplayName(data) || data.email || '';
+  const actor = {
+    name: data ? (formatProfileDisplayName(data) || data.email || '') : '',
+    role: data?.role || '',
+    at: Date.now(),
+  };
+  profileActorCache.set(userId, actor);
+  return { name: actor.name, role: actor.role };
+}
+
+async function getProfileName(userId) {
+  const actor = await getProfileActor(userId);
+  return actor.name;
 }
 
 async function getProfileRole(userId) {
-  if (!userId) return '';
-  const { data } = await getSupabase().from('profiles').select('role').eq('id', userId).maybeSingle();
-  return data?.role || '';
+  const actor = await getProfileActor(userId);
+  return actor.role;
+}
+
+async function loadRequestRow(id) {
+  const { data, error } = await getSupabase().from(TABLE).select('*').eq('id', id).maybeSingle();
+  if (error) throw error;
+  return data;
+}
+
+async function hydrateRequest(row, { history = true, stockArticles, lines } = {}) {
+  if (!row) return null;
+  const [loadedLines, hist, catalog] = await Promise.all([
+    lines ? Promise.resolve(lines) : loadLines(row.id),
+    history ? loadHistory(row.id) : Promise.resolve([]),
+    stockArticles ? Promise.resolve(stockArticles) : catalogForSiteRequests(),
+  ]);
+  return normalizeRequest(row, enrichLinesWithStock(loadedLines, catalog), hist);
+}
+
+async function loadLinesForRequestIds(ids) {
+  const linesByRequest = new Map();
+  if (!ids.length) return linesByRequest;
+  const chunkSize = 80;
+  const chunks = [];
+  for (let i = 0; i < ids.length; i += chunkSize) {
+    chunks.push(ids.slice(i, i + chunkSize));
+  }
+  const concurrency = 3;
+  for (let i = 0; i < chunks.length; i += concurrency) {
+    const batch = chunks.slice(i, i + concurrency);
+    const groups = await Promise.all(batch.map((chunk) => fetchAllPagedSafe(
+      () => getSupabase()
+        .from(LINES)
+        .select('*')
+        .in('request_id', chunk)
+        .order('line_order', { ascending: true }),
+    )));
+    for (const lines of groups) {
+      for (const line of lines || []) {
+        const key = String(line.request_id);
+        if (!linesByRequest.has(key)) linesByRequest.set(key, []);
+        linesByRequest.get(key).push(line);
+      }
+    }
+  }
+  return linesByRequest;
 }
 
 export async function generateSiteRequestRef() {
@@ -415,60 +512,47 @@ async function replaceLines(requestId, lines, stockArticles) {
 }
 
 export async function listSiteMaterialRequests(filters = {}) {
+  const t0 = nowMs();
   await requireUser();
-  let q = getSupabase().from(TABLE).select('*').order('created_at', { ascending: false });
-  if (filters.statut) q = q.eq('statut', filters.statut);
-  if (filters.projectId) q = q.eq('project_id', filters.projectId);
-  if (filters.priorite) q = q.eq('priorite', filters.priorite);
-  if (filters.chefChantier) q = q.ilike('chef_chantier', `%${filters.chefChantier}%`);
-  if (filters.chefProjet) q = q.ilike('chef_projet', `%${filters.chefProjet}%`);
-  const { data, error } = await q;
-  if (error) throw error;
-  const rows = data || [];
-  if (!rows.length) return [];
-
-  const stockArticles = await listStockArticles().catch(() => []);
-  const ids = rows.map((r) => r.id);
-  const linesByRequest = new Map();
-  // Batch par paquets (limite .in PostgREST) — évite le N+1 qui ralentit la liste.
-  const chunkSize = 80;
-  for (let i = 0; i < ids.length; i += chunkSize) {
-    const chunk = ids.slice(i, i + chunkSize);
-    const { data: lines, error: linesErr } = await getSupabase()
-      .from(LINES)
-      .select('*')
-      .in('request_id', chunk)
-      .order('line_order', { ascending: true });
-    if (linesErr) throw linesErr;
-    for (const line of lines || []) {
-      const key = String(line.request_id);
-      if (!linesByRequest.has(key)) linesByRequest.set(key, []);
-      linesByRequest.get(key).push(line);
-    }
+  logSiteRequestTiming('list-start', t0, { statut: filters.statut || '', priorite: filters.priorite || '' });
+  const rows = await fetchAllPagedSafe(() => {
+    let q = getSupabase().from(TABLE).select('*').order('created_at', { ascending: false });
+    if (filters.statut) q = q.eq('statut', filters.statut);
+    if (filters.projectId) q = q.eq('project_id', filters.projectId);
+    if (filters.priorite) q = q.eq('priorite', filters.priorite);
+    if (filters.chefChantier) q = q.ilike('chef_chantier', `%${filters.chefChantier}%`);
+    if (filters.chefProjet) q = q.ilike('chef_projet', `%${filters.chefProjet}%`);
+    return q;
+  });
+  if (!rows.length) {
+    logSiteRequestTiming('list', t0, { n: 0 });
+    return [];
   }
 
-  return rows.map((row) => normalizeRequest(
+  const linesByRequest = await loadLinesForRequestIds(rows.map((r) => r.id));
+  const result = rows.map((row) => normalizeRequest(
     row,
-    enrichLinesWithStock(linesByRequest.get(String(row.id)) || [], stockArticles),
+    (linesByRequest.get(String(row.id)) || []).map((line) => applySiteRequestLinePreparation(line)),
   ));
+  logSiteRequestTiming('list', t0, { n: result.length });
+  return result;
 }
 
 export async function getSiteMaterialRequest(id) {
+  const t0 = nowMs();
   await requireUser();
-  const { data, error } = await getSupabase().from(TABLE).select('*').eq('id', id).maybeSingle();
-  if (error) throw error;
+  const data = await loadRequestRow(id);
   if (!data) return null;
-  const stockArticles = await listStockArticles().catch(() => []);
-  const lines = enrichLinesWithStock(await loadLines(id), stockArticles);
-  const history = await loadHistory(id);
-  return normalizeRequest(data, lines, history);
+  const result = await hydrateRequest(data);
+  logSiteRequestTiming('get', t0, { id, lines: result.lines?.length || 0 });
+  return result;
 }
 
 export async function createSiteMaterialRequest(form, lines = [], { ipAddress } = {}) {
   const user = await requireUser();
   const actorName = await getProfileName(user.id);
   const actorRole = await getProfileRole(user.id);
-  const stockArticles = await listStockArticles().catch(() => []);
+  const stockArticles = await catalogForSiteRequests();
   const montant = estimateMontant(lines, stockArticles);
 
   const buildRow = (ref) => ({
@@ -559,12 +643,12 @@ export async function updateSiteMaterialRequest(id, form, lines = [], { ipAddres
   const user = await requireUser();
   const actorName = await getProfileName(user.id);
   const actorRole = await getProfileRole(user.id);
-  const existing = await getSiteMaterialRequest(id);
+  const existing = await loadRequestRow(id);
   if (!existing) throw new Error('Demande introuvable.');
   if (['livree', 'annulee'].includes(existing.statut)) {
     throw new Error('Demande clôturée — modification impossible.');
   }
-  const stockArticles = await listStockArticles().catch(() => []);
+  const stockArticles = await catalogForSiteRequests();
   const montant = estimateMontant(lines, stockArticles);
   const patch = {
     project_id: form.project_id ?? existing.project_id,
@@ -608,7 +692,7 @@ export async function updateSiteMaterialRequestHeader(id, fields = {}, { ipAddre
   const user = await requireUser();
   const actorName = await getProfileName(user.id);
   const actorRole = await getProfileRole(user.id);
-  const existing = await getSiteMaterialRequest(id);
+  const existing = await loadRequestRow(id);
   if (!existing) throw new Error('Demande introuvable.');
   if (existing.statut === 'annulee') {
     throw new Error('Demande annulée — modification impossible.');
@@ -631,12 +715,7 @@ export async function updateSiteMaterialRequestHeader(id, fields = {}, { ipAddre
   const { data, error } = await getSupabase().from(TABLE).update(patch).eq('id', id).select().single();
   if (error) throw error;
   await logHistory(id, 'modification', 'Récap demande modifié', user.id, actorName, actorRole, ipAddress);
-  const stockArticles = await listStockArticles().catch(() => []);
-  return normalizeRequest(
-    data,
-    enrichLinesWithStock(await loadLines(id), stockArticles),
-    await loadHistory(id),
-  );
+  return hydrateRequest(data);
 }
 
 export async function submitSiteMaterialRequest(id, { ipAddress } = {}) {
@@ -668,7 +747,7 @@ export async function prepareSiteMaterialRequest(id, lineUpdates = [], {
   if (!req) throw new Error('Demande introuvable.');
   const actorName = await getProfileName(user.id);
   const actorRole = await getProfileRole(user.id);
-  const stockArticles = await listStockArticles().catch(() => []);
+  const stockArticles = await catalogForSiteRequests();
 
   const lines = (req.lines || []).map((line) => {
     const upd = lineUpdates.find((u) => u.id === line.id || (
@@ -697,7 +776,7 @@ export async function prepareSiteMaterialRequest(id, lineUpdates = [], {
   }).eq('id', id).select().single();
   if (error) throw error;
   await logHistory(id, 'preparation', partial ? 'Préparation partielle' : 'Préparation en cours', user.id, actorName, actorRole, ipAddress);
-  const result = normalizeRequest(data, enrichLinesWithStock(await loadLines(id), stockArticles), await loadHistory(id));
+  const result = await hydrateRequest(data, { stockArticles });
   const {
     notifySiteRequestPrepared,
     notifySiteRequestPurchaseCreated,
@@ -723,7 +802,7 @@ export async function requestDgValidation(id, { ipAddress } = {}) {
   }).eq('id', id).select().single();
   if (error) throw error;
   await logHistory(id, 'validation_dg_requise', 'Validation DG requise', user.id, actorName, actorRole, ipAddress);
-  const result = normalizeRequest(data, enrichLinesWithStock(await loadLines(id)), await loadHistory(id));
+  const result = await hydrateRequest(data);
   const { notifySiteRequestDgRequired } = await import('../notifications/notificationEvents');
   notifySiteRequestDgRequired(result).catch(() => {});
   return result;
@@ -741,7 +820,7 @@ export async function validateSiteRequestDg(id, { ipAddress } = {}) {
   }).eq('id', id).select().single();
   if (error) throw error;
   await logHistory(id, 'validation_dg', 'Validée par la Direction', user.id, actorName, actorRole, ipAddress);
-  return normalizeRequest(data, enrichLinesWithStock(await loadLines(id)), await loadHistory(id));
+  return hydrateRequest(data);
 }
 
 export async function markSiteRequestReady(id, { ipAddress } = {}) {
@@ -806,7 +885,7 @@ export async function deliverSiteMaterialRequest(id, {
     ...l,
     quantite_livree: Number(l.quantite_preparee) || Number(l.quantite_demandee) || 0,
   }));
-  const stockArticles = await listStockArticles().catch(() => []);
+  const stockArticles = await catalogForSiteRequests();
   await replaceLines(id, updatedLines, stockArticles);
 
   const { data, error } = await getSupabase().from(TABLE).update({
@@ -817,7 +896,7 @@ export async function deliverSiteMaterialRequest(id, {
   }).eq('id', id).select().single();
   if (error) throw error;
   await logHistory(id, 'livraison', movementRef ? `Livrée — bon ${movementRef}` : 'Livrée', user.id, actorName, actorRole, ipAddress);
-  const result = normalizeRequest(data, enrichLinesWithStock(await loadLines(id), stockArticles), await loadHistory(id));
+  const result = await hydrateRequest(data, { stockArticles });
   const { notifySiteRequestDelivered } = await import('../notifications/notificationEvents');
   notifySiteRequestDelivered(result).catch(() => {});
   return result;
@@ -834,7 +913,7 @@ export async function cancelSiteMaterialRequest(id, reason = '', { ipAddress } =
   }).eq('id', id).select().single();
   if (error) throw error;
   await logHistory(id, 'annulation', reason || 'Demande annulée', user.id, actorName, actorRole, ipAddress);
-  return normalizeRequest(data, enrichLinesWithStock(await loadLines(id)), await loadHistory(id));
+  return hydrateRequest(data);
 }
 
 /** Quantité manquante = demandé − préparé (source unique). */
@@ -864,18 +943,21 @@ export function getSiteRequestMissingLines(siteRequest) {
  * Recharge ensuite la demande depuis la DB (source de vérité).
  */
 export async function persistSiteRequestPreparationLines(id, lines) {
+  const t0 = nowMs();
   await requireUser();
-  const existing = await getSiteMaterialRequest(id);
+  const existing = await loadRequestRow(id);
   if (!existing) throw new Error('Demande introuvable.');
   if (['livree', 'annulee'].includes(existing.statut)) {
     throw new Error('Demande clôturée — modification impossible.');
   }
-  const stockArticles = await listStockArticles().catch(() => []);
+  const stockArticles = await catalogForSiteRequests();
   const normalized = (lines || []).map((l) => applySiteRequestLinePreparation(
     l?.quantite_preparee === '' ? { ...l, quantite_preparee: 0 } : l,
   ));
-  await replaceLines(id, normalized, stockArticles);
-  return getSiteMaterialRequest(id);
+  const saved = await replaceLines(id, normalized, stockArticles);
+  const result = await hydrateRequest(existing, { stockArticles, lines: saved });
+  logSiteRequestTiming('persist-prep', t0, { id, lines: saved.length });
+  return result;
 }
 
 /**
@@ -918,7 +1000,7 @@ export async function setSiteMaterialRequestStatut(id, nextStatut, { reason = ''
     actorRole,
     ipAddress,
   );
-  return normalizeRequest(data, enrichLinesWithStock(await loadLines(id)), await loadHistory(id));
+  return hydrateRequest(data);
 }
 
 /**

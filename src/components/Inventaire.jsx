@@ -88,7 +88,9 @@ export default function Inventaire({ activeTab, initialArticleCode, onArticleCod
           onNavigate={onNavigate}
         />
       )}
-      {tab === 'demandes-chantier' && <DemandesChantier onNavigate={onNavigate} />}
+      {tab === 'demandes-chantier' && (
+        <DemandesChantier onNavigate={onNavigate} articles={articles} />
+      )}
       {tab === 'stocks' && (
         <Stocks
           articles={articles}

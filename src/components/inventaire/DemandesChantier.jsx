@@ -146,11 +146,13 @@ function projectFormFromProjet(projet) {
   };
 }
 
-export default function DemandesChantier({ projet, embedded = false, onNavigate }) {
+export default function DemandesChantier({ projet, embedded = false, onNavigate, articles: articlesProp }) {
   const embeddedProjectId = embedded && projet?.id ? String(projet.id) : null;
   const [requests, setRequests] = useState([]);
-  const [projects, setProjects] = useState([]);
-  const [stockArticles, setStockArticles] = useState([]);
+  const [projects, setProjects] = useState(() => (embedded && projet ? [projet] : []));
+  const [stockArticles, setStockArticles] = useState(() => (
+    Array.isArray(articlesProp) && articlesProp.length ? articlesProp : []
+  ));
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -171,33 +173,56 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
   detailRef.current = detail;
 
   const load = useCallback(async () => {
+    const t0 = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
     setLoading(true);
     setError('');
     try {
-      const [rows, projs, arts] = await Promise.all([
-        listSiteMaterialRequests({
-          statut: statutFilter,
-          priorite: prioriteFilter,
-          projectId: embeddedProjectId || undefined,
-        }),
-        embedded ? Promise.resolve(projet ? [projet] : []) : listProjects(),
-        listStockArticles(),
-      ]);
+      const rows = await listSiteMaterialRequests({
+        statut: statutFilter,
+        priorite: prioriteFilter,
+        projectId: embeddedProjectId || undefined,
+      });
       setRequests(
         // Sur le projet : le bas = demandes manuelles / catalogue seulement.
         // Les DC issues d’un BM restent visibles via la fiche BM (haut), pas en double ici.
         (rows || []).filter((r) => !embedded || !isMaterialBesoinSiteRequest(r)),
       );
-      setProjects(projs || []);
-      setStockArticles(arts || []);
+      console.info('[CITYMO] siteRequest', {
+        op: 'list-ui',
+        ms: Math.round((typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()) - t0),
+        n: rows?.length || 0,
+      });
     } catch (err) {
       setError(err.message || 'Erreur de chargement.');
     } finally {
       setLoading(false);
     }
-  }, [statutFilter, prioriteFilter, embeddedProjectId, embedded, projet]);
+  }, [statutFilter, prioriteFilter, embeddedProjectId, embedded]);
 
   useEffect(() => { load(); }, [load]);
+
+  useEffect(() => {
+    if (Array.isArray(articlesProp) && articlesProp.length) {
+      setStockArticles(articlesProp);
+    }
+  }, [articlesProp]);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!embedded) {
+      listProjects()
+        .then((projs) => { if (!cancelled) setProjects(projs || []); })
+        .catch((err) => { if (!cancelled) console.warn('[CITYMO] DC projects', err); });
+    } else if (projet) {
+      setProjects([projet]);
+    }
+    if (!(Array.isArray(articlesProp) && articlesProp.length)) {
+      listStockArticles({ includeLastMovements: false })
+        .then((arts) => { if (!cancelled && Array.isArray(arts)) setStockArticles(arts); })
+        .catch((err) => { if (!cancelled) console.warn('[CITYMO] DC articles', err); });
+    }
+    return () => { cancelled = true; };
+  }, [embedded, projet, articlesProp]);
 
   const filtered = useMemo(() => {
     const q = search.toLowerCase().trim();
@@ -300,14 +325,40 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
     });
   }
 
+  function upsertRequestRow(updated) {
+    if (!updated?.id) return;
+    const matchesStatut = !statutFilter || updated.statut === statutFilter;
+    const matchesPriorite = !prioriteFilter || updated.priorite === prioriteFilter;
+    setRequests((prev) => {
+      const idx = prev.findIndex((r) => String(r.id) === String(updated.id));
+      if (!matchesStatut || !matchesPriorite) {
+        if (idx < 0) return prev;
+        return prev.filter((_, i) => i !== idx);
+      }
+      if (idx < 0) return [updated, ...prev];
+      const next = prev.slice();
+      next[idx] = { ...prev[idx], ...updated, lines: updated.lines || prev[idx].lines };
+      return next;
+    });
+  }
+
   async function openDetail(id) {
+    const t0 = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
     setSaving(true);
     try {
-      const req = await getSiteMaterialRequest(id);
+      const [req, da] = await Promise.all([
+        getSiteMaterialRequest(id),
+        findPurchaseRequestBySiteMaterialRequest(id).catch(() => null),
+      ]);
       setDetail(req);
       syncDetailRecap(req);
-      const da = await findPurchaseRequestBySiteMaterialRequest(id).catch(() => null);
       setLinkedDa(da);
+      console.info('[CITYMO] siteRequest', {
+        op: 'open-detail',
+        ms: Math.round((typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()) - t0),
+        id,
+        lines: req?.lines?.length || 0,
+      });
     } catch (err) {
       setError(err.message);
     } finally {
@@ -349,13 +400,13 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
         setEditId(req.id);
       }
       if (submitAfter) {
-        await submitSiteMaterialRequest(req.id);
+        req = await submitSiteMaterialRequest(req.id);
         if (embedded) {
           alert('Besoin matériel soumis — la demande a été transmise au magasinier.');
         }
       }
+      upsertRequestRow(req);
       closeForm();
-      await load();
     } catch (err) {
       setError(err.message);
     } finally {
@@ -373,13 +424,13 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
     setError('');
     try {
       const updated = await fn(id);
-      if (detail?.id === id) {
+      if (detail?.id === id && updated) {
         setDetail(updated);
         syncDetailRecap(updated);
         const da = await findPurchaseRequestBySiteMaterialRequest(id).catch(() => null);
         setLinkedDa(da);
       }
-      await load();
+      if (updated) upsertRequestRow(updated);
       return updated;
     } catch (err) {
       setError(err.message);
@@ -405,7 +456,7 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
         lines: prev?.lines?.length ? prev.lines : updated.lines,
       }));
       syncDetailRecap(updated);
-      await load();
+      upsertRequestRow({ ...updated, lines: detailRef.current?.lines || updated.lines });
     } catch (err) {
       setError(err.message || 'Erreur enregistrement récap.');
     } finally {
@@ -470,6 +521,9 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
         });
         if (persisted) source = persisted;
         else source = detailRef.current || request;
+      } else {
+        // Liste : hydrater la demande (article_id / stocks) avant DA, sans ouvrir le panneau.
+        source = await getSiteMaterialRequest(request.id) || request;
       }
       const missing = getSiteRequestMissingLines(source);
       if (!missing.length) {
@@ -500,7 +554,7 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
     try {
       await deleteSiteMaterialRequest(id);
       if (detail?.id === id) closeDetail();
-      await load();
+      setRequests((prev) => prev.filter((r) => String(r.id) !== String(id)));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -509,14 +563,23 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
   }
 
   async function handlePdf(id) {
+    const t0 = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
     setSaving(true);
     setError('');
     try {
       if (persistPromiseRef.current) {
         await persistPromiseRef.current.catch(() => {});
       }
-      const full = await getSiteMaterialRequest(id);
+      const current = detailRef.current;
+      const full = (current && String(current.id) === String(id) && Array.isArray(current.lines))
+        ? current
+        : await getSiteMaterialRequest(id);
       await generateSiteRequestPdf(full);
+      console.info('[CITYMO] siteRequest', {
+        op: 'pdf',
+        ms: Math.round((typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()) - t0),
+        id,
+      });
     } catch (err) {
       setError(err.message || 'Erreur lors de la génération du PDF.');
     } finally {
@@ -1628,9 +1691,9 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate 
                         }
                         await prepareSiteMaterialRequest(id, detailRef.current?.lines || detail.lines);
                         const delivered = await deliverSiteMaterialRequest(id);
-                        await generateSiteRequestPdf(delivered || await getSiteMaterialRequest(id));
+                        await generateSiteRequestPdf(delivered);
+                        if (delivered) upsertRequestRow(delivered);
                         closeDetail();
-                        await load();
                       } catch (err) {
                         setError(err.message || 'Erreur lors de la livraison.');
                       } finally {
