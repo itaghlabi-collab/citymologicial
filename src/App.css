@@ -9321,12 +9321,128 @@ tbody tr:last-child td { border-bottom: none; }
 .log-pickup-form-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
+  gap: 10px 12px;
+}
+
+.log-pickup-form-span {
+  grid-column: 1 / -1;
+}
+
+.log-pickup-form label {
+  display: block;
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-2);
+}
+
+.log-pickup-form .log-pickup-search,
+.log-pickup-form select {
+  margin-top: 4px;
+}
+
+.log-pickup-search {
+  position: relative;
+}
+
+.log-pickup-form {
+  overflow: visible;
+}
+
+.log-pickup-search-input {
+  width: 100%;
+  padding: 8px 11px;
+  border: 1.5px solid var(--border);
+  border-radius: 6px;
+  font-size: 0.86rem;
+  background: #fff;
+  outline: none;
+  font-family: var(--font-body);
+  color: var(--text);
+  box-sizing: border-box;
+}
+.log-pickup-search-input:disabled {
+  background: var(--surface-2);
+  color: var(--text);
+}
+
+.log-pickup-search-menu {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 40;
+  background: #fff;
+  border: 1.5px solid var(--border);
+  border-radius: 8px;
+  box-shadow: 0 10px 24px rgba(0, 0, 0, 0.12);
+  max-height: 220px;
+  overflow-y: auto;
+}
+
+.log-pickup-search-option {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 8px 12px;
+  border: 0;
+  background: #fff;
+  font-size: 0.84rem;
+  font-family: var(--font-body);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.log-pickup-search-option:hover,
+.log-pickup-search-option.is-active {
+  background: var(--surface-2);
+}
+
+.log-pickup-recap {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--surface-2);
+  padding: 8px 12px;
+}
+
+.log-pickup-recap-title {
+  font-size: 0.68rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-3);
+  margin-bottom: 6px;
+}
+
+.log-pickup-recap-row {
+  display: flex;
+  justify-content: space-between;
   gap: 12px;
+  font-size: 0.84rem;
+  padding: 3px 0;
+}
+
+.log-pickup-recap-row span:last-child {
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.log-pickup-form-meta {
+  font-size: 0.78rem;
+  color: var(--text-3);
+}
+
+.log-pickup-save {
+  min-width: 140px;
 }
 
 @media (max-width: 720px) {
   .log-pickup-form-grid {
     grid-template-columns: 1fr;
+  }
+  .log-pickup-save {
+    width: 100%;
+    min-height: 44px;
+    justify-content: center;
   }
 }
 

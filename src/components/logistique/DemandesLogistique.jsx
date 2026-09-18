@@ -1,8 +1,8 @@
 /**
- * DemandesLogistique.jsx — Formulaire unique : bon, départ, destination, chauffeur, réceptionnaire.
- * Lecture seule du bon. Aucune écriture stock / livraison / bon d’origine.
+ * DemandesLogistique.jsx — Formulaire unique compact (créer / modifier).
+ * 5 champs. Lecture seule du bon. Aucune écriture stock / livraison / bon d’origine.
  */
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Plus, Search, RefreshCw, Eye, Package, Loader2, X, Pencil, Trash2,
 } from 'lucide-react';
@@ -92,6 +92,109 @@ function empLabel(emp) {
   return emp.poste ? `${name} — ${emp.poste}` : name;
 }
 
+function bonOptionLabel(b) {
+  if (!b) return '';
+  return b.project_name ? `${b.ref} — ${b.project_name}` : (b.ref || b.id || '');
+}
+
+function lineQty(line) {
+  return line?.qty_preparee_bon ?? line?.qty_to_recover ?? line?.qty_demandee_bon ?? '—';
+}
+
+function normQuery(s) {
+  return String(s || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+function PickupSearchSelect({
+  value,
+  options,
+  getLabel,
+  getId = (o) => o.id,
+  onChange,
+  placeholder = 'Rechercher…',
+  disabled = false,
+}) {
+  const wrapRef = useRef(null);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const selected = options.find((o) => String(getId(o)) === String(value));
+  const selectedLabel = selected ? getLabel(selected) : '';
+
+  useEffect(() => {
+    if (!open) setQuery(selectedLabel);
+  }, [open, selectedLabel]);
+
+  useEffect(() => {
+    function onDocClick(e) {
+      if (wrapRef.current?.contains(e.target)) return;
+      setOpen(false);
+    }
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, []);
+
+  const q = normQuery(query);
+  const browsing = open && (!q || query === selectedLabel);
+  const filtered = browsing
+    ? options
+    : options.filter((o) => normQuery(getLabel(o)).includes(q));
+
+  return (
+    <div className="log-pickup-search" ref={wrapRef}>
+      <input
+        className="log-pickup-search-input"
+        value={open ? query : selectedLabel}
+        disabled={disabled}
+        placeholder={placeholder}
+        autoComplete="off"
+        onFocus={() => {
+          if (disabled) return;
+          setQuery('');
+          setOpen(true);
+        }}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setOpen(true);
+          if (!e.target.value && value) onChange('');
+        }}
+      />
+      {open && !disabled && (
+        <div className="log-pickup-search-menu" role="listbox">
+          {filtered.length === 0 ? (
+            <div className="log-pickup-search-option" style={{ color: 'var(--text-3)', cursor: 'default' }}>
+              Aucun bon
+            </div>
+          ) : filtered.slice(0, 60).map((opt) => {
+            const id = String(getId(opt));
+            const active = id === String(value);
+            return (
+              <button
+                key={id}
+                type="button"
+                role="option"
+                aria-selected={active}
+                className={`log-pickup-search-option${active ? ' is-active' : ''}`}
+                onMouseDown={(e) => e.preventDefault()}
+                onClick={() => {
+                  onChange(id);
+                  setQuery(getLabel(opt));
+                  setOpen(false);
+                }}
+              >
+                {getLabel(opt)}
+              </button>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PickupRowActions({ row, canEdit, canDelete, saving, onView, onEdit, onDelete }) {
   return (
     <div className="log-pickup-actions">
@@ -128,14 +231,16 @@ export default function DemandesLogistique() {
 
   const [search, setSearch] = useState('');
   const [view, setView] = useState('list');
+  const [formMode, setFormMode] = useState('create');
   const [form, setForm] = useState(() => emptyForm(user));
   const [formError, setFormError] = useState('');
-  const [detail, setDetail] = useState(null);
   const [toast, setToast] = useState('');
 
   const [employees, setEmployees] = useState([]);
   const [projects, setProjects] = useState([]);
   const [bons, setBons] = useState([]);
+
+  const readOnly = formMode === 'view';
 
   useEffect(() => {
     let cancelled = false;
@@ -165,6 +270,14 @@ export default function DemandesLogistique() {
     [employees, form.assignee_id],
   );
 
+  const bonOptions = useMemo(() => {
+    const list = [...bons];
+    if (form.bon_id && !list.some((b) => String(b.id) === String(form.bon_id))) {
+      list.unshift({ id: form.bon_id, ref: form.bon_ref || form.bon_id, project_name: '' });
+    }
+    return list;
+  }, [bons, form.bon_id, form.bon_ref]);
+
   const filtered = useMemo(
     () => filterPickupRequests(records, { search }),
     [records, search],
@@ -175,31 +288,41 @@ export default function DemandesLogistique() {
     setTimeout(() => setToast(''), 4000);
   }
 
+  function backToList() {
+    setForm(emptyForm(user));
+    setFormError('');
+    setFormMode('create');
+    setView('list');
+  }
+
   function openCreate() {
     setForm(emptyForm(user));
     setFormError('');
-    setDetail(null);
+    setFormMode('create');
     setView('form');
   }
 
   function openEdit(row) {
     setForm(formFromRecord(row, user));
     setFormError('');
-    setDetail(row);
+    setFormMode('edit');
     setView('form');
   }
 
   function openView(row) {
-    setDetail(row);
-    setView('detail');
+    setForm(formFromRecord(row, user));
+    setFormError('');
+    setFormMode('view');
+    setView('form');
   }
 
   function onSelectBon(bonId) {
-    const snapshot = bons.find((b) => String(b.id) === String(bonId));
-    if (!snapshot) {
+    if (!bonId) {
       setForm((p) => ({ ...p, bon_id: '', bon_ref: '', bon_snapshot: null, lines: [] }));
       return;
     }
+    const snapshot = bons.find((b) => String(b.id) === String(bonId));
+    if (!snapshot) return;
     const mapped = pickupFormFromBon(snapshot);
     setForm((p) => ({ ...p, ...mapped }));
   }
@@ -215,13 +338,13 @@ export default function DemandesLogistique() {
 
   async function handleSave(e) {
     e.preventDefault();
+    if (readOnly) return;
     setFormError('');
     const previous = form.id ? records.find((r) => r.id === form.id) : null;
     const res = await save(form, { employees, previous });
     if (res.success) {
       notify(previous ? `Demande ${res.data.ref} modifiée.` : `Demande ${res.data.ref} enregistrée.`);
-      setDetail(res.data);
-      setView('detail');
+      backToList();
     } else {
       setFormError(res.error || 'Enregistrement impossible.');
     }
@@ -232,11 +355,7 @@ export default function DemandesLogistique() {
     const res = await remove(row.id);
     if (res.success) {
       notify(`Demande ${row.ref} supprimée.`);
-      if (detail?.id === row.id || form.id === row.id) {
-        setDetail(null);
-        setForm(emptyForm(user));
-        setView('list');
-      }
+      if (form.id === row.id) backToList();
     }
   }
 
@@ -249,7 +368,11 @@ export default function DemandesLogistique() {
     onDelete: handleDelete,
   };
 
-  const liveDetail = detail && (records.find((r) => r.id === detail.id) || detail);
+  const formTitle = formMode === 'edit'
+    ? `Modifier ${form.ref || 'la demande'}`
+    : formMode === 'view'
+      ? (form.ref || 'Demande logistique')
+      : 'Nouvelle demande logistique';
 
   return (
     <div className="logistique-module log-pickup-page animate-fade-in">
@@ -361,179 +484,130 @@ export default function DemandesLogistique() {
       )}
 
       {view === 'form' && (
-        <form className="card" onSubmit={handleSave} style={{ padding: 20, maxWidth: 720 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 16 }}>
-            <strong>{form.id ? 'Modifier la demande' : 'Nouvelle demande logistique'}</strong>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={() => setView('list')}><X size={14} /> Annuler</button>
+        <form className="card log-pickup-form" onSubmit={handleSave} style={{ padding: 16, maxWidth: 640 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 12 }}>
+            <strong>{formTitle}</strong>
+            <button type="button" className="btn btn-ghost btn-sm" onClick={backToList}><X size={14} /> Retour</button>
           </div>
-          {formError && <div style={{ marginBottom: 12, color: 'var(--red)', fontSize: '0.85rem' }}>{formError}</div>}
-
-          <label style={{ fontSize: '0.82rem', display: 'block', marginBottom: 14 }}>Bon de préparation
-            <select value={form.bon_id} onChange={(e) => onSelectBon(e.target.value)} style={{ ...SELECT, marginTop: 4 }} required>
-              <option value="">— Sélectionner —</option>
-              {form.bon_id && !bons.some((b) => String(b.id) === String(form.bon_id)) && (
-                <option value={form.bon_id}>{form.bon_ref || form.bon_id}</option>
-              )}
-              {bons.map((b) => (
-                <option key={b.id} value={b.id}>{b.ref}{b.project_name ? ` — ${b.project_name}` : ''}</option>
-              ))}
-            </select>
-          </label>
-
-          {(form.lines || []).length > 0 && (
-            <div style={{ marginBottom: 16, border: '1px solid var(--border)', borderRadius: 8, overflow: 'hidden' }}>
-              <div style={{ padding: '8px 12px', fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', background: 'var(--surface-2)' }}>
-                Articles du bon (lecture seule)
-              </div>
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Désignation</th>
-                      <th>Unité</th>
-                      <th>Demandée</th>
-                      <th>Préparée</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {form.lines.map((l) => (
-                      <tr key={l.id}>
-                        <td>{l.designation}</td>
-                        <td>{l.unite}</td>
-                        <td>{l.qty_demandee_bon ?? '—'}</td>
-                        <td>{l.qty_preparee_bon ?? l.qty_to_recover}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          )}
-
-          <label style={{ fontSize: '0.82rem', display: 'block', marginBottom: 14 }}>Lieu de départ
-            <select
-              value={form.departure_project_id}
-              onChange={(e) => onSelectProject('departure_project_id', 'departure_project_name', e.target.value)}
-              style={{ ...SELECT, marginTop: 4 }}
-              required
-            >
-              <option value="">— Sélectionner —</option>
-              {form.departure_project_name && !projects.some((p) => String(p.id) === String(form.departure_project_id)) && (
-                <option value={form.departure_project_id || '__kept_dep__'}>{form.departure_project_name}</option>
-              )}
-              {projects.map((p) => <option key={p.id} value={p.id}>{projectDisplayLabel(p)}</option>)}
-            </select>
-          </label>
-
-          <label style={{ fontSize: '0.82rem', display: 'block', marginBottom: 14 }}>Destination
-            <select
-              value={form.destination_project_id}
-              onChange={(e) => onSelectProject('destination_project_id', 'destination_project_name', e.target.value)}
-              style={{ ...SELECT, marginTop: 4 }}
-              required
-            >
-              <option value="">— Sélectionner —</option>
-              {form.destination_project_name && !projects.some((p) => String(p.id) === String(form.destination_project_id)) && (
-                <option value={form.destination_project_id || '__kept_dest__'}>{form.destination_project_name}</option>
-              )}
-              {projects.map((p) => <option key={p.id} value={p.id}>{projectDisplayLabel(p)}</option>)}
-            </select>
-          </label>
-
-          <label style={{ fontSize: '0.82rem', display: 'block', marginBottom: 14 }}>Chauffeur / Coursier
-            <select
-              value={form.assignee_id}
-              onChange={(e) => {
-                const emp = employees.find((x) => String(x.id) === String(e.target.value));
-                setForm((prev) => ({
-                  ...prev,
-                  assignee_id: e.target.value,
-                  assignee_name: emp ? employeeFullName(emp) : '',
-                }));
-              }}
-              style={{ ...SELECT, marginTop: 4 }}
-              required
-            >
-              <option value="">— Sélectionner —</option>
-              {driverEmployees.map((emp) => <option key={emp.id} value={emp.id}>{empLabel(emp)}</option>)}
-            </select>
-          </label>
-
-          <label style={{ fontSize: '0.82rem', display: 'block', marginBottom: 18 }}>Réceptionnaire
-            <select
-              value={form.receptionnaire_id}
-              onChange={(e) => {
-                const emp = employees.find((x) => String(x.id) === String(e.target.value));
-                setForm((prev) => ({
-                  ...prev,
-                  receptionnaire_id: e.target.value,
-                  receptionnaire_name: emp ? employeeFullName(emp) : '',
-                }));
-              }}
-              style={{ ...SELECT, marginTop: 4 }}
-              required
-            >
-              <option value="">— Sélectionner —</option>
-              {form.receptionnaire_id && !employees.some((e) => String(e.id) === String(form.receptionnaire_id)) && (
-                <option value={form.receptionnaire_id}>{form.receptionnaire_name || form.receptionnaire_id}</option>
-              )}
-              {employees.map((emp) => <option key={emp.id} value={emp.id}>{empLabel(emp)}</option>)}
-            </select>
-          </label>
-
-          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-            <button type="button" className="btn btn-secondary" onClick={() => setView('list')}>Annuler</button>
-            <button type="submit" className="btn btn-primary" disabled={saving}>{saving ? 'Enregistrement…' : 'Enregistrer'}</button>
+          <div className="log-pickup-form-meta" style={{ marginBottom: 12 }}>
+            {form.demandeur_nom || userDisplayName(user)} · {fmtDate(form.date_creation)}
           </div>
-        </form>
-      )}
+          {formError && <div style={{ marginBottom: 10, color: 'var(--red)', fontSize: '0.85rem' }}>{formError}</div>}
 
-      {view === 'detail' && liveDetail && (
-        <div>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={() => setView('list')} style={{ marginBottom: 12 }}>← Retour à la liste</button>
-          <div className="card" style={{ padding: 20 }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' }}>
-              <div>
-                <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800 }}>{liveDetail.ref}</div>
-                <div style={{ fontSize: '0.84rem', color: 'var(--text-3)', marginTop: 4 }}>
-                  {liveDetail.demandeur_nom} · {fmtDate(liveDetail.date_creation || liveDetail.created_at)}
-                </div>
-              </div>
-              <PickupRowActions row={liveDetail} {...rowActionProps} />
-            </div>
-            <div style={{ display: 'grid', gap: 8, marginTop: 16, fontSize: '0.88rem' }}>
-              <div><strong>Bon</strong> — {liveDetail.bon_ref || '—'}</div>
-              <div><strong>Départ</strong> — {pickupDepartureLabel(liveDetail)}</div>
-              <div><strong>Destination</strong> — {pickupDestinationLabel(liveDetail)}</div>
-              <div><strong>Chauffeur / Coursier</strong> — {liveDetail.assignee_name || '—'}</div>
-              <div><strong>Réceptionnaire</strong> — {liveDetail.receptionnaire_name || '—'}</div>
-            </div>
-            {(liveDetail.lines || []).length > 0 && (
-              <div className="table-wrap" style={{ marginTop: 16 }}>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Désignation</th>
-                      <th>Unité</th>
-                      <th>Demandée</th>
-                      <th>Préparée</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {liveDetail.lines.map((l) => (
-                      <tr key={l.id}>
-                        <td>{l.designation}</td>
-                        <td>{l.unite}</td>
-                        <td>{l.qty_demandee_bon ?? '—'}</td>
-                        <td>{l.qty_preparee_bon ?? l.qty_to_recover}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+          <div className="log-pickup-form-grid">
+            <label className="log-pickup-form-span">Bon de préparation
+              <PickupSearchSelect
+                value={form.bon_id}
+                options={bonOptions}
+                getLabel={bonOptionLabel}
+                onChange={onSelectBon}
+                placeholder="Rechercher un bon de préparation…"
+                disabled={readOnly}
+              />
+            </label>
+
+            {(form.lines || []).length > 0 && (
+              <div className="log-pickup-recap log-pickup-form-span">
+                <div className="log-pickup-recap-title">Articles du bon</div>
+                {form.lines.map((l) => (
+                  <div key={l.id} className="log-pickup-recap-row">
+                    <span>{l.designation}</span>
+                    <span>{lineQty(l)} {l.unite || ''}</span>
+                  </div>
+                ))}
               </div>
             )}
+
+            <label>Départ
+              <select
+                value={form.departure_project_id}
+                onChange={(e) => onSelectProject('departure_project_id', 'departure_project_name', e.target.value)}
+                style={SELECT}
+                required={!readOnly}
+                disabled={readOnly}
+              >
+                <option value="">— Sélectionner —</option>
+                {form.departure_project_name && !projects.some((p) => String(p.id) === String(form.departure_project_id)) && (
+                  <option value={form.departure_project_id || '__kept_dep__'}>{form.departure_project_name}</option>
+                )}
+                {projects.map((p) => <option key={p.id} value={p.id}>{projectDisplayLabel(p)}</option>)}
+              </select>
+            </label>
+
+            <label>Destination
+              <select
+                value={form.destination_project_id}
+                onChange={(e) => onSelectProject('destination_project_id', 'destination_project_name', e.target.value)}
+                style={SELECT}
+                required={!readOnly}
+                disabled={readOnly}
+              >
+                <option value="">— Sélectionner —</option>
+                {form.destination_project_name && !projects.some((p) => String(p.id) === String(form.destination_project_id)) && (
+                  <option value={form.destination_project_id || '__kept_dest__'}>{form.destination_project_name}</option>
+                )}
+                {projects.map((p) => <option key={p.id} value={p.id}>{projectDisplayLabel(p)}</option>)}
+              </select>
+            </label>
+
+            <label>Chauffeur / Coursier
+              <select
+                value={form.assignee_id}
+                onChange={(e) => {
+                  const emp = employees.find((x) => String(x.id) === String(e.target.value));
+                  setForm((prev) => ({
+                    ...prev,
+                    assignee_id: e.target.value,
+                    assignee_name: emp ? employeeFullName(emp) : '',
+                  }));
+                }}
+                style={SELECT}
+                required={!readOnly}
+                disabled={readOnly}
+              >
+                <option value="">— Sélectionner —</option>
+                {driverEmployees.map((emp) => <option key={emp.id} value={emp.id}>{empLabel(emp)}</option>)}
+              </select>
+            </label>
+
+            <label>Réceptionnaire
+              <select
+                value={form.receptionnaire_id}
+                onChange={(e) => {
+                  const emp = employees.find((x) => String(x.id) === String(e.target.value));
+                  setForm((prev) => ({
+                    ...prev,
+                    receptionnaire_id: e.target.value,
+                    receptionnaire_name: emp ? employeeFullName(emp) : '',
+                  }));
+                }}
+                style={SELECT}
+                required={!readOnly}
+                disabled={readOnly}
+              >
+                <option value="">— Sélectionner —</option>
+                {form.receptionnaire_id && !employees.some((e) => String(e.id) === String(form.receptionnaire_id)) && (
+                  <option value={form.receptionnaire_id}>{form.receptionnaire_name || form.receptionnaire_id}</option>
+                )}
+                {employees.map((emp) => <option key={emp.id} value={emp.id}>{empLabel(emp)}</option>)}
+              </select>
+            </label>
+
+            <div className="log-pickup-form-span" style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 }}>
+              {readOnly ? (
+                canEdit && (
+                  <button type="button" className="btn btn-secondary" onClick={() => setFormMode('edit')}>
+                    <Pencil size={14} /> Modifier
+                  </button>
+                )
+              ) : (
+                <button type="submit" className="btn btn-primary log-pickup-save" disabled={saving}>
+                  {saving ? 'Enregistrement…' : 'Enregistrer'}
+                </button>
+              )}
+            </div>
           </div>
-        </div>
+        </form>
       )}
     </div>
   );

@@ -60,12 +60,12 @@ export async function searchPreparationBons(query = '') {
   const rows = await listSiteMaterialRequests();
   const bons = (rows || []).filter((r) => isPreparationBon(r));
   const q = normalizeSearch(query);
-  if (!q) return bons.slice(0, 40).map(snapshotPreparationBon);
   const tokens = q.split(/\s+/).filter(Boolean);
-  return bons.filter((b) => {
+  const matched = !q ? bons : bons.filter((b) => {
     const hay = normalizeSearch([b.ref, b.project_ref, b.project_name, b.client_name].join(' '));
     return tokens.every((t) => hay.includes(t));
-  }).slice(0, 40).map(snapshotPreparationBon);
+  });
+  return matched.map(snapshotPreparationBon);
 }
 
 export async function getPreparationBonSnapshot(id) {
