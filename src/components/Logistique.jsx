@@ -1,7 +1,6 @@
 /**
  * Logistique.jsx — Module ERP Logistique CITYMO
- * Gestion de flotte, demandes d'intervention, historique
- * Backend-ready / API-ready / Database-ready
+ * Parc automobile (flotte, entretien, historique) + demandes de récupération
  */
 
 import {
@@ -16,6 +15,7 @@ import { useVehicles } from '../hooks/useVehicles';
 import { useInterventions } from '../hooks/useInterventions';
 import VehicleDailyReportModal from './logistique/VehicleDailyReportModal';
 import { listDailyReportsByVehicle } from '../services/logistique/vehicleDailyReports';
+import DemandesLogistique from './logistique/DemandesLogistique';
 
 // ── Design tokens (cohérents avec App.css) ──────────────────────────────────
 
@@ -1234,7 +1234,6 @@ function isExpiringSoon(dateStr) {
 
 const LOGISTIQUE_TAB_FROM_NAV = {
   vehicules: 'vehicules',
-  interventions: 'interventions',
   'historique-interv': 'historique',
 };
 
@@ -1269,7 +1268,7 @@ function LogistiqueMobileCard({ title, subtitle, badges, meta = [], actions }) {
 
 // ── Composant principal ───────────────────────────────────────────────────────
 
-export default function Logistique({ activeTab: activeTabProp }) {
+function ParcAutomobile({ activeTabProp }) {
   const resolvedTab = resolveLogistiqueTab(activeTabProp);
   const [tab, setTab] = useState(resolvedTab);
   const [detailVehicule, setDetailVehicule] = useState(null);
@@ -1285,7 +1284,7 @@ export default function Logistique({ activeTab: activeTabProp }) {
     if (resolvedTab !== 'vehicules') setDetailVehicule(null);
   }, [resolvedTab]);
 
-  const logistiqueTabActive = ['vehicules', 'interventions', 'historique'].includes(tab);
+  const logistiqueTabActive = true;
   const intDataEnabled = tab === 'interventions' || tab === 'historique' || !!detailVehicule;
 
   const {
@@ -1448,8 +1447,8 @@ export default function Logistique({ activeTab: activeTabProp }) {
       {/* Header */}
       <div className="page-header flex-between">
         <div>
-          <h1 className="page-title">Logistique</h1>
-          <p className="page-subtitle">Gestion de la flotte, interventions et maintenance véhicules</p>
+          <h1 className="page-title">Parc automobile</h1>
+          <p className="page-subtitle">Véhicules, demandes d’entretien / réparation et historique</p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
           <button className="btn btn-ghost btn-sm"><Download size={14} /> Export</button>
@@ -1460,7 +1459,7 @@ export default function Logistique({ activeTab: activeTabProp }) {
       <div className="logistique-tabs" role="tablist">
         {[
           ['vehicules',     <Truck size={14} />,         'Véhicules'],
-          ['interventions', <Wrench size={14} />,        "Demandes d'intervention"],
+          ['interventions', <Wrench size={14} />,        'Entretien / réparation'],
           ['historique',    <Clock size={14} />,         'Historique'],
         ].map(([k, icon, label]) => {
           const isActive = tab === k;
@@ -1542,4 +1541,9 @@ export default function Logistique({ activeTab: activeTabProp }) {
       )}
     </div>
   );
+}
+
+export default function Logistique({ activeTab }) {
+  if (activeTab === 'interventions') return <DemandesLogistique />;
+  return <ParcAutomobile activeTabProp={activeTab} />;
 }

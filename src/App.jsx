@@ -59,7 +59,8 @@ import {
   UserSquare, FileEdit, CalendarRange, Megaphone,
   NotebookPen, Receipt, Lightbulb,
   Contact, ShoppingBag, Tag, FileText, ScrollText, PackageCheck,
-  Truck, Wrench, History,
+  Truck,
+
   FolderOpen, AlertCircle, ClipboardCheck, Factory, Inbox, Hammer, CheckCircle2,
   MessageSquare,
   FolderClosed, Share2, Link, Trash2,
@@ -136,9 +137,8 @@ const NAV = [
   {
     section: 'Logistique',
     items: [
-      { id: 'vehicules',          label: 'Vehicules',            icon: Truck },
-      { id: 'interventions',      label: "Demandes d'intervention", icon: Wrench },
-      { id: 'historique-interv',  label: "Historique d'intervention", icon: History },
+      { id: 'vehicules',          label: 'Parc automobile',      icon: Truck },
+      { id: 'interventions',      label: 'Logistique',           icon: Package },
     ],
   },
   {
@@ -244,9 +244,9 @@ const MODULE_LABELS = {
   devis:               'Devis',
   factures:            'Factures',
   'bon-livraison':     'Bon de livraison',
-  vehicules:           'Vehicules',
-  interventions:       "Demandes d'intervention",
-  'historique-interv': "Historique d'intervention",
+  vehicules:           'Parc automobile',
+  interventions:       'Logistique',
+  'historique-interv': 'Parc automobile — Historique',
   projets:             'Projets',
   'demandes-engins':   "Location d'engins",
   'sav-projets':       'Service Apres-Vente',
