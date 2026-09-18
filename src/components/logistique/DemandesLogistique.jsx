@@ -32,6 +32,25 @@ const INPUT = {
 };
 const SELECT = { ...INPUT, cursor: 'pointer' };
 
+const PICKUP_EXTRA_LOCATIONS = [
+  { id: '__loc_depot_lakhyayta__', name: 'DEPOT LAKHYAYTA' },
+];
+
+function extraLocationById(id) {
+  return PICKUP_EXTRA_LOCATIONS.find((x) => String(x.id) === String(id)) || null;
+}
+
+function extraLocationIdForName(name) {
+  const n = String(name || '').trim().toUpperCase();
+  if (!n) return '';
+  return PICKUP_EXTRA_LOCATIONS.find((x) => x.name.toUpperCase() === n)?.id || '';
+}
+
+function locationLabelInProjects(projects, name) {
+  const n = String(name || '').trim().toUpperCase();
+  return (projects || []).some((p) => projectDisplayLabel(p).trim().toUpperCase() === n);
+}
+
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -81,9 +100,14 @@ function formFromRecord(row, user) {
     bon_ref: row.bon_ref || '',
     bon_snapshot: row.bon_snapshot || null,
     lines: row.lines || [],
-    departure_project_id: row.departure_project_id || '',
+    departure_project_id: row.departure_project_id
+      || extraLocationIdForName(pickupDepartureLabel(row))
+      || '',
     departure_project_name: pickupDepartureLabel(row) === '—' ? '' : pickupDepartureLabel(row),
-    destination_project_id: row.destination_project_id || row.project_id || '',
+    destination_project_id: row.destination_project_id
+      || row.project_id
+      || extraLocationIdForName(pickupDestinationLabel(row))
+      || '',
     destination_project_name: pickupDestinationLabel(row) === '—' ? '' : pickupDestinationLabel(row),
     assignee_id: row.assignee_id || '',
     assignee_name: row.assignee_name || '',
@@ -345,11 +369,20 @@ export default function DemandesLogistique() {
   }
 
   function onSelectProject(fieldId, fieldName, projectId) {
+    if (!projectId) {
+      setForm((prev) => ({ ...prev, [fieldId]: '', [fieldName]: '' }));
+      return;
+    }
+    const extra = extraLocationById(projectId);
+    if (extra) {
+      setForm((prev) => ({ ...prev, [fieldId]: extra.id, [fieldName]: extra.name }));
+      return;
+    }
     const p = projects.find((x) => String(x.id) === String(projectId));
     setForm((prev) => ({
       ...prev,
       [fieldId]: projectId,
-      [fieldName]: p ? projectDisplayLabel(p) : '',
+      [fieldName]: p ? projectDisplayLabel(p) : (String(projectId).startsWith('__kept_') ? prev[fieldName] : ''),
     }));
   }
 
@@ -547,7 +580,10 @@ export default function DemandesLogistique() {
                 disabled={readOnly}
               >
                 <option value="">— Sélectionner —</option>
-                {form.departure_project_name && !projects.some((p) => String(p.id) === String(form.departure_project_id)) && (
+                {PICKUP_EXTRA_LOCATIONS.filter((e) => !locationLabelInProjects(projects, e.name)).map((e) => (
+                  <option key={e.id} value={e.id}>{e.name}</option>
+                ))}
+                {form.departure_project_name && !projects.some((p) => String(p.id) === String(form.departure_project_id)) && !extraLocationById(form.departure_project_id) && (
                   <option value={form.departure_project_id || '__kept_dep__'}>{form.departure_project_name}</option>
                 )}
                 {projects.map((p) => <option key={p.id} value={p.id}>{projectDisplayLabel(p)}</option>)}
@@ -563,7 +599,10 @@ export default function DemandesLogistique() {
                 disabled={readOnly}
               >
                 <option value="">— Sélectionner —</option>
-                {form.destination_project_name && !projects.some((p) => String(p.id) === String(form.destination_project_id)) && (
+                {PICKUP_EXTRA_LOCATIONS.filter((e) => !locationLabelInProjects(projects, e.name)).map((e) => (
+                  <option key={e.id} value={e.id}>{e.name}</option>
+                ))}
+                {form.destination_project_name && !projects.some((p) => String(p.id) === String(form.destination_project_id)) && !extraLocationById(form.destination_project_id) && (
                   <option value={form.destination_project_id || '__kept_dest__'}>{form.destination_project_name}</option>
                 )}
                 {projects.map((p) => <option key={p.id} value={p.id}>{projectDisplayLabel(p)}</option>)}
