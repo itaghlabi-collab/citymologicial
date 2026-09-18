@@ -157,65 +157,88 @@ export function linesFromBonSnapshot(bon) {
 
 export function validatePickupCreate(form) {
   const errors = [];
+  if (!form?.bon_id) errors.push('Sélectionnez un bon de préparation.');
   const lines = (form?.lines || []).map((l, i) => normalizePickupLine(l, i)).filter((l) => l.designation);
-  if (!lines.length) errors.push('Indiquez au moins un élément à récupérer.');
-  lines.forEach((l, i) => {
-    if (!(l.qty_to_recover > 0)) errors.push(`Ligne ${i + 1} : quantité à récupérer requise.`);
-  });
-  if (!String(form?.destination || '').trim() && !String(form?.lieu_recuperation || '').trim()) {
-    errors.push('Indiquez le lieu de récupération ou la destination.');
+  if (form?.bon_id && !lines.length) errors.push('Ce bon de préparation n’a pas d’articles à reprendre.');
+  if (!form?.departure_project_id && !String(form?.departure_project_name || '').trim()) {
+    errors.push('Sélectionnez le lieu de départ.');
+  }
+  if (!form?.destination_project_id && !String(form?.destination_project_name || '').trim()) {
+    errors.push('Sélectionnez la destination.');
+  }
+  if (!form?.assignee_id) errors.push('Sélectionnez un chauffeur ou un coursier.');
+  if (!form?.receptionnaire_id && !String(form?.receptionnaire_name || '').trim()) {
+    errors.push('Indiquez le réceptionnaire.');
   }
   return { ok: errors.length === 0, errors, lines };
 }
 
-export function buildPickupRequest(form, { existing = [], user, employees = [] } = {}) {
+export function pickupDepartureLabel(request) {
+  return request?.departure_project_name || request?.lieu_recuperation || '—';
+}
+
+export function pickupDestinationLabel(request) {
+  return request?.destination_project_name || request?.destination || request?.project_name || '—';
+}
+
+export function buildPickupRequest(form, { existing = [], user, employees = [], previous } = {}) {
   const { ok, errors, lines } = validatePickupCreate(form);
   if (!ok) {
     const err = new Error(errors[0]);
     err.details = errors;
     throw err;
   }
-  if (form.assignee_id) {
-    const emp = (employees || []).find((e) => String(e.id) === String(form.assignee_id));
-    assertPickupAssigneeAllowed(emp, { allowEmpty: false });
-  }
+  const emp = (employees || []).find((e) => String(e.id) === String(form.assignee_id));
+  assertPickupAssigneeAllowed(emp, { allowEmpty: false, keepId: previous?.assignee_id });
   const now = new Date().toISOString();
-  const demandeurNom = String(form.demandeur_nom || '').trim()
+  const demandeurNom = String(form.demandeur_nom || previous?.demandeur_nom || '').trim()
     || [user?.prenom, user?.nom].filter(Boolean).join(' ').trim()
     || user?.email
     || '';
-  const assigneeName = String(form.assignee_name || '').trim();
-  let statut = 'a_organiser';
-  if (assigneeName) statut = 'planifiee';
-  return {
-    id: form.id || newId('dl'),
-    ref: form.ref || nextPickupRef(existing),
-    statut,
-    demandeur_id: form.demandeur_id || user?.id || null,
-    demandeur_nom: demandeurNom,
-    created_at: form.created_at || now,
+  const assigneeName = String(form.assignee_name || emp && [emp.firstname, emp.lastname].filter(Boolean).join(' ') || '').trim();
+  const receptionnaireName = String(form.receptionnaire_name || '').trim();
+  const depKept = !form.departure_project_id || String(form.departure_project_id).startsWith('__kept_');
+  const destKept = !form.destination_project_id || String(form.destination_project_id).startsWith('__kept_');
+  const departureProjectId = depKept ? (previous?.departure_project_id || null) : form.departure_project_id;
+  const destinationProjectId = destKept ? (previous?.destination_project_id || previous?.project_id || null) : form.destination_project_id;
+  const departureProjectName = String(form.departure_project_name || previous?.departure_project_name || '').trim();
+  const destinationProjectName = String(form.destination_project_name || previous?.destination_project_name || '').trim();
+  const base = {
+    id: previous?.id || form.id || newId('dl'),
+    ref: previous?.ref || form.ref || nextPickupRef(existing),
+    statut: previous?.statut || 'a_organiser',
+    demandeur_id: previous?.demandeur_id || form.demandeur_id || user?.id || null,
+    demandeur_nom: previous?.demandeur_nom || demandeurNom,
+    created_at: previous?.created_at || form.created_at || now,
     updated_at: now,
-    date_creation: (form.date_creation || now).slice(0, 10),
+    date_creation: previous?.date_creation || form.date_creation || now.slice(0, 10),
     bon_id: form.bon_id || null,
     bon_ref: form.bon_ref || '',
     bon_snapshot: form.bon_snapshot || null,
-    lieu_recuperation: String(form.lieu_recuperation || '').trim(),
-    destination: String(form.destination || '').trim(),
-    project_id: form.project_id || null,
-    project_name: form.project_name || '',
-    date_souhaitee: form.date_souhaitee || '',
-    priorite: form.priorite || 'normale',
-    observations: String(form.observations || '').trim(),
+    departure_project_id: departureProjectId,
+    departure_project_name: departureProjectName,
+    destination_project_id: destinationProjectId,
+    destination_project_name: destinationProjectName,
+    lieu_recuperation: departureProjectName,
+    destination: destinationProjectName,
+    project_id: destinationProjectId,
+    project_name: destinationProjectName,
+    date_souhaitee: previous?.date_souhaitee || form.date_souhaitee || '',
+    priorite: previous?.priorite || form.priorite || 'normale',
+    observations: previous?.observations || form.observations || '',
     assignee_id: form.assignee_id || null,
     assignee_name: assigneeName,
-    vehicle_id: form.vehicle_id || null,
-    vehicle_label: String(form.vehicle_label || '').trim(),
+    receptionnaire_id: form.receptionnaire_id || null,
+    receptionnaire_name: receptionnaireName,
+    vehicle_id: previous?.vehicle_id || form.vehicle_id || null,
+    vehicle_label: previous?.vehicle_label || form.vehicle_label || '',
     lines,
-    recoveries: [],
-    recovered_at: null,
-    recovered_by_name: '',
-    recovered_by_id: null,
+    recoveries: previous?.recoveries || [],
+    recovered_at: previous?.recovered_at || null,
+    recovered_by_name: previous?.recovered_by_name || '',
+    recovered_by_id: previous?.recovered_by_id || null,
   };
+  return base;
 }
 
 export function assignPickup(request, patch, { employees = [] } = {}) {
@@ -319,15 +342,14 @@ export function confirmPickupRecovery(request, {
   return next;
 }
 
-export function filterPickupRequests(list, { search = '', statut = '', assignee = '' } = {}) {
+export function filterPickupRequests(list, { search = '' } = {}) {
   const q = String(search || '').trim().toLowerCase();
   return (list || []).filter((r) => {
-    if (statut && r.statut !== statut) return false;
-    if (assignee && String(r.assignee_name || '') !== assignee) return false;
     if (!q) return true;
     const hay = [
-      r.ref, r.demandeur_nom, r.destination, r.lieu_recuperation,
-      r.assignee_name, r.bon_ref, r.project_name, r.observations,
+      r.ref, r.bon_ref, r.demandeur_nom,
+      pickupDepartureLabel(r), pickupDestinationLabel(r),
+      r.assignee_name, r.receptionnaire_name,
     ].join(' ').toLowerCase();
     return hay.includes(q);
   });
@@ -404,4 +426,15 @@ export async function savePickupRequest(request) {
   else list.unshift(request);
   writeLocal(list);
   return request;
+}
+
+export async function deletePickupRequest(id) {
+  const remote = await trySupabase(async (sb) => {
+    const { error } = await sb.from(TABLE).delete().eq('id', id);
+    if (error) throw error;
+    return { ok: true };
+  });
+  writeLocal(readLocal().filter((r) => String(r.id) !== String(id)));
+  if (remote?.ok || remote?.missing) return true;
+  throw new Error('Suppression impossible.');
 }

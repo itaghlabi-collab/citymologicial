@@ -1,19 +1,14 @@
 /**
- * Tests fictifs — demandes de récupération logistique.
+ * Tests fictifs — formulaire logistique simplifié (5 champs).
  * node src/services/logistique/pickupRequests.test.js
  * Aucune écriture en production.
  */
 import {
   buildPickupRequest,
-  confirmPickupRecovery,
-  assignPickup,
-  cancelPickup,
-  remainingQty,
-  isPickupFullyRecovered,
-  findActiveLinkedToBon,
   linesFromBonSnapshot,
   filterPickupRequests,
-  nextPickupRef,
+  pickupDepartureLabel,
+  pickupDestinationLabel,
   isPickupDriverPoste,
   filterPickupDriverEmployees,
   assertPickupAssigneeAllowed,
@@ -28,24 +23,10 @@ function close(a, b, msg) {
 }
 
 const user = { id: 'u1', prenom: 'Imane', nom: 'Test' };
-
-const sansBon = buildPickupRequest({
-  demandeur_nom: 'Imane Test',
-  destination: 'Chantier Nord',
-  lieu_recuperation: 'Dépôt central',
-  date_souhaitee: '2026-09-20',
-  priorite: 'normale',
-  observations: 'Récupération outils',
-  lines: [
-    { designation: 'Perceuse', unite: 'U', qty_to_recover: 2 },
-    { designation: 'Câble', unite: 'm', qty_to_recover: 10 },
-  ],
-}, { existing: [], user });
-
-assert(sansBon.statut === 'a_organiser', 'création sans bon → à organiser');
-assert(sansBon.demandeur_nom === 'Imane Test', 'demandeur auto');
-assert(sansBon.lines.length === 2, 'lignes libres conservées');
-assert(!sansBon.bon_id, 'sans bon lié');
+const chauffeur = { id: 'e1', firstname: 'Karim', lastname: 'Naji', poste: 'Chauffeur' };
+const coursier = { id: 'e2', firstname: 'Sara', lastname: 'Bennani', poste: 'Coursier' };
+const magasinier = { id: 'm1', firstname: 'Omar', lastname: 'Said', poste: 'Magasinier' };
+const pool = [chauffeur, coursier, magasinier];
 
 const bon = {
   id: 'bon-1',
@@ -57,122 +38,99 @@ const bon = {
   ],
 };
 const fromBonLines = linesFromBonSnapshot(bon);
-close(fromBonLines[0].qty_to_recover, 15, 'qté à récupérer = préparée si > 0');
-close(fromBonLines[0].qty_demandee_bon, 20, 'qté demandée du bon conservée');
-close(fromBonLines[0].qty_preparee_bon, 15, 'qté préparée du bon conservée');
+close(fromBonLines[0].qty_to_recover, 15, 'qté à récupérer = préparée');
+close(fromBonLines[0].qty_demandee_bon, 20, 'qté demandée conservée');
+close(fromBonLines[1].qty_preparee_bon, 4, 'qté préparée conservée');
 
-const avecBon = buildPickupRequest({
-  ...sansBon,
-  id: undefined,
-  ref: undefined,
+const created = buildPickupRequest({
   bon_id: bon.id,
   bon_ref: bon.ref,
-  destination: bon.project_name,
-  lieu_recuperation: 'A1',
+  bon_snapshot: bon,
   lines: fromBonLines,
-}, { existing: [sansBon], user });
+  departure_project_id: 'p-dep',
+  departure_project_name: 'Dépôt Casa',
+  destination_project_id: 'p-dest',
+  destination_project_name: 'Chantier Nord',
+  assignee_id: 'e1',
+  assignee_name: 'Karim Naji',
+  receptionnaire_id: 'm1',
+  receptionnaire_name: 'Omar Said',
+}, { existing: [], user, employees: pool });
 
-assert(avecBon.ref !== sansBon.ref, 'référence distincte');
-assert(avecBon.bon_ref === 'BP-2026-0042', 'réf bon reprise');
+assert(created.demandeur_nom === 'Imane Test', 'demandeur auto');
+assert(created.bon_ref === 'BP-2026-0042', 'bon lié');
+assert(pickupDepartureLabel(created) === 'Dépôt Casa', 'départ');
+assert(pickupDestinationLabel(created) === 'Chantier Nord', 'destination');
+assert(created.assignee_name === 'Karim Naji', 'chauffeur');
+assert(created.receptionnaire_name === 'Omar Said', 'réceptionnaire');
+assert(created.lines.length === 2, 'articles du bon repris');
 
-const activeDupes = findActiveLinkedToBon([avecBon, sansBon], 'bon-1');
-assert(activeDupes.length === 1, 'doublon actif signalé');
+const edited = buildPickupRequest({
+  ...created,
+  destination_project_id: 'p-dest-2',
+  destination_project_name: 'Chantier Sud',
+}, { existing: [created], user, employees: pool, previous: created });
+assert(edited.id === created.id, 'modification conserve l’id');
+assert(edited.ref === created.ref, 'modification conserve la réf');
+assert(edited.demandeur_nom === created.demandeur_nom, 'demandeur inchangé');
+assert(pickupDestinationLabel(edited) === 'Chantier Sud', 'destination mise à jour');
+assert(edited.lines.length === 2, 'lignes bon conservées');
 
-const chauffeur = { id: 'e1', firstname: 'Karim', lastname: 'Naji', poste: 'Chauffeur' };
-const assigned = assignPickup(avecBon, { assignee_name: 'Karim', assignee_id: 'e1', vehicle_label: 'WW-123' }, { employees: [chauffeur] });
-assert(assigned.statut === 'planifiee', 'affectation → planifiée');
-assert(assigned.assignee_name === 'Karim', 'responsable conservé');
-
-const partial = confirmPickupRecovery(assigned, {
-  quantities: { [assigned.lines[0].id]: 10, [assigned.lines[1].id]: 1 },
-  actorName: 'Karim',
-  dateEffective: '2026-09-21',
-  notes: 'Premier passage',
-});
-assert(partial.statut === 'en_cours', 'partiel ≠ récupérée');
-close(remainingQty(partial.lines[0]), 5, 'restant ciment 5');
-close(remainingQty(partial.lines[1]), 3, 'restant sable 3');
-assert(partial.recoveries.length === 1, 'événement conservé');
-
-let blocked = false;
+let missingBon = false;
 try {
-  confirmPickupRecovery(partial, { quantities: { [partial.lines[0].id]: 99 }, actorName: 'Karim' });
+  buildPickupRequest({
+    departure_project_id: 'p-dep',
+    departure_project_name: 'Dépôt',
+    destination_project_id: 'p-dest',
+    destination_project_name: 'Chantier',
+    assignee_id: 'e1',
+    receptionnaire_name: 'Omar',
+    lines: [],
+  }, { user, employees: pool });
 } catch {
-  blocked = true;
+  missingBon = true;
 }
-assert(blocked, 'quantité > restant refusée');
-
-const full = confirmPickupRecovery(partial, {
-  quantities: { [partial.lines[0].id]: 5, [partial.lines[1].id]: 3 },
-  actorName: 'Karim',
-  dateEffective: '2026-09-22',
-});
-assert(full.statut === 'recuperee', 'complet → récupérée');
-assert(isPickupFullyRecovered(full), 'plus de restant');
-assert(full.recoveries.length === 2, 'récupérations antérieures conservées');
-assert(findActiveLinkedToBon([full], 'bon-1').length === 0, 'récupérée hors doublons actifs');
-
-let double = false;
-try {
-  confirmPickupRecovery(full, { quantities: { [full.lines[0].id]: 1 }, actorName: 'Karim' });
-} catch {
-  double = true;
-}
-assert(double, 'double confirmation refusée');
-
-const cancelled = cancelPickup(buildPickupRequest({
-  destination: 'X',
-  lieu_recuperation: 'Y',
-  lines: [{ designation: 'Seau', unite: 'U', qty_to_recover: 1 }],
-}, { user }));
-assert(cancelled.statut === 'annulee', 'annulation');
-
-assert(nextPickupRef([{ ref: 'DL-2026-0003' }]).startsWith('DL-2026-'), 'ref année');
-assert(filterPickupRequests([sansBon, avecBon], { search: 'atlas' }).length === 1, 'filtre chantier');
-
-assert(isPickupDriverPoste('Chauffeur'), 'poste Chauffeur');
-assert(isPickupDriverPoste('Coursier'), 'poste Coursier');
-assert(isPickupDriverPoste('chauffeur-livreur'), 'chauffeur enregistré composé');
-assert(!isPickupDriverPoste('Magasinier'), 'magasinier exclu');
-assert(!isPickupDriverPoste(''), 'poste vide exclu');
-
-const pool = [
-  { id: 'c1', poste: 'Chauffeur', firstname: 'Ali' },
-  { id: 'c2', poste: 'Coursier', firstname: 'Sara' },
-  { id: 'm1', poste: 'Magasinier', firstname: 'Omar' },
-];
-assert(filterPickupDriverEmployees(pool).length === 2, 'liste restreinte chauffeur/coursier');
-assert(filterPickupDriverEmployees(pool, { keepId: 'm1' }).some((e) => e.id === 'm1'), 'affectation historique conservée dans la liste');
+assert(missingBon, 'bon obligatoire');
 
 let magasinierBlocked = false;
 try {
-  assertPickupAssigneeAllowed(pool[2], { allowEmpty: false });
+  buildPickupRequest({
+    bon_id: bon.id,
+    bon_ref: bon.ref,
+    lines: fromBonLines,
+    departure_project_id: 'p-dep',
+    departure_project_name: 'Dépôt',
+    destination_project_id: 'p-dest',
+    destination_project_name: 'Chantier',
+    assignee_id: 'm1',
+    assignee_name: 'Omar',
+    receptionnaire_name: 'Sara',
+  }, { user, employees: pool });
 } catch {
   magasinierBlocked = true;
 }
-assert(magasinierBlocked, 'enregistrement refuse un magasinier');
+assert(magasinierBlocked, 'magasinier refusé comme chauffeur');
+
+assert(isPickupDriverPoste('Chauffeur') && isPickupDriverPoste('Coursier'), 'postes autorisés');
+assert(!isPickupDriverPoste('Magasinier'), 'magasinier exclu de la liste');
+assert(filterPickupDriverEmployees(pool).length === 2, 'liste chauffeur/coursier');
 assertPickupAssigneeAllowed(null, { allowEmpty: true });
-assertPickupAssigneeAllowed(pool[2], { keepId: 'm1' });
 
-let createBlocked = false;
-try {
-  buildPickupRequest({
-    destination: 'X',
-    lieu_recuperation: 'Y',
-    assignee_id: 'm1',
-    assignee_name: 'Omar',
-    lines: [{ designation: 'Seau', unite: 'U', qty_to_recover: 1 }],
-  }, { user, employees: pool });
-} catch {
-  createBlocked = true;
-}
-assert(createBlocked, 'création refuse un poste hors chauffeur/coursier');
+const kept = buildPickupRequest({
+  bon_id: bon.id,
+  bon_ref: bon.ref,
+  lines: fromBonLines,
+  departure_project_id: 'p-dep',
+  departure_project_name: 'Dépôt Casa',
+  destination_project_id: 'p-dest',
+  destination_project_name: 'Chantier Nord',
+  assignee_id: 'm1',
+  assignee_name: 'Omar Said',
+  receptionnaire_name: 'Sara',
+}, { user, employees: pool, previous: { ...created, assignee_id: 'm1', assignee_name: 'Omar Said' } });
+assert(kept.assignee_id === 'm1', 'affectation historique conservée');
 
-const kept = assignPickup(
-  { ...sansBon, assignee_id: 'm1', assignee_name: 'Omar' },
-  { assignee_id: 'm1', assignee_name: 'Omar' },
-  { employees: pool },
-);
-assert(kept.assignee_id === 'm1', 'historique non chauffeur conservé à l’enregistrement');
+assert(filterPickupRequests([created], { search: 'nord' }).length === 1, 'filtre destination');
+assert(filterPickupRequests([created], { search: 'bp-2026' }).length === 1, 'filtre bon');
 
 console.log('pickupRequests.test.js OK');

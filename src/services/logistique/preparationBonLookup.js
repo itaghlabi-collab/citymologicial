@@ -80,11 +80,6 @@ export function pickupFormFromBon(snapshot) {
     bon_id: snapshot.id,
     bon_ref: snapshot.ref,
     bon_snapshot: snapshot,
-    project_id: snapshot.project_id,
-    project_name: snapshot.project_name || snapshot.project_ref || '',
-    destination: snapshot.destination || snapshot.project_name || '',
-    lieu_recuperation: snapshot.depot_source || '',
-    date_souhaitee: snapshot.date_souhaitee || '',
     lines: linesFromBonSnapshot(snapshot),
   };
 }

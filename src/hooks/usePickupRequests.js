@@ -1,15 +1,12 @@
 /**
- * usePickupRequests.js — Demandes de récupération logistique (persistées hors stock).
+ * usePickupRequests.js — Demandes logistiques (hors stock / hors bons).
  */
 import { useCallback, useEffect, useState } from 'react';
 import {
   listPickupRequests,
   savePickupRequest,
+  deletePickupRequest,
   buildPickupRequest,
-  assignPickup,
-  confirmPickupRecovery,
-  cancelPickup,
-  startPickup,
 } from '../services/logistique/pickupRequests';
 import { formatSupabaseError } from '../services/supabase/formatError';
 
@@ -36,17 +33,31 @@ export function usePickupRequests({ enabled = true, user } = {}) {
 
   useEffect(() => { load(); }, [load]);
 
-  const create = useCallback(async (form, extras = {}) => {
+  const save = useCallback(async (form, extras = {}) => {
     setSaving(true);
     setError('');
     try {
       const current = await listPickupRequests();
-      const built = buildPickupRequest(form, { existing: current, user, employees: extras.employees || [] });
+      const previous = extras.previous || (form.id ? current.find((r) => r.id === form.id) : null);
+      const built = buildPickupRequest(form, {
+        existing: current,
+        user,
+        employees: extras.employees || [],
+        previous,
+      });
       const saved = await savePickupRequest(built);
-      setRecords((prev) => [saved, ...prev.filter((r) => r.id !== saved.id)]);
+      setRecords((prev) => {
+        const idx = prev.findIndex((r) => r.id === saved.id);
+        if (idx >= 0) {
+          const next = [...prev];
+          next[idx] = saved;
+          return next;
+        }
+        return [saved, ...prev];
+      });
       return { success: true, data: saved };
     } catch (err) {
-      const msg = err?.details?.join(' ') || formatSupabaseError(err, err.message || 'Erreur création.');
+      const msg = err?.details?.join(' ') || formatSupabaseError(err, err.message || 'Erreur enregistrement.');
       setError(msg);
       return { success: false, error: msg };
     } finally {
@@ -54,24 +65,21 @@ export function usePickupRequests({ enabled = true, user } = {}) {
     }
   }, [user]);
 
-  const mutate = useCallback(async (id, fn) => {
+  const remove = useCallback(async (id) => {
     setSaving(true);
     setError('');
     try {
-      const current = records.find((r) => r.id === id) || (await listPickupRequests()).find((r) => r.id === id);
-      if (!current) throw new Error('Demande introuvable.');
-      const next = fn(current);
-      const saved = await savePickupRequest(next);
-      setRecords((prev) => prev.map((r) => (r.id === saved.id ? saved : r)));
-      return { success: true, data: saved };
+      await deletePickupRequest(id);
+      setRecords((prev) => prev.filter((r) => r.id !== id));
+      return { success: true };
     } catch (err) {
-      const msg = formatSupabaseError(err, err.message || 'Erreur enregistrement.');
+      const msg = formatSupabaseError(err, err.message || 'Erreur suppression.');
       setError(msg);
       return { success: false, error: msg };
     } finally {
       setSaving(false);
     }
-  }, [records]);
+  }, []);
 
   return {
     records,
@@ -79,10 +87,7 @@ export function usePickupRequests({ enabled = true, user } = {}) {
     saving,
     error,
     reload: load,
-    create,
-    assign: (id, patch, extras = {}) => mutate(id, (r) => assignPickup(r, patch, extras)),
-    confirm: (id, payload) => mutate(id, (r) => confirmPickupRecovery(r, payload)),
-    cancel: (id, reason) => mutate(id, (r) => cancelPickup(r, { reason })),
-    start: (id) => mutate(id, (r) => startPickup(r)),
+    save,
+    remove,
   };
 }
