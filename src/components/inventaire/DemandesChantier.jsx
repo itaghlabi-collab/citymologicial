@@ -1304,7 +1304,7 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate,
       {detail && (
         <>
           <div className="rh-emp-docs-drawer-overlay" onClick={closeDetail} aria-hidden="true" />
-          <aside className="rh-emp-docs-drawer inv-dc-drawer" style={{ maxWidth: 920, width: 'min(96vw, 920px)' }} role="dialog">
+          <aside className="rh-emp-docs-drawer inv-dc-drawer" role="dialog">
             <header className="rh-emp-docs-drawer-header inv-dc-drawer-header">
               <div className="inv-dc-drawer-head-top">
                 <div className="inv-dc-drawer-head-text">
@@ -1466,7 +1466,7 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate,
                   )}
                 </div>
                 {!embedded && detail.statut !== 'annulee' && (
-                  <div style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
+                  <div className="inv-dc-recap-save" style={{ marginTop: 12, display: 'flex', justifyContent: 'flex-end' }}>
                     <button
                       type="button"
                       className="btn btn-primary btn-sm"

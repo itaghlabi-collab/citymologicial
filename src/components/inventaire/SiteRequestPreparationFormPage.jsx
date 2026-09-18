@@ -117,14 +117,15 @@ export default function SiteRequestPreparationFormPage({
     : '—';
 
   return (
-    <div className="animate-fade-in">
+    <div className="animate-fade-in inv-dc-prep-page">
       <button
         type="button"
+        className="inv-dc-prep-back"
         onClick={onBack}
         style={{
           display: 'inline-flex', alignItems: 'center', gap: 6, background: 'none', border: 'none',
           cursor: 'pointer', color: 'var(--text-2)', fontSize: '0.875rem', fontWeight: 600,
-          marginBottom: 16, padding: 0,
+          marginBottom: 16, padding: 0, minHeight: 44,
         }}
       >
         <ChevronLeft size={16} /> Retour aux demandes
@@ -157,7 +158,7 @@ export default function SiteRequestPreparationFormPage({
         >
           Destination et renseignements
         </div>
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 14 }}>
+        <div className="inv-dc-prep-meta-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 14 }}>
           <div>
             <Label required>Projet / destination</Label>
             <select
@@ -245,8 +246,8 @@ export default function SiteRequestPreparationFormPage({
         >
           Catalogue — articles disponibles
         </div>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
-          <div style={{ position: 'relative', flex: '1 1 220px' }}>
+        <div className="inv-dc-prep-filters" style={{ display: 'flex', gap: 10, flexWrap: 'wrap', marginBottom: 12 }}>
+          <div style={{ position: 'relative', flex: '1 1 220px', minWidth: 0 }}>
             <Search size={14} style={{ position: 'absolute', left: 10, top: 11, color: 'var(--text-3)' }} />
             <input
               value={search}
@@ -266,7 +267,7 @@ export default function SiteRequestPreparationFormPage({
             ))}
           </select>
         </div>
-        <div className="table-wrap" style={{ maxHeight: 280, overflow: 'auto' }}>
+        <div className="table-wrap inv-dc-prep-desktop inv-dc-prep-catalog" style={{ maxHeight: 280, overflow: 'auto' }}>
           <table style={{ fontSize: '0.82rem' }}>
             <thead>
               <tr>
@@ -311,6 +312,33 @@ export default function SiteRequestPreparationFormPage({
             </tbody>
           </table>
         </div>
+        <div className="inv-dc-prep-mobile inv-dc-prep-catalog" aria-label="Catalogue articles disponibles">
+          {filteredOffers.length === 0 ? (
+            <div style={{ color: 'var(--text-3)', fontSize: '0.86rem', padding: 8 }}>
+              Aucun article disponible pour ces filtres.
+            </div>
+          ) : filteredOffers.map((o) => {
+            const added = selectedKeys.has(o.key);
+            return (
+              <article key={o.key} className="inv-dc-prep-offer-card">
+                <div className="inv-dc-prep-offer-head">
+                  <div className="inv-dc-prep-offer-ref">{o.reference || '—'}</div>
+                  <div style={{ fontWeight: 800, flexShrink: 0 }}>{o.quantite_disponible} {o.unite}</div>
+                </div>
+                <div className="inv-dc-prep-offer-name">{o.designation}</div>
+                <div className="inv-dc-prep-offer-meta">{formatEmplacementDisplay(o.emplacement)}</div>
+                <button
+                  type="button"
+                  className="btn btn-ghost btn-sm"
+                  disabled={added}
+                  onClick={() => addOffer(o)}
+                >
+                  <Plus size={13} /> {added ? 'Ajouté' : 'Ajouter'}
+                </button>
+              </article>
+            );
+          })}
+        </div>
         <div style={{ marginTop: 8, fontSize: '0.75rem', color: 'var(--text-3)' }}>
           Quantité au dépôt indiqué — distincte du stock global. Les articles sans emplacement disponible n’apparaissent pas.
         </div>
@@ -329,7 +357,8 @@ export default function SiteRequestPreparationFormPage({
             Ajoutez des articles depuis le catalogue ci-dessus.
           </div>
         ) : (
-          <div className="table-wrap">
+          <>
+          <div className="table-wrap inv-dc-prep-desktop">
             <table style={{ fontSize: '0.82rem' }}>
               <thead>
                 <tr>
@@ -378,13 +407,59 @@ export default function SiteRequestPreparationFormPage({
               </tbody>
             </table>
           </div>
+          <div className="inv-dc-prep-mobile" aria-label="Articles à préparer">
+            {lines.map((l, idx) => {
+              const emp = l.emplacement_source || decodeSourceEmplacement(l.remarque).emplacement;
+              const key = preparationOfferKey(l.article_id, emp);
+              const offer = offers.find((o) => o.key === key);
+              const available = Number(offer?.quantite_disponible ?? l.quantite_disponible ?? 0);
+              const qty = Number(l.quantite_demandee);
+              const over = qty > available;
+              return (
+                <article
+                  key={key || idx}
+                  className="inv-dc-prep-line-card"
+                  style={over ? { background: '#FFEBEE', borderColor: 'rgba(211,47,47,0.35)' } : undefined}
+                >
+                  <div className="inv-dc-prep-line-head">
+                    <div className="inv-dc-prep-line-ref">{l.reference || '—'}</div>
+                    <button type="button" className="btn btn-ghost btn-sm" onClick={() => removeLine(idx)} aria-label="Retirer">
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                  <div className="inv-dc-prep-line-name">{l.article_name}</div>
+                  <div className="inv-dc-prep-line-meta">{formatEmplacementDisplay(emp)} · {l.unite}</div>
+                  <div className="inv-dc-prep-qty">
+                    <div>
+                      <Label>Disponible</Label>
+                      <div style={{ fontWeight: 700, minHeight: 44, display: 'flex', alignItems: 'center' }}>{available}</div>
+                    </div>
+                    <div>
+                      <Label>Qté demandée</Label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="any"
+                        value={l.quantite_demandee}
+                        onChange={(e) => updateLine(idx, { quantite_demandee: e.target.value })}
+                        style={{ ...INPUT_STYLE, padding: '8px 10px', borderColor: over ? 'var(--red)' : undefined }}
+                      />
+                    </div>
+                  </div>
+                </article>
+              );
+            })}
+          </div>
+          </>
         )}
       </div>
 
-      <div style={{
-        display: 'flex', flexWrap: 'wrap', gap: 10, justifyContent: 'flex-end',
-        marginTop: 8, paddingTop: 16, borderTop: '2px solid var(--border)',
-      }}
+      <div
+        className="inv-dc-prep-actions"
+        style={{
+          display: 'flex', flexWrap: 'wrap', gap: 10, justifyContent: 'flex-end',
+          marginTop: 8, paddingTop: 16, borderTop: '2px solid var(--border)',
+        }}
       >
         <button type="button" className="btn btn-ghost" onClick={onBack} disabled={saving}>Annuler</button>
         <button
