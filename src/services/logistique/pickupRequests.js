@@ -20,6 +20,42 @@ export const PICKUP_PRIORITES = [
 
 export const PICKUP_ACTIVE_STATUTS = ['a_organiser', 'planifiee', 'en_cours'];
 
+function normPickupPoste(poste) {
+  return String(poste || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+/** Poste réellement enregistré : Chauffeur ou Coursier (mot entier, accents ignorés). */
+export function isPickupDriverPoste(poste) {
+  const tokens = normPickupPoste(poste).split(' ').filter(Boolean);
+  return tokens.includes('chauffeur') || tokens.includes('coursier');
+}
+
+export function filterPickupDriverEmployees(employees, { keepId } = {}) {
+  const list = employees || [];
+  const filtered = list.filter((e) => isPickupDriverPoste(e.poste));
+  if (!keepId) return filtered;
+  const sid = String(keepId);
+  if (filtered.some((e) => String(e.id) === sid)) return filtered;
+  const extra = list.find((e) => String(e.id) === sid);
+  return extra ? [extra, ...filtered] : filtered;
+}
+
+export function assertPickupAssigneeAllowed(employee, { allowEmpty = true, keepId } = {}) {
+  if (!employee) {
+    if (allowEmpty) return;
+    throw new Error('La personne chargée de la récupération est invalide.');
+  }
+  if (keepId && String(employee.id) === String(keepId)) return;
+  if (!isPickupDriverPoste(employee.poste)) {
+    throw new Error('La personne chargée de la récupération doit avoir le poste Chauffeur ou Coursier.');
+  }
+}
+
 const TABLE = 'logistics_pickup_requests';
 const LOCAL_KEY = 'citymo.logisticsPickupRequests.v1';
 
@@ -132,12 +168,16 @@ export function validatePickupCreate(form) {
   return { ok: errors.length === 0, errors, lines };
 }
 
-export function buildPickupRequest(form, { existing = [], user } = {}) {
+export function buildPickupRequest(form, { existing = [], user, employees = [] } = {}) {
   const { ok, errors, lines } = validatePickupCreate(form);
   if (!ok) {
     const err = new Error(errors[0]);
     err.details = errors;
     throw err;
+  }
+  if (form.assignee_id) {
+    const emp = (employees || []).find((e) => String(e.id) === String(form.assignee_id));
+    assertPickupAssigneeAllowed(emp, { allowEmpty: false });
   }
   const now = new Date().toISOString();
   const demandeurNom = String(form.demandeur_nom || '').trim()
@@ -178,9 +218,15 @@ export function buildPickupRequest(form, { existing = [], user } = {}) {
   };
 }
 
-export function assignPickup(request, patch) {
+export function assignPickup(request, patch, { employees = [] } = {}) {
   if (!request) throw new Error('Demande introuvable.');
   if (isPickupLocked(request)) throw new Error('Demande clôturée — affectation impossible.');
+  const nextId = patch.assignee_id !== undefined ? patch.assignee_id : request.assignee_id;
+  if (nextId) {
+    const emp = (employees || []).find((e) => String(e.id) === String(nextId));
+    const sameAsCurrent = String(nextId) === String(request.assignee_id || '');
+    if (!sameAsCurrent) assertPickupAssigneeAllowed(emp, { allowEmpty: false, keepId: request.assignee_id });
+  }
   const assigneeName = patch.assignee_name != null ? String(patch.assignee_name).trim() : request.assignee_name;
   const vehicleLabel = patch.vehicle_label != null ? String(patch.vehicle_label).trim() : request.vehicle_label;
   let statut = request.statut;

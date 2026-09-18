@@ -27,6 +27,7 @@ import {
   isPickupLocked,
   findActiveLinkedToBon,
   filterPickupRequests,
+  filterPickupDriverEmployees,
 } from '../../services/logistique/pickupRequests';
 
 const INPUT = {
@@ -138,6 +139,15 @@ export default function DemandesLogistique() {
       .catch(() => setProjects([]));
   }, [user]);
 
+  const driverEmployees = useMemo(
+    () => filterPickupDriverEmployees(employees),
+    [employees],
+  );
+  const assignDriverEmployees = useMemo(
+    () => filterPickupDriverEmployees(employees, { keepId: detail?.assignee_id || assignPatch.assignee_id }),
+    [employees, detail?.assignee_id, assignPatch.assignee_id],
+  );
+
   const filtered = useMemo(
     () => filterPickupRequests(records, { search, statut: filterStatut }),
     [records, search, filterStatut],
@@ -229,7 +239,7 @@ export default function DemandesLogistique() {
         ? form.lines
         : form.lines.filter((l) => String(l.designation || '').trim()),
     };
-    const res = await create(payload);
+    const res = await create(payload, { employees });
     if (res.success) {
       notify(`Demande ${res.data.ref} créée.`);
       setDetail(res.data);
@@ -272,7 +282,7 @@ export default function DemandesLogistique() {
       assignee_name: emp ? employeeFullName(emp) : assignPatch.assignee_name,
       vehicle_id: assignPatch.vehicle_id || null,
       vehicle_label: veh ? (veh.matricule || veh.vehicule) : assignPatch.vehicle_label,
-    });
+    }, { employees });
     if (res.success) notify('Affectation enregistrée.');
   }
 
@@ -576,7 +586,11 @@ export default function DemandesLogistique() {
               style={{ ...SELECT, marginTop: 4 }}
             >
               <option value="">— À affecter plus tard —</option>
-              {employees.map((emp) => <option key={emp.id} value={emp.id}>{employeeFullName(emp)}</option>)}
+              {driverEmployees.map((emp) => (
+                <option key={emp.id} value={emp.id}>
+                  {employeeFullName(emp)}{emp.poste ? ` — ${emp.poste}` : ''}
+                </option>
+              ))}
             </select>
           </label>
 
@@ -596,7 +610,7 @@ export default function DemandesLogistique() {
           request={liveDetail}
           canEdit={canEdit}
           saving={saving}
-          employees={employees}
+          employees={assignDriverEmployees}
           vehicles={vehicles}
           assignPatch={assignPatch}
           setAssignPatch={setAssignPatch}
@@ -701,8 +715,12 @@ function DetailPickup({
               }}
               style={SELECT}
             >
-              <option value="">Personne chargée…</option>
-              {employees.map((emp) => <option key={emp.id} value={emp.id}>{employeeFullName(emp)}</option>)}
+              <option value="">— À affecter plus tard —</option>
+              {employees.map((emp) => (
+                <option key={emp.id} value={emp.id}>
+                  {employeeFullName(emp)}{emp.poste ? ` — ${emp.poste}` : ''}
+                </option>
+              ))}
             </select>
             <select
               value={assignPatch.vehicle_id}

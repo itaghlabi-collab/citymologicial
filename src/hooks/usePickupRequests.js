@@ -36,12 +36,12 @@ export function usePickupRequests({ enabled = true, user } = {}) {
 
   useEffect(() => { load(); }, [load]);
 
-  const create = useCallback(async (form) => {
+  const create = useCallback(async (form, extras = {}) => {
     setSaving(true);
     setError('');
     try {
       const current = await listPickupRequests();
-      const built = buildPickupRequest(form, { existing: current, user });
+      const built = buildPickupRequest(form, { existing: current, user, employees: extras.employees || [] });
       const saved = await savePickupRequest(built);
       setRecords((prev) => [saved, ...prev.filter((r) => r.id !== saved.id)]);
       return { success: true, data: saved };
@@ -80,7 +80,7 @@ export function usePickupRequests({ enabled = true, user } = {}) {
     error,
     reload: load,
     create,
-    assign: (id, patch) => mutate(id, (r) => assignPickup(r, patch)),
+    assign: (id, patch, extras = {}) => mutate(id, (r) => assignPickup(r, patch, extras)),
     confirm: (id, payload) => mutate(id, (r) => confirmPickupRecovery(r, payload)),
     cancel: (id, reason) => mutate(id, (r) => cancelPickup(r, { reason })),
     start: (id) => mutate(id, (r) => startPickup(r)),

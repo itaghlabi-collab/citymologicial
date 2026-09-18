@@ -100,7 +100,7 @@ export const ERP_RUBRIQUES = Object.freeze([
     submodules: [
       { code: 'vehicules', label: 'Parc automobile' },
       { code: 'interventions', label: 'Logistique' },
-      { code: 'historique-interv', label: 'Parc automobile — Historique' },
+      { code: 'historique-interv', label: "Historique d'intervention" },
     ],
   },
   {

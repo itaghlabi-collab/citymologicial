@@ -14,6 +14,9 @@ import {
   linesFromBonSnapshot,
   filterPickupRequests,
   nextPickupRef,
+  isPickupDriverPoste,
+  filterPickupDriverEmployees,
+  assertPickupAssigneeAllowed,
 } from './pickupRequests.js';
 
 function assert(cond, msg) {
@@ -75,7 +78,8 @@ assert(avecBon.bon_ref === 'BP-2026-0042', 'réf bon reprise');
 const activeDupes = findActiveLinkedToBon([avecBon, sansBon], 'bon-1');
 assert(activeDupes.length === 1, 'doublon actif signalé');
 
-const assigned = assignPickup(avecBon, { assignee_name: 'Karim', assignee_id: 'e1', vehicle_label: 'WW-123' });
+const chauffeur = { id: 'e1', firstname: 'Karim', lastname: 'Naji', poste: 'Chauffeur' };
+const assigned = assignPickup(avecBon, { assignee_name: 'Karim', assignee_id: 'e1', vehicle_label: 'WW-123' }, { employees: [chauffeur] });
 assert(assigned.statut === 'planifiee', 'affectation → planifiée');
 assert(assigned.assignee_name === 'Karim', 'responsable conservé');
 
@@ -125,5 +129,50 @@ assert(cancelled.statut === 'annulee', 'annulation');
 
 assert(nextPickupRef([{ ref: 'DL-2026-0003' }]).startsWith('DL-2026-'), 'ref année');
 assert(filterPickupRequests([sansBon, avecBon], { search: 'atlas' }).length === 1, 'filtre chantier');
+
+assert(isPickupDriverPoste('Chauffeur'), 'poste Chauffeur');
+assert(isPickupDriverPoste('Coursier'), 'poste Coursier');
+assert(isPickupDriverPoste('chauffeur-livreur'), 'chauffeur enregistré composé');
+assert(!isPickupDriverPoste('Magasinier'), 'magasinier exclu');
+assert(!isPickupDriverPoste(''), 'poste vide exclu');
+
+const pool = [
+  { id: 'c1', poste: 'Chauffeur', firstname: 'Ali' },
+  { id: 'c2', poste: 'Coursier', firstname: 'Sara' },
+  { id: 'm1', poste: 'Magasinier', firstname: 'Omar' },
+];
+assert(filterPickupDriverEmployees(pool).length === 2, 'liste restreinte chauffeur/coursier');
+assert(filterPickupDriverEmployees(pool, { keepId: 'm1' }).some((e) => e.id === 'm1'), 'affectation historique conservée dans la liste');
+
+let magasinierBlocked = false;
+try {
+  assertPickupAssigneeAllowed(pool[2], { allowEmpty: false });
+} catch {
+  magasinierBlocked = true;
+}
+assert(magasinierBlocked, 'enregistrement refuse un magasinier');
+assertPickupAssigneeAllowed(null, { allowEmpty: true });
+assertPickupAssigneeAllowed(pool[2], { keepId: 'm1' });
+
+let createBlocked = false;
+try {
+  buildPickupRequest({
+    destination: 'X',
+    lieu_recuperation: 'Y',
+    assignee_id: 'm1',
+    assignee_name: 'Omar',
+    lines: [{ designation: 'Seau', unite: 'U', qty_to_recover: 1 }],
+  }, { user, employees: pool });
+} catch {
+  createBlocked = true;
+}
+assert(createBlocked, 'création refuse un poste hors chauffeur/coursier');
+
+const kept = assignPickup(
+  { ...sansBon, assignee_id: 'm1', assignee_name: 'Omar' },
+  { assignee_id: 'm1', assignee_name: 'Omar' },
+  { employees: pool },
+);
+assert(kept.assignee_id === 'm1', 'historique non chauffeur conservé à l’enregistrement');
 
 console.log('pickupRequests.test.js OK');
