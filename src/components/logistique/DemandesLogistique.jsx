@@ -92,6 +92,32 @@ function empLabel(emp) {
   return emp.poste ? `${name} — ${emp.poste}` : name;
 }
 
+function PickupRowActions({ row, canEdit, canDelete, saving, onView, onEdit, onDelete }) {
+  return (
+    <div className="log-pickup-actions">
+      <button type="button" className="btn btn-ghost btn-sm" onClick={() => onView(row)} disabled={saving}>
+        <Eye size={13} /> Voir
+      </button>
+      {canEdit && (
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => onEdit(row)} disabled={saving}>
+          <Pencil size={13} /> Modifier
+        </button>
+      )}
+      {canDelete && (
+        <button
+          type="button"
+          className="btn btn-ghost btn-sm"
+          style={{ color: 'var(--red)' }}
+          onClick={() => onDelete(row)}
+          disabled={saving}
+        >
+          <Trash2 size={13} /> Supprimer
+        </button>
+      )}
+    </div>
+  );
+}
+
 export default function DemandesLogistique() {
   const { user } = useAuth();
   const { records, loading, saving, error, reload, save, remove } = usePickupRequests({ user });
@@ -206,17 +232,27 @@ export default function DemandesLogistique() {
     const res = await remove(row.id);
     if (res.success) {
       notify(`Demande ${row.ref} supprimée.`);
-      if (detail?.id === row.id) {
+      if (detail?.id === row.id || form.id === row.id) {
         setDetail(null);
+        setForm(emptyForm(user));
         setView('list');
       }
     }
   }
 
+  const rowActionProps = {
+    canEdit,
+    canDelete,
+    saving,
+    onView: openView,
+    onEdit: openEdit,
+    onDelete: handleDelete,
+  };
+
   const liveDetail = detail && (records.find((r) => r.id === detail.id) || detail);
 
   return (
-    <div className="logistique-module animate-fade-in">
+    <div className="logistique-module log-pickup-page animate-fade-in">
       <div className="page-header flex-between">
         <div>
           <h1 className="page-title">Logistique</h1>
@@ -271,7 +307,7 @@ export default function DemandesLogistique() {
             </div>
           ) : (
             <div className="card" style={{ padding: 0 }}>
-              <div className="table-wrap log-desktop-table">
+              <div className="table-wrap table-wrap--wide log-desktop-table">
                 <table>
                   <thead>
                     <tr>
@@ -280,30 +316,26 @@ export default function DemandesLogistique() {
                       <th>Destination</th>
                       <th>Chauffeur / Coursier</th>
                       <th>Réceptionnaire</th>
-                      <th></th>
+                      <th>Actions</th>
                     </tr>
                   </thead>
                   <tbody>
                     {filtered.map((r) => (
                       <tr key={r.id}>
-                        <td style={{ fontWeight: 700 }}>{r.bon_ref || r.ref || '—'}</td>
-                        <td>{pickupDepartureLabel(r)}</td>
-                        <td>{pickupDestinationLabel(r)}</td>
-                        <td>{r.assignee_name || '—'}</td>
-                        <td>{r.receptionnaire_name || '—'}</td>
-                        <td>
-                          <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                            <button type="button" className="btn btn-ghost btn-sm" onClick={() => openView(r)}><Eye size={13} /> Voir</button>
-                            {canEdit && <button type="button" className="btn btn-ghost btn-sm" onClick={() => openEdit(r)}><Pencil size={13} /> Modifier</button>}
-                            {canDelete && <button type="button" className="btn btn-ghost btn-sm" style={{ color: 'var(--red)' }} onClick={() => handleDelete(r)}><Trash2 size={13} /> Supprimer</button>}
-                          </div>
+                        <td data-label="Bon" style={{ fontWeight: 700 }}>{r.bon_ref || r.ref || '—'}</td>
+                        <td data-label="Départ">{pickupDepartureLabel(r)}</td>
+                        <td data-label="Destination">{pickupDestinationLabel(r)}</td>
+                        <td data-label="Chauffeur / Coursier">{r.assignee_name || '—'}</td>
+                        <td data-label="Réceptionnaire">{r.receptionnaire_name || '—'}</td>
+                        <td data-label="Actions" className="log-pickup-actions-cell">
+                          <PickupRowActions row={r} {...rowActionProps} />
                         </td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
               </div>
-              <div className="log-mobile-list">
+              <div className="log-mobile-list" aria-label="Liste des demandes logistiques">
                 {filtered.map((r) => (
                   <div key={r.id} className="log-mobile-card">
                     <div className="log-mobile-card-head">
@@ -318,9 +350,7 @@ export default function DemandesLogistique() {
                       <div className="log-mobile-meta-row"><span>Réceptionnaire</span><span>{r.receptionnaire_name || '—'}</span></div>
                     </div>
                     <div className="log-mobile-card-actions">
-                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => openView(r)}><Eye size={13} /> Voir</button>
-                      {canEdit && <button type="button" className="btn btn-ghost btn-sm" onClick={() => openEdit(r)}><Pencil size={13} /></button>}
-                      {canDelete && <button type="button" className="btn btn-ghost btn-sm" style={{ color: 'var(--red)' }} onClick={() => handleDelete(r)}><Trash2 size={13} /></button>}
+                      <PickupRowActions row={r} {...rowActionProps} />
                     </div>
                   </div>
                 ))}
@@ -469,10 +499,7 @@ export default function DemandesLogistique() {
                   {liveDetail.demandeur_nom} · {fmtDate(liveDetail.date_creation || liveDetail.created_at)}
                 </div>
               </div>
-              <div style={{ display: 'flex', gap: 6 }}>
-                {canEdit && <button type="button" className="btn btn-secondary btn-sm" onClick={() => openEdit(liveDetail)}><Pencil size={13} /> Modifier</button>}
-                {canDelete && <button type="button" className="btn btn-ghost btn-sm" style={{ color: 'var(--red)' }} onClick={() => handleDelete(liveDetail)}><Trash2 size={13} /> Supprimer</button>}
-              </div>
+              <PickupRowActions row={liveDetail} {...rowActionProps} />
             </div>
             <div style={{ display: 'grid', gap: 8, marginTop: 16, fontSize: '0.88rem' }}>
               <div><strong>Bon</strong> — {liveDetail.bon_ref || '—'}</div>

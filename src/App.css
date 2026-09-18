@@ -9402,6 +9402,37 @@ tbody tr:last-child td { border-bottom: none; }
   justify-content: center;
 }
 
+.log-pickup-page .log-pickup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  justify-content: flex-end;
+}
+.log-pickup-page .log-pickup-actions-cell {
+  white-space: nowrap;
+  width: 1%;
+  vertical-align: middle;
+}
+.log-pickup-page .log-pickup-actions .btn {
+  flex-shrink: 0;
+}
+.log-pickup-page .log-mobile-card-actions .log-pickup-actions {
+  width: 100%;
+  justify-content: stretch;
+}
+.log-pickup-page .log-mobile-card-actions .btn {
+  flex: 1 1 108px;
+  min-height: 40px;
+  justify-content: center;
+}
+
+@media (max-width: 420px) {
+  .log-pickup-page .log-mobile-card-actions .btn {
+    flex: 1 1 100%;
+  }
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
    PROJETS — responsive cards liste
    ═══════════════════════════════════════════════════════════════════════════ */
