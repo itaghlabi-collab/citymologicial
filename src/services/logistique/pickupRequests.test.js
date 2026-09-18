@@ -55,6 +55,8 @@ const created = buildPickupRequest({
   assignee_name: 'Karim Naji',
   receptionnaire_id: 'm1',
   receptionnaire_name: 'Omar Said',
+  vehicle_id: 'v1',
+  vehicle_label: '12345-A-6 — Kangoo',
 }, { existing: [], user, employees: pool });
 
 assert(created.demandeur_nom === 'Imane Test', 'demandeur auto');
@@ -63,6 +65,7 @@ assert(pickupDepartureLabel(created) === 'Dépôt Casa', 'départ');
 assert(pickupDestinationLabel(created) === 'Chantier Nord', 'destination');
 assert(created.assignee_name === 'Karim Naji', 'chauffeur');
 assert(created.receptionnaire_name === 'Omar Said', 'réceptionnaire');
+assert(created.vehicle_label === '12345-A-6 — Kangoo', 'véhicule');
 assert(created.lines.length === 2, 'articles du bon repris');
 
 const edited = buildPickupRequest({
@@ -105,6 +108,8 @@ try {
     assignee_id: 'm1',
     assignee_name: 'Omar',
     receptionnaire_name: 'Sara',
+    vehicle_id: 'v1',
+    vehicle_label: '12345-A-6 — Kangoo',
   }, { user, employees: pool });
 } catch {
   magasinierBlocked = true;
@@ -127,6 +132,8 @@ const kept = buildPickupRequest({
   assignee_id: 'm1',
   assignee_name: 'Omar Said',
   receptionnaire_name: 'Sara',
+  vehicle_id: 'v1',
+  vehicle_label: '12345-A-6 — Kangoo',
 }, { user, employees: pool, previous: { ...created, assignee_id: 'm1', assignee_name: 'Omar Said' } });
 assert(kept.assignee_id === 'm1', 'affectation historique conservée');
 

@@ -1,6 +1,7 @@
 /**
  * DemandesLogistique.jsx — Formulaire unique compact (créer / modifier).
- * 5 champs. Lecture seule du bon. Aucune écriture stock / livraison / bon d’origine.
+ * Bon, départ, destination, chauffeur, réceptionnaire, véhicule.
+ * Lecture seule du bon et du parc. Aucune écriture stock / livraison / bon d’origine.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -11,6 +12,7 @@ import { usePickupRequests } from '../../hooks/usePickupRequests';
 import { can } from '../../services/admin/permissions';
 import { listEmployees, employeeFullName } from '../../services/rh/employees';
 import { listProjectsForSelect, projectDisplayLabel } from '../../services/projects/projects';
+import { listVehicles } from '../../services/logistique/vehicles';
 import {
   searchPreparationBons,
   pickupFormFromBon,
@@ -23,9 +25,10 @@ import {
 } from '../../services/logistique/pickupRequests';
 
 const INPUT = {
-  width: '100%', padding: '8px 11px', border: '1.5px solid var(--border)',
-  borderRadius: 6, fontSize: '0.86rem', background: '#fff', outline: 'none',
+  width: '100%', padding: '11px 14px', border: '1.5px solid var(--border)',
+  borderRadius: 8, fontSize: '1rem', background: '#fff', outline: 'none',
   fontFamily: 'var(--font-body)', color: 'var(--text)', boxSizing: 'border-box',
+  minHeight: 46,
 };
 const SELECT = { ...INPUT, cursor: 'pointer' };
 
@@ -61,6 +64,8 @@ function emptyForm(user) {
     assignee_name: '',
     receptionnaire_id: '',
     receptionnaire_name: '',
+    vehicle_id: '',
+    vehicle_label: '',
   };
 }
 
@@ -84,6 +89,8 @@ function formFromRecord(row, user) {
     assignee_name: row.assignee_name || '',
     receptionnaire_id: row.receptionnaire_id || '',
     receptionnaire_name: row.receptionnaire_name || '',
+    vehicle_id: row.vehicle_id || '',
+    vehicle_label: row.vehicle_label || '',
   };
 }
 
@@ -95,6 +102,14 @@ function empLabel(emp) {
 function bonOptionLabel(b) {
   if (!b) return '';
   return b.project_name ? `${b.ref} — ${b.project_name}` : (b.ref || b.id || '');
+}
+
+function vehicleOptionLabel(v) {
+  if (!v) return '';
+  const name = [v.marque, v.modele].filter(Boolean).join(' ') || v.vehicule || '';
+  const mat = v.matricule || v.matricule_ww || '';
+  if (mat && name) return `${mat} — ${name}`;
+  return mat || name || v.id || '';
 }
 
 function lineQty(line) {
@@ -238,6 +253,7 @@ export default function DemandesLogistique() {
 
   const [employees, setEmployees] = useState([]);
   const [projects, setProjects] = useState([]);
+  const [vehicles, setVehicles] = useState([]);
   const [bons, setBons] = useState([]);
 
   const readOnly = formMode === 'view';
@@ -262,6 +278,7 @@ export default function DemandesLogistique() {
   useEffect(() => {
     listEmployees().then((rows) => setEmployees(rows || [])).catch(() => setEmployees([]));
     listProjectsForSelect().then((rows) => setProjects(rows || [])).catch(() => setProjects([]));
+    listVehicles().then((rows) => setVehicles(rows || [])).catch(() => setVehicles([]));
     searchPreparationBons('').then((rows) => setBons(rows || [])).catch(() => setBons([]));
   }, []);
 
@@ -438,6 +455,7 @@ export default function DemandesLogistique() {
                       <th>Départ</th>
                       <th>Destination</th>
                       <th>Chauffeur / Coursier</th>
+                      <th>Véhicule</th>
                       <th>Réceptionnaire</th>
                       <th>Actions</th>
                     </tr>
@@ -449,6 +467,7 @@ export default function DemandesLogistique() {
                         <td data-label="Départ">{pickupDepartureLabel(r)}</td>
                         <td data-label="Destination">{pickupDestinationLabel(r)}</td>
                         <td data-label="Chauffeur / Coursier">{r.assignee_name || '—'}</td>
+                        <td data-label="Véhicule">{r.vehicle_label || '—'}</td>
                         <td data-label="Réceptionnaire">{r.receptionnaire_name || '—'}</td>
                         <td data-label="Actions" className="log-pickup-actions-cell">
                           <PickupRowActions row={r} {...rowActionProps} />
@@ -470,6 +489,7 @@ export default function DemandesLogistique() {
                     <div className="log-mobile-card-meta">
                       <div className="log-mobile-meta-row"><span>Départ</span><span>{pickupDepartureLabel(r)}</span></div>
                       <div className="log-mobile-meta-row"><span>Chauffeur</span><span>{r.assignee_name || '—'}</span></div>
+                      <div className="log-mobile-meta-row"><span>Véhicule</span><span>{r.vehicle_label || '—'}</span></div>
                       <div className="log-mobile-meta-row"><span>Réceptionnaire</span><span>{r.receptionnaire_name || '—'}</span></div>
                     </div>
                     <div className="log-mobile-card-actions">
@@ -484,12 +504,12 @@ export default function DemandesLogistique() {
       )}
 
       {view === 'form' && (
-        <form className="card log-pickup-form" onSubmit={handleSave} style={{ padding: 16, maxWidth: 640 }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 8, marginBottom: 12 }}>
-            <strong>{formTitle}</strong>
-            <button type="button" className="btn btn-ghost btn-sm" onClick={backToList}><X size={14} /> Retour</button>
+        <form className="card log-pickup-form" onSubmit={handleSave}>
+          <div className="log-pickup-form-head">
+            <strong className="log-pickup-form-title">{formTitle}</strong>
+            <button type="button" className="btn btn-ghost log-pickup-back" onClick={backToList}><X size={16} /> Retour</button>
           </div>
-          <div className="log-pickup-form-meta" style={{ marginBottom: 12 }}>
+          <div className="log-pickup-form-meta">
             {form.demandeur_nom || userDisplayName(user)} · {fmtDate(form.date_creation)}
           </div>
           {formError && <div style={{ marginBottom: 10, color: 'var(--red)', fontSize: '0.85rem' }}>{formError}</div>}
@@ -590,6 +610,29 @@ export default function DemandesLogistique() {
                   <option value={form.receptionnaire_id}>{form.receptionnaire_name || form.receptionnaire_id}</option>
                 )}
                 {employees.map((emp) => <option key={emp.id} value={emp.id}>{empLabel(emp)}</option>)}
+              </select>
+            </label>
+
+            <label className="log-pickup-form-span">Véhicule
+              <select
+                value={form.vehicle_id}
+                onChange={(e) => {
+                  const veh = vehicles.find((x) => String(x.id) === String(e.target.value));
+                  setForm((prev) => ({
+                    ...prev,
+                    vehicle_id: e.target.value,
+                    vehicle_label: veh ? vehicleOptionLabel(veh) : '',
+                  }));
+                }}
+                style={SELECT}
+                required={!readOnly}
+                disabled={readOnly}
+              >
+                <option value="">— Sélectionner —</option>
+                {form.vehicle_label && !vehicles.some((v) => String(v.id) === String(form.vehicle_id)) && (
+                  <option value={form.vehicle_id || '__kept_veh__'}>{form.vehicle_label}</option>
+                )}
+                {vehicles.map((v) => <option key={v.id} value={v.id}>{vehicleOptionLabel(v)}</option>)}
               </select>
             </label>
 

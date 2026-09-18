@@ -170,6 +170,9 @@ export function validatePickupCreate(form) {
   if (!form?.receptionnaire_id && !String(form?.receptionnaire_name || '').trim()) {
     errors.push('Indiquez le réceptionnaire.');
   }
+  if (!form?.vehicle_id && !String(form?.vehicle_label || '').trim()) {
+    errors.push('Sélectionnez un véhicule.');
+  }
   return { ok: errors.length === 0, errors, lines };
 }
 
@@ -203,6 +206,9 @@ export function buildPickupRequest(form, { existing = [], user, employees = [], 
   const destinationProjectId = destKept ? (previous?.destination_project_id || previous?.project_id || null) : form.destination_project_id;
   const departureProjectName = String(form.departure_project_name || previous?.departure_project_name || '').trim();
   const destinationProjectName = String(form.destination_project_name || previous?.destination_project_name || '').trim();
+  const vehKept = !form.vehicle_id || String(form.vehicle_id).startsWith('__kept_');
+  const vehicleId = vehKept ? (previous?.vehicle_id || null) : form.vehicle_id;
+  const vehicleLabel = String(form.vehicle_label || previous?.vehicle_label || '').trim();
   const base = {
     id: previous?.id || form.id || newId('dl'),
     ref: previous?.ref || form.ref || nextPickupRef(existing),
@@ -230,8 +236,8 @@ export function buildPickupRequest(form, { existing = [], user, employees = [], 
     assignee_name: assigneeName,
     receptionnaire_id: form.receptionnaire_id || null,
     receptionnaire_name: receptionnaireName,
-    vehicle_id: previous?.vehicle_id || form.vehicle_id || null,
-    vehicle_label: previous?.vehicle_label || form.vehicle_label || '',
+    vehicle_id: vehicleId,
+    vehicle_label: vehicleLabel,
     lines,
     recoveries: previous?.recoveries || [],
     recovered_at: previous?.recovered_at || null,
@@ -349,7 +355,7 @@ export function filterPickupRequests(list, { search = '' } = {}) {
     const hay = [
       r.ref, r.bon_ref, r.demandeur_nom,
       pickupDepartureLabel(r), pickupDestinationLabel(r),
-      r.assignee_name, r.receptionnaire_name,
+      r.assignee_name, r.receptionnaire_name, r.vehicle_label,
     ].join(' ').toLowerCase();
     return hay.includes(q);
   });
