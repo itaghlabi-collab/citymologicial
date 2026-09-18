@@ -42,8 +42,27 @@ const MOIS_LABELS = ['', 'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin', 
 
 const TABLE_FILTERS = [
   { id: 'month', label: 'Vue mois' },
+  { id: 'since_reset', label: 'Depuis la régularisation' },
   { id: 'all', label: 'Vue globale' },
 ];
+
+function isRegularisationCaisse(tx) {
+  const raw = String(tx?.description || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+  return raw.includes('regularisation caisse');
+}
+
+function lastRegularisationDate(transactions) {
+  let latest = '';
+  (transactions || []).forEach((t) => {
+    if (!isRegularisationCaisse(t)) return;
+    const d = String(t.date || '');
+    if (d && d > latest) latest = d;
+  });
+  return latest || null;
+}
 
 const EMPTY_TX = {
   date: '', sens: 'entree', type_operation: 'alimentation_caisse',
@@ -148,16 +167,10 @@ export default function FeuilleCaisse() {
   const yesterdayStr = yesterdayIso(now);
   const isCurrentMonth = year === now.getFullYear() && month === now.getMonth() + 1;
   const isGlobalView = tableFilter === 'all';
+  const isSinceResetView = tableFilter === 'since_reset';
   const periodLabel = `${MOIS_LABELS[month] || month} ${year}`;
   const viewMode = isGlobalView ? 'all' : 'month';
   const selectedDate = todayStr;
-  const filterLabel = isGlobalView
-    ? 'Vue globale — toutes les opérations'
-    : `Vue mois — ${periodLabel}`;
-
-  function selectTableFilter(id) {
-    setTableFilter(id);
-  }
 
   function bumpAllReload() {
     setAllReloadToken((n) => n + 1);
@@ -189,12 +202,43 @@ export default function FeuilleCaisse() {
     [cashSheetRecords],
   );
 
+  const regularisationDate = useMemo(
+    () => lastRegularisationDate(cashSheetRecords),
+    [cashSheetRecords],
+  );
+
+  const sinceResetRecords = useMemo(() => {
+    if (!regularisationDate) return [];
+    return cashSheetRecords.filter((t) => String(t.date || '') > regularisationDate);
+  }, [cashSheetRecords, regularisationDate]);
+
+  const sinceResetTotals = useMemo(
+    () => computeCashTotals(sinceResetRecords, { solde_initial: 0 }),
+    [sinceResetRecords],
+  );
+
   const displayedRecords = useMemo(() => {
     if (isGlobalView) {
       return [...allCashSheetRecords].sort((a, b) => String(b.date).localeCompare(String(a.date)));
     }
+    if (isSinceResetView) {
+      return [...sinceResetRecords].sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    }
     return sortedRecords;
-  }, [isGlobalView, allCashSheetRecords, sortedRecords]);
+  }, [isGlobalView, isSinceResetView, allCashSheetRecords, sinceResetRecords, sortedRecords]);
+
+  const viewTotals = isGlobalView ? allTotals : (isSinceResetView ? sinceResetTotals : totals);
+  const regularisationLabel = regularisationDate ? formatDateShortFr(regularisationDate) : '';
+  const filterLabel = isGlobalView
+    ? 'Vue globale — toutes les opérations'
+    : isSinceResetView
+      ? `Depuis la régularisation — ${regularisationLabel}`
+      : `Vue mois — ${periodLabel}`;
+
+  function selectTableFilter(id) {
+    if (id === 'since_reset' && !regularisationDate) return;
+    setTableFilter(id);
+  }
 
   const viewLoading = isGlobalView ? allLoading : loading;
   const viewError = isGlobalView ? allError : error;
@@ -203,6 +247,10 @@ export default function FeuilleCaisse() {
   const isDayValidated = Boolean(dayValidation?.review_date);
 
   const canEditDay = viewMode === 'month' || !isDayValidated || superAdmin;
+
+  useEffect(() => {
+    if (tableFilter === 'since_reset' && !regularisationDate) setTableFilter('month');
+  }, [tableFilter, regularisationDate]);
 
   useEffect(() => {
     if (!isGlobalView || !configured) return undefined;
@@ -464,6 +512,20 @@ export default function FeuilleCaisse() {
         balance: allBalance,
       };
     }
+    if (isSinceResetView) {
+      return {
+        year,
+        month,
+        periodLabel: regularisationLabel
+          ? `Depuis la régularisation (${regularisationLabel})`
+          : 'Depuis la régularisation',
+        filename: `feuille-caisse-depuis-regularisation-${year}-${String(month).padStart(2, '0')}`,
+        soldeLabel: 'Solde caisse',
+        transactions: sinceResetRecords,
+        totals: sinceResetTotals,
+        balance: { solde_initial: 0 },
+      };
+    }
     return { year, month, transactions: cashSheetRecords, totals, balance };
   }
 
@@ -476,7 +538,9 @@ export default function FeuilleCaisse() {
             <span className="finance-sub-hide-mobile">Journal trésorerie — paiements validés à la date réelle du paiement. </span>
             {isGlobalView
               ? <strong>Toutes périodes</strong>
-              : <>Mois <strong>{periodLabel}</strong></>}
+              : isSinceResetView
+                ? <>Depuis la régularisation <strong>{regularisationLabel}</strong></>
+                : <>Mois <strong>{periodLabel}</strong></>}
             {' · '}<strong>{filterLabel}</strong>
           </p>
         </div>
@@ -492,7 +556,7 @@ export default function FeuilleCaisse() {
           >
             <Download size={14} /> PDF
           </button>
-          {canManage && !isGlobalView && (
+          {canManage && !isGlobalView && !isSinceResetView && (
             <button type="button" className="btn btn-secondary btn-sm" onClick={openBalanceModal}>
               <Wallet size={14} /> Solde initial
             </button>
@@ -526,6 +590,11 @@ export default function FeuilleCaisse() {
                 Période : <strong>toutes (tous mois et années)</strong>
                 {!viewLoading && displayedRecords.length > 0 ? ` — ${displayedRecords.length} op.` : ''}
               </>
+            ) : isSinceResetView ? (
+              <>
+                Période : <strong>après le {regularisationLabel}</strong>
+                {!loading ? ` — ${displayedRecords.length} op.` : ''}
+              </>
             ) : (
               <>
                 Période : <strong>{periodLabel}</strong>
@@ -541,6 +610,10 @@ export default function FeuilleCaisse() {
               type="button"
               className={`btn btn-sm ${tableFilter === f.id ? 'btn-primary' : 'btn-secondary'}`}
               onClick={() => selectTableFilter(f.id)}
+              disabled={f.id === 'since_reset' && !regularisationDate}
+              title={f.id === 'since_reset' && !regularisationDate
+                ? 'Aucune régularisation caisse sur ce mois'
+                : undefined}
             >
               {f.label}
             </button>
@@ -555,9 +628,14 @@ export default function FeuilleCaisse() {
               Revenir au mois en cours
             </button>
           )}
-          {viewMode === 'month' && (
+          {viewMode === 'month' && !isSinceResetView && (
             <span style={{ fontSize: '0.82rem', color: 'var(--text-3)' }}>
               {displayedRecords.length} op. sur le mois
+            </span>
+          )}
+          {isSinceResetView && (
+            <span style={{ fontSize: '0.82rem', color: 'var(--text-3)' }}>
+              {displayedRecords.length} op. depuis la régularisation
             </span>
           )}
           {isGlobalView && (
@@ -621,6 +699,31 @@ export default function FeuilleCaisse() {
             sub="reliquat + entrées − sorties"
           />
         </div>
+      ) : isSinceResetView ? (
+        <div className="stat-grid finance-kpi-grid finance-kpi-strip">
+          <KpiCard
+            icon={<Wallet size={17} />}
+            label="Reliquat"
+            value={formatMAD(sinceResetTotals.soldeInitial)}
+            color="grey"
+            sub="après régularisation (caisse soldée)"
+          />
+          <KpiCard
+            icon={<Plus size={17} />}
+            label="Alimentations / Entrées"
+            value={formatMAD(sinceResetTotals.totalEntrees)}
+            color="green"
+            sub="entrées depuis la régularisation"
+          />
+          <KpiCard icon={<TrendingDown size={17} />} label="Sorties" value={formatMAD(sinceResetTotals.totalSorties)} color="red" />
+          <KpiCard
+            icon={<Wallet size={17} />}
+            label="Solde caisse"
+            value={formatMAD(sinceResetTotals.soldeMois)}
+            color="blue"
+            sub="reliquat + entrées − sorties"
+          />
+        </div>
       ) : (
         <div className="stat-grid finance-kpi-grid finance-kpi-strip">
           <KpiCard
@@ -658,11 +761,15 @@ export default function FeuilleCaisse() {
             icon={<Wallet size={22} />}
             title={isGlobalView
               ? 'Aucune opération — toutes périodes'
-              : `Aucune opération — ${periodLabel}`}
+              : isSinceResetView
+                ? `Aucune opération depuis le ${regularisationLabel}`
+                : `Aucune opération — ${periodLabel}`}
             sub={configured && !viewError
               ? isGlobalView
                 ? 'Aucune opération visible selon vos permissions.'
-                : 'Historique complet du mois. Validez un paiement dans Paiement hebdo ou Sous-traitants — la sortie s\'ajoute automatiquement à la date du paiement.'
+                : isSinceResetView
+                  ? 'La caisse est soldée. La prochaine alimentation apparaîtra ici. La vue mois conserve l’historique complet.'
+                  : 'Historique complet du mois. Validez un paiement dans Paiement hebdo ou Sous-traitants — la sortie s\'ajoute automatiquement à la date du paiement.'
               : 'Connectez-vous et vérifiez la configuration Supabase.'}
             action={canManage && canEditDay ? 'Alimentation manuelle' : undefined}
             onAction={canManage && canEditDay ? () => setShowModal(true) : undefined}
