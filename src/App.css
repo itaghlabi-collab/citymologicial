@@ -7286,6 +7286,14 @@ tbody tr:last-child td { border-bottom: none; }
   align-items: center;
 }
 
+.feuille-caisse-history-row {
+  background: var(--surface-2, #f4f4f4);
+}
+
+.feuille-caisse-history-row td {
+  color: var(--text-3) !important;
+}
+
 .finance-detail-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(240px, 300px);
@@ -7465,7 +7473,7 @@ tbody tr:last-child td { border-bottom: none; }
   }
 
   .finance-module .finance-toolbar-filters .btn {
-    flex: 1 1 calc(33.333% - 6px);
+    flex: 1 1 calc(50% - 6px);
     min-width: 0;
     justify-content: center;
     padding: 7px 8px;

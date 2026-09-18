@@ -8,10 +8,27 @@ function esc(v) {
   return s;
 }
 
+function pushTxRows(rows, transactions) {
+  (transactions || []).forEach((t) => {
+    rows.push([
+      t.date,
+      t.contrepartie,
+      t.description,
+      t.sens === 'sortie' ? t.montant : '',
+      t.sens === 'entree' ? t.montant : '',
+      t.mode_paiement,
+      t.type_operation,
+    ]);
+  });
+}
+
+const TX_HEADER = ['Date', 'Client / Fournisseur', 'Description', 'Sortie de caisse', 'Entrée de caisse', 'Type paiement', 'Type opération'];
+
 export function exportCashSheetExcel({
   year,
   month,
   transactions,
+  historyTransactions,
   totals,
   periodLabel,
   filename,
@@ -24,22 +41,22 @@ export function exportCashSheetExcel({
     ['Reliquat', totals.soldeInitial],
     ['Alimentations / Entrées', totals.totalEntrees],
     ['Sorties', totals.totalSorties],
-    [soldeLabel || 'Solde caisse du mois', totals.soldeMois],
+    [soldeLabel || 'Solde caisse', totals.soldeMois],
     [],
-    ['Date', 'Client / Fournisseur', 'Description', 'Sortie de caisse', 'Entrée de caisse', 'Type paiement', 'Type opération'],
+    ['Opérations comptabilisées'],
+    TX_HEADER,
   ];
 
-  (transactions || []).forEach((t) => {
-    rows.push([
-      t.date,
-      t.contrepartie,
-      t.description,
-      t.sens === 'sortie' ? t.montant : '',
-      t.sens === 'entree' ? t.montant : '',
-      t.mode_paiement,
-      t.type_operation,
-    ]);
-  });
+  const counted = transactions || [];
+  if (counted.length) pushTxRows(rows, counted);
+  else rows.push(['Aucune opération comptabilisée sur cette période.']);
+
+  if ((historyTransactions || []).length) {
+    rows.push([]);
+    rows.push(['Historique', 'Hors calcul']);
+    rows.push(TX_HEADER);
+    pushTxRows(rows, historyTransactions);
+  }
 
   const csv = '\uFEFF' + rows.map((r) => r.map(esc).join(';')).join('\n');
   const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });

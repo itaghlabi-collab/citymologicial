@@ -5,7 +5,7 @@
 import { jsPDF } from 'jspdf';
 
 /** Identifiant visible dans le pied de page pour vérifier la version déployée. */
-export const CASH_SHEET_PDF_VERSION = '2.1';
+export const CASH_SHEET_PDF_VERSION = '2.2';
 import {
   FINANCE_COMPANY,
   formatPdfMAD,
@@ -155,7 +155,7 @@ function measureRowHeight(doc, transaction) {
   return Math.max(ROW_H, lines.length * 3.6 + 2.5);
 }
 
-function drawTableRow(doc, y, transaction, rowIndex) {
+function drawTableRow(doc, y, transaction, rowIndex, muted = false) {
   const rowH = measureRowHeight(doc, transaction);
   const isAlt = rowIndex % 2 === 1;
 
@@ -168,9 +168,9 @@ function drawTableRow(doc, y, transaction, rowIndex) {
   doc.setLineWidth(0.15);
   doc.line(MARGIN, y + rowH, MARGIN + CONTENT_W, y + rowH);
 
-  doc.setFont('helvetica', 'normal');
+  doc.setFont('helvetica', muted ? 'italic' : 'normal');
   doc.setFontSize(7.5);
-  doc.setTextColor(...TEXT);
+  doc.setTextColor(...(muted ? MUTED : TEXT));
 
   const dateStr = transaction.date
     ? String(transaction.date).split('-').reverse().join('/')
@@ -181,22 +181,24 @@ function drawTableRow(doc, y, transaction, rowIndex) {
   const cp = (transaction.contrepartie || '—').trim();
   doc.text(doc.splitTextToSize(cp, COLS[1].w - 4), colX(1) + 2, y + 5);
 
-  const descLines = doc.splitTextToSize((transaction.description || '—').trim(), COLS[2].w - 4);
+  const descBase = (transaction.description || '—').trim();
+  const desc = muted ? `${descBase} — Hors calcul` : descBase;
+  const descLines = doc.splitTextToSize(desc, COLS[2].w - 4);
   doc.text(descLines, colX(2) + 2, y + 5);
 
   if (transaction.sens === 'sortie') {
     doc.setFont('helvetica', 'bold');
-    doc.setTextColor(...RED_DARK);
+    doc.setTextColor(...(muted ? MUTED : RED_DARK));
     doc.text(formatPdfMAD(transaction.montant), colX(3) + COLS[3].w - 2, y + 5, { align: 'right' });
   }
 
   if (transaction.sens === 'entree') {
     doc.setFont('helvetica', 'bold');
-    doc.setTextColor(...GREEN_DARK);
+    doc.setTextColor(...(muted ? MUTED : GREEN_DARK));
     doc.text(formatPdfMAD(transaction.montant), colX(4) + COLS[4].w - 2, y + 5, { align: 'right' });
   }
 
-  doc.setFont('helvetica', 'normal');
+  doc.setFont('helvetica', muted ? 'italic' : 'normal');
   doc.setTextColor(...MUTED);
   doc.setFontSize(7);
   const pay = (transaction.mode_paiement || '—').trim();
@@ -246,6 +248,7 @@ export async function exportCashSheetPdf({
   year,
   month,
   transactions,
+  historyTransactions,
   totals,
   balance,
   periodLabel: periodLabelArg,
@@ -281,30 +284,60 @@ export async function exportCashSheetPdf({
 
   drawCompanyHeader(doc, logo, logoSize);
   drawTitle(doc, title);
-  drawSummaryBox(doc, totals, soldeLabel || 'Solde caisse du mois');
+  drawSummaryBox(doc, totals, soldeLabel || 'Solde caisse');
 
+  const counted = transactions || [];
+  const history = historyTransactions || [];
   let y = TABLE_TOP_FIRST;
-  y = drawTableHeader(doc, y);
-
-  const rows = transactions || [];
   let rowIndex = 0;
 
-  rows.forEach((t) => {
-    const rowH = measureRowHeight(doc, t);
+  const ensureSpace = (rowH) => {
     if (y + rowH > TABLE_BOTTOM) {
       doc.addPage();
       drawMiniPageTitle(doc, title);
       y = drawTableHeader(doc, TABLE_TOP_NEXT);
     }
-    y = drawTableRow(doc, y, t, rowIndex);
-    rowIndex += 1;
-  });
+  };
 
-  if (rows.length === 0) {
+  doc.setFont('helvetica', 'bold');
+  doc.setFontSize(8);
+  doc.setTextColor(...MUTED);
+  doc.text('Opérations comptabilisées', MARGIN, y - 4);
+
+  y = drawTableHeader(doc, y);
+  if (counted.length === 0) {
     doc.setFont('helvetica', 'italic');
     doc.setFontSize(9);
     doc.setTextColor(...MUTED);
-    doc.text('Aucune opération sur cette période.', MARGIN, y + 8);
+    doc.text('Aucune opération comptabilisée sur cette période.', MARGIN, y + 8);
+    y += 16;
+  } else {
+    counted.forEach((t) => {
+      const rowH = measureRowHeight(doc, t);
+      ensureSpace(rowH);
+      y = drawTableRow(doc, y, t, rowIndex, false);
+      rowIndex += 1;
+    });
+  }
+
+  if (history.length) {
+    const labelH = 12;
+    if (y + labelH + HEADER_H > TABLE_BOTTOM) {
+      doc.addPage();
+      drawMiniPageTitle(doc, title);
+      y = TABLE_TOP_NEXT;
+    }
+    doc.setFont('helvetica', 'bold');
+    doc.setFontSize(8);
+    doc.setTextColor(...MUTED);
+    doc.text('Historique — Hors calcul', MARGIN, y + 8);
+    y = drawTableHeader(doc, y + 12);
+    history.forEach((t) => {
+      const rowH = measureRowHeight(doc, { ...t, description: `${t.description || ''} — Hors calcul` });
+      ensureSpace(rowH);
+      y = drawTableRow(doc, y, t, rowIndex, true);
+      rowIndex += 1;
+    });
   }
 
   const pageTotal = doc.getNumberOfPages();
