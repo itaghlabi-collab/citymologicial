@@ -10,7 +10,6 @@ import {
   markAllNotificationsRead,
   normalizeNotification,
 } from '../services/notifications/notifications';
-import { playNotificationSound } from '../utils/notificationSound';
 import { logNotificationDebug } from '../services/notifications/notificationDebug';
 
 const POLL_MS = 1_500;
@@ -34,19 +33,9 @@ export function useNotifications(user) {
   const knownIdsRef = useRef(new Set());
   const announcedIdsRef = useRef(new Set());
   const initialLoadRef = useRef(true);
-  const soundEnabledRef = useRef(true);
   const realtimeOkRef = useRef(false);
   const loadRef = useRef(null);
   const syncTimerRef = useRef(null);
-
-  const playForNew = useCallback((notifications) => {
-    if (!soundEnabledRef.current || !notifications?.length) return;
-    const freshUnread = notifications.filter((n) => n && !n.isRead);
-    if (freshUnread.length > 0) {
-      playNotificationSound();
-      logNotificationDebug('sound.play', { count: freshUnread.length, ids: freshUnread.map((n) => n.id) });
-    }
-  }, []);
 
   const announceUnread = useCallback((notifications) => {
     const fresh = (notifications || []).filter(
@@ -54,8 +43,7 @@ export function useNotifications(user) {
     );
     if (!fresh.length) return;
     fresh.forEach((n) => announcedIdsRef.current.add(n.id));
-    playForNew(fresh);
-  }, [playForNew]);
+  }, []);
 
   const scheduleSync = useCallback(() => {
     if (syncTimerRef.current) clearTimeout(syncTimerRef.current);
@@ -216,19 +204,6 @@ export function useNotifications(user) {
 
     return () => { sb.removeChannel(channel); };
   }, [configured, userId, applyIncoming, scheduleSync]);
-
-  useEffect(() => {
-    if (!userId) return;
-    getSupabase()
-      .from('profiles')
-      .select('notification_sound_enabled')
-      .eq('id', userId)
-      .maybeSingle()
-      .then(({ data }) => {
-        soundEnabledRef.current = data?.notification_sound_enabled !== false;
-      })
-      .catch(() => {});
-  }, [userId]);
 
   const markRead = useCallback(async (id) => {
     await markNotificationRead(id);

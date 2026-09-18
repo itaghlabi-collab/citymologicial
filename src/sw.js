@@ -54,6 +54,7 @@ self.addEventListener('push', (event) => {
       renotify: Boolean(payload.tag),
       data: payload.data,
       silent: true,
+      vibrate: [],
     })
   })())
 })
