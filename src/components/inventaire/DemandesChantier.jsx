@@ -1206,9 +1206,8 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate,
                   <th>Référence</th>
                   {!embedded && <th>Projet</th>}
                   <th>Client</th>
-                  <th>Demandeur / Date de création</th>
+                  <th>Demandeur</th>
                   <th>Nb articles</th>
-                  <th>Magasinier</th>
                   <th>Date souhaitée</th>
                   <th>Préparation</th>
                   <th>Livraison</th>
@@ -1229,11 +1228,10 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate,
                     </td>
                     {!embedded && <td data-label="Projet">{r.project_name || '—'}</td>}
                     <td data-label="Client">{r.client_name || '—'}</td>
-                    <td data-label="Demandeur / Date de création">
+                    <td data-label="Demandeur">
                       <DemandeurCreatedCell req={r} />
                     </td>
                     <td data-label="Nb articles">{r.distinct_articles}</td>
-                    <td data-label="Magasinier">{r.prepared_by_name || '—'}</td>
                     <td data-label="Date souhaitée">{fmtDate(r.date_souhaitee)}</td>
                     <td data-label="Préparation">
                       <span className={`badge ${prepBadgeClass(r.statut)}`}>
