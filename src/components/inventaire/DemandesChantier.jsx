@@ -2,9 +2,10 @@
  * DemandesChantier.jsx — Demandes matériel chantier (Inventaire & Dépôt)
  */
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ClipboardList, Plus, Search, RefreshCw, Loader2, Eye, Edit2, Trash2,
-  Download, CheckCircle, Truck, Package, X, ShoppingCart,
+  Download, CheckCircle, Truck, Package, X, ShoppingCart, MoreHorizontal,
 } from 'lucide-react';
 import { listProjects } from '../../services/projects/projects';
 import { listStockArticles } from '../../services/inventaire/stockArticles';
@@ -161,6 +162,130 @@ function getRowActions(r, handlers, { embedded = false } = {}) {
     actions.push({ key: 'deliver', label: 'Livrer', icon: Truck, onClick: () => handlers.openDetail(r.id) });
   }
   return actions;
+}
+
+const MOBILE_MENU_ITEM_STYLE = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 8,
+  padding: '10px 14px',
+  width: '100%',
+  minHeight: 44,
+  background: 'none',
+  border: 'none',
+  cursor: 'pointer',
+  fontSize: '0.84rem',
+  color: 'var(--text)',
+  textAlign: 'left',
+};
+
+function SiteRequestMobileRowMenu({ actions, disabled }) {
+  const [open, setOpen] = useState(false);
+  const btnRef = useRef(null);
+  const menuRef = useRef(null);
+  const [menuPos, setMenuPos] = useState(null);
+
+  const updatePos = useCallback(() => {
+    if (!btnRef.current) return;
+    const r = btnRef.current.getBoundingClientRect();
+    const menuW = Math.min(240, window.innerWidth - 16);
+    const menuH = Math.min((actions?.length || 4) * 44 + 12, 280);
+    const left = Math.max(8, Math.min(r.right - menuW, window.innerWidth - menuW - 8));
+    const spaceBelow = window.innerHeight - r.bottom;
+    const openUp = spaceBelow < menuH && r.top > spaceBelow;
+    setMenuPos({
+      top: openUp ? undefined : r.bottom + 4,
+      bottom: openUp ? window.innerHeight - r.top + 4 : undefined,
+      left,
+      width: menuW,
+    });
+  }, [actions.length]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    updatePos();
+    const onReposition = () => updatePos();
+    window.addEventListener('scroll', onReposition, true);
+    window.addEventListener('resize', onReposition);
+    return () => {
+      window.removeEventListener('scroll', onReposition, true);
+      window.removeEventListener('resize', onReposition);
+    };
+  }, [open, updatePos]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    function onDocClick(e) {
+      if (btnRef.current?.contains(e.target)) return;
+      if (menuRef.current?.contains(e.target)) return;
+      setOpen(false);
+    }
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, [open]);
+
+  const menu = open && menuPos && createPortal(
+    <div
+      ref={menuRef}
+      className="inv-dc-row-menu"
+      role="menu"
+      style={{
+        position: 'fixed',
+        top: menuPos.top,
+        bottom: menuPos.bottom,
+        left: menuPos.left,
+        width: menuPos.width,
+        zIndex: 10050,
+        background: '#fff',
+        borderRadius: 10,
+        boxShadow: '0 12px 32px rgba(0,0,0,0.16)',
+        border: '1px solid var(--border)',
+        padding: '4px 0',
+      }}
+    >
+      {actions.map((action) => {
+        const Icon = action.icon;
+        return (
+          <button
+            key={action.key}
+            type="button"
+            role="menuitem"
+            disabled={disabled}
+            onClick={() => {
+              setOpen(false);
+              action.onClick?.();
+            }}
+            style={{
+              ...MOBILE_MENU_ITEM_STYLE,
+              color: action.danger ? 'var(--red)' : 'var(--text)',
+            }}
+          >
+            <Icon size={14} /> {action.label}
+          </button>
+        );
+      })}
+    </div>,
+    document.body,
+  );
+
+  return (
+    <div className="inv-dc-row-menu-wrap" onClick={(e) => e.stopPropagation()}>
+      <button
+        ref={btnRef}
+        type="button"
+        className="inv-dc-row-more"
+        onClick={() => setOpen((v) => !v)}
+        disabled={disabled}
+        title="Actions"
+        aria-label="Actions"
+        aria-expanded={open}
+        aria-haspopup="menu"
+      >
+        <MoreHorizontal size={18} />
+      </button>
+      {menu}
+    </div>
+  );
 }
 
 function StatutSelect({ req, disabled, style, onChange }) {
@@ -1190,111 +1315,29 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate,
 
           <div className="inv-dc-mobile" aria-label="Liste demandes chantier">
             {filtered.map((r) => (
-              <article key={r.id} className="inv-dc-card">
-                <header className="inv-dc-card-head">
-                  <div className="inv-dc-card-ref">
-                    {r.ref}
-                    <SiteRequestOrigineBadge req={r} style={{ marginLeft: 8 }} />
-                  </div>
-                  <span
-                    className="badge"
-                    style={{ background: `${siteRequestStatutColor(r.statut)}22`, color: siteRequestStatutColor(r.statut) }}
-                  >
-                    {r.statutLabel}
-                  </span>
-                </header>
-                {!embedded && (
-                  <div className="inv-dc-card-title">{r.project_name || '—'}</div>
-                )}
-                <dl className="inv-dc-card-fields">
-                  <div className="inv-dc-field">
-                    <dt>Client</dt>
-                    <dd>{r.client_name || '—'}</dd>
-                  </div>
-                  <div className="inv-dc-field-grid">
-                    <div className="inv-dc-field">
-                      <dt>Nb articles</dt>
-                      <dd>{r.distinct_articles ?? '—'}</dd>
-                    </div>
-                    <div className="inv-dc-field">
-                      <dt>Date souhaitée</dt>
-                      <dd>{fmtDate(r.date_souhaitee)}</dd>
-                    </div>
-                  </div>
-                  <div className="inv-dc-field-grid">
-                    <div className="inv-dc-field">
-                      <dt>Préparation</dt>
-                      <dd>
-                        <span className={`badge ${prepBadgeClass(r.statut)}`}>
-                          {isPreparationBon(r) ? preparationBonStatutLabel(r.statut) : siteRequestPreparationStatut(r.statut)}
-                        </span>
-                      </dd>
-                    </div>
-                    <div className="inv-dc-field">
-                      <dt>Livraison</dt>
-                      <dd>
-                        {!embedded && !isPreparationBon(r) ? (
-                          <select
-                            value={siteRequestLivraisonValue(r.statut)}
-                            onChange={(e) => handleLivraisonChange(r.id, e.target.value, r.statut)}
-                            disabled={saving || r.statut === 'annulee'}
-                            style={{ ...SELECT_STYLE, fontSize: '0.8rem', fontWeight: 700 }}
-                          >
-                            <option value="none">—</option>
-                            <option value="a_livrer">À livrer</option>
-                            <option value="livree">Livrée</option>
-                          </select>
-                        ) : (
-                          <span className={`badge ${livBadgeClass(r.statut)}`}>
-                            {siteRequestLivraisonStatut(r.statut)}
-                          </span>
-                        )}
-                      </dd>
-                    </div>
-                  </div>
+              <div key={r.id} className="inv-dc-row">
+                <button
+                  type="button"
+                  className="inv-dc-row-main"
+                  onClick={() => rowHandlers.openDetail(r.id)}
+                  aria-label={`${r.ref} ${r.project_name || ''}`.trim()}
+                >
+                  <span className="inv-dc-row-ref">{r.ref}</span>
                   {!embedded && (
-                    <div className="inv-dc-field">
-                      <dt>Statut</dt>
-                      <dd>
-                        <StatutSelect
-                          req={r}
-                          disabled={saving}
-                          onChange={(next) => handleStatutChange(r.id, next, r.statut)}
-                          style={{ ...SELECT_STYLE, fontSize: '0.8rem', fontWeight: 700, color: siteRequestStatutColor(r.statut) }}
-                        />
-                      </dd>
-                    </div>
+                    <span className="inv-dc-row-name">{r.project_name || '—'}</span>
                   )}
-                  {!embedded && !isPreparationBon(r) && getSiteRequestMissingLines(r).length > 0 && (
-                    <button
-                      type="button"
-                      className="btn btn-secondary btn-sm"
-                      style={{ marginTop: 8, width: '100%', justifyContent: 'center' }}
-                      disabled={saving}
-                      onClick={() => handleCreateDaFromMissing(r)}
-                    >
-                      <ShoppingCart size={14} /> Reste commande → demande d&apos;achat
-                    </button>
-                  )}
-                </dl>
-                <footer className="inv-dc-card-actions">
-                  {getRowActions(r, rowHandlers, { embedded }).map((action) => {
-                    const Icon = action.icon;
-                    return (
-                      <button
-                        key={action.key}
-                        type="button"
-                        className={`btn btn-ghost btn-sm inv-dc-action${action.danger ? ' inv-dc-action--danger' : ''}`}
-                        onClick={action.onClick}
-                        disabled={saving}
-                        style={action.danger ? { color: 'var(--red)' } : undefined}
-                      >
-                        <Icon size={14} /> {action.label}
-                      </button>
-                    );
-                  })}
-                </footer>
-              </article>
+                </button>
+                <span
+                  className="badge inv-dc-row-statut"
+                  style={{ background: `${siteRequestStatutColor(r.statut)}22`, color: siteRequestStatutColor(r.statut) }}
+                >
+                  {r.statutLabel}
+                </span>
+                <SiteRequestMobileRowMenu
+                  actions={getRowActions(r, rowHandlers, { embedded })}
+                  disabled={saving}
+                />
+              </div>
             ))}
           </div>
         </div>

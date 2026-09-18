@@ -6280,18 +6280,18 @@ tbody tr:last-child td { border-bottom: none; }
   .inv-dc-page .inv-dc-mobile {
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    padding: 10px;
+    gap: 0;
+    padding: 0;
     max-width: 100%;
     box-sizing: border-box;
     overflow-x: hidden;
   }
 
   .inv-dc-page .inv-dc-list-card {
-    background: transparent;
-    border: none;
-    box-shadow: none;
-    overflow: visible;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow);
+    overflow: hidden;
   }
 
   .inv-dc-page .inv-dc-toolbar {
@@ -6322,72 +6322,95 @@ tbody tr:last-child td { border-bottom: none; }
     transform: translateY(-50%);
   }
 
-  .inv-dc-card {
+  .inv-dc-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
     width: 100%;
     max-width: 100%;
-    box-sizing: border-box;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    box-shadow: var(--shadow);
-    padding: 12px;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-    overflow: visible;
-  }
-
-  .inv-dc-card-head {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    flex-wrap: wrap;
-    gap: 8px;
     min-width: 0;
+    min-height: 48px;
+    padding: 8px 6px 8px 12px;
+    box-sizing: border-box;
+    border-bottom: 1px solid var(--border);
+    background: var(--surface);
+    overflow: hidden;
   }
 
-  .inv-dc-card-ref {
+  .inv-dc-row:last-child {
+    border-bottom: none;
+  }
+
+  .inv-dc-row-main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0;
+    padding: 0;
+    border: none;
+    background: none;
+    cursor: pointer;
+    text-align: left;
+    min-height: 44px;
+  }
+
+  .inv-dc-row-ref {
+    flex: 0 1 auto;
+    max-width: 42%;
+    min-width: 0;
     font-family: var(--font-head);
     font-weight: 800;
-    font-size: 0.9rem;
+    font-size: 0.78rem;
     color: var(--red);
-    letter-spacing: 0.02em;
-    word-break: normal;
-    overflow-wrap: anywhere;
-    min-width: 0;
-    flex: 1;
-  }
-
-  .inv-dc-card-head .badge {
-    flex-shrink: 0;
-    max-width: 46%;
-    white-space: normal;
-    text-align: center;
-    line-height: 1.2;
-  }
-
-  .inv-dc-card-title {
-    margin: 0;
-    font-weight: 700;
-    font-size: 0.92rem;
-    color: var(--text);
-    line-height: 1.3;
-    display: -webkit-box;
-    -webkit-line-clamp: 2;
-    -webkit-box-orient: vertical;
+    letter-spacing: 0.01em;
+    white-space: nowrap;
     overflow: hidden;
-    word-break: normal;
-    overflow-wrap: break-word;
+    text-overflow: ellipsis;
   }
 
-  .inv-dc-card-fields {
-    margin: 0;
-    padding: 8px 0 0;
-    border-top: 1px solid var(--border);
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
+  .inv-dc-row-name {
+    flex: 1 1 0;
     min-width: 0;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text);
+    line-height: 1.25;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .inv-dc-row-statut {
+    flex-shrink: 0;
+    max-width: 92px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.68rem !important;
+    padding: 3px 8px !important;
+    line-height: 1.2;
+    text-align: center;
+  }
+
+  .inv-dc-row-menu-wrap {
+    flex-shrink: 0;
+  }
+
+  .inv-dc-row-more {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    margin: 0;
+    padding: 0;
+    border: none;
+    border-radius: 8px;
+    background: none;
+    color: var(--text-2);
+    cursor: pointer;
   }
 
   .inv-dc-field {
@@ -6427,35 +6450,6 @@ tbody tr:last-child td { border-bottom: none; }
     display: grid;
     grid-template-columns: 1fr 1fr;
     gap: 8px 12px;
-  }
-
-  .inv-dc-card-actions {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 8px;
-    border-top: 1px solid var(--border);
-    padding-top: 10px;
-  }
-
-  .inv-dc-action {
-    min-height: 44px;
-    min-width: 0;
-    width: 100%;
-    padding: 8px 10px !important;
-    display: inline-flex !important;
-    align-items: center;
-    justify-content: center;
-    gap: 5px;
-    font-size: 0.76rem;
-    font-weight: 600;
-    white-space: normal;
-    text-align: center;
-    line-height: 1.2;
-  }
-
-  .inv-dc-action--danger {
-    color: var(--red);
-    grid-column: 1 / -1;
   }
 
   /* Drawer détail — au-dessus du header app (stacking page-content) */
@@ -6841,10 +6835,6 @@ tbody tr:last-child td { border-bottom: none; }
 @media (max-width: 480px) {
   .inv-dc-prep-qty {
     grid-template-columns: 1fr !important;
-  }
-
-  .inv-dc-card-actions {
-    grid-template-columns: 1fr;
   }
 }
 
