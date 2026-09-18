@@ -112,6 +112,20 @@ function fmtDate(d) {
   try { return new Date(`${String(d).slice(0, 10)}T12:00:00`).toLocaleDateString('fr-FR'); } catch { return d; }
 }
 
+function DemandeurCreatedCell({ req }) {
+  const name = String(req?.requested_by_name || '').trim();
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, maxWidth: 180 }}>
+      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {name || '—'}
+      </span>
+      <span style={{ fontSize: '0.75rem', color: 'var(--text-3)' }}>
+        {fmtDate(req?.created_at)}
+      </span>
+    </div>
+  );
+}
+
 function fmtDateTime(d) {
   if (!d) return '—';
   try { return new Date(d).toLocaleString('fr-FR'); } catch { return d; }
@@ -1192,6 +1206,7 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate,
                   <th>Référence</th>
                   {!embedded && <th>Projet</th>}
                   <th>Client</th>
+                  <th>Demandeur / Date de création</th>
                   <th>Nb articles</th>
                   <th>Magasinier</th>
                   <th>Date souhaitée</th>
@@ -1214,6 +1229,9 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate,
                     </td>
                     {!embedded && <td data-label="Projet">{r.project_name || '—'}</td>}
                     <td data-label="Client">{r.client_name || '—'}</td>
+                    <td data-label="Demandeur / Date de création">
+                      <DemandeurCreatedCell req={r} />
+                    </td>
                     <td data-label="Nb articles">{r.distinct_articles}</td>
                     <td data-label="Magasinier">{r.prepared_by_name || '—'}</td>
                     <td data-label="Date souhaitée">{fmtDate(r.date_souhaitee)}</td>
