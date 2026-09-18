@@ -8,14 +8,23 @@ function esc(v) {
   return s;
 }
 
-export function exportCashSheetExcel({ year, month, transactions, totals }) {
+export function exportCashSheetExcel({
+  year,
+  month,
+  transactions,
+  totals,
+  periodLabel,
+  filename,
+  soldeLabel,
+}) {
+  const period = periodLabel || `${month}/${year}`;
   const rows = [
-    ['Feuille de caisse', `${month}/${year}`],
+    ['Feuille de caisse', period],
     [],
     ['Reliquat', totals.soldeInitial],
     ['Alimentations / Entrées', totals.totalEntrees],
     ['Sorties', totals.totalSorties],
-    ['Solde caisse du mois', totals.soldeMois],
+    [soldeLabel || 'Solde caisse du mois', totals.soldeMois],
     [],
     ['Date', 'Client / Fournisseur', 'Description', 'Sortie de caisse', 'Entrée de caisse', 'Type paiement', 'Type opération'],
   ];
@@ -37,7 +46,7 @@ export function exportCashSheetExcel({ year, month, transactions, totals }) {
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
   a.href = url;
-  a.download = `feuille-caisse-${year}-${String(month).padStart(2, '0')}.csv`;
+  a.download = `${filename || `feuille-caisse-${year}-${String(month).padStart(2, '0')}`}.csv`;
   a.click();
   URL.revokeObjectURL(url);
 }

@@ -114,6 +114,27 @@ export async function listFinanceTransactions({ year, month, dateFrom, dateTo } 
   return (data || []).map(normalizeTransaction);
 }
 
+/** Toutes les opérations visibles (mêmes permissions RLS), sans filtre de date ni plafond PostgREST. */
+export async function listAllFinanceTransactions() {
+  const pageSize = 1000;
+  const all = [];
+  let from = 0;
+  for (;;) {
+    const { data, error } = await getSupabase()
+      .from(TABLE)
+      .select('*')
+      .order('date_operation', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    const chunk = data || [];
+    all.push(...chunk);
+    if (chunk.length < pageSize) break;
+    from += pageSize;
+  }
+  return all.map(normalizeTransaction);
+}
+
 export async function listFinanceTransactionsForYear(year) {
   return listFinanceTransactions({ year });
 }

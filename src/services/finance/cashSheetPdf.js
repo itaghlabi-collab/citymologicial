@@ -99,7 +99,7 @@ function drawTitle(doc, title) {
   doc.line(MARGIN, 43, PAGE_W - MARGIN, 43);
 }
 
-function drawSummaryBox(doc, totals) {
+function drawSummaryBox(doc, totals, soldeLabel = 'Solde caisse du mois') {
   const boxW = 88;
   const boxH = 30;
   const boxX = PAGE_W - MARGIN - boxW;
@@ -114,7 +114,7 @@ function drawSummaryBox(doc, totals) {
     ['Reliquat', formatPdfMAD(totals.soldeInitial)],
     ['Alimentations / Entrées', formatPdfMAD(totals.totalEntrees)],
     ['Sorties', formatPdfMAD(totals.totalSorties)],
-    ['Solde caisse du mois', formatPdfMAD(totals.soldeMois)],
+    [soldeLabel, formatPdfMAD(totals.soldeMois)],
   ];
 
   let y = boxY + 6;
@@ -242,8 +242,17 @@ function drawPageFooter(doc, pageNum, pageTotal, { notes, generatedAt }) {
   doc.text(`Page ${pageNum} / ${pageTotal}`, PAGE_W - MARGIN, sigY + 4, { align: 'right' });
 }
 
-export async function exportCashSheetPdf({ year, month, transactions, totals, balance }) {
-  const periodLabel = `${MOIS[month] || month} ${year}`;
+export async function exportCashSheetPdf({
+  year,
+  month,
+  transactions,
+  totals,
+  balance,
+  periodLabel: periodLabelArg,
+  filename,
+  soldeLabel,
+}) {
+  const periodLabel = periodLabelArg || `${MOIS[month] || month} ${year}`;
   const title = `FEUILLE DE CAISSE — ${periodLabel}`;
   const generatedAt = formatGeneratedAt();
   const notes = balance?.notes?.trim() || '';
@@ -272,7 +281,7 @@ export async function exportCashSheetPdf({ year, month, transactions, totals, ba
 
   drawCompanyHeader(doc, logo, logoSize);
   drawTitle(doc, title);
-  drawSummaryBox(doc, totals);
+  drawSummaryBox(doc, totals, soldeLabel || 'Solde caisse du mois');
 
   let y = TABLE_TOP_FIRST;
   y = drawTableHeader(doc, y);
@@ -304,5 +313,5 @@ export async function exportCashSheetPdf({ year, month, transactions, totals, ba
     drawPageFooter(doc, p, pageTotal, { notes, generatedAt });
   }
 
-  doc.save(`feuille-caisse-${year}-${String(month).padStart(2, '0')}.pdf`);
+  doc.save(`${filename || `feuille-caisse-${year}-${String(month).padStart(2, '0')}`}.pdf`);
 }
