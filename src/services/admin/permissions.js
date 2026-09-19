@@ -9,6 +9,7 @@ import { ERP_ACTIONS, allSubmoduleCodes, ERP_RUBRIQUES, findSubmodule } from '..
 /** Accès dépenses / catégories forcé pour comptes métier explicitement listés. */
 const DEPENSES_FULL_ACCESS_EMAILS = new Set([
   'h.barkaoui@citymo.ma',
+  'm.mekssi@citymo.ma',
 ]);
 
 const ROUTES_STORAGE_KEY = 'citymo_allowed_routes_v1';

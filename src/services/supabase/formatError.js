@@ -16,10 +16,13 @@ export function formatSupabaseError(error, fallback = 'Une erreur est survenue.'
     if (message.includes('crm_factures')) return 'Ce numéro de facture existe déjà.';
     return 'Cet enregistrement existe déjà (contrainte unique).';
   }
-  if (code === '42501') {
+  if (code === '42501' || /row-level security/i.test(message)) {
+    if (/finance_charges/i.test(message)) {
+      return 'Enregistrement refusé : ce compte n’a pas le droit de créer une dépense. Un administrateur doit accorder « Créer » sur Dépenses courantes.';
+    }
     return 'Accès refusé (RLS). Exécutez supabase/RUN_FINANCE_RLS_FIX.sql dans Supabase SQL Editor.';
   }
-  if (code === '42703' || message.includes('created_by')) {
+  if (code === '42703' || (/created_by/i.test(message) && !/finance_charges/i.test(message))) {
     return 'Schéma congés incomplet — exécutez supabase/migrations/20260525200000_leaves_rls_super_admin.sql';
   }
   if (

@@ -33,6 +33,13 @@ import {
   formatMAD
 } from './shared.jsx';
 
+function localIsoDate(d = new Date()) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 const EMPTY_FORM = {
   date: '', libelle: '', categorie: '', category_id: '', montant: '',
   fournisseur: '', projet_lie: '', project_id: '', vehicle_id: '', worker_id: '', client_id: '',
@@ -85,9 +92,10 @@ function ChargeAttachmentsList({ items, onRemove, removing }) {
   );
 }
 
-function ChargeForm({ initial, categories, projects = [], onSave, onCancel }) {
+function ChargeForm({ initial, categories, projects = [], onSave, onCancel, saving }) {
   const [form, setForm] = useState(() => ({
     ...EMPTY_FORM,
+    date: localIsoDate(),
     ...(initial || {}),
     justificatifs: Array.isArray(initial?.justificatifs) ? [...initial.justificatifs] : [],
   }));
@@ -95,6 +103,7 @@ function ChargeForm({ initial, categories, projects = [], onSave, onCancel }) {
   const [files, setFiles] = useState([]);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
+  const [saveError, setSaveError] = useState('');
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
   useEffect(() => {
@@ -150,21 +159,39 @@ function ChargeForm({ initial, categories, projects = [], onSave, onCancel }) {
 
   function validate() {
     const e = {};
-    if (!form.libelle.trim()) e.libelle = 'Requis';
-    if (!form.montant || isNaN(Number(form.montant))) e.montant = 'Montant invalide';
+    if (!String(form.libelle || '').trim()) e.libelle = 'Requis';
+    if (form.montant === '' || form.montant === null || form.montant === undefined || isNaN(Number(form.montant))) {
+      e.montant = 'Montant invalide';
+    }
     if (!form.date) e.date = 'Requis';
     return e;
   }
 
-  function handleSubmit(ev) {
+  async function handleSubmit(ev) {
     ev.preventDefault();
+    setSaveError('');
     const e = validate();
-    if (Object.keys(e).length) { setErrors(e); return; }
-    onSave({
-      ...form,
-      montant: parseFloat(form.montant) || 0,
-      justificatifs: stripChargeAttachmentUrls(files),
-    });
+    if (Object.keys(e).length) {
+      setErrors(e);
+      const first = ['date', 'libelle', 'montant'].find((k) => e[k]);
+      requestAnimationFrame(() => {
+        document.getElementById(`charge-field-${first}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      });
+      return;
+    }
+    try {
+      const res = await onSave({
+        ...form,
+        libelle: String(form.libelle || '').trim(),
+        montant: parseFloat(form.montant) || 0,
+        justificatifs: stripChargeAttachmentUrls(files),
+      });
+      if (res && res.success === false) {
+        setSaveError(res.error || 'Enregistrement impossible.');
+      }
+    } catch (err) {
+      setSaveError(err?.message || 'Enregistrement impossible.');
+    }
   }
 
   const inp = (k) => ({ ...INPUT_STYLE, borderColor: errors[k] ? 'var(--red)' : 'var(--border)' });
@@ -172,13 +199,13 @@ function ChargeForm({ initial, categories, projects = [], onSave, onCancel }) {
   return (
     <form onSubmit={handleSubmit}>
       <SectionTitle icon={<TrendingDown size={12} />}>Informations générales</SectionTitle>
-      <FRow>
+      <div className="finance-form-row" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(148px, 1fr))', gap: 14, marginBottom: 14 }}>
         <FField label="Date" required>
-          <input type="date" value={form.date} onChange={e => set('date', e.target.value)} style={inp('date')} />
+          <input id="charge-field-date" type="date" value={form.date} onChange={e => set('date', e.target.value)} style={inp('date')} />
           {errors.date && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.date}</div>}
         </FField>
         <FField label="Libellé" required>
-          <input value={form.libelle} onChange={e => set('libelle', e.target.value)} placeholder="Description de la dépense..." style={inp('libelle')} />
+          <input id="charge-field-libelle" value={form.libelle} onChange={e => set('libelle', e.target.value)} placeholder="Description de la dépense..." style={inp('libelle')} />
           {errors.libelle && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.libelle}</div>}
         </FField>
         <FField label="Catégorie">
@@ -201,10 +228,10 @@ function ChargeForm({ initial, categories, projects = [], onSave, onCancel }) {
           )}
         </FField>
         <FField label="Montant (MAD)" required>
-          <input type="number" min="0" step="0.01" value={form.montant} onChange={e => set('montant', e.target.value)} placeholder="0.00" style={inp('montant')} />
+          <input id="charge-field-montant" type="number" min="0" step="0.01" value={form.montant} onChange={e => set('montant', e.target.value)} placeholder="0.00" style={inp('montant')} />
           {errors.montant && <div style={{ color: 'var(--red)', fontSize: '0.7rem', marginTop: 3 }}>{errors.montant}</div>}
         </FField>
-      </FRow>
+      </div>
 
       <SectionTitle icon={<FileText size={12} />}>Affectation</SectionTitle>
       <FRow>
@@ -258,10 +285,16 @@ function ChargeForm({ initial, categories, projects = [], onSave, onCancel }) {
         </FField>
       </div>
 
+      {(Object.keys(errors).length > 0 || saveError) && (
+        <div style={{ marginBottom: 12, padding: '10px 12px', background: 'var(--red-light, #fde8e8)', border: '1px solid var(--red)', borderRadius: 8, color: 'var(--red)', fontSize: '0.82rem' }}>
+          {saveError || 'Renseignez la date, le libellé et le montant avant d’ajouter la dépense.'}
+        </div>
+      )}
       <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-        <button type="button" className="btn btn-secondary" onClick={onCancel}>Annuler</button>
-        <button type="submit" className="btn btn-primary" disabled={uploading} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          <Plus size={14} /> {initial ? 'Enregistrer' : 'Ajouter dépense'}
+        <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={saving}>Annuler</button>
+        <button type="submit" className="btn btn-primary" disabled={uploading || saving} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {saving ? <Loader2 size={14} className="cin-spin" /> : <Plus size={14} />}
+          {saving ? 'Enregistrement…' : (initial ? 'Enregistrer' : 'Ajouter dépense')}
         </button>
       </div>
     </form>
@@ -405,7 +438,7 @@ function DetailCharge({ charge, onBack, onEdit, onDelete, onValider, onComptabil
 
 export default function Charges({ categories, onNavigate }) {
   const { user } = useAuth();
-  const { records: charges, loading, error, save, remove, reload } = useFinanceCharges();
+  const { records: charges, loading, error, saving, save, remove, reload } = useFinanceCharges();
   const [search, setSearch] = useState('');
   const [filterStatut, setFilterStatut] = useState('');
   const [filterCat, setFilterCat] = useState('');
@@ -487,6 +520,7 @@ export default function Charges({ categories, onNavigate }) {
       setShowModal(false);
       setEditCharge(null);
     }
+    return res;
   }, [editCharge, save, cats]);
 
   async function handleDelete(id) {
@@ -700,7 +734,7 @@ export default function Charges({ categories, onNavigate }) {
 
       {/* Modal */}
       <Modal open={showModal} onClose={() => { setShowModal(false); setEditCharge(null); }} title={editCharge ? 'Modifier la dépense' : 'Nouvelle dépense'} width={720}>
-        <ChargeForm initial={editCharge} categories={cats} projects={projects} onSave={handleSave} onCancel={() => { setShowModal(false); setEditCharge(null); }} />
+        <ChargeForm initial={editCharge} categories={cats} projects={projects} onSave={handleSave} onCancel={() => { setShowModal(false); setEditCharge(null); }} saving={saving} />
       </Modal>
     </div>
   );

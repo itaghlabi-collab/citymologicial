@@ -142,7 +142,12 @@ export async function createFinanceCharge(form, categoryName) {
   const uid = await requireUser();
   const row = { ...toChargeRow(form, categoryName), created_by: uid };
   if (!String(row.ref_charge || '').trim()) {
-    row.ref_charge = await generateChargeRef();
+    try {
+      row.ref_charge = await generateChargeRef();
+    } catch (err) {
+      console.warn('[CITYMO] generateChargeRef', err);
+      row.ref_charge = `CHG-${new Date().getFullYear()}-${Date.now().toString(36).toUpperCase()}`;
+    }
   }
   const { data, error } = await getSupabase()
     .from(TABLE)
@@ -151,7 +156,9 @@ export async function createFinanceCharge(form, categoryName) {
     .single();
   if (error) throw error;
   const charge = normalizeCharge(data);
-  await syncChargeToTransaction(charge);
+  await syncChargeToTransaction(charge).catch((err) => {
+    console.warn('[CITYMO] sync charge → caisse', err);
+  });
   await syncChargeToProjectExpense(charge).catch((err) => {
     console.warn('[CITYMO] sync charge → project_expense', err);
   });
@@ -172,7 +179,9 @@ export async function updateFinanceCharge(id, form, categoryName) {
     .single();
   if (error) throw error;
   const charge = normalizeCharge(data);
-  await syncChargeToTransaction(charge);
+  await syncChargeToTransaction(charge).catch((err) => {
+    console.warn('[CITYMO] sync charge → caisse', err);
+  });
   await syncChargeToProjectExpense(charge).catch((err) => {
     console.warn('[CITYMO] sync charge → project_expense', err);
   });
