@@ -8,6 +8,7 @@ import { useFinanceCharges } from '../../hooks/useFinanceCharges';
 import { useAuth } from '../../hooks/useAuth';
 import { can } from '../../services/admin/permissions';
 import { chargeDisplayRef, listProjectsForCharges } from '../../services/finance/charges';
+import { reconcileDepensesCourantesCash } from '../../services/finance/chargeCashDedupe';
 import {
   isStockDiversCharge,
   parseDiversMetaFromCharge,
@@ -461,13 +462,24 @@ export default function Charges({ categories, onNavigate }) {
     (async () => {
       try {
         const report = await backfillPendingDiversGeneralExpenses({ limit: 150 });
+        const recon = await reconcileDepensesCourantesCash();
         if (cancelled) return;
+        const notes = [];
         if (report?.created_count > 0) {
-          setBackfillNote(`${report.created_count} dépense(s) stock DIVERS rattrapée(s).`);
+          notes.push(`${report.created_count} dépense(s) stock DIVERS rattrapée(s)`);
+        }
+        if (recon.chargesCancelled > 0) {
+          notes.push(`${recon.chargesCancelled} doublon(s) de dépense masqué(s)`);
+        }
+        if (recon.syncedMissing > 0) {
+          notes.push(`${recon.syncedMissing} dépense(s) rattachée(s) à la caisse`);
+        }
+        if (notes.length) {
+          setBackfillNote(`${notes.join(' · ')}.`);
           await reload();
         }
       } catch (err) {
-        console.warn('[CITYMO] backfill DIVERS charges', err);
+        console.warn('[CITYMO] backfill DIVERS / dédup charges', err);
       }
     })();
     return () => { cancelled = true; };
@@ -548,21 +560,22 @@ export default function Charges({ categories, onNavigate }) {
     await save({ ...charge, statut: 'Annulé' }, charge.id, charge.categorie);
   }
 
+  const activeCharges = charges.filter((c) => c.statut !== 'Annulé');
   const filtered = charges.filter(c => {
     const q = search.toLowerCase();
     const matchQ = !q || chargeDisplayRef(c).toLowerCase().includes(q) || c.libelle?.toLowerCase().includes(q) || (c.fournisseur || '').toLowerCase().includes(q) || (c.projet_lie || '').toLowerCase().includes(q);
-    const matchS = !filterStatut || c.statut === filterStatut;
+    const matchS = filterStatut ? c.statut === filterStatut : c.statut !== 'Annulé';
     const matchC = !filterCat || c.categorie === filterCat;
     const matchM = !filterMode || c.mode_paiement === filterMode;
     return matchQ && matchS && matchC && matchM;
   });
 
-  const totalDep     = charges.reduce((s, c) => s + (c.montant || 0), 0);
-  const depMois      = charges.filter(c => (c.date || '').startsWith(moisActuel)).reduce((s, c) => s + (c.montant || 0), 0);
-  const depProjet    = charges.filter(c => c.projet_lie).reduce((s, c) => s + (c.montant || 0), 0);
-  const depHorsProj  = charges.filter(c => !c.projet_lie).reduce((s, c) => s + (c.montant || 0), 0);
-  const validees     = charges.filter(c => c.statut === 'Validée' || c.statut === 'Comptabilisée' || c.statut === 'Comptabilisée automatiquement').length;
-  const enAttente    = charges.filter(c => c.statut === 'En attente validation' || c.statut === 'Brouillon').length;
+  const totalDep     = activeCharges.reduce((s, c) => s + (c.montant || 0), 0);
+  const depMois      = activeCharges.filter(c => (c.date || '').startsWith(moisActuel)).reduce((s, c) => s + (c.montant || 0), 0);
+  const depProjet    = activeCharges.filter(c => c.projet_lie).reduce((s, c) => s + (c.montant || 0), 0);
+  const depHorsProj  = activeCharges.filter(c => !c.projet_lie).reduce((s, c) => s + (c.montant || 0), 0);
+  const validees     = activeCharges.filter(c => c.statut === 'Validée' || c.statut === 'Comptabilisée' || c.statut === 'Comptabilisée automatiquement').length;
+  const enAttente    = activeCharges.filter(c => c.statut === 'En attente validation' || c.statut === 'Brouillon').length;
 
   if (loading && !charges.length) {
     return (

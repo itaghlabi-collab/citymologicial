@@ -30,7 +30,7 @@ import {
 } from '../../services/finance/cashDailyValidation';
 import { computeDailyCashTotals, formatDateShortFr } from '../../services/finance/cashDayTotals';
 import { consolidateCashSheetTransactions } from '../../services/finance/cashSheetDisplay';
-import { dedupeAccidentalChargeCashDuplicates } from '../../services/finance/chargeCashDedupe';
+import { reconcileDepensesCourantesCash } from '../../services/finance/chargeCashDedupe';
 import { auditRhFinanceSync } from '../../services/finance/financeDiagnostics';
 import { notifyCashReviewCompleted } from '../../services/notifications/notificationEvents';
 import { exportCashSheetPdf, CASH_SHEET_PDF_VERSION } from '../../services/finance/cashSheetPdf';
@@ -356,19 +356,22 @@ export default function FeuilleCaisse() {
     (async () => {
       try {
         const r = await runRhPaymentsCashBackfill();
-        let chargeDupes = { txCancelled: 0, chargesCancelled: 0 };
+        let recon = { txCancelled: 0, chargesCancelled: 0, syncedMissing: 0 };
         try {
-          chargeDupes = await dedupeAccidentalChargeCashDuplicates();
+          recon = await reconcileDepensesCourantesCash();
         } catch (dupErr) {
-          console.warn('[CITYMO] dedupe charge → caisse', dupErr);
+          console.warn('[CITYMO] reconcile dépenses ↔ caisse', dupErr);
         }
         if (!cancelled) {
-          if (r.total > 0 || r.removed > 0 || r.legacyPurged > 0 || chargeDupes.txCancelled > 0) {
+          if (r.total > 0 || r.removed > 0 || r.legacyPurged > 0 || recon.txCancelled > 0 || recon.chargesCancelled > 0 || recon.syncedMissing > 0) {
             await reload();
             bumpAllReload();
           }
-          if (chargeDupes.txCancelled > 0) {
-            notify(`${chargeDupes.txCancelled} doublon(s) de dépense retirés de la caisse.`);
+          if (recon.chargesCancelled > 0 || recon.txCancelled > 0) {
+            notify(`${recon.chargesCancelled + recon.txCancelled} doublon(s) de dépense retirés.`);
+          }
+          if (recon.syncedMissing > 0) {
+            notify(`${recon.syncedMissing} dépense(s) rattachée(s) à la feuille de caisse.`);
           }
           if (r.errors?.length) {
             notify(`${r.errors.length} erreur(s) sync RH — vérifiez RUN_FINANCE_TOUT_EN_UN.sql`);

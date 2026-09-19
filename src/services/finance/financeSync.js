@@ -44,6 +44,7 @@ const PAID_CHARGE_STATUTS = new Set(['payé', 'paye', 'validé', 'valide', 'vali
 const PAID_ORDER_STATUTS = new Set(['payé', 'paye', 'exécuté', 'execute', 'comptabilisé', 'comptabilise']);
 const PAID_PAYROLL_KEYS = new Set(['payé', 'paye', 'paid']);
 const PAID_SUBCONTRACTOR_KEYS = new Set(['paid', 'payé', 'paye']);
+const CANCELLED_STATUTS = new Set(['annule', 'refuse', 'refusee']);
 
 function normalizeStatutKey(value) {
   return String(value ?? '')
@@ -55,6 +56,10 @@ function normalizeStatutKey(value) {
 
 function isPaidStatut(value, allowedSet) {
   return allowedSet.has(normalizeStatutKey(value));
+}
+
+export function isCancelledFinanceStatut(value) {
+  return CANCELLED_STATUTS.has(normalizeStatutKey(value));
 }
 
 /** Uniquement statut PAYÉ — pas En attente, Validé, Annulé, Partiel. */
@@ -182,10 +187,21 @@ function mapPaymentMode(mode) {
   return mode?.trim() || 'Espèces';
 }
 
+function isEspecesPaymentMode(mode) {
+  const n = String(mode ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[\s_-]+/g, '');
+  return n === 'especes' || n === 'espece' || n === 'cash';
+}
+
 function isSourceActive(sourceType, entity) {
   if (!entity) return false;
   switch (sourceType) {
     case FINANCE_SOURCE_TYPES.CHARGE:
+      if (isCancelledFinanceStatut(entity.statut)) return false;
+      if (isEspecesPaymentMode(entity.mode_paiement)) return true;
       return isPaidStatut(entity.statut, PAID_CHARGE_STATUTS);
     case FINANCE_SOURCE_TYPES.PAYMENT_ORDER:
       return isPaidStatut(entity.statut, PAID_ORDER_STATUTS);

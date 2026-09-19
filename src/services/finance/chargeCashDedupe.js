@@ -29,6 +29,52 @@ function isActiveChargeCash(tx) {
   return Boolean(tx.charge_id) && !src;
 }
 
+export function chargeRecordFingerprint(c) {
+  const date = String(c?.date || c?.date_charge || '').slice(0, 10);
+  const montant = String(Math.round((Number(c?.montant) || 0) * 100));
+  const lib = String(c?.libelle || '').trim().toLowerCase();
+  const projet = String(c?.projet_lie || c?.project_id || '').trim().toLowerCase();
+  const mode = String(c?.mode_paiement || '').trim().toLowerCase();
+  return `${date}|${montant}|${lib}|${projet}|${mode}`;
+}
+
+/**
+ * Copies Dépenses courantes : même réf, ou même date/libellé/montant/projet/mode.
+ * @returns {{ cancelIds: string[] }}
+ */
+export function selectDuplicateChargeRecordIds(charges) {
+  const active = (charges || []).filter((c) => c?.id && c.statut !== 'Annulé');
+  const cancel = new Set();
+
+  const byRef = new Map();
+  for (const c of active) {
+    const ref = String(c.ref || c.ref_charge || '').trim();
+    if (!ref) continue;
+    if (!byRef.has(ref)) byRef.set(ref, []);
+    byRef.get(ref).push(c);
+  }
+  for (const group of byRef.values()) {
+    if (group.length < 2) continue;
+    const sorted = [...group].sort(byCreatedThenId);
+    for (const extra of sorted.slice(1)) cancel.add(String(extra.id));
+  }
+
+  const remaining = active.filter((c) => !cancel.has(String(c.id)));
+  const byFp = new Map();
+  for (const c of remaining) {
+    const fp = chargeRecordFingerprint(c);
+    if (!byFp.has(fp)) byFp.set(fp, []);
+    byFp.get(fp).push(c);
+  }
+  for (const group of byFp.values()) {
+    if (group.length < 2) continue;
+    const sorted = [...group].sort(byCreatedThenId);
+    for (const extra of sorted.slice(1)) cancel.add(String(extra.id));
+  }
+
+  return { cancelIds: [...cancel] };
+}
+
 export function chargeCashFingerprint(tx) {
   const date = String(tx?.date || tx?.date_operation || '').slice(0, 10);
   const montant = String(Math.round((Number(tx?.montant) || 0) * 100));
@@ -129,4 +175,84 @@ export async function dedupeAccidentalChargeCashDuplicates() {
     }
   }
   return { txCancelled, chargesCancelled };
+}
+
+export async function dedupeAccidentalChargeRecords() {
+  const { getSupabase } = await import('../../lib/supabase.js');
+  const { data, error } = await getSupabase()
+    .from('finance_charges')
+    .select('id, date_charge, libelle, montant, fournisseur, projet_lie, project_id, mode_paiement, ref_charge, statut, created_at')
+    .neq('statut', 'Annulé');
+  if (error) throw error;
+  const rows = (data || []).map((row) => ({
+    ...row,
+    date: row.date_charge,
+    ref: row.ref_charge,
+  }));
+  const { cancelIds } = selectDuplicateChargeRecordIds(rows);
+  const chargesCancelled = await cancelRows('finance_charges', cancelIds);
+  if (cancelIds.length) {
+    const { error: txErr } = await getSupabase()
+      .from('finance_transactions')
+      .update({ statut: 'Annulé' })
+      .eq('source_type', 'charge')
+      .in('source_id', cancelIds);
+    if (txErr) console.warn('[CITYMO] cancel cash for duplicate charges', txErr);
+  }
+  return { chargesCancelled };
+}
+
+export async function reconcileMissingChargeCashLines() {
+  const { getSupabase } = await import('../../lib/supabase.js');
+  const { CASH_RESTART_DATE } = await import('./cashRestartLedger.js');
+  const { normalizeCharge } = await import('./charges.js');
+  const { syncChargeToTransaction } = await import('./financeTransactions.js');
+  const { data: charges, error } = await getSupabase()
+    .from('finance_charges')
+    .select('*')
+    .neq('statut', 'Annulé')
+    .gte('date_charge', CASH_RESTART_DATE);
+  if (error) throw error;
+  const { data: txs, error: txErr } = await getSupabase()
+    .from('finance_transactions')
+    .select('source_id')
+    .eq('source_type', 'charge')
+    .neq('statut', 'Annulé');
+  if (txErr) throw txErr;
+  const synced = new Set((txs || []).map((t) => String(t.source_id || '')).filter(Boolean));
+  let syncedMissing = 0;
+  const { isCashPaymentMode, getCashSheetPaymentMode } = await import('./cashSheetDisplay.js');
+  for (const row of charges || []) {
+    if (synced.has(String(row.id))) continue;
+    const charge = normalizeCharge(row);
+    if (!isCashPaymentMode(getCashSheetPaymentMode(charge))) continue;
+    try {
+      await syncChargeToTransaction(charge);
+      syncedMissing += 1;
+    } catch (err) {
+      console.warn('[CITYMO] reconcile charge → caisse', row.id, err);
+    }
+  }
+  return { syncedMissing };
+}
+
+/** Dédoublonne dépenses + caisse, puis rattache les espèces manquantes (ex. RAHHOU). */
+export async function reconcileDepensesCourantesCash() {
+  const charges = await dedupeAccidentalChargeRecords().catch((err) => {
+    console.warn('[CITYMO] dedupe dépenses courantes', err);
+    return { chargesCancelled: 0 };
+  });
+  const cash = await dedupeAccidentalChargeCashDuplicates().catch((err) => {
+    console.warn('[CITYMO] dedupe charge → caisse', err);
+    return { txCancelled: 0, chargesCancelled: 0 };
+  });
+  const missing = await reconcileMissingChargeCashLines().catch((err) => {
+    console.warn('[CITYMO] reconcile charge cash manquant', err);
+    return { syncedMissing: 0 };
+  });
+  return {
+    chargesCancelled: (charges.chargesCancelled || 0) + (cash.chargesCancelled || 0),
+    txCancelled: cash.txCancelled || 0,
+    syncedMissing: missing.syncedMissing || 0,
+  };
 }

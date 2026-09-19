@@ -4,6 +4,7 @@
 import {
   chargeCashFingerprint,
   selectDuplicateChargeCashIds,
+  selectDuplicateChargeRecordIds,
 } from './chargeCashDedupe.js';
 
 function assert(cond, msg) {
@@ -95,6 +96,21 @@ const afalah = (id, created_at, extra = {}) => ({
       }),
     'empreinte stable date / date_operation',
   );
+}
+
+{
+  const charges = [
+    { id: 'a1', libelle: 'AFALAH NABIL', montant: 300, date: '2026-09-19', projet_lie: 'UNITE', mode_paiement: 'Espèce', statut: 'Brouillon', created_at: '2026-09-19T10:00:00.000Z', ref: 'CHG-2026-1357' },
+    { id: 'a2', libelle: 'AFALAH NABIL', montant: 300, date: '2026-09-19', projet_lie: 'UNITE', mode_paiement: 'Espèce', statut: 'Brouillon', created_at: '2026-09-19T10:00:05.000Z', ref: 'CHG-2026-1358' },
+    { id: 'a3', libelle: 'AFALAH NABIL', montant: 300, date: '2026-09-19', projet_lie: 'UNITE', mode_paiement: 'Espèce', statut: 'Brouillon', created_at: '2026-09-19T10:00:08.000Z', ref: 'CHG-2026-1358' },
+    { id: 'aide', libelle: 'AIDE MEDICALE', montant: 1200, date: '2026-09-19', projet_lie: '', mode_paiement: 'Espèce', statut: 'Brouillon', created_at: '2026-09-19T10:02:00.000Z', ref: 'CHG-2026-1364' },
+    { id: 'rahhou', libelle: 'MOHAMED RAHHOU', montant: 810, date: '2026-09-19', projet_lie: 'UNITE', mode_paiement: 'Espèce', statut: 'Brouillon', created_at: '2026-09-19T10:03:00.000Z', ref: 'CHG-2026-1365' },
+  ];
+  const { cancelIds } = selectDuplicateChargeRecordIds(charges);
+  assert(cancelIds.includes('a2') && cancelIds.includes('a3'), `annule copies AFALAH, got ${cancelIds}`);
+  assert(!cancelIds.includes('a1'), 'garde la 1re AFALAH');
+  assert(!cancelIds.includes('aide'), 'garde AIDE MEDICALE');
+  assert(!cancelIds.includes('rahhou'), 'garde MOHAMED RAHHOU');
 }
 
 console.log('chargeCashDedupe.test.js ok');
