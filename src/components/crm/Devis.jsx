@@ -41,11 +41,6 @@ function fmtDate(d) {
     return new Date(d).toLocaleDateString('fr-MA', { day: '2-digit', month: '2-digit', year: 'numeric' });
   } catch { return d; }
 }
-function fmtCommercial(v) {
-  if (!v?.trim()) return '—';
-  return String(v).trim().toUpperCase();
-}
-
 function pdfOpenButtonStyle(disabled, extra = {}) {
   return {
     background: 'none',
@@ -649,7 +644,6 @@ export default function Devis({ onNavigate }) {
                     { label: 'Référence',      field: 'reference' },
                     { label: 'Titre',           field: 'titre' },
                     { label: 'Client',          field: 'client_nom' },
-                    { label: 'Commercial',      field: 'commercial' },
                     { label: 'Total TTC',       field: 'total_ttc', align: 'right' },
                     { label: 'Statut',          field: 'statut' },
                     { label: 'Création',        field: 'date_creation' },
@@ -696,18 +690,23 @@ export default function Devis({ onNavigate }) {
                             fontWeight: 600,
                             color: 'var(--text)',
                             display: 'block',
+                            width: '100%',
                             maxWidth: '100%',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
+                            whiteSpace: 'normal',
+                            overflow: 'visible',
+                            textOverflow: 'unset',
+                            wordBreak: 'break-word',
+                            overflowWrap: 'anywhere',
+                            lineHeight: 1.35,
+                            height: 'auto',
+                            textAlign: 'left',
                           })}
                         >
                           {d.titre || '—'}
                         </button>
                         {d.type_projet && (
                           <div
-                            title={d.type_projet}
-                            style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                            style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 2, whiteSpace: 'normal', overflow: 'visible', wordBreak: 'break-word' }}
                           >
                             {d.type_projet}
                           </div>
@@ -717,11 +716,6 @@ export default function Devis({ onNavigate }) {
                       {/* Client */}
                       <td data-label="Client" className="crm-col-client" title={clientNom} style={{ fontWeight: 500 }}>
                         {clientNom}
-                      </td>
-
-                      {/* Commercial */}
-                      <td data-label="Commercial" className="crm-col-commercial" title={fmtCommercial(d.commercial)} style={{ color: 'var(--text-2)' }}>
-                        {fmtCommercial(d.commercial)}
                       </td>
 
                       {/* Total TTC */}
