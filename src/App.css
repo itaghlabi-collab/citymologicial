@@ -8404,6 +8404,10 @@ tbody tr:last-child td { border-bottom: none; }
     padding: 16px 18px !important;
   }
 
+  .crm-module--devis .crm-table-desktop .crm-table-scroll-x tbody td {
+    vertical-align: top;
+  }
+
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x thead th,
   .crm-module--factures .crm-table-desktop .crm-table-scroll-x thead th {
     padding-top: 14px !important;
@@ -8428,14 +8432,14 @@ tbody tr:last-child td { border-bottom: none; }
     white-space: nowrap;
   }
 
-  /* Titre — Devis : texte complet, retour à la ligne, hauteur auto */
+  /* Titre — Devis : largeur contrôlée, texte complet, retour à la ligne */
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x .crm-col-title,
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x th:nth-child(2) {
-    width: auto;
-    min-width: 240px;
-    max-width: none;
+    width: 220px;
+    min-width: 200px;
+    max-width: 260px;
     white-space: normal;
-    overflow: hidden;
+    overflow: visible;
     vertical-align: top;
     height: auto;
   }
@@ -8445,10 +8449,12 @@ tbody tr:last-child td { border-bottom: none; }
     width: 100%;
     max-width: 100%;
     overflow: visible;
-    text-overflow: unset;
+    text-overflow: clip;
     white-space: normal;
-    word-break: break-word;
     overflow-wrap: anywhere;
+    word-break: normal;
+    -webkit-line-clamp: unset;
+    line-clamp: unset;
     text-align: left;
     font-size: 0.9rem;
     line-height: 1.35;
@@ -8458,8 +8464,8 @@ tbody tr:last-child td { border-bottom: none; }
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x .crm-col-title > div {
     white-space: normal;
     overflow: visible;
-    word-break: break-word;
     overflow-wrap: anywhere;
+    word-break: normal;
     max-width: 100%;
   }
 
@@ -8503,7 +8509,7 @@ tbody tr:last-child td { border-bottom: none; }
     white-space: nowrap;
   }
 
-  /* Devis : figer les colonnes utiles pour que le surplus aille au titre */
+  /* Devis : surplus réparti sur Client / Commercial, pas sur Titre */
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x th:nth-child(1),
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x .crm-col-ref {
     max-width: 160px;
@@ -8511,14 +8517,16 @@ tbody tr:last-child td { border-bottom: none; }
 
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x th:nth-child(3),
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x .crm-col-client {
-    width: 160px;
-    min-width: 150px;
-    max-width: 170px;
+    width: 190px;
+    min-width: 170px;
+    max-width: 220px;
   }
 
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x th:nth-child(4),
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x .crm-col-commercial {
-    max-width: 150px;
+    width: 170px;
+    min-width: 150px;
+    max-width: 190px;
   }
 
   .crm-module--devis .crm-table-desktop .crm-table-scroll-x th:nth-child(5),
