@@ -1544,6 +1544,7 @@ function ParcAutomobile({ activeTabProp }) {
 }
 
 export default function Logistique({ activeTab }) {
-  if (activeTab === 'interventions') return <DemandesLogistique />;
+  if (activeTab === 'interventions') return <DemandesLogistique view="operations" />;
+  if (activeTab === 'historique-interv') return <DemandesLogistique view="history" />;
   return <ParcAutomobile activeTabProp={activeTab} />;
 }

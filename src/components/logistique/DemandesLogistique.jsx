@@ -11,18 +11,17 @@ import { usePickupRequests } from '../../hooks/usePickupRequests';
 import { can } from '../../services/admin/permissions';
 import { listEmployees, employeeFullName } from '../../services/rh/employees';
 import { listAdminUsers } from '../../services/admin/users';
-import { listProjectsForSelect, projectDisplayLabel } from '../../services/projects/projects';
 import { listVehicles } from '../../services/logistique/vehicles';
 import { searchPreparationBons } from '../../services/logistique/preparationBonLookup';
 import {
   filterPickupRequests,
+  isPickupDriverPoste,
   pickupDepartureLabel,
   pickupDestinationLabel,
   TRIP_MOTIFS,
   TRIP_STATUTS,
   motifLabel,
   tripStatutMeta,
-  collectLocationSuggestions,
   normalizeTimeHM,
   buildVehicleTripRecap,
   tripDurationLabel,
@@ -119,6 +118,20 @@ function vehicleOptionLabel(v) {
   return mat || name || v.id || '';
 }
 
+function isSelectableTripVehicle(v) {
+  const hay = [v?.marque, v?.modele, v?.vehicule]
+    .filter(Boolean)
+    .join(' ')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+  if (!hay) return false;
+  if (hay.includes('h100')) return true;
+  if (hay.includes('ford') && hay.includes('transit')) return true;
+  if (hay.includes('kia')) return true;
+  return false;
+}
+
 function bonOptionLabel(b) {
   if (!b) return '';
   return b.project_name ? `${b.ref} — ${b.project_name}` : (b.ref || b.id || '');
@@ -136,6 +149,7 @@ function mergePeople(employees = [], users = []) {
     byKey.set(`emp:${emp.id}`, {
       id: String(emp.id),
       name,
+      poste: emp.poste || '',
       label: emp.poste ? `${name} — ${emp.poste}` : name,
     });
   });
@@ -145,7 +159,12 @@ function mergePeople(employees = [], users = []) {
     if (u.employee_id && byKey.has(`emp:${u.employee_id}`)) return;
     const id = String(u.employee_id || u.id);
     if (byKey.has(`emp:${id}`) || [...byKey.values()].some((p) => String(p.id) === id)) return;
-    byKey.set(`user:${u.id}`, { id, name, label: name });
+    byKey.set(`user:${u.id}`, {
+      id,
+      name,
+      poste: u.poste || '',
+      label: u.poste ? `${name} — ${u.poste}` : name,
+    });
   });
   return [...byKey.values()].sort((a, b) => a.name.localeCompare(b.name, 'fr'));
 }
@@ -245,26 +264,6 @@ function PickupSearchSelect({
   );
 }
 
-function LocationInput({ id, value, onChange, suggestions, disabled, required }) {
-  return (
-    <>
-      <input
-        list={id}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        style={INPUT}
-        required={required}
-        disabled={disabled}
-        autoComplete="off"
-        placeholder="Saisir ou choisir un lieu…"
-      />
-      <datalist id={id}>
-        {suggestions.map((s) => <option key={s} value={s} />)}
-      </datalist>
-    </>
-  );
-}
-
 function TripRowActions({
   row, canEdit, canDelete, saving, onView, onEdit, onReturn, onDelete,
 }) {
@@ -299,7 +298,8 @@ function TripRowActions({
   );
 }
 
-export default function DemandesLogistique() {
+export default function DemandesLogistique({ view = 'operations' }) {
+  const isHistory = view === 'history';
   const { user } = useAuth();
   const { records, loading, saving, error, reload, save, recordReturn, remove } = usePickupRequests({ user });
 
@@ -314,7 +314,6 @@ export default function DemandesLogistique() {
 
   const [employees, setEmployees] = useState([]);
   const [users, setUsers] = useState([]);
-  const [projects, setProjects] = useState([]);
   const [vehicles, setVehicles] = useState([]);
   const [bons, setBons] = useState([]);
 
@@ -351,15 +350,36 @@ export default function DemandesLogistique() {
   useEffect(() => {
     listEmployees().then((rows) => setEmployees(rows || [])).catch(() => setEmployees([]));
     listAdminUsers().then((rows) => setUsers(rows || [])).catch(() => setUsers([]));
-    listProjectsForSelect().then((rows) => setProjects(rows || [])).catch(() => setProjects([]));
     listVehicles().then((rows) => setVehicles(rows || [])).catch(() => setVehicles([]));
     searchPreparationBons('').then((rows) => setBons(rows || [])).catch(() => setBons([]));
   }, []);
 
-  const people = useMemo(
-    () => mergePeople(employees, users),
-    [employees, users],
-  );
+  const people = useMemo(() => {
+    const all = mergePeople(employees, users);
+    const drivers = all.filter((p) => isPickupDriverPoste(p.poste));
+    if (form.assignee_id && !drivers.some((p) => String(p.id) === String(form.assignee_id))) {
+      const kept = all.find((p) => String(p.id) === String(form.assignee_id));
+      if (kept) return [kept, ...drivers];
+      if (form.assignee_name) {
+        return [{
+          id: form.assignee_id,
+          name: form.assignee_name,
+          poste: '',
+          label: form.assignee_name,
+        }, ...drivers];
+      }
+    }
+    return drivers;
+  }, [employees, users, form.assignee_id, form.assignee_name]);
+
+  const selectableVehicles = useMemo(() => {
+    const list = (vehicles || []).filter(isSelectableTripVehicle);
+    if (form.vehicle_id && !list.some((v) => String(v.id) === String(form.vehicle_id))) {
+      const kept = (vehicles || []).find((v) => String(v.id) === String(form.vehicle_id));
+      if (kept) return [kept, ...list];
+    }
+    return list;
+  }, [vehicles, form.vehicle_id]);
 
   const bonOptions = useMemo(() => {
     const list = [...bons];
@@ -369,10 +389,14 @@ export default function DemandesLogistique() {
     return list;
   }, [bons, form.bon_id, form.bon_ref]);
 
-  const locationSuggestions = useMemo(() => {
-    const projectNames = (projects || []).map((p) => projectDisplayLabel(p)).filter(Boolean);
-    return collectLocationSuggestions(records, projectNames);
-  }, [records, projects]);
+  const operationRows = useMemo(
+    () => (records || []).slice().sort((a, b) => {
+      const da = `${a.date_deplacement || ''}T${a.heure_depart || '00:00'}`;
+      const db = `${b.date_deplacement || ''}T${b.heure_depart || '00:00'}`;
+      return db.localeCompare(da);
+    }),
+    [records],
+  );
 
   const filtered = useMemo(
     () => filterPickupRequests(records, {
@@ -550,14 +574,18 @@ export default function DemandesLogistique() {
     <div className="logistique-module log-pickup-page animate-fade-in">
       <div className="page-header flex-between">
         <div>
-          <h1 className="page-title">Suivi des déplacements logistiques</h1>
-          <p className="page-subtitle">Enregistrement des départs, destinations et motifs de déplacement des véhicules</p>
+          <h1 className="page-title">{isHistory ? 'Historique d’intervention' : 'Suivi des déplacements logistiques'}</h1>
+          <p className="page-subtitle">
+            {isHistory
+              ? 'Récapitulatif des mouvements par véhicule'
+              : 'Enregistrement des départs, destinations et motifs de déplacement des véhicules'}
+          </p>
         </div>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button type="button" className="btn btn-secondary btn-sm" onClick={reload} disabled={loading}>
             <RefreshCw size={14} /> Actualiser
           </button>
-          {(canCreate || formMode !== 'create') && (
+          {!isHistory && (canCreate || formMode !== 'create') && (
             <button type="button" className="btn btn-primary" onClick={resetForm}>
               <Plus size={15} /> Nouveau déplacement
             </button>
@@ -576,7 +604,7 @@ export default function DemandesLogistique() {
         </div>
       )}
 
-      {showForm && (
+      {!isHistory && showForm && (
         <form className="card log-pickup-form" onSubmit={handleSave} style={{ marginBottom: 16, maxWidth: '100%' }}>
           <div className="log-pickup-form-head">
             <strong className="log-pickup-form-title">{formTitle}</strong>
@@ -622,10 +650,10 @@ export default function DemandesLogistique() {
                 disabled={fieldsLocked}
               >
                 <option value="">— Sélectionner —</option>
-                {form.vehicle_label && !vehicles.some((v) => String(v.id) === String(form.vehicle_id)) && (
+                {form.vehicle_label && !selectableVehicles.some((v) => String(v.id) === String(form.vehicle_id)) && (
                   <option value={form.vehicle_id || '__kept_veh__'}>{form.vehicle_label}</option>
                 )}
-                {vehicles.map((v) => <option key={v.id} value={v.id}>{vehicleOptionLabel(v)}</option>)}
+                {selectableVehicles.map((v) => <option key={v.id} value={v.id}>{vehicleOptionLabel(v)}</option>)}
               </select>
             </label>
 
@@ -637,31 +665,33 @@ export default function DemandesLogistique() {
                   : people}
                 getLabel={personLabel}
                 onChange={onSelectPerson}
-                placeholder="Rechercher un utilisateur ou un employé…"
+                placeholder="Rechercher un chauffeur ou un coursier…"
                 disabled={fieldsLocked}
                 emptyLabel="Aucun chauffeur"
               />
             </label>
 
             <label>Départ – De
-              <LocationInput
-                id="log-trip-from"
+              <input
+                type="text"
                 value={form.departure_project_name}
-                onChange={(v) => setForm((p) => ({ ...p, departure_project_name: v, departure_project_id: '' }))}
-                suggestions={locationSuggestions}
-                disabled={fieldsLocked}
+                onChange={(e) => setForm((p) => ({ ...p, departure_project_name: e.target.value, departure_project_id: '' }))}
+                style={INPUT}
                 required={!fieldsLocked}
+                disabled={fieldsLocked}
+                autoComplete="off"
               />
             </label>
 
             <label>Destination – À
-              <LocationInput
-                id="log-trip-to"
+              <input
+                type="text"
                 value={form.destination_project_name}
-                onChange={(v) => setForm((p) => ({ ...p, destination_project_name: v, destination_project_id: '' }))}
-                suggestions={locationSuggestions}
-                disabled={fieldsLocked}
+                onChange={(e) => setForm((p) => ({ ...p, destination_project_name: e.target.value, destination_project_id: '' }))}
+                style={INPUT}
                 required={!fieldsLocked}
+                disabled={fieldsLocked}
+                autoComplete="off"
               />
             </label>
 
@@ -731,6 +761,7 @@ export default function DemandesLogistique() {
         </form>
       )}
 
+      {isHistory && (
       <div className="card log-trip-filters" style={{ marginBottom: 16, padding: '14px 20px' }}>
         <div className="log-trip-filter-grid">
           <label>Date de début
@@ -779,11 +810,11 @@ export default function DemandesLogistique() {
           Afficher tous les véhicules
         </label>
       </div>
+      )}
 
       {loading ? (
         <div style={{ textAlign: 'center', padding: 40 }}><Loader2 size={24} className="spin" /></div>
-      ) : (
-        <>
+      ) : isHistory ? (
       <section className="log-trip-recap" aria-label="Récapitulatif des mouvements par véhicule">
         <h2 className="log-trip-recap-title">Récapitulatif des mouvements par véhicule</h2>
         <div className="log-trip-kpis">
@@ -969,9 +1000,9 @@ export default function DemandesLogistique() {
           </div>
         )}
       </section>
-
-      <h2 className="log-trip-recap-title">Historique des déplacements</h2>
-      {filtered.length === 0 ? (
+      ) : (
+      <>
+      {operationRows.length === 0 ? (
         <div className="card">
           <div style={{ textAlign: 'center', padding: '48px 20px', color: 'var(--text-3)' }}>
             <Package size={28} style={{ marginBottom: 10, opacity: 0.5 }} />
@@ -999,7 +1030,7 @@ export default function DemandesLogistique() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((r) => {
+                {operationRows.map((r) => {
                   const st = tripStatutMeta(r);
                   return (
                     <tr key={r.id}>
@@ -1023,7 +1054,7 @@ export default function DemandesLogistique() {
             </table>
           </div>
           <div className="log-mobile-list" aria-label="Liste des déplacements logistiques">
-            {filtered.map((r) => {
+            {operationRows.map((r) => {
               const st = tripStatutMeta(r);
               return (
                 <div key={r.id} className="log-mobile-card">
