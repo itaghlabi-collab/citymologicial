@@ -2,7 +2,7 @@
  * Charges.jsx — Gestion des dépenses et charges ERP CITYMO
  * Backend-ready / Supabase/S3-ready
  */
-import { useState, useCallback, useEffect, useMemo } from 'react';
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useFinanceCharges } from '../../hooks/useFinanceCharges';
 import { useAuth } from '../../hooks/useAuth';
@@ -104,6 +104,7 @@ function ChargeForm({ initial, categories, projects = [], onSave, onCancel, savi
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState('');
   const [saveError, setSaveError] = useState('');
+  const submittingRef = useRef(false);
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
   useEffect(() => {
@@ -169,6 +170,7 @@ function ChargeForm({ initial, categories, projects = [], onSave, onCancel, savi
 
   async function handleSubmit(ev) {
     ev.preventDefault();
+    if (submittingRef.current || saving) return;
     setSaveError('');
     const e = validate();
     if (Object.keys(e).length) {
@@ -179,6 +181,7 @@ function ChargeForm({ initial, categories, projects = [], onSave, onCancel, savi
       });
       return;
     }
+    submittingRef.current = true;
     try {
       const res = await onSave({
         ...form,
@@ -186,11 +189,13 @@ function ChargeForm({ initial, categories, projects = [], onSave, onCancel, savi
         montant: parseFloat(form.montant) || 0,
         justificatifs: stripChargeAttachmentUrls(files),
       });
-      if (res && res.success === false) {
+      if (res && res.success === false && !res.ignored) {
         setSaveError(res.error || 'Enregistrement impossible.');
       }
     } catch (err) {
       setSaveError(err?.message || 'Enregistrement impossible.');
+    } finally {
+      submittingRef.current = false;
     }
   }
 

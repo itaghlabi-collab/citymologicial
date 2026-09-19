@@ -138,9 +138,39 @@ export async function listFinanceCharges({ reconcileRefs = false } = {}) {
   return (data || []).map(normalizeCharge);
 }
 
+async function findRecentIdenticalCharge(row, uid) {
+  const since = new Date(Date.now() - 2 * 60 * 1000).toISOString();
+  let q = getSupabase()
+    .from(TABLE)
+    .select('*')
+    .eq('created_by', uid)
+    .eq('date_charge', row.date_charge)
+    .eq('libelle', row.libelle)
+    .eq('montant', row.montant)
+    .neq('statut', 'Annulé')
+    .gte('created_at', since)
+    .order('created_at', { ascending: true })
+    .limit(1);
+  if (row.fournisseur) q = q.eq('fournisseur', row.fournisseur);
+  const { data, error } = await q;
+  if (error) {
+    console.warn('[CITYMO] findRecentIdenticalCharge', error);
+    return null;
+  }
+  return data?.[0] || null;
+}
+
 export async function createFinanceCharge(form, categoryName) {
   const uid = await requireUser();
   const row = { ...toChargeRow(form, categoryName), created_by: uid };
+  const recent = await findRecentIdenticalCharge(row, uid);
+  if (recent) {
+    const charge = normalizeCharge(recent);
+    await syncChargeToTransaction(charge).catch((err) => {
+      console.warn('[CITYMO] sync charge → caisse', err);
+    });
+    return charge;
+  }
   if (!String(row.ref_charge || '').trim()) {
     try {
       row.ref_charge = await generateChargeRef();

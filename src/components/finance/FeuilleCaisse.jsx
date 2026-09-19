@@ -30,6 +30,7 @@ import {
 } from '../../services/finance/cashDailyValidation';
 import { computeDailyCashTotals, formatDateShortFr } from '../../services/finance/cashDayTotals';
 import { consolidateCashSheetTransactions } from '../../services/finance/cashSheetDisplay';
+import { dedupeAccidentalChargeCashDuplicates } from '../../services/finance/chargeCashDedupe';
 import { auditRhFinanceSync } from '../../services/finance/financeDiagnostics';
 import { notifyCashReviewCompleted } from '../../services/notifications/notificationEvents';
 import { exportCashSheetPdf, CASH_SHEET_PDF_VERSION } from '../../services/finance/cashSheetPdf';
@@ -355,8 +356,20 @@ export default function FeuilleCaisse() {
     (async () => {
       try {
         const r = await runRhPaymentsCashBackfill();
+        let chargeDupes = { txCancelled: 0, chargesCancelled: 0 };
+        try {
+          chargeDupes = await dedupeAccidentalChargeCashDuplicates();
+        } catch (dupErr) {
+          console.warn('[CITYMO] dedupe charge → caisse', dupErr);
+        }
         if (!cancelled) {
-          if (r.total > 0 || r.removed > 0 || r.legacyPurged > 0) await reload();
+          if (r.total > 0 || r.removed > 0 || r.legacyPurged > 0 || chargeDupes.txCancelled > 0) {
+            await reload();
+            bumpAllReload();
+          }
+          if (chargeDupes.txCancelled > 0) {
+            notify(`${chargeDupes.txCancelled} doublon(s) de dépense retirés de la caisse.`);
+          }
           if (r.errors?.length) {
             notify(`${r.errors.length} erreur(s) sync RH — vérifiez RUN_FINANCE_TOUT_EN_UN.sql`);
           }

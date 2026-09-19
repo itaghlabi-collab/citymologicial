@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { formatSupabaseError } from '../services/supabase/formatError';
 import {
@@ -12,6 +12,7 @@ export function useFinanceCharges() {
   const [records, setRecords] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
   const [error, setError] = useState(null);
   const configured = isSupabaseConfigured();
 
@@ -36,6 +37,8 @@ export function useFinanceCharges() {
   useEffect(() => { load(); }, [load]);
 
   async function save(form, id, categoryName) {
+    if (savingRef.current) return { success: false, ignored: true, error: 'Enregistrement déjà en cours.' };
+    savingRef.current = true;
     setSaving(true);
     setError(null);
     try {
@@ -48,6 +51,7 @@ export function useFinanceCharges() {
       setError(msg);
       return { success: false, error: msg };
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   }

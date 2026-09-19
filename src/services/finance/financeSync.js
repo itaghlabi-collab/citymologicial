@@ -339,15 +339,30 @@ function buildTransactionRow(sourceType, entity) {
 async function findExistingTransaction(sourceType, sourceId) {
   const { data, error } = await getSupabase()
     .from(TABLE)
-    .select('id, statut')
+    .select('id, statut, created_at')
     .eq('source_type', sourceType)
     .eq('source_id', sourceId)
-    .maybeSingle();
+    .order('created_at', { ascending: true });
   if (error) {
     console.error('[FINANCE SYNC ERROR] findExistingTransaction', { sourceType, sourceId, error });
     wrapSyncError(error);
   }
-  return data;
+  const rows = (data || []).filter((row) => row.statut !== 'Annulé');
+  const cancelled = (data || []).filter((row) => row.statut === 'Annulé');
+  const pool = rows.length ? rows : cancelled;
+  if (pool.length <= 1) return pool[0] || null;
+  const [keep, ...dupes] = pool;
+  const extraIds = dupes.map((row) => row.id).filter(Boolean);
+  if (extraIds.length) {
+    const { error: cancelErr } = await getSupabase()
+      .from(TABLE)
+      .update({ statut: 'Annulé', validation_status: 'cancelled', synced_at: new Date().toISOString() })
+      .in('id', extraIds);
+    if (cancelErr) {
+      console.warn('[FINANCE SYNC] collapse duplicate source rows', cancelErr);
+    }
+  }
+  return keep;
 }
 
 /** Supprime lignes consolidées (source_id = hash ouvrier×projet, pas payroll.id). */
