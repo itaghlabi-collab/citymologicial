@@ -279,3 +279,12 @@ export async function runRhPaymentsCashBackfill() {
   ];
   return { payroll, subcontractor, orders, removed, legacyPurged, total: payroll + subcontractor + orders, errors };
 }
+
+/** Une exécution par session — le bouton Actualiser appelle toujours runRhPaymentsCashBackfill(). */
+let rhPaymentsCashBackfillOncePromise = null;
+export function runRhPaymentsCashBackfillOnce() {
+  if (!rhPaymentsCashBackfillOncePromise) {
+    rhPaymentsCashBackfillOncePromise = runRhPaymentsCashBackfill();
+  }
+  return rhPaymentsCashBackfillOncePromise;
+}

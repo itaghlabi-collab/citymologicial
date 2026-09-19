@@ -13,7 +13,6 @@ import {
 import {
   getCashMonthlyBalance,
   upsertCashMonthlyBalance,
-  resolveEffectiveBalance,
 } from '../services/finance/cashMonthlyBalances';
 
 export function useFinanceTransactions(year, month) {
@@ -51,20 +50,20 @@ export function useFinanceTransactions(year, month) {
         console.warn('[CITYMO] cash_monthly_balances indisponible', balResult.reason);
       }
 
-      let effectiveBal = storedBal;
-      try {
-        effectiveBal = await resolveEffectiveBalance(year, month, storedBal);
-      } catch (reliquatErr) {
-        console.warn('[CITYMO] reliquat mensuel indisponible', reliquatErr);
-        effectiveBal = {
-          ...(storedBal || { annee: year, mois: month, alimentation: 0, notes: '' }),
-          solde_initial: Number(storedBal?.solde_initial) || 0,
-        };
-      }
+      // Les KPI feuille utilisent le ledger post-régularisation, pas la chaîne 36 mois.
+      // On ne recalcule pas le reliquat ici (jusqu’à 36 requêtes / mois) à chaque ouverture.
+      const pageBalance = storedBal || {
+        annee: year,
+        mois: month,
+        solde_initial: 0,
+        alimentation: 0,
+        notes: '',
+        force_ouverture: false,
+      };
 
       setRecords(txs);
-      setBalance(effectiveBal);
-      setTotals(computeCashTotals(txs, effectiveBal));
+      setBalance(pageBalance);
+      setTotals(computeCashTotals(txs, pageBalance));
     } catch (err) {
       console.error('[CITYMO] useFinanceTransactions', err);
       setError(formatSupabaseError(err, 'Erreur chargement journal caisse.'));
@@ -77,7 +76,10 @@ export function useFinanceTransactions(year, month) {
 
   useEffect(() => {
     if (!configured) return undefined;
-    const { data: { subscription } } = getSupabase().auth.onAuthStateChange(() => { load(); });
+    const { data: { subscription } } = getSupabase().auth.onAuthStateChange((event) => {
+      if (event === 'INITIAL_SESSION' || event === 'TOKEN_REFRESHED') return;
+      load();
+    });
     return () => subscription.unsubscribe();
   }, [configured, load]);
 

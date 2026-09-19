@@ -8,7 +8,7 @@ import { useFinanceCharges } from '../../hooks/useFinanceCharges';
 import { useAuth } from '../../hooks/useAuth';
 import { can } from '../../services/admin/permissions';
 import { chargeDisplayRef, listProjectsForCharges } from '../../services/finance/charges';
-import { reconcileDepensesCourantesCash } from '../../services/finance/chargeCashDedupe';
+import { reconcileDepensesCourantesCashOnce } from '../../services/finance/chargeCashDedupe';
 import {
   isStockDiversCharge,
   parseDiversMetaFromCharge,
@@ -47,6 +47,16 @@ const EMPTY_FORM = {
   departement: '', mode_paiement: 'Virement', ref_paiement: '',
   statut: 'Brouillon', commentaire: '', validateur: '', justificatifs: [],
 };
+
+let diversChargesBackfillOncePromise = null;
+function backfillPendingDiversGeneralExpensesOnce(options) {
+  if (!diversChargesBackfillOncePromise) {
+    diversChargesBackfillOncePromise = backfillPendingDiversGeneralExpenses(options);
+  }
+  return diversChargesBackfillOncePromise;
+}
+
+let chargesPageMaintenanceUiApplied = false;
 
 function ChargeAttachmentsList({ items, onRemove, removing }) {
   if (!items?.length) return null;
@@ -458,12 +468,14 @@ export default function Charges({ categories, onNavigate }) {
   const [backfillNote, setBackfillNote] = useState('');
 
   useEffect(() => {
+    if (loading || chargesPageMaintenanceUiApplied) return undefined;
     let cancelled = false;
     (async () => {
       try {
-        const report = await backfillPendingDiversGeneralExpenses({ limit: 150 });
-        const recon = await reconcileDepensesCourantesCash();
+        const report = await backfillPendingDiversGeneralExpensesOnce({ limit: 150 });
+        const recon = await reconcileDepensesCourantesCashOnce();
         if (cancelled) return;
+        chargesPageMaintenanceUiApplied = true;
         const notes = [];
         if (report?.created_count > 0) {
           notes.push(`${report.created_count} dépense(s) stock DIVERS rattrapée(s)`);
@@ -483,7 +495,7 @@ export default function Charges({ categories, onNavigate }) {
       }
     })();
     return () => { cancelled = true; };
-  }, [reload]);
+  }, [loading, reload]);
 
   useEffect(() => {
     let id;
@@ -520,10 +532,6 @@ export default function Charges({ categories, onNavigate }) {
   ), []);
 
   useEffect(() => { loadProjects(); }, [loadProjects]);
-
-  useEffect(() => {
-    if (showModal) loadProjects();
-  }, [showModal, loadProjects]);
 
   const cats = categories || [];
   const today = new Date().toISOString().slice(0, 10);

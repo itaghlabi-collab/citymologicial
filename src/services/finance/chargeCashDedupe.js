@@ -256,3 +256,12 @@ export async function reconcileDepensesCourantesCash() {
     syncedMissing: missing.syncedMissing || 0,
   };
 }
+
+/** Une exécution par session navigateur — évite 3 scans complets à chaque ouverture de page. */
+let reconcileDepensesCourantesCashOncePromise = null;
+export function reconcileDepensesCourantesCashOnce() {
+  if (!reconcileDepensesCourantesCashOncePromise) {
+    reconcileDepensesCourantesCashOncePromise = reconcileDepensesCourantesCash();
+  }
+  return reconcileDepensesCourantesCashOncePromise;
+}
