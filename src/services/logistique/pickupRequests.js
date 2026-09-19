@@ -20,6 +20,25 @@ export const PICKUP_PRIORITES = [
 
 export const PICKUP_ACTIVE_STATUTS = ['a_organiser', 'planifiee', 'en_cours'];
 
+export const TRIP_MOTIFS = [
+  { value: 'bon_preparation', label: 'Bon de préparation' },
+  { value: 'recuperation_marchandise', label: 'Récupération de marchandise' },
+  { value: 'transfert_materiel', label: 'Transfert de matériel' },
+  { value: 'autre', label: 'Autre' },
+];
+
+export const TRIP_STATUTS = [
+  { value: 'en_deplacement', label: 'En déplacement', cls: 'badge-orange' },
+  { value: 'retourne', label: 'Retourné', cls: 'badge-green' },
+];
+
+export const DEFAULT_TRIP_LOCATIONS = [
+  'Dépôt Khyayta',
+  'DEPOT LAKHYAYTA',
+  'Siège',
+  'Chantier',
+];
+
 function normPickupPoste(poste) {
   return String(poste || '')
     .normalize('NFD')
@@ -48,12 +67,89 @@ export function filterPickupDriverEmployees(employees, { keepId } = {}) {
 export function assertPickupAssigneeAllowed(employee, { allowEmpty = true, keepId } = {}) {
   if (!employee) {
     if (allowEmpty) return;
-    throw new Error('La personne chargée de la récupération est invalide.');
+    throw new Error('Sélectionnez un chauffeur ou un coursier.');
   }
   if (keepId && String(employee.id) === String(keepId)) return;
-  if (!isPickupDriverPoste(employee.poste)) {
-    throw new Error('La personne chargée de la récupération doit avoir le poste Chauffeur ou Coursier.');
+}
+
+export function normalizeTimeHM(v) {
+  const s = String(v || '').trim();
+  const m = s.match(/^(\d{1,2}):(\d{2})/);
+  if (!m) return '';
+  const h = Math.min(23, Math.max(0, Number(m[1])));
+  const min = Math.min(59, Math.max(0, Number(m[2])));
+  return `${String(h).padStart(2, '0')}:${String(min).padStart(2, '0')}`;
+}
+
+export function timeFromIso(iso) {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  } catch {
+    return '';
   }
+}
+
+export function motifLabel(value) {
+  return TRIP_MOTIFS.find((m) => m.value === value)?.label || value || '—';
+}
+
+export function tripStatutValue(request) {
+  return String(request?.heure_retour || '').trim() ? 'retourne' : 'en_deplacement';
+}
+
+export function tripStatutMeta(request) {
+  const value = tripStatutValue(request);
+  const found = TRIP_STATUTS.find((s) => s.value === value);
+  return { value, label: found?.label || value, cls: found?.cls || 'badge-grey' };
+}
+
+function inferLegacyMotif(row) {
+  if (row?.motif && TRIP_MOTIFS.some((m) => m.value === row.motif)) return row.motif;
+  if (row?.bon_id || row?.bon_ref) return 'bon_preparation';
+  return 'recuperation_marchandise';
+}
+
+/** Mappe les anciennes demandes de récupération vers un déplacement, sans perdre les champs. */
+export function normalizeTripRecord(row) {
+  if (!row) return null;
+  const date_deplacement = String(row.date_deplacement || row.date_creation || row.created_at || '').slice(0, 10);
+  const heure_depart = normalizeTimeHM(row.heure_depart) || timeFromIso(row.created_at);
+  const heure_retour = normalizeTimeHM(row.heure_retour);
+  const motif = inferLegacyMotif(row);
+  const from = pickupDepartureLabel(row);
+  const to = pickupDestinationLabel(row);
+  return {
+    ...row,
+    date_deplacement,
+    heure_depart,
+    heure_retour,
+    motif,
+    observations: row.observations || '',
+    departure_project_name: from === '—' ? (row.departure_project_name || '') : from,
+    destination_project_name: to === '—' ? (row.destination_project_name || '') : to,
+  };
+}
+
+export function collectLocationSuggestions(records = [], extra = []) {
+  const seen = new Set();
+  const out = [];
+  [...DEFAULT_TRIP_LOCATIONS, ...extra, ...(records || []).flatMap((r) => [
+    r.departure_project_name,
+    r.destination_project_name,
+    pickupDepartureLabel(r),
+    pickupDestinationLabel(r),
+  ])].forEach((name) => {
+    const n = String(name || '').trim();
+    if (!n || n === '—') return;
+    const key = n.toUpperCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(n);
+  });
+  return out;
 }
 
 const TABLE = 'logistics_pickup_requests';
@@ -157,23 +253,35 @@ export function linesFromBonSnapshot(bon) {
 
 export function validatePickupCreate(form) {
   const errors = [];
-  if (!form?.bon_id) errors.push('Sélectionnez un bon de préparation.');
-  const lines = (form?.lines || []).map((l, i) => normalizePickupLine(l, i)).filter((l) => l.designation);
-  if (form?.bon_id && !lines.length) errors.push('Ce bon de préparation n’a pas d’articles à reprendre.');
-  if (!form?.departure_project_id && !String(form?.departure_project_name || '').trim()) {
-    errors.push('Sélectionnez le lieu de départ.');
-  }
-  if (!form?.destination_project_id && !String(form?.destination_project_name || '').trim()) {
-    errors.push('Sélectionnez la destination.');
-  }
-  if (!form?.assignee_id) errors.push('Sélectionnez un chauffeur ou un coursier.');
-  if (!form?.receptionnaire_id && !String(form?.receptionnaire_name || '').trim()) {
-    errors.push('Indiquez le réceptionnaire.');
-  }
+  if (!String(form?.date_deplacement || '').trim()) errors.push('Indiquez la date du déplacement.');
+  if (!normalizeTimeHM(form?.heure_depart)) errors.push('Indiquez l’heure de départ.');
   if (!form?.vehicle_id && !String(form?.vehicle_label || '').trim()) {
     errors.push('Sélectionnez un véhicule.');
   }
-  return { ok: errors.length === 0, errors, lines };
+  if (!form?.assignee_id && !String(form?.assignee_name || '').trim()) {
+    errors.push('Sélectionnez un chauffeur ou un coursier.');
+  }
+  if (!String(form?.departure_project_name || form?.lieu_recuperation || '').trim()) {
+    errors.push('Indiquez le lieu de départ.');
+  }
+  if (!String(form?.destination_project_name || form?.destination || '').trim()) {
+    errors.push('Indiquez la destination.');
+  }
+  const motif = String(form?.motif || '').trim();
+  if (!TRIP_MOTIFS.some((m) => m.value === motif)) {
+    errors.push('Sélectionnez le motif du déplacement.');
+  }
+  if (motif === 'bon_preparation' && !form?.bon_id && !String(form?.bon_ref || '').trim()) {
+    errors.push('Sélectionnez un bon de préparation.');
+  }
+  if (motif === 'autre' && !String(form?.observations || '').trim()) {
+    errors.push('Précisez les détails du déplacement.');
+  }
+  const heureRetour = normalizeTimeHM(form?.heure_retour);
+  if (form?.heure_retour && !heureRetour) {
+    errors.push('L’heure de retour est invalide.');
+  }
+  return { ok: errors.length === 0, errors };
 }
 
 export function pickupDepartureLabel(request) {
@@ -185,42 +293,51 @@ export function pickupDestinationLabel(request) {
 }
 
 export function buildPickupRequest(form, { existing = [], user, employees = [], previous } = {}) {
-  const { ok, errors, lines } = validatePickupCreate(form);
+  const prev = previous ? normalizeTripRecord(previous) : previous;
+  const { ok, errors } = validatePickupCreate(form);
   if (!ok) {
     const err = new Error(errors[0]);
     err.details = errors;
     throw err;
   }
   const emp = (employees || []).find((e) => String(e.id) === String(form.assignee_id));
-  assertPickupAssigneeAllowed(emp, { allowEmpty: false, keepId: previous?.assignee_id });
   const now = new Date().toISOString();
-  const demandeurNom = String(form.demandeur_nom || previous?.demandeur_nom || '').trim()
+  const demandeurNom = String(form.demandeur_nom || prev?.demandeur_nom || '').trim()
     || [user?.prenom, user?.nom].filter(Boolean).join(' ').trim()
     || user?.email
     || '';
   const assigneeName = String(form.assignee_name || emp && [emp.firstname, emp.lastname].filter(Boolean).join(' ') || '').trim();
-  const receptionnaireName = String(form.receptionnaire_name || '').trim();
   const depKept = !form.departure_project_id || String(form.departure_project_id).startsWith('__kept_');
   const destKept = !form.destination_project_id || String(form.destination_project_id).startsWith('__kept_');
-  const departureProjectId = depKept ? (previous?.departure_project_id || null) : form.departure_project_id;
-  const destinationProjectId = destKept ? (previous?.destination_project_id || previous?.project_id || null) : form.destination_project_id;
-  const departureProjectName = String(form.departure_project_name || previous?.departure_project_name || '').trim();
-  const destinationProjectName = String(form.destination_project_name || previous?.destination_project_name || '').trim();
+  const departureProjectId = depKept ? (prev?.departure_project_id || null) : form.departure_project_id;
+  const destinationProjectId = destKept ? (prev?.destination_project_id || prev?.project_id || null) : form.destination_project_id;
+  const departureProjectName = String(form.departure_project_name || prev?.departure_project_name || '').trim();
+  const destinationProjectName = String(form.destination_project_name || prev?.destination_project_name || '').trim();
   const vehKept = !form.vehicle_id || String(form.vehicle_id).startsWith('__kept_');
-  const vehicleId = vehKept ? (previous?.vehicle_id || null) : form.vehicle_id;
-  const vehicleLabel = String(form.vehicle_label || previous?.vehicle_label || '').trim();
+  const vehicleId = vehKept ? (prev?.vehicle_id || null) : form.vehicle_id;
+  const vehicleLabel = String(form.vehicle_label || prev?.vehicle_label || '').trim();
+  const motif = String(form.motif || '').trim();
+  const keepBon = motif === 'bon_preparation';
+  const lines = keepBon
+    ? (form.lines || prev?.lines || []).map((l, i) => normalizePickupLine(l, i)).filter((l) => l.designation)
+    : (prev?.lines || []);
   const base = {
-    id: previous?.id || form.id || newId('dl'),
-    ref: previous?.ref || form.ref || nextPickupRef(existing),
-    statut: previous?.statut || 'a_organiser',
-    demandeur_id: previous?.demandeur_id || form.demandeur_id || user?.id || null,
-    demandeur_nom: previous?.demandeur_nom || demandeurNom,
-    created_at: previous?.created_at || form.created_at || now,
+    ...prev,
+    id: prev?.id || form.id || newId('dl'),
+    ref: prev?.ref || form.ref || nextPickupRef(existing),
+    statut: prev?.statut || 'a_organiser',
+    demandeur_id: prev?.demandeur_id || form.demandeur_id || user?.id || null,
+    demandeur_nom: prev?.demandeur_nom || demandeurNom,
+    created_at: prev?.created_at || form.created_at || now,
     updated_at: now,
-    date_creation: previous?.date_creation || form.date_creation || now.slice(0, 10),
-    bon_id: form.bon_id || null,
-    bon_ref: form.bon_ref || '',
-    bon_snapshot: form.bon_snapshot || null,
+    date_creation: prev?.date_creation || form.date_deplacement || form.date_creation || now.slice(0, 10),
+    date_deplacement: String(form.date_deplacement || prev?.date_deplacement || now).slice(0, 10),
+    heure_depart: normalizeTimeHM(form.heure_depart),
+    heure_retour: normalizeTimeHM(form.heure_retour),
+    motif,
+    bon_id: keepBon ? (form.bon_id || null) : null,
+    bon_ref: keepBon ? (form.bon_ref || '') : '',
+    bon_snapshot: keepBon ? (form.bon_snapshot || null) : null,
     departure_project_id: departureProjectId,
     departure_project_name: departureProjectName,
     destination_project_id: destinationProjectId,
@@ -229,22 +346,35 @@ export function buildPickupRequest(form, { existing = [], user, employees = [], 
     destination: destinationProjectName,
     project_id: destinationProjectId,
     project_name: destinationProjectName,
-    date_souhaitee: previous?.date_souhaitee || form.date_souhaitee || '',
-    priorite: previous?.priorite || form.priorite || 'normale',
-    observations: previous?.observations || form.observations || '',
+    date_souhaitee: prev?.date_souhaitee || form.date_souhaitee || '',
+    priorite: prev?.priorite || form.priorite || 'normale',
+    observations: String(form.observations ?? prev?.observations ?? '').trim(),
     assignee_id: form.assignee_id || null,
     assignee_name: assigneeName,
-    receptionnaire_id: form.receptionnaire_id || null,
-    receptionnaire_name: receptionnaireName,
+    receptionnaire_id: form.receptionnaire_id !== undefined ? (form.receptionnaire_id || null) : (prev?.receptionnaire_id || null),
+    receptionnaire_name: form.receptionnaire_name !== undefined
+      ? String(form.receptionnaire_name || '').trim()
+      : (prev?.receptionnaire_name || ''),
     vehicle_id: vehicleId,
     vehicle_label: vehicleLabel,
     lines,
-    recoveries: previous?.recoveries || [],
-    recovered_at: previous?.recovered_at || null,
-    recovered_by_name: previous?.recovered_by_name || '',
-    recovered_by_id: previous?.recovered_by_id || null,
+    recoveries: prev?.recoveries || [],
+    recovered_at: prev?.recovered_at || null,
+    recovered_by_name: prev?.recovered_by_name || '',
+    recovered_by_id: prev?.recovered_by_id || null,
   };
-  return base;
+  return normalizeTripRecord(base);
+}
+
+export function applyTripReturn(request, heureRetour) {
+  if (!request) throw new Error('Déplacement introuvable.');
+  const heure = normalizeTimeHM(heureRetour);
+  if (!heure) throw new Error('Indiquez l’heure de retour.');
+  return normalizeTripRecord({
+    ...request,
+    heure_retour: heure,
+    updated_at: new Date().toISOString(),
+  });
 }
 
 export function assignPickup(request, patch, { employees = [] } = {}) {
@@ -254,7 +384,7 @@ export function assignPickup(request, patch, { employees = [] } = {}) {
   if (nextId) {
     const emp = (employees || []).find((e) => String(e.id) === String(nextId));
     const sameAsCurrent = String(nextId) === String(request.assignee_id || '');
-    if (!sameAsCurrent) assertPickupAssigneeAllowed(emp, { allowEmpty: false, keepId: request.assignee_id });
+    if (!sameAsCurrent && emp) assertPickupAssigneeAllowed(emp, { allowEmpty: false, keepId: request.assignee_id });
   }
   const assigneeName = patch.assignee_name != null ? String(patch.assignee_name).trim() : request.assignee_name;
   const vehicleLabel = patch.vehicle_label != null ? String(patch.vehicle_label).trim() : request.vehicle_label;
@@ -348,14 +478,42 @@ export function confirmPickupRecovery(request, {
   return next;
 }
 
-export function filterPickupRequests(list, { search = '' } = {}) {
+export function filterPickupRequests(list, {
+  search = '',
+  dateFrom = '',
+  dateTo = '',
+  vehicle = '',
+  chauffeur = '',
+  motif = '',
+  statut = '',
+} = {}) {
   const q = String(search || '').trim().toLowerCase();
-  return (list || []).filter((r) => {
+  const from = String(dateFrom || '').slice(0, 10);
+  const to = String(dateTo || '').slice(0, 10);
+  const veh = String(vehicle || '').trim().toLowerCase();
+  const ch = String(chauffeur || '').trim().toLowerCase();
+  const mot = String(motif || '').trim();
+  const st = String(statut || '').trim();
+  return (list || []).map(normalizeTripRecord).filter((r) => {
+    if (!r) return false;
+    const date = String(r.date_deplacement || '').slice(0, 10);
+    if (from && date && date < from) return false;
+    if (to && date && date > to) return false;
+    if (veh) {
+      const hayVeh = `${r.vehicle_id || ''} ${r.vehicle_label || ''}`.toLowerCase();
+      if (!hayVeh.includes(veh)) return false;
+    }
+    if (ch) {
+      const hayCh = `${r.assignee_id || ''} ${r.assignee_name || ''}`.toLowerCase();
+      if (!hayCh.includes(ch)) return false;
+    }
+    if (mot && r.motif !== mot) return false;
+    if (st && tripStatutValue(r) !== st) return false;
     if (!q) return true;
     const hay = [
-      r.ref, r.bon_ref, r.demandeur_nom,
+      r.ref, r.bon_ref, r.demandeur_nom, motifLabel(r.motif),
       pickupDepartureLabel(r), pickupDestinationLabel(r),
-      r.assignee_name, r.receptionnaire_name, r.vehicle_label,
+      r.assignee_name, r.vehicle_label, r.observations,
     ].join(' ').toLowerCase();
     return hay.includes(q);
   });
@@ -405,10 +563,10 @@ export async function listPickupRequests() {
   const remote = await trySupabase(async (sb) => {
     const { data, error } = await sb.from(TABLE).select('*').order('created_at', { ascending: false });
     if (error) throw error;
-    return { rows: (data || []).map(rowToRequest) };
+    return { rows: (data || []).map(rowToRequest).map(normalizeTripRecord).filter(Boolean) };
   });
   if (remote?.rows) return remote.rows;
-  return readLocal();
+  return readLocal().map(normalizeTripRecord).filter(Boolean);
 }
 
 export async function savePickupRequest(request) {

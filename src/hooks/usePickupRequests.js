@@ -7,6 +7,7 @@ import {
   savePickupRequest,
   deletePickupRequest,
   buildPickupRequest,
+  applyTripReturn,
 } from '../services/logistique/pickupRequests';
 import { formatSupabaseError } from '../services/supabase/formatError';
 
@@ -65,6 +66,26 @@ export function usePickupRequests({ enabled = true, user } = {}) {
     }
   }, [user]);
 
+  const recordReturn = useCallback(async (id, heureRetour) => {
+    setSaving(true);
+    setError('');
+    try {
+      const current = await listPickupRequests();
+      const previous = current.find((r) => String(r.id) === String(id));
+      if (!previous) throw new Error('Déplacement introuvable.');
+      const built = applyTripReturn(previous, heureRetour);
+      const saved = await savePickupRequest(built);
+      setRecords((prev) => prev.map((r) => (r.id === saved.id ? saved : r)));
+      return { success: true, data: saved };
+    } catch (err) {
+      const msg = formatSupabaseError(err, err.message || 'Erreur enregistrement du retour.');
+      setError(msg);
+      return { success: false, error: msg };
+    } finally {
+      setSaving(false);
+    }
+  }, []);
+
   const remove = useCallback(async (id) => {
     setSaving(true);
     setError('');
@@ -88,6 +109,7 @@ export function usePickupRequests({ enabled = true, user } = {}) {
     error,
     reload: load,
     save,
+    recordReturn,
     remove,
   };
 }

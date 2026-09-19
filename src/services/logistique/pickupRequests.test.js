@@ -1,143 +1,139 @@
 /**
- * Tests fictifs — formulaire logistique simplifié (5 champs).
+ * Tests — suivi des déplacements logistiques.
  * node src/services/logistique/pickupRequests.test.js
  * Aucune écriture en production.
  */
 import {
   buildPickupRequest,
-  linesFromBonSnapshot,
+  applyTripReturn,
   filterPickupRequests,
   pickupDepartureLabel,
   pickupDestinationLabel,
-  isPickupDriverPoste,
-  filterPickupDriverEmployees,
-  assertPickupAssigneeAllowed,
+  tripStatutValue,
+  tripStatutMeta,
+  motifLabel,
+  normalizeTripRecord,
+  collectLocationSuggestions,
+  validatePickupCreate,
 } from './pickupRequests.js';
 
 function assert(cond, msg) {
   if (!cond) throw new Error(msg);
 }
 
-function close(a, b, msg) {
-  assert(Math.abs(Number(a) - Number(b)) < 0.001, msg || `${a} !== ${b}`);
-}
-
 const user = { id: 'u1', prenom: 'Imane', nom: 'Test' };
 const chauffeur = { id: 'e1', firstname: 'Karim', lastname: 'Naji', poste: 'Chauffeur' };
-const coursier = { id: 'e2', firstname: 'Sara', lastname: 'Bennani', poste: 'Coursier' };
 const magasinier = { id: 'm1', firstname: 'Omar', lastname: 'Said', poste: 'Magasinier' };
-const pool = [chauffeur, coursier, magasinier];
+const pool = [chauffeur, magasinier];
 
-const bon = {
-  id: 'bon-1',
-  ref: 'BP-2026-0042',
-  project_name: 'Résidence Atlas',
-  lines: [
-    { article_name: 'Ciment', unite: 'sac', quantite_demandee: 20, quantite_preparee: 15, emplacement_source: 'A1' },
-    { article_name: 'Sable', unite: 'm3', quantite_demandee: 4, quantite_preparee: 4, emplacement_source: 'A1' },
-  ],
-};
-const fromBonLines = linesFromBonSnapshot(bon);
-close(fromBonLines[0].qty_to_recover, 15, 'qté à récupérer = préparée');
-close(fromBonLines[0].qty_demandee_bon, 20, 'qté demandée conservée');
-close(fromBonLines[1].qty_preparee_bon, 4, 'qté préparée conservée');
-
-const created = buildPickupRequest({
-  bon_id: bon.id,
-  bon_ref: bon.ref,
-  bon_snapshot: bon,
-  lines: fromBonLines,
-  departure_project_id: 'p-dep',
-  departure_project_name: 'Dépôt Casa',
-  destination_project_id: 'p-dest',
-  destination_project_name: 'Chantier Nord',
-  assignee_id: 'e1',
-  assignee_name: 'Karim Naji',
-  receptionnaire_id: 'm1',
-  receptionnaire_name: 'Omar Said',
+const baseForm = {
+  date_deplacement: '2026-09-19',
+  heure_depart: '08:30',
   vehicle_id: 'v1',
   vehicle_label: '12345-A-6 — Kangoo',
-}, { existing: [], user, employees: pool });
+  assignee_id: 'e1',
+  assignee_name: 'Karim Naji',
+  departure_project_name: 'Dépôt Khyayta',
+  destination_project_name: 'Chantier Nord',
+  motif: 'transfert_materiel',
+  observations: '',
+};
 
-assert(created.demandeur_nom === 'Imane Test', 'demandeur auto');
-assert(created.bon_ref === 'BP-2026-0042', 'bon lié');
-assert(pickupDepartureLabel(created) === 'Dépôt Casa', 'départ');
-assert(pickupDestinationLabel(created) === 'Chantier Nord', 'destination');
+const created = buildPickupRequest(baseForm, { existing: [], user, employees: pool });
+assert(created.date_deplacement === '2026-09-19', 'date déplacement');
+assert(created.heure_depart === '08:30', 'heure départ');
+assert(created.vehicle_label.includes('Kangoo'), 'véhicule parc');
 assert(created.assignee_name === 'Karim Naji', 'chauffeur');
-assert(created.receptionnaire_name === 'Omar Said', 'réceptionnaire');
-assert(created.vehicle_label === '12345-A-6 — Kangoo', 'véhicule');
-assert(created.lines.length === 2, 'articles du bon repris');
+assert(pickupDepartureLabel(created) === 'Dépôt Khyayta', 'départ');
+assert(pickupDestinationLabel(created) === 'Chantier Nord', 'destination');
+assert(created.motif === 'transfert_materiel', 'motif');
+assert(!created.bon_id, 'bon absent hors motif bon');
+assert(tripStatutValue(created) === 'en_deplacement', 'sans retour = en déplacement');
+assert(tripStatutMeta(created).label === 'En déplacement', 'libellé statut');
 
-const edited = buildPickupRequest({
-  ...created,
-  destination_project_id: 'p-dest-2',
-  destination_project_name: 'Chantier Sud',
-}, { existing: [created], user, employees: pool, previous: created });
-assert(edited.id === created.id, 'modification conserve l’id');
-assert(edited.ref === created.ref, 'modification conserve la réf');
-assert(edited.demandeur_nom === created.demandeur_nom, 'demandeur inchangé');
-assert(pickupDestinationLabel(edited) === 'Chantier Sud', 'destination mise à jour');
-assert(edited.lines.length === 2, 'lignes bon conservées');
+const returned = applyTripReturn(created, '17:05');
+assert(returned.heure_retour === '17:05', 'heure retour');
+assert(tripStatutValue(returned) === 'retourne', 'avec retour = retourné');
+assert(returned.id === created.id, 'retour conserve l’id');
+
+const magasinierOk = buildPickupRequest({
+  ...baseForm,
+  assignee_id: 'm1',
+  assignee_name: 'Omar Said',
+}, { user, employees: pool });
+assert(magasinierOk.assignee_id === 'm1', 'employé hors poste chauffeur accepté');
+
+const withBon = buildPickupRequest({
+  ...baseForm,
+  motif: 'bon_preparation',
+  bon_id: 'bon-1',
+  bon_ref: 'BP-2026-0042',
+}, { user, employees: pool });
+assert(withBon.bon_ref === 'BP-2026-0042', 'bon lié si motif bon de préparation');
 
 let missingBon = false;
 try {
-  buildPickupRequest({
-    departure_project_id: 'p-dep',
-    departure_project_name: 'Dépôt',
-    destination_project_id: 'p-dest',
-    destination_project_name: 'Chantier',
-    assignee_id: 'e1',
-    receptionnaire_name: 'Omar',
-    lines: [],
-  }, { user, employees: pool });
+  buildPickupRequest({ ...baseForm, motif: 'bon_preparation' }, { user, employees: pool });
 } catch {
   missingBon = true;
 }
-assert(missingBon, 'bon obligatoire');
+assert(missingBon, 'bon obligatoire seulement pour motif bon de préparation');
 
-let magasinierBlocked = false;
+let missingDetails = false;
 try {
-  buildPickupRequest({
-    bon_id: bon.id,
-    bon_ref: bon.ref,
-    lines: fromBonLines,
-    departure_project_id: 'p-dep',
-    departure_project_name: 'Dépôt',
-    destination_project_id: 'p-dest',
-    destination_project_name: 'Chantier',
-    assignee_id: 'm1',
-    assignee_name: 'Omar',
-    receptionnaire_name: 'Sara',
-    vehicle_id: 'v1',
-    vehicle_label: '12345-A-6 — Kangoo',
-  }, { user, employees: pool });
+  buildPickupRequest({ ...baseForm, motif: 'autre', observations: '' }, { user, employees: pool });
 } catch {
-  magasinierBlocked = true;
+  missingDetails = true;
 }
-assert(magasinierBlocked, 'magasinier refusé comme chauffeur');
+assert(missingDetails, 'détails obligatoires si motif Autre');
 
-assert(isPickupDriverPoste('Chauffeur') && isPickupDriverPoste('Coursier'), 'postes autorisés');
-assert(!isPickupDriverPoste('Magasinier'), 'magasinier exclu de la liste');
-assert(filterPickupDriverEmployees(pool).length === 2, 'liste chauffeur/coursier');
-assertPickupAssigneeAllowed(null, { allowEmpty: true });
+const autre = buildPickupRequest({
+  ...baseForm,
+  motif: 'autre',
+  observations: 'Livraison exceptionnelle',
+}, { user, employees: pool });
+assert(autre.observations === 'Livraison exceptionnelle', 'détails Autre');
 
-const kept = buildPickupRequest({
-  bon_id: bon.id,
-  bon_ref: bon.ref,
-  lines: fromBonLines,
-  departure_project_id: 'p-dep',
+const edited = buildPickupRequest({
+  ...created,
+  destination_project_name: 'Chantier Sud',
+  heure_retour: '18:00',
+}, { existing: [created], user, employees: pool, previous: created });
+assert(edited.id === created.id, 'modification conserve l’id');
+assert(edited.ref === created.ref, 'modification conserve la réf');
+assert(pickupDestinationLabel(edited) === 'Chantier Sud', 'destination mise à jour');
+assert(tripStatutValue(edited) === 'retourne', 'retour saisi à la modification');
+
+const legacy = normalizeTripRecord({
+  id: 'old-1',
+  ref: 'DL-2026-0001',
+  bon_id: 'bon-9',
+  bon_ref: 'BP-OLD',
   departure_project_name: 'Dépôt Casa',
-  destination_project_id: 'p-dest',
-  destination_project_name: 'Chantier Nord',
-  assignee_id: 'm1',
-  assignee_name: 'Omar Said',
-  receptionnaire_name: 'Sara',
-  vehicle_id: 'v1',
+  destination_project_name: 'Résidence Atlas',
+  assignee_name: 'Karim Naji',
   vehicle_label: '12345-A-6 — Kangoo',
-}, { user, employees: pool, previous: { ...created, assignee_id: 'm1', assignee_name: 'Omar Said' } });
-assert(kept.assignee_id === 'm1', 'affectation historique conservée');
+  date_creation: '2026-08-01',
+  created_at: '2026-08-01T07:15:00.000Z',
+});
+assert(legacy.motif === 'bon_preparation', 'ancien enregistrement conservé comme bon');
+assert(legacy.date_deplacement === '2026-08-01', 'date héritée');
+assert(legacy.heure_depart, 'heure héritée de created_at');
+assert(tripStatutValue(legacy) === 'en_deplacement', 'ancien sans retour reste en déplacement');
 
-assert(filterPickupRequests([created], { search: 'nord' }).length === 1, 'filtre destination');
-assert(filterPickupRequests([created], { search: 'bp-2026' }).length === 1, 'filtre bon');
+assert(filterPickupRequests([created, returned], { statut: 'en_deplacement' }).length === 1, 'filtre statut');
+assert(filterPickupRequests([created], { motif: 'transfert_materiel' }).length === 1, 'filtre motif');
+assert(filterPickupRequests([created], { vehicle: 'kangoo' }).length === 1, 'filtre véhicule');
+assert(filterPickupRequests([created], { chauffeur: 'karim' }).length === 1, 'filtre chauffeur');
+assert(filterPickupRequests([created], { dateFrom: '2026-09-19', dateTo: '2026-09-19' }).length === 1, 'filtre période');
+assert(filterPickupRequests([created], { dateFrom: '2026-09-20' }).length === 0, 'hors période');
+assert(motifLabel('bon_preparation') === 'Bon de préparation', 'libellé motif');
+
+const suggestions = collectLocationSuggestions([created], ['Siège']);
+assert(suggestions.includes('Dépôt Khyayta'), 'suggestion départ existant');
+assert(suggestions.includes('Siège'), 'suggestion lieu connu');
+
+const v = validatePickupCreate({ ...baseForm, heure_depart: '' });
+assert(!v.ok && v.errors.some((e) => /heure de départ/i.test(e)), 'heure départ obligatoire');
 
 console.log('pickupRequests.test.js OK');
