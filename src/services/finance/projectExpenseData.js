@@ -3,7 +3,7 @@
  */
 import { getSupabase } from '../../lib/supabase';
 import { expenseMatchesProject } from './projectExpenseMerge';
-import { isCountedProjectExpense } from './projectExpenseRules';
+import { isCountedProjectExpense, filterChantierProjectsForDepenses } from './projectExpenseRules';
 
 const PAID_OP = ['Payé'];
 
@@ -22,7 +22,8 @@ export function buildProjectExpenseDashboard(expenses, projects, orders = [], ac
   const withSpend = summaries.filter((p) => Number(p.total_depenses) > 0);
   const top = withSpend[0] || null;
 
-  const totalBudget = (projects || []).reduce((s, p) => s + (Number(p.budget_approuve) || 0), 0);
+  const chantierProjects = filterChantierProjectsForDepenses(projects);
+  const totalBudget = chantierProjects.reduce((s, p) => s + (Number(p.budget_approuve) || 0), 0);
   const budgetConsomme = totalDepenses;
   const budgetRestant = Math.max(0, totalBudget - budgetConsomme);
 
@@ -50,7 +51,7 @@ export function buildProjectExpenseDashboard(expenses, projects, orders = [], ac
     .slice(0, 10);
 
   return {
-    projectCount: (projects || []).length,
+    projectCount: chantierProjects.length,
     totalDepenses,
     depensesMois,
     topProject: top?.nom || null,
@@ -65,9 +66,10 @@ export function buildProjectExpenseDashboard(expenses, projects, orders = [], ac
 }
 
 export function buildProjectSummaries(projects, expenses, orders = [], acquisitionOrders = []) {
+  const chantierProjects = filterChantierProjectsForDepenses(projects);
   const expByProject = {};
   const active = (expenses || []).filter(isCountedProjectExpense);
-  (projects || []).forEach((p) => {
+  chantierProjects.forEach((p) => {
     const key = String(p.id);
     active.forEach((e) => {
       if (!expenseMatchesProject(e, p)) return;
@@ -92,7 +94,7 @@ export function buildProjectSummaries(projects, expenses, orders = [], acquisiti
     payeByProject[o.project_id] = (payeByProject[o.project_id] || 0) + (Number(o.montant_ttc ?? o.montant) || 0);
   });
 
-  return (projects || []).map((p) => {
+  return chantierProjects.map((p) => {
     const exp = expByProject[String(p.id)] || { total: 0, count: 0, fournisseurs: new Set() };
     const budget = Number(p.budget_approuve) || 0;
     return {

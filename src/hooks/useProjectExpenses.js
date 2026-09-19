@@ -20,6 +20,11 @@ import {
 } from '../services/finance/projectExpenseMerge';
 import { backfillProjectExpensesViaApi } from '../services/finance/projectExpenseBackfill';
 import { isSupabaseConfigured } from '../lib/supabase';
+import {
+  filterChantierProjectsForDepenses,
+  isPersonMisclassifiedAsProjectName,
+  collapseDuplicatePersonProjectExpenses,
+} from '../services/finance/projectExpenseRules';
 
 const BACKFILL_SESSION_KEY = 'citymo_dpp_backfill_at';
 const BACKFILL_MIN_INTERVAL_MS = 5 * 60 * 1000;
@@ -40,8 +45,11 @@ async function loadExpenseBundle() {
     fetchErpContextForProjects(),
     fetchLinkedChargesForProjects(),
   ]);
-  const merged = mergeChargesIntoProjectExpenses(exps, charges, projs);
-  return { projs, expenses: enrichExpensesWithProjects(merged, projs), ctx };
+  const merged = collapseDuplicatePersonProjectExpenses(
+    mergeChargesIntoProjectExpenses(exps, charges, projs),
+  );
+  const chantierProjects = filterChantierProjectsForDepenses(projs);
+  return { projs: chantierProjects, expenses: enrichExpensesWithProjects(merged, chantierProjects), ctx };
 }
 
 function shouldRunBackfill() {
@@ -143,7 +151,10 @@ export function useProjectExpenses() {
   );
 
   const unmatched = useMemo(
-    () => expenses.filter((e) => e.project_match_status === 'needs_manual'),
+    () => expenses.filter((e) => (
+      e.project_match_status === 'needs_manual'
+      && !isPersonMisclassifiedAsProjectName(e.project_nom || e.project_name_raw)
+    )),
     [expenses],
   );
 

@@ -53,6 +53,101 @@ export function resolveInternalCostCenterLabel(name) {
   return null;
 }
 
+/**
+ * Personne (ouvrier / libellé de dépense) parfois rangée comme « projet »
+ * via projet_lie / project_name_raw / une fiche projects au même nom.
+ * Ce n'est pas un chantier : à exclure uniquement de la liste / du filtre
+ * Dépenses par projet. Ne supprime aucune dépense.
+ */
+const PERSON_LABELS_NOT_PROJECTS = new Set(['AFALAH NABIL']);
+
+function projectNamePart(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  const afterRef = raw.includes(' — ') ? raw.split(' — ').slice(1).join(' — ').trim() : raw;
+  return afterRef || raw;
+}
+
+export function isPersonMisclassifiedAsProjectName(value) {
+  const full = normalizeProjectSiteKey(value);
+  if (full && PERSON_LABELS_NOT_PROJECTS.has(full)) return true;
+  const part = normalizeProjectSiteKey(projectNamePart(value));
+  return Boolean(part && PERSON_LABELS_NOT_PROJECTS.has(part));
+}
+
+/** Projets chantier affichés dans Dépenses par projet (liste + options). */
+export function filterChantierProjectsForDepenses(projects) {
+  return (projects || []).filter((p) => !isPersonMisclassifiedAsProjectName(p?.nom));
+}
+
+/** Libellé projet pour l'UI : masque uniquement la personne mal classée. */
+export function displayChantierProjectName(expense) {
+  const nom = String(expense?.project_nom || '').trim();
+  if (nom && !isPersonMisclassifiedAsProjectName(nom)) return nom;
+  const raw = String(expense?.project_name_raw || '').trim();
+  if (raw && !isPersonMisclassifiedAsProjectName(raw)) return raw;
+  return '';
+}
+
+function isPersonExpenseLine(expense) {
+  return isPersonMisclassifiedAsProjectName(expense?.element_depense)
+    || isPersonMisclassifiedAsProjectName(expense?.libelle)
+    || isPersonMisclassifiedAsProjectName(expense?.fournisseur);
+}
+
+function personExpenseFingerprint(expense) {
+  const date = String(expense?.date_depense || expense?.date || '').slice(0, 10);
+  const montant = String(Math.round((Number(expense?.montant) || 0) * 100));
+  const who = normalizeProjectSiteKey(
+    expense?.element_depense || expense?.libelle || expense?.fournisseur || '',
+  );
+  const projet = String(expense?.project_id || expense?.project_nom || expense?.project_name_raw || '').trim();
+  return `${date}|${montant}|${who}|${projet}`;
+}
+
+function expenseCreatedMs(expense) {
+  const raw = expense?.created_at;
+  if (!raw) return null;
+  const ms = new Date(raw).getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function byCreatedThenId(a, b) {
+  const ma = expenseCreatedMs(a);
+  const mb = expenseCreatedMs(b);
+  if (ma != null && mb != null && ma !== mb) return ma - mb;
+  return String(a?.id || '').localeCompare(String(b?.id || ''));
+}
+
+/**
+ * Copies accidentelles d'une même dépense personne (ex. AFALAH NABIL 300 MAD)
+ * → une seule ligne. N'efface rien en base.
+ */
+export function collapseDuplicatePersonProjectExpenses(expenses) {
+  const rows = Array.isArray(expenses) ? expenses : [];
+  const seen = new Set();
+  const keep = [];
+  const others = [];
+
+  const personRows = [];
+  for (const e of rows) {
+    if (isPersonExpenseLine(e)) personRows.push(e);
+    else others.push(e);
+  }
+
+  const sorted = [...personRows].sort(byCreatedThenId);
+  for (const e of sorted) {
+    const fp = personExpenseFingerprint(e);
+    if (seen.has(fp)) continue;
+    seen.add(fp);
+    keep.push(e);
+  }
+
+  return [...others, ...keep].sort((a, b) => (
+    String(b?.date_depense || '').localeCompare(String(a?.date_depense || ''))
+  ));
+}
+
 /** Catégorie Dépenses générales pour paie ATELIER / DÉPÔT. */
 export const INTERNAL_LABOR_CHARGE_CATEGORY = "Main-d'œuvre interne";
 

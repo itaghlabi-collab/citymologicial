@@ -7,6 +7,8 @@ import {
   isChargeEligibleForBackfill,
   isChargePaidForProject,
   isCountedProjectExpense,
+  isPersonMisclassifiedAsProjectName,
+  collapseDuplicatePersonProjectExpenses,
 } from './projectExpenseRules';
 
 const SKIP_CHARGE_STATUTS = ['Annulé', 'Refusé', 'Refusée', 'Brouillon'];
@@ -32,24 +34,37 @@ export function buildProjectIndexes(projects) {
   return { projectById, projectByName, projectByRef };
 }
 
+function acceptChantierProject(project, label) {
+  if (!project) return null;
+  if (isPersonMisclassifiedAsProjectName(project.nom)) return null;
+  if (!project.nom && isPersonMisclassifiedAsProjectName(label)) return null;
+  return project;
+}
+
 export function resolveChargeProject(charge, indexes) {
   const { projectById, projectByName, projectByRef } = indexes;
   const label = String(charge.projet_lie || charge.project_name || '').trim();
   const refPart = label.split(' — ')[0]?.trim();
   // Référence explicite (ex. PRJ-202607-0001) prioritaire — évite les doublons de nom.
-  if (refPart && projectByRef[refPart]) return projectByRef[refPart];
+  if (refPart && projectByRef[refPart]) {
+    return acceptChantierProject(projectByRef[refPart], label);
+  }
   if (charge.project_id) {
     const id = String(charge.project_id);
-    return projectById[id] || { id };
+    const byId = projectById[id];
+    if (byId) return acceptChantierProject(byId, label);
+    return acceptChantierProject({ id }, label);
   }
   if (!label) return null;
   const nomPart = label.split(' — ')[1]?.trim() || label;
-  return projectByName[normalizeName(nomPart)] || projectByName[normalizeName(label)] || null;
+  const byName = projectByName[normalizeName(nomPart)] || projectByName[normalizeName(label)] || null;
+  return acceptChantierProject(byName, label);
 }
 
 /** Une ligne project_expenses (ou fusionnée) correspond-elle à ce projet ? */
 export function expenseMatchesProject(expense, project) {
   if (!expense || !project) return false;
+  if (isPersonMisclassifiedAsProjectName(project.nom)) return false;
   if (expense.project_id && String(expense.project_id) === String(project.id)) return true;
   const label = String(expense.project_name_raw || expense.project_nom || '').trim();
   if (!label) return false;
@@ -65,6 +80,7 @@ export function expenseMatchesProject(expense, project) {
 /** Une charge correspond-elle à ce projet (id, ref ou nom) ? */
 export function chargeMatchesProject(charge, project) {
   if (!charge || !project) return false;
+  if (isPersonMisclassifiedAsProjectName(project.nom)) return false;
   if (charge.project_id && String(charge.project_id) === String(project.id)) return true;
   const label = String(charge.projet_lie || '').trim();
   if (!label) return false;
@@ -88,10 +104,13 @@ function chargeExpenseStatut(statut) {
 export function chargeToProjectExpenseRow(charge, projectId, projects) {
   const project = (projects || []).find((p) => String(p.id) === String(projectId));
   const ref = charge.ref_charge || charge.ref || '';
+  const rawLabel = isPersonMisclassifiedAsProjectName(charge.projet_lie)
+    ? (project?.nom || '')
+    : (charge.projet_lie || project?.nom || '');
   return {
     id: `charge:${charge.id}`,
     project_id: String(projectId),
-    project_name_raw: charge.projet_lie || project?.nom || '',
+    project_name_raw: rawLabel,
     project_match_status: 'matched',
     project_nom: project?.nom || '',
     date_depense: charge.date_charge || charge.date || '',
@@ -142,7 +161,7 @@ export function mergeChargesIntoProjectExpenses(expenses, charges, projects) {
     countedChargeIds.add(String(charge.id));
   }
 
-  return merged.sort((a, b) => String(b.date_depense).localeCompare(String(a.date_depense)));
+  return collapseDuplicatePersonProjectExpenses(merged);
 }
 
 async function fetchLinkedChargesViaApi() {

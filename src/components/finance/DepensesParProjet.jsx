@@ -18,6 +18,8 @@ import {
   isImportExcelProjectExpense,
   canEditProjectExpense,
   canDeleteProjectExpense,
+  isPersonMisclassifiedAsProjectName,
+  displayChantierProjectName,
 } from '../../services/finance/projectExpenseRules';
 import { getProjectDetailData } from '../../services/finance/projectExpenseData';
 import { expenseMatchesProject } from '../../services/finance/projectExpenseMerge';
@@ -441,8 +443,11 @@ export default function DepensesParProjet() {
   }
 
   const filteredExpenses = filterProjectExpenses(expenses, { search, origine: filterOrigine });
-  const detail = selectedProject
-    ? getProjectDetailData(selectedProject, expenses, erpContext.orders, erpContext.acquisitionOrders)
+  const selectedChantier = selectedProject && !isPersonMisclassifiedAsProjectName(selectedProject.nom)
+    ? selectedProject
+    : null;
+  const detail = selectedChantier
+    ? getProjectDetailData(selectedChantier, expenses, erpContext.orders, erpContext.acquisitionOrders)
     : null;
 
   const donutFournisseur = dashboard.fournisseurChart.map((s, i) => ({
@@ -624,7 +629,7 @@ export default function DepensesParProjet() {
       )}
 
       {/* ── Projets liste ── */}
-      {view === 'projets' && !selectedProject && (
+      {view === 'projets' && !selectedChantier && (
         <div className="dpp-view dpp-fade-in">
           <SectionHeader
             icon={FolderKanban}
@@ -687,7 +692,7 @@ export default function DepensesParProjet() {
       )}
 
       {/* ── Fiche projet ── */}
-      {view === 'projets' && selectedProject && detail && (
+      {view === 'projets' && selectedChantier && detail && (
         <div className="dpp-view dpp-fade-in dpp-project-detail">
           <button type="button" className="btn btn-secondary btn-sm dpp-back-btn" onClick={() => setSelectedProject(null)}>
             <ArrowLeft size={14} /> Retour à la liste
@@ -697,29 +702,29 @@ export default function DepensesParProjet() {
             <div className="dpp-project-hero-top">
               <div>
                 <p className="dpp-project-hero-label">Fiche projet</p>
-                <h2 className="dpp-project-hero-title">{selectedProject.nom}</h2>
+                <h2 className="dpp-project-hero-title">{selectedChantier.nom}</h2>
               </div>
               <div className="dpp-project-hero-actions">
                 <button
                   type="button"
                   className="btn btn-secondary btn-sm"
                   disabled={pdfBusy}
-                  onClick={() => handleExportPdf({ project: selectedProject, expenses: detail.expenses })}
+                  onClick={() => handleExportPdf({ project: selectedChantier, expenses: detail.expenses })}
                 >
                   {pdfBusy ? <Loader2 size={14} className="cin-spin" /> : <Download size={14} />}
                   {pdfBusy ? ' Génération…' : ' PDF'}
                 </button>
-                <button type="button" className="btn btn-secondary btn-sm" onClick={() => exportProjectExpensesExcel({ project: selectedProject, expenses: detail.expenses })}>
+                <button type="button" className="btn btn-secondary btn-sm" onClick={() => exportProjectExpensesExcel({ project: selectedChantier, expenses: detail.expenses })}>
                   <FileSpreadsheet size={14} /> Excel
                 </button>
               </div>
             </div>
             <div className="dpp-stat-grid">
-              <StatMiniCard icon={User} label="Chef de projet" value={selectedProject.responsable || selectedProject.chef_projet || '—'} />
+              <StatMiniCard icon={User} label="Chef de projet" value={selectedChantier.responsable || selectedChantier.chef_projet || '—'} />
               <StatMiniCard icon={Wallet} label="Budget" value={formatMAD(detail.budget)} />
               <StatMiniCard icon={TrendingDown} label="Total dépenses" value={formatMAD(detail.total)} highlight />
-              <StatMiniCard icon={ShoppingCart} label="Commandé" value={formatMAD(selectedProject.montant_commande)} />
-              <StatMiniCard icon={CreditCard} label="Payé" value={formatMAD(selectedProject.montant_paye)} />
+              <StatMiniCard icon={ShoppingCart} label="Commandé" value={formatMAD(selectedChantier.montant_commande)} />
+              <StatMiniCard icon={CreditCard} label="Payé" value={formatMAD(selectedChantier.montant_paye)} />
               <StatMiniCard icon={Target} label="Reste budget" value={detail.reste != null ? formatMAD(detail.reste) : '—'} />
             </div>
           </header>
@@ -802,8 +807,8 @@ export default function DepensesParProjet() {
                     <tr key={e.id}>
                       <td>{fmtDate(e.date_depense)}</td>
                       <td>
-                        {e.project_nom || e.project_name_raw || '—'}
-                        {e.project_match_status === 'needs_manual' && (
+                        {displayChantierProjectName(e) || '—'}
+                        {e.project_match_status === 'needs_manual' && displayChantierProjectName(e) && (
                           <span className="badge badge-orange dpp-badge-inline">À associer</span>
                         )}
                       </td>
