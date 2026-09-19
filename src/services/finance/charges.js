@@ -125,6 +125,16 @@ export async function listProjectsForCharges() {
   return listProjectsForSelect();
 }
 
+function scheduleChargeSideEffects(charge) {
+  if (!charge?.id) return;
+  syncChargeToTransaction(charge).catch((err) => {
+    console.warn('[CITYMO] sync charge → caisse', err);
+  });
+  syncChargeToProjectExpense(charge).catch((err) => {
+    console.warn('[CITYMO] sync charge → project_expense', err);
+  });
+}
+
 export async function listFinanceCharges({ reconcileRefs = false } = {}) {
   // reconcileRefs est volontairement off par défaut : trop lent au chargement page
   if (reconcileRefs) {
@@ -166,9 +176,7 @@ export async function createFinanceCharge(form, categoryName) {
   const recent = await findRecentIdenticalCharge(row, uid);
   if (recent) {
     const charge = normalizeCharge(recent);
-    await syncChargeToTransaction(charge).catch((err) => {
-      console.warn('[CITYMO] sync charge → caisse', err);
-    });
+    scheduleChargeSideEffects(charge);
     return charge;
   }
   if (!String(row.ref_charge || '').trim()) {
@@ -186,12 +194,7 @@ export async function createFinanceCharge(form, categoryName) {
     .single();
   if (error) throw error;
   const charge = normalizeCharge(data);
-  await syncChargeToTransaction(charge).catch((err) => {
-    console.warn('[CITYMO] sync charge → caisse', err);
-  });
-  await syncChargeToProjectExpense(charge).catch((err) => {
-    console.warn('[CITYMO] sync charge → project_expense', err);
-  });
+  scheduleChargeSideEffects(charge);
   return charge;
 }
 
@@ -209,12 +212,7 @@ export async function updateFinanceCharge(id, form, categoryName) {
     .single();
   if (error) throw error;
   const charge = normalizeCharge(data);
-  await syncChargeToTransaction(charge).catch((err) => {
-    console.warn('[CITYMO] sync charge → caisse', err);
-  });
-  await syncChargeToProjectExpense(charge).catch((err) => {
-    console.warn('[CITYMO] sync charge → project_expense', err);
-  });
+  scheduleChargeSideEffects(charge);
   return charge;
 }
 

@@ -116,6 +116,7 @@ function ChargeForm({ initial, categories, projects = [], onSave, onCancel, savi
   const [uploadError, setUploadError] = useState('');
   const [saveError, setSaveError] = useState('');
   const submittingRef = useRef(false);
+  const [busy, setBusy] = useState(false);
   const set = (k, v) => setForm(p => ({ ...p, [k]: v }));
 
   useEffect(() => {
@@ -181,7 +182,7 @@ function ChargeForm({ initial, categories, projects = [], onSave, onCancel, savi
 
   async function handleSubmit(ev) {
     ev.preventDefault();
-    if (submittingRef.current || saving) return;
+    if (submittingRef.current || saving || busy) return;
     setSaveError('');
     const e = validate();
     if (Object.keys(e).length) {
@@ -193,6 +194,8 @@ function ChargeForm({ initial, categories, projects = [], onSave, onCancel, savi
       return;
     }
     submittingRef.current = true;
+    setBusy(true);
+    setErrors({});
     try {
       const res = await onSave({
         ...form,
@@ -200,16 +203,19 @@ function ChargeForm({ initial, categories, projects = [], onSave, onCancel, savi
         montant: parseFloat(form.montant) || 0,
         justificatifs: stripChargeAttachmentUrls(files),
       });
-      if (res && res.success === false && !res.ignored) {
+      if (res?.ignored) return;
+      if (res && res.success === false) {
         setSaveError(res.error || 'Enregistrement impossible.');
       }
     } catch (err) {
       setSaveError(err?.message || 'Enregistrement impossible.');
     } finally {
       submittingRef.current = false;
+      setBusy(false);
     }
   }
 
+  const locked = uploading || saving || busy;
   const inp = (k) => ({ ...INPUT_STYLE, borderColor: errors[k] ? 'var(--red)' : 'var(--border)' });
 
   return (
@@ -307,10 +313,10 @@ function ChargeForm({ initial, categories, projects = [], onSave, onCancel, savi
         </div>
       )}
       <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
-        <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={saving}>Annuler</button>
-        <button type="submit" className="btn btn-primary" disabled={uploading || saving} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-          {saving ? <Loader2 size={14} className="cin-spin" /> : <Plus size={14} />}
-          {saving ? 'Enregistrement…' : (initial ? 'Enregistrer' : 'Ajouter dépense')}
+        <button type="button" className="btn btn-secondary" onClick={onCancel} disabled={locked}>Annuler</button>
+        <button type="submit" className="btn btn-primary" disabled={locked} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+          {locked && !uploading ? <Loader2 size={14} className="cin-spin" /> : <Plus size={14} />}
+          {locked && !uploading ? 'Enregistrement…' : (initial ? 'Enregistrer' : 'Ajouter dépense')}
         </button>
       </div>
     </form>
@@ -466,6 +472,7 @@ export default function Charges({ categories, onNavigate }) {
   const [projects, setProjects] = useState([]);
   const [canDelete, setCanDelete] = useState(true);
   const [backfillNote, setBackfillNote] = useState('');
+  const [toast, setToast] = useState('');
 
   useEffect(() => {
     if (loading || chargesPageMaintenanceUiApplied) return undefined;
@@ -540,10 +547,13 @@ export default function Charges({ categories, onNavigate }) {
   const handleSave = useCallback(async (data) => {
     const cat = cats.find((c) => c.id === data.category_id);
     const catName = cat?.nom || data.categorie || '';
+    const isEdit = Boolean(editCharge?.id);
     const res = await save({ ...data, categorie: catName }, editCharge?.id, catName);
     if (res.success) {
       setShowModal(false);
       setEditCharge(null);
+      setToast(isEdit ? 'Dépense modifiée avec succès' : 'Dépense enregistrée avec succès');
+      window.setTimeout(() => setToast(''), 4000);
     }
     return res;
   }, [editCharge, save, cats]);
@@ -614,6 +624,9 @@ export default function Charges({ categories, onNavigate }) {
     <div className="animate-fade-in">
       {error && (
         <div className="card" style={{ marginBottom: 12, padding: 12, color: 'var(--red)', fontSize: '0.85rem' }}>{error}</div>
+      )}
+      {toast && (
+        <div className="card" style={{ marginBottom: 12, padding: 12, color: 'var(--green, #1a7f4b)', fontSize: '0.85rem' }}>{toast}</div>
       )}
       {backfillNote && (
         <div className="card" style={{ marginBottom: 12, padding: 12, color: 'var(--green, #1a7f4b)', fontSize: '0.85rem' }}>{backfillNote}</div>

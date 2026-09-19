@@ -7,6 +7,12 @@ import {
   updateFinanceCharge,
   deleteFinanceCharge,
 } from '../services/finance/charges';
+import {
+  SAVE_TIMEOUT_MS,
+  SAVE_TIMEOUT_MESSAGE,
+  withTimeout,
+  upsertChargeRecord,
+} from './financeChargeSave';
 
 export function useFinanceCharges() {
   const [records, setRecords] = useState([]);
@@ -42,10 +48,15 @@ export function useFinanceCharges() {
     setSaving(true);
     setError(null);
     try {
-      if (id) await updateFinanceCharge(id, form, categoryName);
-      else await createFinanceCharge(form, categoryName);
-      await load();
-      return { success: true };
+      const charge = await withTimeout(
+        id ? updateFinanceCharge(id, form, categoryName) : createFinanceCharge(form, categoryName),
+        SAVE_TIMEOUT_MS,
+        SAVE_TIMEOUT_MESSAGE,
+      );
+      if (charge) {
+        setRecords((prev) => upsertChargeRecord(prev, charge));
+      }
+      return { success: true, charge };
     } catch (err) {
       const msg = formatSupabaseError(err, 'Erreur enregistrement.');
       setError(msg);
@@ -60,7 +71,7 @@ export function useFinanceCharges() {
     setSaving(true);
     try {
       await deleteFinanceCharge(id);
-      await load();
+      setRecords((prev) => prev.filter((r) => r.id !== id));
       return { success: true };
     } catch (err) {
       const msg = formatSupabaseError(err, 'Erreur suppression.');
