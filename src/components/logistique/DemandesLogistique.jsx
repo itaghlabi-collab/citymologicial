@@ -24,6 +24,8 @@ import {
   tripStatutMeta,
   collectLocationSuggestions,
   normalizeTimeHM,
+  buildVehicleTripRecap,
+  tripDurationLabel,
 } from '../../services/logistique/pickupRequests';
 
 const INPUT = {
@@ -322,6 +324,8 @@ export default function DemandesLogistique() {
   const [filterChauffeur, setFilterChauffeur] = useState('');
   const [filterMotif, setFilterMotif] = useState('');
   const [filterStatut, setFilterStatut] = useState('');
+  const [showAllVehicles, setShowAllVehicles] = useState(false);
+  const [selectedVehicleKey, setSelectedVehicleKey] = useState('');
 
   const readOnly = formMode === 'view';
   const returnOnly = formMode === 'return';
@@ -385,6 +389,20 @@ export default function DemandesLogistique() {
     }),
     [records, filterDateFrom, filterDateTo, filterVehicle, filterChauffeur, filterMotif, filterStatut],
   );
+
+  const recap = useMemo(() => buildVehicleTripRecap(records, {
+    vehicles,
+    includeIdleVehicles: showAllVehicles,
+    today: todayISO(),
+    dateFrom: filterDateFrom,
+    dateTo: filterDateTo,
+    vehicle: filterVehicle,
+    chauffeur: filterChauffeur,
+    motif: filterMotif,
+    statut: filterStatut,
+  }), [records, vehicles, showAllVehicles, filterDateFrom, filterDateTo, filterVehicle, filterChauffeur, filterMotif, filterStatut]);
+
+  const selectedRecap = recap.rows.find((r) => r.key === selectedVehicleKey) || null;
 
   const chauffeurFilterOptions = useMemo(() => {
     const seen = new Set();
@@ -715,10 +733,10 @@ export default function DemandesLogistique() {
 
       <div className="card log-trip-filters" style={{ marginBottom: 16, padding: '14px 20px' }}>
         <div className="log-trip-filter-grid">
-          <label>Période — du
+          <label>Date de début
             <input type="date" value={filterDateFrom} onChange={(e) => setFilterDateFrom(e.target.value)} style={INPUT} />
           </label>
-          <label>Période — au
+          <label>Date de fin
             <input type="date" value={filterDateTo} onChange={(e) => setFilterDateTo(e.target.value)} style={INPUT} />
           </label>
           <label>Véhicule
@@ -733,7 +751,7 @@ export default function DemandesLogistique() {
                 ))}
             </select>
           </label>
-          <label>Chauffeur
+          <label>Chauffeur / Coursier
             <select value={filterChauffeur} onChange={(e) => setFilterChauffeur(e.target.value)} style={SELECT}>
               <option value="">Tous</option>
               {chauffeurFilterOptions.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
@@ -752,11 +770,208 @@ export default function DemandesLogistique() {
             </select>
           </label>
         </div>
+        <label className="log-trip-idle-toggle">
+          <input
+            type="checkbox"
+            checked={showAllVehicles}
+            onChange={(e) => setShowAllVehicles(e.target.checked)}
+          />
+          Afficher tous les véhicules
+        </label>
       </div>
 
       {loading ? (
         <div style={{ textAlign: 'center', padding: 40 }}><Loader2 size={24} className="spin" /></div>
-      ) : filtered.length === 0 ? (
+      ) : (
+        <>
+      <section className="log-trip-recap" aria-label="Récapitulatif des mouvements par véhicule">
+        <h2 className="log-trip-recap-title">Récapitulatif des mouvements par véhicule</h2>
+        <div className="log-trip-kpis">
+          <article className="log-trip-kpi">
+            <div className="log-trip-kpi-label">Total des mouvements</div>
+            <div className="log-trip-kpi-value">{recap.cards.totalMouvements}</div>
+          </article>
+          <article className="log-trip-kpi">
+            <div className="log-trip-kpi-label">Véhicules en déplacement</div>
+            <div className="log-trip-kpi-value">{recap.cards.vehiculesEnDeplacement}</div>
+          </article>
+          <article className="log-trip-kpi">
+            <div className="log-trip-kpi-label">Mouvements terminés</div>
+            <div className="log-trip-kpi-value">{recap.cards.mouvementsTermines}</div>
+          </article>
+          <article className="log-trip-kpi">
+            <div className="log-trip-kpi-label">Véhicule le plus utilisé</div>
+            <div className="log-trip-kpi-value log-trip-kpi-value--text">{recap.cards.vehiculePlusUtilise}</div>
+          </article>
+        </div>
+
+        {recap.rows.length === 0 ? (
+          <div className="card" style={{ padding: '28px 20px', textAlign: 'center', color: 'var(--text-3)' }}>
+            Aucun véhicule à récapituler pour ces filtres.
+          </div>
+        ) : (
+          <div className="card" style={{ padding: 0 }}>
+            <div className="table-wrap table-wrap--wide log-desktop-table log-trip-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Immatriculation</th>
+                    <th>Modèle</th>
+                    <th>Total</th>
+                    <th>Aujourd’hui</th>
+                    <th>Période filtrée</th>
+                    <th>En cours</th>
+                    <th>Terminés</th>
+                    <th>Dernier départ</th>
+                    <th>Dernier retour</th>
+                    <th>Dernière destination</th>
+                    <th>Km parcourus</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {recap.rows.map((row) => (
+                    <tr
+                      key={row.key}
+                      className={`log-trip-recap-row${selectedVehicleKey === row.key ? ' is-selected' : ''}`}
+                      onClick={() => setSelectedVehicleKey((k) => (k === row.key ? '' : row.key))}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          setSelectedVehicleKey((k) => (k === row.key ? '' : row.key));
+                        }
+                      }}
+                      tabIndex={0}
+                      role="button"
+                      aria-pressed={selectedVehicleKey === row.key}
+                    >
+                      <td data-label="Immatriculation" style={{ fontWeight: 700 }}>{row.matricule}</td>
+                      <td data-label="Modèle">{row.modele}</td>
+                      <td data-label="Total">{row.total}</td>
+                      <td data-label="Aujourd’hui">{row.today}</td>
+                      <td data-label="Période filtrée">{row.period}</td>
+                      <td data-label="En cours">{row.enCours}</td>
+                      <td data-label="Terminés">{row.termines}</td>
+                      <td data-label="Dernier départ">{row.lastDepart || '—'}</td>
+                      <td data-label="Dernier retour">{row.lastRetour || '—'}</td>
+                      <td data-label="Dernière destination">{row.lastDestination && row.lastDestination !== '—' ? row.lastDestination : '—'}</td>
+                      <td data-label="Km parcourus">{row.kmTotal == null ? '—' : `${row.kmTotal} km`}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="log-mobile-list" aria-label="Récapitulatif par véhicule">
+              {recap.rows.map((row) => (
+                <button
+                  key={row.key}
+                  type="button"
+                  className={`log-mobile-card log-trip-recap-mobile${selectedVehicleKey === row.key ? ' is-selected' : ''}`}
+                  onClick={() => setSelectedVehicleKey((k) => (k === row.key ? '' : row.key))}
+                >
+                  <div className="log-mobile-card-head">
+                    <div>
+                      <div className="log-mobile-card-title">{row.matricule}</div>
+                      <div className="log-mobile-card-sub">{row.modele}</div>
+                    </div>
+                  </div>
+                  <div className="log-mobile-card-meta">
+                    <div className="log-mobile-meta-row"><span>Total</span><span>{row.total}</span></div>
+                    <div className="log-mobile-meta-row"><span>Aujourd’hui</span><span>{row.today}</span></div>
+                    <div className="log-mobile-meta-row"><span>Période</span><span>{row.period}</span></div>
+                    <div className="log-mobile-meta-row"><span>En cours</span><span>{row.enCours}</span></div>
+                    <div className="log-mobile-meta-row"><span>Terminés</span><span>{row.termines}</span></div>
+                    <div className="log-mobile-meta-row"><span>Dernier départ</span><span>{row.lastDepart || '—'}</span></div>
+                    <div className="log-mobile-meta-row"><span>Dernier retour</span><span>{row.lastRetour || '—'}</span></div>
+                    <div className="log-mobile-meta-row"><span>Destination</span><span>{row.lastDestination && row.lastDestination !== '—' ? row.lastDestination : '—'}</span></div>
+                    <div className="log-mobile-meta-row"><span>Km</span><span>{row.kmTotal == null ? '—' : `${row.kmTotal} km`}</span></div>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {selectedRecap && (
+          <div className="card log-trip-vehicle-detail">
+            <h3 className="log-trip-detail-title">
+              Mouvements de {selectedRecap.matricule}
+              {selectedRecap.modele && selectedRecap.modele !== '—' ? ` — ${selectedRecap.modele}` : ''}
+            </h3>
+            {selectedRecap.trips.length === 0 ? (
+              <p style={{ color: 'var(--text-3)', margin: 0 }}>0 mouvement</p>
+            ) : (
+              <>
+                <div className="table-wrap table-wrap--wide log-desktop-table log-trip-table">
+                  <table>
+                    <thead>
+                      <tr>
+                        <th>Date</th>
+                        <th>Heure de départ</th>
+                        <th>Lieu de départ</th>
+                        <th>Destination</th>
+                        <th>Chauffeur / Coursier</th>
+                        <th>Motif</th>
+                        <th>Bon de préparation</th>
+                        <th>Heure de retour</th>
+                        <th>Durée</th>
+                        <th>Statut</th>
+                        <th>Observation</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedRecap.trips.map((t) => {
+                        const st = tripStatutMeta(t);
+                        return (
+                          <tr key={t.id}>
+                            <td data-label="Date">{fmtDate(t.date_deplacement)}</td>
+                            <td data-label="Heure de départ">{normalizeTimeHM(t.heure_depart) || '—'}</td>
+                            <td data-label="Lieu de départ">{pickupDepartureLabel(t)}</td>
+                            <td data-label="Destination">{pickupDestinationLabel(t)}</td>
+                            <td data-label="Chauffeur / Coursier">{t.assignee_name || '—'}</td>
+                            <td data-label="Motif">{motifLabel(t.motif)}</td>
+                            <td data-label="Bon de préparation">{t.bon_ref || '—'}</td>
+                            <td data-label="Heure de retour">{normalizeTimeHM(t.heure_retour) || '—'}</td>
+                            <td data-label="Durée">{tripDurationLabel(t)}</td>
+                            <td data-label="Statut"><span className={`badge ${st.cls}`}>{st.label}</span></td>
+                            <td data-label="Observation">{t.observations || '—'}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="log-mobile-list" aria-label="Détail des mouvements du véhicule">
+                  {selectedRecap.trips.map((t) => {
+                    const st = tripStatutMeta(t);
+                    return (
+                      <div key={t.id} className="log-mobile-card">
+                        <div className="log-mobile-card-head">
+                          <div>
+                            <div className="log-mobile-card-title">{fmtDate(t.date_deplacement)} · {normalizeTimeHM(t.heure_depart) || '—'}</div>
+                            <div className="log-mobile-card-sub">{pickupDepartureLabel(t)} → {pickupDestinationLabel(t)}</div>
+                          </div>
+                          <span className={`badge ${st.cls}`}>{st.label}</span>
+                        </div>
+                        <div className="log-mobile-card-meta">
+                          <div className="log-mobile-meta-row"><span>Chauffeur</span><span>{t.assignee_name || '—'}</span></div>
+                          <div className="log-mobile-meta-row"><span>Motif</span><span>{motifLabel(t.motif)}</span></div>
+                          <div className="log-mobile-meta-row"><span>Bon</span><span>{t.bon_ref || '—'}</span></div>
+                          <div className="log-mobile-meta-row"><span>Retour</span><span>{normalizeTimeHM(t.heure_retour) || '—'}</span></div>
+                          <div className="log-mobile-meta-row"><span>Durée</span><span>{tripDurationLabel(t)}</span></div>
+                          <div className="log-mobile-meta-row"><span>Observation</span><span>{t.observations || '—'}</span></div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </div>
+        )}
+      </section>
+
+      <h2 className="log-trip-recap-title">Historique des déplacements</h2>
+      {filtered.length === 0 ? (
         <div className="card">
           <div style={{ textAlign: 'center', padding: '48px 20px', color: 'var(--text-3)' }}>
             <Package size={28} style={{ marginBottom: 10, opacity: 0.5 }} />
@@ -837,6 +1052,8 @@ export default function DemandesLogistique() {
             })}
           </div>
         </div>
+      )}
+        </>
       )}
     </div>
   );

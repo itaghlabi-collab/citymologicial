@@ -519,6 +519,222 @@ export function filterPickupRequests(list, {
   });
 }
 
+function minutesFromHm(hm) {
+  const t = normalizeTimeHM(hm);
+  if (!t) return null;
+  const [h, m] = t.split(':').map(Number);
+  return h * 60 + m;
+}
+
+export function tripDurationLabel(trip) {
+  if (!normalizeTimeHM(trip?.heure_retour)) return 'En cours';
+  const start = minutesFromHm(trip?.heure_depart);
+  const end = minutesFromHm(trip?.heure_retour);
+  if (start == null || end == null) return '—';
+  let mins = end - start;
+  if (mins < 0) mins += 24 * 60;
+  const h = Math.floor(mins / 60);
+  const m = mins % 60;
+  if (h <= 0) return `${m} min`;
+  return `${h} h ${String(m).padStart(2, '0')}`;
+}
+
+export function tripKmDelta(trip) {
+  const rawA = trip?.km_depart;
+  const rawB = trip?.km_retour;
+  if (rawA == null || rawB == null || String(rawA).trim() === '' || String(rawB).trim() === '') return null;
+  const a = Number(rawA);
+  const b = Number(rawB);
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b < a) return null;
+  return b - a;
+}
+
+export function vehicleTripKey(trip) {
+  const id = String(trip?.vehicle_id || '').trim();
+  if (id && !id.startsWith('__kept_')) return `id:${id}`;
+  const label = String(trip?.vehicle_label || '').trim().toUpperCase();
+  return label ? `label:${label}` : 'label:inconnu';
+}
+
+export function parseVehicleDisplay(trip, vehicles = []) {
+  const v = (vehicles || []).find((x) => String(x.id) === String(trip?.vehicle_id || ''));
+  if (v) {
+    const matricule = v.matricule || v.matricule_ww || '';
+    const modele = [v.marque, v.modele].filter(Boolean).join(' ') || v.vehicule || '';
+    return { matricule: matricule || '—', modele: modele || '—' };
+  }
+  const s = String(trip?.vehicle_label || '').trim();
+  const parts = s.split(/\s+[—–]\s+/);
+  if (parts.length >= 2) return { matricule: parts[0] || '—', modele: parts.slice(1).join(' — ') || '—' };
+  return { matricule: s || '—', modele: '—' };
+}
+
+function tripStamp(trip) {
+  return `${String(trip?.date_deplacement || '').slice(0, 10)}T${normalizeTimeHM(trip?.heure_depart) || '00:00'}`;
+}
+
+function latestTrip(list, predicate = () => true) {
+  return (list || [])
+    .filter(predicate)
+    .slice()
+    .sort((a, b) => tripStamp(b).localeCompare(tripStamp(a)))[0] || null;
+}
+
+function uniqueById(list) {
+  const seen = new Set();
+  return (list || []).filter((t) => {
+    const id = String(t?.id || '');
+    if (!id || seen.has(id)) return false;
+    seen.add(id);
+    return true;
+  });
+}
+
+function emptyVehicleRow(key, identity) {
+  return {
+    key,
+    vehicle_id: identity.vehicle_id || '',
+    matricule: identity.matricule || '—',
+    modele: identity.modele || '—',
+    total: 0,
+    today: 0,
+    period: 0,
+    enCours: 0,
+    termines: 0,
+    lastDepart: '',
+    lastRetour: '',
+    lastDestination: '',
+    kmTotal: null,
+    trips: [],
+  };
+}
+
+/**
+ * Récapitulatif par véhicule à partir des déplacements réellement enregistrés.
+ * `periodTrips` = ensemble filtré (période + véhicule + chauffeur + motif + statut).
+ * Total / aujourd’hui / en cours s’appuient sur les mêmes filtres hors dates, sans double comptage.
+ */
+export function buildVehicleTripRecap(records, {
+  vehicles = [],
+  includeIdleVehicles = false,
+  today = '',
+  dateFrom = '',
+  dateTo = '',
+  vehicle = '',
+  chauffeur = '',
+  motif = '',
+  statut = '',
+} = {}) {
+  const scoped = uniqueById(filterPickupRequests(records, { vehicle, chauffeur, motif, statut }));
+  const period = uniqueById(filterPickupRequests(records, {
+    vehicle, chauffeur, motif, statut, dateFrom, dateTo,
+  }));
+  const todayDate = String(today || '').slice(0, 10);
+  const todayList = todayDate
+    ? uniqueById(filterPickupRequests(records, {
+      vehicle, chauffeur, motif, statut, dateFrom: todayDate, dateTo: todayDate,
+    }))
+    : [];
+
+  const rowsMap = new Map();
+
+  function ensureRow(trip) {
+    const key = vehicleTripKey(trip);
+    if (!rowsMap.has(key)) {
+      const display = parseVehicleDisplay(trip, vehicles);
+      rowsMap.set(key, emptyVehicleRow(key, {
+        vehicle_id: trip.vehicle_id || '',
+        ...display,
+      }));
+    }
+    return rowsMap.get(key);
+  }
+
+  scoped.forEach((trip) => {
+    const row = ensureRow(trip);
+    row.total += 1;
+    if (tripStatutValue(trip) === 'en_deplacement') row.enCours += 1;
+    if (tripStatutValue(trip) === 'retourne') row.termines += 1;
+  });
+
+  todayList.forEach((trip) => {
+    ensureRow(trip).today += 1;
+  });
+
+  period.forEach((trip) => {
+    const row = ensureRow(trip);
+    row.period += 1;
+    const km = tripKmDelta(trip);
+    if (km != null) row.kmTotal = (row.kmTotal || 0) + km;
+  });
+
+  rowsMap.forEach((row) => {
+    const allForVehicle = scoped.filter((t) => vehicleTripKey(t) === row.key)
+      .slice()
+      .sort((a, b) => tripStamp(a).localeCompare(tripStamp(b)));
+    const periodForVehicle = allForVehicle.filter((t) => period.some((p) => p.id === t.id));
+    const lastPool = periodForVehicle.length ? periodForVehicle : allForVehicle;
+    const last = latestTrip(lastPool);
+    row.lastDepart = last ? (normalizeTimeHM(last.heure_depart) || '') : '';
+    row.lastDestination = last ? pickupDestinationLabel(last) : '';
+    const lastBack = latestTrip(lastPool, (t) => Boolean(normalizeTimeHM(t.heure_retour)));
+    row.lastRetour = lastBack ? normalizeTimeHM(lastBack.heure_retour) : '';
+    row.trips = allForVehicle;
+  });
+
+  if (includeIdleVehicles) {
+    const vehFilter = String(vehicle || '').trim().toLowerCase();
+    (vehicles || []).forEach((v) => {
+      const key = `id:${v.id}`;
+      if (rowsMap.has(key)) return;
+      if (vehFilter) {
+        const hay = `${v.id} ${v.matricule || ''} ${v.matricule_ww || ''} ${v.marque || ''} ${v.modele || ''} ${v.vehicule || ''}`.toLowerCase();
+        if (!hay.includes(vehFilter)) return;
+      }
+      const matricule = v.matricule || v.matricule_ww || '';
+      const modele = [v.marque, v.modele].filter(Boolean).join(' ') || v.vehicule || '';
+      rowsMap.set(key, emptyVehicleRow(key, {
+        vehicle_id: v.id,
+        matricule: matricule || '—',
+        modele: modele || '—',
+      }));
+    });
+  }
+
+  const rows = [...rowsMap.values()].sort((a, b) => (
+    b.period - a.period || b.total - a.total || String(a.matricule).localeCompare(String(b.matricule), 'fr')
+  ));
+
+  const activeRows = rows.filter((r) => r.total > 0 || r.period > 0);
+  const enDeplacementVeh = new Set(
+    scoped.filter((t) => tripStatutValue(t) === 'en_deplacement').map(vehicleTripKey),
+  );
+  const mostUsed = period.reduce((best, trip) => {
+    const key = vehicleTripKey(trip);
+    const count = (best.counts.get(key) || 0) + 1;
+    best.counts.set(key, count);
+    if (count > best.max) {
+      best.max = count;
+      best.key = key;
+    }
+    return best;
+  }, { counts: new Map(), max: 0, key: '' });
+  const mostUsedRow = rows.find((r) => r.key === mostUsed.key) || null;
+
+  return {
+    rows,
+    cards: {
+      totalMouvements: period.length,
+      vehiculesEnDeplacement: enDeplacementVeh.size,
+      mouvementsTermines: period.filter((t) => tripStatutValue(t) === 'retourne').length,
+      vehiculePlusUtilise: mostUsedRow
+        ? `${mostUsedRow.matricule}${mostUsedRow.modele && mostUsedRow.modele !== '—' ? ` — ${mostUsedRow.modele}` : ''}`
+        : '—',
+    },
+    activeVehicleCount: activeRows.length,
+  };
+}
+
 function readLocal() {
   try {
     if (typeof localStorage === 'undefined') return [];

@@ -15,6 +15,9 @@ import {
   normalizeTripRecord,
   collectLocationSuggestions,
   validatePickupCreate,
+  buildVehicleTripRecap,
+  tripDurationLabel,
+  tripKmDelta,
 } from './pickupRequests.js';
 
 function assert(cond, msg) {
@@ -135,5 +138,46 @@ assert(suggestions.includes('Siège'), 'suggestion lieu connu');
 
 const v = validatePickupCreate({ ...baseForm, heure_depart: '' });
 assert(!v.ok && v.errors.some((e) => /heure de départ/i.test(e)), 'heure départ obligatoire');
+
+assert(tripDurationLabel(created) === 'En cours', 'durée sans retour');
+assert(tripDurationLabel(returned) === '8 h 35', 'durée calculée');
+assert(tripKmDelta({ km_depart: 100, km_retour: 140 }) === 40, 'km si départ et retour');
+assert(tripKmDelta({ km_depart: 100, km_retour: '' }) == null, 'km ignoré si retour absent');
+
+const otherVeh = buildPickupRequest({
+  ...baseForm,
+  vehicle_id: 'v2',
+  vehicle_label: '8888-B-1 — Master',
+  date_deplacement: '2026-09-18',
+  heure_depart: '09:00',
+  heure_retour: '10:00',
+}, { existing: [created], user, employees: pool });
+const recap = buildVehicleTripRecap([created, returned, otherVeh], {
+  today: '2026-09-19',
+  vehicles: [
+    { id: 'v1', matricule: '12345-A-6', marque: 'Renault', modele: 'Kangoo' },
+    { id: 'v2', matricule: '8888-B-1', marque: 'Renault', modele: 'Master' },
+    { id: 'v3', matricule: '0000-C-9', marque: 'Peugeot', modele: 'Partner' },
+  ],
+});
+assert(recap.cards.totalMouvements === 2, 'cartes: 2 mouvements uniques (created/returned = 1 id)');
+assert(recap.rows.filter((r) => r.total > 0).length === 2, '2 véhicules avec mouvements');
+assert(recap.rows.every((r) => r.key !== 'id:v3'), 'véhicule sans déplacement exclu des totaux');
+const idle = buildVehicleTripRecap([created], {
+  today: '2026-09-19',
+  includeIdleVehicles: true,
+  vehicles: [
+    { id: 'v1', matricule: '12345-A-6', marque: 'Renault', modele: 'Kangoo' },
+    { id: 'v3', matricule: '0000-C-9', marque: 'Peugeot', modele: 'Partner' },
+  ],
+});
+assert(idle.rows.some((r) => r.key === 'id:v3' && r.total === 0), 'option afficher tous les véhicules');
+assert(idle.cards.totalMouvements === 1, 'cartes ignorent les 0 mouvement');
+const kango = recap.rows.find((r) => r.key === 'id:v1');
+assert(kango.matricule === '12345-A-6', 'immatriculation');
+assert(kango.modele.includes('Kangoo'), 'modèle');
+assert(kango.today === 1, 'déplacements aujourd’hui');
+assert(kango.enCours === 1, 'en cours');
+assert(recap.cards.vehiculePlusUtilise.includes('12345-A-6') || recap.cards.vehiculePlusUtilise.includes('8888'), 'véhicule le plus utilisé');
 
 console.log('pickupRequests.test.js OK');
