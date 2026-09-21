@@ -215,6 +215,7 @@ export function canEditPurchaseRequest(statut, { isSuperAdmin = false, userEmail
 export const PURCHASE_PRE_DG_EDIT_EMAILS = new Set([
   'h.zirari@citymo.ma',
   'n.fatihi@citymo.ma',
+  'y.mojab@citymo.ma',
 ]);
 
 export function canPreDgEditPurchaseByEmail(email) {

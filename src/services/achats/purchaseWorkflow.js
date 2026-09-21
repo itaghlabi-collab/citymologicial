@@ -219,7 +219,7 @@ export async function updatePurchaseRequestWorkflow(id, form) {
 }
 
 /**
- * Modification DA avant validation DG — réservée à h.zirari / n.fatihi.
+ * Modification DA avant validation DG — réservée à h.zirari / n.fatihi / y.mojab.
  * Pas de sync OA/OP (créés après validation DG).
  */
 export async function updatePurchaseRequestPreDg(id, form, existing = null, ctx = null) {
