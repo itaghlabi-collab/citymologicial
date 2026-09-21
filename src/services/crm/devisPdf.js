@@ -41,8 +41,8 @@ function getFooterQrLayout(qrMeta) {
 }
 
 const CLIENT_W = 58;
-const LOGO_MAX_W = 42;
-const LOGO_MAX_H = 20;
+const LOGO_MAX_W = 52;
+const LOGO_MAX_H = 25;
 
 const COMPANY = {
   address: '228 Bd Mohammed V, Casablanca 20000',
