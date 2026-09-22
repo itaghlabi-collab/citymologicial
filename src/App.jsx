@@ -186,7 +186,7 @@ const NAV = [
     items: [
       { id: 'demandes-achat',     label: "Demandes d'achat",     icon: ClipboardList },
       { id: 'bons-commande',      label: 'Bon de commande',      icon: ShoppingCart },
-      { id: 'suivi-receptions',   label: 'Suivi des réceptions', icon: ClipboardCheck },
+      { id: 'suivi-receptions',   label: 'Demande de récupération', icon: ClipboardCheck },
       { id: 'fournisseurs',       label: 'Fournisseurs',         icon: UserCog },
       { id: 'categories-fournisseurs', label: 'Catégories fournisseurs', icon: Tag },
       { id: 'ordres-achat',       label: "Ordre d'achat",        icon: FileCheck },
@@ -269,7 +269,7 @@ const MODULE_LABELS = {
   'ordres-paiement':   'Ordre de paiement',
   'demandes-achat':    "Demandes d'achat",
   'bons-commande':     'Bon de commande',
-  'suivi-receptions':  'Suivi des réceptions',
+  'suivi-receptions':  'Demande de récupération',
   fournisseurs:        'Fournisseurs',
   'categories-fournisseurs': 'Catégories fournisseurs',
   'ordres-achat':      "Ordre d'achat",
