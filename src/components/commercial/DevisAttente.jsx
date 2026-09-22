@@ -15,11 +15,32 @@ function EmptyState({ icon, title, sub }) {
   );
 }
 
-const IS = (e) => ({ padding: '9px 12px', border: '1.5px solid ' + (e ? 'var(--red)' : 'var(--border)'), borderRadius: 'var(--radius)', fontSize: '0.9rem', fontFamily: 'var(--font-body)', outline: 'none', width: '100%', background: '#fff' });
+const IS = (e) => ({
+  padding: '7px 10px',
+  border: `1.5px solid ${e ? 'var(--red)' : 'var(--border)'}`,
+  borderRadius: 'var(--radius)',
+  fontSize: '0.84rem',
+  fontFamily: 'var(--font-body)',
+  outline: 'none',
+  width: '100%',
+  background: '#fff',
+  minHeight: 36,
+  boxSizing: 'border-box',
+});
 
 function Toast({ t }) {
   if (!t) return null;
-  return <div style={{ position: 'fixed', bottom: 24, right: 24, zIndex: 9999, background: t.type === 'success' ? '#2E7D32' : '#D32F2F', color: '#fff', padding: '12px 20px', borderRadius: 10, boxShadow: '0 4px 20px rgba(0,0,0,0.22)', fontSize: '0.88rem', fontWeight: 600, maxWidth: 340 }}>{t.msg}</div>;
+  return (
+    <div style={{
+      position: 'fixed', bottom: 24, right: 24, zIndex: 9999,
+      background: t.type === 'success' ? '#2E7D32' : '#D32F2F',
+      color: '#fff', padding: '12px 20px', borderRadius: 10,
+      boxShadow: '0 4px 20px rgba(0,0,0,0.22)', fontSize: '0.88rem', fontWeight: 600, maxWidth: 340,
+    }}
+    >
+      {t.msg}
+    </div>
+  );
 }
 
 const EMPTY_FORM = {
@@ -34,6 +55,7 @@ export default function DevisAttente() {
     loading,
     saving,
     error,
+    clearError,
     configured,
     load,
     create,
@@ -65,14 +87,20 @@ export default function DevisAttente() {
     toastRef.current = setTimeout(() => setToast(null), 3000);
   }
 
-  function openAdd() { setEditRow(null); setForm({ ...EMPTY_FORM }); setErrors({}); setModal(true); }
+  function openAdd() {
+    clearError?.();
+    setEditRow(null);
+    setForm({ ...EMPTY_FORM });
+    setErrors({});
+    setModal(true);
+  }
 
   function openEdit(row) {
+    clearError?.();
     setEditRow(row);
     setForm({
       titre: row.titre || '',
       prospect_id: row.prospect_id || '',
-      // Si lié à un prospect catalogue, le champ libre reste vide (le select suffit)
       prospect_nom: row.prospect_id ? '' : (row.prospect_nom || ''),
       type_projet: row.type_projet || '',
       source: row.source || '',
@@ -86,7 +114,7 @@ export default function DevisAttente() {
     setModal(true);
   }
 
-  function setField(k, v) { setForm(p => ({ ...p, [k]: v })); }
+  function setField(k, v) { setForm((p) => ({ ...p, [k]: v })); }
 
   function validate() {
     const e = {};
@@ -106,14 +134,14 @@ export default function DevisAttente() {
       return;
     }
 
-    showToast('success', editRow ? 'Devis mis a jour.' : 'Devis cree.');
+    showToast('success', editRow ? 'Devis mis à jour.' : 'Devis créé.');
     setModal(false);
   }
 
   async function handleDelete(row) {
     if (!window.confirm('Supprimer ce devis ?')) return;
     const result = await remove(row.id);
-    showToast(result.success ? 'success' : 'error', result.success ? 'Devis supprime.' : (result.error || 'Erreur.'));
+    showToast(result.success ? 'success' : 'error', result.success ? 'Devis supprimé.' : (result.error || 'Erreur.'));
   }
 
   const filtered = useMemo(
@@ -128,18 +156,20 @@ export default function DevisAttente() {
   );
 
   const stats = useMemo(() => computeDevisStats(records), [records, computeDevisStats]);
-  const hasFilters = filterStatut || filterProspect || filterDate || filterMontantMin;
+  const hasFilters = filterStatut || filterProspect || filterDate || filterMontantMin || search;
 
   return (
-    <div className="animate-fade-in">
+    <div className="animate-fade-in devis-attente-page">
       <Toast t={toast} />
 
-      <div className="page-header flex-between">
+      <div className="page-header flex-between devis-attente-header">
         <div>
           <h1 className="page-title">Devis en attente</h1>
           <p className="page-subtitle">Suivi et gestion des devis commerciaux</p>
         </div>
-        <button className="btn btn-primary" onClick={openAdd} disabled={loading || saving || !configured}><Plus size={15} /> Nouveau devis</button>
+        <button className="btn btn-primary" onClick={openAdd} disabled={loading || saving || !configured}>
+          <Plus size={15} /> Nouveau devis
+        </button>
       </div>
 
       {!configured && (
@@ -155,8 +185,7 @@ export default function DevisAttente() {
         </div>
       )}
 
-      {/* Stats */}
-      <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))' }}>
+      <div className="stat-grid devis-attente-stats" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
         <div className="stat-card">
           <div className="stat-icon blue"><FileEdit size={18} /></div>
           <div className="stat-body"><div className="stat-value">{loading ? '—' : stats.total}</div><div className="stat-label">Total devis</div></div>
@@ -167,11 +196,15 @@ export default function DevisAttente() {
         </div>
         <div className="stat-card">
           <div className="stat-icon green"><CheckCircle size={18} /></div>
-          <div className="stat-body"><div className="stat-value">{loading ? '—' : stats.acceptes}</div><div className="stat-label">Acceptes</div></div>
+          <div className="stat-body"><div className="stat-value">{loading ? '—' : stats.acceptes}</div><div className="stat-label">Acceptés</div></div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-icon" style={{ background: '#ECEFF1' }}><CheckCircle size={18} style={{ color: '#546E7A' }} /></div>
+          <div className="stat-body"><div className="stat-value">{loading ? '—' : stats.finalises}</div><div className="stat-label">Finalisés</div></div>
         </div>
         <div className="stat-card">
           <div className="stat-icon" style={{ background: '#FFEBEE' }}><X size={18} style={{ color: 'var(--red)' }} /></div>
-          <div className="stat-body"><div className="stat-value">{loading ? '—' : stats.refuses}</div><div className="stat-label">Refuses</div></div>
+          <div className="stat-body"><div className="stat-value">{loading ? '—' : stats.refuses}</div><div className="stat-label">Refusés</div></div>
         </div>
         {stats.stagnants > 0 && (
           <div className="stat-card" style={{ border: '1.5px solid #FF6F00' }}>
@@ -181,32 +214,54 @@ export default function DevisAttente() {
         )}
       </div>
 
-      {/* Filters */}
-      <div className="card" style={{ padding: '14px 20px', marginBottom: 12 }}>
-        <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-          <div style={{ position: 'relative', flex: '1 1 220px' }}>
-            <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
-            <input placeholder="Rechercher titre, prospect, numero..." value={search} onChange={e => setSearch(e.target.value)} style={{ ...IS(false), paddingLeft: 30 }} />
+      {/* Filtres compacts */}
+      <div className="card devis-attente-filters">
+        <div className="devis-attente-filter-row">
+          <div className="devis-attente-search">
+            <Search size={13} className="devis-attente-search-icon" />
+            <input
+              placeholder="Rechercher…"
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+              style={{ ...IS(false), paddingLeft: 28 }}
+            />
           </div>
-          <select value={filterStatut} onChange={e => setFilterStatut(e.target.value)} style={{ ...IS(false), minWidth: 160 }}>
+          <select value={filterStatut} onChange={(e) => setFilterStatut(e.target.value)} style={IS(false)} className="devis-attente-filter-ctrl">
             <option value="">Tous les statuts</option>
-            {DEVIS_STATUTS.map(s => <option key={s} value={s}>{DEVIS_STATUT_LABEL[s]}</option>)}
+            {DEVIS_STATUTS.map((s) => <option key={s} value={s}>{DEVIS_STATUT_LABEL[s]}</option>)}
           </select>
-          <select value={filterProspect} onChange={e => setFilterProspect(e.target.value)} style={{ ...IS(false), minWidth: 180 }}>
+          <select value={filterProspect} onChange={(e) => setFilterProspect(e.target.value)} style={IS(false)} className="devis-attente-filter-ctrl">
             <option value="">Tous les prospects</option>
-            {prospectOptions.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+            {prospectOptions.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
           </select>
-          <input type="date" value={filterDate} onChange={e => setFilterDate(e.target.value)} style={{ ...IS(false), minWidth: 150 }} />
-          <input type="number" min="0" placeholder="Montant min (MAD)" value={filterMontantMin} onChange={e => setFilterMontantMin(e.target.value)} style={{ ...IS(false), minWidth: 160 }} />
+          <input type="date" value={filterDate} onChange={(e) => setFilterDate(e.target.value)} style={IS(false)} className="devis-attente-filter-ctrl" />
+          <input
+            type="number"
+            min="0"
+            placeholder="Montant min"
+            value={filterMontantMin}
+            onChange={(e) => setFilterMontantMin(e.target.value)}
+            style={IS(false)}
+            className="devis-attente-filter-ctrl devis-attente-filter-montant"
+          />
           {hasFilters && (
-            <button onClick={() => { setFilterStatut(''); setFilterProspect(''); setFilterDate(''); setFilterMontantMin(''); }} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', fontSize: '0.82rem', fontWeight: 600 }}>
-              Effacer filtres
+            <button
+              type="button"
+              className="devis-attente-clear"
+              onClick={() => {
+                setSearch('');
+                setFilterStatut('');
+                setFilterProspect('');
+                setFilterDate('');
+                setFilterMontantMin('');
+              }}
+            >
+              Effacer
             </button>
           )}
         </div>
       </div>
 
-      {/* Table */}
       <div className="card">
         <div className="flex-between mb-4">
           <div className="card-title" style={{ marginBottom: 0 }}><FileEdit size={16} /> Devis ({filtered.length})</div>
@@ -219,41 +274,41 @@ export default function DevisAttente() {
         ) : filtered.length === 0 ? (
           <EmptyState
             icon={<FileEdit size={22} style={{ color: 'var(--text-3)' }} />}
-            title={records.length === 0 ? "Aucun devis enregistre" : "Aucun resultat pour ces filtres"}
-            sub={records.length === 0 ? "Creez votre premier devis en cliquant sur Nouveau devis" : "Modifiez vos criteres de recherche"}
+            title={records.length === 0 ? 'Aucun devis enregistré' : 'Aucun résultat pour ces filtres'}
+            sub={records.length === 0 ? 'Créez votre premier devis en cliquant sur Nouveau devis' : 'Modifiez vos critères de recherche'}
           />
         ) : (
           <div className="table-wrap">
             <table>
               <thead>
                 <tr>
-                  <th>Numero</th>
+                  <th>Numéro</th>
                   <th>Titre</th>
                   <th>Prospect</th>
                   <th>Type projet</th>
                   <th>Source</th>
                   <th>Statut</th>
-                  <th>Mise a jour</th>
+                  <th>Mise à jour</th>
                   <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {filtered.map(r => (
+                {filtered.map((r) => (
                   <tr key={r.id} style={isDevisStale(r) ? { background: '#FFF8E1' } : {}}>
-                    <td style={{ fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--red)' }}>
-                      {r.numero || ('DV-' + String(r.id).slice(0, 8))}
-                      {isDevisStale(r) && <span style={{ marginLeft: 6 }} title="Non mis a jour depuis +48h"><AlertTriangle size={12} style={{ color: '#FF6F00', verticalAlign: 'middle' }} /></span>}
+                    <td data-label="Numéro" style={{ fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--red)' }}>
+                      {r.numero || (`DV-${String(r.id).slice(0, 8)}`)}
+                      {isDevisStale(r) && <span style={{ marginLeft: 6 }} title="Non mis à jour depuis +48h"><AlertTriangle size={12} style={{ color: '#FF6F00', verticalAlign: 'middle' }} /></span>}
                     </td>
-                    <td style={{ fontWeight: 600, maxWidth: 220 }}>{r.titre || '—'}</td>
-                    <td style={{ fontWeight: 600 }}>{r.prospect_nom || '-'}</td>
-                    <td><span className="badge badge-blue">{TYPE_PROJET_LABEL[r.type_projet] || r.type_projet || '-'}</span></td>
-                    <td style={{ fontSize: '0.8rem', color: 'var(--text-2)' }}>{SOURCE_LABEL[r.source] || r.source || '-'}</td>
-                    <td><span className={'badge ' + (DEVIS_STATUT_BADGE[r.statut] || 'badge-grey')}>{DEVIS_STATUT_LABEL[r.statut] || r.statut}</span></td>
-                    <td style={{ fontSize: '0.8rem', color: 'var(--text-3)' }}>{r.updated_at ? String(r.updated_at).slice(0, 10) : '-'}</td>
-                    <td>
+                    <td data-label="Titre" style={{ fontWeight: 600, maxWidth: 220 }}>{r.titre || '—'}</td>
+                    <td data-label="Prospect" style={{ fontWeight: 600 }}>{r.prospect_nom || '—'}</td>
+                    <td data-label="Type projet"><span className="badge badge-blue">{TYPE_PROJET_LABEL[r.type_projet] || r.type_projet || '—'}</span></td>
+                    <td data-label="Source" style={{ fontSize: '0.8rem', color: 'var(--text-2)' }}>{SOURCE_LABEL[r.source] || r.source || '—'}</td>
+                    <td data-label="Statut"><span className={`badge ${DEVIS_STATUT_BADGE[r.statut] || 'badge-grey'}`}>{DEVIS_STATUT_LABEL[r.statut] || r.statut}</span></td>
+                    <td data-label="Mise à jour" style={{ fontSize: '0.8rem', color: 'var(--text-3)' }}>{r.updated_at ? String(r.updated_at).slice(0, 10) : '—'}</td>
+                    <td data-label="Actions">
                       <div style={{ display: 'flex', gap: 4 }}>
-                        <button className="btn btn-ghost btn-sm" style={{ padding: '4px 8px' }} onClick={() => openEdit(r)}><Edit2 size={13} /></button>
-                        <button className="btn btn-ghost btn-sm" style={{ padding: '4px 8px' }} onClick={() => handleDelete(r)}><Trash2 size={13} style={{ color: 'var(--red)' }} /></button>
+                        <button type="button" className="btn btn-ghost btn-sm" style={{ padding: '4px 8px' }} onClick={() => openEdit(r)}><Edit2 size={13} /></button>
+                        <button type="button" className="btn btn-ghost btn-sm" style={{ padding: '4px 8px' }} onClick={() => handleDelete(r)}><Trash2 size={13} style={{ color: 'var(--red)' }} /></button>
                       </div>
                     </td>
                   </tr>
@@ -264,15 +319,14 @@ export default function DevisAttente() {
         )}
       </div>
 
-      {/* ── MODAL ── */}
       {modal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 16 }}>
-          <div style={{ background: '#fff', borderRadius: 14, padding: 32, width: '100%', maxWidth: 500, boxShadow: '0 8px 40px rgba(0,0,0,0.2)', maxHeight: '90vh', overflowY: 'auto' }}>
+        <div className="devis-attente-modal-backdrop">
+          <div className="devis-attente-modal">
             <div className="flex-between" style={{ marginBottom: 20 }}>
               <h2 style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.3rem', textTransform: 'uppercase' }}>
                 {editRow ? 'Modifier devis' : 'Nouveau devis'}
               </h2>
-              <button onClick={() => setModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)' }}><X size={20} /></button>
+              <button type="button" onClick={() => setModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-3)' }}><X size={20} /></button>
             </div>
             <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
               <div className="form-group">
@@ -313,52 +367,52 @@ export default function DevisAttente() {
                   disabled={!!form.prospect_id}
                 />
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div className="devis-attente-form-grid">
                 <div className="form-group">
                   <label>Type de projet *</label>
-                  <select style={IS(errors.type_projet)} value={form.type_projet} onChange={e => setField('type_projet', e.target.value)}>
+                  <select style={IS(errors.type_projet)} value={form.type_projet} onChange={(e) => setField('type_projet', e.target.value)}>
                     <option value="">Choisir...</option>
-                    {TYPE_PROJET_VALUES.map(v => <option key={v} value={v}>{TYPE_PROJET_LABEL[v]}</option>)}
+                    {TYPE_PROJET_VALUES.map((v) => <option key={v} value={v}>{TYPE_PROJET_LABEL[v]}</option>)}
                   </select>
                   {errors.type_projet && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.type_projet}</span>}
                 </div>
                 <div className="form-group">
                   <label>Source *</label>
-                  <select style={IS(errors.source)} value={form.source} onChange={e => setField('source', e.target.value)}>
+                  <select style={IS(errors.source)} value={form.source} onChange={(e) => setField('source', e.target.value)}>
                     <option value="">Choisir...</option>
-                    {SOURCE_VALUES.map(v => <option key={v} value={v}>{SOURCE_LABEL[v]}</option>)}
+                    {SOURCE_VALUES.map((v) => <option key={v} value={v}>{SOURCE_LABEL[v]}</option>)}
                   </select>
                   {errors.source && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.source}</span>}
                 </div>
               </div>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+              <div className="devis-attente-form-grid">
                 <div className="form-group">
-                  <label>Montant estime (MAD)</label>
-                  <input type="number" min="0" style={IS(false)} value={form.montant_estime || ''} onChange={e => setField('montant_estime', e.target.value)} placeholder="150000" />
+                  <label>Montant estimé (MAD)</label>
+                  <input type="number" min="0" style={IS(false)} value={form.montant_estime || ''} onChange={(e) => setField('montant_estime', e.target.value)} placeholder="150000" />
                 </div>
                 <div className="form-group">
                   <label>Date relance</label>
-                  <input type="date" style={IS(false)} value={form.date_relance || ''} onChange={e => setField('date_relance', e.target.value)} />
+                  <input type="date" style={IS(false)} value={form.date_relance || ''} onChange={(e) => setField('date_relance', e.target.value)} />
                 </div>
               </div>
               <div className="form-group">
                 <label>Statut</label>
-                <select style={IS(false)} value={form.statut} onChange={e => setField('statut', e.target.value)}>
-                  {DEVIS_STATUTS.map(s => <option key={s} value={s}>{DEVIS_STATUT_LABEL[s]}</option>)}
+                <select style={IS(false)} value={form.statut} onChange={(e) => setField('statut', e.target.value)}>
+                  {DEVIS_STATUTS.map((s) => <option key={s} value={s}>{DEVIS_STATUT_LABEL[s]}</option>)}
                 </select>
               </div>
               <div className="form-group">
                 <label>Commentaire</label>
-                <textarea rows={3} style={{ ...IS(false), resize: 'vertical' }} value={form.commentaire} onChange={e => setField('commentaire', e.target.value)} placeholder="Notes, observations..." />
+                <textarea rows={3} style={{ ...IS(false), resize: 'vertical', minHeight: 72 }} value={form.commentaire} onChange={(e) => setField('commentaire', e.target.value)} placeholder="Notes, observations..." />
               </div>
               <div className="form-group">
                 <label style={{ display: 'flex', alignItems: 'center', gap: 6 }}><Paperclip size={13} /> Document (PDF/image)</label>
                 <input type="file" accept=".pdf,.jpg,.jpeg,.png" style={{ fontSize: '0.85rem', color: 'var(--text-2)' }} />
               </div>
-              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4 }}>
+              <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end', marginTop: 4, flexWrap: 'wrap' }}>
                 <button type="button" className="btn btn-secondary" onClick={() => setModal(false)}>Annuler</button>
                 <button type="submit" className="btn btn-primary" disabled={saving}>
-                  {saving ? <span style={{ display: 'inline-block', width: 16, height: 16, border: '2px solid rgba(255,255,255,0.4)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} /> : <><Plus size={14} /> {editRow ? 'Enregistrer' : 'Creer'}</>}
+                  {saving ? <span style={{ display: 'inline-block', width: 16, height: 16, border: '2px solid rgba(255,255,255,0.4)', borderTopColor: '#fff', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} /> : <><Plus size={14} /> {editRow ? 'Enregistrer' : 'Créer'}</>}
                 </button>
               </div>
             </form>

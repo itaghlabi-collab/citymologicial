@@ -14434,3 +14434,98 @@ tbody tr:last-child td { border-bottom: none; }
   overflow: hidden;
   clip: rect(0,0,0,0);
 }
+
+/* ===== Devis en attente (Commercial) — filtres compacts + responsive ===== */
+.devis-attente-page { min-width: 0; max-width: 100%; }
+.devis-attente-header { flex-wrap: wrap; gap: 10px; }
+.devis-attente-stats { margin-bottom: 12px; }
+.devis-attente-filters.card {
+  padding: 8px 12px;
+  margin-bottom: 12px;
+  overflow: visible;
+}
+.devis-attente-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-width: 0;
+}
+.devis-attente-search {
+  position: relative;
+  flex: 1 1 180px;
+  min-width: 0;
+  max-width: 280px;
+}
+.devis-attente-search-icon {
+  position: absolute;
+  left: 9px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: var(--text-3);
+  pointer-events: none;
+}
+.devis-attente-filter-ctrl {
+  flex: 0 1 148px;
+  min-width: 120px;
+  max-width: 180px;
+  width: auto !important;
+}
+.devis-attente-filter-montant {
+  flex: 0 1 120px;
+  max-width: 140px;
+}
+.devis-attente-clear {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--red);
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 4px 6px;
+  white-space: nowrap;
+}
+.devis-attente-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+}
+.devis-attente-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+}
+.devis-attente-modal {
+  background: #fff;
+  border-radius: 14px;
+  padding: 28px;
+  width: 100%;
+  max-width: 500px;
+  box-shadow: 0 8px 40px rgba(0,0,0,0.2);
+  max-height: 90vh;
+  overflow-y: auto;
+}
+@media (max-width: 768px) {
+  .devis-attente-header .btn-primary { width: 100%; justify-content: center; }
+  .devis-attente-search { flex: 1 1 100%; max-width: none; }
+  .devis-attente-filter-ctrl,
+  .devis-attente-filter-montant {
+    flex: 1 1 calc(50% - 4px);
+    max-width: none;
+    min-width: 0;
+  }
+  .devis-attente-form-grid { grid-template-columns: 1fr; }
+  .devis-attente-modal { padding: 20px 16px; border-radius: 12px; }
+}
+@media (max-width: 480px) {
+  .devis-attente-filter-ctrl,
+  .devis-attente-filter-montant {
+    flex: 1 1 100%;
+  }
+}

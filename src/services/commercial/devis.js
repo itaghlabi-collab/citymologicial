@@ -6,19 +6,21 @@ import { prospectDisplayName } from './prospects';
 
 const TABLE = 'devis';
 
-export const DEVIS_STATUTS = ['en_attente', 'en_cours', 'realise', 'refuse'];
+export const DEVIS_STATUTS = ['en_attente', 'en_cours', 'realise', 'finalise', 'refuse'];
 
 export const DEVIS_STATUT_LABEL = {
   en_attente: 'En attente',
   en_cours: 'En cours',
-  realise: 'Accepte',
-  refuse: 'Refuse',
+  realise: 'Accepté',
+  finalise: 'Finalisé',
+  refuse: 'Refusé',
 };
 
 export const DEVIS_STATUT_BADGE = {
   en_attente: 'badge-orange',
   en_cours: 'badge-blue',
   realise: 'badge-green',
+  finalise: 'badge-grey',
   refuse: 'badge-red',
 };
 
@@ -81,11 +83,20 @@ async function getAuthUserId() {
 }
 
 async function generateNumero() {
-  const { count, error } = await getSupabase()
+  // MAX du suffixe (pas COUNT) — évite collision si DV-001 manquant / déjà DV-002
+  const { data, error } = await getSupabase()
     .from(TABLE)
-    .select('*', { count: 'exact', head: true });
+    .select('numero')
+    .like('numero', 'DV-%')
+    .order('numero', { ascending: false })
+    .limit(100);
   if (error) throw error;
-  return `DV-${String((count || 0) + 1).padStart(3, '0')}`;
+  let max = 0;
+  (data || []).forEach((row) => {
+    const match = String(row.numero || '').match(/DV-(\d+)/i);
+    if (match) max = Math.max(max, Number(match[1]) || 0);
+  });
+  return `DV-${String(max + 1).padStart(3, '0')}`;
 }
 
 export async function listDevis() {
@@ -117,19 +128,28 @@ export async function createDevis(form) {
     throw err;
   }
 
-  row.numero = await generateNumero();
+  let lastError = null;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    row.numero = await generateNumero();
+    const { data, error } = await getSupabase()
+      .from(TABLE)
+      .insert([row])
+      .select(DEVIS_SELECT)
+      .single();
 
-  const { data, error } = await getSupabase()
-    .from(TABLE)
-    .insert([row])
-    .select(DEVIS_SELECT)
-    .single();
+    if (!error) return normalizeDevis(data);
 
-  if (error) {
+    lastError = error;
+    // Collision unique sur numero → réessayer avec MAX+1
+    if (error.code === '23505' && /numero|unique/i.test(`${error.message} ${error.details || ''}`)) {
+      continue;
+    }
     console.error('[CITYMO] devis insert', error, row);
     throw error;
   }
-  return normalizeDevis(data);
+
+  console.error('[CITYMO] devis insert', lastError, row);
+  throw lastError || new Error('Impossible de générer un numéro de devis unique.');
 }
 
 export async function updateDevis(id, form) {
@@ -208,6 +228,7 @@ export function computeDevisStats(records) {
     enAttente: list.filter((r) => r.statut === 'en_attente').length,
     enCours: list.filter((r) => r.statut === 'en_cours').length,
     acceptes: list.filter((r) => r.statut === 'realise').length,
+    finalises: list.filter((r) => r.statut === 'finalise').length,
     refuses: list.filter((r) => r.statut === 'refuse').length,
     stagnants: list.filter(isDevisStale).length,
   };

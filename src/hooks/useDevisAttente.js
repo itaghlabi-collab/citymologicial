@@ -74,14 +74,13 @@ export function useDevisAttente() {
 
   const create = useCallback(async (form) => {
     setSaving(true);
-    setError(null);
+    // Ne pas polluer le bandeau page : l’erreur create reste dans le toast
     try {
       await createDevis(form);
       await load();
       return { success: true };
     } catch (err) {
       const msg = formatSupabaseError(err, 'Erreur enregistrement devis.');
-      setError(msg);
       return { success: false, error: msg };
     } finally {
       setSaving(false);
@@ -90,14 +89,12 @@ export function useDevisAttente() {
 
   const update = useCallback(async (id, form) => {
     setSaving(true);
-    setError(null);
     try {
       await updateDevis(id, form);
       await load();
       return { success: true };
     } catch (err) {
       const msg = formatSupabaseError(err, 'Erreur modification devis.');
-      setError(msg);
       return { success: false, error: msg };
     } finally {
       setSaving(false);
@@ -105,17 +102,17 @@ export function useDevisAttente() {
   }, [load]);
 
   const remove = useCallback(async (id) => {
-    setError(null);
     try {
       await deleteDevis(id);
       await load();
       return { success: true };
     } catch (err) {
       const msg = formatSupabaseError(err, 'Erreur suppression.');
-      setError(msg);
       return { success: false, error: msg };
     }
   }, [load]);
+
+  const clearError = useCallback(() => setError(null), []);
 
   return {
     records,
@@ -124,6 +121,7 @@ export function useDevisAttente() {
     loading,
     saving,
     error,
+    clearError,
     configured,
     load,
     create,
