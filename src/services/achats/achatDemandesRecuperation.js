@@ -125,7 +125,10 @@ export async function ensureDemandeFromPaidOp(op, { notify = false } = {}) {
     .select('*')
     .eq('payment_order_id', op.id)
     .maybeSingle();
-  if (findErr && !/42P01|does not exist/i.test(findErr.message || '')) throw findErr;
+  if (findErr) {
+    if (isMissingTableError(findErr)) return null;
+    throw findErr;
+  }
   if (existing) {
     return { demande: normalizeDemandeRecuperation(existing), created: false };
   }
@@ -207,21 +210,47 @@ export async function onAchatsPaymentOrderPaid(op) {
   }
 }
 
-/** Backfill : OP Achats déjà payés sans demande. */
+function isMissingTableError(err) {
+  const msg = err?.message || String(err || '');
+  return err?.code === '42P01' || /does not exist|schema cache|achat_demandes_recuperation/i.test(msg);
+}
+
+/** Backfill : OP Achats déjà payés sans demande (rapide, non bloquant pour l’UI). */
 export async function syncPaidOpsToDemandesRecuperation() {
   await getAuthUser();
+
+  // Probe table — si absente, sortir tout de suite
+  const { error: probeErr } = await getSupabase().from(TABLE).select('id').limit(1);
+  if (probeErr && isMissingTableError(probeErr)) {
+    const err = new Error(probeErr.message || 'Table absente');
+    err.code = '42P01';
+    throw err;
+  }
+
+  const { data: existingRows, error: existingErr } = await getSupabase()
+    .from(TABLE)
+    .select('payment_order_id')
+    .not('payment_order_id', 'is', null);
+  if (existingErr) {
+    if (isMissingTableError(existingErr)) return [];
+    throw existingErr;
+  }
+  const already = new Set((existingRows || []).map((r) => r.payment_order_id).filter(Boolean));
+
   const { data, error } = await getSupabase()
     .from('payment_orders')
-    .select('*')
+    .select('id, ref_ordre, ref, statut, purchase_request_id, purchase_request_ref, purchase_oa_ref, fournisseur_lie, beneficiaire, motif, date_paiement, created_at')
     .not('purchase_request_id', 'is', null)
     .order('created_at', { ascending: false })
-    .limit(200);
+    .limit(120);
   if (error) {
     if (error.code === '42P01') return [];
     throw error;
   }
+
   const created = [];
   for (const row of data || []) {
+    if (already.has(row.id)) continue;
     const statut = normalizePaymentOrderStatut(row.statut);
     if (statut !== 'Payé') continue;
     const op = {
@@ -236,8 +265,16 @@ export async function syncPaidOpsToDemandesRecuperation() {
       motif: row.motif || '',
       date_paiement: row.date_paiement || '',
     };
-    const result = await ensureDemandeFromPaidOp(op, { notify: false });
-    if (result?.created) created.push(result.demande);
+    try {
+      const result = await ensureDemandeFromPaidOp(op, { notify: false });
+      if (result?.created) {
+        created.push(result.demande);
+        already.add(row.id);
+      }
+    } catch (err) {
+      if (isMissingTableError(err)) return created;
+      console.warn('[CITYMO] sync demande récupération OP', row.id, err);
+    }
   }
   return created;
 }

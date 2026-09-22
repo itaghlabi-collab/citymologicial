@@ -37,15 +37,11 @@ export default function SuiviReceptions() {
   const [recupForm, setRecupForm] = useState({ chauffeur: '', vehicule: '', date_recuperation: todayISO() });
   const [recupErrors, setRecupErrors] = useState({});
 
-  const load = useCallback(async () => {
+  const load = useCallback(async ({ sync = true } = {}) => {
     setLoading(true);
     setError('');
     try {
-      try {
-        await syncPaidOpsToDemandesRecuperation();
-      } catch (syncErr) {
-        console.warn('[CITYMO] sync OP payés → récupération', syncErr);
-      }
+      // Afficher d’abord la liste — ne pas bloquer sur le backfill OP
       setRows(await listDemandesRecuperationAchats());
     } catch (e) {
       const msg = e?.message || String(e);
@@ -55,8 +51,24 @@ export default function SuiviReceptions() {
         setError(msg);
       }
       setRows([]);
-    } finally {
       setLoading(false);
+      return;
+    }
+    setLoading(false);
+
+    if (!sync) return;
+    try {
+      const created = await syncPaidOpsToDemandesRecuperation();
+      if (created?.length) {
+        setRows(await listDemandesRecuperationAchats());
+      }
+    } catch (syncErr) {
+      const msg = syncErr?.message || String(syncErr);
+      if (/achat_demandes_recuperation|does not exist|42P01|schema cache/i.test(msg)) {
+        setError('Table absente — exécutez supabase/RUN_ACHAT_DEMANDES_RECUPERATION.sql dans Supabase.');
+      } else {
+        console.warn('[CITYMO] sync OP payés → récupération', syncErr);
+      }
     }
   }, []);
 
