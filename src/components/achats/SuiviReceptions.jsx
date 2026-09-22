@@ -288,10 +288,10 @@ export default function SuiviReceptions() {
   const isPrete = (r) => r.statut === DEMANDE_RECUP_STATUTS.PRETE || r.statut === 'a_recuperer';
 
   return (
-    <div className="animate-fade-in">
-      <div className="page-header" style={{ marginBottom: 16 }}>
+    <div className="animate-fade-in recup-page">
+      <div className="page-header" style={{ marginBottom: 12 }}>
         <h1 className="page-title">Demande de récupération</h1>
-        <p className="page-subtitle">
+        <p className="page-subtitle recup-page-sub">
           OP Initié = En cours · OP Payé = À récupérer. Le magasinier confirme avec chauffeur/coursier et véhicule.
         </p>
       </div>
@@ -306,14 +306,14 @@ export default function SuiviReceptions() {
         </div>
       )}
 
-      <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', marginBottom: 16 }}>
+      <div className="stat-grid recup-stats" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', marginBottom: 12 }}>
         <KpiCard icon={<Package size={17} />} label="Total (10 dern.)" value={loading ? '—' : kpis.total} color="grey" />
         <KpiCard icon={<ClipboardCheck size={17} />} label="En cours" value={loading ? '—' : kpis.enCours} color="blue" />
         <KpiCard icon={<Truck size={17} />} label="À récupérer" value={loading ? '—' : kpis.aRecuperer} color="orange" />
         <KpiCard icon={<CheckCircle size={17} />} label="Récupérées" value={loading ? '—' : kpis.recuperees} color="green" />
       </div>
 
-      <div className="card" style={{ padding: '10px 12px', marginBottom: 12 }}>
+      <div className="card recup-filters" style={{ padding: '10px 12px', marginBottom: 12 }}>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
           <div style={{ position: 'relative', flex: '1 1 180px', minWidth: 0, maxWidth: 280 }}>
             <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
@@ -353,7 +353,7 @@ export default function SuiviReceptions() {
         </div>
       </div>
 
-      <div className="card">
+      <div className="card recup-list-card">
         {loading ? (
           <div style={{ textAlign: 'center', padding: 40, color: 'var(--text-3)' }}>
             <Loader2 size={24} className="spin" style={{ margin: '0 auto 10px', display: 'block' }} />
@@ -366,60 +366,91 @@ export default function SuiviReceptions() {
             sub="Les demandes apparaissent dès qu’un ordre de paiement est Initié ou Payé."
           />
         ) : (
-          <div className="table-wrap">
-            <table>
-              <thead>
-                <tr>
-                  <th>Réf.</th>
-                  <th>DA</th>
-                  <th>OA</th>
-                  <th>Fournisseur</th>
-                  <th>Quoi</th>
-                  <th>Statut</th>
-                  <th>Chauffeur / Véhicule</th>
-                  <th>Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {filtered.map((r) => (
-                  <tr key={r.id}>
-                    <td style={{ fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--red)' }}>{r.ref}</td>
-                    <td style={{ fontWeight: 600 }}>{r.purchase_request_ref || '—'}</td>
-                    <td>{r.purchase_oa_ref || '—'}</td>
-                    <td>{r.fournisseur || '—'}</td>
-                    <td style={{ maxWidth: 280, fontSize: '0.84rem' }}>{r.quoi || '—'}</td>
-                    <td>
-                      <span className={`badge ${DEMANDE_RECUP_BADGE[r.statut] || 'badge-grey'}`}>
-                        {r.statut_label}
-                      </span>
-                    </td>
-                    <td style={{ fontSize: '0.82rem' }}>
-                      {r.statut === DEMANDE_RECUP_STATUTS.RECUPEREE
-                        ? (
-                          <>
-                            <div>{r.chauffeur || '—'}</div>
-                            <div style={{ color: 'var(--text-3)' }}>{r.vehicule || '—'}</div>
-                          </>
-                          )
-                        : '—'}
-                    </td>
-                    <td>
-                      {isPrete(r) && (
-                        <button
-                          type="button"
-                          className="btn btn-primary btn-sm"
-                          disabled={saving}
-                          onClick={() => openRecup(r)}
-                        >
-                          <Truck size={13} /> Récupérée
-                        </button>
-                      )}
-                    </td>
+          <>
+            {/* Desktop : tableau */}
+            <div className="table-wrap recup-desktop-table">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Réf.</th>
+                    <th>DA</th>
+                    <th>OA</th>
+                    <th>Fournisseur</th>
+                    <th>Quoi</th>
+                    <th>Statut</th>
+                    <th>Chauffeur / Véhicule</th>
+                    <th>Actions</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {filtered.map((r) => (
+                    <tr key={r.id}>
+                      <td style={{ fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--red)' }}>{r.ref}</td>
+                      <td style={{ fontWeight: 600 }}>{r.purchase_request_ref || '—'}</td>
+                      <td>{r.purchase_oa_ref || '—'}</td>
+                      <td>{r.fournisseur || '—'}</td>
+                      <td style={{ maxWidth: 280, fontSize: '0.84rem' }}>{r.quoi || '—'}</td>
+                      <td>
+                        <span className={`badge ${DEMANDE_RECUP_BADGE[r.statut] || 'badge-grey'}`}>
+                          {r.statut_label}
+                        </span>
+                      </td>
+                      <td style={{ fontSize: '0.82rem' }}>
+                        {r.statut === DEMANDE_RECUP_STATUTS.RECUPEREE
+                          ? (
+                            <>
+                              <div>{r.chauffeur || '—'}</div>
+                              <div style={{ color: 'var(--text-3)' }}>{r.vehicule || '—'}</div>
+                            </>
+                            )
+                          : '—'}
+                      </td>
+                      <td>
+                        {isPrete(r) && (
+                          <button
+                            type="button"
+                            className="btn btn-primary btn-sm"
+                            disabled={saving}
+                            onClick={() => openRecup(r)}
+                          >
+                            <Truck size={13} /> Récupérée
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            {/* Mobile : 1 ligne par demande */}
+            <ul className="recup-mobile-list">
+              {filtered.map((r) => (
+                <li key={r.id} className="recup-mobile-row">
+                  <div className="recup-mobile-main">
+                    <span className="recup-mobile-da">{r.purchase_request_ref || r.ref}</span>
+                    <span className="recup-mobile-quoi" title={r.quoi}>{r.quoi || '—'}</span>
+                  </div>
+                  <span className={`badge recup-mobile-badge ${DEMANDE_RECUP_BADGE[r.statut] || 'badge-grey'}`}>
+                    {r.statut_label}
+                  </span>
+                  {isPrete(r) ? (
+                    <button
+                      type="button"
+                      className="btn btn-primary btn-sm recup-mobile-action"
+                      disabled={saving}
+                      onClick={() => openRecup(r)}
+                      aria-label="Marquer récupérée"
+                    >
+                      <Truck size={14} />
+                    </button>
+                  ) : (
+                    <span className="recup-mobile-action-spacer" />
+                  )}
+                </li>
+              ))}
+            </ul>
+          </>
         )}
       </div>
 

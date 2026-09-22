@@ -14529,3 +14529,72 @@ tbody tr:last-child td { border-bottom: none; }
     flex: 1 1 100%;
   }
 }
+
+/* ===== Demande de récupération — mobile 1 ligne ===== */
+.recup-mobile-list { display: none; list-style: none; margin: 0; padding: 0; }
+.recup-desktop-table { display: block; }
+
+@media (max-width: 768px) {
+  .recup-page-sub { font-size: 0.78rem; line-height: 1.35; }
+  .recup-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8px !important;
+    margin-bottom: 10px !important;
+  }
+  .recup-stats .stat-card { padding: 10px 12px; }
+  .recup-stats .stat-value { font-size: 1.15rem; }
+  .recup-stats .stat-label { font-size: 0.68rem; }
+  .recup-filters.card { padding: 8px 10px !important; }
+  .recup-list-card.card { padding: 0; overflow: hidden; }
+
+  .recup-desktop-table { display: none !important; }
+  .recup-mobile-list { display: block; }
+
+  .recup-mobile-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border);
+    min-height: 48px;
+  }
+  .recup-mobile-row:last-child { border-bottom: none; }
+  .recup-mobile-main {
+    flex: 1 1 auto;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+  .recup-mobile-da {
+    font-family: var(--font-head);
+    font-weight: 700;
+    font-size: 0.88rem;
+    color: var(--red);
+    line-height: 1.2;
+  }
+  .recup-mobile-quoi {
+    font-size: 0.78rem;
+    color: var(--text-2);
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.25;
+  }
+  .recup-mobile-badge {
+    flex: 0 0 auto;
+    font-size: 0.65rem !important;
+    padding: 3px 7px !important;
+    white-space: nowrap;
+  }
+  .recup-mobile-action {
+    flex: 0 0 auto;
+    padding: 7px 9px !important;
+    min-width: 36px;
+  }
+  .recup-mobile-action-spacer {
+    flex: 0 0 36px;
+    width: 36px;
+  }
+}
