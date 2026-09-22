@@ -23,7 +23,7 @@ function Toast({ t }) {
 }
 
 const EMPTY_FORM = {
-  prospect_id: '', type_projet: '', source: '', statut: 'en_attente',
+  titre: '', prospect_id: '', prospect_nom: '', type_projet: '', source: '', statut: 'en_attente',
   commentaire: '', assigne_id: '', montant_estime: '', date_relance: '',
 };
 
@@ -70,7 +70,10 @@ export default function DevisAttente() {
   function openEdit(row) {
     setEditRow(row);
     setForm({
+      titre: row.titre || '',
       prospect_id: row.prospect_id || '',
+      // Si lié à un prospect catalogue, le champ libre reste vide (le select suffit)
+      prospect_nom: row.prospect_id ? '' : (row.prospect_nom || ''),
       type_projet: row.type_projet || '',
       source: row.source || '',
       statut: row.statut || 'en_attente',
@@ -183,7 +186,7 @@ export default function DevisAttente() {
         <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap', alignItems: 'center' }}>
           <div style={{ position: 'relative', flex: '1 1 220px' }}>
             <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
-            <input placeholder="Rechercher prospect, numero..." value={search} onChange={e => setSearch(e.target.value)} style={{ ...IS(false), paddingLeft: 30 }} />
+            <input placeholder="Rechercher titre, prospect, numero..." value={search} onChange={e => setSearch(e.target.value)} style={{ ...IS(false), paddingLeft: 30 }} />
           </div>
           <select value={filterStatut} onChange={e => setFilterStatut(e.target.value)} style={{ ...IS(false), minWidth: 160 }}>
             <option value="">Tous les statuts</option>
@@ -225,6 +228,7 @@ export default function DevisAttente() {
               <thead>
                 <tr>
                   <th>Numero</th>
+                  <th>Titre</th>
                   <th>Prospect</th>
                   <th>Type projet</th>
                   <th>Source</th>
@@ -240,6 +244,7 @@ export default function DevisAttente() {
                       {r.numero || ('DV-' + String(r.id).slice(0, 8))}
                       {isDevisStale(r) && <span style={{ marginLeft: 6 }} title="Non mis a jour depuis +48h"><AlertTriangle size={12} style={{ color: '#FF6F00', verticalAlign: 'middle' }} /></span>}
                     </td>
+                    <td style={{ fontWeight: 600, maxWidth: 220 }}>{r.titre || '—'}</td>
                     <td style={{ fontWeight: 600 }}>{r.prospect_nom || '-'}</td>
                     <td><span className="badge badge-blue">{TYPE_PROJET_LABEL[r.type_projet] || r.type_projet || '-'}</span></td>
                     <td style={{ fontSize: '0.8rem', color: 'var(--text-2)' }}>{SOURCE_LABEL[r.source] || r.source || '-'}</td>
@@ -271,11 +276,42 @@ export default function DevisAttente() {
             </div>
             <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
               <div className="form-group">
+                <label>Titre de devis</label>
+                <input
+                  style={IS(false)}
+                  value={form.titre}
+                  onChange={(e) => setField('titre', e.target.value)}
+                  placeholder="ex. Aménagement local, Construction..."
+                />
+              </div>
+              <div className="form-group">
                 <label>Prospect</label>
-                <select style={IS(false)} value={form.prospect_id} onChange={e => setField('prospect_id', e.target.value)}>
+                <select
+                  style={IS(false)}
+                  value={form.prospect_id}
+                  onChange={(e) => setForm((p) => ({
+                    ...p,
+                    prospect_id: e.target.value,
+                    prospect_nom: e.target.value ? '' : p.prospect_nom,
+                  }))}
+                >
                   <option value="">Choisir un prospect...</option>
-                  {prospectOptions.map(p => <option key={p.id} value={p.id}>{p.label}</option>)}
+                  {prospectOptions.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
                 </select>
+                <div style={{ margin: '8px 0 4px', fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
+                  ou saisir un nom
+                </div>
+                <input
+                  style={IS(false)}
+                  value={form.prospect_nom}
+                  onChange={(e) => setForm((p) => ({
+                    ...p,
+                    prospect_nom: e.target.value,
+                    prospect_id: e.target.value.trim() ? '' : p.prospect_id,
+                  }))}
+                  placeholder="Nom du prospect (saisie libre)"
+                  disabled={!!form.prospect_id}
+                />
               </div>
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
                 <div className="form-group">

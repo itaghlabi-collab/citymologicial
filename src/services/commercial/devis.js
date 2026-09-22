@@ -31,11 +31,13 @@ const DEVIS_SELECT = `
 export function normalizeDevis(row) {
   if (!row) return null;
   const p = row.prospects;
+  const libre = String(row.prospect_nom || '').trim();
   return {
     id: row.id,
     numero: row.numero || '',
+    titre: row.titre || '',
     prospect_id: row.prospect_id || '',
-    prospect_nom: prospectDisplayName(p),
+    prospect_nom: libre || prospectDisplayName(p),
     type_projet: row.type_projet || '',
     source: row.source || '',
     montant_estime: row.montant_estime != null ? Number(row.montant_estime) : null,
@@ -49,8 +51,13 @@ export function normalizeDevis(row) {
 }
 
 export function toDevisRow(form) {
+  const prospectId = form.prospect_id || null;
+  const prospectLibre = String(form.prospect_nom || '').trim();
   return {
-    prospect_id: form.prospect_id || null,
+    titre: String(form.titre || '').trim() || null,
+    prospect_id: prospectId,
+    // Nom libre uniquement si aucun prospect sélectionné
+    prospect_nom: prospectId ? null : (prospectLibre || null),
     type_projet: form.type_projet,
     source: form.source,
     montant_estime: form.montant_estime != null && form.montant_estime !== ''
@@ -172,7 +179,8 @@ export function filterDevisRecords(records, filters = {}) {
     if (search) {
       const q = search.toLowerCase();
       const match = (r.prospect_nom || '').toLowerCase().includes(q)
-        || (r.numero || '').toLowerCase().includes(q);
+        || (r.numero || '').toLowerCase().includes(q)
+        || (r.titre || '').toLowerCase().includes(q);
       if (!match) return false;
     }
     if (statut && r.statut !== statut) return false;
