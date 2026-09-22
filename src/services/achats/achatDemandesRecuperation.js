@@ -123,6 +123,7 @@ export function normalizeDemandeRecuperation(row) {
     statut,
     statut_label: DEMANDE_RECUP_LABEL[statut] || statut,
     payment_order_id: row.payment_order_id || '',
+    payment_order_ref: row.payment_order_ref || row.purchase_oa_ref || '',
     purchase_request_id: row.purchase_request_id || '',
     purchase_request_ref: row.purchase_request_ref || '',
     purchase_oa_ref: row.purchase_oa_ref || '',
@@ -192,6 +193,8 @@ export async function ensureDemandeFromOp(op, { notify = false } = {}) {
   );
   const quoi = titre || formatQuoiTitre(existing?.quoi) || '—';
 
+  const opRef = String(op.ref || op.ref_ordre || '').trim();
+
   // Mise à jour si déjà existante (ex. Initié → Payé, ou corriger le quoi)
   if (existing) {
     const cur = existing.statut === 'a_recuperer' ? DEMANDE_RECUP_STATUTS.PRETE : existing.statut;
@@ -205,8 +208,9 @@ export async function ensureDemandeFromOp(op, { notify = false } = {}) {
     if (op.purchase_request_ref && existing.purchase_request_ref !== op.purchase_request_ref) {
       patch.purchase_request_ref = op.purchase_request_ref;
     }
-    if (op.purchase_oa_ref && existing.purchase_oa_ref !== op.purchase_oa_ref) {
-      patch.purchase_oa_ref = op.purchase_oa_ref;
+    // Colonne purchase_oa_ref stocke désormais la réf OP (ordre de paiement)
+    if (opRef && existing.purchase_oa_ref !== opRef) {
+      patch.purchase_oa_ref = opRef;
     }
     const four = op.fournisseur_lie || op.beneficiaire || '';
     if (four && existing.fournisseur !== four) patch.fournisseur = four;
@@ -251,7 +255,8 @@ export async function ensureDemandeFromOp(op, { notify = false } = {}) {
     payment_order_id: op.id,
     purchase_request_id: op.purchase_request_id,
     purchase_request_ref: op.purchase_request_ref || '',
-    purchase_oa_ref: op.purchase_oa_ref || '',
+    // Réf. ordre de paiement (OP) — pas l’OA
+    purchase_oa_ref: opRef,
     fournisseur: op.fournisseur_lie || op.beneficiaire || '',
     projet: '',
     created_by: userId,
@@ -439,7 +444,7 @@ export function filterDemandesRecuperation(rows, { search = '', statut = '', dat
       if (rowDate !== d) return false;
     }
     if (!q) return true;
-    const hay = `${r.ref} ${r.quoi} ${r.purchase_request_ref} ${r.purchase_oa_ref} ${r.fournisseur} ${r.chauffeur} ${r.vehicule}`.toLowerCase();
+    const hay = `${r.ref} ${r.quoi} ${r.purchase_request_ref} ${r.payment_order_ref} ${r.purchase_oa_ref} ${r.fournisseur} ${r.chauffeur} ${r.vehicule}`.toLowerCase();
     return hay.includes(q);
   });
 }

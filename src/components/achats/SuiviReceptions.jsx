@@ -320,7 +320,7 @@ export default function SuiviReceptions() {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="DA, OA, titre, fournisseur…"
+              placeholder="DA, OP, titre, fournisseur…"
               style={{ ...INPUT_STYLE, paddingLeft: 30, minHeight: 36, paddingTop: 7, paddingBottom: 7, fontSize: '0.84rem' }}
             />
           </div>
@@ -374,7 +374,7 @@ export default function SuiviReceptions() {
                   <tr>
                     <th>Réf.</th>
                     <th>DA</th>
-                    <th>OA</th>
+                    <th>OP</th>
                     <th>Fournisseur</th>
                     <th>Quoi</th>
                     <th>Statut</th>
@@ -387,7 +387,7 @@ export default function SuiviReceptions() {
                     <tr key={r.id}>
                       <td style={{ fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--red)' }}>{r.ref}</td>
                       <td style={{ fontWeight: 600 }}>{r.purchase_request_ref || '—'}</td>
-                      <td>{r.purchase_oa_ref || '—'}</td>
+                      <td>{r.payment_order_ref || r.purchase_oa_ref || '—'}</td>
                       <td>{r.fournisseur || '—'}</td>
                       <td style={{ maxWidth: 280, fontSize: '0.84rem' }}>{r.quoi || '—'}</td>
                       <td>
