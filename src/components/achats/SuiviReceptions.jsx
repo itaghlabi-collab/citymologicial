@@ -184,8 +184,15 @@ export default function SuiviReceptions() {
       setRows(await listDemandesRecuperationAchats());
     } catch (e) {
       const msg = e?.message || String(e);
-      if (/achat_demandes_recuperation|does not exist|42P01|schema cache/i.test(msg)) {
+      const code = e?.code || '';
+      if (
+        code === '42P01'
+        || /relation ["'].*achat_demandes_recuperation["'] does not exist/i.test(msg)
+        || /Could not find the table ['"]public\.achat_demandes_recuperation['"]/i.test(msg)
+      ) {
         setError('Table absente — exécutez supabase/RUN_ACHAT_DEMANDES_RECUPERATION.sql dans Supabase.');
+      } else if (/statut_check|check constraint/i.test(msg)) {
+        setError('Contrainte statut manquante — exécutez le SQL en_cours dans Supabase (CHECK avec en_cours).');
       } else {
         setError(msg);
       }
@@ -203,10 +210,17 @@ export default function SuiviReceptions() {
       }
     } catch (syncErr) {
       const msg = syncErr?.message || String(syncErr);
-      if (/achat_demandes_recuperation|does not exist|42P01|schema cache/i.test(msg)) {
+      const code = syncErr?.code || '';
+      if (
+        code === '42P01'
+        || /relation ["'].*achat_demandes_recuperation["'] does not exist/i.test(msg)
+        || /Could not find the table ['"]public\.achat_demandes_recuperation['"]/i.test(msg)
+      ) {
         setError('Table absente — exécutez supabase/RUN_ACHAT_DEMANDES_RECUPERATION.sql dans Supabase.');
+      } else if (/statut_check|check constraint|23514/i.test(`${msg} ${code}`)) {
+        setError('Contrainte statut : ajoutez « en_cours » via SQL Supabase, puis Réessayer.');
       } else {
-        console.warn('[CITYMO] sync OP payés → récupération', syncErr);
+        console.warn('[CITYMO] sync OP → récupération', syncErr);
       }
     }
   }, []);

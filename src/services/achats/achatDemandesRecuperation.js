@@ -54,7 +54,13 @@ function todayISO() {
 
 function isMissingTableError(err) {
   const msg = err?.message || String(err || '');
-  return err?.code === '42P01' || /does not exist|schema cache|achat_demandes_recuperation/i.test(msg);
+  const code = err?.code || '';
+  // Uniquement absence réelle de table — pas les erreurs CHECK / RLS qui citent le nom
+  if (code === '42P01') return true;
+  if (/relation ["'].*achat_demandes_recuperation["'] does not exist/i.test(msg)) return true;
+  if (/Could not find the table ['"]public\.achat_demandes_recuperation['"]/i.test(msg)) return true;
+  if (/schema cache/i.test(msg) && /achat_demandes_recuperation/i.test(msg)) return true;
+  return false;
 }
 
 /** Mappe le statut OP → statut demande récupération (null si hors scope). */
