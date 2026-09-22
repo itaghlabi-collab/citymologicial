@@ -1,9 +1,9 @@
 /**
  * SuiviReceptions.jsx — Demande de récupération (Achats)
  * Source : OP Achats payés → « Prête à récupérer ».
- * Magasinier confirme avec chauffeur + véhicule.
+ * Magasinier confirme avec chauffeur/coursier + les 3 véhicules logistique.
  */
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ClipboardCheck, Search, Loader2, CheckCircle, Package, Truck,
 } from 'lucide-react';
@@ -17,13 +17,150 @@ import {
   DEMANDE_RECUP_LABEL,
   DEMANDE_RECUP_BADGE,
 } from '../../services/achats/achatDemandesRecuperation';
+import { listEmployees, employeeFullName } from '../../services/rh/employees';
+import { listVehicles } from '../../services/logistique/vehicles';
+import { isPickupDriverPoste } from '../../services/logistique/pickupRequests';
 import {
   INPUT_STYLE, SELECT_STYLE,
   KpiCard, EmptyState, FField, Modal,
 } from './shared.jsx';
 
+const LAST_N = 10;
+
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
+}
+
+function vehicleOptionLabel(v) {
+  if (!v) return '';
+  const name = [v.marque, v.modele].filter(Boolean).join(' ') || v.vehicule || '';
+  const mat = v.matricule || v.matricule_ww || '';
+  if (mat && name) return `${mat} — ${name}`;
+  return mat || name || v.id || '';
+}
+
+/** Uniquement H100, KIA, Ford Transit (parc logistique). */
+function isSelectableTripVehicle(v) {
+  const hay = [v?.marque, v?.modele, v?.vehicule]
+    .filter(Boolean)
+    .join(' ')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+  if (!hay) return false;
+  if (hay.includes('h100')) return true;
+  if (hay.includes('ford') && hay.includes('transit')) return true;
+  if (hay.includes('kia')) return true;
+  return false;
+}
+
+function buildDriverOptions(employees = []) {
+  return (employees || [])
+    .filter((e) => isPickupDriverPoste(e.poste))
+    .map((emp) => {
+      const name = employeeFullName(emp);
+      if (!name) return null;
+      const poste = String(emp.poste || '').trim();
+      return {
+        id: String(emp.id),
+        name,
+        label: poste ? `${name} — ${poste}` : name,
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+}
+
+function normQuery(s) {
+  return String(s || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .trim();
+}
+
+function DriverSearchSelect({
+  value,
+  options,
+  onChange,
+  placeholder = 'Rechercher un chauffeur ou un coursier…',
+  disabled = false,
+  invalid = false,
+}) {
+  const wrapRef = useRef(null);
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const selected = options.find((o) => o.name === value || o.label === value);
+  const selectedLabel = selected?.label || value || '';
+
+  useEffect(() => {
+    if (!open) setQuery(selectedLabel);
+  }, [open, selectedLabel]);
+
+  useEffect(() => {
+    function onDocClick(e) {
+      if (wrapRef.current?.contains(e.target)) return;
+      setOpen(false);
+    }
+    document.addEventListener('mousedown', onDocClick);
+    return () => document.removeEventListener('mousedown', onDocClick);
+  }, []);
+
+  const q = normQuery(query);
+  const browsing = open && (!q || query === selectedLabel);
+  const filtered = browsing
+    ? options
+    : options.filter((o) => normQuery(o.label).includes(q));
+
+  return (
+    <div className="log-pickup-search" ref={wrapRef}>
+      <input
+        className="log-pickup-search-input"
+        value={open ? query : selectedLabel}
+        onChange={(e) => {
+          setQuery(e.target.value);
+          setOpen(true);
+        }}
+        onFocus={() => {
+          setOpen(true);
+          setQuery(selectedLabel);
+        }}
+        placeholder={placeholder}
+        disabled={disabled}
+        autoComplete="off"
+        style={invalid ? { borderColor: 'var(--red)' } : undefined}
+      />
+      {open && !disabled && (
+        <div className="log-pickup-search-menu" role="listbox">
+          {filtered.length === 0 ? (
+            <div className="log-pickup-search-option" style={{ color: 'var(--text-3)', cursor: 'default' }}>
+              Aucun chauffeur / coursier
+            </div>
+          ) : (
+            filtered.map((o) => {
+              const active = o.name === value || o.label === value;
+              return (
+                <button
+                  key={o.id}
+                  type="button"
+                  role="option"
+                  aria-selected={active}
+                  className={`log-pickup-search-option${active ? ' is-active' : ''}`}
+                  onMouseDown={(e) => e.preventDefault()}
+                  onClick={() => {
+                    onChange(o.name);
+                    setOpen(false);
+                  }}
+                >
+                  {o.label}
+                </button>
+              );
+            })
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default function SuiviReceptions() {
@@ -36,12 +173,13 @@ export default function SuiviReceptions() {
   const [recupRow, setRecupRow] = useState(null);
   const [recupForm, setRecupForm] = useState({ chauffeur: '', vehicule: '', date_recuperation: todayISO() });
   const [recupErrors, setRecupErrors] = useState({});
+  const [drivers, setDrivers] = useState([]);
+  const [vehicles, setVehicles] = useState([]);
 
   const load = useCallback(async ({ sync = true } = {}) => {
     setLoading(true);
     setError('');
     try {
-      // Afficher d’abord la liste — ne pas bloquer sur le backfill OP
       setRows(await listDemandesRecuperationAchats());
     } catch (e) {
       const msg = e?.message || String(e);
@@ -74,11 +212,35 @@ export default function SuiviReceptions() {
 
   useEffect(() => { load(); }, [load]);
 
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const [emps, vehs] = await Promise.all([
+          listEmployees().catch(() => []),
+          listVehicles().catch(() => []),
+        ]);
+        if (cancelled) return;
+        setDrivers(buildDriverOptions(emps));
+        setVehicles((vehs || []).filter(isSelectableTripVehicle));
+      } catch {
+        if (!cancelled) {
+          setDrivers([]);
+          setVehicles([]);
+        }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  /** 10 dernières demandes (déjà triées created_at desc). */
+  const recent = useMemo(() => (rows || []).slice(0, LAST_N), [rows]);
+
   const filtered = useMemo(
-    () => filterDemandesRecuperation(rows, { search, statut: filterStatut }),
-    [rows, search, filterStatut],
+    () => filterDemandesRecuperation(recent, { search, statut: filterStatut }),
+    [recent, search, filterStatut],
   );
-  const kpis = useMemo(() => computeDemandesRecuperationKpis(rows), [rows]);
+  const kpis = useMemo(() => computeDemandesRecuperationKpis(recent), [recent]);
 
   function openRecup(row) {
     setRecupRow(row);
@@ -100,7 +262,7 @@ export default function SuiviReceptions() {
     try {
       await markDemandeRecuperationDone(recupRow.id, recupForm);
       setRecupRow(null);
-      await load();
+      await load({ sync: false });
     } catch (err) {
       setError(err?.message || 'Erreur enregistrement.');
     } finally {
@@ -115,7 +277,7 @@ export default function SuiviReceptions() {
       <div className="page-header" style={{ marginBottom: 16 }}>
         <h1 className="page-title">Demande de récupération</h1>
         <p className="page-subtitle">
-          Demandes d&apos;achat déjà payées (OP Payé) — prêtes à récupérer. Le magasinier confirme avec chauffeur et véhicule.
+          10 dernières demandes d&apos;achat payées (OP Payé). Le magasinier confirme avec chauffeur/coursier et véhicule.
         </p>
       </div>
 
@@ -125,12 +287,12 @@ export default function SuiviReceptions() {
           padding: '10px 14px', marginBottom: 14, fontSize: '0.85rem', color: '#C62828',
         }}>
           {error}
-          <button type="button" className="btn btn-ghost btn-sm" onClick={load} style={{ marginLeft: 8 }}>Réessayer</button>
+          <button type="button" className="btn btn-ghost btn-sm" onClick={() => load()} style={{ marginLeft: 8 }}>Réessayer</button>
         </div>
       )}
 
       <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', marginBottom: 16 }}>
-        <KpiCard icon={<Package size={17} />} label="Total" value={loading ? '—' : kpis.total} color="grey" />
+        <KpiCard icon={<Package size={17} />} label="Total (10 dern.)" value={loading ? '—' : kpis.total} color="grey" />
         <KpiCard icon={<ClipboardCheck size={17} />} label="Prêtes à récupérer" value={loading ? '—' : kpis.aRecuperer} color="orange" />
         <KpiCard icon={<CheckCircle size={17} />} label="Récupérées" value={loading ? '—' : kpis.recuperees} color="green" />
       </div>
@@ -229,7 +391,7 @@ export default function SuiviReceptions() {
         open={!!recupRow}
         onClose={() => !saving && setRecupRow(null)}
         title="Confirmer la récupération"
-        width={440}
+        width={460}
       >
         {recupRow && (
           <form onSubmit={handleConfirmRecup} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -237,22 +399,29 @@ export default function SuiviReceptions() {
               <strong>{recupRow.purchase_request_ref || recupRow.ref}</strong>
               {recupRow.fournisseur ? ` — ${recupRow.fournisseur}` : ''}
             </p>
-            <FField label="Chauffeur" required>
-              <input
-                style={{ ...INPUT_STYLE, borderColor: recupErrors.chauffeur ? 'var(--red)' : undefined }}
+            <FField label="Chauffeur / Coursier" required>
+              <DriverSearchSelect
                 value={recupForm.chauffeur}
-                onChange={(e) => setRecupForm((p) => ({ ...p, chauffeur: e.target.value }))}
-                placeholder="Nom du chauffeur"
+                options={drivers}
+                invalid={!!recupErrors.chauffeur}
+                disabled={saving}
+                onChange={(name) => setRecupForm((p) => ({ ...p, chauffeur: name }))}
               />
               {recupErrors.chauffeur && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{recupErrors.chauffeur}</span>}
             </FField>
             <FField label="Véhicule" required>
-              <input
-                style={{ ...INPUT_STYLE, borderColor: recupErrors.vehicule ? 'var(--red)' : undefined }}
+              <select
+                style={{ ...SELECT_STYLE, borderColor: recupErrors.vehicule ? 'var(--red)' : undefined }}
                 value={recupForm.vehicule}
+                disabled={saving}
                 onChange={(e) => setRecupForm((p) => ({ ...p, vehicule: e.target.value }))}
-                placeholder="Immatricule / véhicule"
-              />
+              >
+                <option value="">— Sélectionner —</option>
+                {vehicles.map((v) => {
+                  const label = vehicleOptionLabel(v);
+                  return <option key={v.id} value={label}>{label}</option>;
+                })}
+              </select>
               {recupErrors.vehicule && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{recupErrors.vehicule}</span>}
             </FField>
             <FField label="Date récupération">
@@ -260,6 +429,7 @@ export default function SuiviReceptions() {
                 type="date"
                 style={INPUT_STYLE}
                 value={recupForm.date_recuperation}
+                disabled={saving}
                 onChange={(e) => setRecupForm((p) => ({ ...p, date_recuperation: e.target.value }))}
               />
             </FField>
