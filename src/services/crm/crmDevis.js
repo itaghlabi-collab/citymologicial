@@ -176,13 +176,20 @@ export async function generateCrmDevisReference() {
   const y = now.getFullYear();
   const m = String(now.getMonth() + 1).padStart(2, '0');
   const prefix = `PR-${y}-${m}-`;
-  const { count, error } = await getSupabase()
+  // MAX du suffixe (pas COUNT) — évite les collisions si des numéros manquent / ont été supprimés
+  const { data, error } = await getSupabase()
     .from(TABLE)
-    .select('*', { count: 'exact', head: true })
-    .like('reference', `${prefix}%`);
+    .select('reference')
+    .like('reference', `${prefix}%`)
+    .order('reference', { ascending: false })
+    .limit(100);
   if (error) throw error;
-  const seq = String((count || 0) + 1).padStart(4, '0');
-  return `${prefix}${seq}`;
+  let max = 0;
+  (data || []).forEach((row) => {
+    const match = String(row.reference || '').match(/PR-\d{4}-\d{2}-(\d+)/i);
+    if (match) max = Math.max(max, Number(match[1]) || 0);
+  });
+  return `${prefix}${String(max + 1).padStart(4, '0')}`;
 }
 
 async function fetchLignes(devisId) {
@@ -298,14 +305,26 @@ async function upsertLignes(devisId, lignes) {
 export async function createCrmDevis(form) {
   await getAuthUserId();
   const totals = computeTotals(form.lignes);
-  const reference = form.reference?.trim() || await generateCrmDevisReference();
-  const row = { ...toDevisRow({ ...form, reference }, totals), reference };
+  let reference = form.reference?.trim() || await generateCrmDevisReference();
+  let row = { ...toDevisRow({ ...form, reference }, totals), reference };
 
-  const { data, error } = await getSupabase()
+  let { data, error } = await getSupabase()
     .from(TABLE)
     .insert([row])
     .select('*')
     .single();
+
+  // Collision rare (formulaire ouvert avec une réf déjà prise, ou course) → 1 nouvel essai
+  if (error?.code === '23505' && /crm_devis|reference/i.test(error.message || '')) {
+    reference = await generateCrmDevisReference();
+    row = { ...toDevisRow({ ...form, reference }, totals), reference };
+    ({ data, error } = await getSupabase()
+      .from(TABLE)
+      .insert([row])
+      .select('*')
+      .single());
+  }
+
   if (error) {
     console.error('[CITYMO] crmDevis insert', error, row);
     throw error;
