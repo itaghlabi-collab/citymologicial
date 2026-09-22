@@ -1,24 +1,34 @@
 /**
- * achatDemandesRecuperation.js — Demandes de récupération Achats (simple).
- * Qui / quand / quoi + suivi statut. Ne touche pas Logistique ni OA check-list.
+ * achatDemandesRecuperation.js — Demandes de récupération Achats liées aux OP payés.
+ * OP Payé → « Prête à récupérer » + notif magasinier.
+ * Magasinier marque récupérée avec chauffeur + véhicule.
  */
 import { getSupabase } from '../../lib/supabase';
+import {
+  notifyInventaireUsers,
+  NOTIFICATION_TYPES,
+  NOTIFICATION_PRIORITIES,
+  moduleActionUrl,
+} from '../notifications/notifications';
+import { normalizePaymentOrderStatut } from '../finance/paymentOrders';
 
 const TABLE = 'achat_demandes_recuperation';
 
 export const DEMANDE_RECUP_STATUTS = {
-  A_RECUPERER: 'a_recuperer',
+  PRETE: 'prete_a_recuperer',
   RECUPEREE: 'recuperee',
   ANNULEE: 'annulee',
 };
 
 export const DEMANDE_RECUP_LABEL = {
-  a_recuperer: 'À récupérer',
+  prete_a_recuperer: 'Prête à récupérer',
+  a_recuperer: 'Prête à récupérer', // legacy
   recuperee: 'Récupérée',
   annulee: 'Annulée',
 };
 
 export const DEMANDE_RECUP_BADGE = {
+  prete_a_recuperer: 'badge-orange',
   a_recuperer: 'badge-orange',
   recuperee: 'badge-green',
   annulee: 'badge-grey',
@@ -34,9 +44,25 @@ async function getAuthUser() {
   return user;
 }
 
+function todayISO() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function buildQuoi(op) {
+  const parts = [
+    op.purchase_request_ref ? `DA ${op.purchase_request_ref}` : '',
+    op.purchase_oa_ref ? `OA ${op.purchase_oa_ref}` : '',
+    op.ref ? `OP ${op.ref}` : '',
+    op.fournisseur_lie || op.beneficiaire || '',
+    op.motif || '',
+  ].filter(Boolean);
+  return parts.join(' — ') || 'Récupération marchandise payée';
+}
+
 export function normalizeDemandeRecuperation(row) {
   if (!row) return null;
-  const statut = row.statut || DEMANDE_RECUP_STATUTS.A_RECUPERER;
+  let statut = row.statut || DEMANDE_RECUP_STATUTS.PRETE;
+  if (statut === 'a_recuperer') statut = DEMANDE_RECUP_STATUTS.PRETE;
   return {
     id: row.id,
     ref: row.ref || '',
@@ -45,6 +71,15 @@ export function normalizeDemandeRecuperation(row) {
     quoi: row.quoi || '',
     statut,
     statut_label: DEMANDE_RECUP_LABEL[statut] || statut,
+    payment_order_id: row.payment_order_id || '',
+    purchase_request_id: row.purchase_request_id || '',
+    purchase_request_ref: row.purchase_request_ref || '',
+    purchase_oa_ref: row.purchase_oa_ref || '',
+    fournisseur: row.fournisseur || '',
+    projet: row.projet || '',
+    chauffeur: row.chauffeur || '',
+    vehicule: row.vehicule || '',
+    date_recuperation: row.date_recuperation || '',
     created_by: row.created_by || '',
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -79,34 +114,42 @@ export async function listDemandesRecuperationAchats() {
   return (data || []).map(normalizeDemandeRecuperation);
 }
 
-export async function createDemandeRecuperationAchats(form) {
-  const user = await getAuthUser();
-  const qui = String(form.qui || '').trim();
-  const quand = String(form.quand || '').trim();
-  const quoi = String(form.quoi || '').trim();
-  if (!qui) {
-    const err = new Error('Indiquez qui récupère / demande.');
-    err.code = 'VALIDATION';
-    throw err;
+/** Crée (si besoin) une demande liée à un OP Achats payé. */
+export async function ensureDemandeFromPaidOp(op, { notify = false } = {}) {
+  if (!op?.id) return null;
+  if (!op.purchase_request_id) return null;
+  if (normalizePaymentOrderStatut(op.statut) !== 'Payé') return null;
+
+  const { data: existing, error: findErr } = await getSupabase()
+    .from(TABLE)
+    .select('*')
+    .eq('payment_order_id', op.id)
+    .maybeSingle();
+  if (findErr && !/42P01|does not exist/i.test(findErr.message || '')) throw findErr;
+  if (existing) {
+    return { demande: normalizeDemandeRecuperation(existing), created: false };
   }
-  if (!quand) {
-    const err = new Error('Indiquez la date (quand).');
-    err.code = 'VALIDATION';
-    throw err;
-  }
-  if (!quoi) {
-    const err = new Error('Indiquez quoi récupérer.');
-    err.code = 'VALIDATION';
-    throw err;
+
+  let userId = null;
+  try {
+    userId = (await getAuthUser()).id;
+  } catch {
+    userId = null;
   }
 
   const row = {
     ref: await generateRef(),
-    qui,
-    quand,
-    quoi,
-    statut: DEMANDE_RECUP_STATUTS.A_RECUPERER,
-    created_by: user.id,
+    qui: '',
+    quand: op.date_paiement || todayISO(),
+    quoi: buildQuoi(op),
+    statut: DEMANDE_RECUP_STATUTS.PRETE,
+    payment_order_id: op.id,
+    purchase_request_id: op.purchase_request_id,
+    purchase_request_ref: op.purchase_request_ref || '',
+    purchase_oa_ref: op.purchase_oa_ref || '',
+    fournisseur: op.fournisseur_lie || op.beneficiaire || '',
+    projet: '',
+    created_by: userId,
   };
 
   const { data, error } = await getSupabase()
@@ -114,20 +157,113 @@ export async function createDemandeRecuperationAchats(form) {
     .insert([row])
     .select('*')
     .single();
-  if (error) throw error;
-  return normalizeDemandeRecuperation(data);
+
+  if (error) {
+    // Course : une autre requête a déjà créé la ligne
+    if (error.code === '23505') {
+      const { data: again } = await getSupabase()
+        .from(TABLE)
+        .select('*')
+        .eq('payment_order_id', op.id)
+        .maybeSingle();
+      if (again) return { demande: normalizeDemandeRecuperation(again), created: false };
+    }
+    throw error;
+  }
+
+  const demande = normalizeDemandeRecuperation(data);
+  if (notify) {
+    try {
+      await notifyMagasinierRecuperation(demande, op);
+    } catch (err) {
+      console.warn('[CITYMO] notif magasinier récupération', err);
+    }
+  }
+  return { demande, created: true };
 }
 
-export async function updateDemandeRecuperationStatut(id, statut) {
+async function notifyMagasinierRecuperation(demande, op) {
+  const da = demande.purchase_request_ref || op?.purchase_request_ref || '—';
+  const opRef = op?.ref || demande.ref || '—';
+  return notifyInventaireUsers({
+    title: 'Prête à récupérer',
+    message: `Paiement validé (${opRef}) — DA ${da}. Ouvrez Demande de récupération pour confirmer (chauffeur + véhicule).`,
+    type: NOTIFICATION_TYPES.SYSTEM,
+    priority: NOTIFICATION_PRIORITIES.HIGH,
+    entityType: 'achat_demande_recuperation',
+    entityId: demande.id,
+    actionUrl: moduleActionUrl('suivi-receptions'),
+    submoduleCode: 'suivi-receptions',
+  });
+}
+
+/** Hook appelé quand un OP Achats passe à Payé. */
+export async function onAchatsPaymentOrderPaid(op) {
+  try {
+    return await ensureDemandeFromPaidOp(op, { notify: true });
+  } catch (err) {
+    console.warn('[CITYMO] ensureDemandeFromPaidOp', err);
+    return null;
+  }
+}
+
+/** Backfill : OP Achats déjà payés sans demande. */
+export async function syncPaidOpsToDemandesRecuperation() {
   await getAuthUser();
-  if (!Object.values(DEMANDE_RECUP_STATUTS).includes(statut)) {
-    const err = new Error('Statut invalide.');
+  const { data, error } = await getSupabase()
+    .from('payment_orders')
+    .select('*')
+    .not('purchase_request_id', 'is', null)
+    .order('created_at', { ascending: false })
+    .limit(200);
+  if (error) {
+    if (error.code === '42P01') return [];
+    throw error;
+  }
+  const created = [];
+  for (const row of data || []) {
+    const statut = normalizePaymentOrderStatut(row.statut);
+    if (statut !== 'Payé') continue;
+    const op = {
+      id: row.id,
+      ref: row.ref_ordre || row.ref || '',
+      statut: 'Payé',
+      purchase_request_id: row.purchase_request_id,
+      purchase_request_ref: row.purchase_request_ref || '',
+      purchase_oa_ref: row.purchase_oa_ref || '',
+      fournisseur_lie: row.fournisseur_lie || '',
+      beneficiaire: row.beneficiaire || '',
+      motif: row.motif || '',
+      date_paiement: row.date_paiement || '',
+    };
+    const result = await ensureDemandeFromPaidOp(op, { notify: false });
+    if (result?.created) created.push(result.demande);
+  }
+  return created;
+}
+
+export async function markDemandeRecuperationDone(id, { chauffeur, vehicule, date_recuperation } = {}) {
+  await getAuthUser();
+  const ch = String(chauffeur || '').trim();
+  const ve = String(vehicule || '').trim();
+  if (!ch) {
+    const err = new Error('Indiquez le chauffeur.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  if (!ve) {
+    const err = new Error('Indiquez le véhicule.');
     err.code = 'VALIDATION';
     throw err;
   }
   const { data, error } = await getSupabase()
     .from(TABLE)
-    .update({ statut })
+    .update({
+      statut: DEMANDE_RECUP_STATUTS.RECUPEREE,
+      chauffeur: ch,
+      vehicule: ve,
+      date_recuperation: date_recuperation || todayISO(),
+    })
     .eq('id', id)
     .select('*')
     .single();
@@ -144,18 +280,22 @@ export async function deleteDemandeRecuperationAchats(id) {
 export function filterDemandesRecuperation(rows, { search = '', statut = '' } = {}) {
   const q = search.trim().toLowerCase();
   return (rows || []).filter((r) => {
-    if (statut && r.statut !== statut) return false;
+    if (statut) {
+      const s = r.statut === 'a_recuperer' ? DEMANDE_RECUP_STATUTS.PRETE : r.statut;
+      if (s !== statut) return false;
+    }
     if (!q) return true;
-    const hay = `${r.ref} ${r.qui} ${r.quoi}`.toLowerCase();
+    const hay = `${r.ref} ${r.quoi} ${r.purchase_request_ref} ${r.purchase_oa_ref} ${r.fournisseur} ${r.chauffeur} ${r.vehicule}`.toLowerCase();
     return hay.includes(q);
   });
 }
 
 export function computeDemandesRecuperationKpis(rows) {
   const list = rows || [];
+  const isPrete = (r) => r.statut === DEMANDE_RECUP_STATUTS.PRETE || r.statut === 'a_recuperer';
   return {
     total: list.length,
-    aRecuperer: list.filter((r) => r.statut === DEMANDE_RECUP_STATUTS.A_RECUPERER).length,
+    aRecuperer: list.filter(isPrete).length,
     recuperees: list.filter((r) => r.statut === DEMANDE_RECUP_STATUTS.RECUPEREE).length,
     annulees: list.filter((r) => r.statut === DEMANDE_RECUP_STATUTS.ANNULEE).length,
   };

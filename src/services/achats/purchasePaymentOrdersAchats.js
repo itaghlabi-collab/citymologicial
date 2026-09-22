@@ -209,6 +209,12 @@ export async function markAchatsPaymentOrderPaid(id, userName) {
     });
     await notifyPaymentValidated(updated);
   }
+  try {
+    const { onAchatsPaymentOrderPaid } = await import('./achatDemandesRecuperation');
+    await onAchatsPaymentOrderPaid(updated);
+  } catch (err) {
+    console.warn('[CITYMO] demande récupération après OP payé', err);
+  }
   return updated;
 }
 

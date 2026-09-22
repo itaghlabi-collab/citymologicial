@@ -252,6 +252,14 @@ export async function updatePaymentOrder(id, form) {
   await syncPaymentOrderToTransaction(order);
   if (order.statut === 'Payé' && prevNorm !== 'Payé') {
     await syncPaymentOrderPaidOutcome(order);
+    if (order.purchase_request_id) {
+      try {
+        const { onAchatsPaymentOrderPaid } = await import('../achats/achatDemandesRecuperation');
+        await onAchatsPaymentOrderPaid(order);
+      } catch (err) {
+        console.warn('[CITYMO] demande récupération après OP payé (update)', err);
+      }
+    }
   }
   return order;
 }
@@ -317,6 +325,15 @@ export async function markPaymentOrderPaid(id, { valide_par, date_paiement } = {
   if (prev?.purchase_request_id) {
     const { notifyPaymentValidated } = await import('../notifications/purchaseWorkflowNotifications');
     await notifyPaymentValidated(order);
+    try {
+      const { onAchatsPaymentOrderPaid } = await import('../achats/achatDemandesRecuperation');
+      await onAchatsPaymentOrderPaid({
+        ...order,
+        purchase_request_id: prev.purchase_request_id || order.purchase_request_id,
+      });
+    } catch (err) {
+      console.warn('[CITYMO] demande récupération après OP payé (finance)', err);
+    }
   }
   return order;
 }

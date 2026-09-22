@@ -1,18 +1,16 @@
 /**
  * SuiviReceptions.jsx — Demande de récupération (Achats)
- * Création simple (qui / quand / quoi) + suivi statut.
- * Route inchangée : suivi-receptions. Ne touche pas Logistique.
+ * Source : OP Achats payés → « Prête à récupérer ».
+ * Magasinier confirme avec chauffeur + véhicule.
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ClipboardCheck, Plus, Search, Loader2, Trash2, CheckCircle, X, Package,
+  ClipboardCheck, Search, Loader2, CheckCircle, Package, Truck,
 } from 'lucide-react';
-import { useAuth } from '../../hooks/useAuth';
 import {
   listDemandesRecuperationAchats,
-  createDemandeRecuperationAchats,
-  updateDemandeRecuperationStatut,
-  deleteDemandeRecuperationAchats,
+  syncPaidOpsToDemandesRecuperation,
+  markDemandeRecuperationDone,
   filterDemandesRecuperation,
   computeDemandesRecuperationKpis,
   DEMANDE_RECUP_STATUTS,
@@ -20,7 +18,7 @@ import {
   DEMANDE_RECUP_BADGE,
 } from '../../services/achats/achatDemandesRecuperation';
 import {
-  INPUT_STYLE, SELECT_STYLE, TEXTAREA_STYLE,
+  INPUT_STYLE, SELECT_STYLE,
   KpiCard, EmptyState, FField, Modal,
 } from './shared.jsx';
 
@@ -28,32 +26,26 @@ function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function userLabel(user) {
-  return (user?.nom || user?.email || '').trim();
-}
-
-const EMPTY_FORM = () => ({
-  qui: '',
-  quand: todayISO(),
-  quoi: '',
-});
-
 export default function SuiviReceptions() {
-  const { user } = useAuth();
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [filterStatut, setFilterStatut] = useState('');
-  const [showModal, setShowModal] = useState(false);
-  const [form, setForm] = useState(EMPTY_FORM);
-  const [formErrors, setFormErrors] = useState({});
+  const [recupRow, setRecupRow] = useState(null);
+  const [recupForm, setRecupForm] = useState({ chauffeur: '', vehicule: '', date_recuperation: todayISO() });
+  const [recupErrors, setRecupErrors] = useState({});
 
   const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
+      try {
+        await syncPaidOpsToDemandesRecuperation();
+      } catch (syncErr) {
+        console.warn('[CITYMO] sync OP payés → récupération', syncErr);
+      }
       setRows(await listDemandesRecuperationAchats());
     } catch (e) {
       const msg = e?.message || String(e);
@@ -76,76 +68,43 @@ export default function SuiviReceptions() {
   );
   const kpis = useMemo(() => computeDemandesRecuperationKpis(rows), [rows]);
 
-  function openCreate() {
-    setForm({ ...EMPTY_FORM(), qui: userLabel(user) });
-    setFormErrors({});
-    setShowModal(true);
+  function openRecup(row) {
+    setRecupRow(row);
+    setRecupForm({ chauffeur: '', vehicule: '', date_recuperation: todayISO() });
+    setRecupErrors({});
   }
 
-  function validate() {
-    const e = {};
-    if (!String(form.qui || '').trim()) e.qui = 'Requis';
-    if (!String(form.quand || '').trim()) e.quand = 'Requis';
-    if (!String(form.quoi || '').trim()) e.quoi = 'Requis';
-    return e;
-  }
-
-  async function handleCreate(ev) {
+  async function handleConfirmRecup(ev) {
     ev.preventDefault();
-    const errs = validate();
-    if (Object.keys(errs).length) {
-      setFormErrors(errs);
+    const e = {};
+    if (!String(recupForm.chauffeur || '').trim()) e.chauffeur = 'Requis';
+    if (!String(recupForm.vehicule || '').trim()) e.vehicule = 'Requis';
+    if (Object.keys(e).length) {
+      setRecupErrors(e);
       return;
     }
     setSaving(true);
     setError('');
     try {
-      await createDemandeRecuperationAchats(form);
-      setShowModal(false);
+      await markDemandeRecuperationDone(recupRow.id, recupForm);
+      setRecupRow(null);
       await load();
-    } catch (e) {
-      setError(e?.message || 'Erreur création.');
+    } catch (err) {
+      setError(err?.message || 'Erreur enregistrement.');
     } finally {
       setSaving(false);
     }
   }
 
-  async function markRecuperee(row) {
-    if (!window.confirm(`Marquer ${row.ref} comme récupérée ?`)) return;
-    setSaving(true);
-    try {
-      await updateDemandeRecuperationStatut(row.id, DEMANDE_RECUP_STATUTS.RECUPEREE);
-      await load();
-    } catch (e) {
-      setError(e?.message || 'Erreur.');
-    } finally {
-      setSaving(false);
-    }
-  }
-
-  async function handleDelete(row) {
-    if (!window.confirm(`Supprimer la demande ${row.ref} ?`)) return;
-    setSaving(true);
-    try {
-      await deleteDemandeRecuperationAchats(row.id);
-      await load();
-    } catch (e) {
-      setError(e?.message || 'Erreur suppression.');
-    } finally {
-      setSaving(false);
-    }
-  }
+  const isPrete = (r) => r.statut === DEMANDE_RECUP_STATUTS.PRETE || r.statut === 'a_recuperer';
 
   return (
     <div className="animate-fade-in">
-      <div className="page-header flex-between" style={{ marginBottom: 16, flexWrap: 'wrap', gap: 12 }}>
-        <div>
-          <h1 className="page-title">Demande de récupération</h1>
-          <p className="page-subtitle">Créer une demande (qui / quand / quoi) puis suivre le statut.</p>
-        </div>
-        <button type="button" className="btn btn-primary" onClick={openCreate} disabled={loading || saving}>
-          <Plus size={15} /> Créer une demande
-        </button>
+      <div className="page-header" style={{ marginBottom: 16 }}>
+        <h1 className="page-title">Demande de récupération</h1>
+        <p className="page-subtitle">
+          Demandes d&apos;achat déjà payées (OP Payé) — prêtes à récupérer. Le magasinier confirme avec chauffeur et véhicule.
+        </p>
       </div>
 
       {error && (
@@ -160,7 +119,7 @@ export default function SuiviReceptions() {
 
       <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', marginBottom: 16 }}>
         <KpiCard icon={<Package size={17} />} label="Total" value={loading ? '—' : kpis.total} color="grey" />
-        <KpiCard icon={<ClipboardCheck size={17} />} label="À récupérer" value={loading ? '—' : kpis.aRecuperer} color="orange" />
+        <KpiCard icon={<ClipboardCheck size={17} />} label="Prêtes à récupérer" value={loading ? '—' : kpis.aRecuperer} color="orange" />
         <KpiCard icon={<CheckCircle size={17} />} label="Récupérées" value={loading ? '—' : kpis.recuperees} color="green" />
       </div>
 
@@ -171,15 +130,15 @@ export default function SuiviReceptions() {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Réf., qui, quoi..."
+              placeholder="DA, OA, fournisseur, chauffeur..."
               style={{ ...INPUT_STYLE, paddingLeft: 32 }}
             />
           </div>
-          <select value={filterStatut} onChange={(e) => setFilterStatut(e.target.value)} style={{ ...SELECT_STYLE, minWidth: 160 }}>
+          <select value={filterStatut} onChange={(e) => setFilterStatut(e.target.value)} style={{ ...SELECT_STYLE, minWidth: 180 }}>
             <option value="">Tous les statuts</option>
-            {Object.entries(DEMANDE_RECUP_LABEL).map(([k, label]) => (
-              <option key={k} value={k}>{label}</option>
-            ))}
+            <option value={DEMANDE_RECUP_STATUTS.PRETE}>{DEMANDE_RECUP_LABEL.prete_a_recuperer}</option>
+            <option value={DEMANDE_RECUP_STATUTS.RECUPEREE}>{DEMANDE_RECUP_LABEL.recuperee}</option>
+            <option value={DEMANDE_RECUP_STATUTS.ANNULEE}>{DEMANDE_RECUP_LABEL.annulee}</option>
           </select>
         </div>
       </div>
@@ -194,9 +153,7 @@ export default function SuiviReceptions() {
           <EmptyState
             icon={<ClipboardCheck size={22} />}
             title="Aucune demande"
-            sub="Créez une demande de récupération (qui, quand, quoi)."
-            action="Créer une demande"
-            onAction={openCreate}
+            sub="Les demandes d’achat apparaissent ici dès que l’ordre de paiement est Payé."
           />
         ) : (
           <div className="table-wrap">
@@ -204,10 +161,12 @@ export default function SuiviReceptions() {
               <thead>
                 <tr>
                   <th>Réf.</th>
-                  <th>Qui</th>
-                  <th>Quand</th>
+                  <th>DA</th>
+                  <th>OA</th>
+                  <th>Fournisseur</th>
                   <th>Quoi</th>
                   <th>Statut</th>
+                  <th>Chauffeur / Véhicule</th>
                   <th>Actions</th>
                 </tr>
               </thead>
@@ -215,37 +174,36 @@ export default function SuiviReceptions() {
                 {filtered.map((r) => (
                   <tr key={r.id}>
                     <td style={{ fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--red)' }}>{r.ref}</td>
-                    <td style={{ fontWeight: 600 }}>{r.qui}</td>
-                    <td style={{ whiteSpace: 'nowrap' }}>{r.quand || '—'}</td>
-                    <td style={{ maxWidth: 320 }}>{r.quoi}</td>
+                    <td style={{ fontWeight: 600 }}>{r.purchase_request_ref || '—'}</td>
+                    <td>{r.purchase_oa_ref || '—'}</td>
+                    <td>{r.fournisseur || '—'}</td>
+                    <td style={{ maxWidth: 280, fontSize: '0.84rem' }}>{r.quoi || '—'}</td>
                     <td>
                       <span className={`badge ${DEMANDE_RECUP_BADGE[r.statut] || 'badge-grey'}`}>
                         {r.statut_label}
                       </span>
                     </td>
+                    <td style={{ fontSize: '0.82rem' }}>
+                      {r.statut === DEMANDE_RECUP_STATUTS.RECUPEREE
+                        ? (
+                          <>
+                            <div>{r.chauffeur || '—'}</div>
+                            <div style={{ color: 'var(--text-3)' }}>{r.vehicule || '—'}</div>
+                          </>
+                          )
+                        : '—'}
+                    </td>
                     <td>
-                      <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
-                        {r.statut === DEMANDE_RECUP_STATUTS.A_RECUPERER && (
-                          <button
-                            type="button"
-                            className="btn btn-primary btn-sm"
-                            disabled={saving}
-                            onClick={() => markRecuperee(r)}
-                            title="Marquer récupérée"
-                          >
-                            <CheckCircle size={13} /> Récupérée
-                          </button>
-                        )}
+                      {isPrete(r) && (
                         <button
                           type="button"
-                          className="btn btn-ghost btn-sm"
+                          className="btn btn-primary btn-sm"
                           disabled={saving}
-                          onClick={() => handleDelete(r)}
-                          title="Supprimer"
+                          onClick={() => openRecup(r)}
                         >
-                          <Trash2 size={13} style={{ color: 'var(--red)' }} />
+                          <Truck size={13} /> Récupérée
                         </button>
-                      </div>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -255,46 +213,55 @@ export default function SuiviReceptions() {
         )}
       </div>
 
-      <Modal open={showModal} onClose={() => !saving && setShowModal(false)} title="Créer une demande de récupération" width={480}>
-        <form onSubmit={handleCreate} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          <FField label="Qui" required>
-            <input
-              style={{ ...INPUT_STYLE, borderColor: formErrors.qui ? 'var(--red)' : undefined }}
-              value={form.qui}
-              onChange={(e) => setForm((p) => ({ ...p, qui: e.target.value }))}
-              placeholder="Nom du demandeur / récupérateur"
-            />
-            {formErrors.qui && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{formErrors.qui}</span>}
-          </FField>
-          <FField label="Quand" required>
-            <input
-              type="date"
-              style={{ ...INPUT_STYLE, borderColor: formErrors.quand ? 'var(--red)' : undefined }}
-              value={form.quand}
-              onChange={(e) => setForm((p) => ({ ...p, quand: e.target.value }))}
-            />
-            {formErrors.quand && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{formErrors.quand}</span>}
-          </FField>
-          <FField label="Quoi" required>
-            <textarea
-              rows={4}
-              style={{ ...TEXTAREA_STYLE, borderColor: formErrors.quoi ? 'var(--red)' : undefined }}
-              value={form.quoi}
-              onChange={(e) => setForm((p) => ({ ...p, quoi: e.target.value }))}
-              placeholder="Ex. Matériel électrique OA-2026-279, 4 disques NAS..."
-            />
-            {formErrors.quoi && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{formErrors.quoi}</span>}
-          </FField>
-          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 4 }}>
-            <button type="button" className="btn btn-secondary" disabled={saving} onClick={() => setShowModal(false)}>
-              <X size={14} /> Annuler
-            </button>
-            <button type="submit" className="btn btn-primary" disabled={saving}>
-              {saving ? <Loader2 size={14} className="spin" /> : <Plus size={14} />}
-              Créer
-            </button>
-          </div>
-        </form>
+      <Modal
+        open={!!recupRow}
+        onClose={() => !saving && setRecupRow(null)}
+        title="Confirmer la récupération"
+        width={440}
+      >
+        {recupRow && (
+          <form onSubmit={handleConfirmRecup} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <p style={{ margin: 0, fontSize: '0.84rem', color: 'var(--text-2)' }}>
+              <strong>{recupRow.purchase_request_ref || recupRow.ref}</strong>
+              {recupRow.fournisseur ? ` — ${recupRow.fournisseur}` : ''}
+            </p>
+            <FField label="Chauffeur" required>
+              <input
+                style={{ ...INPUT_STYLE, borderColor: recupErrors.chauffeur ? 'var(--red)' : undefined }}
+                value={recupForm.chauffeur}
+                onChange={(e) => setRecupForm((p) => ({ ...p, chauffeur: e.target.value }))}
+                placeholder="Nom du chauffeur"
+              />
+              {recupErrors.chauffeur && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{recupErrors.chauffeur}</span>}
+            </FField>
+            <FField label="Véhicule" required>
+              <input
+                style={{ ...INPUT_STYLE, borderColor: recupErrors.vehicule ? 'var(--red)' : undefined }}
+                value={recupForm.vehicule}
+                onChange={(e) => setRecupForm((p) => ({ ...p, vehicule: e.target.value }))}
+                placeholder="Immatricule / véhicule"
+              />
+              {recupErrors.vehicule && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{recupErrors.vehicule}</span>}
+            </FField>
+            <FField label="Date récupération">
+              <input
+                type="date"
+                style={INPUT_STYLE}
+                value={recupForm.date_recuperation}
+                onChange={(e) => setRecupForm((p) => ({ ...p, date_recuperation: e.target.value }))}
+              />
+            </FField>
+            <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+              <button type="button" className="btn btn-secondary" disabled={saving} onClick={() => setRecupRow(null)}>
+                Annuler
+              </button>
+              <button type="submit" className="btn btn-primary" disabled={saving}>
+                {saving ? <Loader2 size={14} className="spin" /> : <CheckCircle size={14} />}
+                Valider récupération
+              </button>
+            </div>
+          </form>
+        )}
       </Modal>
     </div>
   );
