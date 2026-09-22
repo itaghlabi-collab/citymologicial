@@ -58,7 +58,7 @@ WHERE statut = 'recuperee';
 ALTER TABLE public.achat_demandes_recuperation DROP CONSTRAINT IF EXISTS achat_demandes_recuperation_statut_check;
 ALTER TABLE public.achat_demandes_recuperation
   ADD CONSTRAINT achat_demandes_recuperation_statut_check
-  CHECK (statut IN ('prete_a_recuperer', 'recuperee', 'annulee'));
+  CHECK (statut IN ('en_cours', 'prete_a_recuperer', 'recuperee', 'annulee'));
 
 CREATE UNIQUE INDEX IF NOT EXISTS idx_achat_dem_recup_payment_order
   ON public.achat_demandes_recuperation (payment_order_id)

@@ -169,6 +169,12 @@ export async function initiateAchatsPaymentOrder(id, userName) {
     });
   }
   await notifyPaymentInitiated(updated);
+  try {
+    const { onAchatsPaymentOrderInitiated } = await import('./achatDemandesRecuperation');
+    await onAchatsPaymentOrderInitiated(updated);
+  } catch (err) {
+    console.warn('[CITYMO] demande récupération après OP initié', err);
+  }
   return updated;
 }
 

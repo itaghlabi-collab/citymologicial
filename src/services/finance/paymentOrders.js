@@ -289,6 +289,14 @@ export async function initiatePaymentOrder(id, { prepare_par } = {}) {
   await syncPaymentOrderToTransaction(order);
   const { notifyPaymentInitiated } = await import('../notifications/purchaseWorkflowNotifications');
   await notifyPaymentInitiated(order);
+  if (order.purchase_request_id) {
+    try {
+      const { onAchatsPaymentOrderInitiated } = await import('../achats/achatDemandesRecuperation');
+      await onAchatsPaymentOrderInitiated(order);
+    } catch (err) {
+      console.warn('[CITYMO] demande récupération après OP initié (finance)', err);
+    }
+  }
   return order;
 }
 

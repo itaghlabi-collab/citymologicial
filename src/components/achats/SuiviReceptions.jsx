@@ -170,6 +170,7 @@ export default function SuiviReceptions() {
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [filterStatut, setFilterStatut] = useState('');
+  const [filterDate, setFilterDate] = useState('');
   const [recupRow, setRecupRow] = useState(null);
   const [recupForm, setRecupForm] = useState({ chauffeur: '', vehicule: '', date_recuperation: todayISO() });
   const [recupErrors, setRecupErrors] = useState({});
@@ -196,8 +197,8 @@ export default function SuiviReceptions() {
 
     if (!sync) return;
     try {
-      const created = await syncPaidOpsToDemandesRecuperation();
-      if (created?.length) {
+      const touched = await syncPaidOpsToDemandesRecuperation();
+      if (touched?.length) {
         setRows(await listDemandesRecuperationAchats());
       }
     } catch (syncErr) {
@@ -237,8 +238,8 @@ export default function SuiviReceptions() {
   const recent = useMemo(() => (rows || []).slice(0, LAST_N), [rows]);
 
   const filtered = useMemo(
-    () => filterDemandesRecuperation(recent, { search, statut: filterStatut }),
-    [recent, search, filterStatut],
+    () => filterDemandesRecuperation(recent, { search, statut: filterStatut, date: filterDate }),
+    [recent, search, filterStatut, filterDate],
   );
   const kpis = useMemo(() => computeDemandesRecuperationKpis(recent), [recent]);
 
@@ -277,7 +278,7 @@ export default function SuiviReceptions() {
       <div className="page-header" style={{ marginBottom: 16 }}>
         <h1 className="page-title">Demande de récupération</h1>
         <p className="page-subtitle">
-          10 dernières demandes d&apos;achat payées (OP Payé). Le magasinier confirme avec chauffeur/coursier et véhicule.
+          OP Initié = En cours · OP Payé = À récupérer. Le magasinier confirme avec chauffeur/coursier et véhicule.
         </p>
       </div>
 
@@ -291,29 +292,50 @@ export default function SuiviReceptions() {
         </div>
       )}
 
-      <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', marginBottom: 16 }}>
+      <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', marginBottom: 16 }}>
         <KpiCard icon={<Package size={17} />} label="Total (10 dern.)" value={loading ? '—' : kpis.total} color="grey" />
-        <KpiCard icon={<ClipboardCheck size={17} />} label="Prêtes à récupérer" value={loading ? '—' : kpis.aRecuperer} color="orange" />
+        <KpiCard icon={<ClipboardCheck size={17} />} label="En cours" value={loading ? '—' : kpis.enCours} color="blue" />
+        <KpiCard icon={<Truck size={17} />} label="À récupérer" value={loading ? '—' : kpis.aRecuperer} color="orange" />
         <KpiCard icon={<CheckCircle size={17} />} label="Récupérées" value={loading ? '—' : kpis.recuperees} color="green" />
       </div>
 
-      <div className="card" style={{ padding: '14px 16px', marginBottom: 12 }}>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-          <div style={{ position: 'relative', flex: '1 1 220px' }}>
-            <Search size={14} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
+      <div className="card" style={{ padding: '10px 12px', marginBottom: 12 }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div style={{ position: 'relative', flex: '1 1 180px', minWidth: 0, maxWidth: 280 }}>
+            <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="DA, OA, fournisseur, chauffeur..."
-              style={{ ...INPUT_STYLE, paddingLeft: 32 }}
+              placeholder="DA, OA, titre, fournisseur…"
+              style={{ ...INPUT_STYLE, paddingLeft: 30, minHeight: 36, paddingTop: 7, paddingBottom: 7, fontSize: '0.84rem' }}
             />
           </div>
-          <select value={filterStatut} onChange={(e) => setFilterStatut(e.target.value)} style={{ ...SELECT_STYLE, minWidth: 180 }}>
+          <select
+            value={filterStatut}
+            onChange={(e) => setFilterStatut(e.target.value)}
+            style={{ ...SELECT_STYLE, minWidth: 140, maxWidth: 180, minHeight: 36, padding: '7px 10px', fontSize: '0.84rem' }}
+          >
             <option value="">Tous les statuts</option>
+            <option value={DEMANDE_RECUP_STATUTS.EN_COURS}>{DEMANDE_RECUP_LABEL.en_cours}</option>
             <option value={DEMANDE_RECUP_STATUTS.PRETE}>{DEMANDE_RECUP_LABEL.prete_a_recuperer}</option>
             <option value={DEMANDE_RECUP_STATUTS.RECUPEREE}>{DEMANDE_RECUP_LABEL.recuperee}</option>
             <option value={DEMANDE_RECUP_STATUTS.ANNULEE}>{DEMANDE_RECUP_LABEL.annulee}</option>
           </select>
+          <input
+            type="date"
+            value={filterDate}
+            onChange={(e) => setFilterDate(e.target.value)}
+            style={{ ...INPUT_STYLE, minWidth: 140, maxWidth: 170, minHeight: 36, padding: '7px 10px', fontSize: '0.84rem', width: 'auto' }}
+          />
+          {(filterStatut || filterDate || search) && (
+            <button
+              type="button"
+              onClick={() => { setSearch(''); setFilterStatut(''); setFilterDate(''); }}
+              style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--red)', fontSize: '0.78rem', fontWeight: 600 }}
+            >
+              Effacer
+            </button>
+          )}
         </div>
       </div>
 
@@ -327,7 +349,7 @@ export default function SuiviReceptions() {
           <EmptyState
             icon={<ClipboardCheck size={22} />}
             title="Aucune demande"
-            sub="Les demandes d’achat apparaissent ici dès que l’ordre de paiement est Payé."
+            sub="Les demandes apparaissent dès qu’un ordre de paiement est Initié ou Payé."
           />
         ) : (
           <div className="table-wrap">

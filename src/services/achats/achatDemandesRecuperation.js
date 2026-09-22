@@ -1,6 +1,7 @@
 /**
- * achatDemandesRecuperation.js — Demandes de récupération Achats liées aux OP payés.
- * OP Payé → « Prête à récupérer » + notif magasinier.
+ * achatDemandesRecuperation.js — Demandes de récupération Achats liées aux OP.
+ * OP Initié → « En cours »
+ * OP Payé → « À récupérer » + notif magasinier
  * Magasinier marque récupérée avec chauffeur + véhicule.
  */
 import { getSupabase } from '../../lib/supabase';
@@ -15,19 +16,22 @@ import { normalizePaymentOrderStatut } from '../finance/paymentOrders';
 const TABLE = 'achat_demandes_recuperation';
 
 export const DEMANDE_RECUP_STATUTS = {
+  EN_COURS: 'en_cours',
   PRETE: 'prete_a_recuperer',
   RECUPEREE: 'recuperee',
   ANNULEE: 'annulee',
 };
 
 export const DEMANDE_RECUP_LABEL = {
-  prete_a_recuperer: 'Prête à récupérer',
-  a_recuperer: 'Prête à récupérer', // legacy
+  en_cours: 'En cours',
+  prete_a_recuperer: 'À récupérer',
+  a_recuperer: 'À récupérer', // legacy
   recuperee: 'Récupérée',
   annulee: 'Annulée',
 };
 
 export const DEMANDE_RECUP_BADGE = {
+  en_cours: 'badge-blue',
   prete_a_recuperer: 'badge-orange',
   a_recuperer: 'badge-orange',
   recuperee: 'badge-green',
@@ -48,15 +52,29 @@ function todayISO() {
   return new Date().toISOString().slice(0, 10);
 }
 
-function buildQuoi(op) {
-  const parts = [
-    op.purchase_request_ref ? `DA ${op.purchase_request_ref}` : '',
-    op.purchase_oa_ref ? `OA ${op.purchase_oa_ref}` : '',
-    op.ref ? `OP ${op.ref}` : '',
-    op.fournisseur_lie || op.beneficiaire || '',
-    op.motif || '',
-  ].filter(Boolean);
-  return parts.join(' — ') || 'Récupération marchandise payée';
+function isMissingTableError(err) {
+  const msg = err?.message || String(err || '');
+  return err?.code === '42P01' || /does not exist|schema cache|achat_demandes_recuperation/i.test(msg);
+}
+
+/** Mappe le statut OP → statut demande récupération (null si hors scope). */
+export function recupStatutFromOpStatut(opStatut) {
+  const s = normalizePaymentOrderStatut(opStatut);
+  if (s === 'Payé') return DEMANDE_RECUP_STATUTS.PRETE;
+  if (s === 'Initié') return DEMANDE_RECUP_STATUTS.EN_COURS;
+  return null;
+}
+
+/** Titre de la demande d'achat uniquement. */
+async function resolvePurchaseRequestTitre(purchaseRequestId, fallback = '') {
+  if (!purchaseRequestId) return String(fallback || '').trim();
+  const { data, error } = await getSupabase()
+    .from('purchase_requests')
+    .select('titre')
+    .eq('id', purchaseRequestId)
+    .maybeSingle();
+  if (error || !data) return String(fallback || '').trim();
+  return String(data.titre || '').trim() || String(fallback || '').trim();
 }
 
 export function normalizeDemandeRecuperation(row) {
@@ -114,11 +132,16 @@ export async function listDemandesRecuperationAchats() {
   return (data || []).map(normalizeDemandeRecuperation);
 }
 
-/** Crée (si besoin) une demande liée à un OP Achats payé. */
-export async function ensureDemandeFromPaidOp(op, { notify = false } = {}) {
+/**
+ * Crée / met à jour une demande liée à un OP Achats.
+ * Initié → en_cours | Payé → prete_a_recuperer
+ */
+export async function ensureDemandeFromOp(op, { notify = false } = {}) {
   if (!op?.id) return null;
   if (!op.purchase_request_id) return null;
-  if (normalizePaymentOrderStatut(op.statut) !== 'Payé') return null;
+
+  const targetStatut = recupStatutFromOpStatut(op.statut);
+  if (!targetStatut) return null;
 
   const { data: existing, error: findErr } = await getSupabase()
     .from(TABLE)
@@ -129,8 +152,54 @@ export async function ensureDemandeFromPaidOp(op, { notify = false } = {}) {
     if (isMissingTableError(findErr)) return null;
     throw findErr;
   }
+
+  const titre = await resolvePurchaseRequestTitre(
+    op.purchase_request_id,
+    op.purchase_request_titre || op.titre || '',
+  );
+  const quoi = titre || '—';
+
+  // Mise à jour si déjà existante (ex. Initié → Payé, ou corriger le quoi)
   if (existing) {
-    return { demande: normalizeDemandeRecuperation(existing), created: false };
+    const cur = existing.statut === 'a_recuperer' ? DEMANDE_RECUP_STATUTS.PRETE : existing.statut;
+    // Ne pas rétrograder une récupérée
+    if (cur === DEMANDE_RECUP_STATUTS.RECUPEREE || cur === DEMANDE_RECUP_STATUTS.ANNULEE) {
+      return { demande: normalizeDemandeRecuperation(existing), created: false, updated: false };
+    }
+    const patch = {};
+    if (cur !== targetStatut) patch.statut = targetStatut;
+    if (quoi && existing.quoi !== quoi) patch.quoi = quoi;
+    if (op.purchase_request_ref && existing.purchase_request_ref !== op.purchase_request_ref) {
+      patch.purchase_request_ref = op.purchase_request_ref;
+    }
+    if (op.purchase_oa_ref && existing.purchase_oa_ref !== op.purchase_oa_ref) {
+      patch.purchase_oa_ref = op.purchase_oa_ref;
+    }
+    const four = op.fournisseur_lie || op.beneficiaire || '';
+    if (four && existing.fournisseur !== four) patch.fournisseur = four;
+
+    if (Object.keys(patch).length === 0) {
+      return { demande: normalizeDemandeRecuperation(existing), created: false, updated: false };
+    }
+
+    const { data: updated, error: updErr } = await getSupabase()
+      .from(TABLE)
+      .update(patch)
+      .eq('id', existing.id)
+      .select('*')
+      .single();
+    if (updErr) throw updErr;
+
+    const demande = normalizeDemandeRecuperation(updated);
+    // Notif uniquement au passage à « À récupérer »
+    if (notify && patch.statut === DEMANDE_RECUP_STATUTS.PRETE) {
+      try {
+        await notifyMagasinierRecuperation(demande, op);
+      } catch (err) {
+        console.warn('[CITYMO] notif magasinier récupération', err);
+      }
+    }
+    return { demande, created: false, updated: true };
   }
 
   let userId = null;
@@ -144,8 +213,8 @@ export async function ensureDemandeFromPaidOp(op, { notify = false } = {}) {
     ref: await generateRef(),
     qui: '',
     quand: op.date_paiement || todayISO(),
-    quoi: buildQuoi(op),
-    statut: DEMANDE_RECUP_STATUTS.PRETE,
+    quoi,
+    statut: targetStatut,
     payment_order_id: op.id,
     purchase_request_id: op.purchase_request_id,
     purchase_request_ref: op.purchase_request_ref || '',
@@ -162,35 +231,40 @@ export async function ensureDemandeFromPaidOp(op, { notify = false } = {}) {
     .single();
 
   if (error) {
-    // Course : une autre requête a déjà créé la ligne
     if (error.code === '23505') {
       const { data: again } = await getSupabase()
         .from(TABLE)
         .select('*')
         .eq('payment_order_id', op.id)
         .maybeSingle();
-      if (again) return { demande: normalizeDemandeRecuperation(again), created: false };
+      if (again) return { demande: normalizeDemandeRecuperation(again), created: false, updated: false };
     }
     throw error;
   }
 
   const demande = normalizeDemandeRecuperation(data);
-  if (notify) {
+  if (notify && targetStatut === DEMANDE_RECUP_STATUTS.PRETE) {
     try {
       await notifyMagasinierRecuperation(demande, op);
     } catch (err) {
       console.warn('[CITYMO] notif magasinier récupération', err);
     }
   }
-  return { demande, created: true };
+  return { demande, created: true, updated: false };
+}
+
+/** @deprecated alias — garder compat appels Payé */
+export async function ensureDemandeFromPaidOp(op, opts = {}) {
+  return ensureDemandeFromOp(op, opts);
 }
 
 async function notifyMagasinierRecuperation(demande, op) {
   const da = demande.purchase_request_ref || op?.purchase_request_ref || '—';
   const opRef = op?.ref || demande.ref || '—';
+  const titre = demande.quoi || '—';
   return notifyInventaireUsers({
-    title: 'Prête à récupérer',
-    message: `Paiement validé (${opRef}) — DA ${da}. Ouvrez Demande de récupération pour confirmer (chauffeur + véhicule).`,
+    title: 'À récupérer',
+    message: `Paiement validé (${opRef}) — DA ${da} : ${titre}. Confirmez chauffeur + véhicule.`,
     type: NOTIFICATION_TYPES.SYSTEM,
     priority: NOTIFICATION_PRIORITIES.HIGH,
     entityType: 'achat_demande_recuperation',
@@ -200,26 +274,45 @@ async function notifyMagasinierRecuperation(demande, op) {
   });
 }
 
-/** Hook appelé quand un OP Achats passe à Payé. */
+/** Hook : OP Achats → Payé. */
 export async function onAchatsPaymentOrderPaid(op) {
   try {
-    return await ensureDemandeFromPaidOp(op, { notify: true });
+    return await ensureDemandeFromOp({ ...op, statut: 'Payé' }, { notify: true });
   } catch (err) {
-    console.warn('[CITYMO] ensureDemandeFromPaidOp', err);
+    console.warn('[CITYMO] ensureDemandeFromOp (payé)', err);
     return null;
   }
 }
 
-function isMissingTableError(err) {
-  const msg = err?.message || String(err || '');
-  return err?.code === '42P01' || /does not exist|schema cache|achat_demandes_recuperation/i.test(msg);
+/** Hook : OP Achats → Initié. */
+export async function onAchatsPaymentOrderInitiated(op) {
+  try {
+    return await ensureDemandeFromOp({ ...op, statut: 'Initié' }, { notify: false });
+  } catch (err) {
+    console.warn('[CITYMO] ensureDemandeFromOp (initié)', err);
+    return null;
+  }
 }
 
-/** Backfill : OP Achats déjà payés sans demande (rapide, non bloquant pour l’UI). */
+function mapOpRow(row) {
+  return {
+    id: row.id,
+    ref: row.ref_ordre || row.ref || '',
+    statut: row.statut,
+    purchase_request_id: row.purchase_request_id,
+    purchase_request_ref: row.purchase_request_ref || '',
+    purchase_oa_ref: row.purchase_oa_ref || '',
+    fournisseur_lie: row.fournisseur_lie || '',
+    beneficiaire: row.beneficiaire || '',
+    motif: row.motif || '',
+    date_paiement: row.date_paiement || '',
+  };
+}
+
+/** Backfill : OP Initié / Payé (rapide, non bloquant pour l’UI). */
 export async function syncPaidOpsToDemandesRecuperation() {
   await getAuthUser();
 
-  // Probe table — si absente, sortir tout de suite
   const { error: probeErr } = await getSupabase().from(TABLE).select('id').limit(1);
   if (probeErr && isMissingTableError(probeErr)) {
     const err = new Error(probeErr.message || 'Table absente');
@@ -229,13 +322,13 @@ export async function syncPaidOpsToDemandesRecuperation() {
 
   const { data: existingRows, error: existingErr } = await getSupabase()
     .from(TABLE)
-    .select('payment_order_id')
+    .select('id, payment_order_id, statut, quoi')
     .not('payment_order_id', 'is', null);
   if (existingErr) {
     if (isMissingTableError(existingErr)) return [];
     throw existingErr;
   }
-  const already = new Set((existingRows || []).map((r) => r.payment_order_id).filter(Boolean));
+  const byOpId = new Map((existingRows || []).map((r) => [r.payment_order_id, r]));
 
   const { data, error } = await getSupabase()
     .from('payment_orders')
@@ -248,35 +341,21 @@ export async function syncPaidOpsToDemandesRecuperation() {
     throw error;
   }
 
-  const created = [];
+  const touched = [];
   for (const row of data || []) {
-    if (already.has(row.id)) continue;
     const statut = normalizePaymentOrderStatut(row.statut);
-    if (statut !== 'Payé') continue;
-    const op = {
-      id: row.id,
-      ref: row.ref_ordre || row.ref || '',
-      statut: 'Payé',
-      purchase_request_id: row.purchase_request_id,
-      purchase_request_ref: row.purchase_request_ref || '',
-      purchase_oa_ref: row.purchase_oa_ref || '',
-      fournisseur_lie: row.fournisseur_lie || '',
-      beneficiaire: row.beneficiaire || '',
-      motif: row.motif || '',
-      date_paiement: row.date_paiement || '',
-    };
+    if (statut !== 'Payé' && statut !== 'Initié') continue;
+    const op = mapOpRow(row);
     try {
-      const result = await ensureDemandeFromPaidOp(op, { notify: false });
-      if (result?.created) {
-        created.push(result.demande);
-        already.add(row.id);
-      }
+      const result = await ensureDemandeFromOp(op, { notify: false });
+      if (result?.created || result?.updated) touched.push(result.demande);
+      byOpId.set(row.id, result?.demande || byOpId.get(row.id));
     } catch (err) {
-      if (isMissingTableError(err)) return created;
+      if (isMissingTableError(err)) return touched;
       console.warn('[CITYMO] sync demande récupération OP', row.id, err);
     }
   }
-  return created;
+  return touched;
 }
 
 export async function markDemandeRecuperationDone(id, { chauffeur, vehicule, date_recuperation } = {}) {
@@ -314,12 +393,17 @@ export async function deleteDemandeRecuperationAchats(id) {
   if (error) throw error;
 }
 
-export function filterDemandesRecuperation(rows, { search = '', statut = '' } = {}) {
+export function filterDemandesRecuperation(rows, { search = '', statut = '', date = '' } = {}) {
   const q = search.trim().toLowerCase();
+  const d = String(date || '').slice(0, 10);
   return (rows || []).filter((r) => {
     if (statut) {
       const s = r.statut === 'a_recuperer' ? DEMANDE_RECUP_STATUTS.PRETE : r.statut;
       if (s !== statut) return false;
+    }
+    if (d) {
+      const rowDate = String(r.date_recuperation || r.quand || r.created_at || '').slice(0, 10);
+      if (rowDate !== d) return false;
     }
     if (!q) return true;
     const hay = `${r.ref} ${r.quoi} ${r.purchase_request_ref} ${r.purchase_oa_ref} ${r.fournisseur} ${r.chauffeur} ${r.vehicule}`.toLowerCase();
@@ -332,6 +416,7 @@ export function computeDemandesRecuperationKpis(rows) {
   const isPrete = (r) => r.statut === DEMANDE_RECUP_STATUTS.PRETE || r.statut === 'a_recuperer';
   return {
     total: list.length,
+    enCours: list.filter((r) => r.statut === DEMANDE_RECUP_STATUTS.EN_COURS).length,
     aRecuperer: list.filter(isPrete).length,
     recuperees: list.filter((r) => r.statut === DEMANDE_RECUP_STATUTS.RECUPEREE).length,
     annulees: list.filter((r) => r.statut === DEMANDE_RECUP_STATUTS.ANNULEE).length,
