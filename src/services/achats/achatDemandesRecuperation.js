@@ -71,16 +71,42 @@ export function recupStatutFromOpStatut(opStatut) {
   return null;
 }
 
-/** Titre de la demande d'achat uniquement. */
+/**
+ * Nettoie / extrait le titre DA et le force en MAJUSCULES.
+ * Si l’ancien format long « DA … — OA … — titre » est stocké, garde le dernier segment.
+ */
+export function formatQuoiTitre(raw) {
+  let s = String(raw || '').trim();
+  if (!s || s === '—') return '';
+  // Ancien buildQuoi : plusieurs segments séparés par —
+  if (s.includes('—') || s.includes(' - ')) {
+    const parts = s.split(/\s*[—–-]\s*/).map((p) => p.trim()).filter(Boolean);
+    // Ignore préfixes type « DA DA-2026-093 », « OA … », « OP … », « Achat »
+    const cleaned = parts.filter((p) => !/^(DA|OA|OP)\b/i.test(p) && !/^achat$/i.test(p));
+    s = (cleaned.length ? cleaned[cleaned.length - 1] : parts[parts.length - 1]) || s;
+  }
+  return s.trim().toLocaleUpperCase('fr-FR');
+}
+
+/** Titre de la demande d'achat uniquement (puis MAJUSCULES). */
 async function resolvePurchaseRequestTitre(purchaseRequestId, fallback = '') {
-  if (!purchaseRequestId) return String(fallback || '').trim();
-  const { data, error } = await getSupabase()
-    .from('purchase_requests')
-    .select('titre')
-    .eq('id', purchaseRequestId)
-    .maybeSingle();
-  if (error || !data) return String(fallback || '').trim();
-  return String(data.titre || '').trim() || String(fallback || '').trim();
+  let titre = '';
+  if (purchaseRequestId) {
+    const { data, error } = await getSupabase()
+      .from('purchase_requests')
+      .select('titre, payload')
+      .eq('id', purchaseRequestId)
+      .maybeSingle();
+    if (!error && data) {
+      titre = String(data.titre || '').trim();
+      if (!titre) {
+        const line0 = data.payload?.lines?.[0];
+        titre = String(line0?.designation || line0?.article_name || '').trim();
+      }
+    }
+  }
+  if (!titre) titre = String(fallback || '').trim();
+  return formatQuoiTitre(titre);
 }
 
 export function normalizeDemandeRecuperation(row) {
@@ -92,7 +118,8 @@ export function normalizeDemandeRecuperation(row) {
     ref: row.ref || '',
     qui: row.qui || '',
     quand: row.quand || '',
-    quoi: row.quoi || '',
+    // Toujours afficher le titre DA en majuscules (nettoie aussi l’ancien format long)
+    quoi: formatQuoiTitre(row.quoi) || '—',
     statut,
     statut_label: DEMANDE_RECUP_LABEL[statut] || statut,
     payment_order_id: row.payment_order_id || '',
@@ -161,20 +188,20 @@ export async function ensureDemandeFromOp(op, { notify = false } = {}) {
 
   const titre = await resolvePurchaseRequestTitre(
     op.purchase_request_id,
-    op.purchase_request_titre || op.titre || '',
+    op.purchase_request_titre || op.titre || existing?.quoi || '',
   );
-  const quoi = titre || '—';
+  const quoi = titre || formatQuoiTitre(existing?.quoi) || '—';
 
   // Mise à jour si déjà existante (ex. Initié → Payé, ou corriger le quoi)
   if (existing) {
     const cur = existing.statut === 'a_recuperer' ? DEMANDE_RECUP_STATUTS.PRETE : existing.statut;
-    // Ne pas rétrograder une récupérée
-    if (cur === DEMANDE_RECUP_STATUTS.RECUPEREE || cur === DEMANDE_RECUP_STATUTS.ANNULEE) {
-      return { demande: normalizeDemandeRecuperation(existing), created: false, updated: false };
-    }
     const patch = {};
-    if (cur !== targetStatut) patch.statut = targetStatut;
-    if (quoi && existing.quoi !== quoi) patch.quoi = quoi;
+    // Ne pas rétrograder une récupérée / annulée
+    if (cur !== DEMANDE_RECUP_STATUTS.RECUPEREE && cur !== DEMANDE_RECUP_STATUTS.ANNULEE) {
+      if (cur !== targetStatut) patch.statut = targetStatut;
+    }
+    // Toujours corriger le quoi (titre DA en majuscules)
+    if (quoi && formatQuoiTitre(existing.quoi) !== quoi) patch.quoi = quoi;
     if (op.purchase_request_ref && existing.purchase_request_ref !== op.purchase_request_ref) {
       patch.purchase_request_ref = op.purchase_request_ref;
     }
