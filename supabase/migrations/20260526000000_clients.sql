@@ -51,7 +51,8 @@ CREATE INDEX IF NOT EXISTS idx_clients_ice ON public.clients(ice);
 CREATE INDEX IF NOT EXISTS idx_clients_email ON public.clients(email);
 CREATE INDEX IF NOT EXISTS idx_clients_created_at ON public.clients(created_at DESC);
 
-CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_nom_unique ON public.clients (lower(trim(nom)));
+CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_nom_prenom_unique
+  ON public.clients (lower(trim(nom)), lower(trim(coalesce(prenom, ''))));
 CREATE UNIQUE INDEX IF NOT EXISTS idx_clients_ice_unique
   ON public.clients (ice) WHERE ice IS NOT NULL AND trim(ice) <> '';
 

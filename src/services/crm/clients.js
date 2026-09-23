@@ -49,12 +49,15 @@ export function clientDisplayName(c) {
 
 /** Form UI → DB row */
 export function toClientRow(form) {
+  const iceRaw = String(form.ice || '').trim();
+  // ICE placeholder (vide / que des 0) → null (évite faux doublons ICE)
+  const ice = !iceRaw || /^0+$/.test(iceRaw) ? null : iceRaw;
   return {
     nom: form.nom?.trim() || '',
     prenom: form.prenom?.trim() || null,
     email: form.email?.trim() || null,
     telephone: form.telephone?.trim() || null,
-    ice: form.ice?.trim() || null,
+    ice,
     responsable: form.responsable?.trim() || null,
     adresse: form.adresse?.trim() || null,
     ville: form.ville?.trim() || null,

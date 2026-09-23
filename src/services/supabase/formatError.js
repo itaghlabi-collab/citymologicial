@@ -9,7 +9,14 @@ export function formatSupabaseError(error, fallback = 'Une erreur est survenue.'
   const message = error.message || fallback;
 
   if (code === '23505') {
-    if (message.includes('clients')) return 'Ce client existe déjà (nom ou ICE en doublon).';
+    const detail = `${message} ${error.details || ''} ${error.hint || ''}`;
+    if (/idx_clients_ice|clients_ice|\(ice\)/i.test(detail)) {
+      return 'Cet ICE est déjà utilisé par un autre client.';
+    }
+    if (/idx_clients_nom_prenom|idx_clients_nom_unique|clients_nom/i.test(detail)) {
+      return 'Un client avec le même nom et prénom existe déjà.';
+    }
+    if (message.includes('clients')) return 'Ce client existe déjà (nom+prénom ou ICE en doublon).';
     if (message.includes('articles')) return 'Un article avec ce nom existe déjà.';
     if (message.includes('categories')) return 'Une catégorie avec ce nom ou slug existe déjà.';
     if (message.includes('crm_devis')) return 'Ce numéro de devis existe déjà.';
