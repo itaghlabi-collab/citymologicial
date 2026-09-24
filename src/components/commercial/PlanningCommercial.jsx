@@ -235,18 +235,18 @@ export default function PlanningCommercial() {
   const nbTerrain = stats.terrain;
 
   return (
-    <div className="animate-fade-in">
-      <div className="page-header flex-between">
+    <div className="animate-fade-in planning-commercial-page">
+      <div className="page-header flex-between planning-comm-header">
         <div>
           <h1 className="page-title">Planning Commercial</h1>
           <p className="page-subtitle">Rendez-vous structures et visites terrain</p>
         </div>
-        <div style={{ display: 'flex', gap: 8 }}>
+        <div className="planning-comm-actions">
           <button className="btn btn-ghost btn-sm" style={{ border: '1.5px solid #455A64', color: '#455A64', display: 'flex', alignItems: 'center', gap: 6, fontWeight: 700 }} onClick={() => openCreateRapide('')} disabled={loading || saving || !configured}>
-            <Zap size={14} /> Nouveau RDV
+            <Zap size={14} /> <span className="planning-comm-btn-label">Nouveau RDV</span>
           </button>
           <button className="btn btn-primary" style={{ display: 'flex', alignItems: 'center', gap: 6 }} onClick={() => openCreatePrevu('')} disabled={loading || saving || !configured}>
-            <Plus size={14} /> RDV prevu
+            <Plus size={14} /> <span className="planning-comm-btn-label">RDV prevu</span>
           </button>
         </div>
       </div>
@@ -265,42 +265,42 @@ export default function PlanningCommercial() {
       )}
 
       {/* Stats */}
-      <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(165px, 1fr))' }}>
+      <div className="stat-grid planning-comm-stats" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))' }}>
         <div className="stat-card"><div className="stat-icon blue"><CalendarRange size={18} /></div><div className="stat-body"><div className="stat-value">{loading ? '—' : nbPlanifie}</div><div className="stat-label">A venir</div></div></div>
         <div className="stat-card"><div className="stat-icon green"><CheckCircle size={18} /></div><div className="stat-body"><div className="stat-value">{loading ? '—' : nbRealise}</div><div className="stat-label">Realises</div></div></div>
-        <div className="stat-card"><div className="stat-icon"><Clock size={18} /></div><div className="stat-body"><div className="stat-value">{loading ? '—' : nbAujourdhui}</div><div className="stat-label">Aujourd'hui</div></div></div>
+        <div className="stat-card"><div className="stat-icon"><Clock size={18} /></div><div className="stat-body"><div className="stat-value">{loading ? '—' : nbAujourdhui}</div><div className="stat-label">Aujourd&apos;hui</div></div></div>
         <div className="stat-card"><div className="stat-icon" style={{ background: '#ECEFF1' }}><Zap size={18} style={{ color: '#455A64' }} /></div><div className="stat-body"><div className="stat-value">{loading ? '—' : nbTerrain}</div><div className="stat-label">Terrain</div></div></div>
         {nbStale > 0 && <div className="stat-card"><div className="stat-icon orange"><AlertCircle size={18} /></div><div className="stat-body"><div className="stat-value" style={{ color: '#E65100' }}>{nbStale}</div><div className="stat-label">En retard</div></div></div>}
       </div>
 
       {/* Legend */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 16, padding: '8px 16px', background: 'var(--surface)', borderRadius: 8, border: '1px solid var(--border)', marginBottom: 12, flexWrap: 'wrap' }}>
-        <span style={{ fontSize: '0.75rem', fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase' }}>Legende :</span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.8rem' }}>
-          <span style={{ width: 12, height: 12, borderRadius: 3, background: 'var(--red)', display: 'inline-block' }} /> RDV Prevu (pipeline CRM)
+      <div className="planning-comm-legend">
+        <span className="planning-comm-legend-label">Légende</span>
+        <span className="planning-comm-legend-item">
+          <span style={{ width: 10, height: 10, borderRadius: 2, background: 'var(--red)', display: 'inline-block' }} /> Prévu
         </span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: '0.8rem' }}>
-          <span style={{ width: 12, height: 12, borderRadius: 3, background: '#455A64', display: 'inline-block' }} /> RDV Terrain (rapide)
+        <span className="planning-comm-legend-item">
+          <span style={{ width: 10, height: 10, borderRadius: 2, background: '#455A64', display: 'inline-block' }} /> Terrain
         </span>
       </div>
 
-      {/* Filters + View toggle */}
-      <div className="card" style={{ marginBottom: 16 }}>
-        <div style={{ display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
-          <input placeholder="Rechercher..." value={search} onChange={e => setSearch(e.target.value)} style={{ ...IS(false), width: 200 }} />
-          <select value={filterStatut} onChange={e => setFilterStatut(e.target.value)} style={{ ...IS(false), width: 150 }}>
-            <option value="">Tous les statuts</option>
+      {/* Filters + View toggle — compact */}
+      <div className="card planning-comm-filters">
+        <div className="planning-comm-filter-row">
+          <input placeholder="Rechercher…" value={search} onChange={e => setSearch(e.target.value)} className="planning-comm-filter-search" style={IS(false)} />
+          <select value={filterStatut} onChange={e => setFilterStatut(e.target.value)} className="planning-comm-filter-ctrl" style={IS(false)}>
+            <option value="">Statuts</option>
             {PLANNING_STATUTS.map(s => <option key={s} value={s}>{PLANNING_STATUT_LABEL[s]}</option>)}
           </select>
-          <select value={filterRdvType} onChange={e => setFilterRdvType(e.target.value)} style={{ ...IS(false), width: 150 }}>
-            <option value="">Tous types RDV</option>
+          <select value={filterRdvType} onChange={e => setFilterRdvType(e.target.value)} className="planning-comm-filter-ctrl" style={IS(false)}>
+            <option value="">Types</option>
             <option value="prevu">Prevu</option>
             <option value="rapide">Terrain</option>
           </select>
-          <input type="date" value={filterDate} onChange={e => setFilterDate(e.target.value)} style={{ ...IS(false), width: 150 }} />
-          <div style={{ marginLeft: 'auto', display: 'flex', gap: 6 }}>
+          <input type="date" value={filterDate} onChange={e => setFilterDate(e.target.value)} className="planning-comm-filter-ctrl" style={IS(false)} />
+          <div className="planning-comm-view-toggle">
             {['month', 'list'].map(v => (
-              <button key={v} onClick={() => setView(v)} className={'btn ' + (view === v ? 'btn-primary' : 'btn-ghost btn-sm')} style={{ fontSize: '0.8rem' }}>
+              <button key={v} type="button" onClick={() => setView(v)} className={'btn ' + (view === v ? 'btn-primary' : 'btn-ghost btn-sm')} style={{ fontSize: '0.78rem', padding: '6px 10px' }}>
                 {v === 'month' ? 'Calendrier' : 'Liste'}
               </button>
             ))}
@@ -342,7 +342,7 @@ export default function PlanningCommercial() {
               const dayRdvs = rdvsForDay(d);
               const isToday = dateStr === todayStr;
               return (
-                <div key={i} onClick={() => setSelectedDay(selectedDay === d ? null : d)} style={{ minHeight: 72, background: isToday ? 'rgba(211,47,47,0.06)' : 'var(--bg)', borderRadius: 6, padding: '4px 6px', cursor: 'pointer', border: isToday ? '1.5px solid var(--red)' : '1.5px solid var(--border)', position: 'relative' }}>
+                <div key={i} className="planning-comm-cal-cell" onClick={() => setSelectedDay(selectedDay === d ? null : d)} style={{ minHeight: 72, background: isToday ? 'rgba(211,47,47,0.06)' : 'var(--bg)', borderRadius: 6, padding: '4px 6px', cursor: 'pointer', border: isToday ? '1.5px solid var(--red)' : '1.5px solid var(--border)', position: 'relative' }}>
                   <div style={{ fontWeight: isToday ? 800 : 600, fontSize: '0.8rem', color: isToday ? 'var(--red)' : 'var(--text)', marginBottom: 3 }}>{d}</div>
                   {dayRdvs.slice(0, 2).map((r, ri) => {
                     const ps = rdvPillStyle(r);
@@ -399,7 +399,7 @@ export default function PlanningCommercial() {
           )}
         </div>
       ) : (
-        <div className="card">
+        <div className="card planning-comm-list-card">
           <div className="card-title"><CalendarRange size={16} /> Tous les RDV ({filtered.length})</div>
           {loading ? (
             <div style={{ textAlign: 'center', padding: 32, color: 'var(--text-3)' }}>
@@ -413,7 +413,8 @@ export default function PlanningCommercial() {
               sub={rdvList.length === 0 ? "Planifiez un RDV prevu ou enregistrez une visite terrain via les boutons ci-dessus" : "Modifiez vos criteres de recherche"}
             />
           ) : (
-          <div className="table-wrap">
+          <>
+          <div className="table-wrap planning-comm-desktop-table">
             <table>
               <thead>
                 <tr><th>Titre / Contact</th><th>Type RDV</th><th>Date</th><th>Heure</th><th>Lieu</th><th>Statut</th><th>Actions</th></tr>
@@ -437,8 +438,8 @@ export default function PlanningCommercial() {
                     <td><span className={'badge ' + (PLANNING_STATUT_BADGE[r.statut] || 'badge-grey')}>{PLANNING_STATUT_LABEL[r.statut] || r.statut}</span></td>
                     <td>
                       <div style={{ display: 'flex', gap: 4 }}>
-                        <button className="btn btn-ghost btn-sm" onClick={() => openEdit(r)}><Edit2 size={13} /></button>
-                        <button className="btn btn-ghost btn-sm" style={{ color: 'var(--red)' }} onClick={() => handleDelete(r)}><Trash2 size={13} /></button>
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => openEdit(r)}><Edit2 size={13} /></button>
+                        <button type="button" className="btn btn-ghost btn-sm" style={{ color: 'var(--red)' }} onClick={() => handleDelete(r)}><Trash2 size={13} /></button>
                       </div>
                     </td>
                   </tr>
@@ -446,6 +447,36 @@ export default function PlanningCommercial() {
               </tbody>
             </table>
           </div>
+
+          {/* Mobile : 1 ligne par RDV */}
+          <ul className="planning-comm-mobile-list">
+            {filtered.map((r) => (
+              <li key={r.id} className="planning-comm-mobile-row">
+                <button type="button" className="planning-comm-mobile-main" onClick={() => openEdit(r)}>
+                  <span className="planning-comm-mobile-title">
+                    {isPlanningStale(r) && <AlertCircle size={12} style={{ color: '#E65100', flexShrink: 0 }} />}
+                    {rdvDisplayTitle(r)}
+                  </span>
+                  <span className="planning-comm-mobile-meta">
+                    {r.date}{r.heure ? ` · ${r.heure}` : ''}{r.lieu ? ` · ${r.lieu}` : ''}
+                  </span>
+                </button>
+                <span
+                  className={'badge planning-comm-mobile-type ' + (r.rdv_type === 'rapide' ? 'badge-grey' : 'badge-red')}
+                  style={{ background: r.rdv_type === 'rapide' ? '#455A64' : undefined, color: r.rdv_type === 'rapide' ? '#fff' : undefined }}
+                >
+                  {r.rdv_type === 'rapide' ? 'Terrain' : 'Prévu'}
+                </span>
+                <span className={`badge planning-comm-mobile-statut ${PLANNING_STATUT_BADGE[r.statut] || 'badge-grey'}`}>
+                  {PLANNING_STATUT_LABEL[r.statut] || r.statut}
+                </span>
+                <button type="button" className="btn btn-ghost btn-sm planning-comm-mobile-del" style={{ color: 'var(--red)' }} onClick={() => handleDelete(r)} aria-label="Supprimer">
+                  <Trash2 size={13} />
+                </button>
+              </li>
+            ))}
+          </ul>
+          </>
           )}
         </div>
       )}

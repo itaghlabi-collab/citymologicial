@@ -14598,3 +14598,81 @@ tbody tr:last-child td { border-bottom: none; }
     width: 36px;
   }
 }
+
+/* ===== Planning commercial — responsive compact ===== */
+.planning-comm-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.planning-comm-legend {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 6px 12px; margin-bottom: 10px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  font-size: 0.78rem; color: var(--text-2);
+}
+.planning-comm-legend-label {
+  font-size: 0.7rem; font-weight: 700; color: var(--text-3);
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.planning-comm-legend-item { display: inline-flex; align-items: center; gap: 5px; }
+.planning-comm-filters.card { padding: 8px 12px; margin-bottom: 12px; }
+.planning-comm-filter-row {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 8px; width: 100%; min-width: 0;
+}
+.planning-comm-filter-search { flex: 1 1 160px; min-width: 0; max-width: 240px; }
+.planning-comm-filter-ctrl { flex: 0 1 130px; min-width: 110px; max-width: 160px; width: auto !important; }
+.planning-comm-view-toggle { margin-left: auto; display: flex; gap: 4px; }
+.planning-comm-mobile-list { display: none; list-style: none; margin: 0; padding: 0; }
+.planning-comm-desktop-table { display: block; }
+
+@media (max-width: 768px) {
+  .planning-comm-header { flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+  .planning-comm-actions { width: 100%; }
+  .planning-comm-actions .btn { flex: 1 1 auto; justify-content: center; }
+  .planning-comm-stats {
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+    gap: 8px !important; margin-bottom: 8px !important;
+  }
+  .planning-comm-stats .stat-card { padding: 8px 10px; }
+  .planning-comm-stats .stat-value { font-size: 1.1rem; }
+  .planning-comm-stats .stat-label { font-size: 0.65rem; }
+  .planning-comm-legend { padding: 5px 10px; margin-bottom: 8px; gap: 8px; }
+  .planning-comm-filters.card { padding: 8px 10px !important; }
+  .planning-comm-filter-search { flex: 1 1 100%; max-width: none; }
+  .planning-comm-filter-ctrl { flex: 1 1 calc(50% - 4px); max-width: none; min-width: 0; }
+  .planning-comm-view-toggle { width: 100%; margin-left: 0; }
+  .planning-comm-view-toggle .btn { flex: 1; justify-content: center; }
+
+  .planning-comm-list-card.card { padding: 10px 0 0; overflow: hidden; }
+  .planning-comm-list-card .card-title { padding: 0 12px 8px; margin-bottom: 0; font-size: 0.88rem; }
+  .planning-comm-desktop-table { display: none !important; }
+  .planning-comm-mobile-list { display: block; }
+
+  .planning-comm-mobile-row {
+    display: flex; align-items: center; gap: 6px;
+    padding: 9px 12px; border-top: 1px solid var(--border); min-height: 48px;
+  }
+  .planning-comm-mobile-main {
+    flex: 1 1 auto; min-width: 0; text-align: left;
+    background: none; border: none; padding: 0; cursor: pointer;
+    display: flex; flex-direction: column; gap: 2px;
+    font: inherit; color: inherit;
+  }
+  .planning-comm-mobile-title {
+    display: flex; align-items: center; gap: 4px;
+    font-weight: 700; font-size: 0.84rem; line-height: 1.2;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .planning-comm-mobile-meta {
+    font-size: 0.72rem; color: var(--text-3);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .planning-comm-mobile-type,
+  .planning-comm-mobile-statut {
+    flex: 0 0 auto; font-size: 0.62rem !important; padding: 2px 6px !important; white-space: nowrap;
+  }
+  .planning-comm-mobile-del { flex: 0 0 auto; padding: 6px !important; }
+
+  /* Calendrier : cellules plus compactes */
+  .planning-commercial-page .card [style*="minHeight: 72"],
+  .planning-commercial-page .card [style*="min-height: 72"] { min-height: 52px !important; }
+}
+
+  .planning-comm-cal-cell { min-height: 52px !important; padding: 3px 4px !important; }
