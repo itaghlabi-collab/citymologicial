@@ -95,7 +95,9 @@ export async function createAchatsPaymentOrderFromAcquisition({
     userId,
     userName: PURCHASE_ASSIGNEE.label,
   });
-  await notifyPaymentOrderCreated(request, oa, op);
+  void notifyPaymentOrderCreated(request, oa, op).catch((err) => {
+    console.warn('[CITYMO] notif OP créé', err);
+  });
   return op;
 }
 

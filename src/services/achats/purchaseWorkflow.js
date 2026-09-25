@@ -580,45 +580,50 @@ async function validateGroupedSupplierQuote(request, quote, ctx) {
 
   const refsSummary = groupOrders.map((g) => `${g.oa_ref}/${g.op_ref}`).join(', ');
 
-  let updated = await patchRequest(
+  const updated = await patchRequest(
     request.id,
     {
-      statut: 'Devis validé',
+      statut: 'Ordre de paiement créé',
       selected_quote_id: quote.id,
+      acquisition_order_id: first.oa.id,
+      payment_order_id: first.op.id,
       payload: { ...request.payload, group_orders: groupOrders },
     },
     'Validation devis (groupé)',
-    `Fournisseur retenu : ${quote.supplier_name} — ${projectGroups.length} projet(s)`,
+    `Fournisseur retenu : ${quote.supplier_name} — ${projectGroups.length} projet(s) — ${refsSummary}`,
     ctx,
     refsSummary,
   );
 
-  updated = await patchRequest(
-    request.id,
-    {
-      statut: 'Ordre d\'achat créé',
-      acquisition_order_id: first.oa.id,
-    },
-    'Création ordres d\'achat',
-    `${projectGroups.length} OA : ${groupOrders.map((g) => g.oa_ref).join(', ')}`,
-    ctx,
-  );
-
-  updated = await patchRequest(
-    request.id,
-    {
-      statut: 'Ordre de paiement créé',
-      payment_order_id: first.op.id,
-    },
-    'Ordres de paiement créés',
-    `${projectGroups.length} OP : ${groupOrders.map((g) => g.op_ref).join(', ')}`,
-    ctx,
-  );
-
-  await notifyPurchaseSupplierValidated(updated, { quote, oa: first.oa, op: first.op });
-  for (const { oa } of created) {
-    await notifyOaCreated(updated, oa);
-  }
+  // Historique détaillé + notifs en arrière-plan (ne bloquent pas le bouton Valider)
+  void (async () => {
+    try {
+      await Promise.all([
+        appendPurchaseRequestHistory({
+          purchaseRequestId: request.id,
+          action: 'Création ordres d\'achat',
+          detail: `${projectGroups.length} OA : ${groupOrders.map((g) => g.oa_ref).join(', ')}`,
+          userId: ctx.user.id,
+          userName: ctx.userName,
+        }),
+        appendPurchaseRequestHistory({
+          purchaseRequestId: request.id,
+          action: 'Ordres de paiement créés',
+          detail: `${projectGroups.length} OP : ${groupOrders.map((g) => g.op_ref).join(', ')}`,
+          userId: ctx.user.id,
+          userName: ctx.userName,
+        }),
+      ]);
+    } catch (err) {
+      console.warn('[CITYMO] historique validation devis groupé', err);
+    }
+    try {
+      await notifyPurchaseSupplierValidated(updated, { quote, oa: first.oa, op: first.op });
+      await Promise.all(created.map(({ oa }) => notifyOaCreated(updated, oa)));
+    } catch (err) {
+      console.warn('[CITYMO] notifs validation devis groupé', err);
+    }
+  })();
 
   return { request: updated, quote, oa: first.oa, op: first.op, groupOrders, acquisitionOrders: created.map((c) => c.oa), paymentOrders: created.map((c) => c.op) };
 }
@@ -659,39 +664,50 @@ export async function validateSupplierQuote(requestId, quoteId) {
 
   await updateAcquisitionOrder(oa.id, { payment_order_id: op.id });
 
-  let updated = await patchRequest(
+  const updated = await patchRequest(
     requestId,
-    { statut: 'Devis validé', selected_quote_id: quoteId },
+    {
+      statut: 'Ordre de paiement créé',
+      selected_quote_id: quoteId,
+      acquisition_order_id: oa.id,
+      payment_order_id: op.id,
+    },
     'Validation devis',
-    `Fournisseur retenu : ${quote.supplier_name} — ${quote.ref_devis || 'sans réf.'}`,
+    `Fournisseur retenu : ${quote.supplier_name} — ${quote.ref_devis || 'sans réf.'} — OA ${oa.ref} / OP ${op.ref}`,
     ctx,
     `OA ${oa.ref} / OP ${op.ref}`,
   );
 
-  updated = await patchRequest(
-    requestId,
-    {
-      statut: 'Ordre d\'achat créé',
-      acquisition_order_id: oa.id,
-    },
-    'Création ordre d\'achat',
-    oa.ref,
-    ctx,
-  );
+  // Historique détaillé + notifs en arrière-plan (ne bloquent pas le bouton Valider)
+  void (async () => {
+    try {
+      await Promise.all([
+        appendPurchaseRequestHistory({
+          purchaseRequestId: requestId,
+          action: 'Création ordre d\'achat',
+          detail: oa.ref,
+          userId: ctx.user.id,
+          userName: ctx.userName,
+        }),
+        appendPurchaseRequestHistory({
+          purchaseRequestId: requestId,
+          action: 'Ordre de paiement créé',
+          detail: op.ref,
+          userId: ctx.user.id,
+          userName: ctx.userName,
+        }),
+      ]);
+    } catch (err) {
+      console.warn('[CITYMO] historique validation devis', err);
+    }
+    try {
+      await notifyPurchaseSupplierValidated(updated, { quote, oa, op });
+      await notifyOaCreated(updated, oa);
+    } catch (err) {
+      console.warn('[CITYMO] notifs validation devis', err);
+    }
+  })();
 
-  updated = await patchRequest(
-    requestId,
-    {
-      statut: 'Ordre de paiement créé',
-      payment_order_id: op.id,
-    },
-    'Ordre de paiement créé',
-    op.ref,
-    ctx,
-  );
-
-  await notifyPurchaseSupplierValidated(updated, { quote, oa, op });
-  await notifyOaCreated(updated, oa);
   return { request: updated, quote, oa, op };
 }
 

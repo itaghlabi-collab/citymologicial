@@ -241,8 +241,8 @@ export async function lockOtherQuotes(purchaseRequestId, selectedQuoteId) {
     .from(TABLE)
     .select('id, statut')
     .eq('purchase_request_id', purchaseRequestId);
-  for (const q of quotes || []) {
+  await Promise.all((quotes || []).map((q) => {
     const statut = q.id === selectedQuoteId ? QUOTE_STATUSES.RETENU : QUOTE_STATUSES.VERROUILLE;
-    await getSupabase().from(TABLE).update({ statut }).eq('id', q.id);
-  }
+    return getSupabase().from(TABLE).update({ statut }).eq('id', q.id);
+  }));
 }

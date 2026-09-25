@@ -579,10 +579,10 @@ export default function DemandeAchatDetail({
   const roleRef = useRef(null);
   roleRef.current = role;
 
-  const load = useCallback(async () => {
+  const load = useCallback(async ({ silent = false } = {}) => {
     if (!requestId) return null;
     const t0 = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
-    setLoading(true);
+    if (!silent) setLoading(true);
     setError('');
     try {
       const [data, r] = await Promise.all([
@@ -602,7 +602,7 @@ export default function DemandeAchatDetail({
       setError(err.message || 'Erreur chargement');
       return null;
     } finally {
-      setLoading(false);
+      if (!silent) setLoading(false);
     }
   }, [requestId, user, refreshKey]);
 
@@ -613,12 +613,12 @@ export default function DemandeAchatDetail({
   const quotes = bundle?.quotes || [];
   const history = bundle?.history || [];
 
-  async function runAction(fn) {
+  async function runAction(fn, { silentReload = true } = {}) {
     setSaving(true);
     setError('');
     try {
       await fn();
-      const data = await load();
+      const data = await load({ silent: silentReload });
       if (onRefresh) await onRefresh(data?.request);
     } catch (err) {
       setError(err.message || 'Erreur');
@@ -866,15 +866,32 @@ export default function DemandeAchatDetail({
                   if (!window.confirm('Supprimer ce devis ?')) return;
                   runAction(() => removeQuoteFromRequest(request.id, quoteId));
                 }}
-                onValidate={(quoteId) => runAction(async () => {
+                onValidate={async (quoteId) => {
                   if (!window.confirm('Valider ce devis ? OA et OP seront créés automatiquement.')) return;
-                  setValidatingId(quoteId);
-                  try {
-                    await validateSupplierQuote(request.id, quoteId);
-                  } finally {
-                    setValidatingId(null);
-                  }
-                })}
+                  await runAction(async () => {
+                    setValidatingId(quoteId);
+                    try {
+                      const result = await validateSupplierQuote(request.id, quoteId);
+                      if (result?.request) {
+                        setBundle((b) => (b ? {
+                          ...b,
+                          request: result.request,
+                          quotes: (b.quotes || []).map((q) => (
+                            q.id === quoteId
+                              ? { ...q, selected: true, verrouille: true, statut: 'Retenu' }
+                              : { ...q, selected: false, verrouille: true, statut: 'Verrouillé' }
+                          )),
+                          acquisitionOrder: result.oa || b.acquisitionOrder,
+                          paymentOrder: result.op || b.paymentOrder,
+                          acquisitionOrders: result.acquisitionOrders || (result.oa ? [result.oa] : b.acquisitionOrders),
+                          paymentOrders: result.paymentOrders || (result.op ? [result.op] : b.paymentOrders),
+                        } : b));
+                      }
+                    } finally {
+                      setValidatingId(null);
+                    }
+                  });
+                }}
               />
             </div>
           )}
