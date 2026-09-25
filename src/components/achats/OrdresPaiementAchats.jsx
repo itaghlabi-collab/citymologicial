@@ -205,17 +205,30 @@ export default function OrdresPaiementAchats() {
     setActionId(id);
     try {
       const userName = user?.user_metadata?.full_name || user?.email?.split('@')[0] || 'Utilisateur';
-      if (type === 'initiate') await initiateAchatsPaymentOrder(id, userName);
-      else if (type === 'validate') await initiateAchatsPaymentOrder(id, userName);
-      else if (type === 'paid') await markAchatsPaymentOrderPaid(id, userName);
-      else if (type === 'submit') await initiateAchatsPaymentOrder(id, userName);
-      else if (type === 'delete') await deleteAchatsPaymentOrder(id);
-      else if (type === 'update') await updateAchatsPaymentOrder(id, form);
-      await load();
-      if (detailId === id && type === 'delete') {
-        setDetailId(null);
-        setDetail(null);
-      } else if (detailId === id) await openDetail(id);
+      let updated = null;
+      if (type === 'initiate' || type === 'validate' || type === 'submit') {
+        updated = await initiateAchatsPaymentOrder(id, userName);
+      } else if (type === 'paid') {
+        updated = await markAchatsPaymentOrderPaid(id, userName);
+      } else if (type === 'delete') {
+        await deleteAchatsPaymentOrder(id);
+      } else if (type === 'update') {
+        updated = await updateAchatsPaymentOrder(id, form);
+      }
+
+      if (type === 'delete') {
+        setItems((prev) => prev.filter((o) => o.id !== id));
+        if (detailId === id) {
+          setDetailId(null);
+          setDetail(null);
+        }
+      } else if (updated) {
+        setItems((prev) => prev.map((o) => (o.id === id ? { ...o, ...updated } : o)));
+        if (detailId === id) setDetail((d) => (d ? { ...d, ...updated } : updated));
+      } else {
+        await load();
+        if (detailId === id) await openDetail(id);
+      }
     } catch (err) {
       setError(err.message);
     } finally {

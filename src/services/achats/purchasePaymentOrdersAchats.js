@@ -158,23 +158,38 @@ export async function initiateAchatsPaymentOrder(id, userName) {
     .single();
   if (error) throw error;
   const updated = normalizeAchatsPaymentOrder(data);
-  const { syncPaymentOrderToTransaction } = await import('../finance/financeTransactions');
-  await syncPaymentOrderToTransaction(updated);
-  if (op.purchase_request_id) {
-    await appendPurchaseRequestHistory({
-      purchaseRequestId: op.purchase_request_id,
-      action: 'Virement initié',
-      detail: updated.ref,
-      userName,
-    });
-  }
-  await notifyPaymentInitiated(updated);
-  try {
-    const { onAchatsPaymentOrderInitiated } = await import('./achatDemandesRecuperation');
-    await onAchatsPaymentOrderInitiated(updated);
-  } catch (err) {
-    console.warn('[CITYMO] demande récupération après OP initié', err);
-  }
+  // Side effects non bloquants : l’UI doit réagir dès le UPDATE statut.
+  void (async () => {
+    try {
+      const { syncPaymentOrderToTransaction } = await import('../finance/financeTransactions');
+      await syncPaymentOrderToTransaction(updated);
+    } catch (err) {
+      console.warn('[CITYMO] sync transaction après OP initié (achats)', err);
+    }
+    if (op.purchase_request_id) {
+      try {
+        await appendPurchaseRequestHistory({
+          purchaseRequestId: op.purchase_request_id,
+          action: 'Virement initié',
+          detail: updated.ref,
+          userName,
+        });
+      } catch (err) {
+        console.warn('[CITYMO] historique après OP initié', err);
+      }
+    }
+    try {
+      await notifyPaymentInitiated(updated);
+    } catch (err) {
+      console.warn('[CITYMO] notif OP initié (achats)', err);
+    }
+    try {
+      const { onAchatsPaymentOrderInitiated } = await import('./achatDemandesRecuperation');
+      await onAchatsPaymentOrderInitiated(updated);
+    } catch (err) {
+      console.warn('[CITYMO] demande récupération après OP initié', err);
+    }
+  })();
   return updated;
 }
 
@@ -203,24 +218,43 @@ export async function markAchatsPaymentOrderPaid(id, userName) {
     .single();
   if (error) throw error;
   const updated = normalizeAchatsPaymentOrder(data);
-  const { syncPaymentOrderToTransaction } = await import('../finance/financeTransactions');
-  await syncPaymentOrderToTransaction(updated);
-  await syncPaymentOrderPaidOutcome(updated);
-  if (op.purchase_request_id) {
-    await appendPurchaseRequestHistory({
-      purchaseRequestId: op.purchase_request_id,
-      action: 'Paiement validé',
-      detail: updated.ref,
-      userName,
-    });
-    await notifyPaymentValidated(updated);
-  }
-  try {
-    const { onAchatsPaymentOrderPaid } = await import('./achatDemandesRecuperation');
-    await onAchatsPaymentOrderPaid(updated);
-  } catch (err) {
-    console.warn('[CITYMO] demande récupération après OP payé', err);
-  }
+  // Side effects non bloquants : l’UI doit réagir dès le UPDATE statut.
+  void (async () => {
+    try {
+      const { syncPaymentOrderToTransaction } = await import('../finance/financeTransactions');
+      await syncPaymentOrderToTransaction(updated);
+    } catch (err) {
+      console.warn('[CITYMO] sync transaction après OP payé (achats)', err);
+    }
+    try {
+      await syncPaymentOrderPaidOutcome(updated);
+    } catch (err) {
+      console.warn('[CITYMO] sync outcome après OP payé (achats)', err);
+    }
+    if (op.purchase_request_id) {
+      try {
+        await appendPurchaseRequestHistory({
+          purchaseRequestId: op.purchase_request_id,
+          action: 'Paiement validé',
+          detail: updated.ref,
+          userName,
+        });
+      } catch (err) {
+        console.warn('[CITYMO] historique après OP payé', err);
+      }
+      try {
+        await notifyPaymentValidated(updated);
+      } catch (err) {
+        console.warn('[CITYMO] notif OP payé (achats)', err);
+      }
+    }
+    try {
+      const { onAchatsPaymentOrderPaid } = await import('./achatDemandesRecuperation');
+      await onAchatsPaymentOrderPaid(updated);
+    } catch (err) {
+      console.warn('[CITYMO] demande récupération après OP payé', err);
+    }
+  })();
   return updated;
 }
 

@@ -17,7 +17,7 @@ export function usePaymentOrders() {
   const [error, setError] = useState(null);
   const configured = isSupabaseConfigured();
 
-  const load = useCallback(async () => {
+  const load = useCallback(async ({ reconcileRefs = false } = {}) => {
     if (!configured) {
       setError('Supabase non configuré (.env)');
       setLoading(false);
@@ -26,7 +26,7 @@ export function usePaymentOrders() {
     setLoading(true);
     setError(null);
     try {
-      setRecords(await listPaymentOrders({ reconcileRefs: true }));
+      setRecords(await listPaymentOrders({ reconcileRefs }));
     } catch (err) {
       console.error('[CITYMO] usePaymentOrders', err);
       setError(formatSupabaseError(err, 'Erreur chargement ordres de paiement.'));
@@ -35,7 +35,7 @@ export function usePaymentOrders() {
     }
   }, [configured]);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => { load({ reconcileRefs: true }); }, [load]);
 
   async function save(form, id) {
     setSaving(true);
@@ -73,8 +73,8 @@ export function usePaymentOrders() {
     setSaving(true);
     setError(null);
     try {
-      await initiatePaymentOrder(id, opts);
-      await load();
+      const order = await initiatePaymentOrder(id, opts);
+      setRecords((prev) => prev.map((r) => (r.id === id ? { ...r, ...order } : r)));
       return { success: true };
     } catch (err) {
       const msg = formatSupabaseError(err, 'Erreur initiation du virement.');
@@ -89,8 +89,8 @@ export function usePaymentOrders() {
     setSaving(true);
     setError(null);
     try {
-      await markPaymentOrderPaid(id, opts);
-      await load();
+      const order = await markPaymentOrderPaid(id, opts);
+      setRecords((prev) => prev.map((r) => (r.id === id ? { ...r, ...order } : r)));
       return { success: true };
     } catch (err) {
       const msg = formatSupabaseError(err, 'Erreur validation du paiement.');

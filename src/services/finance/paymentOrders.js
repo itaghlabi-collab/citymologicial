@@ -286,17 +286,28 @@ export async function initiatePaymentOrder(id, { prepare_par } = {}) {
     .single();
   if (error) throw error;
   const order = normalizePaymentOrder(data);
-  await syncPaymentOrderToTransaction(order);
-  const { notifyPaymentInitiated } = await import('../notifications/purchaseWorkflowNotifications');
-  await notifyPaymentInitiated(order);
-  if (order.purchase_request_id) {
+  // Side effects non bloquants : l’UI doit réagir dès le UPDATE statut.
+  void (async () => {
     try {
-      const { onAchatsPaymentOrderInitiated } = await import('../achats/achatDemandesRecuperation');
-      await onAchatsPaymentOrderInitiated(order);
+      await syncPaymentOrderToTransaction(order);
     } catch (err) {
-      console.warn('[CITYMO] demande récupération après OP initié (finance)', err);
+      console.warn('[CITYMO] sync transaction après OP initié', err);
     }
-  }
+    try {
+      const { notifyPaymentInitiated } = await import('../notifications/purchaseWorkflowNotifications');
+      await notifyPaymentInitiated(order);
+    } catch (err) {
+      console.warn('[CITYMO] notif OP initié', err);
+    }
+    if (order.purchase_request_id) {
+      try {
+        const { onAchatsPaymentOrderInitiated } = await import('../achats/achatDemandesRecuperation');
+        await onAchatsPaymentOrderInitiated(order);
+      } catch (err) {
+        console.warn('[CITYMO] demande récupération après OP initié (finance)', err);
+      }
+    }
+  })();
   return order;
 }
 
@@ -328,21 +339,37 @@ export async function markPaymentOrderPaid(id, { valide_par, date_paiement } = {
     .single();
   if (error) throw error;
   const order = normalizePaymentOrder(data);
-  await syncPaymentOrderToTransaction(order);
-  await syncPaymentOrderPaidOutcome(order);
-  if (prev?.purchase_request_id) {
-    const { notifyPaymentValidated } = await import('../notifications/purchaseWorkflowNotifications');
-    await notifyPaymentValidated(order);
+  const purchaseRequestId = prev?.purchase_request_id || order.purchase_request_id;
+  // Side effects non bloquants : l’UI doit réagir dès le UPDATE statut.
+  void (async () => {
     try {
-      const { onAchatsPaymentOrderPaid } = await import('../achats/achatDemandesRecuperation');
-      await onAchatsPaymentOrderPaid({
-        ...order,
-        purchase_request_id: prev.purchase_request_id || order.purchase_request_id,
-      });
+      await syncPaymentOrderToTransaction(order);
     } catch (err) {
-      console.warn('[CITYMO] demande récupération après OP payé (finance)', err);
+      console.warn('[CITYMO] sync transaction après OP payé', err);
     }
-  }
+    try {
+      await syncPaymentOrderPaidOutcome(order);
+    } catch (err) {
+      console.warn('[CITYMO] sync outcome après OP payé', err);
+    }
+    if (purchaseRequestId) {
+      try {
+        const { notifyPaymentValidated } = await import('../notifications/purchaseWorkflowNotifications');
+        await notifyPaymentValidated(order);
+      } catch (err) {
+        console.warn('[CITYMO] notif OP payé', err);
+      }
+      try {
+        const { onAchatsPaymentOrderPaid } = await import('../achats/achatDemandesRecuperation');
+        await onAchatsPaymentOrderPaid({
+          ...order,
+          purchase_request_id: purchaseRequestId,
+        });
+      } catch (err) {
+        console.warn('[CITYMO] demande récupération après OP payé (finance)', err);
+      }
+    }
+  })();
   return order;
 }
 
