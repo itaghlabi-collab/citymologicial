@@ -483,7 +483,7 @@ export default function OrdresPaiement({ categories = [] }) {
                     </td>
                     <td data-label="Bénéficiaire">
                       <div>
-                        <div style={{ fontWeight: 600, fontSize: '0.87rem' }}>{o.beneficiaire}</div>
+                        <div style={{ fontWeight: 600, fontSize: '0.87rem', textTransform: 'uppercase' }}>{o.beneficiaire}</div>
                         {o.type_benef && <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>{o.type_benef}</div>}
                       </div>
                     </td>
