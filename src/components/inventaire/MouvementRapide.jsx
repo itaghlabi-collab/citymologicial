@@ -29,6 +29,7 @@ import {
   articleAllowedForMovementType,
   ARTICLE_CLEARED_FOR_SORTIE_HINT,
   ARTICLE_CLEARED_FOR_SORTIE_HINT_WITH_MATERIEL,
+  ARTICLE_CLEARED_FOR_TRANSFERT_HINT,
   SORTIE_CLEARED_HINT,
   ARTICLE_TYPE_CONSOMMABLE,
 } from '../../services/inventaire/articleMovementRules';
@@ -69,22 +70,22 @@ const TYPE_CONFIG = {
 const MOVEMENT_TYPES = ['Entrée', 'Transfert', 'Sortie'];
 
 function articleFilterHint(type, allowMaterielSortie = false) {
-  if (type === 'Sortie') {
-    return allowMaterielSortie
-      ? 'Consommables et matériels disponibles pour une sortie.'
-      : 'Seuls les consommables sont disponibles pour une sortie.';
-  }
-  if (type === 'Transfert' || type === 'Entrée') return 'Consommables, outils et matériels disponibles.';
+  if (allowMaterielSortie) return 'Consommables, outils et matériels disponibles.';
+  if (type === 'Sortie') return 'Seuls les consommables sont disponibles pour une sortie.';
+  if (type === 'Transfert') return 'Seuls les matériels et outils sont disponibles pour un transfert.';
+  if (type === 'Entrée') return 'Consommables, outils et matériels disponibles.';
   return '';
 }
 
 function emptyArticlesMessage(type, allowMaterielSortie = false) {
-  if (type === 'Sortie') {
-    return allowMaterielSortie
-      ? 'Aucun consommable ou matériel disponible pour une sortie de stock.'
-      : 'Aucun consommable disponible pour une sortie de stock.';
+  if (allowMaterielSortie) {
+    if (type === 'Sortie') return 'Aucun article disponible pour une sortie de stock.';
+    if (type === 'Transfert') return 'Aucun article disponible pour un transfert.';
+    if (type === 'Entrée') return 'Aucun article disponible pour une entrée en stock.';
+    return 'Aucun article disponible.';
   }
-  if (type === 'Transfert') return 'Aucun article disponible pour un transfert.';
+  if (type === 'Sortie') return 'Aucun consommable disponible pour une sortie de stock.';
+  if (type === 'Transfert') return 'Aucun matériel ou outil disponible pour un transfert.';
   if (type === 'Entrée') return 'Aucun article disponible pour une entrée en stock.';
   return 'Aucun article disponible.';
 }
@@ -264,7 +265,9 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
       setTypeHint(
         nextType === 'Sortie'
           ? sortieClearedHint(allowMaterielSortie)
-          : 'Cet article n’est pas disponible pour ce type de mouvement.',
+          : nextType === 'Transfert'
+            ? ARTICLE_CLEARED_FOR_TRANSFERT_HINT
+            : 'Cet article n’est pas disponible pour ce type de mouvement.',
       );
       setArticleStock(null);
       setForm((f) => ({
@@ -285,6 +288,7 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
     if (!art || (type && !articleAllowedForMovementType(art, type, movementOptions))) {
       clearSelectedArticle();
       if (type === 'Sortie') setTypeHint(sortieClearedHint(allowMaterielSortie));
+      else if (type === 'Transfert') setTypeHint(ARTICLE_CLEARED_FOR_TRANSFERT_HINT);
       return;
     }
     setSelectedArticle(art);
@@ -416,7 +420,9 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
     if (!type) return 'Sélectionnez un type de mouvement.';
     if (!form.article_id || !selectedArticle) return 'Sélectionnez un article.';
     if (!articleAllowedForMovementType(selectedArticle, type, movementOptions)) {
-      return type === 'Sortie' ? sortieClearedHint(allowMaterielSortie) : SORTIE_CLEARED_HINT;
+      if (type === 'Sortie') return sortieClearedHint(allowMaterielSortie);
+      if (type === 'Transfert') return ARTICLE_CLEARED_FOR_TRANSFERT_HINT;
+      return SORTIE_CLEARED_HINT;
     }
     if (!qty || qty <= 0) return 'La quantité doit être supérieure à 0.';
     if (!form.date_creation) return 'La date est requise.';
@@ -871,9 +877,11 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
                     placeholder="Tapez une lettre pour rechercher…"
                     emptyMessage={type === 'Sortie'
                       ? (allowMaterielSortie
-                        ? 'Aucun consommable ou matériel ne correspond à cette recherche.'
+                        ? 'Aucun article ne correspond à cette recherche.'
                         : 'Aucun consommable ne correspond à cette recherche.')
-                      : undefined}
+                      : type === 'Transfert' && !allowMaterielSortie
+                        ? 'Aucun matériel ou outil ne correspond à cette recherche.'
+                        : undefined}
                   />
                 </div>
               )}
