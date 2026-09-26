@@ -77,7 +77,8 @@ function toProjectRow(form) {
     date_debut: form.date_debut || null,
     date_fin_prevue: form.date_fin_prevue || null,
     statut: allowed.includes(statut) ? statut : 'brouillon',
-    responsable: (form.responsable || form.chef_projet || '').trim() || null,
+    // UI envoie chef_projet ; ne pas laisser un ancien `responsable` écraser le nouveau choix
+    responsable: (form.chef_projet || form.responsable || '').trim() || null,
     chef_chantier: form.chef_chantier?.trim() || null,
     budget_estime: Number(form.budget_approuve ?? form.budget_estime) || 0,
     budget_consomme: Number(form.budget_consomme) || 0,

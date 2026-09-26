@@ -345,10 +345,13 @@ function FormulaireProjet({ initial, onSave, onCancel, saving, clients = [] }) {
     const cp = employees.find((e) => String(e.id) === String(chefProjetId));
     const cc = employees.find((e) => String(e.id) === String(chefChantierId));
     const selectedDevis = crmDevisList.find((d) => String(d.id) === String(devisId));
+    const chefProjetLabel = cp ? employeeSelectLabel(cp) : '';
+    const chefChantierLabel = cc ? employeeSelectLabel(cc) : '';
     onSave({
       ...form,
-      chef_projet: cp ? employeeSelectLabel(cp) : '',
-      chef_chantier: cc ? employeeSelectLabel(cc) : '',
+      chef_projet: chefProjetLabel,
+      responsable: chefProjetLabel,
+      chef_chantier: chefChantierLabel,
       devis_lie: selectedDevis?.reference || form.devis_lie || '',
       devis_id: selectedDevis?.id || form.devis_id || '',
       client_nom: cl ? clientDisplayName(cl) : (form.client || '').trim(),
