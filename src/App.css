@@ -12612,6 +12612,61 @@ tbody tr:last-child td { border-bottom: none; }
   }
 }
 
+/* ── Annuaire Corps de métier (scoped) ─────────────────────────────────────── */
+.corps-metier-page .corps-metier-name,
+.corps-metier-page .achats-annuaire-card-name.corps-metier-name,
+.corps-metier-page .achats-fourn-card-name.corps-metier-name {
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+
+.corps-metier-page .corps-metier-trade,
+.corps-metier-page .achats-annuaire-cat.corps-metier-trade {
+  text-transform: uppercase;
+  color: #1565C0;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.corps-metier-page .corps-metier-liste-filters {
+  margin-bottom: 16px;
+}
+
+.corps-metier-page .corps-metier-filters,
+.corps-metier-page .corps-metier-liste-filters .achats-annuaire-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+@media (max-width: 768px) {
+  .corps-metier-page .corps-metier-filters,
+  .corps-metier-page .corps-metier-liste-filters .achats-annuaire-filters {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    align-items: stretch;
+  }
+
+  .corps-metier-page .corps-metier-filters select,
+  .corps-metier-page .corps-metier-liste-filters .achats-annuaire-filters select {
+    max-width: none;
+    width: 100%;
+    min-width: 0;
+  }
+
+  .corps-metier-page .corps-metier-filters .achats-annuaire-check,
+  .corps-metier-page .corps-metier-filters > .btn,
+  .corps-metier-page .corps-metier-liste-filters .achats-annuaire-filters > .btn {
+    grid-column: 1 / -1;
+  }
+
+  .corps-metier-page .corps-metier-card .achats-annuaire-actions {
+    flex-wrap: wrap;
+  }
+}
+
 .achats-module .achats-da-mobile,
 .achats-module .achats-quote-mobile {
   display: none;
