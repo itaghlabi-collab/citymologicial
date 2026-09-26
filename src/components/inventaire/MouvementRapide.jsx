@@ -700,7 +700,7 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
                             </span>
                           </td>
                           <td>
-                            <div style={{ fontSize: '0.82rem', fontWeight: 600 }}>{m.article_designation || '—'}</div>
+                            <div style={{ fontSize: '0.82rem', fontWeight: 600, textTransform: 'uppercase' }}>{m.article_designation || '—'}</div>
                             <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>{m.article_code}</div>
                           </td>
                           <td style={{ fontFamily: 'var(--font-head)', fontWeight: 700 }}>{m.quantite}</td>
@@ -739,7 +739,7 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
                           {m.type_mouvement}
                         </span>
                       </div>
-                      <div style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: 4 }}>{m.article_designation || '—'}</div>
+                      <div style={{ fontSize: '0.85rem', fontWeight: 600, marginBottom: 4, textTransform: 'uppercase' }}>{m.article_designation || '—'}</div>
                       <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--text-2)' }}>
                         <span>Qté: <strong>{m.quantite}</strong></span>
                         <span>{m.date_creation}</span>
