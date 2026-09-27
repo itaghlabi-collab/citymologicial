@@ -118,6 +118,37 @@ const EMPTY_DRAFT = () => ({
 });
 
 const DRAFT_COMMIT_DEDUP_MS = 800;
+const AUTOSAVE_MS = 700;
+
+function draftHasContent(d) {
+  if (!d) return false;
+  return !!(d.designation?.trim() || d.description?.trim() || d.article_id);
+}
+
+/** Sur sortie : on garde la ligne en cours même si la qté/PU n’est pas encore validée. */
+function forceCompletableDraft(d) {
+  if (!d) return d;
+  if (d.mode === 'titre' || d.mode === 'sous_titre') return d;
+  const qty = parseFrDecimal(d.quantite);
+  const prix = parseFrDecimal(d.prix_ht);
+  const remise = parseFrDecimal(d.remise);
+  return {
+    ...d,
+    quantite: (qty == null || qty <= 0) ? '1' : d.quantite,
+    prix_ht: (prix == null || prix < 0) ? '0' : d.prix_ht,
+    remise: (remise == null || remise < 0 || remise > 100) ? '0' : d.remise,
+  };
+}
+
+function mapSavedLignes(lignes, fallback) {
+  if (!lignes?.length) return fallback;
+  return lignes.map((l) => ({
+    ...EMPTY_LIGNE(),
+    ...l,
+    ephemeral: l.ephemeral ?? (l.type === 'article' && !l.article_id && !!l.designation?.trim()),
+    _id: l._id || `${Date.now()}-${Math.random()}`,
+  }));
+}
 
 const DEFAULT_CONDITIONS = [
   '• Les prix sont exprimés en MAD',
@@ -1050,6 +1081,25 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
   const lastDraftCommitRef = useRef({ key: '', at: 0 });
   /** Verrou synchrone : setSavingLocal(true) ne bloque le 2e clic qu'après re-render. */
   const saveInFlightRef = useRef(false);
+  const dirtyRef = useRef(false);
+  const formRef = useRef(form);
+  const draftRef = useRef(draft);
+  const editDraftRef = useRef(editDraft);
+  const editingIdxRef = useRef(editingIdx);
+  const articlesRef = useRef(articles);
+  const onSavedRef = useRef(onSaved);
+  const devisRef = useRef(devis);
+  const autosaveTimerRef = useRef(null);
+  const persistRef = useRef(async () => false);
+  const savePromiseRef = useRef(null);
+  const mountedRef = useRef(true);
+  formRef.current = form;
+  draftRef.current = draft;
+  editDraftRef.current = editDraft;
+  editingIdxRef.current = editingIdx;
+  articlesRef.current = articles;
+  onSavedRef.current = onSaved;
+  devisRef.current = devis;
   const isSaving = saving || savingLocal;
   const isPersisted = !!(devis?.id || form.id);
 
@@ -1083,12 +1133,156 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
     });
   }, [articles]);
 
-  function setField(k, v) { setForm((p) => ({ ...p, [k]: v })); }
+  function absorbPendingDrafts(baseForm, { force = false } = {}) {
+    const arts = articlesRef.current || [];
+    let lignes = [...(baseForm.lignes || [])];
+    let absorbed = false;
+    const eidx = editingIdxRef.current;
+    const ed = editDraftRef.current;
+    if (eidx != null && ed && (force ? draftHasContent(ed) : !validateDraftFields(ed))) {
+      const src = force ? forceCompletableDraft(ed) : ed;
+      if (force || !validateDraftFields(src)) {
+        const ligne = enrichLignesDescriptions([draftToLigne(src, arts)], arts)[0];
+        if (lignes[eidx]) {
+          lignes[eidx] = { ...ligne, _id: lignes[eidx]._id };
+          absorbed = true;
+        }
+      }
+    }
+    const d = draftRef.current;
+    if (d && (force ? draftHasContent(d) : !validateDraftFields(d) && draftHasContent(d))) {
+      const src = force ? forceCompletableDraft(d) : d;
+      if (force || !validateDraftFields(src)) {
+        const ligne = enrichLignesDescriptions([draftToLigne(src, arts)], arts)[0];
+        lignes.push(ligne);
+        absorbed = true;
+      }
+    }
+    return { form: absorbed ? { ...baseForm, lignes } : baseForm, absorbed };
+  }
+
+  function markDirty() {
+    dirtyRef.current = true;
+    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    autosaveTimerRef.current = setTimeout(() => {
+      persistRef.current({ reason: 'autosave' });
+    }, AUTOSAVE_MS);
+  }
+
+  function setField(k, v) {
+    markDirty();
+    setForm((p) => ({ ...p, [k]: v }));
+  }
+
+  async function persistDevis({ reason = 'autosave', toast = false, stayOnForm = true, requireFields = false } = {}) {
+    const absorbOnLeave = reason === 'leave' || reason === 'manual';
+    const { form: nextForm, absorbed } = absorbPendingDrafts(formRef.current, { force: absorbOnLeave });
+    if (absorbed) {
+      dirtyRef.current = true;
+      formRef.current = nextForm;
+      setForm(nextForm);
+      if (editingIdxRef.current != null) {
+        setEditingIdx(null);
+        setEditDraft(null);
+        setEditError('');
+      }
+      if (draftHasContent(draftRef.current)) {
+        setDraft(EMPTY_DRAFT());
+        setDraftError('');
+      }
+    }
+    if (!dirtyRef.current && reason !== 'manual') return true;
+    const persisted = !!(devisRef.current?.id || nextForm.id);
+    const hasIdentity = !!(nextForm.titre?.trim() || nextForm.client_id || (nextForm.lignes || []).length);
+    if (requireFields || reason === 'autosave') {
+      const errs = {};
+      if (!nextForm.titre?.trim()) errs.titre = 'Requis';
+      if (!nextForm.client_id) errs.client_id = 'Requis';
+      if (Object.keys(errs).length) {
+        if (requireFields) setErrors(errs);
+        return false;
+      }
+    } else if (!persisted && !hasIdentity) {
+      dirtyRef.current = false;
+      return true;
+    }
+    if (savePromiseRef.current) {
+      try { await savePromiseRef.current; } catch { /* relance ci-dessous */ }
+      if (!dirtyRef.current && reason !== 'manual') return true;
+    }
+    setApiError('');
+    saveInFlightRef.current = true;
+    if (reason !== 'autosave') setSavingLocal(true);
+    const payload = {
+      ...nextForm,
+      lignes: enrichLignesDescriptions(nextForm.lignes, articlesRef.current || []),
+    };
+    const run = (async () => {
+      const result = await onSavedRef.current(payload, !!(payload.id || devisRef.current?.id), { stayOnForm });
+      if (result && result.success === false) {
+        if (mountedRef.current) setApiError(result.error || "Erreur lors de l'enregistrement.");
+        return false;
+      }
+      if (result?.data) {
+        const saved = result.data;
+        const merged = {
+          ...formRef.current,
+          ...saved,
+          lignes: mapSavedLignes(saved.lignes, formRef.current.lignes),
+        };
+        formRef.current = merged;
+        if (mountedRef.current) setForm(merged);
+      }
+      dirtyRef.current = false;
+      if (toast && mountedRef.current) {
+        setSaveToast('Devis enregistré');
+        setTimeout(() => setSaveToast(''), 3000);
+      }
+      return true;
+    })();
+    savePromiseRef.current = run;
+    try {
+      return await run;
+    } catch (err) {
+      if (mountedRef.current) setApiError(err.message || "Erreur lors de l'enregistrement.");
+      return false;
+    } finally {
+      if (savePromiseRef.current === run) savePromiseRef.current = null;
+      saveInFlightRef.current = false;
+      setSavingLocal(false);
+    }
+  }
+  persistRef.current = persistDevis;
+
+  useEffect(() => {
+    mountedRef.current = true;
+    const flush = () => { persistRef.current({ reason: 'leave' }); };
+    const onVisibility = () => {
+      if (document.visibilityState === 'hidden') flush();
+    };
+    window.addEventListener('pagehide', flush);
+    document.addEventListener('visibilitychange', onVisibility);
+    return () => {
+      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+      window.removeEventListener('pagehide', flush);
+      document.removeEventListener('visibilitychange', onVisibility);
+      flush();
+      mountedRef.current = false;
+    };
+  }, []);
+
+  async function leaveDevis() {
+    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    const ok = await persistDevis({ reason: 'leave', stayOnForm: true });
+    if (!ok && dirtyRef.current) return;
+    onBack();
+  }
 
   const selectedClient = clients.find((c) => String(c.id) === String(form.client_id));
   const formWithClients = { ...form, _clients: clients };
 
   function deleteLigne(idx) {
+    markDirty();
     setForm((p) => ({ ...p, lignes: p.lignes.filter((_, i) => i !== idx) }));
     if (editingIdx === idx) {
       setEditingIdx(null);
@@ -1100,6 +1294,7 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
   }
 
   function duplicateLigne(idx) {
+    markDirty();
     setForm((p) => {
       const ls = [...p.lignes];
       ls.splice(idx + 1, 0, { ...ls[idx], _id: Date.now() + Math.random() });
@@ -1221,6 +1416,7 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
     const err = validateDraftFields(editDraft);
     if (err) { setEditError(err); return; }
     const ligne = enrichLignesDescriptions([draftToLigne(editDraft, articles)], articles)[0];
+    markDirty();
     setForm((p) => {
       const ls = [...p.lignes];
       ls[editingIdx] = { ...ligne, _id: ls[editingIdx]._id };
@@ -1242,12 +1438,14 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
     }
     lastDraftCommitRef.current = { key, at: now };
     const ligne = enrichLignesDescriptions([draftToLigne(draft, articles)], articles)[0];
+    markDirty();
     setForm((p) => ({ ...p, lignes: [...p.lignes, ligne] }));
     resetDraft();
   }
 
   function reorderLignes(from, to) {
     if (from == null || to == null || from === to) return;
+    markDirty();
     setForm((p) => {
       const ls = [...p.lignes];
       const [item] = ls.splice(from, 1);
@@ -1301,84 +1499,17 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
 
   let articleLineNum = 0;
 
-  function validate() {
-    const e = {};
-    if (!form.titre?.trim()) e.titre = 'Requis';
-    if (!form.client_id) e.client_id = 'Requis';
-    return e;
-  }
-
   async function handleSave(e) {
     e.preventDefault();
-    if (saveInFlightRef.current) return;
-    setApiError('');
-    const errs = validate();
-    if (Object.keys(errs).length) { setErrors(errs); return; }
-    saveInFlightRef.current = true;
-    setSavingLocal(true);
-    try {
-      const payload = {
-        ...form,
-        total_ht: totalHT,
-        total_tva: totalTVA,
-        total_ttc: totalTTC,
-        lignes: enrichLignesDescriptions(form.lignes, articles),
-      };
-      const result = await onSaved(payload, isPersisted, { stayOnForm: false });
-      if (result && result.success === false) {
-        setApiError(result.error || "Erreur lors de l'enregistrement.");
-      }
-    } catch (err) {
-      setApiError(err.message || "Erreur lors de l'enregistrement.");
-    } finally {
-      saveInFlightRef.current = false;
-      setSavingLocal(false);
-    }
+    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    dirtyRef.current = true;
+    await persistDevis({ reason: 'manual', toast: false, stayOnForm: false, requireFields: true });
   }
 
   async function handleEnregistrer() {
-    if (saveInFlightRef.current) return;
-    setApiError('');
-    const errs = validate();
-    if (Object.keys(errs).length) { setErrors(errs); return; }
-    saveInFlightRef.current = true;
-    setSavingLocal(true);
-    try {
-      const payload = {
-        ...form,
-        total_ht: totalHT,
-        total_tva: totalTVA,
-        total_ttc: totalTTC,
-        lignes: enrichLignesDescriptions(form.lignes, articles),
-      };
-      const result = await onSaved(payload, isPersisted, { stayOnForm: true });
-      if (result && result.success === false) {
-        setApiError(result.error || "Erreur lors de l'enregistrement.");
-        return;
-      }
-      if (result?.data) {
-        const saved = result.data;
-        setForm((p) => ({
-          ...p,
-          ...saved,
-          lignes: saved.lignes?.length
-            ? saved.lignes.map((l) => ({
-              ...EMPTY_LIGNE(),
-              ...l,
-              ephemeral: l.ephemeral ?? (l.type === 'article' && !l.article_id && !!l.designation?.trim()),
-              _id: l._id || `${Date.now()}-${Math.random()}`,
-            }))
-            : p.lignes,
-        }));
-      }
-      setSaveToast('Devis enregistré');
-      setTimeout(() => setSaveToast(''), 3000);
-    } catch (err) {
-      setApiError(err.message || "Erreur lors de l'enregistrement.");
-    } finally {
-      saveInFlightRef.current = false;
-      setSavingLocal(false);
-    }
+    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
+    dirtyRef.current = true;
+    await persistDevis({ reason: 'manual', toast: true, stayOnForm: true, requireFields: true });
   }
 
   async function handlePdf() {
@@ -1441,7 +1572,7 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
         }
       `}</style>
 
-      <button type="button" className="crm-back-btn" onClick={onBack} aria-label="Retour aux devis">
+      <button type="button" className="crm-back-btn" onClick={leaveDevis} aria-label="Retour aux devis">
         <ChevronLeft size={16} /> Retour aux devis
       </button>
 
@@ -1452,7 +1583,7 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
             <p className="page-subtitle">Prévisualisation professionnelle — les lignes s&apos;ajoutent via le bouton OK</p>
           </div>
           <div style={{ display: 'flex', gap: 8 }}>
-            <button type="button" className="btn btn-ghost" onClick={onBack}>Annuler</button>
+            <button type="button" className="btn btn-ghost" onClick={leaveDevis}>Annuler</button>
             <button type="submit" className="btn btn-primary" disabled={isSaving} style={{ minWidth: 130 }}>
               {isSaving ? <Spinner /> : <><FileText size={14} /> {showCreateLabel ? 'Créer devis' : 'Enregistrer'}</>}
             </button>
