@@ -133,12 +133,31 @@ export function getArticlePublicUrl(code) {
 }
 
 /**
+ * Douchette configurée en clavier QWERTY sur un poste AZERTY :
+ * « QRT)éàé§)à§'( » → « ART-2026-0645 ». Les codes articles ne contiennent jamais
+ * ces caractères AZERTY, donc un scan correct n'est jamais modifié.
+ */
+const AZERTY_TO_QWERTY = {
+  '&': '1', 'é': '2', '"': '3', "'": '4', '’': '4', '(': '5',
+  '§': '6', 'è': '7', '!': '8', 'ç': '9', 'à': '0',
+  ')': '-', '_': '8', '?': 'M',
+  a: 'q', q: 'a', z: 'w', w: 'z', A: 'Q', Q: 'A', Z: 'W', W: 'Z',
+};
+const AZERTY_MARKERS = /[&é"'’(§èçà]/;
+
+function fixAzertyScan(s) {
+  if (!AZERTY_MARKERS.test(s)) return s;
+  return Array.from(s).map((ch) => (ch === '-' ? '6' : (AZERTY_TO_QWERTY[ch] ?? ch))).join('');
+}
+
+/**
  * Extrait le code article depuis un scan douchette (CODE128) ou QR (URL).
  * Ex. TYJ2X8GA ou https://citymo.app/inventaire/articles/TYJ2X8GA
  */
 export function parseScannedArticleCode(raw) {
   let s = normalizeScannedCode(raw);
   if (!s) return '';
+  if (!/^https?:\/\//i.test(s)) s = fixAzertyScan(s);
 
   const pathMatch = s.match(/\/inventaire\/articles\/([^/?#]+)/i);
   if (pathMatch) {
