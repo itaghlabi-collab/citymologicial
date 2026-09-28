@@ -178,18 +178,19 @@ function printHtml(article, formatKey, qrDataUrl = '') {
   w.document.open();
   w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(code)}</title>
 <style>
-  @page { size: ${fmt.width}mm ${fmt.height}mm; margin: 1.2mm; }
+  @page { size: ${fmt.width}mm ${fmt.height}mm; margin: 0; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { width: ${fmt.width}mm; height: ${fmt.height}mm; overflow: hidden; }
   body {
     width: ${fmt.width}mm; height: ${fmt.height}mm; overflow: hidden;
     font-family: Helvetica, Arial, sans-serif; color: #000;
     display: flex; flex-direction: column; align-items: center; justify-content: space-between;
-    text-align: center; padding: 1.2mm;
+    text-align: center; padding: 2.4mm; break-inside: avoid;
   }
   .designation { font-weight: 800; font-size: ${desSize}; line-height: 1.15; width: 100%; }
   .codes { display: flex; align-items: center; justify-content: center; gap: 3mm; width: 100%; flex: 1; min-height: 0; }
-  .barcode-wrap { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 0; }
-  .barcode-wrap img { max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; }
+  .barcode-wrap { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; min-height: 0; }
+  .barcode-wrap img { display: block; width: 100%; height: auto; }
   .qr-wrap { flex-shrink: 0; }
   .qr-wrap img { display: block; width: ${qrSize}; height: ${qrSize}; image-rendering: pixelated; }
   .code { font-weight: 800; font-size: ${codeSize}; letter-spacing: 0.08em; }

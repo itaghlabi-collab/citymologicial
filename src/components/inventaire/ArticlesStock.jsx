@@ -238,7 +238,7 @@ function DetailArticle({
         <button type="button" className="btn btn-ghost btn-sm" onClick={scrollToHistory}><History size={13} /> Voir historique</button>
         <button type="button" className="btn btn-ghost btn-sm" onClick={onBarcode}><Barcode size={13} /> Code-barres</button>
         <button type="button" className="btn btn-ghost btn-sm" onClick={() => downloadStockArticleLabel(article, 'standard')}><Download size={13} /> Étiquette</button>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => printStockArticleLabel(article, 'standard')}><Printer size={13} /> Imprimer</button>
+        <button type="button" className="btn btn-ghost btn-sm" onClick={() => printStockArticleLabel(article, 'small')}><Printer size={13} /> Imprimer</button>
         {article.statut !== 'Archivé' && (
           <button type="button" className="btn btn-ghost btn-sm" onClick={onArchive}><Archive size={13} /> Archiver</button>
         )}

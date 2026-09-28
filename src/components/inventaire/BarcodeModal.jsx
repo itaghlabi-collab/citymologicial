@@ -69,7 +69,7 @@ export default function BarcodeModal({ open, article, onClose }) {
           <button
             type="button"
             className="btn btn-primary btn-sm"
-            onClick={() => printStockArticleLabel(article, 'standard')}
+            onClick={() => printStockArticleLabel(article, 'small')}
             style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}
           >
             <Printer size={14} /> Imprimer
