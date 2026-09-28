@@ -118,7 +118,6 @@ const EMPTY_DRAFT = () => ({
 });
 
 const DRAFT_COMMIT_DEDUP_MS = 800;
-const AUTOSAVE_MS = 1500;
 
 function draftHasContent(d) {
   if (!d) return false;
@@ -1089,7 +1088,6 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
   const articlesRef = useRef(articles);
   const onSavedRef = useRef(onSaved);
   const devisRef = useRef(devis);
-  const autosaveTimerRef = useRef(null);
   const editSeqRef = useRef(0);
   const persistRef = useRef(async () => false);
   const savePromiseRef = useRef(null);
@@ -1162,17 +1160,9 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
     return { form: absorbed ? { ...baseForm, lignes } : baseForm, absorbed };
   }
 
-  function scheduleAutosave() {
-    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
-    autosaveTimerRef.current = setTimeout(() => {
-      persistRef.current({ reason: 'autosave' });
-    }, AUTOSAVE_MS);
-  }
-
   function markDirty() {
     dirtyRef.current = true;
     editSeqRef.current += 1;
-    scheduleAutosave();
   }
 
   function setField(k, v) {
@@ -1267,7 +1257,6 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
       }
       if (editedDuringSave) {
         dirtyRef.current = true;
-        if (mountedRef.current) scheduleAutosave();
         return true;
       }
       dirtyRef.current = false;
@@ -1300,7 +1289,6 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
     window.addEventListener('pagehide', flush);
     document.addEventListener('visibilitychange', onVisibility);
     return () => {
-      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
       window.removeEventListener('pagehide', flush);
       document.removeEventListener('visibilitychange', onVisibility);
       flush();
@@ -1309,7 +1297,6 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
   }, []);
 
   async function leaveDevis() {
-    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
     const ok = await persistDevis({ reason: 'leave', stayOnForm: true });
     if (!ok && dirtyRef.current) return;
     onBack();
@@ -1538,13 +1525,11 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
 
   async function handleSave(e) {
     e.preventDefault();
-    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
     dirtyRef.current = true;
     await persistDevis({ reason: 'manual', toast: false, stayOnForm: false, requireFields: true });
   }
 
   async function handleEnregistrer() {
-    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
     dirtyRef.current = true;
     await persistDevis({ reason: 'manual', toast: true, stayOnForm: true, requireFields: true });
   }
