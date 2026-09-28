@@ -81,13 +81,15 @@ function drawLabelOnDoc(doc, x, y, article, formatKey) {
   const barcodeMaxW = contentW * 0.94;
 
   const barcodeMeta = renderBarcodeForPrint(code, barcodePrintOpts(formatKey));
-  if (barcodeMeta?.dataUrl) {
+  if (barcodeMeta?.bars?.length) {
     const size = containBarcodeMm(barcodeMeta, barcodeMaxW, barcodeMaxH);
     const imgX = x + (W - size.width) / 2;
     const imgY = barcodeTop + (barcodeMaxH - size.height) / 2;
-    try {
-      doc.addImage(barcodeMeta.dataUrl, 'PNG', imgX, imgY, size.width, size.height, undefined, 'FAST');
-    } catch { /* skip */ }
+    const k = size.width / barcodeMeta.pxW;
+    doc.setFillColor(0, 0, 0);
+    barcodeMeta.bars.forEach((b) => {
+      doc.rect(imgX + b.x * k, imgY + barcodeMeta.barTop * k, b.w * k, barcodeMeta.barHeight * k, 'F');
+    });
   }
 
   doc.setFont('helvetica', 'bold');

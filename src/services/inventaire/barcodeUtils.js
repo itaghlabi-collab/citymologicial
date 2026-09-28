@@ -26,36 +26,55 @@ export function renderBarcodeCanvas(value, options = {}) {
   return canvas;
 }
 
-/** Génère un code-barres net, ajusté à une largeur max (px). */
+function getBarcodeModules(code) {
+  const target = {};
+  JsBarcode(target, code, { format: 'CODE128' });
+  return (target.encodings || []).map((e) => e.data || '').join('');
+}
+
+/**
+ * Code-barres vectoriel (barres + SVG), ajusté à une largeur max (px).
+ * bars : positions dans le repère pxW × pxH.
+ */
 export function renderBarcodeForPrint(value, { maxWidthPx = 520, barHeight = 72, margin = 6 } = {}) {
   const code = String(value || '').trim();
   if (!code) return null;
 
-  let moduleW = 3;
-  let canvas = renderBarcodeCanvas(code, {
-    width: moduleW,
-    height: barHeight,
-    displayValue: false,
-    margin,
-    textMargin: 0,
-  });
+  let modules;
+  try {
+    modules = getBarcodeModules(code);
+  } catch {
+    return null;
+  }
+  if (!modules) return null;
 
-  for (let i = 0; i < 8 && canvas && canvas.width > maxWidthPx; i += 1) {
-    moduleW = Math.max(1, moduleW * (maxWidthPx / canvas.width));
-    canvas = renderBarcodeCanvas(code, {
-      width: moduleW,
-      height: barHeight,
-      displayValue: false,
-      margin,
-      textMargin: 0,
-    });
+  const moduleW = Math.min(3, (maxWidthPx - margin * 2) / modules.length);
+  const pxW = modules.length * moduleW + margin * 2;
+  const pxH = barHeight + margin * 2;
+
+  const bars = [];
+  let i = 0;
+  while (i < modules.length) {
+    if (modules[i] !== '1') { i += 1; continue; }
+    let j = i;
+    while (j < modules.length && modules[j] === '1') j += 1;
+    bars.push({ x: margin + i * moduleW, w: (j - i) * moduleW });
+    i = j;
   }
 
-  if (!canvas) return null;
+  const rects = bars
+    .map((b) => `<rect x="${b.x}" y="${margin}" width="${b.w}" height="${barHeight}"/>`)
+    .join('');
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${pxW} ${pxH}" width="${pxW}" height="${pxH}" shape-rendering="crispEdges">`
+    + `<rect width="100%" height="100%" fill="#fff"/><g fill="#000">${rects}</g></svg>`;
+
   return {
-    dataUrl: canvas.toDataURL('image/png'),
-    pxW: canvas.width,
-    pxH: canvas.height,
+    dataUrl: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`,
+    pxW,
+    pxH,
+    bars,
+    barTop: margin,
+    barHeight,
   };
 }
 
