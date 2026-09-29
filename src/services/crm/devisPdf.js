@@ -186,6 +186,19 @@ function fmtUnite(u) {
   return map[u] || u || 'unité';
 }
 
+function computeRemiseTotals(devis) {
+  let brut = 0;
+  let remise = 0;
+  (devis.lignes || []).forEach((l) => {
+    if (l.type !== 'article') return;
+    const lineBrut = (Number(l.quantite) || 0) * (Number(l.prix_ht) || 0);
+    brut += lineBrut;
+    remise += lineBrut * ((Number(l.remise) || 0) / 100);
+  });
+  const round2 = (n) => Math.round(n * 100) / 100;
+  return { brut: round2(brut), remise: round2(remise) };
+}
+
 function buildPdfRows(devis) {
   const lignes = devis.lignes || [];
   const hasArticles = lignes.some((l) => l.type === 'article');
@@ -454,9 +467,13 @@ export async function generateDevisPdf(devis, catMap = {}, options = {}) {
     return startY + h;
   };
 
+  const remiseTotals = computeRemiseTotals(devis);
+  const hasRemise = remiseTotals.remise > 0.004;
+  const totalsRowCount = hasRemise ? 5 : 3;
+
   const drawTotalsBlock = (startY) => {
     if (showSignature) {
-      const blockH = TOTAL_ROW_H * 3;
+      const blockH = TOTAL_ROW_H * totalsRowCount;
       const splitX = M + CONTENT_W / 2;
       const leftW = CONTENT_W / 2;
       const rightW = CONTENT_W / 2;
@@ -491,7 +508,11 @@ export async function generateDevisPdf(devis, catMap = {}, options = {}) {
       }
 
       const items = [
-        { label: 'Total HT :', value: devis.total_ht, bold: false, fs: 8 },
+        ...(hasRemise ? [
+          { label: 'Total HT brut :', value: remiseTotals.brut, bold: false, fs: 8 },
+          { label: 'Remise :', value: -remiseTotals.remise, bold: false, fs: 8, red: true },
+        ] : []),
+        { label: hasRemise ? 'Total HT net :' : 'Total HT :', value: devis.total_ht, bold: false, fs: 8 },
         { label: `TVA (${tvaPct}%) :`, value: devis.total_tva, bold: false, fs: 8 },
         { label: 'Total TTC :', value: devis.total_ttc, bold: true, fs: 9, ttc: true },
       ];
@@ -510,7 +531,7 @@ export async function generateDevisPdf(devis, catMap = {}, options = {}) {
         const mid = cy + TOTAL_ROW_H / 2 + 1;
         doc.setFont('helvetica', item.bold ? 'bold' : 'normal');
         doc.setFontSize(item.fs);
-        doc.setTextColor(...TEXT);
+        doc.setTextColor(...(item.red ? RED : TEXT));
         doc.text(item.label, splitX + 3, mid);
         textRight(doc, `${fmtNum(item.value)} MAD`, splitX + rightW - 3, mid);
       });
@@ -523,7 +544,11 @@ export async function generateDevisPdf(devis, catMap = {}, options = {}) {
     }
 
     const items = [
-      { label: 'Total HT', value: devis.total_ht, bold: true, red: false, fs: 8 },
+      ...(hasRemise ? [
+        { label: 'Total HT brut', value: remiseTotals.brut, bold: false, red: false, fs: 8 },
+        { label: 'Remise', value: -remiseTotals.remise, bold: false, red: true, fs: 8 },
+      ] : []),
+      { label: hasRemise ? 'Total HT net' : 'Total HT', value: devis.total_ht, bold: true, red: false, fs: 8 },
       { label: 'TVA', value: devis.total_tva, bold: false, red: false, fs: 8 },
       { label: 'Total TTC', value: devis.total_ttc, bold: true, red: true, fs: 9 },
     ];
@@ -713,7 +738,7 @@ export async function generateDevisPdf(devis, catMap = {}, options = {}) {
     });
   }
 
-  ensureSpace(TOTAL_ROW_H * 3);
+  ensureSpace(TOTAL_ROW_H * totalsRowCount);
   y = drawTotalsBlock(y);
 
   y += 12;
