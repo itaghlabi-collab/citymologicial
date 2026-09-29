@@ -157,6 +157,9 @@ export function downloadStockArticleLabels(articles = [], formatOrLegacy = 'stan
 
 /** 203 dpi (8 dots/mm) — résolution native DT325B / JT 80DW. */
 const THERMAL_DOTS_PER_MM = 8;
+/** Hauteur de barres CODE128 1D standard (20 mm) — pas toute la colonne gauche. */
+const THERMAL_BAR_H_MM = 20;
+const THERMAL_BAR_H_PX = THERMAL_BAR_H_MM * THERMAL_DOTS_PER_MM; // 160 px @ 203 dpi
 
 function wrapCanvasLines(ctx, text, maxWidth, maxLines) {
   const raw = String(text || '').trim().toUpperCase();
@@ -200,8 +203,8 @@ async function renderThermalLabelPng(article) {
   const fmt = LABEL_FORMATS.thermal;
   const W = Math.round(fmt.width * THERMAL_DOTS_PER_MM);
   const H = Math.round(fmt.height * THERMAL_DOTS_PER_MM);
-  const pad = 12;
-  const colGap = 10;
+  const pad = 16; // 2 mm — zone de silence / évite le clipping au bord
+  const colGap = 12;
   const code = getArticleBarcodeValue(article);
   const designation = String(article.designation || article.nom || '—').trim();
 
@@ -214,22 +217,27 @@ async function renderThermalLabelPng(article) {
   ctx.fillRect(0, 0, W, H);
   ctx.fillStyle = '#000000';
 
-  const rightColW = 184;
+  /** Colonne droite bornée pour laisser ≥334 px au CODE128 (modules 2 px, sans débord). */
+  const rightColW = 132;
   const codeFont = 18;
   const codeBoxH = 22;
   const codeGap = 6;
+  const barH = THERMAL_BAR_H_PX;
   const barX = pad;
-  const barY = pad;
   const barW = W - pad * 2 - rightColW - colGap;
-  const barH = H - pad * 2 - codeBoxH - codeGap;
   const rightX = pad + barW + colGap;
+
+  const leftColH = H - pad * 2;
+  const stackH = barH + codeGap + codeBoxH;
+  const stackY = pad + Math.max(0, Math.floor((leftColH - stackH) / 2));
+  const barY = stackY;
 
   drawCode128Bars(ctx, code, { x: barX, y: barY, maxWidth: barW, height: barH });
 
   ctx.font = `bold ${codeFont}px Helvetica, Arial, sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'bottom';
-  ctx.fillText(code || '—', barX + Math.floor(barW / 2), H - pad);
+  ctx.fillText(code || '—', barX + Math.floor(barW / 2), stackY + stackH);
 
   const nameFont = 20;
   const nameLineH = 24;

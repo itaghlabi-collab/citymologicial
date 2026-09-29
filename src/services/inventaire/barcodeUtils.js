@@ -47,7 +47,7 @@ export function drawCode128Bars(ctx, code, { x, y, maxWidth, height }) {
   }
   if (!modules) return false;
 
-  const moduleW = Math.max(2, Math.floor(maxWidth / modules.length));
+  const moduleW = Math.max(1, Math.floor(maxWidth / modules.length));
   const totalW = modules.length * moduleW;
   const startX = x + Math.floor((maxWidth - totalW) / 2);
   ctx.fillStyle = '#000000';

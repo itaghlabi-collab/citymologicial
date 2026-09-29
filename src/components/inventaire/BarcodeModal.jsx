@@ -33,7 +33,7 @@ export default function BarcodeModal({ open, article, onClose }) {
         >
           <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
             <div style={{ flex: 1, minWidth: 0, textAlign: 'center' }}>
-              <BarcodeDisplay article={article} height={88} width={2.2} displayValue={false} />
+              <BarcodeDisplay article={article} height={72} width={2.4} displayValue={false} />
               <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '0.85rem', marginTop: 6, letterSpacing: '0.06em' }}>
                 {code}
               </div>
