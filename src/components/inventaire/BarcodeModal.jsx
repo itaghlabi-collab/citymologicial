@@ -85,7 +85,7 @@ export default function BarcodeModal({ open, article, onClose }) {
         </div>
         <p style={{ fontSize: '0.72rem', color: 'var(--text-3)', textAlign: 'center', margin: 0 }}>
           <Barcode size={11} style={{ verticalAlign: -2, marginRight: 4 }} />
-          CODE128 (douchette) + QR code (mobile) — {code}
+          Impression 48×65 mm : CODE128 + QR — {code}
         </p>
       </div>
     </Modal>
