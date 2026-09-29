@@ -200,7 +200,8 @@ async function renderThermalLabelPng(article) {
   const fmt = LABEL_FORMATS.thermal;
   const W = Math.round(fmt.width * THERMAL_DOTS_PER_MM);
   const H = Math.round(fmt.height * THERMAL_DOTS_PER_MM);
-  const pad = 16;
+  const pad = 12;
+  const colGap = 10;
   const code = getArticleBarcodeValue(article);
   const designation = String(article.designation || article.nom || '—').trim();
 
@@ -208,30 +209,42 @@ async function renderThermalLabelPng(article) {
   canvas.width = W;
   canvas.height = H;
   const ctx = canvas.getContext('2d');
+  ctx.imageSmoothingEnabled = false;
   ctx.fillStyle = '#ffffff';
   ctx.fillRect(0, 0, W, H);
   ctx.fillStyle = '#000000';
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'top';
-  ctx.font = 'bold 22px Helvetica, Arial, sans-serif';
 
-  const lines = wrapCanvasLines(ctx, designation, W - pad * 2, 2);
-  let y = pad;
-  lines.forEach((line) => {
-    ctx.fillText(line, W / 2, y);
-    y += 26;
-  });
-
-  const codeFont = 20;
-  const codeY = H - pad - codeFont;
-  const qrSize = 152;
-  const gap = 10;
+  const rightColW = 184;
+  const codeFont = 18;
+  const codeBoxH = 22;
+  const codeGap = 6;
   const barX = pad;
-  const barY = y + 8;
-  const barH = Math.max(96, codeY - 10 - barY);
-  const barW = W - pad * 2 - qrSize - gap;
+  const barY = pad;
+  const barW = W - pad * 2 - rightColW - colGap;
+  const barH = H - pad * 2 - codeBoxH - codeGap;
+  const rightX = pad + barW + colGap;
 
   drawCode128Bars(ctx, code, { x: barX, y: barY, maxWidth: barW, height: barH });
+
+  ctx.font = `bold ${codeFont}px Helvetica, Arial, sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText(code || '—', barX + Math.floor(barW / 2), H - pad);
+
+  const nameFont = 20;
+  const nameLineH = 24;
+  ctx.font = `bold ${nameFont}px Helvetica, Arial, sans-serif`;
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'top';
+  const lines = wrapCanvasLines(ctx, designation, rightColW, 2);
+  let nameY = pad;
+  lines.forEach((line) => {
+    ctx.fillText(line, rightX, nameY);
+    nameY += nameLineH;
+  });
+
+  const qrY = nameY + 8;
+  const qrSize = Math.max(96, Math.min(rightColW, H - pad - qrY));
 
   try {
     const QRCode = (await import('qrcode')).default;
@@ -242,16 +255,10 @@ async function renderThermalLabelPng(article) {
       errorCorrectionLevel: 'M',
       color: { dark: '#000000', light: '#ffffff' },
     });
-    const qrX = W - pad - qrSize;
-    const qrY = barY + Math.max(0, Math.floor((barH - qrSize) / 2));
-    ctx.drawImage(qrCanvas, qrX, qrY, qrSize, qrSize);
+    ctx.drawImage(qrCanvas, rightX, qrY);
   } catch {
     /* QR optionnel */
   }
-
-  ctx.font = 'bold 20px Helvetica, Arial, sans-serif';
-  ctx.textBaseline = 'bottom';
-  ctx.fillText(code || '—', W / 2, H - pad);
 
   return canvas.toDataURL('image/png');
 }
@@ -320,7 +327,7 @@ function printThermalPng(pngDataUrl) {
   return true;
 }
 
-/** Impression thermique 65×48 mm : nom + CODE128 net + QR (bitmap 203 dpi). */
+/** Impression thermique 65×48 mm : CODE128 horizontal à gauche, nom + QR à droite (bitmap 203 dpi). */
 export async function printStockArticleLabel(article) {
   const png = await renderThermalLabelPng(article);
   if (!printThermalPng(png)) {

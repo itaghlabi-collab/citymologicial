@@ -24,25 +24,39 @@ export default function BarcodeModal({ open, article, onClose }) {
         <div
           style={{
             width: '100%',
-            maxWidth: 320,
-            padding: '14px 12px 10px',
+            maxWidth: 360,
+            padding: '12px 10px 8px',
             background: '#fff',
             border: '1px solid var(--border)',
             borderRadius: 6,
-            textAlign: 'center',
           }}
         >
-          <div style={{ fontWeight: 800, fontSize: '0.82rem', marginBottom: 10, lineHeight: 1.25 }}>
-            {designation}
-          </div>
-          <div style={{ display: 'flex', gap: 12, alignItems: 'center', justifyContent: 'center', flexWrap: 'wrap' }}>
-            <div style={{ flex: 1, minWidth: 140 }}>
-              <BarcodeDisplay article={article} height={72} width={2.4} displayValue={false} />
+          <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
+            <div style={{ flex: 1, minWidth: 0, textAlign: 'center' }}>
+              <BarcodeDisplay article={article} height={88} width={2.2} displayValue={false} />
+              <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '0.85rem', marginTop: 6, letterSpacing: '0.06em' }}>
+                {code}
+              </div>
             </div>
-            <QrCodeDisplay article={article} size={88} />
-          </div>
-          <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '0.9rem', marginTop: 8, letterSpacing: '0.06em' }}>
-            {code}
+            <div style={{ width: 112, flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 6 }}>
+              <div
+                style={{
+                  fontWeight: 800,
+                  fontSize: '0.68rem',
+                  lineHeight: 1.2,
+                  textTransform: 'uppercase',
+                  textAlign: 'left',
+                  display: '-webkit-box',
+                  WebkitLineClamp: 2,
+                  WebkitBoxOrient: 'vertical',
+                  overflow: 'hidden',
+                  wordBreak: 'break-word',
+                }}
+              >
+                {designation}
+              </div>
+              <QrCodeDisplay article={article} size={96} />
+            </div>
           </div>
           <div style={{ fontSize: '0.68rem', color: 'var(--text-3)', marginTop: 6, wordBreak: 'break-all' }}>
             {getArticlePublicUrl(code)}
@@ -85,7 +99,7 @@ export default function BarcodeModal({ open, article, onClose }) {
         </div>
         <p style={{ fontSize: '0.72rem', color: 'var(--text-3)', textAlign: 'center', margin: 0 }}>
           <Barcode size={11} style={{ verticalAlign: -2, marginRight: 4 }} />
-          Impression 65×48 mm : nom + code-barres + QR — {code}
+          Impression 65×48 mm : code-barres horizontal à gauche, nom et QR à droite — {code}
         </p>
       </div>
     </Modal>
