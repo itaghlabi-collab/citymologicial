@@ -6,7 +6,6 @@ import {
   getArticleBarcodeValue,
   renderBarcodeForPrint,
   containBarcodeMm,
-  getArticlePublicUrl,
 } from './barcodeUtils';
 
 const TEXT = [0, 0, 0];
@@ -146,65 +145,21 @@ export function downloadStockArticleLabels(articles = [], formatOrLegacy = 'stan
   return downloadStockArticleLabelsA4(articles, formatOrLegacy);
 }
 
-function printHtml(article, formatKey, qrDataUrl = '') {
+function printLabelPdf(article, formatKey) {
   const fmt = LABEL_FORMATS[formatKey] || LABEL_FORMATS.standard;
-  const code = getArticleBarcodeValue(article);
-  const designation = String(article.designation || article.nom || '—').trim().toUpperCase();
-  const barcodeMeta = renderBarcodeForPrint(code, barcodePrintOpts(formatKey));
-
-  const esc = (s) => String(s || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
-
-  const desSize = formatKey === 'small' ? '7px' : '9px';
-  const codeSize = formatKey === 'small' ? '9px' : '10px';
-  const qrSize = formatKey === 'small' ? '14mm' : '18mm';
-
-  const w = window.open('', '_blank', 'noopener,noreferrer,width=420,height=520');
-  if (!w) return false;
-
-  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(code)}</title>
-<style>
-  @page { size: ${fmt.width}mm ${fmt.height}mm; margin: 1.2mm; }
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
-    width: ${fmt.width}mm; height: ${fmt.height}mm; overflow: hidden;
-    font-family: Helvetica, Arial, sans-serif; color: #000;
-    display: flex; flex-direction: column; align-items: center; justify-content: space-between;
-    text-align: center; padding: 1.2mm;
-  }
-  .designation { font-weight: 800; font-size: ${desSize}; line-height: 1.15; width: 100%; }
-  .codes { display: flex; align-items: center; justify-content: center; gap: 2mm; width: 100%; flex: 1; min-height: 0; }
-  .barcode-wrap { flex: 1; display: flex; align-items: center; justify-content: center; min-height: 0; }
-  .barcode-wrap img { max-width: 100%; max-height: 100%; width: auto; height: auto; object-fit: contain; }
-  .qr-wrap img { width: ${qrSize}; height: ${qrSize}; }
-  .code { font-weight: 800; font-size: ${codeSize}; letter-spacing: 0.08em; }
-</style></head><body>
-  <div class="designation">${esc(designation)}</div>
-  <div class="codes">
-    <div class="barcode-wrap">${barcodeMeta?.dataUrl ? `<img src="${barcodeMeta.dataUrl}" alt="${esc(code)}" />` : ''}</div>
-    ${qrDataUrl ? `<div class="qr-wrap"><img src="${qrDataUrl}" alt="QR" /></div>` : ''}
-  </div>
-  <div class="code">${esc(code)}</div>
-  <script>window.onload=function(){window.focus();window.print();};</script>
-</body></html>`);
-  w.document.close();
-  return true;
-}
-
-export async function printStockArticleLabel(article, formatOrLegacy = 'standard') {
-  const formatKey = resolveFormat(formatOrLegacy);
-  let qrDataUrl = '';
-  try {
-    const QRCode = (await import('qrcode')).default;
-    qrDataUrl = await QRCode.toDataURL(getArticlePublicUrl(getArticleBarcodeValue(article)), { width: 96, margin: 0 });
-  } catch {
-    /* QR optionnel */
-  }
-  if (!printHtml(article, formatKey, qrDataUrl)) {
+  const doc = createLabelPdf(fmt);
+  drawLabelOnDoc(doc, 0, 0, article, formatKey);
+  doc.autoPrint();
+  const url = doc.output('bloburl');
+  const w = window.open(url, '_blank', 'noopener,noreferrer');
+  if (!w) {
     downloadStockArticleLabel(article, formatKey);
   }
+}
+
+/** Impression physique = même étiquette 80×50 (ou 50×30) que le PDF : CODE128 seul, sans QR. */
+export function printStockArticleLabel(article, formatOrLegacy = 'standard') {
+  printLabelPdf(article, resolveFormat(formatOrLegacy));
 }
 
 export function printStockArticleLabels(articles = [], formatOrLegacy = 'standard') {
