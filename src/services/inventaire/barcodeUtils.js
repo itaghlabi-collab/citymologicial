@@ -220,7 +220,7 @@ export function parseScannedArticleCode(raw) {
   return s;
 }
 
-/** Code article depuis l’URL /inventaire/articles/CODE (ouverture QR mobile). */
+/** Code article depuis l’URL /inventaire/articles/CODE (QR → fiche Stocks). */
 export function parseInventaireArticlePath(pathname) {
   const path = pathname || (typeof window !== 'undefined' ? window.location.pathname : '');
   const m = String(path).match(/^\/inventaire\/articles\/([^/]+)\/?$/i);

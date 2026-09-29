@@ -762,6 +762,19 @@ export default function ArticlesStock({
     return cat ? (cat.nom || cat.name) : '';
   }, [categories]);
 
+  const openArticleInStocks = useCallback((article) => {
+    try {
+      if (article?.id) {
+        sessionStorage.setItem(OPEN_ARTICLE_KEY, JSON.stringify({ id: article.id, code: article.code }));
+      }
+    } catch { /* ignore */ }
+    setDetailId(null);
+    setDetailArticle(null);
+    setScanError('');
+    syncArticleRoute(null, { replace: true });
+    onNavigate?.('stocks');
+  }, [onNavigate]);
+
   const handleBarcodeScan = useCallback(async (code) => {
     setScanLoading(true);
     setScanError('');
@@ -774,51 +787,33 @@ export default function ArticlesStock({
     setShowScanner(false);
     setBarcodeArticle(null);
     setScanError('');
+    if (onNavigate) {
+      openArticleInStocks(article);
+      return;
+    }
     openArticleDetail(article);
-  }, [lookupByBarcode, articles, openArticleDetail]);
+  }, [lookupByBarcode, articles, openArticleDetail, onNavigate, openArticleInStocks]);
 
   useEffect(() => {
     if (!initialArticleCode || loading) return undefined;
+    const code = initialArticleCode;
+    onArticleCodeConsumed?.();
     let cancelled = false;
     (async () => {
       setScanLoading(true);
       setScanError('');
-      const { article, error: lookupErr } = await lookupByBarcode(initialArticleCode, articles);
+      const { article, error: lookupErr } = await lookupByBarcode(code, articles);
       if (cancelled) return;
       setScanLoading(false);
       if (article) {
-        openArticleDetail(article);
-        onArticleCodeConsumed?.();
+        if (onNavigate) openArticleInStocks(article);
+        else openArticleDetail(article);
       } else {
         setScanError(lookupErr || 'Article introuvable.');
-        onArticleCodeConsumed?.();
       }
     })();
     return () => { cancelled = true; };
-  }, [initialArticleCode, loading, articles, lookupByBarcode, onArticleCodeConsumed, openArticleDetail]);
-
-  // Ouverture depuis la vue Stocks (sessionStorage) — UI only
-  useEffect(() => {
-    if (loading || !articles.length) return;
-    let raw;
-    try {
-      raw = sessionStorage.getItem(OPEN_ARTICLE_KEY);
-      if (!raw) return;
-      sessionStorage.removeItem(OPEN_ARTICLE_KEY);
-    } catch {
-      return;
-    }
-    let parsed;
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      parsed = { code: raw };
-    }
-    const article = articles.find((a) => a.id === parsed?.id)
-      || articles.find((a) => getArticleBarcodeValue(a) === String(parsed?.code || '').trim())
-      || articles.find((a) => a.code === String(parsed?.code || '').trim());
-    if (article) openArticleDetail(article);
-  }, [loading, articles, openArticleDetail]);
+  }, [initialArticleCode, loading]);
 
   const filtered = useMemo(() => articles.filter((x) => {
     const q = search.toLowerCase();

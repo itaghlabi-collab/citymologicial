@@ -38,6 +38,7 @@ import { useAuth } from '../../hooks/useAuth';
 import { getArticleBarcodeValue } from '../../services/inventaire/barcodeUtils';
 import { formatSupabaseError } from '../../services/supabase/formatError';
 import { useIsMobile } from '../../hooks/useIsMobile';
+import ArticleScanBar from './ArticleScanBar';
 
 function getStatutStock(qte, seuil) {
   const q = Number(qte) || 0;
@@ -200,10 +201,13 @@ export default function Stocks({
   emplacementsList = EMPLACEMENTS_STOCK,
   onNavigate,
   onArticlesChange,
+  initialArticleCode,
+  onArticleCodeConsumed,
 }) {
   const { user } = useAuth();
   const {
     records: hookArticles, loading, saving, reload, save, archive, remove, getMovements,
+    lookupByBarcode,
   } = useStockArticles();
 
   const arts = (hookArticles?.length ? hookArticles : articlesProp) || [];
@@ -239,6 +243,9 @@ export default function Stocks({
   const [detailLevels, setDetailLevels] = useState([]);
   const [detailLevelsLoading, setDetailLevelsLoading] = useState(false);
   const [canDelete, setCanDelete] = useState(false);
+  const [pendingFiche, setPendingFiche] = useState(null);
+  const [scanLoading, setScanLoading] = useState(false);
+  const [scanError, setScanError] = useState('');
   const isMobile = useIsMobile();
 
   const loadLevels = useCallback(async () => {
@@ -314,7 +321,29 @@ export default function Stocks({
     return () => { cancelled = true; };
   }, [user?.id, user?.email]);
 
-  const detailArt = detailId ? arts.find((a) => a.id === detailId) : null;
+  const detailArt = detailId
+    ? (arts.find((a) => String(a.id) === String(detailId))
+      || (pendingFiche && String(pendingFiche.id) === String(detailId) ? pendingFiche : null))
+    : null;
+
+  const openStockFiche = useCallback((article) => {
+    if (!article?.id) return;
+    setPendingFiche(article);
+    setDetailId(article.id);
+    setScanError('');
+  }, []);
+
+  const handleBarcodeScan = useCallback(async (code) => {
+    setScanLoading(true);
+    setScanError('');
+    const { article, error: lookupErr } = await lookupByBarcode(code, arts);
+    setScanLoading(false);
+    if (!article) {
+      setScanError(lookupErr || 'Aucun article trouvé pour ce code.');
+      return;
+    }
+    openStockFiche(article);
+  }, [lookupByBarcode, arts, openStockFiche]);
 
   // Ouverture depuis Articles de stock / navigation / lien traçabilité
   useEffect(() => {
@@ -344,10 +373,30 @@ export default function Stocks({
     } catch {
       parsed = { code: raw };
     }
-    const article = arts.find((a) => a.id === parsed?.id)
-      || arts.find((a) => a.code === String(parsed?.code || '').trim());
-    if (article) setDetailId(article.id);
-  }, [loading, arts]);
+    const wantedId = parsed?.id != null ? String(parsed.id) : '';
+    const wantedCode = String(parsed?.code || '').trim();
+    const article = arts.find((a) => wantedId && String(a.id) === wantedId)
+      || arts.find((a) => wantedCode && getArticleBarcodeValue(a) === wantedCode)
+      || arts.find((a) => wantedCode && String(a.code) === wantedCode);
+    if (article) openStockFiche(article);
+  }, [loading, arts, openStockFiche]);
+
+  useEffect(() => {
+    if (!initialArticleCode || loading) return undefined;
+    const code = initialArticleCode;
+    onArticleCodeConsumed?.();
+    let cancelled = false;
+    (async () => {
+      setScanLoading(true);
+      setScanError('');
+      const { article, error: lookupErr } = await lookupByBarcode(code, arts);
+      if (cancelled) return;
+      setScanLoading(false);
+      if (article) openStockFiche(article);
+      else setScanError(lookupErr || 'Article introuvable.');
+    })();
+    return () => { cancelled = true; };
+  }, [initialArticleCode, loading]);
 
   useEffect(() => {
     if (!detailId) {
@@ -542,6 +591,14 @@ export default function Stocks({
   if (detailArt) {
     return (
       <div className="animate-fade-in">
+        <ArticleScanBar
+          onScan={handleBarcodeScan}
+          loading={scanLoading}
+          error={scanError}
+          compact
+          label="Scan rapide — changer d'article"
+          placeholder="Scannez un code-barres ou QR code…"
+        />
         <StockFiche
           article={detailArt}
           categories={categories}
@@ -549,7 +606,7 @@ export default function Stocks({
           movementsLoading={detailMovementsLoading}
           stockLevels={detailLevels}
           stockLevelsLoading={detailLevelsLoading}
-          onBack={() => setDetailId(null)}
+          onBack={() => { setDetailId(null); setPendingFiche(null); setScanError(''); }}
           onEditFiche={() => setEditFiche(detailArt)}
           onEditCatalog={() => setCatalogModal({ article: detailArt })}
           onMvt={(type) => setMvtModal({ type, article: detailArt })}
@@ -617,6 +674,14 @@ export default function Stocks({
           </button>
         </div>
       </div>
+
+      <ArticleScanBar
+        onScan={handleBarcodeScan}
+        loading={scanLoading}
+        error={scanError}
+        label="Scanner un article"
+        placeholder="Scannez le code-barres ou le QR code, puis Entrée…"
+      />
 
       {(levelsError || movementsError) && (
         <div style={{ background: '#FFF8E1', color: '#E65100', border: '1px solid #FFCC80', borderRadius: 8, padding: '10px 14px', fontSize: '0.84rem', marginBottom: 12 }}>

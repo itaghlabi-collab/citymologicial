@@ -379,6 +379,7 @@ function PageContent({
     case 'articles-stock':      return (
       <Inventaire
         activeTab="articles-stock"
+        onNavigate={onNavigate}
         initialArticleCode={inventaireArticleCode}
         onArticleCodeConsumed={onInventaireArticleCodeConsumed}
       />
@@ -387,7 +388,14 @@ function PageContent({
     case 'bons-mouvements':     return <Inventaire activeTab="bons-mouvements" onNavigate={onNavigate} />;
     case 'mouvement-rapide':    return <Inventaire activeTab="mouvement-rapide" onNavigate={onNavigate} />;
     case 'demandes-chantier':   return <Inventaire activeTab="demandes-chantier" onNavigate={onNavigate} />;
-    case 'stocks':              return <Inventaire activeTab="stocks" onNavigate={onNavigate} />;
+    case 'stocks':              return (
+      <Inventaire
+        activeTab="stocks"
+        onNavigate={onNavigate}
+        initialArticleCode={inventaireArticleCode}
+        onArticleCodeConsumed={onInventaireArticleCodeConsumed}
+      />
+    );
     case 'inventaire-physique': return <Inventaire activeTab="inventaire-physique" />;
     case 'affectation-materiel': return <Inventaire activeTab="affectation-materiel" />;
     /* Administration */
@@ -610,7 +618,7 @@ function Header({ module, onToggleSidebar, user, onLogout, onNavigate, mobileMen
 export default function App() {
   const { user, loading, logout, refreshUser } = useAuth();
   const [module, setModule] = useState(() => {
-    if (parseInventaireArticlePath()) return 'articles-stock';
+    if (parseInventaireArticlePath()) return 'stocks';
     if (parseSousTraitantPath()) return 'situation-sous-traitants';
     return parseModuleFromSearch() || 'dashboard';
   });
@@ -644,7 +652,7 @@ export default function App() {
       const code = parseInventaireArticlePath();
       const st = parseSousTraitantPath();
       if (code) {
-        setModule('articles-stock');
+        setModule('stocks');
         setInventaireArticleCode(code);
         setSousTraitantRoute(null);
       } else if (st) {

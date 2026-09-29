@@ -99,6 +99,8 @@ export default function Inventaire({ activeTab, initialArticleCode, onArticleCod
           emplacementsList={emplacementNoms}
           onNavigate={onNavigate}
           onArticlesChange={setArticles}
+          initialArticleCode={initialArticleCode}
+          onArticleCodeConsumed={onArticleCodeConsumed}
         />
       )}
       {tab === 'inventaire-physique' && (
