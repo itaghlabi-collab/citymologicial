@@ -214,6 +214,9 @@ export function parseScannedArticleCode(raw) {
     }
   }
 
+  const artRef = s.match(/ART-\d{4}-\d{4,}/i);
+  if (artRef) return artRef[0].toUpperCase();
+
   return s;
 }
 

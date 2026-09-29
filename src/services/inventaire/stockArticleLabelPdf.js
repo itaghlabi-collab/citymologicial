@@ -258,10 +258,12 @@ async function renderThermalLabelPng(article) {
 
 function printThermalPng(pngDataUrl) {
   const fmt = LABEL_FORMATS.thermal;
+  const prevFocus = document.activeElement;
   document.querySelectorAll('iframe[data-citymo-label-print]').forEach((el) => el.remove());
   const iframe = document.createElement('iframe');
   iframe.setAttribute('data-citymo-label-print', '1');
   iframe.setAttribute('aria-hidden', 'true');
+  iframe.tabIndex = -1;
   iframe.style.cssText = `position:fixed;left:-10000px;top:0;width:${fmt.width}mm;height:${fmt.height}mm;border:0;`;
   document.body.appendChild(iframe);
   const w = iframe.contentWindow;
@@ -286,12 +288,28 @@ function printThermalPng(pngDataUrl) {
 </body></html>`);
   w.document.close();
 
-  const cleanup = () => setTimeout(() => iframe.remove(), 800);
+  let restored = false;
+  const restore = () => {
+    if (restored) return;
+    restored = true;
+    window.removeEventListener('focus', restore);
+    try { iframe.remove(); } catch { /* already gone */ }
+    const scan = document.querySelector('input[aria-label="Scanner un article"]');
+    const el = (prevFocus && document.contains(prevFocus) && prevFocus.focus)
+      ? prevFocus
+      : scan;
+    try { el?.focus?.(); } catch { /* ignore */ }
+  };
+
   const img = w.document.querySelector('img');
   const launch = () => {
-    w.addEventListener('afterprint', cleanup, { once: true });
-    w.focus();
-    w.print();
+    w.addEventListener('afterprint', restore, { once: true });
+    window.addEventListener('focus', restore);
+    try {
+      w.print();
+    } finally {
+      setTimeout(restore, 400);
+    }
   };
   if (!img || img.complete) {
     requestAnimationFrame(launch);

@@ -1,7 +1,7 @@
 /**
  * ArticleScanBar.jsx — Zone scan douchette HID (clavier + Entrée)
  */
-import { useEffect, useRef, useState, useImperativeHandle, forwardRef } from 'react';
+import { useEffect, useRef, useState, useImperativeHandle, forwardRef, useCallback } from 'react';
 import { Loader2, ScanLine, CheckCircle2 } from 'lucide-react';
 import { INPUT_STYLE } from './shared.jsx';
 import { parseScannedArticleCode } from '../../services/inventaire/barcodeUtils';
@@ -37,16 +37,56 @@ const ArticleScanBar = forwardRef(function ArticleScanBar({
     return () => clearTimeout(t);
   }, [loading, error, success, disabled]);
 
-  function submit(raw) {
+  const submit = useCallback((raw) => {
     const code = parseScannedArticleCode(raw);
     if (!code || loading || disabled) return;
     setValue('');
     onScan(code);
     setTimeout(() => inputRef.current?.focus(), 20);
-  }
+  }, [loading, disabled, onScan]);
+
+  /** Douchette HID même si le champ n’a plus le focus (après impression, modal, etc.). */
+  useEffect(() => {
+    if (disabled || loading) return undefined;
+    let buf = '';
+    let idle = null;
+    const isOtherField = (el) => {
+      if (!el || el === inputRef.current) return false;
+      const tag = el.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+      if (el.isContentEditable) return true;
+      return false;
+    };
+    const onKey = (ev) => {
+      if (ev.target === inputRef.current) return;
+      if (isOtherField(ev.target)) return;
+      if (ev.key === 'Enter' || ev.key === 'Tab') {
+        if (buf.length >= 3) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          const raw = buf;
+          buf = '';
+          clearTimeout(idle);
+          submit(raw);
+        }
+        return;
+      }
+      if (ev.key.length === 1 && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
+        buf += ev.key;
+        clearTimeout(idle);
+        idle = setTimeout(() => { buf = ''; }, 800);
+      }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => {
+      window.removeEventListener('keydown', onKey, true);
+      clearTimeout(idle);
+    };
+  }, [disabled, loading, submit]);
 
   function handleKeyDown(ev) {
-    if (ev.key !== 'Enter') return;
+    if (ev.key !== 'Enter' && ev.key !== 'Tab') return;
+    if (!ev.target.value) return;
     ev.preventDefault();
     submit(ev.target.value);
   }

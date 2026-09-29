@@ -523,6 +523,7 @@ export default function ArticlesStock({
   const [showModal, setShowModal] = useState(false);
   const [editItem, setEditItem] = useState(null);
   const [detailId, setDetailId] = useState(null);
+  const [detailArticle, setDetailArticle] = useState(null);
   const [historyId, setHistoryId] = useState(null);
   const [historyRows, setHistoryRows] = useState([]);
   const [historyLoading, setHistoryLoading] = useState(false);
@@ -751,6 +752,7 @@ export default function ArticlesStock({
   const openArticleDetail = useCallback((article) => {
     if (!article?.id) return;
     setDetailId(article.id);
+    setDetailArticle(article);
     setScanError('');
     syncArticleRoute(getArticleBarcodeValue(article));
   }, []);
@@ -770,6 +772,7 @@ export default function ArticlesStock({
       return;
     }
     setShowScanner(false);
+    setBarcodeArticle(null);
     setScanError('');
     openArticleDetail(article);
   }, [lookupByBarcode, articles, openArticleDetail]);
@@ -860,7 +863,13 @@ export default function ArticlesStock({
     else setSelectedIds((prev) => [...new Set([...prev, ...ids])]);
   }
 
-  const detailArt = detailId ? articles.find((x) => x.id === detailId) : null;
+  const detailArt = (() => {
+    if (!detailId) return null;
+    const fromList = articles.find((x) => String(x.id) === String(detailId));
+    if (fromList) return fromList;
+    if (detailArticle && String(detailArticle.id) === String(detailId)) return detailArticle;
+    return null;
+  })();
 
   if (loading && !articles.length) {
     return (
@@ -882,6 +891,7 @@ export default function ArticlesStock({
           stockLevelsLoading={detailStockLevelsLoading}
           onBack={() => {
             setDetailId(null);
+            setDetailArticle(null);
             setScanError('');
             syncArticleRoute(null, { replace: true });
           }}
