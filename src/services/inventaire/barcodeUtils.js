@@ -33,6 +33,36 @@ function getBarcodeModules(code) {
 }
 
 /**
+ * CODE128 en barres entières (px) — indispensable pour imprimante thermique 203 dpi.
+ * Pas de SVG : le driver DT325B / JT 80DW rasterise mal les SVG.
+ */
+export function drawCode128Bars(ctx, code, { x, y, maxWidth, height }) {
+  const value = String(code || '').trim();
+  if (!value || !ctx || maxWidth < 8 || height < 8) return false;
+  let modules;
+  try {
+    modules = getBarcodeModules(value);
+  } catch {
+    return false;
+  }
+  if (!modules) return false;
+
+  const moduleW = Math.max(2, Math.floor(maxWidth / modules.length));
+  const totalW = modules.length * moduleW;
+  const startX = x + Math.floor((maxWidth - totalW) / 2);
+  ctx.fillStyle = '#000000';
+  let i = 0;
+  while (i < modules.length) {
+    if (modules[i] !== '1') { i += 1; continue; }
+    let j = i;
+    while (j < modules.length && modules[j] === '1') j += 1;
+    ctx.fillRect(startX + i * moduleW, y, (j - i) * moduleW, height);
+    i = j;
+  }
+  return true;
+}
+
+/**
  * Code-barres vectoriel (barres + SVG), ajusté à une largeur max (px).
  * bars : positions dans le repère pxW × pxH.
  */

@@ -7,6 +7,7 @@ import {
   renderBarcodeForPrint,
   containBarcodeMm,
   getArticlePublicUrl,
+  drawCode128Bars,
 } from './barcodeUtils';
 
 const TEXT = [0, 0, 0];
@@ -16,8 +17,8 @@ const A4_H = 297;
 export const LABEL_FORMATS = {
   small: { key: 'small', width: 50, height: 30, name: '50×30 mm' },
   standard: { key: 'standard', width: 80, height: 50, name: '80×50 mm' },
-  /** Rouleau thermique DT325B / JT 80DW — étiquette 4,8 × 6,5 cm. */
-  thermal: { key: 'thermal', width: 48, height: 65, name: '48×65 mm' },
+  /** Rouleau thermique DT325B / JT 80DW — étiquette 6,5 × 4,8 cm (paysage). */
+  thermal: { key: 'thermal', width: 65, height: 48, name: '65×48 mm' },
 };
 
 const A4_GRID = {
@@ -40,7 +41,7 @@ function barcodePrintOpts(formatKey) {
     return { maxWidthPx: 360, barHeight: 64, margin: 4 };
   }
   if (formatKey === 'thermal') {
-    return { maxWidthPx: 400, barHeight: 56, margin: 3 };
+    return { maxWidthPx: 480, barHeight: 72, margin: 4 };
   }
   return { maxWidthPx: 560, barHeight: 88, margin: 6 };
 }
@@ -154,22 +155,114 @@ export function downloadStockArticleLabels(articles = [], formatOrLegacy = 'stan
   return downloadStockArticleLabelsA4(articles, formatOrLegacy);
 }
 
-function printThermalHtml(article, qrDataUrl = '') {
+/** 203 dpi (8 dots/mm) — résolution native DT325B / JT 80DW. */
+const THERMAL_DOTS_PER_MM = 8;
+
+function wrapCanvasLines(ctx, text, maxWidth, maxLines) {
+  const raw = String(text || '').trim().toUpperCase();
+  if (!raw) return ['—'];
+  const words = raw.split(/\s+/);
+  const lines = [];
+  let current = '';
+  const push = (s) => {
+    if (s) lines.push(s);
+  };
+  for (const word of words) {
+    if (lines.length >= maxLines) break;
+    const trial = current ? `${current} ${word}` : word;
+    if (ctx.measureText(trial).width <= maxWidth) {
+      current = trial;
+      continue;
+    }
+    push(current);
+    current = '';
+    if (lines.length >= maxLines) break;
+    if (ctx.measureText(word).width <= maxWidth) {
+      current = word;
+    } else {
+      let chunk = '';
+      for (const ch of word) {
+        if (ctx.measureText(chunk + ch).width <= maxWidth) chunk += ch;
+        else {
+          push(chunk);
+          chunk = ch;
+          if (lines.length >= maxLines) break;
+        }
+      }
+      current = chunk;
+    }
+  }
+  push(current);
+  return lines.filter(Boolean).slice(0, maxLines);
+}
+
+async function renderThermalLabelPng(article) {
   const fmt = LABEL_FORMATS.thermal;
+  const W = Math.round(fmt.width * THERMAL_DOTS_PER_MM);
+  const H = Math.round(fmt.height * THERMAL_DOTS_PER_MM);
+  const pad = 16;
   const code = getArticleBarcodeValue(article);
-  const designation = String(article.designation || article.nom || '—').trim().toUpperCase();
-  const barcodeMeta = renderBarcodeForPrint(code, barcodePrintOpts('thermal'));
+  const designation = String(article.designation || article.nom || '—').trim();
 
-  const esc = (s) => String(s || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+  const canvas = document.createElement('canvas');
+  canvas.width = W;
+  canvas.height = H;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, W, H);
+  ctx.fillStyle = '#000000';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.font = 'bold 22px Helvetica, Arial, sans-serif';
 
+  const lines = wrapCanvasLines(ctx, designation, W - pad * 2, 2);
+  let y = pad;
+  lines.forEach((line) => {
+    ctx.fillText(line, W / 2, y);
+    y += 26;
+  });
+
+  const codeFont = 20;
+  const codeY = H - pad - codeFont;
+  const qrSize = 152;
+  const gap = 10;
+  const barX = pad;
+  const barY = y + 8;
+  const barH = Math.max(96, codeY - 10 - barY);
+  const barW = W - pad * 2 - qrSize - gap;
+
+  drawCode128Bars(ctx, code, { x: barX, y: barY, maxWidth: barW, height: barH });
+
+  try {
+    const QRCode = (await import('qrcode')).default;
+    const qrCanvas = document.createElement('canvas');
+    await QRCode.toCanvas(qrCanvas, getArticlePublicUrl(code), {
+      width: qrSize,
+      margin: 1,
+      errorCorrectionLevel: 'M',
+      color: { dark: '#000000', light: '#ffffff' },
+    });
+    const qrX = W - pad - qrSize;
+    const qrY = barY + Math.max(0, Math.floor((barH - qrSize) / 2));
+    ctx.drawImage(qrCanvas, qrX, qrY, qrSize, qrSize);
+  } catch {
+    /* QR optionnel */
+  }
+
+  ctx.font = 'bold 20px Helvetica, Arial, sans-serif';
+  ctx.textBaseline = 'bottom';
+  ctx.fillText(code || '—', W / 2, H - pad);
+
+  return canvas.toDataURL('image/png');
+}
+
+function printThermalPng(pngDataUrl) {
+  const fmt = LABEL_FORMATS.thermal;
   document.querySelectorAll('iframe[data-citymo-label-print]').forEach((el) => el.remove());
   const iframe = document.createElement('iframe');
   iframe.setAttribute('data-citymo-label-print', '1');
   iframe.setAttribute('aria-hidden', 'true');
-  iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
+  iframe.style.cssText = `position:fixed;left:-10000px;top:0;width:${fmt.width}mm;height:${fmt.height}mm;border:0;`;
   document.body.appendChild(iframe);
   const w = iframe.contentWindow;
   if (!w) {
@@ -178,64 +271,41 @@ function printThermalHtml(article, qrDataUrl = '') {
   }
 
   w.document.open();
-  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(code)}</title>
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>etiquette</title>
 <style>
   @page { size: ${fmt.width}mm ${fmt.height}mm; margin: 0; }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body {
-    width: ${fmt.width}mm; height: ${fmt.height}mm; overflow: hidden;
+  html, body { width: ${fmt.width}mm; height: ${fmt.height}mm; overflow: hidden; background: #fff; }
+  img {
+    display: block; width: ${fmt.width}mm; height: ${fmt.height}mm;
+    image-rendering: pixelated; image-rendering: crisp-edges;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
   }
-  body {
-    font-family: Helvetica, Arial, sans-serif; color: #000;
-    display: flex; flex-direction: column; align-items: center; justify-content: space-between;
-    text-align: center; padding: 2.2mm; break-inside: avoid;
-  }
-  .designation { font-weight: 800; font-size: 7.5px; line-height: 1.15; width: 100%; }
-  .codes { display: flex; align-items: center; justify-content: center; gap: 2mm; width: 100%; flex: 1; min-height: 0; }
-  .barcode-wrap { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; }
-  .barcode-wrap img { display: block; width: 100%; height: auto; max-height: 22mm; }
-  .qr-wrap { flex-shrink: 0; }
-  .qr-wrap img { display: block; width: 16mm; height: 16mm; image-rendering: pixelated; }
-  .code { font-weight: 800; font-size: 8.5px; letter-spacing: 0.06em; }
 </style></head><body>
-  <div class="designation">${esc(designation)}</div>
-  <div class="codes">
-    <div class="barcode-wrap">${barcodeMeta?.dataUrl ? `<img src="${barcodeMeta.dataUrl}" alt="${esc(code)}" />` : ''}</div>
-    ${qrDataUrl ? `<div class="qr-wrap"><img src="${qrDataUrl}" alt="QR" /></div>` : ''}
-  </div>
-  <div class="code">${esc(code)}</div>
+  <img src="${pngDataUrl}" alt="etiquette" />
 </body></html>`);
   w.document.close();
 
-  const cleanup = () => setTimeout(() => iframe.remove(), 500);
+  const cleanup = () => setTimeout(() => iframe.remove(), 800);
+  const img = w.document.querySelector('img');
   const launch = () => {
     w.addEventListener('afterprint', cleanup, { once: true });
     w.focus();
     w.print();
   };
-  const imgs = Array.from(w.document.images || []);
-  Promise.all(imgs.map((img) => (img.complete
-    ? Promise.resolve()
-    : new Promise((resolve) => { img.onload = resolve; img.onerror = resolve; }))))
-    .then(launch);
+  if (!img || img.complete) {
+    requestAnimationFrame(launch);
+  } else {
+    img.onload = launch;
+    img.onerror = launch;
+  }
   return true;
 }
 
-/** Impression = étiquette 48×65 mm (DT325B / JT 80DW) : nom + CODE128 + QR. */
+/** Impression thermique 65×48 mm : nom + CODE128 net + QR (bitmap 203 dpi). */
 export async function printStockArticleLabel(article) {
-  let qrDataUrl = '';
-  try {
-    const QRCode = (await import('qrcode')).default;
-    qrDataUrl = await QRCode.toDataURL(getArticlePublicUrl(getArticleBarcodeValue(article)), {
-      scale: 8,
-      margin: 1,
-      errorCorrectionLevel: 'M',
-      color: { dark: '#000000', light: '#ffffff' },
-    });
-  } catch {
-    /* QR optionnel */
-  }
-  if (!printThermalHtml(article, qrDataUrl)) {
+  const png = await renderThermalLabelPng(article);
+  if (!printThermalPng(png)) {
     downloadStockArticleLabel(article, 'thermal');
   }
 }
