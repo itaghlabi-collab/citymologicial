@@ -118,7 +118,6 @@ const EMPTY_DRAFT = () => ({
 });
 
 const DRAFT_COMMIT_DEDUP_MS = 800;
-const AUTOSAVE_MS = 700;
 
 function draftHasContent(d) {
   if (!d) return false;
@@ -1089,7 +1088,7 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
   const articlesRef = useRef(articles);
   const onSavedRef = useRef(onSaved);
   const devisRef = useRef(devis);
-  const autosaveTimerRef = useRef(null);
+  const editSeqRef = useRef(0);
   const persistRef = useRef(async () => false);
   const savePromiseRef = useRef(null);
   const mountedRef = useRef(true);
@@ -1163,10 +1162,7 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
 
   function markDirty() {
     dirtyRef.current = true;
-    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
-    autosaveTimerRef.current = setTimeout(() => {
-      persistRef.current({ reason: 'autosave' });
-    }, AUTOSAVE_MS);
+    editSeqRef.current += 1;
   }
 
   function setField(k, v) {
@@ -1175,8 +1171,12 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
   }
 
   async function persistDevis({ reason = 'autosave', toast = false, stayOnForm = true, requireFields = false } = {}) {
+    const isAutosave = reason === 'autosave';
     const absorbOnLeave = reason === 'leave' || reason === 'manual';
-    const { form: nextForm, absorbed } = absorbPendingDrafts(formRef.current, { force: absorbOnLeave });
+    // L'auto-save ne doit pas avaler une ligne en cours de saisie dans le composeur.
+    const { form: nextForm, absorbed } = isAutosave
+      ? { form: formRef.current, absorbed: false }
+      : absorbPendingDrafts(formRef.current, { force: absorbOnLeave });
     if (absorbed) {
       dirtyRef.current = true;
       formRef.current = nextForm;
@@ -1194,7 +1194,7 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
     if (!dirtyRef.current && reason !== 'manual') return true;
     const persisted = !!(devisRef.current?.id || nextForm.id);
     const hasIdentity = !!(nextForm.titre?.trim() || nextForm.client_id || (nextForm.lignes || []).length);
-    if (requireFields || reason === 'autosave') {
+    if (requireFields || isAutosave) {
       const errs = {};
       if (!nextForm.titre?.trim()) errs.titre = 'Requis';
       if (!nextForm.client_id) errs.client_id = 'Requis';
@@ -1212,26 +1212,52 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
     }
     setApiError('');
     saveInFlightRef.current = true;
-    if (reason !== 'autosave') setSavingLocal(true);
+    if (!isAutosave) setSavingLocal(true);
+    const seqAtStart = editSeqRef.current;
     const payload = {
       ...nextForm,
       lignes: enrichLignesDescriptions(nextForm.lignes, articlesRef.current || []),
     };
     const run = (async () => {
-      const result = await onSavedRef.current(payload, !!(payload.id || devisRef.current?.id), { stayOnForm });
+      const result = await onSavedRef.current(
+        payload,
+        !!(payload.id || devisRef.current?.id),
+        { stayOnForm, silent: isAutosave },
+      );
       if (result && result.success === false) {
         if (mountedRef.current) setApiError(result.error || "Erreur lors de l'enregistrement.");
         return false;
       }
+      const editedDuringSave = editSeqRef.current !== seqAtStart;
       if (result?.data) {
         const saved = result.data;
-        const merged = {
-          ...formRef.current,
-          ...saved,
-          lignes: mapSavedLignes(saved.lignes, formRef.current.lignes),
-        };
+        // Auto-save / saisie pendant l'envoi : ne jamais écraser ce que l'utilisateur tape
+        // (le serveur renvoie des valeurs trimées / plus anciennes).
+        const merged = (isAutosave || editedDuringSave)
+          ? {
+            ...formRef.current,
+            id: saved.id || formRef.current.id,
+            reference: formRef.current.reference || saved.reference,
+          }
+          : {
+            ...formRef.current,
+            ...saved,
+            lignes: mapSavedLignes(saved.lignes, formRef.current.lignes),
+          };
         formRef.current = merged;
-        if (mountedRef.current) setForm(merged);
+        if (mountedRef.current) {
+          if (isAutosave || editedDuringSave) {
+            setForm((p) => (p.id === merged.id && p.reference === merged.reference
+              ? p
+              : { ...p, id: merged.id, reference: merged.reference }));
+          } else {
+            setForm(merged);
+          }
+        }
+      }
+      if (editedDuringSave) {
+        dirtyRef.current = true;
+        return true;
       }
       dirtyRef.current = false;
       if (toast && mountedRef.current) {
@@ -1263,7 +1289,6 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
     window.addEventListener('pagehide', flush);
     document.addEventListener('visibilitychange', onVisibility);
     return () => {
-      if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
       window.removeEventListener('pagehide', flush);
       document.removeEventListener('visibilitychange', onVisibility);
       flush();
@@ -1272,7 +1297,6 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
   }, []);
 
   async function leaveDevis() {
-    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
     const ok = await persistDevis({ reason: 'leave', stayOnForm: true });
     if (!ok && dirtyRef.current) return;
     onBack();
@@ -1501,13 +1525,11 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
 
   async function handleSave(e) {
     e.preventDefault();
-    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
     dirtyRef.current = true;
     await persistDevis({ reason: 'manual', toast: false, stayOnForm: false, requireFields: true });
   }
 
   async function handleEnregistrer() {
-    if (autosaveTimerRef.current) clearTimeout(autosaveTimerRef.current);
     dirtyRef.current = true;
     await persistDevis({ reason: 'manual', toast: true, stayOnForm: true, requireFields: true });
   }
@@ -1576,7 +1598,16 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
         <ChevronLeft size={16} /> Retour aux devis
       </button>
 
-      <form onSubmit={handleSave}>
+      <form
+        onSubmit={handleSave}
+        onKeyDown={(e) => {
+          if (e.key !== 'Enter') return;
+          const t = e.target;
+          if (t?.tagName === 'INPUT' && !['submit', 'button', 'checkbox', 'radio'].includes(t.type)) {
+            e.preventDefault();
+          }
+        }}
+      >
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16, marginBottom: 16, flexWrap: 'wrap' }}>
           <div>
             <h1 className="page-title" style={{ marginBottom: 2 }}>{isPersisted ? 'Modifier devis' : 'Nouveau devis'}</h1>

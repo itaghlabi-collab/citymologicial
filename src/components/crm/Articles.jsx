@@ -171,10 +171,7 @@ function ArticleModal({ article, categories, onClose, onSave, saving }) {
             </div>
           )}
 
-          {/* Section 1 – Informations principales */}
-          <details className="crm-form-collapse" open>
-            <summary>Informations principales</summary>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 12 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
 
               <div className="crm-form-grid">
                 <div className="form-group" style={{ gridColumn: '1 / -1' }}>
@@ -230,25 +227,21 @@ function ArticleModal({ article, categories, onClose, onSave, saving }) {
                   </select>
                 </div>
               </div>
-            </div>
-          </details>
 
-          <details className="crm-form-collapse">
-            <summary>Description article</summary>
-            <div className="form-group" style={{ marginTop: 12 }}>
-              <label>Description</label>
-              <textarea
-                rows={5}
-                value={form.description}
-                onChange={e => setField('description', e.target.value)}
-                placeholder="Specifications techniques, dimensions, normes, conditions d'utilisation, materiaux..."
-                style={{ ...IS(false), resize: 'vertical', lineHeight: 1.65, minHeight: 110 }}
-              />
-              <div style={{ fontSize: '0.72rem', color: 'var(--text-3)', marginTop: 4 }}>
-                Utilisee dans les devis, factures et bons de livraison. Soyez precis pour une generation documentaire optimale.
+              <div className="form-group">
+                <label>Description</label>
+                <textarea
+                  rows={5}
+                  value={form.description}
+                  onChange={e => setField('description', e.target.value)}
+                  placeholder="Specifications techniques, dimensions, normes, conditions d'utilisation, materiaux..."
+                  style={{ ...IS(false), resize: 'vertical', lineHeight: 1.65, minHeight: 110 }}
+                />
+                <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>
+                  Utilisee dans les devis, factures et bons de livraison. Soyez precis pour une generation documentaire optimale.
+                </div>
               </div>
-            </div>
-          </details>
+          </div>
 
           <div className="crm-form-actions">
             <button type="button" className="btn btn-ghost" onClick={onClose} disabled={saving}>Annuler</button>

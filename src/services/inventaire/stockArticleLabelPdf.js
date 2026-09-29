@@ -6,6 +6,7 @@ import {
   getArticleBarcodeValue,
   renderBarcodeForPrint,
   containBarcodeMm,
+  getArticlePublicUrl,
 } from './barcodeUtils';
 
 const TEXT = [0, 0, 0];
@@ -80,13 +81,15 @@ function drawLabelOnDoc(doc, x, y, article, formatKey) {
   const barcodeMaxW = contentW * 0.94;
 
   const barcodeMeta = renderBarcodeForPrint(code, barcodePrintOpts(formatKey));
-  if (barcodeMeta?.dataUrl) {
+  if (barcodeMeta?.bars?.length) {
     const size = containBarcodeMm(barcodeMeta, barcodeMaxW, barcodeMaxH);
     const imgX = x + (W - size.width) / 2;
     const imgY = barcodeTop + (barcodeMaxH - size.height) / 2;
-    try {
-      doc.addImage(barcodeMeta.dataUrl, 'PNG', imgX, imgY, size.width, size.height, undefined, 'FAST');
-    } catch { /* skip */ }
+    const k = size.width / barcodeMeta.pxW;
+    doc.setFillColor(0, 0, 0);
+    barcodeMeta.bars.forEach((b) => {
+      doc.rect(imgX + b.x * k, imgY + barcodeMeta.barTop * k, b.w * k, barcodeMeta.barHeight * k, 'F');
+    });
   }
 
   doc.setFont('helvetica', 'bold');
@@ -145,21 +148,93 @@ export function downloadStockArticleLabels(articles = [], formatOrLegacy = 'stan
   return downloadStockArticleLabelsA4(articles, formatOrLegacy);
 }
 
-function printLabelPdf(article, formatKey) {
+function printHtml(article, formatKey, qrDataUrl = '') {
   const fmt = LABEL_FORMATS[formatKey] || LABEL_FORMATS.standard;
-  const doc = createLabelPdf(fmt);
-  drawLabelOnDoc(doc, 0, 0, article, formatKey);
-  doc.autoPrint();
-  const url = doc.output('bloburl');
-  const w = window.open(url, '_blank', 'noopener,noreferrer');
+  const code = getArticleBarcodeValue(article);
+  const designation = String(article.designation || article.nom || '—').trim().toUpperCase();
+  const barcodeMeta = renderBarcodeForPrint(code, barcodePrintOpts(formatKey));
+
+  const esc = (s) => String(s || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+
+  const desSize = formatKey === 'small' ? '7px' : '9px';
+  const codeSize = formatKey === 'small' ? '9px' : '10px';
+  const qrSize = formatKey === 'small' ? '14mm' : '18mm';
+
+  document.querySelectorAll('iframe[data-citymo-label-print]').forEach((el) => el.remove());
+  const iframe = document.createElement('iframe');
+  iframe.setAttribute('data-citymo-label-print', '1');
+  iframe.setAttribute('aria-hidden', 'true');
+  iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0;';
+  document.body.appendChild(iframe);
+  const w = iframe.contentWindow;
   if (!w) {
-    downloadStockArticleLabel(article, formatKey);
+    iframe.remove();
+    return false;
   }
+
+  w.document.open();
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${esc(code)}</title>
+<style>
+  @page { size: ${fmt.width}mm ${fmt.height}mm; margin: 0; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html { width: ${fmt.width}mm; height: ${fmt.height}mm; overflow: hidden; }
+  body {
+    width: ${fmt.width}mm; height: ${fmt.height}mm; overflow: hidden;
+    font-family: Helvetica, Arial, sans-serif; color: #000;
+    display: flex; flex-direction: column; align-items: center; justify-content: space-between;
+    text-align: center; padding: 2.4mm; break-inside: avoid;
+  }
+  .designation { font-weight: 800; font-size: ${desSize}; line-height: 1.15; width: 100%; }
+  .codes { display: flex; align-items: center; justify-content: center; gap: 3mm; width: 100%; flex: 1; min-height: 0; }
+  .barcode-wrap { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; min-height: 0; }
+  .barcode-wrap img { display: block; width: 100%; height: auto; }
+  .qr-wrap { flex-shrink: 0; }
+  .qr-wrap img { display: block; width: ${qrSize}; height: ${qrSize}; image-rendering: pixelated; }
+  .code { font-weight: 800; font-size: ${codeSize}; letter-spacing: 0.08em; }
+</style></head><body>
+  <div class="designation">${esc(designation)}</div>
+  <div class="codes">
+    <div class="barcode-wrap">${barcodeMeta?.dataUrl ? `<img src="${barcodeMeta.dataUrl}" alt="${esc(code)}" />` : ''}</div>
+    ${qrDataUrl ? `<div class="qr-wrap"><img src="${qrDataUrl}" alt="QR" /></div>` : ''}
+  </div>
+  <div class="code">${esc(code)}</div>
+</body></html>`);
+  w.document.close();
+
+  const cleanup = () => setTimeout(() => iframe.remove(), 500);
+  const launch = () => {
+    w.addEventListener('afterprint', cleanup, { once: true });
+    w.focus();
+    w.print();
+  };
+  const imgs = Array.from(w.document.images || []);
+  Promise.all(imgs.map((img) => (img.complete
+    ? Promise.resolve()
+    : new Promise((resolve) => { img.onload = resolve; img.onerror = resolve; }))))
+    .then(launch);
+  return true;
 }
 
-/** Impression physique = même étiquette 80×50 (ou 50×30) que le PDF : CODE128 seul, sans QR. */
-export function printStockArticleLabel(article, formatOrLegacy = 'standard') {
-  printLabelPdf(article, resolveFormat(formatOrLegacy));
+export async function printStockArticleLabel(article, formatOrLegacy = 'standard') {
+  const formatKey = resolveFormat(formatOrLegacy);
+  let qrDataUrl = '';
+  try {
+    const QRCode = (await import('qrcode')).default;
+    qrDataUrl = await QRCode.toDataURL(getArticlePublicUrl(getArticleBarcodeValue(article)), {
+      scale: 10,
+      margin: 2,
+      errorCorrectionLevel: 'M',
+      color: { dark: '#000000', light: '#ffffff' },
+    });
+  } catch {
+    /* QR optionnel */
+  }
+  if (!printHtml(article, formatKey, qrDataUrl)) {
+    downloadStockArticleLabel(article, formatKey);
+  }
 }
 
 export function printStockArticleLabels(articles = [], formatOrLegacy = 'standard') {

@@ -12,7 +12,7 @@ export default function BarcodeDisplay({ article, value, height = 56, width = 2,
     const canvas = canvasRef.current;
     if (!canvas || !code) return;
     try {
-      const rendered = renderBarcodeCanvas(code, { height, width, displayValue });
+      const rendered = renderBarcodeCanvas(code, { height, width: Math.max(1, Math.round(width)), displayValue });
       if (!rendered) return;
       const ctx = canvas.getContext('2d');
       canvas.width = rendered.width;

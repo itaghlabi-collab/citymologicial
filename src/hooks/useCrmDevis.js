@@ -56,35 +56,43 @@ export function useCrmDevis() {
     return () => subscription.unsubscribe();
   }, [configured, load]);
 
-  const create = useCallback(async (form) => {
-    setSaving(true);
+  // silent : auto-save du formulaire — pas de spinner global ni rechargement bloquant de la liste.
+  const create = useCallback(async (form, { silent = false } = {}) => {
+    if (!silent) setSaving(true);
     setError(null);
     try {
       const data = await createCrmDevis(form);
-      await load();
+      if (silent) load();
+      else await load();
       return { success: true, data };
     } catch (err) {
       const msg = formatSupabaseError(err, 'Erreur création devis.');
       setError(msg);
       return { success: false, error: msg };
     } finally {
-      setSaving(false);
+      if (!silent) setSaving(false);
     }
   }, [load]);
 
-  const update = useCallback(async (id, form) => {
-    setSaving(true);
+  const update = useCallback(async (id, form, { silent = false } = {}) => {
+    if (!silent) setSaving(true);
     setError(null);
     try {
       const data = await updateCrmDevis(id, form);
-      await load();
+      if (silent) {
+        if (data) {
+          setRecords((prev) => prev.map((r) => (String(r.id) === String(id) ? { ...r, ...data } : r)));
+        }
+      } else {
+        await load();
+      }
       return { success: true, data };
     } catch (err) {
       const msg = formatSupabaseError(err, 'Erreur modification devis.');
       setError(msg);
       return { success: false, error: msg };
     } finally {
-      setSaving(false);
+      if (!silent) setSaving(false);
     }
   }, [load]);
 
