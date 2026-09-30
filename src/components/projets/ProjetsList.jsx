@@ -1471,7 +1471,13 @@ export default function ProjetsList({ onCreateSAV }) {
 
       {/* KPIs */}
       <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', marginBottom: 20 }}>
-        <KpiCard icon={<FolderOpen size={17} />}  label="Total projets"    value={total}                                           color="grey"  />
+        <KpiCard
+          icon={<FolderOpen size={17} />}
+          label="Total projets"
+          value={total}
+          color="grey"
+          onClick={() => setFilterStatut('')}
+        />
         <KpiCard icon={<Layers size={17} />}       label="En cours"         value={enCours}                                         color="blue"  />
         <KpiCard
           icon={<CheckCircle size={17} />}
