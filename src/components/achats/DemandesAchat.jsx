@@ -1,7 +1,7 @@
 /**
  * DemandesAchat.jsx — Tableau de bord & workflow demandes d'achat ERP CITYMO
  */
-import { useState, useCallback, useMemo, useEffect } from 'react';
+import { useState, useCallback, useMemo, useEffect, useRef } from 'react';
 import {
   ClipboardList, Plus, Eye, Edit2, Trash2, Search, Filter,
   Download, AlertTriangle, Clock, Loader2, RefreshCw, FileText,
@@ -449,10 +449,27 @@ function GroupedDemandeForm({ initial, onSave, onCancel, saving, suppliers = [],
   );
 }
 
-function DemandeForm({ initial, onSave, onCancel, saving, suppliers = [], projects = [], sessionUser, superAdminEdit = false }) {
+function demandeFormSnapshot(form, attachments) {
+  return JSON.stringify({
+    ...form,
+    lignes: (form.lignes || []).map(({ id, ...rest }) => rest),
+    attachments: (attachments || []).map((a) => a.storage_path || a.name || ''),
+  });
+}
+
+function DemandeForm({ initial, onSave, onCancel, saving, suppliers = [], projects = [], sessionUser, superAdminEdit = false, onDirtyChange }) {
   const [form, setForm] = useState(() => toFormState(initial));
   const [attachments, setAttachments] = useState(() => initial?.payload?.attachments || []);
   const [errors, setErrors] = useState({});
+  const baselineSnapshot = useMemo(
+    () => demandeFormSnapshot(toFormState(initial), initial?.payload?.attachments || []),
+    [initial],
+  );
+
+  useEffect(() => {
+    if (!onDirtyChange) return;
+    onDirtyChange(demandeFormSnapshot(form, attachments) !== baselineSnapshot);
+  }, [form, attachments, baselineSnapshot, onDirtyChange]);
   const set = (k, v) => setForm((p) => ({ ...p, [k]: v }));
   const isHorsProjet = form.link_type === 'hors_projet';
 
@@ -842,6 +859,8 @@ export default function DemandesAchat() {
   const [showFilters, setShowFilters] = useState(false);
   const [modalMode, setModalMode] = useState(null);
   const [editItem, setEditItem] = useState(null);
+  const [confirmLeaveOpen, setConfirmLeaveOpen] = useState(false);
+  const newDemandeDirtyRef = useRef(false);
   const [detailId, setDetailId] = useState(null);
   const [detailAddQuote, setDetailAddQuote] = useState(false);
   const [detailRefreshKey, setDetailRefreshKey] = useState(0);
@@ -927,6 +946,21 @@ export default function DemandesAchat() {
   function closeModal() {
     setModalMode(null);
     setEditItem(null);
+    newDemandeDirtyRef.current = false;
+    setConfirmLeaveOpen(false);
+  }
+
+  const handleNewDemandeDirtyChange = useCallback((dirty) => {
+    newDemandeDirtyRef.current = dirty;
+  }, []);
+
+  function handleModalOverlayClose() {
+    const isNewSimple = modalMode === 'simple' && !editItem;
+    if (isNewSimple && newDemandeDirtyRef.current) {
+      setConfirmLeaveOpen(true);
+      return;
+    }
+    closeModal();
   }
 
   async function handleDelete(id) {
@@ -1313,6 +1347,7 @@ export default function DemandesAchat() {
       <Modal
         open={modalMode !== null}
         onClose={closeModal}
+        onOverlayClose={handleModalOverlayClose}
         className="achats-da-uppercase"
         title={
         editItem
@@ -1339,8 +1374,28 @@ export default function DemandesAchat() {
             projects={projects}
             sessionUser={user}
             superAdminEdit={superAdmin && editItem && editItem.statut !== 'Brouillon'}
+            onDirtyChange={editItem ? undefined : handleNewDemandeDirtyChange}
           />
         )}
+      </Modal>
+
+      <Modal
+        open={confirmLeaveOpen}
+        onClose={() => setConfirmLeaveOpen(false)}
+        title="Demande non enregistrée"
+        width={460}
+      >
+        <p style={{ margin: '0 0 20px', fontSize: '0.9rem', color: 'var(--text-2)' }}>
+          Vous avez des informations non enregistrées. Que souhaitez-vous faire ?
+        </p>
+        <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, flexWrap: 'wrap' }}>
+          <button type="button" className="btn btn-secondary" onClick={() => setConfirmLeaveOpen(false)}>
+            Continuer la saisie
+          </button>
+          <button type="button" className="btn btn-primary" onClick={closeModal}>
+            Quitter sans enregistrer
+          </button>
+        </div>
       </Modal>
     </div>
   );

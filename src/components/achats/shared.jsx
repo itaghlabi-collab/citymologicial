@@ -136,13 +136,13 @@ export function EmptyState({ icon, title, sub, action, onAction }) {
   );
 }
 
-export function Modal({ open, onClose, title, children, width, contentClassName = '', className = '' }) {
+export function Modal({ open, onClose, onOverlayClose, title, children, width, contentClassName = '', className = '' }) {
   if (!open) return null;
   return (
     <div
       className={`achats-modal-overlay${className ? ` ${className}` : ''}`}
       role="presentation"
-      onClick={(e) => e.target === e.currentTarget && onClose()}
+      onClick={(e) => e.target === e.currentTarget && (onOverlayClose || onClose)()}
     >
       <div
         className="achats-modal-box"
