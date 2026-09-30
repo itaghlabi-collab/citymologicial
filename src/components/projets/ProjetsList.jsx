@@ -79,12 +79,19 @@ function Badge({ type, children }) {
   return <span className={`badge ${cfg.cls}`}>{children || cfg.label}</span>;
 }
 
-function KpiCard({ icon, label, value, sub, color }) {
+function KpiCard({ icon, label, value, sub, color, onClick, active = false }) {
   const colors = { red: 'var(--red)', blue: '#1565C0', green: '#2E7D32', orange: '#E65100', grey: 'var(--text-3)' };
   const bg     = { red: 'var(--red-light)', blue: '#E3F2FD', green: '#E8F5E9', orange: '#FFF3E0', grey: 'var(--surface-2)' };
   const c = color || 'grey';
   return (
-    <div className="stat-card">
+    <div
+      className="stat-card"
+      onClick={onClick}
+      role={onClick ? 'button' : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (e) => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); onClick(); } } : undefined}
+      style={onClick ? { cursor: 'pointer', outline: active ? `2px solid ${colors[c]}` : undefined } : undefined}
+    >
       <div className="stat-icon" style={{ background: bg[c], color: colors[c] }}>{icon}</div>
       <div className="stat-body">
         <div className="stat-value">{value}</div>
@@ -1364,7 +1371,7 @@ export default function ProjetsList({ onCreateSAV }) {
     }
   }, [fetchOne]);
 
-  const filtered = filterProjects(projets, {
+  const filteredAll = filterProjects(projets, {
     search,
     statut: filterStatut,
     client_id: filterClient,
@@ -1372,6 +1379,7 @@ export default function ProjetsList({ onCreateSAV }) {
     type_intervention: filterIntervention,
     date: filterDate,
   });
+  const filtered = filterStatut ? filteredAll : filteredAll.filter((p) => p.statut !== 'termine');
 
   const kpi = computeProjectStats(projets);
   const total = kpi.total;
@@ -1465,7 +1473,14 @@ export default function ProjetsList({ onCreateSAV }) {
       <div className="stat-grid" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(170px, 1fr))', marginBottom: 20 }}>
         <KpiCard icon={<FolderOpen size={17} />}  label="Total projets"    value={total}                                           color="grey"  />
         <KpiCard icon={<Layers size={17} />}       label="En cours"         value={enCours}                                         color="blue"  />
-        <KpiCard icon={<CheckCircle size={17} />}  label="Clôturés"         value={termines}                                        color="green" />
+        <KpiCard
+          icon={<CheckCircle size={17} />}
+          label="Clôturés"
+          value={termines}
+          color="green"
+          active={filterStatut === 'termine'}
+          onClick={() => setFilterStatut((s) => (s === 'termine' ? '' : 'termine'))}
+        />
         <KpiCard icon={<AlertTriangle size={17} />}label="En retard"        value={enRetard}                                        color="red"   />
         <KpiCard icon={<DollarSign size={17} />}   label="Budget total"     value={budgetTotal.toLocaleString('fr-MA') + ' MAD'}   color="green" />
         <KpiCard icon={<TrendingUp size={17} />}   label="Budget consommé"  value={budgetConso.toLocaleString('fr-MA') + ' MAD'}   color="orange"/>
