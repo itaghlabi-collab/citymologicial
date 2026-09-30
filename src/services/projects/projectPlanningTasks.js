@@ -243,10 +243,15 @@ export async function updateProjectPlanningTask(id, form) {
 
 export async function deleteProjectPlanningTask(id) {
   await getAuthUserId();
-  const { error } = await getSupabase().from(TABLE).delete().eq('id', id);
+  const { data, error } = await getSupabase().from(TABLE).delete().eq('id', id).select('id');
   if (error) {
     console.error('[CITYMO] project_planning_tasks delete', error);
     throw error;
+  }
+  if (!data?.length) {
+    const err = new Error("Suppression refusée : vous n'avez pas le droit de supprimer des tâches du planning.");
+    err.code = 'FORBIDDEN';
+    throw err;
   }
 }
 
