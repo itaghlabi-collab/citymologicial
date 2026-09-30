@@ -181,13 +181,40 @@ function fixAzertyScan(s) {
 }
 
 /**
+ * Douchette en mode AZERTY sur un poste avec Verr. Maj actif :
+ * « art6éàé-6à-'( » → « ART-2026-0645 » (lettres minuscules, tiret ↔ 6 inversés).
+ */
+const CAPS_AZERTY_TO_QWERTY = {
+  '&': '1', 'é': '2', '"': '3', "'": '4', '’': '4', '(': '5',
+  '-': '6', '§': '6', 'è': '7', '_': '8', '!': '8', 'ç': '9', 'à': '0',
+  '6': '-',
+};
+
+function fixCapsLockAzertyScan(s) {
+  if (!AZERTY_MARKERS.test(s)) return s;
+  return Array.from(s).map((ch) => CAPS_AZERTY_TO_QWERTY[ch] ?? ch).join('').toUpperCase();
+}
+
+const ART_REF_RE = /ART-\d{4}-\d{4,}/i;
+
+/** Choisit la lecture du scan qui donne un code article valide ; sinon comportement historique. */
+function resolveKeyboardScan(s) {
+  if (ART_REF_RE.test(s)) return s;
+  const azerty = fixAzertyScan(s);
+  if (ART_REF_RE.test(azerty)) return azerty;
+  const capsLock = fixCapsLockAzertyScan(s);
+  if (ART_REF_RE.test(capsLock)) return capsLock;
+  return azerty;
+}
+
+/**
  * Extrait le code article depuis un scan douchette (CODE128) ou QR (URL).
  * Ex. TYJ2X8GA ou https://citymo.app/inventaire/articles/TYJ2X8GA
  */
 export function parseScannedArticleCode(raw) {
   let s = normalizeScannedCode(raw);
   if (!s) return '';
-  if (!/^https?:\/\//i.test(s)) s = fixAzertyScan(s);
+  if (!/^https?:\/\//i.test(s)) s = resolveKeyboardScan(s);
 
   const pathMatch = s.match(/\/inventaire\/articles\/([^/?#]+)/i);
   if (pathMatch) {
@@ -214,7 +241,7 @@ export function parseScannedArticleCode(raw) {
     }
   }
 
-  const artRef = s.match(/ART-\d{4}-\d{4,}/i);
+  const artRef = s.match(ART_REF_RE);
   if (artRef) return artRef[0].toUpperCase();
 
   return s;
