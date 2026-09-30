@@ -18,6 +18,7 @@ const TABLE = 'achat_demandes_recuperation';
 export const DEMANDE_RECUP_STATUTS = {
   EN_COURS: 'en_cours',
   PRETE: 'prete_a_recuperer',
+  EN_TRANSPORT: 'en_transport',
   RECUPEREE: 'recuperee',
   ANNULEE: 'annulee',
 };
@@ -26,6 +27,7 @@ export const DEMANDE_RECUP_LABEL = {
   en_cours: 'En cours',
   prete_a_recuperer: 'À récupérer',
   a_recuperer: 'À récupérer', // legacy
+  en_transport: 'En cours de transport',
   recuperee: 'Récupérée',
   annulee: 'Annulée',
 };
@@ -34,6 +36,7 @@ export const DEMANDE_RECUP_BADGE = {
   en_cours: 'badge-blue',
   prete_a_recuperer: 'badge-orange',
   a_recuperer: 'badge-orange',
+  en_transport: 'badge-purple',
   recuperee: 'badge-green',
   annulee: 'badge-grey',
 };
@@ -199,8 +202,12 @@ export async function ensureDemandeFromOp(op, { notify = false } = {}) {
   if (existing) {
     const cur = existing.statut === 'a_recuperer' ? DEMANDE_RECUP_STATUTS.PRETE : existing.statut;
     const patch = {};
-    // Ne pas rétrograder une récupérée / annulée
-    if (cur !== DEMANDE_RECUP_STATUTS.RECUPEREE && cur !== DEMANDE_RECUP_STATUTS.ANNULEE) {
+    // Ne pas rétrograder une demande en transport / récupérée / annulée
+    if (
+      cur !== DEMANDE_RECUP_STATUTS.EN_TRANSPORT
+      && cur !== DEMANDE_RECUP_STATUTS.RECUPEREE
+      && cur !== DEMANDE_RECUP_STATUTS.ANNULEE
+    ) {
       if (cur !== targetStatut) patch.statut = targetStatut;
     }
     // Toujours corriger le quoi (titre DA en majuscules)
@@ -413,7 +420,7 @@ export async function markDemandeRecuperationDone(id, { chauffeur, vehicule, dat
   const { data, error } = await getSupabase()
     .from(TABLE)
     .update({
-      statut: DEMANDE_RECUP_STATUTS.RECUPEREE,
+      statut: DEMANDE_RECUP_STATUTS.EN_TRANSPORT,
       chauffeur: ch,
       vehicule: ve,
       date_recuperation: date_recuperation || todayISO(),
@@ -423,6 +430,33 @@ export async function markDemandeRecuperationDone(id, { chauffeur, vehicule, dat
     .single();
   if (error) throw error;
   return normalizeDemandeRecuperation(data);
+}
+
+/** En cours de transport → Récupérée (livraison confirmée par le magasinier). */
+export async function markDemandeRecuperationDelivered(id) {
+  await getAuthUser();
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .update({ statut: DEMANDE_RECUP_STATUTS.RECUPEREE })
+    .eq('id', id)
+    .eq('statut', DEMANDE_RECUP_STATUTS.EN_TRANSPORT)
+    .select('*')
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) {
+    const err = new Error('Cette demande n’est plus en cours de transport — actualisez la page.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  return normalizeDemandeRecuperation(data);
+}
+
+/** DA liée (lecture seule) — via fonction SQL get_recup_purchase_request. */
+export async function getRecupPurchaseRequest(recupId) {
+  await getAuthUser();
+  const { data, error } = await getSupabase().rpc('get_recup_purchase_request', { p_recup_id: recupId });
+  if (error) throw error;
+  return data || null;
 }
 
 export async function deleteDemandeRecuperationAchats(id) {
@@ -456,6 +490,7 @@ export function computeDemandesRecuperationKpis(rows) {
     total: list.length,
     enCours: list.filter((r) => r.statut === DEMANDE_RECUP_STATUTS.EN_COURS).length,
     aRecuperer: list.filter(isPrete).length,
+    enTransport: list.filter((r) => r.statut === DEMANDE_RECUP_STATUTS.EN_TRANSPORT).length,
     recuperees: list.filter((r) => r.statut === DEMANDE_RECUP_STATUTS.RECUPEREE).length,
     annulees: list.filter((r) => r.statut === DEMANDE_RECUP_STATUTS.ANNULEE).length,
   };
