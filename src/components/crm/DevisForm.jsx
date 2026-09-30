@@ -1283,14 +1283,9 @@ export default function DevisForm({ devis, onBack, onSaved, saving = false }) {
   useEffect(() => {
     mountedRef.current = true;
     const flush = () => { persistRef.current({ reason: 'leave' }); };
-    const onVisibility = () => {
-      if (document.visibilityState === 'hidden') flush();
-    };
     window.addEventListener('pagehide', flush);
-    document.addEventListener('visibilitychange', onVisibility);
     return () => {
       window.removeEventListener('pagehide', flush);
-      document.removeEventListener('visibilitychange', onVisibility);
       flush();
       mountedRef.current = false;
     };
