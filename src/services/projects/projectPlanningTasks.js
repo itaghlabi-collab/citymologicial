@@ -283,6 +283,17 @@ export async function shiftPlanningTaskDates(id, newStart, newEnd) {
   return normalizePlanningTask(data);
 }
 
+/** Enregistre uniquement la colonne ordre — aucune date ni durée n'est recalculée. */
+export async function reorderProjectPlanningTasks(changes = []) {
+  if (!changes.length) return;
+  await getAuthUserId();
+  const results = await Promise.all(changes.map(({ id, ordre }) => (
+    getSupabase().from(TABLE).update({ ordre }).eq('id', id)
+  )));
+  const failed = results.find((r) => r.error);
+  if (failed) throw failed.error;
+}
+
 /** Importe les tâches types d'un lot (modèle WBS) sans modifier les tâches existantes. */
 export async function importPlanningWbsTemplate(projectId, lot) {
   const template = PLANNING_WBS_TEMPLATES[lot];
@@ -559,7 +570,13 @@ export function buildGanttDisplayRows(tasks, collapsedLots = new Set()) {
     byLot[lot].push(t);
   });
 
-  const lotOrder = [...PLANNING_LOTS.filter((l) => byLot[l]), ...Object.keys(byLot).filter((l) => !PLANNING_LOTS.includes(l))];
+  const orderKey = (t) => (Number(t.ordre) > 0 ? Number(t.ordre) : Infinity);
+  Object.values(byLot).forEach((list) => list.sort((a, b) => (orderKey(a) - orderKey(b)) || 0));
+  const baseLotOrder = [...PLANNING_LOTS.filter((l) => byLot[l]), ...Object.keys(byLot).filter((l) => !PLANNING_LOTS.includes(l))];
+  const lotOrder = baseLotOrder
+    .map((lot, i) => ({ lot, i, rank: Math.min(...byLot[lot].map(orderKey)) }))
+    .sort((a, b) => (a.rank - b.rank) || (a.i - b.i))
+    .map((x) => x.lot);
   const rows = [];
   let idx = 0;
 
