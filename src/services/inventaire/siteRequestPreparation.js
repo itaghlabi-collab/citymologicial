@@ -4,6 +4,7 @@
  */
 
 const DEPRECATED_EMPLACEMENTS = ['F5', 'G3', 'F2'];
+const PREPARATION_SOURCE_EMPLACEMENT = 'DEPOT LAKHYAYTA';
 const SOURCE_PREFIX = /^\[Source:\s*([^\]]+)\]\s*/i;
 
 function isDeprecatedEmplacement(value) {
@@ -59,11 +60,13 @@ function isActiveArticle(article) {
  */
 export function buildPreparationOffers(articles = [], levels = []) {
   const byArticle = new Map();
+  const sourceKey = normalizeSearch(PREPARATION_SOURCE_EMPLACEMENT);
   (levels || []).forEach((level) => {
     const articleId = String(level.article_id || '');
     const emplacement = String(level.emplacement || '').trim();
     const qty = Number(level.quantite) || 0;
     if (!articleId || !emplacement || qty <= 0 || isDeprecatedEmplacement(emplacement)) return;
+    if (normalizeSearch(emplacement) !== sourceKey) return;
     if (!byArticle.has(articleId)) byArticle.set(articleId, []);
     byArticle.get(articleId).push({
       emplacement,
