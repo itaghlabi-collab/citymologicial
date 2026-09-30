@@ -689,25 +689,25 @@ export default function MouvementRapide({ articles = [], emplacementsList, onArt
                       const cfg = TYPE_CONFIG[m.type_mouvement] || {};
                       return (
                         <tr key={m.id} style={isCancelled ? { opacity: 0.5 } : {}}>
-                          <td>
+                          <td style={{ textTransform: 'uppercase' }}>
                             <span style={{ fontFamily: 'var(--font-head)', fontWeight: 700, fontSize: '0.82rem', color: 'var(--red)' }}>{m.ref}</span>
                             {isCancelled && <span className="badge badge-red" style={{ fontSize: '0.65rem', marginLeft: 6 }}>Annulé</span>}
                           </td>
-                          <td style={{ fontSize: '0.83rem' }}>{m.date_creation}</td>
-                          <td>
+                          <td style={{ fontSize: '0.83rem', textTransform: 'uppercase' }}>{m.date_creation}</td>
+                          <td style={{ textTransform: 'uppercase' }}>
                             <span className={`badge ${m.type_mouvement === 'Entrée' ? 'badge-green' : m.type_mouvement === 'Sortie' ? 'badge-red' : 'badge-blue'}`} style={{ fontSize: '0.7rem' }}>
                               {m.type_mouvement}
                             </span>
                           </td>
-                          <td>
+                          <td style={{ textTransform: 'uppercase' }}>
                             <div style={{ fontSize: '0.82rem', fontWeight: 600, textTransform: 'uppercase' }}>{m.article_designation || '—'}</div>
                             <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>{m.article_code}</div>
                           </td>
-                          <td style={{ fontFamily: 'var(--font-head)', fontWeight: 700 }}>{m.quantite}</td>
-                          <td style={{ fontSize: '0.82rem' }}>{formatEmplacementDisplay(m.emplacement_source)}</td>
-                          <td style={{ fontSize: '0.82rem' }}>{formatEmplacementDisplay(m.emplacement_destination)}</td>
-                          <td style={{ fontSize: '0.82rem', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{m.motif || '—'}</td>
-                          <td style={{ fontSize: '0.82rem' }}>{m.cree_par || '—'}</td>
+                          <td style={{ fontFamily: 'var(--font-head)', fontWeight: 700, textTransform: 'uppercase' }}>{m.quantite}</td>
+                          <td style={{ fontSize: '0.82rem', textTransform: 'uppercase' }}>{formatEmplacementDisplay(m.emplacement_source)}</td>
+                          <td style={{ fontSize: '0.82rem', textTransform: 'uppercase' }}>{formatEmplacementDisplay(m.emplacement_destination)}</td>
+                          <td style={{ fontSize: '0.82rem', maxWidth: 140, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textTransform: 'uppercase' }}>{m.motif || '—'}</td>
+                          <td style={{ fontSize: '0.82rem', textTransform: 'uppercase' }}>{m.cree_par || '—'}</td>
                           <td>
                             <MRActions
                               isCancelled={isCancelled}
