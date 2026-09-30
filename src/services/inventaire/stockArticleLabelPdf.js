@@ -157,9 +157,12 @@ export function downloadStockArticleLabels(articles = [], formatOrLegacy = 'stan
 
 /** 203 dpi (8 dots/mm) — résolution native DT325B / JT 80DW. */
 const THERMAL_DOTS_PER_MM = 8;
-/** Hauteur de barres CODE128 1D standard (20 mm) — pas toute la colonne gauche. */
-const THERMAL_BAR_H_MM = 20;
-const THERMAL_BAR_H_PX = THERMAL_BAR_H_MM * THERMAL_DOTS_PER_MM; // 160 px @ 203 dpi
+/** Hauteur de barres CODE128 si le QR n'est pas disponible (sinon = hauteur du QR). */
+const THERMAL_BAR_H_MM = 14;
+const THERMAL_BAR_H_PX = THERMAL_BAR_H_MM * THERMAL_DOTS_PER_MM; // 112 px @ 203 dpi
+/** QR : 3 points par module (net à 203 dpi), marge 1 module. */
+const THERMAL_QR_SCALE = 3;
+const THERMAL_QR_MARGIN = 1;
 
 function wrapCanvasLines(ctx, text, maxWidth, maxLines) {
   const raw = String(text || '').trim().toUpperCase();
@@ -222,10 +225,27 @@ async function renderThermalLabelPng(article) {
   const codeFont = 18;
   const codeBoxH = 22;
   const codeGap = 6;
-  const barH = THERMAL_BAR_H_PX;
   const barX = pad;
   const barW = W - pad * 2 - rightColW - colGap;
   const rightX = pad + barW + colGap;
+
+  let qrCanvas = null;
+  try {
+    const QRCode = (await import('qrcode')).default;
+    qrCanvas = document.createElement('canvas');
+    await QRCode.toCanvas(qrCanvas, getArticlePublicUrl(code), {
+      scale: THERMAL_QR_SCALE,
+      margin: THERMAL_QR_MARGIN,
+      errorCorrectionLevel: 'M',
+      color: { dark: '#000000', light: '#ffffff' },
+    });
+  } catch {
+    qrCanvas = null; /* QR optionnel */
+  }
+
+  /** Barres de la même hauteur que la zone noire du QR → QR aligné sur le code-barres. */
+  const qrQuiet = THERMAL_QR_SCALE * THERMAL_QR_MARGIN;
+  const barH = qrCanvas ? qrCanvas.height - qrQuiet * 2 : THERMAL_BAR_H_PX;
 
   const leftColH = H - pad * 2;
   const stackH = barH + codeGap + codeBoxH;
@@ -239,34 +259,21 @@ async function renderThermalLabelPng(article) {
   ctx.textBaseline = 'bottom';
   ctx.fillText(code || '—', barX + Math.floor(barW / 2), stackY + stackH);
 
+  const qrY = barY - qrQuiet;
+
   const nameFont = 20;
   const nameLineH = 24;
   ctx.font = `bold ${nameFont}px Helvetica, Arial, sans-serif`;
   ctx.textAlign = 'left';
   ctx.textBaseline = 'top';
   const lines = wrapCanvasLines(ctx, designation, rightColW, 2);
-  let nameY = pad;
+  let nameY = qrCanvas ? Math.max(pad, qrY - 8 - lines.length * nameLineH) : pad;
   lines.forEach((line) => {
     ctx.fillText(line, rightX, nameY);
     nameY += nameLineH;
   });
 
-  const qrY = nameY + 8;
-  const qrSize = Math.max(96, Math.min(rightColW, H - pad - qrY));
-
-  try {
-    const QRCode = (await import('qrcode')).default;
-    const qrCanvas = document.createElement('canvas');
-    await QRCode.toCanvas(qrCanvas, getArticlePublicUrl(code), {
-      width: qrSize,
-      margin: 1,
-      errorCorrectionLevel: 'M',
-      color: { dark: '#000000', light: '#ffffff' },
-    });
-    ctx.drawImage(qrCanvas, rightX, qrY);
-  } catch {
-    /* QR optionnel */
-  }
+  if (qrCanvas) ctx.drawImage(qrCanvas, rightX, qrY);
 
   return canvas.toDataURL('image/png');
 }
