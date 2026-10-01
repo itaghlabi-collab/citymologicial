@@ -605,7 +605,7 @@ export default function BCLignesSection({ lignes, onChange }) {
               />
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(7, minmax(0, 1fr))', gap: 10, marginBottom: 12, alignItems: 'end' }}>
+            <div className="achats-bc-line-grid" style={{ display: 'grid', gap: 10, marginBottom: 12, alignItems: 'end' }}>
               <div>
                 <FieldLabel>Quantité</FieldLabel>
                 <input type="number" min="0" step="0.01" value={draft.qte} onChange={(e) => setF('qte', e.target.value)} style={INPUT_STYLE} />

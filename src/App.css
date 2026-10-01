@@ -12687,6 +12687,23 @@ tbody tr:last-child td { border-bottom: none; }
   text-transform: uppercase;
 }
 
+/* Bon de commande — ligne Quantité … TVA : 7 colonnes sur ordinateur, repliée sur tablette / mobile */
+.achats-bc-line-grid {
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+}
+
+@media (max-width: 900px) {
+  .achats-bc-line-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .achats-bc-line-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 .achats-da-tabs {
   display: flex;
   gap: 8px;
