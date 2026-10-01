@@ -239,13 +239,69 @@ function buildPdfRows(devis) {
   return rows;
 }
 
+/**
+ * Helvetica jsPDF = WinAnsi : un seul caractère hors table (ex. parenthèse pleine largeur « （ »)
+ * encode toute la ligne sur 2 octets → lettres espacées, « ÿ » et débordement de colonne.
+ */
+const WIN_ANSI_EXTRA = new Set('€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ');
+
+function pdfSafeText(value) {
+  const s = String(value ?? '')
+    .normalize('NFC')
+    .replace(/[\uFF01-\uFF5E]/g, (ch) => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+    .replace(/[\u3000\u2000-\u200A\u202F\u205F\t]/g, ' ')
+    .replace(/[\u200B-\u200D\u2060\uFEFF\r]/g, '')
+    .replace(/[\u2010-\u2012]/g, '-')
+    .replace(/\u2032/g, "'")
+    .replace(/\u3001/g, ',')
+    .replace(/\u3002/g, '.')
+    .replace(/[\u300C-\u300F]/g, '"')
+    .replace(/[\u3010\u3014]/g, '[')
+    .replace(/[\u3011\u3015]/g, ']');
+  return Array.from(s).filter((ch) => {
+    const c = ch.charCodeAt(0);
+    return c === 10 || (c >= 32 && c <= 126) || (c >= 160 && c <= 255) || WIN_ANSI_EXTRA.has(ch);
+  }).join('');
+}
+
+/** Recoupe toute ligne encore plus large que la colonne (mot très long sans espace). Police déjà active. */
+function fitLinesToWidth(doc, lines, maxW) {
+  const out = [];
+  lines.forEach((line) => {
+    if (doc.getTextWidth(line) <= maxW) {
+      out.push(line);
+      return;
+    }
+    let chunk = '';
+    Array.from(line).forEach((ch) => {
+      if (chunk && doc.getTextWidth(chunk + ch) > maxW) {
+        out.push(chunk);
+        chunk = ch;
+      } else {
+        chunk += ch;
+      }
+    });
+    if (chunk) out.push(chunk);
+  });
+  return out;
+}
+
+function splitPdfText(doc, text, maxW) {
+  return fitLinesToWidth(doc, doc.splitTextToSize(text, maxW), maxW);
+}
+
 function getDesigLines(doc, row) {
+  const maxW = COL_W[1] - 4;
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(7.5);
-  const titleLines = doc.splitTextToSize(row.designation || '—', COL_W[1] - 4);
-  const descLines = row.description
-    ? (doc.setFont('helvetica', 'normal'), doc.setFontSize(6.5), doc.splitTextToSize(row.description, COL_W[1] - 4))
-    : [];
+  const titleLines = splitPdfText(doc, pdfSafeText(row.designation) || '—', maxW);
+  const description = pdfSafeText(row.description);
+  let descLines = [];
+  if (description) {
+    doc.setFont('helvetica', 'normal');
+    doc.setFontSize(6.5);
+    descLines = splitPdfText(doc, description, maxW);
+  }
   return { titleLines, descLines };
 }
 
@@ -266,10 +322,11 @@ function getLabelRowLayout(doc, text, options = {}) {
     indent = 0,
     minH = CAT_ROW_H,
   } = options;
-  const displayText = uppercase ? String(text || '').toUpperCase() : String(text || '');
+  const safeText = pdfSafeText(text);
+  const displayText = uppercase ? safeText.toUpperCase() : safeText;
   doc.setFont('helvetica', italic ? 'italic' : (bold ? 'bold' : 'normal'));
   doc.setFontSize(fontSize);
-  const lines = doc.splitTextToSize(displayText, COL_W[1] - 4 - indent);
+  const lines = splitPdfText(doc, displayText, COL_W[1] - 4 - indent);
   const lineH = fontSize >= 9 ? 3.8 : fontSize >= 8 ? 3.5 : italic ? 3.2 : 3.4;
   const h = Math.max(PAD_TOP + lines.length * lineH + PAD_BOTTOM, minH);
   return { lines, h, lineH, fontSize, bold, italic, indent };
