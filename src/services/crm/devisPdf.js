@@ -227,7 +227,7 @@ function buildPdfRows(devis) {
     rows.push({
       kind: 'article',
       num,
-      designation: l.designation || '—',
+      designation: l.designation || '',
       description: l.description || '',
       unite: fmtUnite(l.unite),
       quantite: l.quantite,
@@ -294,8 +294,9 @@ function getDesigLines(doc, row) {
   const maxW = COL_W[1] - 4;
   doc.setFont('helvetica', 'bold');
   doc.setFontSize(7.5);
-  const titleLines = splitPdfText(doc, pdfSafeText(row.designation) || '—', maxW);
   const description = pdfSafeText(row.description);
+  const title = pdfSafeText(row.designation) || (description ? '' : '—');
+  const titleLines = title ? splitPdfText(doc, title, maxW) : [];
   let descLines = [];
   if (description) {
     doc.setFont('helvetica', 'normal');
