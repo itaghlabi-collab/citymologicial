@@ -1,0 +1,557 @@
+/* ═══ Commercial / Marketing › Suivi des tâches — styles du module (préfixe sta-) ═══ */
+
+.sta-page .spin { animation: spin 0.75s linear infinite; }
+
+.sta-muted {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--text-3);
+  font-size: 0.85rem;
+  padding: 8px 0;
+}
+
+.sta-alert {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-radius: var(--radius);
+  padding: 10px 16px;
+  margin-bottom: 16px;
+  font-size: 0.85rem;
+}
+.sta-alert--warn { background: #FFF3E0; border: 1px solid #FFB74D; color: #E65100; }
+.sta-alert--error { background: #FFEBEE; border: 1px solid #EF9A9A; color: #C62828; }
+
+.sta-kpis { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+
+/* ── Filtres ─────────────────────────────────────────────────────────────── */
+.sta-quickbar {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.sta-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-2);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.sta-chip:hover { border-color: var(--red-mid); color: var(--red); }
+.sta-chip.is-active { background: var(--red); border-color: var(--red); color: #fff; }
+.sta-chip-count {
+  min-width: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: rgba(0, 0, 0, 0.08);
+  font-size: 0.72rem;
+  text-align: center;
+}
+.sta-chip.is-active .sta-chip-count { background: rgba(255, 255, 255, 0.25); }
+
+.sta-filters {
+  display: grid;
+  grid-template-columns: minmax(220px, 2fr) repeat(5, minmax(0, 1fr)) auto;
+  gap: 10px;
+  align-items: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 12px;
+  margin-bottom: 16px;
+}
+
+.sta-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  border: 1.5px solid var(--border);
+  border-radius: 6px;
+  background: #fff;
+  color: var(--text-3);
+}
+.sta-search input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  outline: none;
+  padding: 9px 0;
+  font-size: 0.875rem;
+  background: transparent;
+}
+
+/* ── Tableau Kanban ──────────────────────────────────────────────────────── */
+.sta-mobile-tabs { display: none; }
+
+.sta-board {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+  align-items: start;
+}
+
+.sta-col {
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  min-height: 240px;
+  display: flex;
+  flex-direction: column;
+  transition: border-color 0.15s, background 0.15s;
+}
+.sta-col.is-drop { border-color: var(--red-mid); background: #FFF7F7; }
+
+.sta-col-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  border-top: 3px solid var(--text-3);
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: var(--surface);
+}
+.sta-col-head--a_faire { border-top-color: var(--text-3); }
+.sta-col-head--en_cours { border-top-color: #1565C0; }
+.sta-col-head--en_attente_validation { border-top-color: #E65100; }
+.sta-col-head--termine { border-top-color: #2E7D32; }
+
+.sta-col-title {
+  font-family: var(--font-head);
+  font-weight: 700;
+  font-size: 0.92rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text);
+}
+.sta-col-count {
+  min-width: 24px;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-align: center;
+  color: var(--text-2);
+}
+
+.sta-col-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px;
+  flex: 1;
+}
+
+.sta-col-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 24px 8px;
+  color: var(--text-3);
+  font-size: 0.8rem;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+}
+
+/* ── Carte ───────────────────────────────────────────────────────────────── */
+.sta-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 10px 12px;
+  cursor: grab;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  transition: box-shadow 0.15s, transform 0.15s;
+  outline: none;
+}
+.sta-card:hover { box-shadow: var(--shadow-lg); }
+.sta-card:focus-visible { border-color: var(--red-mid); }
+.sta-card:active { cursor: grabbing; }
+.sta-card--drop-before { box-shadow: 0 -3px 0 0 var(--red), var(--shadow); }
+.sta-card--done .sta-card-title { color: var(--text-3); text-decoration: line-through; }
+
+.sta-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+}
+.sta-card-title {
+  font-weight: 600;
+  font-size: 0.86rem;
+  color: var(--text);
+  line-height: 1.3;
+  word-break: break-word;
+}
+
+.sta-prio {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.sta-card-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 10px;
+  font-size: 0.75rem;
+  color: var(--text-2);
+}
+.sta-card-meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sta-badges { display: flex; flex-wrap: wrap; gap: 4px; }
+.sta-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 7px;
+  border-radius: 4px;
+  font-size: 0.66rem;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+}
+.sta-badge--retard { background: var(--red-light); color: var(--red-dark); }
+.sta-badge--relance { background: #FFF3E0; color: #E65100; }
+.sta-badge--relance-today { background: #E65100; color: #fff; }
+.sta-badge--relance-retard { background: var(--red); color: #fff; }
+.sta-badge--bloque { background: #37474F; color: #fff; }
+.sta-badge--valider { background: #F3E5F5; color: #6A1B9A; }
+
+.sta-card-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.75rem;
+  color: var(--text-2);
+}
+.sta-resp { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.sta-avatar {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  background: var(--red-light);
+  color: var(--red-dark);
+  font-size: 0.62rem;
+  font-weight: 800;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.sta-resp-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sta-due { display: inline-flex; align-items: center; gap: 4px; white-space: nowrap; }
+.sta-due--late { color: var(--red); font-weight: 700; }
+
+.sta-card-move { display: none; }
+
+/* ── Bouton flottant (mobile) ────────────────────────────────────────────── */
+.sta-fab { display: none; }
+
+/* ── Modales ─────────────────────────────────────────────────────────────── */
+.sta-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  padding: 16px;
+}
+.sta-modal {
+  background: #fff;
+  border-radius: 12px;
+  width: 100%;
+  max-width: 600px;
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.18);
+}
+.sta-modal--wide { max-width: 760px; }
+.sta-modal-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 20px 24px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.sta-modal-title {
+  font-family: var(--font-head);
+  font-weight: 700;
+  font-size: 1.2rem;
+  line-height: 1.25;
+  word-break: break-word;
+}
+.sta-modal-body { padding: 16px 24px; overflow-y: auto; }
+.sta-modal-foot {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  padding: 12px 24px 18px;
+  border-top: 1px solid var(--border);
+}
+
+.sta-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px 14px;
+}
+.sta-form-grid--inner { margin-top: 10px; }
+.sta-field { min-width: 0; }
+.sta-field--full { grid-column: 1 / -1; }
+.sta-label {
+  display: block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--text-2);
+  margin-bottom: 5px;
+}
+.sta-optbox {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 10px 12px;
+  background: var(--surface-2);
+}
+.sta-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+}
+.sta-check input { width: 16px; height: 16px; accent-color: var(--red); }
+
+/* ── Détail ──────────────────────────────────────────────────────────────── */
+.sta-detail-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 14px;
+}
+.sta-quick-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 12px;
+}
+.sta-quick { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.sta-quick > span { font-size: 0.75rem; font-weight: 600; color: var(--text-3); }
+.sta-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding-bottom: 14px;
+  margin-bottom: 14px;
+  border-bottom: 1px solid var(--border);
+}
+.sta-info-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px 16px;
+  margin-bottom: 14px;
+}
+.sta-info-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--text-3);
+  margin-bottom: 2px;
+}
+.sta-info-value { font-size: 0.86rem; color: var(--text); word-break: break-word; }
+.sta-text-block { margin-bottom: 14px; }
+.sta-text-block p { font-size: 0.86rem; color: var(--text); white-space: pre-wrap; line-height: 1.45; }
+
+.sta-tabs-inline {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 12px;
+}
+.sta-tab-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 12px;
+  border: none;
+  border-bottom: 2px solid transparent;
+  background: none;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-2);
+  cursor: pointer;
+  margin-bottom: -1px;
+}
+.sta-tab-inline.is-active { color: var(--red); border-bottom-color: var(--red); }
+
+.sta-comments { display: flex; flex-direction: column; gap: 8px; margin-bottom: 10px; }
+.sta-comment {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 8px 10px;
+  background: var(--surface-2);
+}
+.sta-comment-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.75rem;
+  color: var(--text-3);
+  margin-bottom: 3px;
+}
+.sta-comment-head strong { color: var(--text); font-weight: 600; }
+.sta-comment-body { font-size: 0.85rem; color: var(--text); white-space: pre-wrap; word-break: break-word; }
+.sta-comment-form { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+
+.sta-history { display: flex; flex-direction: column; gap: 10px; }
+.sta-history-row { display: flex; gap: 10px; align-items: flex-start; }
+.sta-history-dot {
+  width: 8px;
+  height: 8px;
+  margin-top: 6px;
+  border-radius: 50%;
+  background: var(--red);
+  flex-shrink: 0;
+}
+.sta-history-text { font-size: 0.84rem; color: var(--text); }
+.sta-history-meta { font-size: 0.72rem; color: var(--text-3); margin-top: 1px; }
+
+.sta-toast {
+  position: fixed;
+  bottom: 28px;
+  right: 28px;
+  background: var(--text);
+  color: #fff;
+  border-radius: 8px;
+  padding: 12px 20px;
+  font-size: 0.875rem;
+  font-weight: 600;
+  z-index: 9999;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18);
+  max-width: 340px;
+}
+
+/* ── Responsive ──────────────────────────────────────────────────────────── */
+@media (max-width: 1200px) {
+  .sta-filters { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .sta-search { grid-column: 1 / -1; }
+}
+
+@media (max-width: 1024px) and (min-width: 769px) {
+  .sta-board { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
+@media (max-width: 768px) {
+  .sta-page { padding-bottom: 80px; }
+  .sta-page .page-header .sta-header-add { display: none !important; }
+  .sta-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+  .sta-quickbar,
+  .sta-mobile-tabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 4px;
+    -webkit-overflow-scrolling: touch;
+  }
+  .sta-mobile-tabs { display: flex; gap: 8px; margin-bottom: 12px; }
+
+  .sta-filters { grid-template-columns: 1fr 1fr; padding: 10px; }
+  .sta-search { grid-column: 1 / -1; }
+
+  .sta-board { grid-template-columns: 1fr; }
+  .sta-col { display: none; min-height: 0; }
+  .sta-col.is-mobile-active { display: flex; }
+  .sta-col-head { display: none; }
+  .sta-col { background: transparent; border: none; }
+  .sta-col-list { padding: 0; }
+
+  .sta-card { cursor: pointer; }
+  .sta-card-move {
+    display: block;
+    width: 100%;
+    margin-top: 2px;
+    padding: 6px 10px;
+    min-height: 36px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    background: var(--surface-2);
+    font-size: 0.8rem;
+    color: var(--text-2);
+  }
+
+  .sta-fab {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    position: fixed;
+    right: 16px;
+    bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+    z-index: 900;
+    padding: 12px 18px;
+    border: none;
+    border-radius: 999px;
+    background: var(--red);
+    color: #fff;
+    font-weight: 700;
+    font-size: 0.9rem;
+    box-shadow: 0 6px 20px rgba(211, 47, 47, 0.35);
+    cursor: pointer;
+  }
+
+  .sta-overlay { padding: 0; align-items: flex-end; }
+  .sta-modal,
+  .sta-modal--wide {
+    max-width: 100%;
+    max-height: 94vh;
+    border-radius: 14px 14px 0 0;
+  }
+  .sta-modal-head { padding: 16px 16px 10px; }
+  .sta-modal-body { padding: 14px 16px; }
+  .sta-modal-foot { padding: 10px 16px calc(14px + env(safe-area-inset-bottom, 0px)); }
+  .sta-form-grid,
+  .sta-info-grid,
+  .sta-quick-actions { grid-template-columns: 1fr; }
+
+  .sta-toast { left: 16px; right: 16px; bottom: 84px; max-width: none; }
+}

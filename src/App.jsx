@@ -35,6 +35,7 @@ import Prospects from './components/commercial/Prospects';
 import DevisAttente from './components/commercial/DevisAttente';
 import PlanningCommercial from './components/commercial/PlanningCommercial';
 import ActionsMarketing from './components/commercial/ActionsMarketing';
+import SuiviTachesCommercial from './components/commercial/SuiviTachesCommercial';
 import ComptesRendus from './components/commercial/ComptesRendus';
 import DepensesCom from './components/commercial/Depenses';
 import PropositionsMarketing from './components/commercial/PropositionsMarketing';
@@ -56,7 +57,7 @@ import {
   LayoutDashboard, CheckSquare, CalendarDays, CalendarClock,
   Building2, Users, CalendarOff,
   HardHat, ClockIcon, Banknote, BarChart3, Handshake, BookUser, UserCheck,
-  UserSquare, FileEdit, CalendarRange, Megaphone,
+  UserSquare, FileEdit, CalendarRange, Megaphone, ListChecks,
   NotebookPen, Receipt, Lightbulb,
   Contact, ShoppingBag, Tag, FileText, ScrollText, PackageCheck,
   Truck, History,
@@ -118,6 +119,7 @@ const NAV = [
       { id: 'devis-attente',      label: 'Devis en attente',     icon: FileEdit },
       { id: 'planning-commercial',label: 'Planning commercial',  icon: CalendarRange },
       { id: 'actions-marketing',  label: 'Actions marketing',    icon: Megaphone },
+      { id: 'suivi-taches-com',   label: 'Suivi des tâches',     icon: ListChecks },
       { id: 'compte-rendu-com',   label: 'Compte rendu',         icon: NotebookPen },
       { id: 'depenses-com',       label: 'Depenses',             icon: Receipt },
       { id: 'propositions',       label: 'Propositions',         icon: Lightbulb },
@@ -236,6 +238,7 @@ const MODULE_LABELS = {
   'devis-attente':     'Devis en attente',
   'planning-commercial': 'Planning commercial',
   'actions-marketing': 'Actions marketing',
+  'suivi-taches-com':  'Suivi des tâches',
   'compte-rendu-com':  'Compte rendu',
   'depenses-com':      'Depenses',
   propositions:        'Propositions',
@@ -326,6 +329,7 @@ function PageContent({
     case 'devis-attente':       return <DevisAttente />;
     case 'planning-commercial': return <PlanningCommercial />;
     case 'actions-marketing':   return <ActionsMarketing />;
+    case 'suivi-taches-com':    return <SuiviTachesCommercial />;
     case 'compte-rendu-com':    return <ComptesRendus />;
     case 'depenses-com':        return <DepensesCom />;
     case 'propositions':        return <PropositionsMarketing />;

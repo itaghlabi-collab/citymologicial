@@ -75,6 +75,7 @@ export const ERP_RUBRIQUES = Object.freeze([
       { code: 'devis-attente', label: 'Devis en attente' },
       { code: 'planning-commercial', label: 'Planning commercial' },
       { code: 'actions-marketing', label: 'Actions marketing' },
+      { code: 'suivi-taches-com', label: 'Suivi des tâches' },
       { code: 'compte-rendu-com', label: 'Compte rendu' },
       { code: 'depenses-com', label: 'Dépenses' },
       { code: 'propositions', label: 'Propositions' },

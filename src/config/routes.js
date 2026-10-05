@@ -37,6 +37,7 @@ export const ROUTES = {
   DEVIS_ATTENTE:      'devis-attente',
   PLANNING_COMMERCIAL:'planning-commercial',
   ACTIONS_MARKETING:  'actions-marketing',
+  SUIVI_TACHES_COM:   'suivi-taches-com',
   COMPTE_RENDU_COM:   'compte-rendu-com',
   DEPENSES_COM:       'depenses-com',
   PROPOSITIONS:       'propositions',
