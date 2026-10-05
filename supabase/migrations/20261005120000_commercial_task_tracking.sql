@@ -269,4 +269,6 @@ WHERE rp.submodule_code = 'actions-marketing'
   AND rp.granted = true
 ON CONFLICT ON CONSTRAINT role_permissions_role_submodule_action_key DO NOTHING;
 
+NOTIFY pgrst, 'reload schema';
+
 SELECT 'commercial_task_tracking OK' AS status;
