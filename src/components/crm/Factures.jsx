@@ -43,6 +43,11 @@ function fmtCommercial(v) {
   return String(v).trim().toUpperCase();
 }
 
+/** Onglet « Factures d'acompte » : type acompte, ou ancienne numérotation AC-… */
+function isAcompteListRow(f) {
+  return f.facture_type === 'acompte' || /^AC-/i.test(String(f.numero || ''));
+}
+
 /** Reste affiché en liste : facture d'acompte → reste à facturer sur devis ; sinon reste à payer. */
 function factureResteListe(f) {
   if (f.facture_type === 'acompte' && f.devis_reste_apres != null) {
@@ -356,8 +361,11 @@ export default function Factures() {
     }))
     .map(archiveToFactureRow);
 
+  const showAcomptes = docKind === 'acomptes';
+  const tabFactures = factures.filter((f) => isAcompteListRow(f) === showAcomptes);
+
   const filtered = [
-    ...filterCrmFactures(factures, {
+    ...filterCrmFactures(tabFactures, {
       search,
       statut: filterStatut,
       commercial: filterCommercial,
@@ -365,7 +373,7 @@ export default function Factures() {
       date: filterDate,
       montant_min: filterMontantMin,
     }),
-    ...(filterStatut && filterStatut !== 'archive_importee' ? [] : archiveRows),
+    ...(showAcomptes || (filterStatut && filterStatut !== 'archive_importee') ? [] : archiveRows),
   ].sort((a, b) => {
     let va = a[sortField] ?? '';
     let vb = b[sortField] ?? '';
@@ -498,7 +506,10 @@ export default function Factures() {
     return (
       <FactureAcompte
         onBack={backToList}
-        onCreated={(ok, msg) => showToast(msg, ok ? 'success' : 'error')}
+        onCreated={(ok, msg) => {
+          showToast(msg, ok ? 'success' : 'error');
+          if (ok) { setDocKind('acomptes'); setPage(1); }
+        }}
         createAcompte={createAcompte}
         fetchDevisSummary={fetchDevisAcompteSummary}
         configured={configured}
@@ -601,7 +612,7 @@ export default function Factures() {
         </div>
       </div>
 
-      <CrmDocTabs active="factures" onChange={setDocKind} />
+      <CrmDocTabs active={docKind} onChange={(k) => { setDocKind(k); setPage(1); }} />
 
       {!configured && (
         <div style={{ background: '#FFF3E0', border: '1px solid #FFB74D', borderRadius: 'var(--radius)', padding: '10px 16px', marginBottom: 16, fontSize: '0.85rem', color: '#E65100' }}>

@@ -3,6 +3,7 @@ export default function CrmDocTabs({ active, onChange }) {
   const tabs = [
     { id: 'factures', label: 'Factures' },
     { id: 'proformas', label: 'Proformas' },
+    { id: 'acomptes', label: "Factures d'acompte" },
   ];
   return (
     <div
