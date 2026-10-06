@@ -14605,30 +14605,86 @@ tbody tr:last-child td { border-bottom: none; }
 /* ===== Demande de récupération — mobile 1 ligne ===== */
 .recup-mobile-list { display: none; list-style: none; margin: 0; padding: 0; }
 .recup-desktop-table { display: block; }
+.recup-new-btn-short { display: none; }
 
 @media (max-width: 768px) {
-  .recup-page-sub { font-size: 0.78rem; line-height: 1.35; }
-  .recup-stats {
-    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-    gap: 8px !important;
+  /* En-tête : titre + bouton sur une ligne */
+  .recup-page .page-header.recup-header {
+    flex-direction: row !important;
+    flex-wrap: nowrap !important;
+    align-items: center !important;
+    gap: 10px !important;
     margin-bottom: 10px !important;
   }
-  .recup-stats .stat-card { padding: 10px 12px; }
-  .recup-stats .stat-value { font-size: 1.15rem; }
-  .recup-stats .stat-label { font-size: 0.68rem; }
-  .recup-filters.card { padding: 8px 10px !important; }
-  .recup-list-card.card { padding: 0; overflow: hidden; }
+  .recup-page .recup-header-text { flex: 1 1 auto; }
+  .recup-page .recup-header .page-title { font-size: 1.05rem; margin: 0; line-height: 1.2; }
+  .recup-page-sub { display: none; }
+  .recup-page .page-header .btn-primary.recup-new-btn {
+    width: auto !important;
+    flex: 0 0 auto;
+    min-height: 36px;
+    padding: 7px 12px;
+    font-size: 0.82rem;
+    gap: 4px;
+  }
+  .recup-new-btn-long { display: none; }
+  .recup-new-btn-short { display: inline; }
 
+  /* KPI : une seule bande compacte */
+  .recup-stats {
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
+    gap: 6px !important;
+    margin-bottom: 10px !important;
+  }
+  .recup-stats .stat-card {
+    padding: 7px 4px;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+    gap: 2px;
+    min-height: 0;
+  }
+  .recup-stats .stat-icon { display: none; }
+  .recup-stats .stat-body { min-width: 0; width: 100%; }
+  .recup-stats .stat-value { font-size: 1.05rem; line-height: 1.1; }
+  .recup-stats .stat-label {
+    font-size: 0.6rem;
+    line-height: 1.15;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  /* Filtres : recherche pleine largeur, statut + date côte à côte */
+  .recup-filters.card { padding: 8px !important; margin-bottom: 10px !important; }
+  .recup-filters .recup-filters-row {
+    display: grid !important;
+    grid-template-columns: 1fr 1fr;
+    gap: 6px !important;
+  }
+  .recup-filters .recup-filter-search { grid-column: 1 / -1; max-width: none !important; }
+  .recup-filters .recup-filters-row select,
+  .recup-filters .recup-filters-row input[type="date"] {
+    width: 100% !important;
+    min-width: 0 !important;
+    max-width: none !important;
+    min-height: 36px !important;
+    height: 36px;
+  }
+  .recup-filters .recup-filters-row > button { grid-column: 1 / -1; justify-self: end; padding: 0; }
+
+  /* Liste : lignes fines */
+  .recup-list-card.card { padding: 0; overflow: hidden; }
   .recup-desktop-table { display: none !important; }
   .recup-mobile-list { display: block; }
 
   .recup-mobile-row {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 10px 12px;
+    gap: 10px;
+    padding: 9px 12px;
     border-bottom: 1px solid var(--border);
-    min-height: 48px;
   }
   .recup-mobile-row:last-child { border-bottom: none; }
   .recup-mobile-main {
@@ -14636,38 +14692,48 @@ tbody tr:last-child td { border-bottom: none; }
     min-width: 0;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: 1px;
+  }
+  .recup-mobile-top {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
   }
   .recup-mobile-da {
     font-family: var(--font-head);
     font-weight: 700;
-    font-size: 0.88rem;
+    font-size: 0.84rem;
     color: var(--red);
-    line-height: 1.2;
+    line-height: 1.25;
+    white-space: nowrap;
+    cursor: pointer;
   }
-  .recup-mobile-quoi {
-    font-size: 0.78rem;
-    color: var(--text-2);
-    font-weight: 600;
+  .recup-mobile-badge {
+    flex: 0 1 auto;
+    min-width: 0;
+    font-size: 0.6rem !important;
+    padding: 2px 6px !important;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
-    line-height: 1.25;
   }
-  .recup-mobile-badge {
-    flex: 0 0 auto;
-    font-size: 0.65rem !important;
-    padding: 3px 7px !important;
+  .recup-mobile-quoi,
+  .recup-mobile-trajet {
+    font-size: 0.76rem;
     white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    line-height: 1.3;
   }
+  .recup-mobile-quoi { color: var(--text-2); font-weight: 600; }
+  .recup-mobile-trajet { color: var(--text-3); font-weight: 500; font-size: 0.72rem; }
   .recup-mobile-action {
     flex: 0 0 auto;
-    padding: 7px 9px !important;
-    min-width: 36px;
-  }
-  .recup-mobile-action-spacer {
-    flex: 0 0 36px;
-    width: 36px;
+    min-height: 32px;
+    padding: 6px 12px !important;
+    font-size: 0.76rem !important;
+    border-radius: 8px;
   }
 }
 

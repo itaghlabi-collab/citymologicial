@@ -392,15 +392,15 @@ export default function SuiviReceptions() {
 
   return (
     <div className="animate-fade-in recup-page">
-      <div className="page-header" style={{ marginBottom: 12, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
-        <div style={{ minWidth: 0 }}>
+      <div className="page-header recup-header" style={{ marginBottom: 12, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+        <div className="recup-header-text" style={{ minWidth: 0 }}>
           <h1 className="page-title">Demande de récupération</h1>
           <p className="page-subtitle recup-page-sub">
             Créez une demande (DA, départ, destination). Le magasinier la traite avec chauffeur/coursier et véhicule.
           </p>
         </div>
         <button type="button" className="btn btn-primary recup-new-btn" onClick={openCreate} disabled={saving}>
-          <Plus size={15} /> Nouvelle demande
+          <Plus size={15} /> <span className="recup-new-btn-long">Nouvelle demande</span><span className="recup-new-btn-short">Nouvelle</span>
         </button>
       </div>
 
@@ -422,8 +422,8 @@ export default function SuiviReceptions() {
       </div>
 
       <div className="card recup-filters" style={{ padding: '10px 12px', marginBottom: 12 }}>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
-          <div style={{ position: 'relative', flex: '1 1 180px', minWidth: 0, maxWidth: 280 }}>
+        <div className="recup-filters-row" style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+          <div className="recup-filter-search" style={{ position: 'relative', flex: '1 1 180px', minWidth: 0, maxWidth: 280 }}>
             <Search size={13} style={{ position: 'absolute', left: 10, top: '50%', transform: 'translateY(-50%)', color: 'var(--text-3)' }} />
             <input
               value={search}
@@ -560,45 +560,46 @@ export default function SuiviReceptions() {
               {filtered.map((r) => (
                 <li key={r.id} className="recup-mobile-row">
                   <div className="recup-mobile-main">
-                    <span
-                      className="recup-mobile-da"
-                      role={r.purchase_request_id ? 'button' : undefined}
-                      tabIndex={r.purchase_request_id ? 0 : undefined}
-                      onClick={r.purchase_request_id ? () => openDa(r) : undefined}
-                      style={r.purchase_request_id ? { cursor: 'pointer', textDecoration: 'underline' } : undefined}
-                    >
-                      {r.purchase_request_ref || r.ref}
-                    </span>
+                    <div className="recup-mobile-top">
+                      <span
+                        className="recup-mobile-da"
+                        role={r.purchase_request_id ? 'button' : undefined}
+                        tabIndex={r.purchase_request_id ? 0 : undefined}
+                        onClick={r.purchase_request_id ? () => openDa(r) : undefined}
+                      >
+                        {r.purchase_request_ref || r.ref}
+                      </span>
+                      <span className={`badge recup-mobile-badge ${DEMANDE_RECUP_BADGE[r.statut] || 'badge-grey'}`}>
+                        {r.statut_label}
+                      </span>
+                    </div>
                     <span className="recup-mobile-quoi" title={r.quoi}>{r.quoi || '—'}</span>
                     {(r.depart || r.destination) && (
-                      <span className="recup-mobile-quoi" title={trajet(r)} style={{ color: 'var(--text-3)' }}>{trajet(r)}</span>
+                      <span className="recup-mobile-trajet" title={trajet(r)}>{trajet(r)}</span>
+                    )}
+                    {showDriver(r) && (r.chauffeur || r.vehicule) && (
+                      <span className="recup-mobile-trajet">{[r.chauffeur, r.vehicule].filter(Boolean).join(' · ')}</span>
                     )}
                   </div>
-                  <span className={`badge recup-mobile-badge ${DEMANDE_RECUP_BADGE[r.statut] || 'badge-grey'}`}>
-                    {r.statut_label}
-                  </span>
-                  {isATraiter(r) ? (
+                  {isATraiter(r) && (
                     <button
                       type="button"
                       className="btn btn-primary btn-sm recup-mobile-action"
                       disabled={saving}
                       onClick={() => openRecup(r)}
-                      aria-label="Traiter"
                     >
-                      <Truck size={14} />
+                      Traiter
                     </button>
-                  ) : isEnTransport(r) ? (
+                  )}
+                  {isEnTransport(r) && (
                     <button
                       type="button"
-                      className="btn btn-primary btn-sm recup-mobile-action"
+                      className="btn btn-secondary btn-sm recup-mobile-action"
                       disabled={saving}
                       onClick={() => setDeliverRow(r)}
-                      aria-label="Marquer traitée"
                     >
-                      <CheckCircle size={14} />
+                      Traitée
                     </button>
-                  ) : (
-                    <span className="recup-mobile-action-spacer" />
                   )}
                 </li>
               ))}
