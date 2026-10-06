@@ -1,23 +1,26 @@
 /**
- * SuiviReceptions.jsx — Demande de récupération (Achats)
- * Source : OP Achats payés → « Prête à récupérer ».
- * Magasinier confirme avec chauffeur/coursier + les 3 véhicules logistique.
+ * SuiviReceptions.jsx — Demande de récupération (Achats), 100 % manuelle.
+ * Création (DA + départ + destination) → « En attente de traitement ».
+ * Magasinier « Traiter » (chauffeur/coursier + véhicule) → « En cours de transport » → « Traitée ».
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  ClipboardCheck, Search, Loader2, CheckCircle, Package, Truck, Navigation,
+  ClipboardCheck, Search, Loader2, CheckCircle, Package, Truck, Navigation, Plus, Clock,
 } from 'lucide-react';
 import {
   listDemandesRecuperationAchats,
-  syncPaidOpsToDemandesRecuperation,
   markDemandeRecuperationDone,
-  markDemandeRecuperationDelivered,
+  markDemandeRecuperationTraitee,
+  createDemandeRecuperationManuelle,
+  listPurchaseRequestsForRecup,
+  listProjectsForRecup,
   getRecupPurchaseRequest,
   filterDemandesRecuperation,
   computeDemandesRecuperationKpis,
   DEMANDE_RECUP_STATUTS,
   DEMANDE_RECUP_LABEL,
   DEMANDE_RECUP_BADGE,
+  DEPOT_KHYAYTA_LABEL,
 } from '../../services/achats/achatDemandesRecuperation';
 import { listEmployees, employeeFullName } from '../../services/rh/employees';
 import { listVehicles } from '../../services/logistique/vehicles';
@@ -28,6 +31,8 @@ import {
 } from './shared.jsx';
 
 const LAST_N = 10;
+const DEPOT_DESTINATION = '__depot_khyayta__';
+const EMPTY_CREATE_FORM = { purchaseRequestId: '', depart: '', destination: '', remarque: '' };
 
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
@@ -88,6 +93,7 @@ function DriverSearchSelect({
   placeholder = 'Rechercher un chauffeur ou un coursier…',
   disabled = false,
   invalid = false,
+  emptyLabel = 'Aucun chauffeur / coursier',
 }) {
   const wrapRef = useRef(null);
   const [open, setOpen] = useState(false);
@@ -136,7 +142,7 @@ function DriverSearchSelect({
         <div className="log-pickup-search-menu" role="listbox">
           {filtered.length === 0 ? (
             <div className="log-pickup-search-option" style={{ color: 'var(--text-3)', cursor: 'default' }}>
-              Aucun chauffeur / coursier
+              {emptyLabel}
             </div>
           ) : (
             filtered.map((o) => {
@@ -183,8 +189,15 @@ export default function SuiviReceptions() {
   const [daData, setDaData] = useState(null);
   const [daLoading, setDaLoading] = useState(false);
   const [daError, setDaError] = useState('');
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createForm, setCreateForm] = useState(EMPTY_CREATE_FORM);
+  const [createErrors, setCreateErrors] = useState({});
+  const [createError, setCreateError] = useState('');
+  const [prOptions, setPrOptions] = useState([]);
+  const [projectOptions, setProjectOptions] = useState([]);
+  const [optionsLoading, setOptionsLoading] = useState(false);
 
-  const load = useCallback(async ({ sync = true } = {}) => {
+  const load = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
@@ -204,33 +217,80 @@ export default function SuiviReceptions() {
         setError(msg);
       }
       setRows([]);
-      setLoading(false);
-      return;
     }
     setLoading(false);
-
-    if (!sync) return;
-    try {
-      const touched = await syncPaidOpsToDemandesRecuperation();
-      if (touched?.length) {
-        setRows(await listDemandesRecuperationAchats());
-      }
-    } catch (syncErr) {
-      const msg = syncErr?.message || String(syncErr);
-      const code = syncErr?.code || '';
-      if (
-        code === '42P01'
-        || /relation ["'].*achat_demandes_recuperation["'] does not exist/i.test(msg)
-        || /Could not find the table ['"]public\.achat_demandes_recuperation['"]/i.test(msg)
-      ) {
-        setError('Table absente — exécutez supabase/RUN_ACHAT_DEMANDES_RECUPERATION.sql dans Supabase.');
-      } else if (/statut_check|check constraint|23514/i.test(`${msg} ${code}`)) {
-        setError('Contrainte statut : ajoutez « en_cours » via SQL Supabase, puis Réessayer.');
-      } else {
-        console.warn('[CITYMO] sync OP → récupération', syncErr);
-      }
-    }
   }, []);
+
+  async function openCreate() {
+    setCreateForm(EMPTY_CREATE_FORM);
+    setCreateErrors({});
+    setCreateError('');
+    setCreateOpen(true);
+    if (prOptions.length && projectOptions.length) return;
+    setOptionsLoading(true);
+    try {
+      const [prs, projects] = await Promise.all([
+        listPurchaseRequestsForRecup(),
+        listProjectsForRecup(),
+      ]);
+      setPrOptions(prs.map((pr) => ({
+        ...pr,
+        name: pr.id,
+        label: [pr.ref_demande, pr.titre].filter(Boolean).join(' — ') || pr.id,
+      })));
+      setProjectOptions(projects);
+    } catch (err) {
+      const msg = err?.message || String(err);
+      setCreateError(/list_purchase_requests_for_recup|list_projects_for_recup|schema cache/i.test(msg)
+        ? 'Exécutez supabase/RUN_ACHAT_RECUP_MANUELLE.sql dans Supabase.'
+        : msg);
+    } finally {
+      setOptionsLoading(false);
+    }
+  }
+
+  function onPickPurchaseRequest(id) {
+    const pr = prOptions.find((o) => o.id === id);
+    setCreateForm((p) => ({
+      ...p,
+      purchaseRequestId: id,
+      depart: p.depart || pr?.fournisseur_souhaite || '',
+    }));
+  }
+
+  async function handleCreate(ev) {
+    ev.preventDefault();
+    const e = {};
+    if (!createForm.purchaseRequestId) e.purchaseRequestId = 'Requis';
+    if (!createForm.depart.trim()) e.depart = 'Requis';
+    if (!createForm.destination) e.destination = 'Requis';
+    if (Object.keys(e).length) {
+      setCreateErrors(e);
+      return;
+    }
+    const purchaseRequest = prOptions.find((o) => o.id === createForm.purchaseRequestId);
+    const project = projectOptions.find((p) => p.id === createForm.destination);
+    setSaving(true);
+    setCreateError('');
+    try {
+      await createDemandeRecuperationManuelle({
+        purchaseRequest,
+        depart: createForm.depart,
+        destination: createForm.destination === DEPOT_DESTINATION ? DEPOT_KHYAYTA_LABEL : project?.label,
+        destinationProjectId: project?.id || null,
+        remarque: createForm.remarque,
+      });
+      setCreateOpen(false);
+      await load();
+    } catch (err) {
+      const msg = err?.message || 'Erreur enregistrement.';
+      setCreateError(/statut_check|check constraint|column .* does not exist|schema cache/i.test(msg)
+        ? 'Exécutez supabase/RUN_ACHAT_RECUP_MANUELLE.sql dans Supabase.'
+        : msg);
+    } finally {
+      setSaving(false);
+    }
+  }
 
   useEffect(() => { load(); }, [load]);
 
@@ -284,7 +344,7 @@ export default function SuiviReceptions() {
     try {
       await markDemandeRecuperationDone(recupRow.id, recupForm);
       setRecupRow(null);
-      await load({ sync: false });
+      await load();
     } catch (err) {
       setError(err?.message || 'Erreur enregistrement.');
     } finally {
@@ -297,9 +357,9 @@ export default function SuiviReceptions() {
     setSaving(true);
     setError('');
     try {
-      await markDemandeRecuperationDelivered(deliverRow.id);
+      await markDemandeRecuperationTraitee(deliverRow.id);
       setDeliverRow(null);
-      await load({ sync: false });
+      await load();
     } catch (err) {
       setError(err?.message || 'Erreur enregistrement.');
     } finally {
@@ -323,17 +383,25 @@ export default function SuiviReceptions() {
     }
   }
 
-  const isPrete = (r) => r.statut === DEMANDE_RECUP_STATUTS.PRETE || r.statut === 'a_recuperer';
+  const isATraiter = (r) => r.statut === DEMANDE_RECUP_STATUTS.EN_ATTENTE
+    || r.statut === DEMANDE_RECUP_STATUTS.PRETE || r.statut === 'a_recuperer';
   const isEnTransport = (r) => r.statut === DEMANDE_RECUP_STATUTS.EN_TRANSPORT;
-  const showDriver = (r) => r.statut === DEMANDE_RECUP_STATUTS.RECUPEREE || isEnTransport(r);
+  const showDriver = (r) => r.statut === DEMANDE_RECUP_STATUTS.RECUPEREE
+    || r.statut === DEMANDE_RECUP_STATUTS.TRAITEE || isEnTransport(r);
+  const trajet = (r) => (r.depart || r.destination ? `${r.depart || '—'} → ${r.destination || '—'}` : '—');
 
   return (
     <div className="animate-fade-in recup-page">
-      <div className="page-header" style={{ marginBottom: 12 }}>
-        <h1 className="page-title">Demande de récupération</h1>
-        <p className="page-subtitle recup-page-sub">
-          OP Initié = En cours · OP Payé = À récupérer. Le magasinier confirme avec chauffeur/coursier et véhicule.
-        </p>
+      <div className="page-header" style={{ marginBottom: 12, display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
+        <div style={{ minWidth: 0 }}>
+          <h1 className="page-title">Demande de récupération</h1>
+          <p className="page-subtitle recup-page-sub">
+            Créez une demande (DA, départ, destination). Le magasinier la traite avec chauffeur/coursier et véhicule.
+          </p>
+        </div>
+        <button type="button" className="btn btn-primary recup-new-btn" onClick={openCreate} disabled={saving}>
+          <Plus size={15} /> Nouvelle demande
+        </button>
       </div>
 
       {error && (
@@ -348,10 +416,9 @@ export default function SuiviReceptions() {
 
       <div className="stat-grid recup-stats" style={{ gridTemplateColumns: 'repeat(auto-fill, minmax(140px, 1fr))', marginBottom: 12 }}>
         <KpiCard icon={<Package size={17} />} label="Total (10 dern.)" value={loading ? '—' : kpis.total} color="grey" />
-        <KpiCard icon={<ClipboardCheck size={17} />} label="En cours" value={loading ? '—' : kpis.enCours} color="blue" />
-        <KpiCard icon={<Truck size={17} />} label="À récupérer" value={loading ? '—' : kpis.aRecuperer} color="orange" />
+        <KpiCard icon={<Clock size={17} />} label="En attente" value={loading ? '—' : kpis.enAttente} color="orange" />
         <KpiCard icon={<Navigation size={17} />} label="En transport" value={loading ? '—' : kpis.enTransport} color="purple" />
-        <KpiCard icon={<CheckCircle size={17} />} label="Récupérées" value={loading ? '—' : kpis.recuperees} color="green" />
+        <KpiCard icon={<CheckCircle size={17} />} label="Traitées" value={loading ? '—' : kpis.traitees} color="green" />
       </div>
 
       <div className="card recup-filters" style={{ padding: '10px 12px', marginBottom: 12 }}>
@@ -361,7 +428,7 @@ export default function SuiviReceptions() {
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="DA, OP, titre, fournisseur…"
+              placeholder="DA, titre, départ, destination…"
               style={{ ...INPUT_STYLE, paddingLeft: 30, minHeight: 36, paddingTop: 7, paddingBottom: 7, fontSize: '0.84rem' }}
             />
           </div>
@@ -371,9 +438,11 @@ export default function SuiviReceptions() {
             style={{ ...SELECT_STYLE, minWidth: 140, maxWidth: 180, minHeight: 36, padding: '7px 10px', fontSize: '0.84rem' }}
           >
             <option value="">Tous les statuts</option>
+            <option value={DEMANDE_RECUP_STATUTS.EN_ATTENTE}>{DEMANDE_RECUP_LABEL.en_attente_traitement}</option>
+            <option value={DEMANDE_RECUP_STATUTS.EN_TRANSPORT}>{DEMANDE_RECUP_LABEL.en_transport}</option>
+            <option value={DEMANDE_RECUP_STATUTS.TRAITEE}>{DEMANDE_RECUP_LABEL.traitee}</option>
             <option value={DEMANDE_RECUP_STATUTS.EN_COURS}>{DEMANDE_RECUP_LABEL.en_cours}</option>
             <option value={DEMANDE_RECUP_STATUTS.PRETE}>{DEMANDE_RECUP_LABEL.prete_a_recuperer}</option>
-            <option value={DEMANDE_RECUP_STATUTS.EN_TRANSPORT}>{DEMANDE_RECUP_LABEL.en_transport}</option>
             <option value={DEMANDE_RECUP_STATUTS.RECUPEREE}>{DEMANDE_RECUP_LABEL.recuperee}</option>
             <option value={DEMANDE_RECUP_STATUTS.ANNULEE}>{DEMANDE_RECUP_LABEL.annulee}</option>
           </select>
@@ -405,7 +474,9 @@ export default function SuiviReceptions() {
           <EmptyState
             icon={<ClipboardCheck size={22} />}
             title="Aucune demande"
-            sub="Les demandes apparaissent dès qu’un ordre de paiement est Initié ou Payé."
+            sub="Cliquez sur « Nouvelle demande » pour créer une demande de récupération."
+            action="Nouvelle demande"
+            onAction={openCreate}
           />
         ) : (
           <>
@@ -416,9 +487,8 @@ export default function SuiviReceptions() {
                   <tr>
                     <th>Réf.</th>
                     <th>DA</th>
-                    <th>OP</th>
-                    <th>Fournisseur</th>
                     <th>Quoi</th>
+                    <th>Départ → Destination</th>
                     <th>Statut</th>
                     <th>Chauffeur / Véhicule</th>
                     <th>Actions</th>
@@ -440,9 +510,8 @@ export default function SuiviReceptions() {
                           </button>
                         ) : (r.purchase_request_ref || '—')}
                       </td>
-                      <td>{r.payment_order_ref || r.purchase_oa_ref || '—'}</td>
-                      <td>{r.fournisseur || '—'}</td>
                       <td style={{ maxWidth: 280, fontSize: '0.84rem' }}>{r.quoi || '—'}</td>
+                      <td style={{ maxWidth: 260, fontSize: '0.82rem' }}>{trajet(r)}</td>
                       <td>
                         <span className={`badge ${DEMANDE_RECUP_BADGE[r.statut] || 'badge-grey'}`}>
                           {r.statut_label}
@@ -459,14 +528,14 @@ export default function SuiviReceptions() {
                           : '—'}
                       </td>
                       <td>
-                        {isPrete(r) && (
+                        {isATraiter(r) && (
                           <button
                             type="button"
                             className="btn btn-primary btn-sm"
                             disabled={saving}
                             onClick={() => openRecup(r)}
                           >
-                            <Truck size={13} /> À récupérer
+                            <Truck size={13} /> Traiter
                           </button>
                         )}
                         {isEnTransport(r) && (
@@ -476,7 +545,7 @@ export default function SuiviReceptions() {
                             disabled={saving}
                             onClick={() => setDeliverRow(r)}
                           >
-                            <CheckCircle size={13} /> Récupérée
+                            <CheckCircle size={13} /> Traitée
                           </button>
                         )}
                       </td>
@@ -501,17 +570,20 @@ export default function SuiviReceptions() {
                       {r.purchase_request_ref || r.ref}
                     </span>
                     <span className="recup-mobile-quoi" title={r.quoi}>{r.quoi || '—'}</span>
+                    {(r.depart || r.destination) && (
+                      <span className="recup-mobile-quoi" title={trajet(r)} style={{ color: 'var(--text-3)' }}>{trajet(r)}</span>
+                    )}
                   </div>
                   <span className={`badge recup-mobile-badge ${DEMANDE_RECUP_BADGE[r.statut] || 'badge-grey'}`}>
                     {r.statut_label}
                   </span>
-                  {isPrete(r) ? (
+                  {isATraiter(r) ? (
                     <button
                       type="button"
                       className="btn btn-primary btn-sm recup-mobile-action"
                       disabled={saving}
                       onClick={() => openRecup(r)}
-                      aria-label="À récupérer"
+                      aria-label="Traiter"
                     >
                       <Truck size={14} />
                     </button>
@@ -521,7 +593,7 @@ export default function SuiviReceptions() {
                       className="btn btn-primary btn-sm recup-mobile-action"
                       disabled={saving}
                       onClick={() => setDeliverRow(r)}
-                      aria-label="Marquer récupérée"
+                      aria-label="Marquer traitée"
                     >
                       <CheckCircle size={14} />
                     </button>
@@ -538,7 +610,7 @@ export default function SuiviReceptions() {
       <Modal
         open={!!recupRow}
         onClose={() => !saving && setRecupRow(null)}
-        title="À récupérer — chauffeur et véhicule"
+        title="Traiter — chauffeur et véhicule"
         width={460}
         className="achats-da-uppercase"
       >
@@ -547,6 +619,9 @@ export default function SuiviReceptions() {
             <p style={{ margin: 0, fontSize: '0.84rem', color: 'var(--text-2)' }}>
               <strong>{recupRow.purchase_request_ref || recupRow.ref}</strong>
               {recupRow.fournisseur ? ` — ${recupRow.fournisseur}` : ''}
+              {(recupRow.depart || recupRow.destination) && (
+                <><br />{trajet(recupRow)}</>
+              )}
             </p>
             <FField label="Chauffeur / Coursier" required>
               <DriverSearchSelect
@@ -598,7 +673,7 @@ export default function SuiviReceptions() {
       <Modal
         open={!!deliverRow}
         onClose={() => !saving && setDeliverRow(null)}
-        title="Confirmer la récupération"
+        title="Confirmer le traitement"
         width={440}
         className="achats-da-uppercase"
       >
@@ -608,7 +683,7 @@ export default function SuiviReceptions() {
               <strong>{deliverRow.purchase_request_ref || deliverRow.ref}</strong>
               {deliverRow.fournisseur ? ` — ${deliverRow.fournisseur}` : ''}
               <br />
-              Marquer cette demande comme récupérée (livrée) ?
+              Le transport est terminé : marquer cette demande comme traitée ?
             </p>
             <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
               <button type="button" className="btn btn-secondary" disabled={saving} onClick={() => setDeliverRow(null)}>
@@ -616,11 +691,80 @@ export default function SuiviReceptions() {
               </button>
               <button type="button" className="btn btn-primary" disabled={saving} onClick={handleConfirmDelivered}>
                 {saving ? <Loader2 size={14} className="spin" /> : <CheckCircle size={14} />}
-                Récupérée
+                Traitée
               </button>
             </div>
           </div>
         )}
+      </Modal>
+
+      <Modal
+        open={createOpen}
+        onClose={() => !saving && setCreateOpen(false)}
+        title="Nouvelle demande de récupération"
+        width={520}
+      >
+        <form onSubmit={handleCreate} style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {createError && (
+            <div style={{ background: '#FFEBEE', border: '1px solid #EF9A9A', borderRadius: 8, padding: '8px 12px', fontSize: '0.82rem', color: '#C62828' }}>
+              {createError}
+            </div>
+          )}
+          <FField label="Demande d’achat" required>
+            <DriverSearchSelect
+              value={createForm.purchaseRequestId}
+              options={prOptions}
+              placeholder={optionsLoading ? 'Chargement…' : 'Rechercher une demande d’achat…'}
+              emptyLabel="Aucune demande d’achat"
+              invalid={!!createErrors.purchaseRequestId}
+              disabled={saving || optionsLoading}
+              onChange={onPickPurchaseRequest}
+            />
+            {createErrors.purchaseRequestId && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{createErrors.purchaseRequestId}</span>}
+          </FField>
+          <FField label="Départ" required>
+            <input
+              style={{ ...INPUT_STYLE, borderColor: createErrors.depart ? 'var(--red)' : undefined }}
+              value={createForm.depart}
+              disabled={saving}
+              placeholder="Ex. fournisseur, adresse, ville…"
+              onChange={(e) => setCreateForm((p) => ({ ...p, depart: e.target.value }))}
+            />
+            {createErrors.depart && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{createErrors.depart}</span>}
+          </FField>
+          <FField label="Destination" required>
+            <select
+              style={{ ...SELECT_STYLE, borderColor: createErrors.destination ? 'var(--red)' : undefined }}
+              value={createForm.destination}
+              disabled={saving || optionsLoading}
+              onChange={(e) => setCreateForm((p) => ({ ...p, destination: e.target.value }))}
+            >
+              <option value="">— Sélectionner —</option>
+              <option value={DEPOT_DESTINATION}>{DEPOT_KHYAYTA_LABEL}</option>
+              {projectOptions.map((p) => (
+                <option key={p.id} value={p.id}>{p.label}</option>
+              ))}
+            </select>
+            {createErrors.destination && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{createErrors.destination}</span>}
+          </FField>
+          <FField label="Remarque">
+            <textarea
+              style={{ ...INPUT_STYLE, minHeight: 64, resize: 'vertical' }}
+              value={createForm.remarque}
+              disabled={saving}
+              onChange={(e) => setCreateForm((p) => ({ ...p, remarque: e.target.value }))}
+            />
+          </FField>
+          <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+            <button type="button" className="btn btn-secondary" disabled={saving} onClick={() => setCreateOpen(false)}>
+              Annuler
+            </button>
+            <button type="submit" className="btn btn-primary" disabled={saving || optionsLoading}>
+              {saving ? <Loader2 size={14} className="spin" /> : <Plus size={14} />}
+              Créer la demande
+            </button>
+          </div>
+        </form>
       </Modal>
 
       <Modal

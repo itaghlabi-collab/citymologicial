@@ -1,8 +1,8 @@
 /**
- * achatDemandesRecuperation.js — Demandes de récupération Achats liées aux OP.
- * OP Initié → « En cours »
- * OP Payé → « À récupérer » + notif magasinier
- * Magasinier marque récupérée avec chauffeur + véhicule.
+ * achatDemandesRecuperation.js — Demandes de récupération Achats (création manuelle).
+ * Création → « En attente de traitement » + notif magasinier
+ * Magasinier « Traiter » (chauffeur + véhicule) → « En cours de transport » → « Traitée ».
+ * Les anciennes demandes issues des OP restent affichées avec leur statut.
  */
 import { getSupabase } from '../../lib/supabase';
 import {
@@ -21,9 +21,13 @@ export const DEMANDE_RECUP_STATUTS = {
   EN_TRANSPORT: 'en_transport',
   RECUPEREE: 'recuperee',
   ANNULEE: 'annulee',
+  EN_ATTENTE: 'en_attente_traitement',
+  TRAITEE: 'traitee',
 };
 
 export const DEMANDE_RECUP_LABEL = {
+  en_attente_traitement: 'En attente de traitement',
+  traitee: 'Traitée',
   en_cours: 'En cours',
   prete_a_recuperer: 'À récupérer',
   a_recuperer: 'À récupérer', // legacy
@@ -33,6 +37,8 @@ export const DEMANDE_RECUP_LABEL = {
 };
 
 export const DEMANDE_RECUP_BADGE = {
+  en_attente_traitement: 'badge-orange',
+  traitee: 'badge-green',
   en_cours: 'badge-blue',
   prete_a_recuperer: 'badge-orange',
   a_recuperer: 'badge-orange',
@@ -40,6 +46,8 @@ export const DEMANDE_RECUP_BADGE = {
   recuperee: 'badge-green',
   annulee: 'badge-grey',
 };
+
+export const DEPOT_KHYAYTA_LABEL = 'Dépôt Khyayta';
 
 async function getAuthUser() {
   const { data: { user }, error } = await getSupabase().auth.getUser();
@@ -135,6 +143,10 @@ export function normalizeDemandeRecuperation(row) {
     chauffeur: row.chauffeur || '',
     vehicule: row.vehicule || '',
     date_recuperation: row.date_recuperation || '',
+    depart: row.depart || '',
+    destination: row.destination || '',
+    destination_project_id: row.destination_project_id || '',
+    remarque: row.remarque || '',
     created_by: row.created_by || '',
     created_at: row.created_at,
     updated_at: row.updated_at,
@@ -319,24 +331,122 @@ async function notifyMagasinierRecuperation(demande, op) {
   });
 }
 
-/** Hook : OP Achats → Payé. */
-export async function onAchatsPaymentOrderPaid(op) {
-  try {
-    return await ensureDemandeFromOp({ ...op, statut: 'Payé' }, { notify: true });
-  } catch (err) {
-    console.warn('[CITYMO] ensureDemandeFromOp (payé)', err);
-    return null;
-  }
+/** Hook OP Achats → Payé : désactivé (les demandes de récupération sont créées manuellement). */
+export async function onAchatsPaymentOrderPaid() {
+  return null;
 }
 
-/** Hook : OP Achats → Initié. */
-export async function onAchatsPaymentOrderInitiated(op) {
-  try {
-    return await ensureDemandeFromOp({ ...op, statut: 'Initié' }, { notify: false });
-  } catch (err) {
-    console.warn('[CITYMO] ensureDemandeFromOp (initié)', err);
-    return null;
+/** Hook OP Achats → Initié : désactivé (les demandes de récupération sont créées manuellement). */
+export async function onAchatsPaymentOrderInitiated() {
+  return null;
+}
+
+/** Demandes d'achat proposables (fonction SQL list_purchase_requests_for_recup). */
+export async function listPurchaseRequestsForRecup() {
+  await getAuthUser();
+  const { data, error } = await getSupabase().rpc('list_purchase_requests_for_recup');
+  if (error) throw error;
+  return (data || []).map((r) => ({
+    id: r.id,
+    ref_demande: r.ref_demande || '',
+    titre: r.titre || '',
+    statut: r.statut || '',
+    project_id: r.project_id || '',
+    project_label: [r.project_ref, r.project_name].filter(Boolean).join(' — '),
+    fournisseur_souhaite: r.fournisseur_souhaite || '',
+  }));
+}
+
+/** Projets proposables comme destination (fonction SQL list_projects_for_recup). */
+export async function listProjectsForRecup() {
+  await getAuthUser();
+  const { data, error } = await getSupabase().rpc('list_projects_for_recup');
+  if (error) throw error;
+  return (data || []).map((p) => ({
+    id: p.id,
+    label: [p.ref, p.nom].filter(Boolean).join(' — ') || p.nom || p.ref || '—',
+  }));
+}
+
+/** Création manuelle → « En attente de traitement » + notification magasiniers. */
+export async function createDemandeRecuperationManuelle({
+  purchaseRequest,
+  depart,
+  destination,
+  destinationProjectId,
+  remarque,
+} = {}) {
+  const user = await getAuthUser();
+  if (!purchaseRequest?.id) {
+    const err = new Error('Choisissez la demande d’achat.');
+    err.code = 'VALIDATION';
+    throw err;
   }
+  const dep = String(depart || '').trim();
+  const dest = String(destination || '').trim();
+  if (!dep) {
+    const err = new Error('Indiquez le départ.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  if (!dest) {
+    const err = new Error('Choisissez la destination.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+
+  const row = {
+    ref: await generateRef(),
+    qui: '',
+    quand: todayISO(),
+    quoi: formatQuoiTitre(purchaseRequest.titre) || '—',
+    statut: DEMANDE_RECUP_STATUTS.EN_ATTENTE,
+    purchase_request_id: purchaseRequest.id,
+    purchase_request_ref: purchaseRequest.ref_demande || '',
+    fournisseur: purchaseRequest.fournisseur_souhaite || '',
+    projet: purchaseRequest.project_label || '',
+    depart: dep,
+    destination: dest,
+    destination_project_id: destinationProjectId || null,
+    remarque: String(remarque || '').trim() || null,
+    created_by: user.id,
+  };
+
+  const { data, error } = await getSupabase().from(TABLE).insert([row]).select('*').single();
+  if (error) throw error;
+  const demande = normalizeDemandeRecuperation(data);
+
+  notifyInventaireUsers({
+    title: 'Nouvelle demande de récupération',
+    message: `${demande.ref} — DA ${demande.purchase_request_ref || '—'} : ${demande.quoi}. ${dep} → ${dest}. À traiter.`,
+    type: NOTIFICATION_TYPES.SYSTEM,
+    priority: NOTIFICATION_PRIORITIES.HIGH,
+    entityType: 'achat_demande_recuperation',
+    entityId: demande.id,
+    actionUrl: moduleActionUrl('suivi-receptions'),
+    submoduleCode: 'suivi-receptions',
+  }).catch((err) => console.warn('[CITYMO] notif magasinier récupération', err));
+
+  return demande;
+}
+
+/** En cours de transport → Traitée. */
+export async function markDemandeRecuperationTraitee(id) {
+  await getAuthUser();
+  const { data, error } = await getSupabase()
+    .from(TABLE)
+    .update({ statut: DEMANDE_RECUP_STATUTS.TRAITEE })
+    .eq('id', id)
+    .eq('statut', DEMANDE_RECUP_STATUTS.EN_TRANSPORT)
+    .select('*')
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) {
+    const err = new Error('Cette demande n’est plus en cours de transport — actualisez la page.');
+    err.code = 'VALIDATION';
+    throw err;
+  }
+  return normalizeDemandeRecuperation(data);
 }
 
 function mapOpRow(row) {
@@ -478,7 +588,7 @@ export function filterDemandesRecuperation(rows, { search = '', statut = '', dat
       if (rowDate !== d) return false;
     }
     if (!q) return true;
-    const hay = `${r.ref} ${r.quoi} ${r.purchase_request_ref} ${r.payment_order_ref} ${r.purchase_oa_ref} ${r.fournisseur} ${r.chauffeur} ${r.vehicule}`.toLowerCase();
+    const hay = `${r.ref} ${r.quoi} ${r.purchase_request_ref} ${r.payment_order_ref} ${r.purchase_oa_ref} ${r.fournisseur} ${r.chauffeur} ${r.vehicule} ${r.depart} ${r.destination}`.toLowerCase();
     return hay.includes(q);
   });
 }
@@ -493,5 +603,8 @@ export function computeDemandesRecuperationKpis(rows) {
     enTransport: list.filter((r) => r.statut === DEMANDE_RECUP_STATUTS.EN_TRANSPORT).length,
     recuperees: list.filter((r) => r.statut === DEMANDE_RECUP_STATUTS.RECUPEREE).length,
     annulees: list.filter((r) => r.statut === DEMANDE_RECUP_STATUTS.ANNULEE).length,
+    enAttente: list.filter((r) => r.statut === DEMANDE_RECUP_STATUTS.EN_ATTENTE || isPrete(r)).length,
+    traitees: list.filter((r) => r.statut === DEMANDE_RECUP_STATUTS.TRAITEE
+      || r.statut === DEMANDE_RECUP_STATUTS.RECUPEREE).length,
   };
 }
