@@ -8,6 +8,7 @@ import ProjetsList from './projets/ProjetsList';
 import SAVModule from './projets/SAVModule';
 import ComptesRendusSAV from './projets/ComptesRendusSAV';
 import DemandesEnginsLocation from './projets/DemandesEnginsLocation';
+import DemandesTransport from './projets/DemandesTransport';
 
 /**
  * Ce composant reçoit la prop `activeTab` transmise par App.jsx
@@ -45,6 +46,9 @@ export default function Projets({ activeTab }) {
       )}
       {tab === 'demandes-engins' && (
         <DemandesEnginsLocation key="demandes-engins" />
+      )}
+      {tab === 'demandes-transport' && (
+        <DemandesTransport key="demandes-transport" />
       )}
       {tab === 'sav-projets' && (
         <SAVModule

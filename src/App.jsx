@@ -60,7 +60,7 @@ import {
   UserSquare, FileEdit, CalendarRange, Megaphone, ListChecks,
   NotebookPen, Receipt, Lightbulb,
   Contact, ShoppingBag, Tag, FileText, ScrollText, PackageCheck,
-  Truck, History,
+  Truck, History, Route,
 
   FolderOpen, AlertCircle, ClipboardCheck, Factory, Inbox, Hammer, CheckCircle2,
   MessageSquare,
@@ -149,6 +149,7 @@ const NAV = [
     items: [
       { id: 'projets',            label: 'Projets',              icon: FolderOpen      },
       { id: 'demandes-engins',    label: "Location d'engins", icon: Truck },
+      { id: 'demandes-transport', label: 'Demande de transport', icon: Route },
       { id: 'sav-projets',        label: 'SAV',                  icon: AlertCircle     },
       { id: 'cr-sav',             label: 'Comptes rendus SAV',   icon: ClipboardCheck  },
     ],
@@ -253,6 +254,7 @@ const MODULE_LABELS = {
   'historique-interv': "Historique d'intervention",
   projets:             'Projets',
   'demandes-engins':   "Location d'engins",
+  'demandes-transport': 'Demande de transport',
   'sav-projets':       'Service Apres-Vente',
   'cr-sav':            'Comptes rendus SAV',
   fabrication:         'Fabrication',
@@ -347,6 +349,7 @@ function PageContent({
     /* Projets */
     case 'projets':             return <Projets activeTab="projets" />;
     case 'demandes-engins':     return <Projets activeTab="demandes-engins" />;
+    case 'demandes-transport':  return <Projets activeTab="demandes-transport" />;
     case 'sav-projets':         return <Projets activeTab="sav-projets" />;
     case 'cr-sav':              return <Projets activeTab="cr-sav" />;
     /* Fabrication */

@@ -59,6 +59,7 @@ export const ROUTES = {
   // Projets
   PROJETS:            'projets',
   DEMANDES_ENGINS:    'demandes-engins',
+  DEMANDES_TRANSPORT: 'demandes-transport',
   SAV_PROJETS:        'sav-projets',
   CR_SAV:             'cr-sav',
 
