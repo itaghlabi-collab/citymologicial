@@ -49,6 +49,13 @@ export const DEMANDE_RECUP_BADGE = {
 
 export const DEPOT_KHYAYTA_LABEL = 'Dépôt Khyayta';
 
+/** Nom affiché du créateur, depuis la session. */
+export function recupCreatorName(user) {
+  const meta = user?.user_metadata || {};
+  const fromParts = [meta.prenom, meta.nom].filter(Boolean).join(' ');
+  return String(meta.full_name || meta.name || fromParts || user?.email?.split('@')[0] || '').trim();
+}
+
 async function getAuthUser() {
   const { data: { user }, error } = await getSupabase().auth.getUser();
   if (error || !user) {
@@ -397,7 +404,7 @@ export async function createDemandeRecuperationManuelle({
 
   const row = {
     ref: await generateRef(),
-    qui: '',
+    qui: recupCreatorName(user),
     quand: todayISO(),
     quoi: formatQuoiTitre(purchaseRequest.titre) || '—',
     statut: DEMANDE_RECUP_STATUTS.EN_ATTENTE,
@@ -418,7 +425,7 @@ export async function createDemandeRecuperationManuelle({
 
   notifyInventaireUsers({
     title: 'Nouvelle demande de récupération',
-    message: `${demande.ref} — DA ${demande.purchase_request_ref || '—'} : ${demande.quoi}. ${dep} → ${dest}. À traiter.`,
+    message: `${demande.ref} — DA ${demande.purchase_request_ref || '—'} : ${demande.quoi}. ${dep} → ${dest}.${demande.qui ? ` Par ${demande.qui}.` : ''} À traiter.`,
     type: NOTIFICATION_TYPES.SYSTEM,
     priority: NOTIFICATION_PRIORITIES.HIGH,
     entityType: 'achat_demande_recuperation',
@@ -588,7 +595,7 @@ export function filterDemandesRecuperation(rows, { search = '', statut = '', dat
       if (rowDate !== d) return false;
     }
     if (!q) return true;
-    const hay = `${r.ref} ${r.quoi} ${r.purchase_request_ref} ${r.payment_order_ref} ${r.purchase_oa_ref} ${r.fournisseur} ${r.chauffeur} ${r.vehicule} ${r.depart} ${r.destination}`.toLowerCase();
+    const hay = `${r.ref} ${r.quoi} ${r.purchase_request_ref} ${r.payment_order_ref} ${r.purchase_oa_ref} ${r.fournisseur} ${r.chauffeur} ${r.vehicule} ${r.depart} ${r.destination} ${r.qui}`.toLowerCase();
     return hay.includes(q);
   });
 }

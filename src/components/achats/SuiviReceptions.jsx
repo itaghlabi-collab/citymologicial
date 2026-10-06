@@ -21,7 +21,9 @@ import {
   DEMANDE_RECUP_LABEL,
   DEMANDE_RECUP_BADGE,
   DEPOT_KHYAYTA_LABEL,
+  recupCreatorName,
 } from '../../services/achats/achatDemandesRecuperation';
+import { useAuth } from '../../hooks/useAuth';
 import { listEmployees, employeeFullName } from '../../services/rh/employees';
 import { listVehicles } from '../../services/logistique/vehicles';
 import { isPickupDriverPoste } from '../../services/logistique/pickupRequests';
@@ -172,6 +174,8 @@ function DriverSearchSelect({
 }
 
 export default function SuiviReceptions() {
+  const { user } = useAuth();
+  const creatorName = recupCreatorName(user);
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -486,6 +490,7 @@ export default function SuiviReceptions() {
                 <thead>
                   <tr>
                     <th>Réf.</th>
+                    <th>Créée par</th>
                     <th>DA</th>
                     <th>Quoi</th>
                     <th>Départ → Destination</th>
@@ -498,6 +503,7 @@ export default function SuiviReceptions() {
                   {filtered.map((r) => (
                     <tr key={r.id}>
                       <td style={{ fontFamily: 'var(--font-head)', fontWeight: 700, color: 'var(--red)' }}>{r.ref}</td>
+                      <td style={{ fontSize: '0.82rem' }}>{r.qui || '—'}</td>
                       <td style={{ fontWeight: 600 }}>
                         {r.purchase_request_id ? (
                           <button
@@ -577,6 +583,7 @@ export default function SuiviReceptions() {
                     {(r.depart || r.destination) && (
                       <span className="recup-mobile-trajet" title={trajet(r)}>{trajet(r)}</span>
                     )}
+                    {r.qui && <span className="recup-mobile-trajet">Par {r.qui}</span>}
                     {showDriver(r) && (r.chauffeur || r.vehicule) && (
                       <span className="recup-mobile-trajet">{[r.chauffeur, r.vehicule].filter(Boolean).join(' · ')}</span>
                     )}
@@ -623,6 +630,7 @@ export default function SuiviReceptions() {
               {(recupRow.depart || recupRow.destination) && (
                 <><br />{trajet(recupRow)}</>
               )}
+              {recupRow.qui && <><br />Demandée par {recupRow.qui}</>}
             </p>
             <FField label="Chauffeur / Coursier" required>
               <DriverSearchSelect
@@ -711,6 +719,9 @@ export default function SuiviReceptions() {
               {createError}
             </div>
           )}
+          <FField label="Créée par">
+            <input style={{ ...INPUT_STYLE, background: 'var(--surface-2)' }} value={creatorName || '—'} readOnly disabled />
+          </FField>
           <FField label="Demande d’achat" required>
             <DriverSearchSelect
               value={createForm.purchaseRequestId}
