@@ -28,11 +28,11 @@ export default function BibliothequePrix() {
   const [search, setSearch] = useState('');
   const [exporting, setExporting] = useState(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async ({ force = false } = {}) => {
     setLoading(true);
     setError('');
     try {
-      setData(await loadPriceLines());
+      setData(await loadPriceLines({ force }));
     } catch (err) {
       setError(err?.message || 'Impossible de charger les devis et factures.');
     } finally {
@@ -70,7 +70,7 @@ export default function BibliothequePrix() {
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button type="button" className="btn btn-secondary" onClick={load} disabled={loading} title="Actualiser">
+          <button type="button" className="btn btn-secondary" onClick={() => load({ force: true })} disabled={loading} title="Actualiser">
             <RefreshCw size={15} className={loading ? 'spin' : undefined} />
           </button>
           <button type="button" className="btn btn-primary recup-new-btn" onClick={handleExport} disabled={loading || exporting || !library.length}>

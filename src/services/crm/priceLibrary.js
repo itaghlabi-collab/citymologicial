@@ -6,15 +6,18 @@
 import * as XLSX from 'xlsx';
 import { getSupabase } from '../../lib/supabase';
 import { clientDisplayName } from './clients';
-import { listCategories } from './categories';
 import { normalizeLigne as normalizeDevisLigne } from './crmDevis';
 import { normalizeLigne as normalizeFactureLigne } from './crmFactures';
 
 const PAGE = 1000;
+const CACHE_TTL_MS = 10 * 60 * 1000;
+const LINE_COLUMNS = 'type, designation, description, categorie_id, unite, quantite, prix_ht, remise, tva, total_ht';
 const ACOMPTE_LINE_RE = /^\s*(facture\s+d['’]\s*)?acompte\b/i;
 
+let cache = null;
+
 function isFactureAcompte(f) {
-  return f?.facture_type === 'acompte' || /^AC-/i.test(String(f?.numero || ''));
+  return f?.type === 'acompte' || /^AC-/i.test(String(f?.numero || ''));
 }
 
 async function fetchAll(table, select, orderCol = 'id') {
@@ -45,21 +48,23 @@ function round2(n) {
   return Math.round((Number(n) || 0) * 100) / 100;
 }
 
-/** Charge et met à plat toutes les lignes article des devis et factures. */
-export async function loadPriceLines() {
-  const { data: { user } } = await getSupabase().auth.getUser();
-  if (!user) {
+/** Charge et met à plat toutes les lignes article des devis et factures (cache 10 min, `force` pour recharger). */
+export async function loadPriceLines({ force = false } = {}) {
+  if (!force && cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.data;
+
+  const { data: { session } } = await getSupabase().auth.getSession();
+  if (!session?.user) {
     const err = new Error('Session requise.');
     err.code = 'AUTH';
     throw err;
   }
 
   const [devis, factures, devisLignes, factureLignes, categories] = await Promise.all([
-    fetchAll('crm_devis', 'id, reference, titre, statut, date_creation, clients ( nom, prenom )'),
-    fetchAll('crm_factures', '*, clients ( nom, prenom )'),
-    fetchAll('crm_devis_lignes', '*'),
-    fetchAll('crm_facture_lignes', '*'),
-    listCategories().catch(() => []),
+    fetchAll('crm_devis', 'id, reference, statut, date_creation, clients ( nom, prenom )'),
+    fetchAll('crm_factures', 'id, numero, type, statut, date_emission, clients ( nom, prenom )'),
+    fetchAll('crm_devis_lignes', `id, devis_id, ${LINE_COLUMNS}`),
+    fetchAll('crm_facture_lignes', `id, facture_id, ${LINE_COLUMNS}`),
+    fetchAll('categories', 'id, nom').catch(() => []),
   ]);
 
   const catById = new Map((categories || []).map((c) => [String(c.id), c.nom || '']));
@@ -96,7 +101,9 @@ export async function loadPriceLines() {
   factureLignes.forEach((row) => push(normalizeFactureLigne(row), factureById.get(row.facture_id), 'Facture'));
 
   lines.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-  return { lines, nbDevis: devis.length, nbFactures: facturesHorsAcompte.length };
+  const data = { lines, nbDevis: devis.length, nbFactures: facturesHorsAcompte.length };
+  cache = { at: Date.now(), data };
+  return data;
 }
 
 /** Regroupe par désignation + unité. Les prix à 0 sont exclus des statistiques. */
