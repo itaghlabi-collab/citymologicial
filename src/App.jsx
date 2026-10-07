@@ -30,6 +30,7 @@ import Articles from './components/crm/Articles';
 import Categories from './components/crm/Categories';
 import Devis from './components/crm/Devis';
 import Factures from './components/crm/Factures';
+import BibliothequePrix from './components/crm/BibliothequePrix';
 import BonLivraison from './components/crm/BonLivraison';
 import Prospects from './components/commercial/Prospects';
 import DevisAttente from './components/commercial/DevisAttente';
@@ -59,7 +60,7 @@ import {
   HardHat, ClockIcon, Banknote, BarChart3, Handshake, BookUser, UserCheck,
   UserSquare, FileEdit, CalendarRange, Megaphone, ListChecks,
   NotebookPen, Receipt, Lightbulb,
-  Contact, ShoppingBag, Tag, FileText, ScrollText, PackageCheck,
+  Contact, ShoppingBag, Tag, FileText, ScrollText, PackageCheck, BookOpen,
   Truck, History, Route,
 
   FolderOpen, AlertCircle, ClipboardCheck, Factory, Inbox, Hammer, CheckCircle2,
@@ -134,6 +135,7 @@ const NAV = [
       { id: 'devis',              label: 'Devis',                icon: FileText },
       { id: 'factures',           label: 'Factures',             icon: ScrollText },
       { id: 'bon-livraison',      label: 'Bon de livraison',     icon: PackageCheck },
+      { id: 'bibliotheque-prix',  label: 'Bibliothèque de prix', icon: BookOpen },
     ],
   },
   {
@@ -249,6 +251,7 @@ const MODULE_LABELS = {
   devis:               'Devis',
   factures:            'Factures',
   'bon-livraison':     'Bon de livraison',
+  'bibliotheque-prix': 'Bibliothèque de prix',
   vehicules:           'Parc automobile',
   interventions:       'Logistique',
   'historique-interv': "Historique d'intervention",
@@ -342,6 +345,7 @@ function PageContent({
     case 'devis':               return <Devis onNavigate={onNavigate} />;
     case 'factures':            return <Factures />;
     case 'bon-livraison':       return <BonLivraison />;
+    case 'bibliotheque-prix':   return <BibliothequePrix />;
     /* Logistique */
     case 'vehicules':           return <Logistique activeTab="vehicules" />;
     case 'interventions':       return <Logistique activeTab="interventions" />;
