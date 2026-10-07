@@ -7,8 +7,6 @@ import { BookOpen, Download, Loader2, Search, FileText, ScrollText, RefreshCw } 
 import { loadPriceLines, buildPriceLibrary, exportPriceLibraryExcel } from '../../services/crm/priceLibrary';
 import { INPUT_STYLE, KpiCard } from '../achats/shared.jsx';
 
-const PREVIEW_LIMIT = 300;
-
 function fmtMad(n) {
   return (Number(n) || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
@@ -135,7 +133,7 @@ export default function BibliothequePrix() {
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.slice(0, PREVIEW_LIMIT).map((r) => (
+                  {filtered.map((r) => (
                     <tr key={`${r.designation}|${r.unite}`}>
                       <td style={{ maxWidth: 360, fontWeight: 600, fontSize: '0.84rem' }}>{r.designation}</td>
                       <td style={{ fontSize: '0.82rem' }}>{r.categorie || '—'}</td>
@@ -156,7 +154,7 @@ export default function BibliothequePrix() {
             </div>
 
             <ul className="recup-mobile-list">
-              {filtered.slice(0, PREVIEW_LIMIT).map((r) => (
+              {filtered.map((r) => (
                 <li key={`${r.designation}|${r.unite}`} className="recup-mobile-row">
                   <div className="recup-mobile-main">
                     <span className="recup-mobile-quoi" title={r.designation}>{r.designation}</span>
@@ -172,11 +170,6 @@ export default function BibliothequePrix() {
               ))}
             </ul>
 
-            {filtered.length > PREVIEW_LIMIT && (
-              <div style={{ padding: '10px 14px', fontSize: '0.78rem', color: 'var(--text-3)', borderTop: '1px solid var(--border)' }}>
-                Aperçu limité à {PREVIEW_LIMIT} lignes sur {filtered.length} — l’export Excel contient tout.
-              </div>
-            )}
           </>
         )}
       </div>

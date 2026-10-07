@@ -11,6 +11,11 @@ import { normalizeLigne as normalizeDevisLigne } from './crmDevis';
 import { normalizeLigne as normalizeFactureLigne } from './crmFactures';
 
 const PAGE = 1000;
+const ACOMPTE_LINE_RE = /^\s*(facture\s+d['’]\s*)?acompte\b/i;
+
+function isFactureAcompte(f) {
+  return f?.facture_type === 'acompte' || /^AC-/i.test(String(f?.numero || ''));
+}
 
 async function fetchAll(table, select, orderCol = 'id') {
   const out = [];
@@ -51,7 +56,7 @@ export async function loadPriceLines() {
 
   const [devis, factures, devisLignes, factureLignes, categories] = await Promise.all([
     fetchAll('crm_devis', 'id, reference, titre, statut, date_creation, clients ( nom, prenom )'),
-    fetchAll('crm_factures', 'id, numero, statut, date_emission, clients ( nom, prenom )'),
+    fetchAll('crm_factures', '*, clients ( nom, prenom )'),
     fetchAll('crm_devis_lignes', '*'),
     fetchAll('crm_facture_lignes', '*'),
     listCategories().catch(() => []),
@@ -59,13 +64,14 @@ export async function loadPriceLines() {
 
   const catById = new Map((categories || []).map((c) => [String(c.id), c.nom || '']));
   const devisById = new Map(devis.map((d) => [d.id, d]));
-  const factureById = new Map(factures.map((f) => [f.id, f]));
+  const facturesHorsAcompte = factures.filter((f) => !isFactureAcompte(f));
+  const factureById = new Map(facturesHorsAcompte.map((f) => [f.id, f]));
 
   const lines = [];
   const push = (l, doc, source) => {
     if (!doc || l.type !== 'article') return;
     const designation = String(l.designation || '').trim();
-    if (!designation) return;
+    if (!designation || ACOMPTE_LINE_RE.test(designation)) return;
     const prix = round2(l.prix_ht);
     const remise = Number(l.remise) || 0;
     lines.push({
@@ -90,7 +96,7 @@ export async function loadPriceLines() {
   factureLignes.forEach((row) => push(normalizeFactureLigne(row), factureById.get(row.facture_id), 'Facture'));
 
   lines.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-  return { lines, nbDevis: devis.length, nbFactures: factures.length };
+  return { lines, nbDevis: devis.length, nbFactures: facturesHorsAcompte.length };
 }
 
 /** Regroupe par désignation + unité. Les prix à 0 sont exclus des statistiques. */
