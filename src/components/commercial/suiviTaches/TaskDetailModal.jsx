@@ -58,6 +58,7 @@ export default function TaskDetailModal({
   const [loadingSide, setLoadingSide] = useState(true);
   const [comment, setComment] = useState('');
   const [posting, setPosting] = useState(false);
+  const [commentError, setCommentError] = useState('');
 
   const loadSide = useCallback(async () => {
     try {
@@ -89,14 +90,19 @@ export default function TaskDetailModal({
   }
 
   async function postComment() {
-    if (!comment.trim()) return;
+    if (!comment.trim()) {
+      setCommentError('Écrivez un commentaire avant de cliquer sur Ajouter.');
+      return;
+    }
     setPosting(true);
+    setCommentError('');
     try {
       const created = await addTaskComment(task.id, comment);
       setComments((prev) => [...prev, created]);
       setComment('');
     } catch (err) {
-      notify(formatSupabaseError(err, 'Erreur ajout commentaire.'));
+      console.error('[CITYMO] ajout commentaire tâche', err);
+      setCommentError(formatSupabaseError(err, 'Erreur ajout commentaire.'));
     } finally {
       setPosting(false);
     }
@@ -208,13 +214,28 @@ export default function TaskDetailModal({
             <textarea
               style={{ ...inputStyle(false), resize: 'vertical', minHeight: 56 }}
               value={comment}
-              onChange={(e) => setComment(e.target.value)}
+              onChange={(e) => { setComment(e.target.value); if (commentError) setCommentError(''); }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                  e.preventDefault();
+                  postComment();
+                }
+              }}
               placeholder="Ajouter un commentaire..."
             />
-            <button type="button" className="btn btn-primary btn-sm" onClick={postComment} disabled={posting || !comment.trim()}>
+            <button
+              type="button"
+              className="btn btn-primary btn-sm"
+              onClick={postComment}
+              disabled={posting}
+              style={!comment.trim() ? { opacity: 0.55 } : undefined}
+            >
               {posting ? 'Envoi...' : 'Ajouter'}
             </button>
           </div>
+          {commentError && (
+            <div style={{ color: 'var(--red)', fontSize: '0.8rem', marginTop: 6 }}>{commentError}</div>
+          )}
         </div>
       )}
 
