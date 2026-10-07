@@ -48,6 +48,89 @@ function round2(n) {
   return Math.round((Number(n) || 0) * 100) / 100;
 }
 
+function toLine(l, meta) {
+  if (!l || l.type !== 'article') return null;
+  const designation = String(l.designation || '').trim();
+  if (!designation || ACOMPTE_LINE_RE.test(designation)) return null;
+  const prix = round2(l.prix_ht);
+  const remise = Number(l.remise) || 0;
+  return {
+    ...meta,
+    designation,
+    description: String(l.description || '').trim(),
+    unite: String(l.unite || 'unite').trim(),
+    quantite: Number(l.quantite) || 0,
+    prix_ht: prix,
+    remise,
+    prix_net: round2(prix * (1 - remise / 100)),
+    tva: Number(l.tva ?? 20),
+  };
+}
+
+function finalize(lines, nbDevis, nbFactures) {
+  lines.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
+  return { lines, nbDevis, nbFactures };
+}
+
+function isMissingFunction(err) {
+  const msg = `${err?.code || ''} ${err?.message || ''}`;
+  return /PGRST202|42883|crm_price_library_lines|schema cache/i.test(msg);
+}
+
+/** Voie rapide : fonction SQL crm_price_library_lines (droits vérifiés une seule fois). */
+async function loadViaRpc() {
+  const rows = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await getSupabase()
+      .rpc('crm_price_library_lines')
+      .range(from, from + PAGE - 1);
+    if (error) throw error;
+    rows.push(...(data || []));
+    if (!data || data.length < PAGE) break;
+  }
+  const lines = [];
+  const devisRefs = new Set();
+  const factureRefs = new Set();
+  rows.forEach((r) => {
+    const normalize = r.source === 'Devis' ? normalizeDevisLigne : normalizeFactureLigne;
+    const line = toLine(normalize({ ...r, type: 'article' }), {
+      source: r.source,
+      reference: r.reference || '',
+      date: String(r.doc_date || '').slice(0, 10),
+      statut: r.statut || '',
+      client: r.client || '',
+      categorie: r.categorie || '',
+    });
+    if (!line) return;
+    lines.push(line);
+    (r.source === 'Devis' ? devisRefs : factureRefs).add(line.reference);
+  });
+  return finalize(lines, devisRefs.size, factureRefs.size);
+}
+
+const STORAGE_KEY = 'citymo_price_library_v1';
+
+/** Dernière bibliothèque chargée sur ce navigateur (affichage instantané). */
+export function readStoredPriceLines(userId) {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed?.data || parsed.userId !== userId) return null;
+    return parsed.data;
+  } catch {
+    return null;
+  }
+}
+
+function storePriceLines(userId, data) {
+  try {
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify({ userId, at: Date.now(), data }));
+  } catch {
+    /* quota dépassé : on garde seulement le cache mémoire */
+  }
+}
+
 /** Charge et met à plat toutes les lignes article des devis et factures (cache 10 min, `force` pour recharger). */
 export async function loadPriceLines({ force = false } = {}) {
   if (!force && cache && Date.now() - cache.at < CACHE_TTL_MS) return cache.data;
@@ -59,6 +142,20 @@ export async function loadPriceLines({ force = false } = {}) {
     throw err;
   }
 
+  let data;
+  try {
+    data = await loadViaRpc();
+  } catch (err) {
+    if (!isMissingFunction(err)) throw err;
+    data = await loadViaTables();
+  }
+  cache = { at: Date.now(), data };
+  storePriceLines(session.user.id, data);
+  return data;
+}
+
+/** Voie de secours (SQL rapide non exécuté) : lecture table par table. */
+async function loadViaTables() {
   const [devis, factures, devisLignes, factureLignes, categories] = await Promise.all([
     fetchAll('crm_devis', 'id, reference, statut, date_creation, clients ( nom, prenom )'),
     fetchAll('crm_factures', 'id, numero, type, statut, date_emission, clients ( nom, prenom )'),
@@ -74,36 +171,22 @@ export async function loadPriceLines({ force = false } = {}) {
 
   const lines = [];
   const push = (l, doc, source) => {
-    if (!doc || l.type !== 'article') return;
-    const designation = String(l.designation || '').trim();
-    if (!designation || ACOMPTE_LINE_RE.test(designation)) return;
-    const prix = round2(l.prix_ht);
-    const remise = Number(l.remise) || 0;
-    lines.push({
+    if (!doc) return;
+    const line = toLine(l, {
       source,
       reference: source === 'Devis' ? doc.reference : doc.numero,
       date: String((source === 'Devis' ? doc.date_creation : doc.date_emission) || '').slice(0, 10),
       statut: doc.statut || '',
       client: clientDisplayName(doc.clients) || '',
-      designation,
-      description: String(l.description || '').trim(),
       categorie: catById.get(String(l.categorie_id || '')) || '',
-      unite: String(l.unite || 'unite').trim(),
-      quantite: Number(l.quantite) || 0,
-      prix_ht: prix,
-      remise,
-      prix_net: round2(prix * (1 - remise / 100)),
-      tva: Number(l.tva ?? 20),
     });
+    if (line) lines.push(line);
   };
 
   devisLignes.forEach((row) => push(normalizeDevisLigne(row), devisById.get(row.devis_id), 'Devis'));
   factureLignes.forEach((row) => push(normalizeFactureLigne(row), factureById.get(row.facture_id), 'Facture'));
 
-  lines.sort((a, b) => (b.date || '').localeCompare(a.date || ''));
-  const data = { lines, nbDevis: devis.length, nbFactures: facturesHorsAcompte.length };
-  cache = { at: Date.now(), data };
-  return data;
+  return finalize(lines, devis.length, facturesHorsAcompte.length);
 }
 
 /** Regroupe par désignation + unité. Les prix à 0 sont exclus des statistiques. */

@@ -4,7 +4,10 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { BookOpen, Download, Loader2, Search, FileText, ScrollText, RefreshCw } from 'lucide-react';
-import { loadPriceLines, buildPriceLibrary, exportPriceLibraryExcel } from '../../services/crm/priceLibrary';
+import {
+  loadPriceLines, readStoredPriceLines, buildPriceLibrary, exportPriceLibraryExcel,
+} from '../../services/crm/priceLibrary';
+import { useAuth } from '../../hooks/useAuth';
 import { INPUT_STYLE, KpiCard } from '../achats/shared.jsx';
 
 function fmtMad(n) {
@@ -22,14 +25,18 @@ function normQuery(s) {
 }
 
 export default function BibliothequePrix() {
-  const [data, setData] = useState({ lines: [], nbDevis: 0, nbFactures: 0 });
-  const [loading, setLoading] = useState(true);
+  const { user } = useAuth();
+  const [stored] = useState(() => readStoredPriceLines(user?.id));
+  const [data, setData] = useState(stored || { lines: [], nbDevis: 0, nbFactures: 0 });
+  const [loading, setLoading] = useState(!stored);
+  const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState('');
   const [search, setSearch] = useState('');
   const [exporting, setExporting] = useState(false);
 
-  const load = useCallback(async ({ force = false } = {}) => {
-    setLoading(true);
+  const load = useCallback(async ({ force = false, background = false } = {}) => {
+    if (background) setRefreshing(true);
+    else setLoading(true);
     setError('');
     try {
       setData(await loadPriceLines({ force }));
@@ -37,10 +44,13 @@ export default function BibliothequePrix() {
       setError(err?.message || 'Impossible de charger les devis et factures.');
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, []);
 
-  useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    load({ background: Boolean(stored) });
+  }, [load, stored]);
 
   const library = useMemo(() => buildPriceLibrary(data.lines), [data.lines]);
   const filtered = useMemo(() => {
@@ -70,8 +80,14 @@ export default function BibliothequePrix() {
           </p>
         </div>
         <div style={{ display: 'flex', gap: 8 }}>
-          <button type="button" className="btn btn-secondary" onClick={() => load({ force: true })} disabled={loading} title="Actualiser">
-            <RefreshCw size={15} className={loading ? 'spin' : undefined} />
+          <button
+            type="button"
+            className="btn btn-secondary"
+            onClick={() => load({ force: true, background: data.lines.length > 0 })}
+            disabled={loading || refreshing}
+            title={refreshing ? 'Mise à jour…' : 'Actualiser'}
+          >
+            <RefreshCw size={15} className={loading || refreshing ? 'spin' : undefined} />
           </button>
           <button type="button" className="btn btn-primary recup-new-btn" onClick={handleExport} disabled={loading || exporting || !library.length}>
             {exporting ? <Loader2 size={15} className="spin" /> : <Download size={15} />}
