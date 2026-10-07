@@ -35,13 +35,16 @@ async function fetchAll(table, select, orderCol = 'id') {
   return out;
 }
 
+/** Clé de regroupement : ignore accents, majuscules, espaces et ponctuation (« Light Box » = « Lightbox »). */
 function normKey(s) {
   return String(s || '')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
     .toLowerCase()
-    .replace(/[^a-z0-9%]+/g, ' ')
-    .trim();
+    .replace(/×/g, 'x')
+    .replace(/²/g, '2')
+    .replace(/³/g, '3')
+    .replace(/[^a-z0-9%]+/g, '');
 }
 
 function round2(n) {
@@ -192,8 +195,13 @@ async function loadViaTables() {
 /** Regroupe par désignation + unité. Les prix à 0 sont exclus des statistiques. */
 export function buildPriceLibrary(lines) {
   const groups = new Map();
+  const seen = new Set();
   (lines || []).forEach((l) => {
     const key = `${normKey(l.designation)}|${normKey(l.unite)}`;
+    // Ligne identique répétée dans le même document : comptée une seule fois.
+    const lineKey = `${l.source}|${l.reference}|${key}|${l.quantite}|${l.prix_ht}`;
+    if (seen.has(lineKey)) return;
+    seen.add(lineKey);
     let g = groups.get(key);
     if (!g) {
       g = { key, labels: new Map(), unite: l.unite, categories: new Map(), rows: [] };
