@@ -34,7 +34,7 @@ import {
 
 const LAST_N = 10;
 const DEPOT_DESTINATION = '__depot_khyayta__';
-const EMPTY_CREATE_FORM = { purchaseRequestId: '', depart: '', destination: '', remarque: '' };
+const EMPTY_CREATE_FORM = { purchaseRequestId: '', depart: '', passageDepot: false, destination: '', remarque: '' };
 
 function todayISO() {
   return new Date().toISOString().slice(0, 10);
@@ -282,15 +282,20 @@ export default function SuiviReceptions() {
         depart: createForm.depart,
         destination: createForm.destination === DEPOT_DESTINATION ? DEPOT_KHYAYTA_LABEL : project?.label,
         destinationProjectId: project?.id || null,
+        passageDepot: createForm.passageDepot,
         remarque: createForm.remarque,
       });
       setCreateOpen(false);
       await load();
     } catch (err) {
       const msg = err?.message || 'Erreur enregistrement.';
-      setCreateError(/statut_check|check constraint|column .* does not exist|schema cache/i.test(msg)
-        ? 'Exécutez supabase/RUN_ACHAT_RECUP_MANUELLE.sql dans Supabase.'
-        : msg);
+      if (/passage_depot/i.test(msg)) {
+        setCreateError('Exécutez supabase/RUN_ACHAT_RECUP_PASSAGE_DEPOT.sql dans Supabase.');
+      } else {
+        setCreateError(/statut_check|check constraint|column .* does not exist|schema cache/i.test(msg)
+          ? 'Exécutez supabase/RUN_ACHAT_RECUP_MANUELLE.sql dans Supabase.'
+          : msg);
+      }
     } finally {
       setSaving(false);
     }
@@ -392,7 +397,9 @@ export default function SuiviReceptions() {
   const isEnTransport = (r) => r.statut === DEMANDE_RECUP_STATUTS.EN_TRANSPORT;
   const showDriver = (r) => r.statut === DEMANDE_RECUP_STATUTS.RECUPEREE
     || r.statut === DEMANDE_RECUP_STATUTS.TRAITEE || isEnTransport(r);
-  const trajet = (r) => (r.depart || r.destination ? `${r.depart || '—'} → ${r.destination || '—'}` : '—');
+  const trajet = (r) => (r.depart || r.destination
+    ? `${r.depart || '—'} → ${r.passage_depot ? `${DEPOT_KHYAYTA_LABEL} → ` : ''}${r.destination || '—'}`
+    : '—');
 
   return (
     <div className="animate-fade-in recup-page">
@@ -743,6 +750,22 @@ export default function SuiviReceptions() {
               onChange={(e) => setCreateForm((p) => ({ ...p, depart: e.target.value }))}
             />
             {createErrors.depart && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{createErrors.depart}</span>}
+          </FField>
+          <FField label={`Passage — ${DEPOT_KHYAYTA_LABEL}`}>
+            <div style={{ display: 'flex', gap: 18, alignItems: 'center', minHeight: 38 }}>
+              {[{ v: true, l: 'Oui' }, { v: false, l: 'Non' }].map((o) => (
+                <label key={o.l} style={{ display: 'inline-flex', alignItems: 'center', gap: 6, cursor: 'pointer', fontSize: '0.9rem', fontWeight: 600 }}>
+                  <input
+                    type="radio"
+                    name="recup-passage-depot"
+                    checked={createForm.passageDepot === o.v}
+                    disabled={saving}
+                    onChange={() => setCreateForm((p) => ({ ...p, passageDepot: o.v }))}
+                  />
+                  {o.l}
+                </label>
+              ))}
+            </div>
           </FField>
           <FField label="Destination" required>
             <select

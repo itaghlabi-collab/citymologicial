@@ -153,6 +153,7 @@ export function normalizeDemandeRecuperation(row) {
     depart: row.depart || '',
     destination: row.destination || '',
     destination_project_id: row.destination_project_id || '',
+    passage_depot: row.passage_depot === true,
     remarque: row.remarque || '',
     created_by: row.created_by || '',
     created_at: row.created_at,
@@ -381,6 +382,7 @@ export async function createDemandeRecuperationManuelle({
   depart,
   destination,
   destinationProjectId,
+  passageDepot = false,
   remarque,
 } = {}) {
   const user = await getAuthUser();
@@ -415,6 +417,7 @@ export async function createDemandeRecuperationManuelle({
     depart: dep,
     destination: dest,
     destination_project_id: destinationProjectId || null,
+    passage_depot: passageDepot === true,
     remarque: String(remarque || '').trim() || null,
     created_by: user.id,
   };
@@ -425,7 +428,7 @@ export async function createDemandeRecuperationManuelle({
 
   notifyInventaireUsers({
     title: 'Nouvelle demande de récupération',
-    message: `${demande.ref} — DA ${demande.purchase_request_ref || '—'} : ${demande.quoi}. ${dep} → ${dest}.${demande.qui ? ` Par ${demande.qui}.` : ''} À traiter.`,
+    message: `${demande.ref} — DA ${demande.purchase_request_ref || '—'} : ${demande.quoi}. ${dep} → ${demande.passage_depot ? `${DEPOT_KHYAYTA_LABEL} → ` : ''}${dest}.${demande.qui ? ` Par ${demande.qui}.` : ''} À traiter.`,
     type: NOTIFICATION_TYPES.SYSTEM,
     priority: NOTIFICATION_PRIORITIES.HIGH,
     entityType: 'achat_demande_recuperation',
