@@ -482,11 +482,18 @@ async function upsertPaiements(factureId, paiements) {
 export async function createCrmFacture(form) {
   await getAuthUserId();
   const computed = computeTotals(form.lignes);
-  const totals = {
-    total_ht: computed.total_ht || Number(form.total_ht) || 0,
-    total_tva: computed.total_tva || Number(form.total_tva) || 0,
-    total_ttc: computed.total_ttc || Number(form.total_ttc) || 0,
-  };
+  // Conversion devis → facture : les montants doivent rester identiques à ceux du devis.
+  const totals = form.keepSourceTotals && Number(form.total_ttc) > 0
+    ? {
+      total_ht: Number(form.total_ht) || 0,
+      total_tva: Number(form.total_tva) || 0,
+      total_ttc: Number(form.total_ttc) || 0,
+    }
+    : {
+      total_ht: computed.total_ht || Number(form.total_ht) || 0,
+      total_tva: computed.total_tva || Number(form.total_tva) || 0,
+      total_ttc: computed.total_ttc || Number(form.total_ttc) || 0,
+    };
   const payeInfo = computePaiements(form, totals.total_ttc);
   const numero = form.numero?.trim() || await generateCrmFactureNumero();
   const row = { ...toFactureRow({ ...form, numero, facture_type: 'facture' }, totals, payeInfo), numero };
@@ -646,6 +653,7 @@ export async function createCrmFactureFromDevis(devisId) {
     total_ht: devis.total_ht,
     total_tva: devis.total_tva,
     total_ttc: devis.total_ttc,
+    keepSourceTotals: true,
     lignes: (devis.lignes || []).map((l) => hydrateDocLigneFromSource(l, articles)),
     paiements: [],
     acompte_montant: 0,
