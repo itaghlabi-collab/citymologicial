@@ -1,16 +1,17 @@
 -- CITYMO — Prix des devis KITEA RABAT (CFO, CFA, FLUIDES)
--- Met à jour UNIQUEMENT le prix HT et le total HT des lignes article de ces 3 devis,
--- puis recalcule total HT / TVA / TTC de ces 3 devis (même calcul que l'ERP).
--- Sécurités : devis retrouvé par client KITEA RABAT + titre, uniquement s'il est en brouillon ;
--- une ligne n'est modifiée que si son prix est encore à 0 (aucun prix saisi n'est écrasé).
--- Aucune autre table, aucun autre devis, aucune désignation ni quantité n'est modifié.
--- Sources des prix : bibliothèque CITYMO (export du 07/10/2026) ou estimation marché marocain — voir Excel de contrôle.
+-- Complète UNIQUEMENT les lignes article dont le prix est encore à 0 : les prix déjà saisis ne sont pas touchés.
+-- Lignes retrouvées par désignation exacte, puis par désignation sans code / majuscules / espaces / apostrophes
+-- (cas des désignations modifiées dans l'ERP). Puis recalcul total HT / TVA / TTC (même calcul que l'ERP).
+-- Devis retrouvé par client KITEA RABAT + titre, uniquement s'il est en brouillon.
+-- Aucune autre table, aucun autre devis, aucune désignation ni quantité n'est modifié. Ré-exécutable sans risque.
+-- Sources : bibliothèque CITYMO (export du 07/10/2026) ou estimation marché marocain — voir Excel de contrôle.
 
--- ===== CFO (PR-2026-10-0007) =====
+-- ===== CFO =====
 DO $$
 DECLARE
   did UUID;
-  n   INT;
+  n1  INT;
+  n2  INT;
 BEGIN
   SELECT d.id INTO did FROM public.crm_devis d
   JOIN public.clients c ON c.id = d.client_id
@@ -27,6 +28,7 @@ BEGIN
     RETURN;
   END IF;
 
+  -- 1) désignation identique
   UPDATE public.crm_devis_lignes l
   SET prix_ht  = v.prix,
       total_ht = round(l.quantite * v.prix * (1 - coalesce(l.remise, 0) / 100.0), 2)
@@ -110,7 +112,93 @@ BEGIN
     AND coalesce(l.type, 'article') = 'article'
     AND l.designation = v.designation
     AND coalesce(l.prix_ht, 0) = 0;
-  GET DIAGNOSTICS n = ROW_COUNT;
+  GET DIAGNOSTICS n1 = ROW_COUNT;
+
+  -- 2) désignation modifiée dans l'ERP (code retiré, majuscules, espaces, apostrophes)
+  UPDATE public.crm_devis_lignes l
+  SET prix_ht  = v.prix,
+      total_ht = round(l.quantite * v.prix * (1 - coalesce(l.remise, 0) / 100.0), 2)
+  FROM (VALUES
+    ('foyer lumineux simple allumage principal', 400),
+    ('foyer lumineux simple allumage secondaire', 250),
+    ('foyer lumineux commandé par bouton poussoir', 350),
+    ('foyer lumineux commandé par commutateur à clé', 550),
+    ('détecteur de présence infrarouge', 650),
+    ('goulotte lumineuse led suspendue, module led 4000k intégré, longueur 1500 mm (~57 w)', 250),
+    ('goulotte lumineuse led suspendue, module led 4000k intégré, longueur 3000 mm (~115 w)', 350),
+    ('downlight encastré led 4000k, 35 w', 80),
+    ('downlight encastré led 4000k, 25 w', 80),
+    ('spot sur rail led 4000k, 32 w, faisceau 36°', 35),
+    ('spot sur rail led 4000k, 32 w, faisceau 60°', 35),
+    ('projecteur linéaire sur rail led 4000k, 60 w, symétrique', 60),
+    ('projecteur linéaire sur rail led 4000k, 60 w, asymétrique', 60),
+    ('panneau led 4000k, 1200 x 250 mm, 32 w', 120),
+    ('panneau led 4000k, 595 x 595 mm, 36 w', 120),
+    ('hublot led 4000k, 14 w', 100),
+    ('luminaire industriel suspendu led 4000k, puissance sélectionnable jusqu''à 200 w', 300),
+    ('plafonnier linéaire led 4000k, 60 w', 150),
+    ('suspension décorative led sur mesure (composition multi-éléments)', 1200),
+    ('rail électrifié 3 circuits, longueur 1000 mm', 80),
+    ('rail électrifié 3 circuits, longueur 2000 mm', 120),
+    ('rail électrifié 3 circuits, longueur 3000 mm', 160),
+    ('accessoires de raccordement et de suspension du rail 3 circuits (connecteurs, embouts, alimentation, étriers, câbles et manchons de suspension)', 15000),
+    ('foyer de prises de courant principal', 450),
+    ('foyer de prises de courant secondaire', 280),
+    ('prise de courant normale 2x16 a+t', 220),
+    ('prise de courant normale 2x16 a+t étanche', 320),
+    ('prise de courant montée au plafond', 300),
+    ('prise de courant ondulée 2x16 a+t (circuit teo)', 280),
+    ('prise informatique rj45', 375),
+    ('bloc 4 prises normales + 4 prises ondulées + 4 rj45', 2800),
+    ('alimentation climatisation gainable 8 kw (unité intérieure)', 1800),
+    ('alimentation cassette climatisation drv 2,5 kw (unité intérieure, attente dédiée par cassette)', 900),
+    ('alimentation drv 10 kw (unité extérieure climatisation)', 3500),
+    ('alimentation caisson de ventilation 2,5 kw', 1200),
+    ('alimentation dédiée ascenseur', 6000),
+    ('alimentation dédiée monte-charge', 6000),
+    ('alimentation dédiée escalier mécanique (escalator)', 8000),
+    ('alimentation caisson de désenfumage 9 kw', 3500),
+    ('alimentation détection incendie', 3500),
+    ('alimentation détection intrusion', 2500),
+    ('alimentation sonorisation', 2500),
+    ('alimentation local informatique', 6000),
+    ('alimentation des enseignes', 1200),
+    ('alimentation éclairage extérieur', 1500),
+    ('alimentation chauffe-eau électrique instantané 8 kw', 1500),
+    ('alimentation sèche-main 6,5 kw', 1200),
+    ('alimentation onduleurs 20kva', 8000),
+    ('attentes électriques diverses 2,3 kw (portes automatiques, armoire informatique, panneaux d''affichage)', 650),
+    ('attentes électriques ascensseur / escalator / monte charge en 4 x 10 mm²', 4500),
+    ('attentes électriques cr1 de 4 x10 mm²', 4000),
+    ('tableau de protection électrique / tgbt (ip31, réserve 25%, parafoudre)', 280000),
+    ('armoire divisionnaire (te rdc / te etage)', 45000),
+    ('liaison électrique tgbt - transformateur existant (raccordement)', 1100),
+    ('liaison électrique tgbt - te éclairage', 400),
+    ('liaison électrique tgbt - te prises de courant', 400),
+    ('liaison électrique tgbt - te climatisation', 450),
+    ('liaison électrique tgbt - te ondulé (teo)', 350),
+    ('liaison électrique tgbt - te secouru', 400),
+    ('liaison électrique groupe électrogène - armoire (coffret) de secours', 750),
+    ('réfection de la mise à la terre du bâtiment (tgbt), y compris terre séparée des compteurs (voir cps art. cfo-3.10)', 70000),
+    ('chemin de câble - largeur 365 mm (voir cps art. cfo-4.1)', 380),
+    ('chemin de câble - largeur 250 mm (voir cps art. cfo-4.2)', 300),
+    ('chemin de câble - largeur 95 mm (voir cps art. cfo-4.3)', 140),
+    ('chemin de câble - largeur 63 mm (voir cps art. cfo-4.4)', 110),
+    ('tubage (fourreaux/conduits)', 45000),
+    ('groupe électrogène 200 kva complet, y compris désinstallation et évacuation de l''ancien groupe, mise à la terre séparée et travaux de gros-œuvre du local associés', 420000),
+    ('fourniture, pose, raccordement, programmation, essais et mise en service d''une centrale d''alimentation centralisée', 65000),
+    ('bloc autonome / luminaire d''éclairage de sécurité d''ambiance adressable', 1200),
+    ('bloc d''éclairage de sécurité de balisage adressable', 1100),
+    ('alimentation 5*4mm²', 120),
+    ('prise courant 380v (triphase)', 650),
+    ('démontage de l''existant', 35000),
+    ('installation du chantier', 25000)
+  ) AS v(cle, prix)
+  WHERE l.devis_id = did
+    AND coalesce(l.type, 'article') = 'article'
+    AND lower(regexp_replace(regexp_replace(translate(trim(l.designation), '’‘', ''''''), '^([A-Za-z]+-)?[0-9]+(\.[0-9]+)*\s*[—–-]\s*', ''), '\s+', ' ', 'g')) = v.cle
+    AND coalesce(l.prix_ht, 0) = 0;
+  GET DIAGNOSTICS n2 = ROW_COUNT;
 
   UPDATE public.crm_devis d
   SET total_ht = t.ht, total_tva = t.ttc - t.ht, total_ttc = t.ttc
@@ -125,14 +213,15 @@ BEGIN
   ) t
   WHERE d.id = did;
 
-  RAISE NOTICE 'Devis CFO : % lignes chiffrées, totaux recalculés.', n;
+  RAISE NOTICE 'Devis CFO : % lignes complétées, totaux recalculés.', n1 + n2;
 END $$;
 
--- ===== CFA (PR-2026-10-0008) =====
+-- ===== CFA =====
 DO $$
 DECLARE
   did UUID;
-  n   INT;
+  n1  INT;
+  n2  INT;
 BEGIN
   SELECT d.id INTO did FROM public.crm_devis d
   JOIN public.clients c ON c.id = d.client_id
@@ -149,6 +238,7 @@ BEGIN
     RETURN;
   END IF;
 
+  -- 1) désignation identique
   UPDATE public.crm_devis_lignes l
   SET prix_ht  = v.prix,
       total_ht = round(l.quantite * v.prix * (1 - coalesce(l.remise, 0) / 100.0), 2)
@@ -230,7 +320,91 @@ BEGIN
     AND coalesce(l.type, 'article') = 'article'
     AND l.designation = v.designation
     AND coalesce(l.prix_ht, 0) = 0;
-  GET DIAGNOSTICS n = ROW_COUNT;
+  GET DIAGNOSTICS n1 = ROW_COUNT;
+
+  -- 2) désignation modifiée dans l'ERP (code retiré, majuscules, espaces, apostrophes)
+  UPDATE public.crm_devis_lignes l
+  SET prix_ht  = v.prix,
+      total_ht = round(l.quantite * v.prix * (1 - coalesce(l.remise, 0) / 100.0), 2)
+  FROM (VALUES
+    ('contrôleur système sonorisation (matrice de zones, priorités, entrée contact évacuation ssi)', 45000),
+    ('pupitre d''appel et poste de pupitre', 6500),
+    ('lecteur source (mp3/usb/sd, tuner fm)', 4500),
+    ('amplificateur de puissance 2x500 w', 14000),
+    ('chargeur batterie 24 v + batteries 12 v/75 ah', 9000),
+    ('module de supervision de fin de ligne', 900),
+    ('baie technique 42 u + accessoires (ventilation, tablettes, organisateur, pdu)', 12000),
+    ('haut-parleur de plafond 6 w + dôme anti-feu', 650),
+    ('haut-parleur étanche 6 w + dôme acoustique', 750),
+    ('projecteur sonore 20 w unidirectionnel', 1100),
+    ('projecteur sonore 10 w bidirectionnel', 1300),
+    ('câblage 100 v résistant au feu (cr1), essais et mise en service', 55000),
+    ('ecs/cmsi adressable 512 points', 95000),
+    ('centralisateur de mise en sécurité', 45000),
+    ('matériel déporté (répétiteur multivoies)', 12000),
+    ('module déporté ligne ouverte', 6000),
+    ('module de surveillance', 5000),
+    ('alimentation en54-4 27,6 v/5 a + batteries', 6500),
+    ('détecteur optique adressable', 650),
+    ('détecteur thermique adressable', 650),
+    ('déclencheur manuel adressable + capot de protection', 750),
+    ('indicateur d''action', 250),
+    ('sirène d''évacuation avec socle', 900),
+    ('avertisseur sonore avec flash', 1200),
+    ('détecteur linéaire à faisceau', 12000),
+    ('module de report d''alarme sms/gprs', 4500),
+    ('câblage (cr1/c2), essais et mise en service', 85000),
+    ('caméra ip bullet extérieure ip66', 1000),
+    ('caméra ip dôme fixe intérieure', 950),
+    ('caméra dôme varifocale', 2200),
+    ('nvr hd (dimensionné selon nombre de caméras, réserve 30%)', 25000),
+    ('commutateur poe 24 ports', 8525),
+    ('panneau de brassage 24 ports', 450),
+    ('écran de supervision et commande ptz', 18000),
+    ('baie informatique 16 u + unité de stockage 30 to', 25000),
+    ('câblage, conduits, mise en marche et asservissement', 45000),
+    ('centrale de contrôle d''accès (commutateurs poe + logiciel de gestion)', 25000),
+    ('lecteur de badge de proximité', 1500),
+    ('lecteur badge + digicode', 2200),
+    ('lecteur badge + reconnaissance d''empreinte + reconnaissance faciale', 6500),
+    ('ventouse électromagnétique', 1200),
+    ('serrure électromagnétique', 1500),
+    ('serrure électrique', 1200),
+    ('kit de porte simple vantail à ventouse (bouton, brise-glace, ferme-porte)', 1800),
+    ('kit de porte double vantail à 2 ventouses', 3200),
+    ('kit de porte à serrure électrique', 1600),
+    ('pointeuse (badge/empreinte/code/facial) + support', 4500),
+    ('cartes de proximité, programmation', 25),
+    ('vidéophone (intérieur + extérieur)', 4500),
+    ('câblage, conduits et mise en marche (contrôle d''accès)', 18000),
+    ('centrale anti-intrusion (28 zones filaires/radio)', 12000),
+    ('détecteur volumétrique infrarouge/double technologie 180°', 650),
+    ('contact magnétique de porte', 250),
+    ('détecteur de présence d''eau ip (locaux techniques)', 800),
+    ('bouton anti-panique discret (caisse et caisse centrale)', 450),
+    ('clavier mural déporté', 1800),
+    ('sirène d''intrusion intérieure', 650),
+    ('câblage, conduits et mise en service (anti-intrusion)', 15000),
+    ('baie informatique fédératrice équipée, complète (panneaux de brassage catégorie 6a, cordons de brassage, tiroirs optiques, pdu connecté)', 45000),
+    ('baie informatique d''étage équipée, complète (panneaux de brassage catégorie 6a, cordons de brassage, tiroirs optiques, pdu connecté)', 30000),
+    ('câble 4 paires catégorie 6a sf/ftp', 35),
+    ('fibre optique om4 multimode 12 brins', 75),
+    ('prise rj45 catégorie 6a', 375),
+    ('réseau de conduits (câblage informatique)', 35000),
+    ('obturation coupe-feu de l''ensemble des réservations de la salle de brassage', 8000),
+    ('terre informatique (prise de terre dédiée, distincte de la terre électrique générale)', 15000),
+    ('test de certification du câblage et mise en service', 12000),
+    ('onduleur centralisé (rackable) 10 kva', 28000),
+    ('borne wifi 7 (point d''accès), voir caractéristiques cps art. cfa-7.1', 4500),
+    ('contrôleur wifi (gestion centralisée des bornes)', 3335),
+    ('commutateur (switch) 48 ports niveau 2, y compris module 1g', 9500),
+    ('commutateur (switch) 24 ports niveau 3, y compris module 1g', 12000)
+  ) AS v(cle, prix)
+  WHERE l.devis_id = did
+    AND coalesce(l.type, 'article') = 'article'
+    AND lower(regexp_replace(regexp_replace(translate(trim(l.designation), '’‘', ''''''), '^([A-Za-z]+-)?[0-9]+(\.[0-9]+)*\s*[—–-]\s*', ''), '\s+', ' ', 'g')) = v.cle
+    AND coalesce(l.prix_ht, 0) = 0;
+  GET DIAGNOSTICS n2 = ROW_COUNT;
 
   UPDATE public.crm_devis d
   SET total_ht = t.ht, total_tva = t.ttc - t.ht, total_ttc = t.ttc
@@ -245,14 +419,15 @@ BEGIN
   ) t
   WHERE d.id = did;
 
-  RAISE NOTICE 'Devis CFA : % lignes chiffrées, totaux recalculés.', n;
+  RAISE NOTICE 'Devis CFA : % lignes complétées, totaux recalculés.', n1 + n2;
 END $$;
 
--- ===== FLUIDES (PR-2026-10-0009) =====
+-- ===== FLUIDES =====
 DO $$
 DECLARE
   did UUID;
-  n   INT;
+  n1  INT;
+  n2  INT;
 BEGIN
   SELECT d.id INTO did FROM public.crm_devis d
   JOIN public.clients c ON c.id = d.client_id
@@ -269,6 +444,7 @@ BEGIN
     RETURN;
   END IF;
 
+  -- 1) désignation identique
   UPDATE public.crm_devis_lignes l
   SET prix_ht  = v.prix,
       total_ht = round(l.quantite * v.prix * (1 - coalesce(l.remise, 0) / 100.0), 2)
@@ -379,7 +555,118 @@ BEGIN
     AND coalesce(l.type, 'article') = 'article'
     AND l.designation = v.designation
     AND coalesce(l.prix_ht, 0) = 0;
-  GET DIAGNOSTICS n = ROW_COUNT;
+  GET DIAGNOSTICS n1 = ROW_COUNT;
+
+  -- 2) désignation modifiée dans l'ERP (code retiré, majuscules, espaces, apostrophes)
+  UPDATE public.crm_devis_lignes l
+  SET prix_ht  = v.prix,
+      total_ht = round(l.quantite * v.prix * (1 - coalesce(l.remise, 0) / 100.0), 2)
+  FROM (VALUES
+    ('branchement eau potable', 15000),
+    ('compteur eau calibre 20 (ketia)', 3500),
+    ('ø 32 intérieur', 75),
+    ('ø 25 intérieur', 55),
+    ('ø 20 intérieur', 45),
+    ('ø 16 intérieur', 40),
+    ('ø 32', 220),
+    ('ø 25', 180),
+    ('ø 20', 150),
+    ('ø 15', 120),
+    ('lavabo sur colonne (pose)', 400),
+    ('w-c a l''anglaise a reservoir (pose)', 500),
+    ('évier en acier inoxydable (pose)', 400),
+    ('anti – belier', 650),
+    ('dn 32', 1800),
+    ('dn 40', 2600),
+    ('chauffe eau 50 litres', 4500),
+    ('ø 75', 90),
+    ('ø 110', 120),
+    ('ø 125', 150),
+    ('ø 80', 450),
+    ('tube en pvc ø = 40 à 50 mm', 60),
+    ('branchement eau incendie', 35000),
+    ('ø 80/90', 450),
+    ('ø 40/49 à ø 50/60', 280),
+    ('dn 25/8 (hall de vente, galerie marchande)', 4500),
+    ('dn 33/12 (réserves)', 6500),
+    ('vanne d''isolement', 1500),
+    ('extincteur à eau pulvérisée 6 litres', 450),
+    ('extincteur à poudre polyvalente (abc) de 9 kg', 700),
+    ('extincteur à c02 de 2 kg', 210),
+    ('extincteur à c02 de 6 kg', 1100),
+    ('puissance frigorifique 12.60 kwf', 42000),
+    ('puissance frigorifique 17.00 kwf', 52000),
+    ('ø 400 à ø 510', 650),
+    ('gaine regtangulaire pre--isolee', 450),
+    ('ø 200 a ø 250', 150),
+    ('gaine en tôle galvanisee', 380),
+    ('ø 100 à ø 315', 180),
+    ('ø 300 à ø 550', 320),
+    ('ø 630', 450),
+    ('débit 200 à 600 m³/h', 650),
+    ('débit 650 à 1000 m³/h', 850),
+    ('débit 1100 à 2000 m³/h', 1300),
+    ('grille de transfert 500 x 150', 450),
+    ('régulateur de débit pour gaine', 1500),
+    ('4000 m³/h à 5000 m³/h', 2500),
+    ('ø 250 à ø 315', 450),
+    ('ø 100 à ø 200', 300),
+    ('attente évacuation condensât', 60),
+    ('1500 à 2000', 18000),
+    ('2500 à 4000 m³/h', 26000),
+    ('600 à 1000 m³/h', 9500),
+    ('1200 à 2000 m³/h', 14000),
+    ('2200 à 4000 m³/h', 22000),
+    ('bouche vmc auto réglable', 250),
+    ('3 kw f', 7000),
+    ('5 kw f', 11500),
+    ('puissance frigorifique : 28 kw', 120000),
+    ('puissance frigorifique : 2,8 kw', 9500),
+    ('puissance frigorifique : 5,6 kw', 12500),
+    ('puissance frigorifique : 3,6 kw', 11000),
+    ('plénum de soufflage', 1800),
+    ('a) tableau et raccordement électrique climatisations unités extérieures et intérieures hall de vente', 45000),
+    ('tableau et raccordement électrique caissons de ventilation.', 25000),
+    ('repérage', 8000),
+    ('débit d''air de 34 000 m3/h / 68 000 m3/h à hmt appropriée', 150000),
+    ('débit d''air de 41 000 m3/h / 82 000 m3/h à hmt appropriée', 165000),
+    ('débit : 9500 m3/h / 19 000 m3/h', 38000),
+    ('débit : 20 000 m3/h / 40 000 m3/h', 58000),
+    ('débit : 30 000 m3/h / 60 000 m3/h', 75000),
+    ('débit : 9000 m3/h / 18 000 m3/h', 36000),
+    ('débit : 17 000 m3/h / 34 000 m3/h', 52000),
+    ('débit : 25 000 m3/h / 50 000 m3/h', 68000),
+    ('coffret de relayage', 4500),
+    ('clapet coupe-feu', 4500),
+    ('gaine en staff 4 cm', 380),
+    ('gaine en tole galvanisee', 380),
+    ('calfeutrement gaines techniques', 450),
+    ('désenfumage hall de vente (rdc)', 65000),
+    ('désenfumage hall de vente (r+1)', 55000),
+    ('désenfumage stock', 45000),
+    ('tetes sprinkleurs (dn15 à dn20)', 280),
+    ('ø 150', 950),
+    ('ø 102/114', 650),
+    ('ø 50/60', 320),
+    ('ø 40/49', 260),
+    ('ø 33/42', 220),
+    ('ø 26/32', 180),
+    ('zone hall de vente', 85000),
+    ('zone bureaux', 15000),
+    ('zone réserves', 45000),
+    ('vidanges et point f', 6500),
+    ('armoire électrique et câblage', 45000),
+    ('armoire reports d''alarmes', 18000),
+    ('reperage', 8000),
+    ('indicateur de passage d''eau', 9000),
+    ('démontage de l''existant', 40000),
+    ('installation du chantier', 25000)
+  ) AS v(cle, prix)
+  WHERE l.devis_id = did
+    AND coalesce(l.type, 'article') = 'article'
+    AND lower(regexp_replace(regexp_replace(translate(trim(l.designation), '’‘', ''''''), '^([A-Za-z]+-)?[0-9]+(\.[0-9]+)*\s*[—–-]\s*', ''), '\s+', ' ', 'g')) = v.cle
+    AND coalesce(l.prix_ht, 0) = 0;
+  GET DIAGNOSTICS n2 = ROW_COUNT;
 
   UPDATE public.crm_devis d
   SET total_ht = t.ht, total_tva = t.ttc - t.ht, total_ttc = t.ttc
@@ -394,7 +681,17 @@ BEGIN
   ) t
   WHERE d.id = did;
 
-  RAISE NOTICE 'Devis FLUIDES : % lignes chiffrées, totaux recalculés.', n;
+  RAISE NOTICE 'Devis FLUIDES : % lignes complétées, totaux recalculés.', n1 + n2;
 END $$;
 
-SELECT 'prix KITEA RABAT OK' AS status;
+-- ===== Vérification : totaux des devis KITEA RABAT =====
+SELECT d.reference, d.titre, d.statut,
+       COUNT(l.id) FILTER (WHERE coalesce(l.type, 'article') = 'article') AS nb_articles,
+       COUNT(l.id) FILTER (WHERE coalesce(l.type, 'article') = 'article' AND coalesce(l.prix_ht, 0) = 0) AS articles_a_0,
+       d.total_ht, d.total_tva, d.total_ttc
+FROM public.crm_devis d
+JOIN public.clients c ON c.id = d.client_id
+LEFT JOIN public.crm_devis_lignes l ON l.devis_id = d.id
+WHERE lower(trim(c.nom)) = 'kitea rabat'
+GROUP BY d.id, d.reference, d.titre, d.statut, d.total_ht, d.total_tva, d.total_ttc
+ORDER BY d.reference;
