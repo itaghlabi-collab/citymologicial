@@ -230,6 +230,12 @@ export async function loadMainDashboardData({ dateFrom, dateTo } = {}) {
   const today = new Date().toISOString().slice(0, 10);
   const from = dateFrom || today.slice(0, 7) + '-01';
   const to = dateTo || today;
+  // buildAttendanceSummary ne lit que [to − 6 j, to] ; 1 jour de marge (fuseau horaire)
+  const attendanceStart = (() => {
+    const d = new Date(to);
+    d.setDate(d.getDate() - 7);
+    return d.toISOString().slice(0, 10);
+  })();
 
   const empty = {
     configured: false,
@@ -254,11 +260,11 @@ export async function loadMainDashboardData({ dateFrom, dateTo } = {}) {
   const facturesPromise = listCrmFactures();
   const results = await Promise.allSettled([
     loadInternalDashboardData({ facturesPromise }),
-    listFinanceCharges(),
+    listFinanceCharges({ dateFrom: from, dateTo: to }),
     listPaymentOrders(),
     listFinanceTransactions({ dateFrom: chartRangeStart(from), dateTo: to }),
     listProjects(),
-    listAttendance(),
+    listAttendance({ dateFrom: attendanceStart, dateTo: to }),
     listLeaves(),
     listPurchaseOrders(),
     listStockArticles({ includeLastMovements: false }),

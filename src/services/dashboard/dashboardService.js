@@ -1,14 +1,14 @@
 /**
  * dashboardService.js — Service central tableau de bord ERP CITYMO
- * Chargement agrégé, alertes prioritaires, realtime + polling permanent.
+ * Chargement agrégé, alertes prioritaires, realtime (rafraîchissement limité côté hook).
  */
 import { getSupabase, isSupabaseConfigured } from '../../lib/supabase';
 import { loadMainDashboardData } from './dashboardData';
 import { formatDate, roundMoney } from '../../utils/formatters';
 import { ROUTES } from '../../config/routes';
 
-/** Polling permanent — garde le dashboard à jour même si le realtime lâche. */
-export const DASHBOARD_POLL_MS = 15_000;
+/** Intervalle minimum entre deux rechargements automatiques (realtime / retour onglet). */
+export const DASHBOARD_MIN_REFRESH_MS = 45_000;
 
 /** Tables Supabase écoutées pour rafraîchissement automatique */
 export const DASHBOARD_REALTIME_TABLES = [
@@ -185,13 +185,9 @@ export function subscribeDashboardRealtime(onChange) {
     }, 350);
   };
 
-  // Polling toujours actif (filet de sécurité + cas realtime coupé)
-  const pollTimer = setInterval(notify, DASHBOARD_POLL_MS);
-
   if (!isSupabaseConfigured()) {
     return () => {
       clearTimeout(debounceTimer);
-      clearInterval(pollTimer);
     };
   }
 
@@ -210,7 +206,6 @@ export function subscribeDashboardRealtime(onChange) {
 
   return () => {
     clearTimeout(debounceTimer);
-    clearInterval(pollTimer);
     sb.removeChannel(channel);
   };
 }

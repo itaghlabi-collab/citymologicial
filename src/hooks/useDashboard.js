@@ -2,7 +2,11 @@
  * useDashboard.js — Hook tableau de bord (chargement auto permanent + realtime)
  */
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { loadDashboardData, subscribeDashboardRealtime } from '../services/dashboard/dashboardService';
+import {
+  loadDashboardData,
+  subscribeDashboardRealtime,
+  DASHBOARD_MIN_REFRESH_MS,
+} from '../services/dashboard/dashboardService';
 import { getSessionUser } from '../services/supabase/requireUser';
 
 /** Cache mémoire par utilisateur + période — invalidé au changement de compte. */
@@ -37,6 +41,8 @@ export function useDashboard({ dateFrom, dateTo }) {
   const loadInFlightRef = useRef(false);
   const dataRef = useRef(peekCachedPayload(dateFrom, dateTo));
   const loadRef = useRef(null);
+  const lastLoadAtRef = useRef(0);
+  const autoRefreshTimerRef = useRef(null);
 
   const flashUpdated = useCallback(() => {
     setJustUpdated(true);
@@ -49,6 +55,7 @@ export function useDashboard({ dateFrom, dateTo }) {
   const load = useCallback(async ({ silent = false, flash = false } = {}) => {
     if (loadInFlightRef.current) return;
     loadInFlightRef.current = true;
+    lastLoadAtRef.current = Date.now();
 
     let userId = '';
     try {
@@ -106,20 +113,34 @@ export function useDashboard({ dateFrom, dateTo }) {
     };
   }, [load]);
 
-  // Realtime + polling permanent
-  useEffect(() => {
-    const unsub = subscribeDashboardRealtime(() => {
+  // Rafraîchissement automatique : au plus un toutes les DASHBOARD_MIN_REFRESH_MS,
+  // jamais quand l'onglet est caché (le retour sur l'onglet relance la demande).
+  const requestAutoRefresh = useCallback(() => {
+    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
+    if (autoRefreshTimerRef.current) return;
+    const wait = Math.max(0, lastLoadAtRef.current + DASHBOARD_MIN_REFRESH_MS - Date.now());
+    autoRefreshTimerRef.current = setTimeout(() => {
+      autoRefreshTimerRef.current = null;
+      if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
       loadRef.current?.({ silent: true, flash: true });
-    });
-    return unsub;
-  }, [dateFrom, dateTo]);
+    }, wait);
+  }, []);
 
-  // Rafraîchir dès le retour sur l'onglet / la fenêtre
+  useEffect(() => () => {
+    clearTimeout(autoRefreshTimerRef.current);
+    autoRefreshTimerRef.current = null;
+  }, []);
+
+  // Realtime
+  useEffect(() => {
+    const unsub = subscribeDashboardRealtime(requestAutoRefresh);
+    return unsub;
+  }, [dateFrom, dateTo, requestAutoRefresh]);
+
+  // Rafraîchir au retour sur l'onglet / la fenêtre (limité)
   useEffect(() => {
     const refreshNow = () => {
-      if (document.visibilityState === 'visible') {
-        loadRef.current?.({ silent: true, flash: true });
-      }
+      if (document.visibilityState === 'visible') requestAutoRefresh();
     };
     document.addEventListener('visibilitychange', refreshNow);
     window.addEventListener('focus', refreshNow);
@@ -127,7 +148,7 @@ export function useDashboard({ dateFrom, dateTo }) {
       document.removeEventListener('visibilitychange', refreshNow);
       window.removeEventListener('focus', refreshNow);
     };
-  }, []);
+  }, [requestAutoRefresh]);
 
   return {
     data,

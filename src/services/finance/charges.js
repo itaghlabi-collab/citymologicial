@@ -135,15 +135,17 @@ function scheduleChargeSideEffects(charge) {
   });
 }
 
-export async function listFinanceCharges({ reconcileRefs = false } = {}) {
+export async function listFinanceCharges({ reconcileRefs = false, dateFrom = null, dateTo = null } = {}) {
   // reconcileRefs est volontairement off par défaut : trop lent au chargement page
   if (reconcileRefs) {
     await reconcileMissingChargeRefs().catch(() => 0);
   }
-  const { data, error } = await getSupabase()
+  let query = getSupabase()
     .from(TABLE)
-    .select('*')
-    .order('date_charge', { ascending: false });
+    .select('*');
+  if (dateFrom) query = query.gte('date_charge', dateFrom);
+  if (dateTo) query = query.lte('date_charge', dateTo);
+  const { data, error } = await query.order('date_charge', { ascending: false });
   if (error) throw error;
   return (data || []).map(normalizeCharge);
 }

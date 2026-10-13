@@ -329,10 +329,13 @@ export async function cleanupDuplicateAttendance(rawRows = []) {
   return toDelete.length;
 }
 
-async function fetchAttendanceRows(select, { activeOnly = false } = {}) {
-  const base = getSupabase()
+async function fetchAttendanceRows(select, { activeOnly = false, dateFrom = null, dateTo = null } = {}) {
+  let base = getSupabase()
     .from(TABLE)
-    .select(select)
+    .select(select);
+  if (dateFrom) base = base.gte('date', dateFrom);
+  if (dateTo) base = base.lte('date', dateTo);
+  base = base
     .order('date', { ascending: false })
     .order('created_at', { ascending: false });
 
@@ -366,7 +369,8 @@ async function getAuthUserId() {
 }
 
 export async function listAttendance(options = {}) {
-  const { includeLegacy = false } = options;
+  const { includeLegacy = false, dateFrom = null, dateTo = null } = options;
+  const range = { dateFrom, dateTo };
   let assignmentLookup = null;
   if (!includeLegacy) {
     try {
@@ -381,15 +385,15 @@ export async function listAttendance(options = {}) {
     cachedAssignmentLookup = null;
   }
 
-  let { data, error } = await fetchAttendanceRows(ATTENDANCE_SELECT, { activeOnly: !includeLegacy });
+  let { data, error } = await fetchAttendanceRows(ATTENDANCE_SELECT, { activeOnly: !includeLegacy, ...range });
 
   if (error) {
     console.warn('[CITYMO] attendance list (full join)', error.message);
-    ({ data, error } = await fetchAttendanceRows(ATTENDANCE_SELECT_FALLBACK, { activeOnly: !includeLegacy }));
+    ({ data, error } = await fetchAttendanceRows(ATTENDANCE_SELECT_FALLBACK, { activeOnly: !includeLegacy, ...range }));
   }
   if (error) {
     console.warn('[CITYMO] attendance list (fallback)', error.message);
-    ({ data, error } = await fetchAttendanceRows(ATTENDANCE_SELECT_MINIMAL, { activeOnly: !includeLegacy }));
+    ({ data, error } = await fetchAttendanceRows(ATTENDANCE_SELECT_MINIMAL, { activeOnly: !includeLegacy, ...range }));
   }
 
   if (error) {
@@ -402,12 +406,12 @@ export async function listAttendance(options = {}) {
     try {
       const removed = await cleanupDuplicateAttendance(data);
       if (removed > 0) {
-        ({ data, error } = await fetchAttendanceRows(ATTENDANCE_SELECT, { activeOnly: true }));
+        ({ data, error } = await fetchAttendanceRows(ATTENDANCE_SELECT, { activeOnly: true, ...range }));
         if (error) {
-          ({ data, error } = await fetchAttendanceRows(ATTENDANCE_SELECT_FALLBACK, { activeOnly: true }));
+          ({ data, error } = await fetchAttendanceRows(ATTENDANCE_SELECT_FALLBACK, { activeOnly: true, ...range }));
         }
         if (error) {
-          ({ data, error } = await fetchAttendanceRows(ATTENDANCE_SELECT_MINIMAL, { activeOnly: true }));
+          ({ data, error } = await fetchAttendanceRows(ATTENDANCE_SELECT_MINIMAL, { activeOnly: true, ...range }));
         }
         if (error) throw error;
       }
