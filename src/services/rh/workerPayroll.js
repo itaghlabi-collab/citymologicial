@@ -156,7 +156,7 @@ export function normalizeWorkerPayroll(row) {
     avances: row.avances,
     retenues: row.retenues,
   });
-  return {
+  const normalized = {
     id: row.id,
     batchId: row.batch_id || '',
     workerId: row.worker_id || '',
@@ -190,6 +190,30 @@ export function normalizeWorkerPayroll(row) {
     created_at: row.created_at,
     updated_at: row.updated_at,
   };
+  Object.defineProperty(normalized, '_dbRow', { value: row, enumerable: false });
+  return normalized;
+}
+
+function sameDbValue(current, next) {
+  const empty = (v) => v === null || v === undefined || v === '';
+  if (empty(current) && empty(next)) return true;
+  if (empty(current) || empty(next)) return false;
+  if (typeof next === 'number') return Math.abs((Number(current) || 0) - next) < 0.0005;
+  if (typeof next === 'boolean') return Boolean(current) === next;
+  return String(current).trim() === String(next).trim();
+}
+
+/** true si la ligne en base contient déjà exactement les valeurs à écrire. */
+function payrollRowUnchanged(existing, row) {
+  const dbRow = existing?._dbRow;
+  if (!dbRow) return false;
+  return Object.keys(row).every((key) => key in dbRow && sameDbValue(dbRow[key], row[key]));
+}
+
+async function runInChunks(tasks, size = 8) {
+  for (let i = 0; i < tasks.length; i += size) {
+    await Promise.all(tasks.slice(i, i + size).map((task) => task()));
+  }
 }
 
 export function toWorkerPayrollRow(line, batchMeta) {
@@ -1023,6 +1047,7 @@ export async function syncWorkerPayrollFromAttendance(ctx) {
   const importBatchId = ctx.importMeta?.batchId || null;
   const importSource = ctx.importMeta?.source || null;
   const importRef = ctx.importMeta?.ref || null;
+  const writes = [];
 
   for (const draft of drafts) {
     const match = existing.find(
@@ -1072,37 +1097,42 @@ export async function syncWorkerPayrollFromAttendance(ctx) {
     const row = toWorkerPayrollRow(linePayload, batchMeta);
 
     if (match) {
-      let { error } = await getSupabase()
-        .from(TABLE)
-        .update(row)
-        .eq('id', match.id);
-      if (error && /import_batch_id|import_source|import_ref|column|schema cache/i.test(error.message || '')) {
-        const fallback = { ...row };
-        delete fallback.import_batch_id;
-        delete fallback.import_source;
-        delete fallback.import_ref;
-        ({ error } = await getSupabase().from(TABLE).update(fallback).eq('id', match.id));
-      }
-      if (error) {
-        console.error('[CITYMO] workerPayroll sync update', error, { id: match.id });
-        throw error;
-      }
-      updated += 1;
+      if (payrollRowUnchanged(match, row)) continue;
+      writes.push(async () => {
+        let { error } = await getSupabase()
+          .from(TABLE)
+          .update(row)
+          .eq('id', match.id);
+        if (error && /import_batch_id|import_source|import_ref|column|schema cache/i.test(error.message || '')) {
+          const fallback = { ...row };
+          delete fallback.import_batch_id;
+          delete fallback.import_source;
+          delete fallback.import_ref;
+          ({ error } = await getSupabase().from(TABLE).update(fallback).eq('id', match.id));
+        }
+        if (error) {
+          console.error('[CITYMO] workerPayroll sync update', error, { id: match.id });
+          throw error;
+        }
+        updated += 1;
+      });
     } else {
       if (!draft.joursPaies || draft.joursPaies <= 0) continue;
-      let { error } = await getSupabase().from(TABLE).insert(row);
-      if (error && /import_batch_id|import_source|import_ref|column|schema cache/i.test(error.message || '')) {
-        const fallback = { ...row };
-        delete fallback.import_batch_id;
-        delete fallback.import_source;
-        delete fallback.import_ref;
-        ({ error } = await getSupabase().from(TABLE).insert(fallback));
-      }
-      if (error) {
-        console.error('[CITYMO] workerPayroll sync insert', error, row);
-        throw error;
-      }
-      created += 1;
+      writes.push(async () => {
+        let { error } = await getSupabase().from(TABLE).insert(row);
+        if (error && /import_batch_id|import_source|import_ref|column|schema cache/i.test(error.message || '')) {
+          const fallback = { ...row };
+          delete fallback.import_batch_id;
+          delete fallback.import_source;
+          delete fallback.import_ref;
+          ({ error } = await getSupabase().from(TABLE).insert(fallback));
+        }
+        if (error) {
+          console.error('[CITYMO] workerPayroll sync insert', error, row);
+          throw error;
+        }
+        created += 1;
+      });
     }
   }
 
@@ -1111,13 +1141,17 @@ export async function syncWorkerPayrollFromAttendance(ctx) {
     if (e.statut === 'Payé' || e.statut === 'Annulé') continue;
     const key = payrollDraftKey(e);
     if (draftKeys.has(key)) continue;
-    const { error } = await getSupabase().from(TABLE).delete().eq('id', e.id);
-    if (error) {
-      console.error('[CITYMO] workerPayroll sync delete stale', error, { id: e.id });
-      throw error;
-    }
-    removed += 1;
+    writes.push(async () => {
+      const { error } = await getSupabase().from(TABLE).delete().eq('id', e.id);
+      if (error) {
+        console.error('[CITYMO] workerPayroll sync delete stale', error, { id: e.id });
+        throw error;
+      }
+      removed += 1;
+    });
   }
+
+  await runInChunks(writes);
 
   return { created, updated, removed, skippedPaid };
 }
