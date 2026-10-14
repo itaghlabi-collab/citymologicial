@@ -12,8 +12,12 @@ import {
 } from '../services/notifications/notifications';
 import { logNotificationDebug } from '../services/notifications/notificationDebug';
 
-const POLL_MS = 1_500;
-const POLL_HIDDEN_MS = 15_000;
+/** Le realtime livre les notifications instantanément ; le poll n'est qu'un filet de sécurité. */
+const POLL_MS = 30_000;
+/** Realtime indisponible : poll plus fréquent pour rester réactif. */
+const POLL_NO_REALTIME_MS = 10_000;
+/** Retour onglet / focus : pas de rechargement si le dernier date de moins de ça. */
+const REFRESH_ON_FOCUS_MIN_MS = 10_000;
 
 function rowToNotification(row) {
   return normalizeNotification(row);
@@ -36,6 +40,10 @@ export function useNotifications(user) {
   const realtimeOkRef = useRef(false);
   const loadRef = useRef(null);
   const syncTimerRef = useRef(null);
+  const userRef = useRef(user);
+  const lastLoadAtRef = useRef(0);
+  const loadInFlightRef = useRef(false);
+  userRef.current = user;
 
   const announceUnread = useCallback((notifications) => {
     const fresh = (notifications || []).filter(
@@ -83,11 +91,16 @@ export function useNotifications(user) {
       setLoading(false);
       return;
     }
-    logNotificationDebug('session', { currentUserId: userId, email: user.email });
+    // Base lente : ne jamais empiler les requêtes, attendre la fin de la précédente.
+    if (loadInFlightRef.current) return;
+    loadInFlightRef.current = true;
+    const currentUser = userRef.current;
+    lastLoadAtRef.current = Date.now();
+    logNotificationDebug('session', { currentUserId: userId, email: currentUser?.email });
     try {
       const [list, unread] = await Promise.all([
-        listNotificationsForUser(user),
-        countUnreadNotifications(user),
+        listNotificationsForUser(currentUser),
+        countUnreadNotifications(currentUser),
       ]);
 
       if (initialLoadRef.current) {
@@ -105,9 +118,10 @@ export function useNotifications(user) {
     } catch (err) {
       console.warn('[CITYMO] useNotifications load', err);
     } finally {
+      loadInFlightRef.current = false;
       setLoading(false);
     }
-  }, [configured, userId, user, announceUnread]);
+  }, [configured, userId, announceUnread]);
 
   loadRef.current = load;
 
@@ -125,26 +139,25 @@ export function useNotifications(user) {
   useEffect(() => {
     if (!configured || !userId) return undefined;
 
-    const tick = () => {
-      if (!isDocumentVisible()) return;
-      loadRef.current?.();
-    };
-
-    const schedule = () => (isDocumentVisible() ? POLL_MS : POLL_HIDDEN_MS);
+    const schedule = () => (realtimeOkRef.current ? POLL_MS : POLL_NO_REALTIME_MS);
 
     let timer = null;
     const loop = () => {
-      tick();
+      // Onglet caché : aucune requête ; le retour sur l'onglet recharge.
+      if (isDocumentVisible() && Date.now() - lastLoadAtRef.current >= schedule() - 500) {
+        loadRef.current?.();
+      }
       timer = setTimeout(loop, schedule());
     };
     timer = setTimeout(loop, schedule());
 
-    const onVisible = () => {
-      if (document.visibilityState === 'visible') {
-        loadRef.current?.();
-      }
+    const refreshIfStale = () => {
+      if (!isDocumentVisible()) return;
+      if (Date.now() - lastLoadAtRef.current < REFRESH_ON_FOCUS_MIN_MS) return;
+      loadRef.current?.();
     };
-    const onFocus = () => { loadRef.current?.(); };
+    const onVisible = () => refreshIfStale();
+    const onFocus = () => refreshIfStale();
 
     document.addEventListener('visibilitychange', onVisible);
     window.addEventListener('focus', onFocus);
@@ -212,10 +225,10 @@ export function useNotifications(user) {
   }, []);
 
   const markAllRead = useCallback(async () => {
-    await markAllNotificationsRead(user);
+    await markAllNotificationsRead(userRef.current);
     setItems((prev) => prev.map((n) => ({ ...n, isRead: true, readAt: n.readAt || new Date().toISOString() })));
     setUnreadCount(0);
-  }, [user]);
+  }, []);
 
   const displayUnreadCount = useMemo(() => unreadCount, [unreadCount]);
 

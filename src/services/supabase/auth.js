@@ -7,8 +7,12 @@ import { validateAccountAccess } from '../admin/accountAccess';
 
 const PROFILE_TIMEOUT_MS = 5000;
 
+/** SIGNED_IN est aussi émis au retour sur l'onglet : une seule écriture par session navigateur. */
+let lastSignInRecordedFor = '';
+
 async function recordLastSignIn(userId) {
-  if (!userId) return;
+  if (!userId || lastSignInRecordedFor === userId) return;
+  lastSignInRecordedFor = userId;
   try {
     await getSupabase()
       .from('profiles')
@@ -212,6 +216,7 @@ export function subscribeToAuthChanges(onUser) {
       });
 
       if (!session?.user) {
+        if (event === 'SIGNED_OUT') lastSignInRecordedFor = '';
         if (event === 'SIGNED_OUT' || event === 'INITIAL_SESSION') {
           logAuth('onAuthStateChange → user null', { event });
           onUser(null);
@@ -239,7 +244,10 @@ export function subscribeToAuthChanges(onUser) {
           recordLastSignIn(session.user.id);
         }
 
-        loadProfileInBackground(session.user, onUser);
+        // Profil déjà obtenu ci-dessus : inutile de le relire (seul le cas « profil absent » doit le créer).
+        if (!access.profile) {
+          loadProfileInBackground(session.user, onUser);
+        }
       })();
     },
   );

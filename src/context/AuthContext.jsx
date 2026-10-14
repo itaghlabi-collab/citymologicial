@@ -1,11 +1,23 @@
-import { createContext, useState, useEffect, useCallback } from 'react';
+import { createContext, useState, useEffect, useCallback, useRef } from 'react';
 import { loginWithCredentials, logout as authLogout, clearLegacyAuthStorage, handleUnauthorized } from '../services/auth';
 import { subscribeToAuthChanges, getSupabaseSessionUser } from '../services/supabase/auth';
 import { isSupabaseConfigured } from '../lib/supabase';
 import { logAuth, logAuthError } from '../utils/authLog';
 import { warmAccessibleRoutes, clearPermissionCache } from '../services/admin/permissions';
+import { clearProfileAccessCache } from '../services/admin/accountAccess';
 
 export const AuthContext = createContext(null);
+
+const USER_KEYS = [
+  'id', 'nom', 'email', 'role', 'role_id', 'initiales',
+  'department_id', 'created_at', 'statut', 'must_change_password',
+];
+
+function sameUser(a, b) {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  return USER_KEYS.every((k) => a[k] === b[k]);
+}
 
 function finishLoading(setLoading) {
   setLoading(false);
@@ -13,8 +25,20 @@ function finishLoading(setLoading) {
 }
 
 export function AuthProvider({ children }) {
-  const [user, setUser] = useState(null);
+  const [user, setUserState] = useState(null);
   const [loading, setLoading] = useState(true);
+  const warmedUserIdRef = useRef('');
+
+  // Même utilisateur, mêmes données : on garde l'objet existant (évite de relancer toute l'app).
+  const setUser = useCallback((next) => {
+    setUserState((prev) => (sameUser(prev, next) ? prev : next));
+  }, []);
+
+  const warmRoutesOnce = useCallback((nextUser) => {
+    if (!nextUser?.id || warmedUserIdRef.current === nextUser.id) return;
+    warmedUserIdRef.current = nextUser.id;
+    warmAccessibleRoutes(nextUser).catch(() => {});
+  }, []);
 
   useEffect(() => {
     clearLegacyAuthStorage();
@@ -41,9 +65,11 @@ export function AuthProvider({ children }) {
       setUser(nextUser);
       finishLoading(setLoading);
       if (nextUser?.id) {
-        warmAccessibleRoutes(nextUser).catch(() => {});
+        warmRoutesOnce(nextUser);
       } else {
+        warmedUserIdRef.current = '';
         clearPermissionCache();
+        clearProfileAccessCache();
       }
     });
 
@@ -81,9 +107,7 @@ export function AuthProvider({ children }) {
       if (result.success) {
         setUser(result.user);
         finishLoading(setLoading);
-        if (result.user?.id) {
-          warmAccessibleRoutes(result.user).catch(() => {});
-        }
+        warmRoutesOnce(result.user);
       }
       return result;
     } catch (err) {
@@ -96,19 +120,22 @@ export function AuthProvider({ children }) {
         errorStatus: err?.status ?? null,
       };
     }
-  }, []);
+  }, [setUser, warmRoutesOnce]);
 
   const logout = useCallback(async () => {
     logAuth('AuthContext logout →');
     clearPermissionCache();
+    clearProfileAccessCache();
+    warmedUserIdRef.current = '';
     await authLogout();
     setUser(null);
-  }, []);
+  }, [setUser]);
 
   const refreshUser = useCallback(async () => {
+    clearProfileAccessCache();
     const next = await getSupabaseSessionUser();
     setUser(next);
-  }, []);
+  }, [setUser]);
 
   return (
     <AuthContext.Provider value={{ user, loading, login, logout, refreshUser }}>
