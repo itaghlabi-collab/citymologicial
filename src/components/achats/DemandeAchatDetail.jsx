@@ -650,7 +650,7 @@ export default function DemandeAchatDetail({
     ? (request.payload?.lines || [])
     : (() => {
       const lines = normalizeRequestLines(request);
-      if (lines.length === 1 && request.titre) {
+      if (lines.length === 1 && request.titre && (!lines[0].designation || lines[0].designation === '—')) {
         return [{ ...lines[0], designation: request.titre }];
       }
       return lines;
