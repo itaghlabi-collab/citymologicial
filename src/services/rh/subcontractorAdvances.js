@@ -113,6 +113,41 @@ export async function listAdvanceImputations(subcontractorId) {
   return (data || []).map(normalizeImputation);
 }
 
+async function selectAllPaged(buildQuery, pageSize = 1000) {
+  const all = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await buildQuery().range(from, from + pageSize - 1);
+    if (error) throw error;
+    all.push(...(data || []));
+    if ((data || []).length < pageSize) break;
+  }
+  return all;
+}
+
+/** Toutes les avances globales (tous sous-traitants) — même tri que listGlobalAdvances. */
+export async function listAllGlobalAdvances() {
+  await getAuthUserId();
+  const rows = await selectAllPaged(() => getSupabase()
+    .from(ADV_TABLE)
+    .select('*')
+    .order('advance_date', { ascending: false })
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: true }));
+  return rows.map(normalizeAdvance);
+}
+
+/** Toutes les imputations d'avance (tous sous-traitants) — même tri que listAdvanceImputations. */
+export async function listAllAdvanceImputations() {
+  await getAuthUserId();
+  const rows = await selectAllPaged(() => getSupabase()
+    .from(IMP_TABLE)
+    .select('*, projects ( nom )')
+    .order('imputation_date', { ascending: false })
+    .order('created_at', { ascending: false })
+    .order('id', { ascending: true }));
+  return rows.map(normalizeImputation);
+}
+
 export function summarizeAdvances(advances = []) {
   return {
     avancesVersees: totalAdvancesPaid(advances),

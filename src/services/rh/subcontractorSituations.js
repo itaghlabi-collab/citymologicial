@@ -131,6 +131,25 @@ export async function listSituations(subcontractorId) {
   return (data || []).map(normalizeSituation);
 }
 
+/** Toutes les situations (tous sous-traitants), paginées au-delà de 1000 lignes. */
+export async function listAllSituations(pageSize = 1000) {
+  await getAuthUserId();
+  const all = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await getSupabase()
+      .from(TABLE)
+      .select('*, projects ( nom )')
+      .order('situation_date', { ascending: false })
+      .order('created_at', { ascending: false })
+      .order('id', { ascending: true })
+      .range(from, from + pageSize - 1);
+    if (error) throw error;
+    all.push(...(data || []));
+    if ((data || []).length < pageSize) break;
+  }
+  return all.map(normalizeSituation);
+}
+
 export async function getSituation(id) {
   await getAuthUserId();
   const { data, error } = await getSupabase()

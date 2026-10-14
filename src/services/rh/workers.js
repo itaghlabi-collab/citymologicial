@@ -7,6 +7,7 @@ import {
   isDataUrl,
   isHttpUrl,
   resolveStorageUrl,
+  resolveStorageUrls,
   uploadWorkerMedia,
 } from './workerStorage';
 import {
@@ -319,7 +320,16 @@ export async function listWorkers() {
     (data || []).map(normalizeWorker),
     assignmentMap,
   );
-  return Promise.all(normalized.map(enrichWorkerMedia));
+  const urls = await resolveStorageUrls(
+    normalized.flatMap((w) => [w.photo, w.cin_recto, w.cin_verso]),
+  );
+  const urlFor = (v) => (v ? urls.get(v) ?? '' : '');
+  return normalized.map((w) => ({
+    ...w,
+    photo: urlFor(w.photo),
+    cin_recto: urlFor(w.cin_recto),
+    cin_verso: urlFor(w.cin_verso),
+  }));
 }
 
 async function insertWorkerRow(row) {

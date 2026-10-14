@@ -13,8 +13,13 @@ import {
   subcontractorFullName,
 } from './subcontractors';
 import { paymentStatusFromDb } from './subcontractorConstants';
-import { listSituations } from './subcontractorSituations';
-import { listGlobalAdvances, listAdvanceImputations } from './subcontractorAdvances';
+import { listSituations, listAllSituations } from './subcontractorSituations';
+import {
+  listGlobalAdvances,
+  listAdvanceImputations,
+  listAllGlobalAdvances,
+  listAllAdvanceImputations,
+} from './subcontractorAdvances';
 import { listAccountEvents } from './subcontractorAccountEvents';
 import { buildSubcontractorLedger } from './subcontractorLedger';
 import { listEvaluations, summarizePerformance } from './subcontractorEvaluations';
@@ -468,19 +473,29 @@ export function buildAccountHistory(payments = [], events = [], imputations = []
 }
 
 export async function listSubcontractorAccounts() {
-  const [subs, payments] = await Promise.all([
+  const [subs, payments, allSituations, allAdvances, allImputations] = await Promise.all([
     listSubcontractors(),
     listAllSubcontractorPayments(null),
+    safeList(listAllSituations()),
+    safeList(listAllGlobalAdvances()),
+    safeList(listAllAdvanceImputations()),
   ]);
-  const bySub = new Map();
-  (payments || []).forEach((p) => {
-    const id = p.subcontractorId;
-    if (!id) return;
-    if (!bySub.has(id)) bySub.set(id, []);
-    bySub.get(id).push(p);
-  });
+  const groupBySub = (rows) => {
+    const map = new Map();
+    (rows || []).forEach((r) => {
+      const id = r.subcontractorId;
+      if (!id) return;
+      if (!map.has(id)) map.set(id, []);
+      map.get(id).push(r);
+    });
+    return map;
+  };
+  const bySub = groupBySub(payments);
+  const situationsBySub = groupBySub(allSituations);
+  const advancesBySub = groupBySub(allAdvances);
+  const imputationsBySub = groupBySub(allImputations);
 
-  const accounts = await Promise.all((subs || []).map(async (sub) => {
+  const accounts = (subs || []).map((sub) => {
     const subPayments = bySub.get(sub.id) || [];
     const hasActivity = subPayments.length > 0
       || (sub.activeProjectsCount || 0) > 0
@@ -489,13 +504,10 @@ export async function listSubcontractorAccounts() {
       || (Number(sub.totalPaid) || 0) > 0;
     if (!hasActivity && sub.statut !== 'actif') return null;
 
-  // Also pass imputations when available for list KPIs
-  const [situations, advances, imputations] = await Promise.all([
-    safeList(listSituations(sub.id)),
-    safeList(listGlobalAdvances(sub.id)),
-    safeList(listAdvanceImputations(sub.id)),
-  ]);
-  const kpis = buildAccountKpis({
+    const situations = situationsBySub.get(sub.id) || [];
+    const advances = advancesBySub.get(sub.id) || [];
+    const imputations = imputationsBySub.get(sub.id) || [];
+    const kpis = buildAccountKpis({
     payments: subPayments,
     balances: [],
     assignments: sub.activeAssignments || [],
@@ -519,7 +531,7 @@ export async function listSubcontractorAccounts() {
       kpis,
       lastPayment: subPayments[0] || null,
     };
-  }));
+  });
 
   return accounts.filter(Boolean)
     .sort((a, b) => String(a.fullName || '').localeCompare(String(b.fullName || ''), 'fr'));

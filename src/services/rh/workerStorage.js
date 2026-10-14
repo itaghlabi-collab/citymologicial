@@ -59,9 +59,24 @@ export async function uploadWorkerMedia(workerId, kind, source) {
   return path;
 }
 
+/** Liens signés réutilisés jusqu'à 5 min avant leur expiration. */
+const SIGNED_URL_CACHE_MS = (SIGNED_URL_TTL - 300) * 1000;
+const signedUrlCache = new Map();
+
+function cachedSignedUrl(path) {
+  const hit = signedUrlCache.get(path);
+  return hit && hit.expiresAt > Date.now() ? hit.url : null;
+}
+
+function rememberSignedUrl(path, url) {
+  if (url) signedUrlCache.set(path, { url, expiresAt: Date.now() + SIGNED_URL_CACHE_MS });
+}
+
 export async function resolveStorageUrl(pathOrUrl) {
   if (!pathOrUrl) return '';
   if (isDataUrl(pathOrUrl) || isHttpUrl(pathOrUrl)) return pathOrUrl;
+  const cached = cachedSignedUrl(pathOrUrl);
+  if (cached) return cached;
 
   const { data, error } = await getSupabase().storage
     .from(WORKERS_BUCKET)
@@ -71,7 +86,42 @@ export async function resolveStorageUrl(pathOrUrl) {
     console.warn('[CITYMO] signed URL', pathOrUrl, error.message);
     return '';
   }
+  rememberSignedUrl(pathOrUrl, data?.signedUrl);
   return data?.signedUrl || '';
+}
+
+/** Signe plusieurs chemins en un seul appel Storage. Retourne Map(valeur → URL). */
+export async function resolveStorageUrls(values = []) {
+  const result = new Map();
+  const toSign = [];
+  [...new Set(values.filter(Boolean))].forEach((v) => {
+    if (isDataUrl(v) || isHttpUrl(v)) {
+      result.set(v, v);
+      return;
+    }
+    const cached = cachedSignedUrl(v);
+    if (cached) result.set(v, cached);
+    else toSign.push(v);
+  });
+
+  for (let i = 0; i < toSign.length; i += 500) {
+    const chunk = toSign.slice(i, i + 500);
+    const { data, error } = await getSupabase().storage
+      .from(WORKERS_BUCKET)
+      .createSignedUrls(chunk, SIGNED_URL_TTL);
+    if (error) {
+      console.warn('[CITYMO] signed URLs', error.message);
+      chunk.forEach((p) => result.set(p, ''));
+      continue;
+    }
+    chunk.forEach((p, idx) => {
+      const item = (data || []).find((d) => d.path === p) || data?.[idx];
+      const url = item && !item.error ? (item.signedUrl || '') : '';
+      rememberSignedUrl(p, url);
+      result.set(p, url);
+    });
+  }
+  return result;
 }
 
 export async function deleteWorkerMedia(paths = []) {
