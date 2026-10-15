@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { useAuth } from './hooks/useAuth';
 import { initNotificationSoundUnlock, unlockNotificationSound } from './utils/notificationSound';
 import './App.css';
@@ -41,7 +41,7 @@ import ComptesRendus from './components/commercial/ComptesRendus';
 import DepensesCom from './components/commercial/Depenses';
 import PropositionsMarketing from './components/commercial/PropositionsMarketing';
 import Projets from './components/Projets';
-import Fabrication from './components/Fabrication';
+const Fabrication = lazy(() => import('./components/Fabrication'));
 import Logistique from './components/Logistique';
 import Achats from './components/Achats';
 import Finance from './components/Finance';
@@ -160,6 +160,7 @@ const NAV = [
     section: 'Fabrication',
     items: [
       { id: 'fabrication',            label: 'Tableau de bord',       icon: Factory },
+      { id: 'fabrication-plans-projets', label: 'Plans / Projets',    icon: FolderOpen },
       { id: 'fabrication-plans',      label: 'Plans à fabriquer',     icon: Inbox },
       { id: 'fabrication-suivi',      label: 'Suivi de production',   icon: Hammer },
       { id: 'fabrication-terminee',   label: 'Production terminée',   icon: CheckCircle2 },
@@ -261,6 +262,7 @@ const MODULE_LABELS = {
   'sav-projets':       'Service Apres-Vente',
   'cr-sav':            'Comptes rendus SAV',
   fabrication:         'Fabrication',
+  'fabrication-plans-projets': 'Plans / Projets',
   'fabrication-plans': 'Plans à fabriquer',
   'fabrication-suivi': 'Suivi de production',
   'fabrication-terminee': 'Production terminée',
@@ -357,11 +359,17 @@ function PageContent({
     case 'sav-projets':         return <Projets activeTab="sav-projets" />;
     case 'cr-sav':              return <Projets activeTab="cr-sav" />;
     /* Fabrication */
-    case 'fabrication':         return <Fabrication activeTab="fabrication" />;
-    case 'fabrication-plans':   return <Fabrication activeTab="fabrication-plans" />;
-    case 'fabrication-suivi':   return <Fabrication activeTab="fabrication-suivi" />;
-    case 'fabrication-terminee': return <Fabrication activeTab="fabrication-terminee" />;
-    case 'fabrication-bons-livraison': return <Fabrication activeTab="fabrication-bons-livraison" />;
+    case 'fabrication':
+    case 'fabrication-plans-projets':
+    case 'fabrication-plans':
+    case 'fabrication-suivi':
+    case 'fabrication-terminee':
+    case 'fabrication-bons-livraison':
+      return (
+        <Suspense fallback={<div style={{ padding: 40, textAlign: 'center', color: 'var(--text-3)' }}>Chargement…</div>}>
+          <Fabrication activeTab={module} />
+        </Suspense>
+      );
     /* SAV legacy */
     case 'sav':                 return <SAV />;
     /* Documents */

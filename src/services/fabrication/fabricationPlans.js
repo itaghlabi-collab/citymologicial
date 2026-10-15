@@ -7,8 +7,10 @@ import { formatSupabaseError } from '../supabase/formatError';
 import { todayISO } from '../../constants/fabrication';
 import {
   uploadFabricationFile,
-  resolveProjectFileUrl,
+  signFabricationPaths,
 } from './fabricationStorage';
+import { createLibraryPlan } from './fabricationLibrary';
+import { loadProductionExtras } from './fabricationProductions';
 
 const TABLE = 'fabrication_plans';
 const ATT = 'fabrication_attachments';
@@ -74,11 +76,15 @@ function normalizeHistory(row) {
     nouveau_statut: row.nouveau_statut || '',
     avancement: row.avancement == null ? null : Number(row.avancement),
     commentaire: row.commentaire || '',
+    line_id: row.line_id || null,
+    quantite_realisee: row.quantite_realisee == null ? null : Number(row.quantite_realisee),
+    probleme: row.probleme || '',
+    date_saisie: row.date_saisie || '',
     created_at: row.created_at,
   };
 }
 
-export function normalizePlan(row, attachments = [], history = []) {
+export function normalizePlan(row, attachments = [], history = [], extras = {}) {
   if (!row) return null;
   return {
     id: row.id,
@@ -108,16 +114,24 @@ export function normalizePlan(row, attachments = [], history = []) {
     date_affectation: row.date_affectation || null,
     created_at: row.created_at,
     updated_at: row.updated_at,
+    library_plan_id: row.library_plan_id || null,
+    machine_type: row.machine_type || '',
+    description: row.description || '',
+    observations: row.observations || '',
+    responsable_employee_id: row.responsable_employee_id || null,
     attachments,
     history,
+    lines: extras.lines || [],
+    ouvriers: extras.ouvriers || [],
+    operations: extras.operations || [],
+    library_plan: extras.library_plan || null,
   };
 }
 
 async function withUrls(rows) {
-  return Promise.all((rows || []).map(async (row) => {
-    const url = await resolveProjectFileUrl(row.storage_path);
-    return normalizeAttachment(row, url);
-  }));
+  const list = rows || [];
+  const urls = await signFabricationPaths(list.map((r) => r.storage_path));
+  return list.map((row) => normalizeAttachment(row, urls[row.storage_path] || ''));
 }
 
 async function loadAttachments(planIds) {
@@ -135,6 +149,50 @@ async function loadAttachments(planIds) {
     byPlan[att.plan_id].push(att);
   });
   return byPlan;
+}
+
+/** Plans de la bibliothèque liés (référence, nom, fichiers signés) — requêtes groupées. */
+async function loadLibraryRefs(libraryIds) {
+  const ids = [...new Set(libraryIds.filter(Boolean))];
+  if (!ids.length) return {};
+  const sb = getSupabase();
+  const [{ data: plans, error }, { data: files, error: fErr }] = await Promise.all([
+    sb.from('fabrication_library_plans').select('id, reference, nom, client_nom, designation').in('id', ids),
+    sb.from('fabrication_library_files').select('*').in('library_plan_id', ids).order('created_at', { ascending: true }),
+  ]);
+  if (error || fErr) {
+    console.warn('[CITYMO] fabrication library refs', (error || fErr).message);
+    return {};
+  }
+  const urls = await signFabricationPaths((files || []).map((f) => f.storage_path));
+  const out = {};
+  (plans || []).forEach((p) => { out[p.id] = { ...p, files: [] }; });
+  (files || []).forEach((f) => {
+    out[f.library_plan_id]?.files.push({
+      id: f.id,
+      kind: 'plan',
+      storage_path: f.storage_path,
+      file_name: f.file_name || '',
+      mime_type: f.mime_type || '',
+      file_size: Number(f.file_size || 0),
+      url: urls[f.storage_path] || '',
+    });
+  });
+  return out;
+}
+
+async function loadExtrasFor(rows) {
+  const [extras, libs] = await Promise.all([
+    loadProductionExtras(rows.map((r) => r.id)).catch((err) => {
+      console.warn('[CITYMO] fabrication extras', err.message);
+      return {};
+    }),
+    loadLibraryRefs(rows.map((r) => r.library_plan_id)),
+  ]);
+  return (row) => ({
+    ...(extras[row.id] || {}),
+    library_plan: row.library_plan_id ? libs[row.library_plan_id] || null : null,
+  });
 }
 
 export async function generateFabricationRef() {
@@ -164,8 +222,11 @@ export async function listFabricationPlans() {
     .order('date_transmission', { ascending: false });
   if (error) throw schemaError(error);
   const rows = data || [];
-  const byPlan = await loadAttachments(rows.map((r) => r.id));
-  return rows.map((row) => normalizePlan(row, byPlan[row.id] || []));
+  const [byPlan, extrasOf] = await Promise.all([
+    loadAttachments(rows.map((r) => r.id)),
+    loadExtrasFor(rows),
+  ]);
+  return rows.map((row) => normalizePlan(row, byPlan[row.id] || [], [], extrasOf(row)));
 }
 
 export async function getFabricationPlan(id) {
@@ -183,7 +244,8 @@ export async function getFabricationPlan(id) {
   ]);
   if (attErr) throw schemaError(attErr);
   if (histErr) throw schemaError(histErr);
-  return normalizePlan(data, await withUrls(atts || []), (hist || []).map(normalizeHistory));
+  const [attachments, extrasOf] = await Promise.all([withUrls(atts || []), loadExtrasFor([data])]);
+  return normalizePlan(data, attachments, (hist || []).map(normalizeHistory), extrasOf(data));
 }
 
 async function insertHistory({ planId, userId, userName, ancien, nouveau, avancement, commentaire }) {
@@ -218,6 +280,10 @@ async function insertAttachmentRow({ planId, userId, kind, storage_path, file_na
   return data;
 }
 
+/**
+ * « Transmettre à Fabrication » (module Projets) : le plan entre dans la bibliothèque
+ * « Plans / Projets » (source Projets) — une seule fiche par plan, sans doublon.
+ */
 export async function transmitFabricationPlan({
   project,
   designation,
@@ -225,74 +291,32 @@ export async function transmitFabricationPlan({
   file,
   existingDocument,
 }) {
-  const user = await requireUser();
-  const name = await getProfileName(user.id);
+  await requireUser();
   const designationClean = String(designation || '').trim();
   if (!project?.id) throw new Error('Projet obligatoire.');
   if (!designationClean) throw new Error('L’objet / désignation est obligatoire.');
   if (!file && !existingDocument?.storage_path) throw new Error('Joignez ou sélectionnez un plan.');
 
-  const reference = await generateFabricationRef();
-  const payload = {
-    reference,
-    project_id: project.id,
-    projet_nom: project.nom || '',
-    projet_ref: project.ref || '',
-    designation: designationClean,
-    commentaire_transmission: String(commentaire || '').trim(),
-    statut: 'plan_recu',
-    transmetteur_id: user.id,
-    transmetteur_nom: name,
-    created_by: user.id,
-    updated_by: user.id,
-  };
-
-  const { data, error } = await getSupabase()
-    .from(TABLE)
-    .insert([payload])
-    .select('*')
-    .single();
-  if (error) throw schemaError(error);
-
   try {
-    if (existingDocument?.storage_path) {
-      await insertAttachmentRow({
-        planId: data.id,
-        userId: user.id,
-        kind: 'plan',
-        storage_path: existingDocument.storage_path,
-        file_name: existingDocument.file_name,
-        mime_type: existingDocument.mime_type,
-        file_size: existingDocument.file_size,
-        project_document_id: existingDocument.id,
-      });
-    } else if (file) {
-      const storage_path = await uploadFabricationFile(data.id, file);
-      await insertAttachmentRow({
-        planId: data.id,
-        userId: user.id,
-        kind: 'plan',
-        storage_path,
-        file_name: file.name,
-        mime_type: file.type,
-        file_size: file.size,
-      });
-    }
-    await insertHistory({
-      planId: data.id,
-      userId: user.id,
-      userName: name,
-      ancien: '',
-      nouveau: 'plan_recu',
-      avancement: 0,
-      commentaire: String(commentaire || '').trim() || 'Transmission du plan',
+    return await createLibraryPlan({
+      nom: designationClean,
+      project: {
+        id: project.id,
+        nom: project.nom || '',
+        ref: project.ref || '',
+        client_nom: project.client_nom || project.client || '',
+      },
+      designation: designationClean,
+      observations: '',
+      files: file ? [file] : [],
+      existingDocument: existingDocument?.storage_path ? existingDocument : null,
+      source: 'projets',
+      commentaire_transmission: String(commentaire || '').trim(),
     });
   } catch (err) {
-    console.error('[CITYMO] fabrication transmit attachment', err);
+    console.error('[CITYMO] fabrication transmit', err);
     throw err;
   }
-
-  return getFabricationPlan(data.id);
 }
 
 export async function assignFabricationPlan(id, {

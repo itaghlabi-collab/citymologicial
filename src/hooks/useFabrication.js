@@ -9,11 +9,27 @@ import {
   listFabricationUsers,
   SCHEMA_HINT,
 } from '../services/fabrication/fabricationPlans';
+import {
+  listLibraryPlans,
+  getLibraryPlan,
+  createLibraryPlan,
+  updateLibraryPlan,
+  listProjectsForFabrication,
+} from '../services/fabrication/fabricationLibrary';
+import {
+  listAtelierStaff,
+  saveProduction as saveProductionService,
+  recordProductionProgress,
+  updateOperationStatut,
+} from '../services/fabrication/fabricationProductions';
 
 export function useFabrication() {
   const configured = isSupabaseConfigured();
   const [records, setRecords] = useState([]);
+  const [library, setLibrary] = useState([]);
   const [users, setUsers] = useState([]);
+  const [staff, setStaff] = useState([]);
+  const [projects, setProjects] = useState([]);
   const [loading, setLoading] = useState(configured);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -27,12 +43,21 @@ export function useFabrication() {
     setLoading(true);
     setError('');
     try {
-      const [rows, people] = await Promise.all([
+      const [rows, libRows, people, staffRows, projectRows] = await Promise.all([
         listFabricationPlans(),
+        listLibraryPlans().catch((err) => {
+          console.warn('[CITYMO] fabrication library', err.message);
+          return [];
+        }),
         listFabricationUsers().catch(() => []),
+        listAtelierStaff().catch(() => []),
+        listProjectsForFabrication().catch(() => []),
       ]);
       setRecords(rows);
+      setLibrary(libRows);
       setUsers(people);
+      setStaff(staffRows);
+      setProjects(projectRows);
     } catch (err) {
       console.error('[CITYMO] fabrication load', err);
       setError(err.message || SCHEMA_HINT);
@@ -44,54 +69,68 @@ export function useFabrication() {
 
   useEffect(() => { load(); }, [load]);
 
-  const transmit = useCallback(async (payload) => {
+  const run = useCallback(async (fn, fallback) => {
     setSaving(true);
     setError('');
     try {
-      const row = await transmitFabricationPlan(payload);
+      const row = await fn();
       await load();
       return { success: true, row };
     } catch (err) {
-      return { success: false, error: err.message || 'Erreur transmission.' };
+      return { success: false, error: err.message || fallback };
     } finally {
       setSaving(false);
     }
   }, [load]);
 
-  const assign = useCallback(async (id, payload) => {
-    setSaving(true);
-    setError('');
-    try {
-      await assignFabricationPlan(id, payload);
-      await load();
-      return { success: true };
-    } catch (err) {
-      return { success: false, error: err.message || 'Erreur affectation.' };
-    } finally {
-      setSaving(false);
-    }
-  }, [load]);
+  const transmit = useCallback(
+    (payload) => run(() => transmitFabricationPlan(payload), 'Erreur transmission.'),
+    [run],
+  );
 
-  const updateProduction = useCallback(async (id, payload) => {
-    setSaving(true);
-    setError('');
-    try {
-      await updateFabricationProduction(id, payload);
-      await load();
-      return { success: true };
-    } catch (err) {
-      return { success: false, error: err.message || 'Erreur mise à jour.' };
-    } finally {
-      setSaving(false);
-    }
-  }, [load]);
+  const assign = useCallback(
+    (id, payload) => run(() => assignFabricationPlan(id, payload), 'Erreur affectation.'),
+    [run],
+  );
+
+  const updateProduction = useCallback(
+    (id, payload) => run(() => updateFabricationProduction(id, payload), 'Erreur mise à jour.'),
+    [run],
+  );
+
+  const saveLibraryPlan = useCallback(
+    (id, payload) => run(
+      () => (id ? updateLibraryPlan(id, payload) : createLibraryPlan(payload)),
+      'Erreur enregistrement du plan.',
+    ),
+    [run],
+  );
+
+  const saveProduction = useCallback(
+    (payload, options) => run(() => saveProductionService(payload, options), 'Erreur enregistrement production.'),
+    [run],
+  );
+
+  const recordProgress = useCallback(
+    (id, payload) => run(() => recordProductionProgress(id, payload), 'Erreur mise à jour.'),
+    [run],
+  );
+
+  const setOperationStatut = useCallback(
+    (opId, statut) => run(() => updateOperationStatut(opId, statut), 'Erreur opération.'),
+    [run],
+  );
 
   const fetchOne = useCallback(async (id) => getFabricationPlan(id), []);
+  const fetchLibraryPlan = useCallback(async (id) => getLibraryPlan(id), []);
 
   return {
     configured,
     records,
+    library,
     users,
+    staff,
+    projects,
     loading,
     saving,
     error,
@@ -99,6 +138,11 @@ export function useFabrication() {
     transmit,
     assign,
     updateProduction,
+    saveLibraryPlan,
+    saveProduction,
+    recordProgress,
+    setOperationStatut,
     fetchOne,
+    fetchLibraryPlan,
   };
 }

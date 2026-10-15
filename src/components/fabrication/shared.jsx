@@ -3,7 +3,20 @@ import {
   fabStatutMeta,
   fabPrioriteMeta,
   fabAtelierLabel,
+  fabIsLate,
+  fabIsDueSoon,
+  fabDelayDays,
 } from '../../constants/fabrication';
+
+/** Badges d'échéance — n'altèrent jamais le statut. */
+export function FabDeadlineBadges({ plan }) {
+  if (fabIsLate(plan)) {
+    const d = fabDelayDays(plan);
+    return <span className="badge badge-red" title={`${d} jour${d > 1 ? 's' : ''} de retard`}>🔴 EN RETARD</span>;
+  }
+  if (fabIsDueSoon(plan)) return <span className="badge badge-orange">🟠 ÉCHÉANCE PROCHE</span>;
+  return null;
+}
 
 export const FAB_INPUT = {
   width: '100%', padding: '8px 11px', border: '1.5px solid var(--border)',
@@ -122,8 +135,23 @@ export function fmtDateTime(iso) {
   try { return new Date(iso).toLocaleString('fr-MA'); } catch { return iso; }
 }
 
+/** Fichiers du plan : pièces propres à la production, sinon ceux de la bibliothèque. */
+export function planFiles(plan) {
+  const own = (plan?.attachments || []).filter((a) => a.kind === 'plan');
+  if (own.length) return own;
+  return plan?.library_plan?.files || plan?.files || [];
+}
+
 export function planFile(plan) {
-  return (plan?.attachments || []).find((a) => a.kind === 'plan') || null;
+  return planFiles(plan)[0] || null;
+}
+
+export function isImageFile(f) {
+  return /^image\//.test(f?.mime_type || '') || /\.(jpe?g|png|webp|gif)$/i.test(f?.file_name || '');
+}
+
+export function isPdfFile(f) {
+  return f?.mime_type === 'application/pdf' || /\.pdf$/i.test(f?.file_name || '');
 }
 
 export function planPhotos(plan) {

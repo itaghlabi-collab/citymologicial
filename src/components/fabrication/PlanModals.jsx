@@ -5,13 +5,19 @@ import {
   FAB_PRIORITES,
   FAB_STATUTS_MAJ,
   FAB_AVANCEMENT_PRESETS,
+  FAB_OPERATION_STATUTS,
   fabStatutMeta,
   fabOnTimeLabel,
+  fabAtelierFullLabel,
+  fabUniteLabel,
+  fabFmtQty,
+  fabLinePercent,
 } from '../../constants/fabrication';
 import {
-  FabModal, FabField, FabBadge, FabProgress, fmtDate, fmtDateTime, planFile, planPhotos,
-  FAB_INPUT, FAB_SELECT, FAB_TEXTAREA, fabAtelierLabel,
+  FabModal, FabField, FabBadge, FabProgress, FabDeadlineBadges, fmtDate, fmtDateTime, planFile, planFiles, planPhotos,
+  FAB_INPUT, FAB_SELECT, FAB_TEXTAREA,
 } from './shared';
+import FilePreviewList from './FilePreview';
 
 export function AffecterAtelierModal({ open, onClose, plan, users, onSubmit, saving }) {
   const [atelier, setAtelier] = useState('');
@@ -247,30 +253,113 @@ export function MajProductionModal({ open, onClose, plan, onSubmit, saving }) {
   );
 }
 
-export function PlanDetailModal({ open, onClose, plan }) {
+export function PlanDetailModal({ open, onClose, plan, canUpdate = false, onOperationStatut }) {
   if (!plan) return null;
-  const file = planFile(plan);
+  const files = planFiles(plan);
   const photos = planPhotos(plan);
   const delayLabel = fabOnTimeLabel(plan);
+  const lines = plan.lines || [];
+  const operations = plan.operations || [];
+  const ouvriers = plan.ouvriers || [];
+  const linesById = new Map(lines.map((l) => [l.id, l]));
 
   return (
-    <FabModal open={open} onClose={onClose} title={plan.designation || 'Détail production'} width={720}>
+    <FabModal open={open} onClose={onClose} title={plan.designation || 'Détail production'} width={820}>
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 14 }}>
+        <FabBadge statut={plan.statut} />
+        <FabBadge priorite={plan.priorite} />
+        <FabDeadlineBadges plan={plan} />
+      </div>
       <div className="fab-form-grid">
         <FabField label="Projet"><div>{plan.projet_nom || '—'}</div></FabField>
         <FabField label="Référence"><div>{plan.reference}</div></FabField>
-        <FabField label="Atelier"><div>{fabAtelierLabel(plan.atelier)}</div></FabField>
-        <FabField label="Chef d’atelier"><div>{plan.chef_atelier_nom || '—'}</div></FabField>
-        <FabField label="Statut"><FabBadge statut={plan.statut} /></FabField>
-        <FabField label="Priorité"><FabBadge priorite={plan.priorite} /></FabField>
+        {plan.library_plan ? (
+          <FabField label="Plan"><div>{plan.library_plan.reference} · {plan.library_plan.nom}</div></FabField>
+        ) : null}
+        {plan.library_plan?.client_nom ? (
+          <FabField label="Client"><div>{plan.library_plan.client_nom}</div></FabField>
+        ) : null}
+        <FabField label="Atelier"><div>{fabAtelierFullLabel(plan.atelier, plan.machine_type)}</div></FabField>
+        <FabField label="Responsable"><div>{plan.chef_atelier_nom || '—'}</div></FabField>
         <FabField label="Transmis par"><div>{plan.transmetteur_nom || '—'}</div></FabField>
         <FabField label="Date réception"><div>{fmtDateTime(plan.date_transmission)}</div></FabField>
         <FabField label="Début prévu"><div>{fmtDate(plan.date_debut_prevue)}</div></FabField>
-        <FabField label="Fin prévue"><div>{fmtDate(plan.date_fin_prevue)}</div></FabField>
+        <FabField label="Date limite"><div>{fmtDate(plan.date_fin_prevue)}</div></FabField>
         <FabField label="Début réel"><div>{fmtDate(plan.date_debut_reelle)}</div></FabField>
         <FabField label="Fin réelle"><div>{fmtDate(plan.date_fin_reelle)}</div></FabField>
         <div className="fab-span-2">
           <FabField label="Avancement"><FabProgress value={plan.avancement} /></FabField>
         </div>
+        {plan.description ? (
+          <div className="fab-span-2"><FabField label="Description"><div style={{ whiteSpace: 'pre-wrap' }}>{plan.description}</div></FabField></div>
+        ) : null}
+        {plan.observations ? (
+          <div className="fab-span-2"><FabField label="Observations"><div style={{ whiteSpace: 'pre-wrap' }}>{plan.observations}</div></FabField></div>
+        ) : null}
+        {lines.length ? (
+          <div className="fab-span-2">
+            <FabField label="Désignations">
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr><th>Désignation</th><th>Atelier</th><th>Demandée</th><th>Réalisée</th><th>Restante</th><th>Avancement</th></tr>
+                  </thead>
+                  <tbody>
+                    {lines.map((l) => {
+                      const unit = fabUniteLabel(l.unite, l.unite_autre);
+                      return (
+                        <tr key={l.id}>
+                          <td>{l.designation}{l.description ? <div className="fab-card-meta">{l.description}</div> : null}</td>
+                          <td>{fabAtelierFullLabel(l.atelier, l.machine_type)}</td>
+                          <td>{fabFmtQty(l.quantite)} {unit}</td>
+                          <td>{fabFmtQty(l.quantite_realisee)} {unit}</td>
+                          <td>{fabFmtQty(Math.max(0, l.quantite - l.quantite_realisee))} {unit}</td>
+                          <td><FabProgress value={fabLinePercent(l)} /></td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </FabField>
+          </div>
+        ) : null}
+        {ouvriers.length ? (
+          <div className="fab-span-2">
+            <FabField label={`Ouvriers (${ouvriers.length})`}>
+              <div className="fab-newfiles">
+                {ouvriers.map((o) => <span key={o.id} className="fab-chip">{o.nom}{o.poste ? ` · ${o.poste}` : ''}</span>)}
+              </div>
+            </FabField>
+          </div>
+        ) : null}
+        {operations.length ? (
+          <div className="fab-span-2">
+            <FabField label="Opérations">
+              <div className="fab-watch-list">
+                {operations.map((o) => (
+                  <div key={o.id} className="fab-op-row">
+                    <div>
+                      <strong>{o.travail}</strong>
+                      <div className="fab-card-meta" style={{ margin: 0 }}>
+                        {o.responsable_nom || '—'} · prévue {fmtDate(o.date_prevue)} · limite {fmtDate(o.date_limite)}
+                      </div>
+                    </div>
+                    {canUpdate && onOperationStatut ? (
+                      <select style={{ ...FAB_SELECT, width: 130 }} value={o.statut} onChange={(e) => onOperationStatut(o.id, e.target.value)}>
+                        {FAB_OPERATION_STATUTS.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
+                      </select>
+                    ) : (
+                      <span className={`badge ${FAB_OPERATION_STATUTS.find((s) => s.value === o.statut)?.badge || 'badge-grey'}`}>
+                        {FAB_OPERATION_STATUTS.find((s) => s.value === o.statut)?.label || o.statut}
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </FabField>
+          </div>
+        ) : null}
         {plan.statut === 'termine' ? (
           <div className="fab-span-2">
             <span className={`badge ${delayLabel.startsWith('Retard') ? 'badge-red' : 'badge-green'}`}>{delayLabel}</span>
@@ -282,15 +371,11 @@ export function PlanDetailModal({ open, onClose, plan }) {
           </div>
         ) : null}
         {plan.consigne ? (
-          <div className="fab-span-2"><FabField label="Consigne"><div>{plan.consigne}</div></FabField></div>
+          <div className="fab-span-2"><FabField label="Instructions / consigne"><div>{plan.consigne}</div></FabField></div>
         ) : null}
         <div className="fab-span-2">
           <FabField label="Plan">
-            {file?.url ? (
-              <a href={file.url} target="_blank" rel="noreferrer" className="btn btn-ghost btn-sm" style={{ display: 'inline-flex', gap: 6 }}>
-                <ExternalLink size={13} /> {file.file_name || 'Ouvrir'}
-              </a>
-            ) : '—'}
+            {files.length ? <FilePreviewList files={files} compact /> : '—'}
           </FabField>
         </div>
         {photos.length ? (
@@ -321,12 +406,22 @@ export function PlanDetailModal({ open, onClose, plan }) {
                   <div style={{ color: 'var(--text-3)' }}>{h.utilisateur_nom || '—'}</div>
                 </div>
                 <div>
-                  <div>
-                    {h.ancien_statut ? `${fabStatutMeta(h.ancien_statut).label} → ` : ''}
-                    {fabStatutMeta(h.nouveau_statut).label}
-                    {h.avancement != null ? ` · ${h.avancement} %` : ''}
-                  </div>
+                  {h.nouveau_statut ? (
+                    <div>
+                      {h.ancien_statut ? `${fabStatutMeta(h.ancien_statut).label} → ` : ''}
+                      {fabStatutMeta(h.nouveau_statut).label}
+                      {h.avancement != null ? ` · ${h.avancement} %` : ''}
+                    </div>
+                  ) : null}
+                  {h.line_id && linesById.get(h.line_id) ? (
+                    <div>
+                      {linesById.get(h.line_id).designation} : {fabFmtQty(h.quantite_realisee)}{' '}
+                      {fabUniteLabel(linesById.get(h.line_id).unite, linesById.get(h.line_id).unite_autre)} réalisé(s)
+                      {h.date_saisie ? ` · ${fmtDate(h.date_saisie)}` : ''}
+                    </div>
+                  ) : null}
                   {h.commentaire ? <div style={{ color: 'var(--text-2)' }}>{h.commentaire}</div> : null}
+                  {h.probleme ? <div style={{ color: 'var(--red)' }}>Problème : {h.probleme}</div> : null}
                 </div>
               </div>
             ))}
