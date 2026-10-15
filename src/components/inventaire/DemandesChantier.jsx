@@ -5,7 +5,7 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import {
   ClipboardList, Plus, Search, RefreshCw, Loader2, Eye, Edit2, Trash2,
-  Download, CheckCircle, Truck, Package, X, ShoppingCart, MoreHorizontal,
+  Download, CheckCircle, Truck, Package, X, ShoppingCart, MoreHorizontal, QrCode,
 } from 'lucide-react';
 import { listProjects } from '../../services/projects/projects';
 import { listStockArticles } from '../../services/inventaire/stockArticles';
@@ -60,6 +60,10 @@ import {
   findPurchaseRequestBySiteMaterialRequest,
 } from '../../services/achats/purchaseRequests';
 import { generateSiteRequestPdf } from '../../services/inventaire/siteRequestPdf';
+import {
+  generateSiteRequestShippingLabels,
+  consumeSiteRequestLinkParam,
+} from '../../services/inventaire/siteRequestShippingLabelPdf';
 import { buildInitialLines } from './SiteRequestForm.jsx';
 import SiteRequestFormPage from './SiteRequestFormPage.jsx';
 import SiteRequestCreateModeModal from './SiteRequestCreateModeModal.jsx';
@@ -149,6 +153,7 @@ function getRowActions(r, handlers, { embedded = false } = {}) {
   const actions = [
     { key: 'view', label: 'Voir', icon: Eye, onClick: () => handlers.openDetail(r.id) },
     { key: 'pdf', label: 'Télécharger PDF', icon: Download, onClick: () => handlers.handlePdf(r.id) },
+    { key: 'labels', label: 'Étiquettes colis', icon: QrCode, onClick: () => handlers.handleShippingLabels(r.id) },
   ];
   if (r.statut === 'brouillon') {
     actions.push({ key: 'edit', label: 'Modifier', icon: Edit2, onClick: () => handlers.openEdit(r.id) });
@@ -394,8 +399,12 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate,
     if (embedded) return undefined;
     let pendingId = null;
     try { pendingId = sessionStorage.getItem('citymo_site_request_detail'); } catch { pendingId = null; }
+    if (pendingId) {
+      try { sessionStorage.removeItem('citymo_site_request_detail'); } catch { /* ignore */ }
+    } else {
+      pendingId = consumeSiteRequestLinkParam();
+    }
     if (!pendingId) return undefined;
-    try { sessionStorage.removeItem('citymo_site_request_detail'); } catch { /* ignore */ }
     openDetail(pendingId);
     return undefined;
   }, [embedded]);
@@ -856,7 +865,33 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate,
     }
   }
 
-  const rowHandlers = { openDetail, openEdit, handlePdf, handleDelete, markPrepared, markDelivered };
+  async function handleShippingLabels(id) {
+    const raw = window.prompt('Nombre de colis à étiqueter :', '1');
+    if (raw == null) return;
+    const count = Math.floor(Number(String(raw).replace(',', '.')));
+    if (!Number.isFinite(count) || count < 1 || count > 99) {
+      setError('Nombre de colis invalide (entre 1 et 99).');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      if (persistPromiseRef.current) {
+        await persistPromiseRef.current.catch(() => {});
+      }
+      const current = detailRef.current;
+      const full = (current && String(current.id) === String(id) && Array.isArray(current.lines))
+        ? current
+        : await getSiteMaterialRequest(id);
+      await generateSiteRequestShippingLabels(full, count);
+    } catch (err) {
+      setError(err.message || 'Erreur lors de la génération des étiquettes.');
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const rowHandlers = { openDetail, openEdit, handlePdf, handleShippingLabels, handleDelete, markPrepared, markDelivered };
 
   function lineMatchKey(line) {
     if (line?.id != null && String(line.id) !== '') return `id:${line.id}`;
@@ -1916,6 +1951,7 @@ export default function DemandesChantier({ projet, embedded = false, onNavigate,
 
               <div className="inv-dc-detail-actions" style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 20 }}>
                 <button type="button" className="btn btn-secondary btn-sm" onClick={() => handlePdf(detail.id)}><Download size={14} /> Télécharger PDF</button>
+                <button type="button" className="btn btn-secondary btn-sm" disabled={saving} onClick={() => handleShippingLabels(detail.id)}><QrCode size={14} /> Étiquettes colis</button>
                 {isPreparationBon(detail) ? (
                   <>
                     {!embedded && ['soumise', 'en_preparation', 'preparation_partielle'].includes(detail.statut) && (
