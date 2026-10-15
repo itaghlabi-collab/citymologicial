@@ -1,9 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
-  AlertCircle, Eye, FileEdit, Inbox, Loader2, Play, Plus, RefreshCw, Search,
+  AlertCircle, Eye, FileEdit, FileText, Inbox, Play, Plus, RefreshCw, Search,
 } from 'lucide-react';
-import { FAB_ATELIERS, fabAtelierFullLabel } from '../../constants/fabrication';
-import { FabBadge, FabEmpty, fmtDate, fmtDateTime } from './shared';
+import { FAB_ATELIERS, fabAtelierFullLabel, fabAtelierColor } from '../../constants/fabrication';
+import {
+  FabEmpty, FabChips, FabPageHeader, FabSkeleton, FabAtelierDot, fmtDate, fmtDateTime, isImageFile,
+} from './shared';
 import FabFilters from './FabFilters';
 
 function matches(q, ...parts) {
@@ -11,13 +13,18 @@ function matches(q, ...parts) {
 }
 
 export default function PlansAFabriquer({
-  library, records, loading, error, onReload, canStart, canAssign,
+  library, records, loading, error, onReload, canStart, canAssign, preset,
   onStart, onResumeDraft, onViewPlan, onViewProduction, onAssignLegacy,
 }) {
   const [search, setSearch] = useState('');
   const [projet, setProjet] = useState('');
   const [atelier, setAtelier] = useState('');
+  const [tab, setTab] = useState('disponibles');
   const q = search.trim().toLowerCase();
+
+  useEffect(() => {
+    if (preset?.tab) setTab(preset.tab);
+  }, [preset]);
 
   const projets = useMemo(() => {
     const s = new Set();
@@ -43,30 +50,26 @@ export default function PlansAFabriquer({
     };
   }, [records, projet, atelier, q]);
 
+  const chipOptions = [
+    { value: 'disponibles', label: 'Disponibles', count: disponibles.length, tone: 'blue' },
+    { value: 'brouillons', label: 'Brouillons', count: brouillons.length, tone: 'grey' },
+    { value: 'legacy', label: 'Ancien circuit', count: legacy.length, tone: 'purple', hidden: !legacy.length && tab !== 'legacy' },
+  ];
+
   return (
     <div className="fab-page animate-fade-in">
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">Plans à fabriquer</h1>
-          <p className="page-subtitle">Plans disponibles à lancer et productions en préparation</p>
-        </div>
-        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-          <button type="button" className="btn btn-ghost btn-sm" onClick={onReload} disabled={loading}>
-            <RefreshCw size={14} /> Actualiser
+      <FabPageHeader title="Plans à fabriquer" subtitle="Plans disponibles à lancer et productions en préparation">
+        <button type="button" className="btn btn-ghost btn-sm" onClick={onReload} disabled={loading}>
+          <RefreshCw size={14} className={loading ? 'spin' : ''} /> Actualiser
+        </button>
+        {canStart ? (
+          <button type="button" className="btn btn-primary fab-cta" onClick={() => onStart(null)}>
+            <Plus size={16} /> DÉBUTER UNE PRODUCTION
           </button>
-          {canStart ? (
-            <button type="button" className="btn btn-primary fab-cta" onClick={() => onStart(null)}>
-              <Plus size={16} /> DÉBUTER UNE PRODUCTION
-            </button>
-          ) : null}
-        </div>
-      </div>
+        ) : null}
+      </FabPageHeader>
 
-      {error ? (
-        <div className="card" style={{ padding: 14, marginBottom: 16, color: 'var(--red)', display: 'flex', gap: 8 }}>
-          <AlertCircle size={16} /> {error}
-        </div>
-      ) : null}
+      {error ? <div className="fab-alert"><AlertCircle size={16} /> {error}</div> : null}
 
       <FabFilters
         search={(
@@ -74,13 +77,15 @@ export default function PlansAFabriquer({
             <Search size={15} className="fab-search-icon" aria-hidden />
             <input
               className="fab-search-input"
-              placeholder="Recherche plan, projet, client, référence"
+              placeholder="Rechercher plan, projet, client, référence…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
         )}
+        chips={<FabChips options={chipOptions} value={tab} onChange={setTab} />}
         activeCount={[projet, atelier].filter(Boolean).length}
+        onReset={() => { setProjet(''); setAtelier(''); }}
       >
         <select className="fab-filter" value={projet} onChange={(e) => setProjet(e.target.value)}>
           <option value="">Tous les projets</option>
@@ -93,63 +98,91 @@ export default function PlansAFabriquer({
       </FabFilters>
 
       {loading ? (
-        <div className="card" style={{ padding: 40, textAlign: 'center' }}><Loader2 size={22} /></div>
+        <div className="card fab-pad"><FabSkeleton rows={4} /></div>
       ) : (
         <>
-          <Section title={`Plans disponibles à lancer (${disponibles.length})`}>
-            {disponibles.length === 0 ? (
-              <FabEmpty
-                icon={<Inbox size={22} />}
-                title="Aucun plan en attente de lancement"
-                sub="Les plans ajoutés dans « Plans / Projets » ou transmis depuis un projet apparaissent ici."
-              />
+          {tab === 'disponibles' && (
+            disponibles.length === 0 ? (
+              <div className="card">
+                <FabEmpty
+                  icon={<Inbox size={22} />}
+                  title="Aucun plan en attente de lancement"
+                  sub="Les plans ajoutés dans « Plans / Projets » ou transmis depuis un projet apparaissent ici."
+                />
+              </div>
             ) : (
               <div className="fab-grid-cards">
-                {disponibles.map((p) => (
-                  <div key={p.id} className="fab-card">
-                    <div className="fab-card-title">{p.nom}</div>
-                    <div className="fab-card-sub">{p.reference} · {p.projet_nom || '—'}{p.client_nom ? ` · ${p.client_nom}` : ''}</div>
-                    <div className="fab-card-meta">
-                      {p.atelier ? fabAtelierFullLabel(p.atelier, p.machine_type) : 'Atelier non défini'} · {(p.files || []).length} fichier(s)
+                {disponibles.map((p) => {
+                  const files = p.files || [];
+                  const first = files[0];
+                  return (
+                    <div key={p.id} className="fab-card fab-card-accent" style={{ '--atelier': fabAtelierColor(p.atelier) }}>
+                      <div className="fab-card-top">
+                        <button type="button" className="fab-thumb" onClick={() => onViewPlan(p)} title="Consulter le plan">
+                          {first?.url && isImageFile(first) ? <img src={first.url} alt="" loading="lazy" /> : <FileText size={18} />}
+                          {files.length > 1 ? <span className="fab-thumb-count">{files.length}</span> : null}
+                        </button>
+                        <div className="fab-card-top-text">
+                          <div className="fab-card-title">{p.nom}</div>
+                          <div className="fab-card-sub">{p.reference} · {p.projet_nom || '—'}</div>
+                        </div>
+                      </div>
+                      <div className="fab-card-meta">
+                        {p.atelier ? <span className="fab-atelier-tag"><FabAtelierDot atelier={p.atelier} />{fabAtelierFullLabel(p.atelier, p.machine_type)}</span> : 'Atelier non défini'}
+                        {p.client_nom ? ` · ${p.client_nom}` : ''}
+                      </div>
+                      <div className="fab-card-meta">
+                        {p.source === 'projets' ? 'Transmis depuis Projets' : 'Ajouté'} le {fmtDate(p.created_at)}{p.created_by_nom ? ` · ${p.created_by_nom}` : ''}
+                      </div>
+                      <div className="fab-card-actions">
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => onViewPlan(p)}><Eye size={13} /> Consulter</button>
+                        {canStart ? (
+                          <button type="button" className="btn btn-primary btn-sm" onClick={() => onStart(p)}><Play size={13} /> Débuter</button>
+                        ) : null}
+                      </div>
                     </div>
-                    <div className="fab-card-meta">
-                      {p.source === 'projets' ? 'Transmis depuis Projets' : 'Ajouté'} le {fmtDate(p.created_at)} · {p.created_by_nom || '—'}
-                    </div>
-                    <div className="fab-card-actions">
-                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => onViewPlan(p)}><Eye size={13} /> Consulter</button>
-                      {canStart ? (
-                        <button type="button" className="btn btn-primary btn-sm" onClick={() => onStart(p)}><Play size={13} /> Débuter</button>
-                      ) : null}
-                    </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
-            )}
-          </Section>
+            )
+          )}
 
-          {brouillons.length ? (
-            <Section title={`Brouillons (${brouillons.length})`} hint="Non démarrés — n’apparaissent pas dans le suivi.">
-              <div className="fab-grid-cards">
-                {brouillons.map((p) => (
-                  <div key={p.id} className="fab-card">
-                    <div className="fab-card-title">{p.designation || 'Brouillon'}</div>
-                    <div className="fab-card-sub">{p.reference} · {p.projet_nom || '—'}</div>
-                    <div className="fab-card-meta">{fabAtelierFullLabel(p.atelier, p.machine_type)} · modifié le {fmtDateTime(p.updated_at)}</div>
-                    <div style={{ marginTop: 6 }}><FabBadge statut={p.statut} /></div>
-                    <div className="fab-card-actions">
-                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => onViewProduction(p)}><Eye size={13} /> Voir</button>
-                      {canStart ? (
-                        <button type="button" className="btn btn-primary btn-sm" onClick={() => onResumeDraft(p)}><FileEdit size={13} /> Reprendre</button>
-                      ) : null}
-                    </div>
-                  </div>
-                ))}
+          {tab === 'brouillons' && (
+            brouillons.length === 0 ? (
+              <div className="card">
+                <FabEmpty icon={<FileEdit size={22} />} title="Aucun brouillon" sub="Les productions enregistrées en brouillon apparaissent ici, avant leur démarrage." />
               </div>
-            </Section>
-          ) : null}
+            ) : (
+              <>
+                <div className="fab-hint">Non démarrés — n’apparaissent pas dans le suivi.</div>
+                <div className="fab-grid-cards">
+                  {brouillons.map((p) => (
+                    <div key={p.id} className="fab-card fab-card-accent" style={{ '--atelier': fabAtelierColor(p.atelier) }}>
+                      <div className="fab-card-title">{p.designation || 'Brouillon'}</div>
+                      <div className="fab-card-sub">{p.reference} · {p.projet_nom || '—'}</div>
+                      <div className="fab-card-meta">
+                        <span className="fab-atelier-tag"><FabAtelierDot atelier={p.atelier} />{fabAtelierFullLabel(p.atelier, p.machine_type)}</span>
+                        {' · '}modifié le {fmtDateTime(p.updated_at)}
+                      </div>
+                      <div className="fab-card-actions">
+                        <button type="button" className="btn btn-ghost btn-sm" onClick={() => onViewProduction(p)}><Eye size={13} /> Voir</button>
+                        {canStart ? (
+                          <button type="button" className="btn btn-primary btn-sm" onClick={() => onResumeDraft(p)}><FileEdit size={13} /> Reprendre</button>
+                        ) : null}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </>
+            )
+          )}
 
-          {legacy.length ? (
-            <Section title={`Plans reçus — ancien circuit (${legacy.length})`}>
+          {tab === 'legacy' && (
+            legacy.length === 0 ? (
+              <div className="card">
+                <FabEmpty icon={<Inbox size={22} />} title="Aucun plan de l’ancien circuit" sub="Tous les anciens plans reçus ont été affectés." />
+              </div>
+            ) : (
               <div className="fab-grid-cards">
                 {legacy.map((p) => (
                   <div key={p.id} className="fab-card">
@@ -165,20 +198,10 @@ export default function PlansAFabriquer({
                   </div>
                 ))}
               </div>
-            </Section>
-          ) : null}
+            )
+          )}
         </>
       )}
-    </div>
-  );
-}
-
-function Section({ title, hint, children }) {
-  return (
-    <div className="card" style={{ padding: 16, marginBottom: 16 }}>
-      <div className="fab-section-title" style={{ fontSize: '1rem' }}>{title}</div>
-      {hint ? <div className="fab-card-meta" style={{ marginTop: -6, marginBottom: 10 }}>{hint}</div> : null}
-      {children}
     </div>
   );
 }

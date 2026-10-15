@@ -6,6 +6,7 @@ import {
   fabIsLate,
   fabIsDueSoon,
   fabDelayDays,
+  fabAtelierColor,
 } from '../../constants/fabrication';
 
 /** Badges d'échéance — n'altèrent jamais le statut. */
@@ -25,22 +26,6 @@ export const FAB_INPUT = {
 };
 export const FAB_SELECT = { ...FAB_INPUT, cursor: 'pointer' };
 export const FAB_TEXTAREA = { ...FAB_INPUT, minHeight: 80, resize: 'vertical' };
-
-export function FabKpiCard({ icon, label, value, sub, color }) {
-  const colors = { red: 'var(--red)', blue: '#1565C0', green: '#2E7D32', orange: '#E65100', grey: 'var(--text-3)', purple: '#6A1B9A' };
-  const bg = { red: 'var(--red-light)', blue: '#E3F2FD', green: '#E8F5E9', orange: '#FFF3E0', grey: 'var(--surface-2)', purple: '#F3E5F5' };
-  const c = color || 'grey';
-  return (
-    <div className="stat-card">
-      <div className="stat-icon" style={{ background: bg[c], color: colors[c] }}>{icon}</div>
-      <div className="stat-body">
-        <div className="stat-value">{value}</div>
-        <div className="stat-label">{label}</div>
-        {sub ? <div style={{ fontSize: '0.7rem', color: 'var(--text-3)', marginTop: 2 }}>{sub}</div> : null}
-      </div>
-    </div>
-  );
-}
 
 export function FabBadge({ statut, priorite, children }) {
   if (priorite) {
@@ -103,16 +88,106 @@ export function FabEmpty({ icon, title, sub, hint }) {
   );
 }
 
-export function FabProgress({ value }) {
+export function FabProgress({ value, compact = false }) {
   const v = Math.max(0, Math.min(100, Number(value) || 0));
+  const tone = v >= 100 ? 'is-done' : v >= 50 ? 'is-mid' : '';
   return (
-    <div className="fab-progress">
+    <div className={`fab-progress${compact ? ' is-compact' : ''}`}>
       <div className="fab-progress-track">
-        <div className="fab-progress-fill" style={{ width: `${v}%` }} />
+        <div className={`fab-progress-fill ${tone}`} style={{ width: `${v}%` }} />
       </div>
       <span className="fab-progress-label">{v} %</span>
     </div>
   );
+}
+
+/** Indicateur compact et cliquable. */
+export function FabStat({ icon, label, value, sub, tone = 'grey', active = false, onClick }) {
+  const Tag = onClick ? 'button' : 'div';
+  return (
+    <Tag
+      type={onClick ? 'button' : undefined}
+      className={`fab-stat tone-${tone}${active ? ' is-active' : ''}${onClick ? ' is-clickable' : ''}`}
+      onClick={onClick}
+    >
+      <span className="fab-stat-icon">{icon}</span>
+      <span className="fab-stat-body">
+        <span className="fab-stat-value">{value}</span>
+        <span className="fab-stat-label">{label}</span>
+        {sub ? <span className="fab-stat-sub">{sub}</span> : null}
+      </span>
+    </Tag>
+  );
+}
+
+/** Filtres rapides en puces (défilement horizontal sur mobile). */
+export function FabChips({ options, value, onChange }) {
+  return (
+    <div className="fab-chips" role="tablist">
+      {options.filter((o) => !o.hidden).map((o) => (
+        <button
+          key={o.value}
+          type="button"
+          role="tab"
+          aria-selected={value === o.value}
+          className={`fab-chip-btn tone-${o.tone || 'grey'}${value === o.value ? ' is-on' : ''}`}
+          onClick={() => onChange(o.value)}
+        >
+          {o.label}
+          {o.count != null ? <span className="fab-chip-count">{o.count}</span> : null}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+export function FabPageHeader({ title, subtitle, children }) {
+  return (
+    <div className="fab-header">
+      <div className="fab-header-text">
+        <h1 className="page-title">{title}</h1>
+        {subtitle ? <p className="page-subtitle">{subtitle}</p> : null}
+      </div>
+      {children ? <div className="fab-header-actions">{children}</div> : null}
+    </div>
+  );
+}
+
+export function FabSkeleton({ rows = 4 }) {
+  return (
+    <div className="fab-skeleton">
+      {Array.from({ length: rows }).map((_, i) => <div key={i} className="fab-skeleton-row" />)}
+    </div>
+  );
+}
+
+export function FabRing({ value, size = 92, label }) {
+  const v = Math.max(0, Math.min(100, Number(value) || 0));
+  const r = (size - 10) / 2;
+  const c = 2 * Math.PI * r;
+  return (
+    <div className="fab-ring" style={{ width: size, height: size }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+        <circle cx={size / 2} cy={size / 2} r={r} className="fab-ring-track" />
+        <circle
+          cx={size / 2}
+          cy={size / 2}
+          r={r}
+          className="fab-ring-fill"
+          strokeDasharray={c}
+          strokeDashoffset={c - (c * v) / 100}
+        />
+      </svg>
+      <div className="fab-ring-text">
+        <strong>{v}%</strong>
+        {label ? <span>{label}</span> : null}
+      </div>
+    </div>
+  );
+}
+
+export function FabAtelierDot({ atelier }) {
+  return <span className="fab-atelier-dot" style={{ background: fabAtelierColor(atelier) }} />;
 }
 
 export function fmtDate(iso) {

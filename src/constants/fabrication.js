@@ -5,6 +5,17 @@ export const FAB_ATELIERS = [
   { value: 'machinerie', label: 'Machinerie' },
 ];
 
+export const FAB_ATELIER_COLORS = {
+  menuiserie_bois: '#8D6E63',
+  aluminium: '#546E7A',
+  ferronnerie: '#37474F',
+  machinerie: '#6A1B9A',
+};
+
+export function fabAtelierColor(value) {
+  return FAB_ATELIER_COLORS[value] || 'var(--text-3)';
+}
+
 export const FAB_MACHINES = [
   { value: 'cnc', label: 'CNC' },
   { value: 'laser', label: 'Laser' },
@@ -145,6 +156,16 @@ export function fabIsDueSoon(plan, asOf = todayISO()) {
   if (!plan.date_fin_prevue) return false;
   const days = daysBetween(asOf, plan.date_fin_prevue);
   return days !== null && days >= 0 && days <= FAB_ECHEANCE_PROCHE_JOURS;
+}
+
+/** Échéance relative : « Aujourd’hui », « J-3 », « Retard 2 j ». */
+export function fabDueLabel(plan, asOf = todayISO()) {
+  if (!plan?.date_fin_prevue || plan.statut === 'termine') return '';
+  const d = daysBetween(asOf, plan.date_fin_prevue);
+  if (d === null) return '';
+  if (d < 0) return `Retard ${-d} j`;
+  if (d === 0) return 'Aujourd’hui';
+  return `J-${d}`;
 }
 
 export function fabOnTimeLabel(plan) {

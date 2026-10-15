@@ -18,9 +18,10 @@ import ProgressUpdateModal from './fabrication/ProgressUpdateModal';
 import BonsLivraisonFab from './fabrication/BonsLivraisonFab';
 import { AffecterAtelierModal, MajProductionModal, PlanDetailModal } from './fabrication/PlanModals';
 
-function FabricationPlansRouter({ tab }) {
+function FabricationPlansRouter({ tab, onNavigate }) {
   const { user } = useAuth();
   const fab = useFabrication();
+  const [preset, setPreset] = useState(null);
   const [perms, setPerms] = useState({
     assign: false, update: false, libCreate: false, libEdit: false, ready: false,
   });
@@ -76,6 +77,21 @@ function FabricationPlansRouter({ tab }) {
     setLibDetail({ plan, focus: focus || '' });
   }
 
+  function go(target, options = null) {
+    if (options?.start) {
+      setWizard({ initialPlan: null, draft: null });
+      return;
+    }
+    setPreset(options ? { ...options, target, key: Date.now() } : null);
+    if (onNavigate) onNavigate(target);
+  }
+
+  useEffect(() => {
+    if (preset && preset.target !== tab) setPreset(null);
+  }, [tab, preset]);
+
+  const presetFor = (target) => (preset?.target === target ? preset : null);
+
   async function changeOperationStatut(opId, statut) {
     const res = await fab.setOperationStatut(opId, statut);
     if (res.success && detail?.id) {
@@ -94,6 +110,8 @@ function FabricationPlansRouter({ tab }) {
           error={fab.error}
           onReload={fab.load}
           onOpenPlan={openDetail}
+          onGo={go}
+          canStart={perms.assign}
         />
       )}
       {tab === 'fabrication-plans-projets' && (
@@ -118,6 +136,7 @@ function FabricationPlansRouter({ tab }) {
           onReload={fab.load}
           canStart={perms.assign}
           canAssign={perms.assign}
+          preset={presetFor('fabrication-plans')}
           onStart={(plan) => setWizard({ initialPlan: plan, draft: null })}
           onResumeDraft={async (prod) => {
             const full = await fab.fetchOne(prod.id).catch(() => prod);
@@ -130,6 +149,7 @@ function FabricationPlansRouter({ tab }) {
       )}
       {(tab === 'fabrication-suivi' || tab === 'fabrication-terminee') && (
         <FabricationList
+          key={tab}
           mode={tab === 'fabrication-suivi' ? 'suivi' : 'termine'}
           records={records}
           loading={fab.loading}
@@ -139,6 +159,7 @@ function FabricationPlansRouter({ tab }) {
           onView={openDetail}
           onUpdate={setMajPlan}
           onProgress={setProgressPlan}
+          preset={presetFor(tab)}
         />
       )}
 
@@ -206,7 +227,7 @@ function FabricationPlansRouter({ tab }) {
   );
 }
 
-export default function Fabrication({ activeTab }) {
+export default function Fabrication({ activeTab, onNavigate }) {
   const tab = activeTab || 'fabrication';
 
   /* Isolé : Bon de livraison Fabrication (≠ CRM bon-livraison) */
@@ -214,5 +235,5 @@ export default function Fabrication({ activeTab }) {
     return <BonsLivraisonFab />;
   }
 
-  return <FabricationPlansRouter tab={tab} />;
+  return <FabricationPlansRouter tab={tab} onNavigate={onNavigate} />;
 }

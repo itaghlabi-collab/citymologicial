@@ -367,7 +367,7 @@ function PageContent({
     case 'fabrication-bons-livraison':
       return (
         <Suspense fallback={<div style={{ padding: 40, textAlign: 'center', color: 'var(--text-3)' }}>Chargement…</div>}>
-          <Fabrication activeTab={module} />
+          <Fabrication activeTab={module} onNavigate={onNavigate} />
         </Suspense>
       );
     /* SAV legacy */

@@ -12,9 +12,12 @@ import {
   fabUniteLabel,
   fabFmtQty,
   fabLinePercent,
+  fabDueLabel,
+  fabIsLate,
+  fabIsDueSoon,
 } from '../../constants/fabrication';
 import {
-  FabModal, FabField, FabBadge, FabProgress, FabDeadlineBadges, fmtDate, fmtDateTime, planFile, planFiles, planPhotos,
+  FabModal, FabField, FabBadge, FabProgress, FabRing, FabDeadlineBadges, fmtDate, fmtDateTime, planFile, planFiles, planPhotos,
   FAB_INPUT, FAB_SELECT, FAB_TEXTAREA,
 } from './shared';
 import FilePreviewList from './FilePreview';
@@ -270,6 +273,21 @@ export function PlanDetailModal({ open, onClose, plan, canUpdate = false, onOper
         <FabBadge priorite={plan.priorite} />
         <FabDeadlineBadges plan={plan} />
       </div>
+      <div className="fab-detail-summary">
+        <FabRing value={plan.avancement} size={76} label="avancement" />
+        <div className="fab-detail-facts">
+          <div><span>Atelier</span><strong>{fabAtelierFullLabel(plan.atelier, plan.machine_type)}</strong></div>
+          <div><span>Responsable</span><strong>{plan.chef_atelier_nom || '—'}</strong></div>
+          <div>
+            <span>Date limite</span>
+            <strong>
+              {fmtDate(plan.date_fin_prevue)}
+              {fabDueLabel(plan) ? <em className={`fab-due ${fabIsLate(plan) ? 'is-late' : fabIsDueSoon(plan) ? 'is-soon' : ''}`}>{fabDueLabel(plan)}</em> : null}
+            </strong>
+          </div>
+          <div><span>Équipe</span><strong>{ouvriers.length ? `${ouvriers.length} ouvrier(s)` : '—'}</strong></div>
+        </div>
+      </div>
       <div className="fab-form-grid">
         <FabField label="Projet"><div>{plan.projet_nom || '—'}</div></FabField>
         <FabField label="Référence"><div>{plan.reference}</div></FabField>
@@ -279,17 +297,11 @@ export function PlanDetailModal({ open, onClose, plan, canUpdate = false, onOper
         {plan.library_plan?.client_nom ? (
           <FabField label="Client"><div>{plan.library_plan.client_nom}</div></FabField>
         ) : null}
-        <FabField label="Atelier"><div>{fabAtelierFullLabel(plan.atelier, plan.machine_type)}</div></FabField>
-        <FabField label="Responsable"><div>{plan.chef_atelier_nom || '—'}</div></FabField>
         <FabField label="Transmis par"><div>{plan.transmetteur_nom || '—'}</div></FabField>
         <FabField label="Date réception"><div>{fmtDateTime(plan.date_transmission)}</div></FabField>
         <FabField label="Début prévu"><div>{fmtDate(plan.date_debut_prevue)}</div></FabField>
-        <FabField label="Date limite"><div>{fmtDate(plan.date_fin_prevue)}</div></FabField>
         <FabField label="Début réel"><div>{fmtDate(plan.date_debut_reelle)}</div></FabField>
         <FabField label="Fin réelle"><div>{fmtDate(plan.date_fin_reelle)}</div></FabField>
-        <div className="fab-span-2">
-          <FabField label="Avancement"><FabProgress value={plan.avancement} /></FabField>
-        </div>
         {plan.description ? (
           <div className="fab-span-2"><FabField label="Description"><div style={{ whiteSpace: 'pre-wrap' }}>{plan.description}</div></FabField></div>
         ) : null}
@@ -309,12 +321,12 @@ export function PlanDetailModal({ open, onClose, plan, canUpdate = false, onOper
                       const unit = fabUniteLabel(l.unite, l.unite_autre);
                       return (
                         <tr key={l.id}>
-                          <td>{l.designation}{l.description ? <div className="fab-card-meta">{l.description}</div> : null}</td>
-                          <td>{fabAtelierFullLabel(l.atelier, l.machine_type)}</td>
-                          <td>{fabFmtQty(l.quantite)} {unit}</td>
-                          <td>{fabFmtQty(l.quantite_realisee)} {unit}</td>
-                          <td>{fabFmtQty(Math.max(0, l.quantite - l.quantite_realisee))} {unit}</td>
-                          <td><FabProgress value={fabLinePercent(l)} /></td>
+                          <td data-label="Désignation">{l.designation}{l.description ? <div className="fab-card-meta">{l.description}</div> : null}</td>
+                          <td data-label="Atelier">{fabAtelierFullLabel(l.atelier, l.machine_type)}</td>
+                          <td data-label="Demandée">{fabFmtQty(l.quantite)} {unit}</td>
+                          <td data-label="Réalisée">{fabFmtQty(l.quantite_realisee)} {unit}</td>
+                          <td data-label="Restante">{fabFmtQty(Math.max(0, l.quantite - l.quantite_realisee))} {unit}</td>
+                          <td data-label="Avancement"><FabProgress value={fabLinePercent(l)} /></td>
                         </tr>
                       );
                     })}

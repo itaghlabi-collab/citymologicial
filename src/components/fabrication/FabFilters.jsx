@@ -1,26 +1,31 @@
 import { useState } from 'react';
-import { SlidersHorizontal } from 'lucide-react';
+import { RotateCcw, SlidersHorizontal } from 'lucide-react';
 
-function initiallyOpen() {
-  return typeof window === 'undefined' || window.innerWidth > 768;
-}
-
-/** Recherche toujours visible + filtres repliables (repliés par défaut sur mobile). */
-export default function FabFilters({ search, activeCount = 0, children }) {
-  const [open, setOpen] = useState(initiallyOpen);
+/** Recherche + filtres rapides toujours visibles ; filtres détaillés repliables (repliés par défaut). */
+export default function FabFilters({ search, chips, activeCount = 0, onReset, children }) {
+  const [open, setOpen] = useState(false);
   return (
-    <div className="card fab-filters-card">
-      <div className="fab-toolbar" style={{ marginBottom: 0 }}>
+    <div className="fab-filterbar">
+      <div className="fab-filterbar-row">
         {search}
-        <button
-          type="button"
-          className={`btn btn-ghost btn-sm fab-filters-toggle${open ? ' is-on' : ''}`}
-          onClick={() => setOpen((v) => !v)}
-        >
-          <SlidersHorizontal size={14} /> Filtres{activeCount ? ` (${activeCount})` : ''}
-        </button>
+        {children ? (
+          <button
+            type="button"
+            className={`btn btn-ghost btn-sm fab-filters-toggle${open || activeCount ? ' is-on' : ''}`}
+            onClick={() => setOpen((v) => !v)}
+            aria-expanded={open}
+          >
+            <SlidersHorizontal size={14} /> Filtres{activeCount ? <span className="fab-chip-count">{activeCount}</span> : null}
+          </button>
+        ) : null}
+        {activeCount && onReset ? (
+          <button type="button" className="btn btn-ghost btn-sm fab-filters-reset" onClick={onReset} title="Réinitialiser les filtres">
+            <RotateCcw size={13} />
+          </button>
+        ) : null}
       </div>
-      {open ? <div className="fab-toolbar" style={{ marginTop: 10, marginBottom: 0 }}>{children}</div> : null}
+      {chips ? <div className="fab-filterbar-chips">{chips}</div> : null}
+      {open && children ? <div className="fab-filterbar-panel">{children}</div> : null}
     </div>
   );
 }

@@ -1,21 +1,24 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
-  Search, RefreshCw, Eye, Loader2, AlertCircle, Hammer, CheckCircle2, TrendingUp,
+  Search, RefreshCw, Eye, AlertCircle, Hammer, CheckCircle2, TrendingUp, Clock, Timer, FileText,
 } from 'lucide-react';
 import {
   FAB_ATELIERS,
   FAB_MACHINES,
-  FAB_STATUTS,
   FAB_SUIVI_STATUTS,
   fabAtelierFullLabel,
+  fabAtelierColor,
   fabOnTimeLabel,
   fabIsLate,
   fabIsDueSoon,
+  fabDelayDays,
+  fabDueLabel,
   fabUniteLabel,
   fabFmtQty,
 } from '../../constants/fabrication';
 import {
-  FabBadge, FabDeadlineBadges, FabEmpty, FabProgress, fmtDate, planFile,
+  FabBadge, FabEmpty, FabProgress, FabChips, FabPageHeader, FabSkeleton, FabStat, FabAtelierDot,
+  fmtDate, planFile,
 } from './shared';
 import { downloadUrl } from './FilePreview';
 import FabFilters from './FabFilters';
@@ -37,6 +40,24 @@ const MODES = {
   },
 };
 
+const SUIVI_CHIPS = [
+  { value: 'all', label: 'Toutes', test: () => true },
+  { value: 'en_fabrication', label: 'En cours', tone: 'orange', test: (p) => p.statut === 'en_fabrication' },
+  { value: 'a_lancer', label: 'À lancer', tone: 'grey', test: (p) => p.statut === 'a_lancer' },
+  { value: 'en_attente', label: 'En attente', tone: 'blue', test: (p) => p.statut === 'en_attente' },
+  { value: 'bloque', label: 'Bloquées', tone: 'red', test: (p) => p.statut === 'bloque' },
+  { value: 'retard', label: 'En retard', tone: 'red', test: (p) => fabIsLate(p) },
+  { value: 'proche', label: 'Échéance proche', tone: 'orange', test: (p) => fabIsDueSoon(p) },
+];
+
+const isLateDone = (p) => fabOnTimeLabel(p).startsWith('Retard');
+
+const TERMINE_CHIPS = [
+  { value: 'all', label: 'Toutes', test: () => true },
+  { value: 'ontime', label: 'Dans les délais', tone: 'green', test: (p) => !isLateDone(p) },
+  { value: 'late', label: 'En retard', tone: 'red', test: (p) => isLateDone(p) },
+];
+
 function inMode(plan, mode) {
   if (mode === 'suivi') return FAB_SUIVI_STATUTS.includes(plan.statut);
   if (mode === 'termine') return plan.statut === 'termine';
@@ -57,19 +78,41 @@ function productionAteliers(p) {
   return set;
 }
 
-/** Quantités par désignation — jamais additionnées entre lignes. */
-function QtyCell({ plan, field }) {
+/** Quantités réalisée / demandée par désignation — jamais additionnées entre lignes. */
+function QtyCell({ plan, max = 2 }) {
   const lines = plan.lines || [];
-  if (!lines.length) return <span>—</span>;
+  if (!lines.length) return <span className="fab-muted">—</span>;
+  const shown = lines.slice(0, max);
   return (
     <div className="fab-qty-list">
-      {lines.map((l) => (
+      {shown.map((l) => (
         <div key={l.id} title={l.designation}>
-          {fabFmtQty(l[field])} {fabUniteLabel(l.unite, l.unite_autre)}
+          <strong>{fabFmtQty(l.quantite_realisee)}</strong>
+          <span className="fab-muted"> / {fabFmtQty(l.quantite)} {fabUniteLabel(l.unite, l.unite_autre)}</span>
           {lines.length > 1 ? <span className="fab-qty-name"> · {l.designation}</span> : null}
         </div>
       ))}
+      {lines.length > max ? <div className="fab-qty-name">+ {lines.length - max} autre(s) désignation(s)</div> : null}
     </div>
+  );
+}
+
+function DueCell({ plan }) {
+  const label = fabDueLabel(plan);
+  const cls = fabIsLate(plan) ? 'is-late' : fabIsDueSoon(plan) ? 'is-soon' : '';
+  return (
+    <div className="fab-due-cell">
+      <span>{fmtDate(plan.date_fin_prevue)}</span>
+      {label ? <span className={`fab-due ${cls}`}>{label}</span> : null}
+    </div>
+  );
+}
+
+function AtelierCell({ plan }) {
+  return (
+    <span className="fab-atelier-tag">
+      <FabAtelierDot atelier={plan.atelier} />{fabAtelierFullLabel(plan.atelier, plan.machine_type)}
+    </span>
   );
 }
 
@@ -83,58 +126,109 @@ export default function FabricationList({
   onView,
   onUpdate,
   onProgress,
+  preset,
 }) {
   const cfg = MODES[mode] || MODES.suivi;
   const Icon = cfg.icon;
+  const chips = mode === 'suivi' ? SUIVI_CHIPS : TERMINE_CHIPS;
   const [search, setSearch] = useState('');
   const [projet, setProjet] = useState('');
   const [atelier, setAtelier] = useState('');
   const [machine, setMachine] = useState('');
-  const [statut, setStatut] = useState('');
   const [responsable, setResponsable] = useState('');
-  const [echeance, setEcheance] = useState('');
+  const [chip, setChip] = useState('all');
+
+  useEffect(() => {
+    if (!preset) return;
+    setChip(preset.chip || 'all');
+    setAtelier(preset.atelier || '');
+    setMachine('');
+  }, [preset]);
 
   const scoped = useMemo(() => records.filter((p) => inMode(p, mode)), [records, mode]);
 
   const projets = useMemo(() => [...new Set(scoped.map((p) => p.projet_nom).filter(Boolean))].sort(), [scoped]);
   const responsables = useMemo(() => [...new Set(scoped.map((p) => p.chef_atelier_nom).filter(Boolean))].sort(), [scoped]);
 
-  const rows = useMemo(() => {
+  const base = useMemo(() => {
     const q = search.trim().toLowerCase();
     return scoped.filter((p) => {
-      if (statut && p.statut !== statut) return false;
       if (projet && p.projet_nom !== projet) return false;
       if (atelier && !productionAteliers(p).has(atelier)) return false;
       if (machine && !productionMachines(p).has(machine)) return false;
       if (responsable && p.chef_atelier_nom !== responsable) return false;
-      if (echeance === 'retard' && !fabIsLate(p)) return false;
-      if (echeance === 'proche' && !fabIsDueSoon(p)) return false;
       if (q) {
         const blob = `${p.reference} ${p.projet_nom} ${p.designation} ${p.chef_atelier_nom} ${(p.lines || []).map((l) => l.designation).join(' ')}`.toLowerCase();
         if (!blob.includes(q)) return false;
       }
       return true;
     });
-  }, [scoped, search, statut, projet, atelier, machine, responsable, echeance]);
+  }, [scoped, search, projet, atelier, machine, responsable]);
 
-  const activeFilters = [projet, atelier, machine, statut, responsable, echeance].filter(Boolean).length;
+  const activeChip = chips.find((c) => c.value === chip) || chips[0];
+  const rows = useMemo(() => {
+    const list = base.filter(activeChip.test);
+    if (mode === 'suivi') {
+      return [...list].sort((a, b) => String(a.date_fin_prevue || '9999').localeCompare(String(b.date_fin_prevue || '9999')));
+    }
+    return [...list].sort((a, b) => String(b.date_fin_reelle || '').localeCompare(String(a.date_fin_reelle || '')));
+  }, [base, activeChip, mode]);
+
+  const chipOptions = chips.map((c) => {
+    const count = base.filter(c.test).length;
+    return {
+      value: c.value, label: c.label, tone: c.tone, count, hidden: c.value !== 'all' && c.value !== chip && !count,
+    };
+  });
+
+  const termineStats = useMemo(() => {
+    if (mode !== 'termine') return null;
+    const late = base.filter(isLateDone);
+    const avgDelay = late.length
+      ? Math.round(late.reduce((s, p) => s + fabDelayDays(p, p.date_fin_reelle), 0) / late.length)
+      : 0;
+    return {
+      total: base.length,
+      onTimePct: base.length ? Math.round(((base.length - late.length) / base.length) * 100) : null,
+      late: late.length,
+      avgDelay,
+    };
+  }, [base, mode]);
+
+  const activeFilters = [projet, atelier, machine, responsable].filter(Boolean).length;
+  const resetFilters = () => { setProjet(''); setAtelier(''); setMachine(''); setResponsable(''); };
   const update = (p) => ((p.lines || []).length ? onProgress(p) : onUpdate(p));
 
   return (
     <div className="fab-page animate-fade-in">
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">{cfg.title}</h1>
-          <p className="page-subtitle">{cfg.subtitle}</p>
-        </div>
+      <FabPageHeader title={cfg.title} subtitle={cfg.subtitle}>
         <button type="button" className="btn btn-ghost btn-sm" onClick={onReload} disabled={loading}>
-          <RefreshCw size={14} /> Actualiser
+          <RefreshCw size={14} className={loading ? 'spin' : ''} /> Actualiser
         </button>
-      </div>
+      </FabPageHeader>
 
-      {error ? (
-        <div className="card" style={{ padding: 14, marginBottom: 16, color: 'var(--red)', display: 'flex', gap: 8 }}>
-          <AlertCircle size={16} /> {error}
+      {error ? <div className="fab-alert"><AlertCircle size={16} /> {error}</div> : null}
+
+      {termineStats ? (
+        <div className="fab-stats fab-stats-3">
+          <FabStat icon={<CheckCircle2 size={17} />} tone="green" label="Terminées" value={loading ? '…' : termineStats.total} />
+          <FabStat
+            icon={<Clock size={17} />}
+            tone="blue"
+            label="Dans les délais"
+            value={loading ? '…' : termineStats.onTimePct == null ? '—' : `${termineStats.onTimePct} %`}
+            active={chip === 'ontime'}
+            onClick={() => setChip(chip === 'ontime' ? 'all' : 'ontime')}
+          />
+          <FabStat
+            icon={<Timer size={17} />}
+            tone="red"
+            label="Livrées en retard"
+            value={loading ? '…' : termineStats.late}
+            sub={termineStats.late ? `${termineStats.avgDelay} j de retard en moyenne` : null}
+            active={chip === 'late'}
+            onClick={() => setChip(chip === 'late' ? 'all' : 'late')}
+          />
         </div>
       ) : null}
 
@@ -144,13 +238,15 @@ export default function FabricationList({
             <Search size={15} className="fab-search-icon" aria-hidden />
             <input
               className="fab-search-input"
-              placeholder="Recherche référence, projet, désignation"
+              placeholder="Rechercher référence, projet, désignation…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
             />
           </div>
         )}
+        chips={<FabChips options={chipOptions} value={chip} onChange={setChip} />}
         activeCount={activeFilters}
+        onReset={resetFilters}
       >
         <select className="fab-filter" value={projet} onChange={(e) => setProjet(e.target.value)}>
           <option value="">Tous les projets</option>
@@ -166,86 +262,69 @@ export default function FabricationList({
             {FAB_MACHINES.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
           </select>
         ) : null}
-        {mode === 'suivi' ? (
-          <select className="fab-filter" value={statut} onChange={(e) => setStatut(e.target.value)}>
-            <option value="">Tous les statuts</option>
-            {FAB_STATUTS.filter((s) => FAB_SUIVI_STATUTS.includes(s.value)).map((s) => (
-              <option key={s.value} value={s.value}>{s.label}</option>
-            ))}
-          </select>
-        ) : null}
         <select className="fab-filter" value={responsable} onChange={(e) => setResponsable(e.target.value)}>
           <option value="">Tous les responsables</option>
           {responsables.map((n) => <option key={n} value={n}>{n}</option>)}
         </select>
-        {mode === 'suivi' ? (
-          <select className="fab-filter" value={echeance} onChange={(e) => setEcheance(e.target.value)}>
-            <option value="">Toutes échéances</option>
-            <option value="retard">En retard</option>
-            <option value="proche">Échéance proche</option>
-          </select>
-        ) : null}
       </FabFilters>
 
-      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
-        {loading ? (
-          <div style={{ padding: 40, textAlign: 'center' }}><Loader2 size={22} /></div>
-        ) : rows.length === 0 ? (
-          <FabEmpty icon={<Icon size={22} />} title={cfg.empty} sub="Données réelles uniquement." hint={cfg.emptyHint} />
-        ) : (
-          <>
-            <div className="table-wrap fab-table-desktop">
-              <table>
+      {loading ? (
+        <div className="card fab-pad"><FabSkeleton rows={5} /></div>
+      ) : rows.length === 0 ? (
+        <div className="card">
+          <FabEmpty
+            icon={<Icon size={22} />}
+            title={base.length ? 'Aucun résultat pour ce filtre' : cfg.empty}
+            sub="Données réelles uniquement."
+            hint={base.length ? null : cfg.emptyHint}
+          />
+        </div>
+      ) : (
+        <>
+          <div className="card fab-list-table" style={{ padding: 0, overflow: 'hidden' }}>
+            <div className="table-wrap">
+              <table className="fab-table">
                 <thead>
                   {mode === 'suivi' ? (
                     <tr>
-                      <th>Référence</th>
-                      <th>Projet</th>
-                      <th>Désignation</th>
+                      <th>Production</th>
                       <th>Atelier</th>
-                      <th>Qté demandée</th>
-                      <th>Qté réalisée</th>
+                      <th>Réalisé / demandé</th>
                       <th>Responsable</th>
-                      <th>Date limite</th>
+                      <th>Échéance</th>
                       <th>Avancement</th>
                       <th>Statut</th>
-                      <th>Actions</th>
+                      <th aria-label="Actions" />
                     </tr>
                   ) : (
                     <tr>
-                      <th>Référence</th>
-                      <th>Projet</th>
-                      <th>Désignation</th>
-                      <th>Qté demandée</th>
-                      <th>Qté produite</th>
+                      <th>Production</th>
                       <th>Atelier</th>
+                      <th>Produit / demandé</th>
                       <th>Responsable</th>
-                      <th>Date fin</th>
+                      <th>Fin</th>
                       <th>Délai</th>
                       <th>Plan</th>
-                      <th>Actions</th>
+                      <th aria-label="Actions" />
                     </tr>
                   )}
                 </thead>
                 <tbody>
                   {rows.map((p) => (mode === 'suivi' ? (
-                    <tr key={p.id}>
-                      <td><strong>{p.reference}</strong></td>
-                      <td>{p.projet_nom || '—'}</td>
-                      <td>{p.designation}</td>
-                      <td>{fabAtelierFullLabel(p.atelier, p.machine_type)}</td>
-                      <td><QtyCell plan={p} field="quantite" /></td>
-                      <td><QtyCell plan={p} field="quantite_realisee" /></td>
-                      <td>{p.chef_atelier_nom || <span className="badge badge-grey">Sans responsable</span>}</td>
-                      <td>{fmtDate(p.date_fin_prevue)}</td>
-                      <td><FabProgress value={p.avancement} /></td>
+                    <tr key={p.id} className="fab-row-click" onClick={() => onView(p)}>
                       <td>
-                        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: 'flex-start' }}>
-                          <FabBadge statut={p.statut} />
-                          <FabDeadlineBadges plan={p} />
-                        </div>
+                        <strong>{p.designation}</strong>
+                        <div className="fab-card-meta">{p.reference} · {p.projet_nom || '—'}</div>
                       </td>
-                      <td><RowActions plan={p} canUpdate={canUpdate} onView={onView} onUpdate={update} /></td>
+                      <td><AtelierCell plan={p} /></td>
+                      <td><QtyCell plan={p} /></td>
+                      <td>{p.chef_atelier_nom || <span className="badge badge-orange">Sans responsable</span>}</td>
+                      <td><DueCell plan={p} /></td>
+                      <td><FabProgress value={p.avancement} /></td>
+                      <td><FabBadge statut={p.statut} /></td>
+                      <td onClick={(e) => e.stopPropagation()}>
+                        <RowActions plan={p} canUpdate={canUpdate} onView={onView} onUpdate={update} />
+                      </td>
                     </tr>
                   ) : (
                     <TermineRow key={p.id} plan={p} onView={onView} />
@@ -253,14 +332,14 @@ export default function FabricationList({
                 </tbody>
               </table>
             </div>
-            <div className="fab-cards-mobile" style={{ padding: 12 }}>
-              {rows.map((p) => (
-                <ProductionCard key={p.id} plan={p} mode={mode} canUpdate={canUpdate} onView={onView} onUpdate={update} />
-              ))}
-            </div>
-          </>
-        )}
-      </div>
+          </div>
+          <div className="fab-list-cards fab-grid-cards">
+            {rows.map((p) => (
+              <ProductionCard key={p.id} plan={p} mode={mode} canUpdate={canUpdate} onView={onView} onUpdate={update} />
+            ))}
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -269,23 +348,23 @@ function TermineRow({ plan, onView }) {
   const file = planFile(plan);
   const delay = fabOnTimeLabel(plan);
   return (
-    <tr>
-      <td><strong>{plan.reference}</strong></td>
-      <td>{plan.projet_nom || '—'}</td>
-      <td>{plan.designation}</td>
-      <td><QtyCell plan={plan} field="quantite" /></td>
-      <td><QtyCell plan={plan} field="quantite_realisee" /></td>
-      <td>{fabAtelierFullLabel(plan.atelier, plan.machine_type)}</td>
-      <td>{plan.chef_atelier_nom || '—'}</td>
-      <td>{fmtDate(plan.date_fin_reelle)}</td>
-      <td><span className={`badge ${delay.startsWith('Retard') ? 'badge-red' : 'badge-green'}`}>{delay}</span></td>
+    <tr className="fab-row-click" onClick={() => onView(plan)}>
       <td>
+        <strong>{plan.designation}</strong>
+        <div className="fab-card-meta">{plan.reference} · {plan.projet_nom || '—'}</div>
+      </td>
+      <td><AtelierCell plan={plan} /></td>
+      <td><QtyCell plan={plan} /></td>
+      <td>{plan.chef_atelier_nom || '—'}</td>
+      <td className="fab-nowrap">{fmtDate(plan.date_fin_reelle)}</td>
+      <td><span className={`badge ${isLateDone(plan) ? 'badge-red' : 'badge-green'}`}>{delay.replace('Terminé dans les délais', 'Dans les délais')}</span></td>
+      <td onClick={(e) => e.stopPropagation()}>
         {file?.url ? (
-          <a href={downloadUrl(file)} rel="noreferrer">{plan.library_plan?.reference || file.file_name || 'Plan'}</a>
+          <a className="fab-link" href={downloadUrl(file)} rel="noreferrer"><FileText size={13} /> {plan.library_plan?.reference || 'Plan'}</a>
         ) : (plan.library_plan?.reference || '—')}
       </td>
-      <td>
-        <button type="button" className="btn btn-ghost btn-sm" onClick={() => onView(plan)}><Eye size={13} /></button>
+      <td onClick={(e) => e.stopPropagation()}>
+        <button type="button" className="btn btn-ghost btn-sm" title="Détail" onClick={() => onView(plan)}><Eye size={13} /></button>
       </td>
     </tr>
   );
@@ -293,31 +372,45 @@ function TermineRow({ plan, onView }) {
 
 function ProductionCard({ plan, mode, canUpdate, onView, onUpdate }) {
   const lines = plan.lines || [];
+  const late = mode === 'termine' && isLateDone(plan);
   return (
-    <div className="fab-card">
-      <div className="fab-card-title">{plan.designation}</div>
-      <div className="fab-card-sub">{plan.reference} · {plan.projet_nom || '—'}</div>
-      <div className="fab-card-meta">{fabAtelierFullLabel(plan.atelier, plan.machine_type)} · {plan.chef_atelier_nom || 'Sans responsable'}</div>
+    <div className="fab-card fab-card-accent" style={{ '--atelier': fabAtelierColor(plan.atelier) }}>
+      <div className="fab-card-top">
+        <div className="fab-card-top-text">
+          <div className="fab-card-title">{plan.designation}</div>
+          <div className="fab-card-sub">{plan.reference} · {plan.projet_nom || '—'}</div>
+        </div>
+        <FabBadge statut={plan.statut} />
+      </div>
+      <div className="fab-card-meta">
+        <AtelierCell plan={plan} /> · {plan.chef_atelier_nom || <span className="fab-warn-text">Sans responsable</span>}
+      </div>
       {lines.length ? (
-        <div className="fab-card-meta">
-          {lines.map((l) => (
-            <div key={l.id}>
-              {l.designation} : {fabFmtQty(l.quantite_realisee)} / {fabFmtQty(l.quantite)} {fabUniteLabel(l.unite, l.unite_autre)}
+        <div className="fab-card-lines">
+          {lines.slice(0, 3).map((l) => (
+            <div key={l.id} className="fab-card-line">
+              <span className="fab-card-line-name">{l.designation}</span>
+              <span><strong>{fabFmtQty(l.quantite_realisee)}</strong> / {fabFmtQty(l.quantite)} {fabUniteLabel(l.unite, l.unite_autre)}</span>
             </div>
           ))}
+          {lines.length > 3 ? <div className="fab-qty-name">+ {lines.length - 3} autre(s)</div> : null}
         </div>
       ) : null}
-      <div className="fab-card-meta">
-        {mode === 'termine' ? `Terminée le ${fmtDate(plan.date_fin_reelle)}` : `Limite : ${fmtDate(plan.date_fin_prevue)}`}
+      <div className="fab-card-foot">
+        <FabProgress value={plan.avancement} />
+        {mode === 'suivi' ? (
+          <span className={`fab-due ${fabIsLate(plan) ? 'is-late' : fabIsDueSoon(plan) ? 'is-soon' : ''}`}>
+            {fabDueLabel(plan) || fmtDate(plan.date_fin_prevue)}
+          </span>
+        ) : (
+          <span className={`fab-due ${late ? 'is-late' : 'is-ok'}`}>
+            {late ? fabOnTimeLabel(plan).replace('Retard : ', 'Retard ') : 'Dans les délais'}
+          </span>
+        )}
       </div>
-      <FabProgress value={plan.avancement} />
-      <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
-        <FabBadge statut={plan.statut} />
-        {mode === 'suivi' ? <FabDeadlineBadges plan={plan} /> : null}
-        {mode === 'termine' ? (
-          <span className={`badge ${fabOnTimeLabel(plan).startsWith('Retard') ? 'badge-red' : 'badge-green'}`}>{fabOnTimeLabel(plan)}</span>
-        ) : null}
-      </div>
+      {mode === 'suivi' && plan.statut === 'bloque' && plan.motif_blocage ? (
+        <div className="fab-card-meta fab-warn-text">Blocage : {plan.motif_blocage}</div>
+      ) : null}
       <div className="fab-card-actions">
         <button type="button" className="btn btn-ghost btn-sm" onClick={() => onView(plan)}><Eye size={13} /> Détail</button>
         {mode === 'suivi' && canUpdate ? (
@@ -330,7 +423,7 @@ function ProductionCard({ plan, mode, canUpdate, onView, onUpdate }) {
 
 function RowActions({ plan, canUpdate, onView, onUpdate }) {
   return (
-    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+    <div className="fab-actions">
       <button type="button" className="btn btn-ghost btn-sm" title="Détail" onClick={() => onView(plan)}><Eye size={13} /></button>
       {canUpdate ? (
         <button type="button" className="btn btn-secondary btn-sm" title="Mettre à jour l’avancement" onClick={() => onUpdate(plan)}>
