@@ -23,7 +23,7 @@ function FabricationPlansRouter({ tab, onNavigate }) {
   const fab = useFabrication();
   const [preset, setPreset] = useState(null);
   const [perms, setPerms] = useState({
-    assign: false, update: false, libCreate: false, libEdit: false, ready: false,
+    assign: false, start: false, update: false, libCreate: false, libEdit: false, ready: false,
   });
   const [detail, setDetail] = useState(null);
   const [assignPlan, setAssignPlan] = useState(null);
@@ -37,13 +37,23 @@ function FabricationPlansRouter({ tab, onNavigate }) {
     let alive = true;
     (async () => {
       if (!user) return;
-      const [assign, update, libCreate, libEdit] = await Promise.all([
+      const [assign, start, update, libCreate, libEdit] = await Promise.all([
         can(user, 'fabrication-plans', 'valider'),
+        can(user, 'fabrication-plans', 'creer'),
         can(user, 'fabrication-suivi', 'modifier'),
         can(user, 'fabrication-plans-projets', 'creer'),
         can(user, 'fabrication-plans-projets', 'modifier'),
       ]);
-      if (alive) setPerms({ assign, update, libCreate, libEdit, ready: true });
+      if (alive) {
+        setPerms({
+          assign,
+          start: start || assign,
+          update,
+          libCreate,
+          libEdit,
+          ready: true,
+        });
+      }
     })();
     return () => { alive = false; };
   }, [user]);
@@ -111,7 +121,7 @@ function FabricationPlansRouter({ tab, onNavigate }) {
           onReload={fab.load}
           onOpenPlan={openDetail}
           onGo={go}
-          canStart={perms.assign}
+          canStart={perms.start}
         />
       )}
       {tab === 'fabrication-plans-projets' && (
@@ -134,7 +144,7 @@ function FabricationPlansRouter({ tab, onNavigate }) {
           loading={fab.loading}
           error={fab.error}
           onReload={fab.load}
-          canStart={perms.assign}
+          canStart={perms.start}
           canAssign={perms.assign}
           preset={presetFor('fabrication-plans')}
           onStart={(plan) => setWizard({ initialPlan: plan, draft: null })}
@@ -175,7 +185,7 @@ function FabricationPlansRouter({ tab, onNavigate }) {
         plan={libDetail?.plan}
         focus={libDetail?.focus}
         canEdit={perms.libEdit}
-        canStart={perms.assign}
+        canStart={perms.start}
         onClose={() => setLibDetail(null)}
         onEdit={(plan) => { setLibDetail(null); setLibForm({ plan }); }}
         onStart={(plan) => { setLibDetail(null); setWizard({ initialPlan: plan, draft: null }); }}
