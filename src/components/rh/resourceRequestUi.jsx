@@ -109,3 +109,61 @@ export function CoverageBadge({ coverage }) {
   if (!coverage) return null;
   return <span className={`badge ${coverage.badge}`}>{coverage.label}</span>;
 }
+
+/** Délai de prise en charge RH — même règle que public.check_resource_requests_sla. */
+export const RH_SLA_HOURS = 48;
+const HOUR_MS = 3600000;
+const SLA_WARN_MS = 12 * HOUR_MS;
+
+export function getRequestSla(r, now = Date.now()) {
+  if (!r?.created_at || r.statut !== 'en_attente') return null;
+  if (r.request_type === 'recrutement' || r.parent_request_id) return null;
+  const start = new Date(r.created_at).getTime();
+  if (Number.isNaN(start)) return null;
+  const deadline = start + RH_SLA_HOURS * HOUR_MS;
+  const remaining = deadline - now;
+  return {
+    deadline,
+    remaining,
+    overdue: remaining <= 0,
+    level: remaining <= 0 ? 'late' : remaining <= SLA_WARN_MS ? 'warn' : 'ok',
+    elapsedPct: Math.min(100, Math.max(0, ((now - start) / (RH_SLA_HOURS * HOUR_MS)) * 100)),
+  };
+}
+
+function fmtSlaDuration(ms) {
+  const totalMin = Math.floor(Math.abs(ms) / 60000);
+  const days = Math.floor(totalMin / 1440);
+  const hours = Math.floor((totalMin % 1440) / 60);
+  const minutes = totalMin % 60;
+  if (days) return `${days} j ${hours} h`;
+  if (hours) return `${hours} h ${String(minutes).padStart(2, '0')}`;
+  return `${minutes} min`;
+}
+
+const SLA_COLORS = { ok: '#2E7D32', warn: '#E65100', late: '#C62828' };
+
+export function SlaCountdown({ request, now, compact = false }) {
+  const sla = getRequestSla(request, now);
+  if (!sla) {
+    return compact ? null : <span style={{ fontSize: '0.75rem', color: 'var(--text-3)' }}>Prise en charge</span>;
+  }
+  const color = SLA_COLORS[sla.level];
+  const badge = sla.level === 'late' ? 'badge-red' : sla.level === 'warn' ? 'badge-orange' : 'badge-green';
+  const label = sla.overdue
+    ? `Retard ${fmtSlaDuration(sla.remaining)}`
+    : `${fmtSlaDuration(sla.remaining)} restantes`;
+  const title = `Échéance de prise en charge RH : ${new Date(sla.deadline).toLocaleString('fr-FR')}`;
+  return (
+    <div title={title} style={{ display: 'inline-flex', flexDirection: 'column', gap: 4, minWidth: compact ? 0 : 120 }}>
+      <span className={`badge ${badge}`} style={{ whiteSpace: 'nowrap', alignSelf: 'flex-start' }}>
+        {sla.overdue ? '⏰ ' : '⏳ '}{label}
+      </span>
+      {!compact ? (
+        <div style={{ height: 4, background: 'var(--surface-2)', borderRadius: 2, overflow: 'hidden' }}>
+          <div style={{ width: `${sla.elapsedPct}%`, height: '100%', background: color, borderRadius: 2 }} />
+        </div>
+      ) : null}
+    </div>
+  );
+}

@@ -39,6 +39,8 @@ import {
   deleteResourceRequestWarnMessage,
   CoverageProgressBar,
   CoverageBadge,
+  SlaCountdown,
+  getRequestSla,
 } from './rh/resourceRequestUi';
 
 function fmtDate(d) {
@@ -65,6 +67,13 @@ export default function DemandesRessources() {
   const [view, setView] = useState('list');
   const [detail, setDetail] = useState(null);
   const [assignOpen, setAssignOpen] = useState(false);
+  const [slaOnly, setSlaOnly] = useState(false);
+  const [now, setNow] = useState(() => Date.now());
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 60000);
+    return () => clearInterval(timer);
+  }, []);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -108,8 +117,14 @@ export default function DemandesRessources() {
 
   const stats = useMemo(() => computeResourceRequestStats(requests), [requests]);
 
+  const overdueCount = useMemo(
+    () => requests.filter((r) => getRequestSla(r, now)?.overdue).length,
+    [requests, now],
+  );
+
   const filtered = useMemo(() => {
     let list = filterRequestsByTab(requests, activeTab);
+    if (slaOnly) list = list.filter((r) => getRequestSla(r, now)?.overdue);
     const q = search.toLowerCase().trim();
     if (!q) return list;
     return list.filter((r) =>
@@ -118,7 +133,7 @@ export default function DemandesRessources() {
       || (r.fonction || '').toLowerCase().includes(q)
       || (r.requested_by_name || '').toLowerCase().includes(q),
     );
-  }, [requests, activeTab, search]);
+  }, [requests, activeTab, search, slaOnly, now]);
 
   async function openDetail(id, openAssign = false) {
     setDetailLoading(true);
@@ -370,6 +385,22 @@ export default function DemandesRessources() {
         <div
           role="button"
           tabIndex={0}
+          onClick={() => setSlaOnly((v) => !v)}
+          onKeyDown={(e) => e.key === 'Enter' && setSlaOnly((v) => !v)}
+          style={{ cursor: 'pointer', borderRadius: 12, outline: slaOnly ? '2px solid var(--red)' : 'none' }}
+          title={slaOnly ? 'Afficher toutes les demandes' : 'Afficher uniquement les demandes hors délai 48 h'}
+        >
+          <KpiCard
+            icon={<Clock size={17} />}
+            label="Hors délai 48 h"
+            value={loading ? '—' : overdueCount}
+            sub={slaOnly ? 'filtre actif — cliquer pour retirer' : 'non prises en charge'}
+            color="red"
+          />
+        </div>
+        <div
+          role="button"
+          tabIndex={0}
           onClick={() => setActiveTab('cloturee')}
           onKeyDown={(e) => e.key === 'Enter' && setActiveTab('cloturee')}
           style={{ cursor: 'pointer' }}
@@ -474,8 +505,9 @@ export default function DemandesRessources() {
                   {r.date_souhaitee ? (
                     <div className="rh-m-card-meta">Souhaitée : {fmtDate(r.date_souhaitee)}</div>
                   ) : null}
-                  <div style={{ marginTop: 6 }}>
+                  <div style={{ marginTop: 6, display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
                     <span className={`badge ${statutBadgeClass(derived.statut)}`}>{derived.label}</span>
+                    <SlaCountdown request={r} now={now} compact />
                   </div>
                   <div className="rh-m-card-actions">
                     <button type="button" className="btn btn-ghost btn-sm" title="Voir" aria-label="Voir" onClick={() => openDetail(r.id)}>
@@ -514,7 +546,7 @@ export default function DemandesRessources() {
 
           <div className="card rh-desk-only" style={{ padding: 0 }}>
             <div className="table-wrap" style={{ overflowX: 'auto' }}>
-              <table style={{ minWidth: 1200 }}>
+              <table style={{ minWidth: 1320 }}>
                 <thead>
                   <tr>
                     <th>Référence</th>
@@ -527,6 +559,7 @@ export default function DemandesRessources() {
                     <th>Priorité</th>
                     <th>Date souhaitée</th>
                     <th>Statut</th>
+                    <th>Délai RH (48 h)</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
@@ -555,6 +588,9 @@ export default function DemandesRessources() {
                         <td data-label="Date souhaitée">{fmtDate(r.date_souhaitee)}</td>
                         <td data-label="Statut">
                           <span className={`badge ${statutBadgeClass(derived.statut)}`}>{derived.label}</span>
+                        </td>
+                        <td data-label="Délai RH">
+                          <SlaCountdown request={r} now={now} />
                         </td>
                         <td data-label="Actions">
                           <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
