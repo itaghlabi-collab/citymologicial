@@ -12,9 +12,11 @@ import ArticleScanBar from './ArticleScanBar.jsx';
 import { EMPLACEMENTS_STOCK, INPUT_STYLE, SELECT_STYLE, filterVisibleEmplacements } from './shared.jsx';
 import { articleScanLabel } from '../../services/inventaire/scanFeedback';
 
-const CHANTIER_EMPLACEMENTS = filterVisibleEmplacements(EMPLACEMENTS_STOCK.filter((e) =>
-  e.toUpperCase().includes('CHANTIER') || e.toUpperCase().includes('VILLA') || e.includes('LOGIPARC') || e.includes('ONDA'),
-));
+const CHANTIER_EMPLACEMENTS = filterVisibleEmplacements(EMPLACEMENTS_STOCK.filter((e) => {
+  const u = e.toUpperCase();
+  return u.includes('CHANTIER') || u.includes('VILLA') || u.includes('LOGIPARC') || u.includes('ONDA')
+    || u.includes('GISSAH') || u.includes('WYCON') || u.includes('PIAZZA') || u.includes('LAMARTINE');
+}));
 
 export default function AffectationMaterielScan() {
   const { user } = useAuth();
