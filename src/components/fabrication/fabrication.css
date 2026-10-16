@@ -461,6 +461,37 @@
   margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--border);
 }
 
+/* ---------- Cartes projet (drill-down) ---------- */
+.fab-project-grid { margin-top: 4px; }
+.fab-project-card {
+  text-align: left; cursor: pointer; border: 1.5px solid var(--border);
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+}
+.fab-project-card:hover {
+  border-color: var(--red); box-shadow: var(--shadow-lg); transform: translateY(-1px);
+}
+.fab-project-card-top {
+  display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;
+}
+.fab-project-icon {
+  width: 36px; height: 36px; border-radius: 10px; display: inline-flex;
+  align-items: center; justify-content: center; background: var(--red-light); color: var(--red);
+}
+.fab-project-chevron { color: var(--text-3); flex-shrink: 0; }
+.fab-project-stats {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  margin-top: 10px; font-size: 0.82rem; color: var(--text-2);
+}
+.fab-pill {
+  display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 99px;
+  font-size: 0.72rem; font-weight: 800; background: var(--surface-2); color: var(--text-2);
+}
+.fab-pill.tone-blue { background: #E3F2FD; color: #1565C0; }
+.fab-pill.tone-orange { background: #FFF3E0; color: #E65100; }
+
+.fab-wizard-page .fab-wizard-card { padding: 20px; max-width: 920px; }
+.fab-wizard-page .fab-steps { margin-bottom: 18px; }
+
 .fab-progress-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 10px; align-items: end; font-size: 0.82rem; }
 .fab-progress-grid span { display: block; color: var(--text-3); font-size: 0.7rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; margin-bottom: 5px; }
 .fab-op-row {

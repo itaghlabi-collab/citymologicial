@@ -110,6 +110,22 @@ function FabricationPlansRouter({ tab, onNavigate }) {
     }
   }
 
+  if (wizard) {
+    return (
+      <DebuterProductionWizard
+        open
+        initialPlan={wizard.initialPlan || null}
+        draft={wizard.draft || null}
+        library={fab.library}
+        staff={fab.staff}
+        projects={fab.projects}
+        saving={fab.saving}
+        onClose={() => setWizard(null)}
+        onSave={fab.saveProduction}
+      />
+    );
+  }
+
   return (
     <>
       {tab === 'fabrication' && (
@@ -199,17 +215,6 @@ function FabricationPlansRouter({ tab, onNavigate }) {
         currentUserName={userName}
         onClose={() => setLibForm(null)}
         onSubmit={fab.saveLibraryPlan}
-      />
-      <DebuterProductionWizard
-        open={Boolean(wizard)}
-        initialPlan={wizard?.initialPlan || null}
-        draft={wizard?.draft || null}
-        library={fab.library}
-        staff={fab.staff}
-        projects={fab.projects}
-        saving={fab.saving}
-        onClose={() => setWizard(null)}
-        onSave={fab.saveProduction}
       />
       <ProgressUpdateModal
         open={Boolean(progressPlan)}

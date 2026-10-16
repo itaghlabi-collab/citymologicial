@@ -190,7 +190,7 @@ function cleanLines(lines = []) {
 
 function validateProduction(payload, lines, draft) {
   if (!payload.project?.id) throw new Error('Le projet est obligatoire.');
-  if (!lines.length) throw new Error('Ajoutez au moins une désignation.');
+  if (!lines.length) throw new Error('Ajoutez au moins une tâche de production.');
   if (draft) return;
   if (!payload.library_plan_id) throw new Error('Sélectionnez un plan.');
   lines.forEach((l, i) => {

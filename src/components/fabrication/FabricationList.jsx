@@ -28,7 +28,7 @@ const MODES = {
     title: 'Suivi de production',
     subtitle: 'Productions lancées — quantités, avancement et échéances',
     empty: 'Aucune production en cours',
-    emptyHint: 'Les productions débutées depuis « Plans à fabriquer » apparaissent ici.',
+    emptyHint: 'Les productions débutées depuis « Démarrage de production » apparaissent ici.',
     icon: Hammer,
   },
   termine: {
@@ -92,7 +92,7 @@ function QtyCell({ plan, max = 2 }) {
           {lines.length > 1 ? <span className="fab-qty-name"> · {l.designation}</span> : null}
         </div>
       ))}
-      {lines.length > max ? <div className="fab-qty-name">+ {lines.length - max} autre(s) désignation(s)</div> : null}
+      {lines.length > max ? <div className="fab-qty-name">+ {lines.length - max} autre(s) tâche(s)</div> : null}
     </div>
   );
 }

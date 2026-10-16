@@ -310,18 +310,18 @@ export function PlanDetailModal({ open, onClose, plan, canUpdate = false, onOper
         ) : null}
         {lines.length ? (
           <div className="fab-span-2">
-            <FabField label="Désignations">
+            <FabField label="Tâches de production">
               <div className="table-wrap">
                 <table>
                   <thead>
-                    <tr><th>Désignation</th><th>Atelier</th><th>Demandée</th><th>Réalisée</th><th>Restante</th><th>Avancement</th></tr>
+                    <tr><th>Tâche</th><th>Atelier</th><th>Demandée</th><th>Réalisée</th><th>Restante</th><th>Avancement</th></tr>
                   </thead>
                   <tbody>
                     {lines.map((l) => {
                       const unit = fabUniteLabel(l.unite, l.unite_autre);
                       return (
                         <tr key={l.id}>
-                          <td data-label="Désignation">{l.designation}{l.description ? <div className="fab-card-meta">{l.description}</div> : null}</td>
+                          <td data-label="Tâche">{l.designation}{l.description ? <div className="fab-card-meta">{l.description}</div> : null}</td>
                           <td data-label="Atelier">{fabAtelierFullLabel(l.atelier, l.machine_type)}</td>
                           <td data-label="Demandée">{fabFmtQty(l.quantite)} {unit}</td>
                           <td data-label="Réalisée">{fabFmtQty(l.quantite_realisee)} {unit}</td>

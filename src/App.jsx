@@ -161,7 +161,7 @@ const NAV = [
     items: [
       { id: 'fabrication',            label: 'Tableau de bord',       icon: Factory },
       { id: 'fabrication-plans-projets', label: 'Plans / Projets',    icon: FolderOpen },
-      { id: 'fabrication-plans',      label: 'Plans à fabriquer',     icon: Inbox },
+      { id: 'fabrication-plans',      label: 'Démarrage de production', icon: Inbox },
       { id: 'fabrication-suivi',      label: 'Suivi de production',   icon: Hammer },
       { id: 'fabrication-terminee',   label: 'Production terminée',   icon: CheckCircle2 },
       { id: 'fabrication-bons-livraison', label: 'Bon de livraison',  icon: PackageCheck },
@@ -263,7 +263,7 @@ const MODULE_LABELS = {
   'cr-sav':            'Comptes rendus SAV',
   fabrication:         'Fabrication',
   'fabrication-plans-projets': 'Plans / Projets',
-  'fabrication-plans': 'Plans à fabriquer',
+  'fabrication-plans': 'Démarrage de production',
   'fabrication-suivi': 'Suivi de production',
   'fabrication-terminee': 'Production terminée',
   'fabrication-bons-livraison': 'Bon de livraison',

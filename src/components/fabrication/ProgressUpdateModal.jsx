@@ -77,7 +77,7 @@ export default function ProgressUpdateModal({ open, onClose, production, onSubmi
           <div style={{ fontSize: '0.84rem', color: 'var(--text-2)' }}>{production.designation}</div>
         </div>
 
-        <div className="fab-section-title">Quantités par désignation</div>
+        <div className="fab-section-title">Quantités par tâche de production</div>
         {previewLines.map((l) => {
           const restante = Math.max(0, l.quantite - l.quantite_realisee);
           const unit = fabUniteLabel(l.unite, l.unite_autre);
@@ -107,7 +107,7 @@ export default function ProgressUpdateModal({ open, onClose, production, onSubmi
         })}
 
         <div className="fab-card-meta" style={{ margin: '4px 0 12px' }}>
-          Avancement global (moyenne des désignations) : <strong>{globalPct} %</strong>
+          Avancement global (moyenne des tâches) : <strong>{globalPct} %</strong>
         </div>
 
         <div className="fab-form-grid">

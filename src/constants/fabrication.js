@@ -175,3 +175,31 @@ export function fabOnTimeLabel(plan) {
   if (delay <= 0) return 'Terminé dans les délais';
   return `Retard : ${delay} jour${delay > 1 ? 's' : ''}`;
 }
+
+/** Poste « ouvrier » / métier d’atelier (affectation production). */
+const FAB_OUVRIER_POSTE_RE = /ouvrier|menuisier|ferron|aluminium|machinist|peintre|soudeur|monteur|plaquiste|electricien|plombier|carreleur|macon|maçon/;
+
+export function isOuvrierPoste(poste = '', department = '') {
+  const blob = `${poste} ${department}`
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '');
+  if (!blob.trim()) return false;
+  if (/\b(chef|responsable|directeur|comptable|commercial)\b/.test(blob) && !/ouvrier/.test(blob)) {
+    return false;
+  }
+  return FAB_OUVRIER_POSTE_RE.test(blob);
+}
+
+/** Groupe une liste d’éléments par nom de projet (clé d’affichage). */
+export function groupByProjetNom(items, getNom = (x) => x.projet_nom) {
+  const map = new Map();
+  (items || []).forEach((item) => {
+    const nom = String(getNom(item) || '').trim() || 'Sans projet';
+    if (!map.has(nom)) map.set(nom, []);
+    map.get(nom).push(item);
+  });
+  return [...map.entries()]
+    .sort((a, b) => a[0].localeCompare(b[0], 'fr'))
+    .map(([nom, rows]) => ({ nom, rows }));
+}
