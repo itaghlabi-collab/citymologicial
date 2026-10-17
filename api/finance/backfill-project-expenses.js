@@ -19,6 +19,7 @@ import {
   OP_LIVE_STATUT,
   SKIP_CHARGE_STATUTS,
 } from '../../lib/financeProjectExpenseSync.mjs';
+import { fetchAllRows } from '../../lib/supabaseFetchAllRows.mjs';
 
 export const config = { maxDuration: 120 };
 
@@ -64,20 +65,23 @@ export default async function handler(req, res) {
       { data: existingExpenses, error: expErr },
     ] = await Promise.all([
       admin.from('projects').select('id, ref, nom'),
-      admin
+      fetchAllRows(() => admin
         .from('finance_charges')
         .select('id, project_id, projet_lie, date_charge, libelle, categorie, fournisseur, montant, mode_paiement, statut, ref_charge, commentaire, created_at')
-        .or('project_id.not.is.null,projet_lie.not.is.null'),
-      admin
+        .or('project_id.not.is.null,projet_lie.not.is.null')
+        .order('id', { ascending: true })),
+      fetchAllRows(() => admin
         .from('payment_orders')
         .select('id, project_id, purchase_request_id, purchase_acquisition_order_id, date_ordre, date_paiement, motif, ref_ordre, commentaire, observation, fournisseur_lie, beneficiaire, montant, montant_ttc, mode_paiement, statut, created_at')
         .eq('statut', OP_LIVE_STATUT)
-        .not('project_id', 'is', null),
-      admin
+        .not('project_id', 'is', null)
+        .order('id', { ascending: true })),
+      fetchAllRows(() => admin
         .from('project_expenses')
         .select('id, source_type, source_id, project_id, montant, element_depense, statut')
         .not('source_type', 'is', null)
-        .not('source_id', 'is', null),
+        .not('source_id', 'is', null)
+        .order('id', { ascending: true })),
     ]);
 
     if (chargesErr) return res.status(500).json({ error: chargesErr.message });

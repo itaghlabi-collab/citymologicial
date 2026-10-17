@@ -2,6 +2,7 @@
  * projectExpenseData.js — Agrégations dashboard / liste projets
  */
 import { getSupabase } from '../../lib/supabase';
+import { fetchAllRows } from '../supabase/fetchAllRows';
 import { expenseMatchesProject } from './projectExpenseMerge';
 import { isCountedProjectExpense, filterChantierProjectsForDepenses } from './projectExpenseRules';
 
@@ -115,8 +116,14 @@ export async function fetchErpContextForProjects() {
   const sb = getSupabase();
   // payment_orders : colonne = montant (pas montant_ttc) — select invalide → 400 PostgREST
   const [ordersRes, oaRes] = await Promise.all([
-    sb.from('payment_orders').select('id, project_id, montant, statut').not('project_id', 'is', null),
-    sb.from('purchase_acquisition_orders').select('id, project_id, montant_ttc, statut').not('project_id', 'is', null),
+    fetchAllRows(() => sb.from('payment_orders')
+      .select('id, project_id, montant, statut')
+      .not('project_id', 'is', null)
+      .order('id', { ascending: true })),
+    fetchAllRows(() => sb.from('purchase_acquisition_orders')
+      .select('id, project_id, montant_ttc, statut')
+      .not('project_id', 'is', null)
+      .order('id', { ascending: true })),
   ]);
   if (ordersRes.error) console.warn('[CITYMO] fetchErpContext payment_orders', ordersRes.error);
   if (oaRes.error) console.warn('[CITYMO] fetchErpContext purchase_acquisition_orders', oaRes.error);

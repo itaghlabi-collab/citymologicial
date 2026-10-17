@@ -3,6 +3,7 @@
  */
 import { verifySupabaseAccessTokenVercel } from '../../lib/verifySupabaseTokenVercel.mjs';
 import { getSupabaseAdmin } from '../../lib/supabaseAdminVercel.mjs';
+import { fetchAllRows } from '../../lib/supabaseFetchAllRows.mjs';
 import {
   buildProjectIndexes,
   resolveChargeProject,
@@ -63,11 +64,12 @@ export default async function handler(req, res) {
 
     const [{ data: projects }, { data: charges, error: chargesErr }] = await Promise.all([
       admin.from('projects').select('id, ref, nom'),
-      admin
+      fetchAllRows(() => admin
         .from('finance_charges')
         .select('id, project_id, projet_lie, date_charge, libelle, categorie, fournisseur, montant, mode_paiement, statut, ref_charge, commentaire')
         .eq('statut', CHARGE_SYNC_STATUT)
-        .or('project_id.not.is.null,projet_lie.not.is.null'),
+        .or('project_id.not.is.null,projet_lie.not.is.null')
+        .order('id', { ascending: true })),
     ]);
 
     if (chargesErr) {

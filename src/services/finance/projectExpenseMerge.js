@@ -2,6 +2,7 @@
  * projectExpenseMerge.js — Fusion dépenses générales (finance_charges) + project_expenses
  */
 import { getSupabase } from '../../lib/supabase';
+import { fetchAllRows } from '../supabase/fetchAllRows';
 import { ORIGINE_LABELS } from './projectExpenses';
 import {
   isChargeEligibleForBackfill,
@@ -187,11 +188,12 @@ async function fetchLinkedChargesViaApi() {
 }
 
 export async function fetchLinkedChargesForProjects() {
-  const { data, error } = await getSupabase()
+  const { data, error } = await fetchAllRows(() => getSupabase()
     .from('finance_charges')
     .select('id, project_id, projet_lie, date_charge, libelle, categorie, fournisseur, montant, mode_paiement, statut, ref_charge, commentaire')
     .or('project_id.not.is.null,projet_lie.not.is.null')
-    .order('date_charge', { ascending: false });
+    .order('date_charge', { ascending: false })
+    .order('id', { ascending: true }));
 
   if (!error && Array.isArray(data) && data.length) {
     return data.filter(
