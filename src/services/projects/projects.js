@@ -109,13 +109,23 @@ export async function generateProjectRef() {
   const y = now.getFullYear();
   const m = String(now.getMonth() + 1).padStart(2, '0');
   const prefix = `PRJ-${y}${m}-`;
-  const { count, error } = await getSupabase()
+  const { data, error } = await getSupabase()
     .from(TABLE)
-    .select('*', { count: 'exact', head: true })
+    .select('ref')
     .like('ref', `${prefix}%`);
   if (error) throw error;
-  const seq = String((count || 0) + 1).padStart(4, '0');
-  return `${prefix}${seq}`;
+  const maxSeq = (data || []).reduce((max, row) => {
+    const n = Number.parseInt(String(row.ref || '').slice(prefix.length), 10);
+    return Number.isFinite(n) && n > max ? n : max;
+  }, 0);
+  return `${prefix}${String(maxSeq + 1).padStart(4, '0')}`;
+}
+
+const AUTO_PROJECT_REF_RE = /^PRJ-\d{6}-\d{4,}$/;
+
+function isProjectRefConflict(error) {
+  if (error?.code !== '23505') return false;
+  return /projects_ref_unique|\(ref\)/i.test(`${error.message || ''} ${error.details || ''}`);
 }
 
 const SELECT_FOR_LINK = 'id, nom, ref, client_nom, statut, created_at';
@@ -259,18 +269,22 @@ export async function getProjectById(id) {
 
 export async function createProject(form) {
   await getAuthUserId();
-  const ref = form.ref?.trim() || await generateProjectRef();
-  const row = { ...toProjectRow({ ...form, ref }), ref };
-  const { data, error } = await getSupabase()
-    .from(TABLE)
-    .insert([row])
-    .select('*')
-    .single();
-  if (error) {
+  let ref = form.ref?.trim() || await generateProjectRef();
+  for (let attempt = 0; ; attempt += 1) {
+    const row = { ...toProjectRow({ ...form, ref }), ref };
+    const { data, error } = await getSupabase()
+      .from(TABLE)
+      .insert([row])
+      .select('*')
+      .single();
+    if (!error) return getProjectById(data.id);
+    if (attempt < 5 && AUTO_PROJECT_REF_RE.test(ref) && isProjectRefConflict(error)) {
+      ref = await generateProjectRef();
+      continue;
+    }
     console.error('[CITYMO] projects insert', error, row);
     throw error;
   }
-  return getProjectById(data.id);
 }
 
 export async function updateProject(id, form) {
