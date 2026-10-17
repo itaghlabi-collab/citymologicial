@@ -130,20 +130,30 @@ function toRow(form, userId) {
   };
 }
 
+/** PostgREST plafonne chaque réponse à 1000 lignes : lecture par pages. */
+const LIST_PAGE_SIZE = 1000;
+
 export async function listProjectExpenses(filters = {}) {
-  let q = getSupabase()
-    .from(TABLE)
-    .select(filters.withProjectJoin ? SELECT : LIST_SELECT)
-    .order('date_depense', { ascending: false });
-  if (filters.project_id) q = q.eq('project_id', filters.project_id);
-  if (filters.origine) q = q.eq('origine', filters.origine);
-  if (filters.statut) q = q.eq('statut', filters.statut);
-  const { data, error } = await q;
-  if (error) {
-    console.error('[CITYMO] project_expenses list', error);
-    throw error;
+  const rows = [];
+  for (let from = 0; ; from += LIST_PAGE_SIZE) {
+    let q = getSupabase()
+      .from(TABLE)
+      .select(filters.withProjectJoin ? SELECT : LIST_SELECT)
+      .order('date_depense', { ascending: false })
+      .order('id', { ascending: true })
+      .range(from, from + LIST_PAGE_SIZE - 1);
+    if (filters.project_id) q = q.eq('project_id', filters.project_id);
+    if (filters.origine) q = q.eq('origine', filters.origine);
+    if (filters.statut) q = q.eq('statut', filters.statut);
+    const { data, error } = await q;
+    if (error) {
+      console.error('[CITYMO] project_expenses list', error);
+      throw error;
+    }
+    rows.push(...(data || []));
+    if (!data || data.length < LIST_PAGE_SIZE) break;
   }
-  return (data || []).map(normalizeProjectExpense);
+  return rows.map(normalizeProjectExpense);
 }
 
 export async function createProjectExpense(form) {
