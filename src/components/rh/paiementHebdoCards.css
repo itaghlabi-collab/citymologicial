@@ -1,0 +1,83 @@
+/* =============================================
+   Paiement hebdo ouvriers — cartes par ouvrier (2 niveaux)
+   ============================================= */
+.ph-list { display: flex; flex-direction: column; gap: 10px; }
+
+.ph-worker {
+  background: var(--surface, #fff); border: 1px solid var(--border); border-radius: 12px;
+  overflow: hidden; transition: box-shadow 0.15s, border-color 0.15s;
+}
+.ph-worker.is-open { border-color: rgba(211, 47, 47, 0.35); box-shadow: 0 2px 12px rgba(0, 0, 0, 0.05); }
+
+.ph-worker-head {
+  display: flex; align-items: center; gap: 12px; width: 100%;
+  padding: 12px 16px; background: none; border: none; cursor: pointer; text-align: left;
+  font-family: var(--font-body);
+}
+.ph-worker-head:hover { background: #fafbfc; }
+.ph-avatar {
+  width: 36px; height: 36px; border-radius: 50%; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--red-light); color: var(--red); font-weight: 800; font-size: 0.8rem;
+}
+.ph-worker-main { flex: 1; min-width: 0; }
+.ph-worker-name {
+  font-family: var(--font-head); font-weight: 800; font-size: 0.95rem; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ph-worker-sub { font-size: 0.76rem; color: var(--text-3); margin-top: 2px; }
+.ph-amount { font-weight: 800; color: var(--red); white-space: nowrap; font-size: 0.98rem; }
+.ph-amount.is-sm { font-size: 0.88rem; }
+.ph-chevron { color: var(--text-3); flex-shrink: 0; transition: transform 0.15s; }
+.is-open > .ph-worker-head .ph-chevron,
+.is-open > .ph-site-head .ph-chevron { transform: rotate(90deg); color: var(--red); }
+
+.ph-status {
+  display: inline-flex; align-items: center; padding: 3px 10px; border-radius: 999px;
+  font-size: 0.7rem; font-weight: 700; white-space: nowrap;
+}
+.ph-status.s-paye { background: #E8F5E9; color: #2E7D32; }
+.ph-status.s-attente { background: #FFF3E0; color: #E65100; }
+.ph-status.s-partiel { background: #E3F2FD; color: #1565C0; }
+.ph-status.s-annule { background: #FFEBEE; color: #C62828; }
+.ph-status.s-mixte { background: #F5F5F5; color: #616161; }
+
+.ph-sites { padding: 4px 14px 14px; display: flex; flex-direction: column; gap: 8px; }
+.ph-sites-title {
+  font-size: 0.68rem; font-weight: 800; letter-spacing: 0.08em; text-transform: uppercase;
+  color: var(--text-3); padding: 4px 2px 0;
+}
+.ph-site { background: var(--surface-2, #f6f7f8); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
+.ph-site.is-open { border-color: rgba(211, 47, 47, 0.3); }
+.ph-site-head {
+  display: flex; align-items: center; gap: 10px; width: 100%;
+  padding: 10px 12px; background: none; border: none; cursor: pointer; text-align: left;
+  font-family: var(--font-body);
+}
+.ph-site-name { flex: 1; min-width: 0; font-weight: 700; font-size: 0.86rem; color: var(--text); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ph-site-days { font-size: 0.78rem; color: var(--text-2); white-space: nowrap; }
+
+.ph-detail { background: #fff; border-top: 1px solid var(--border); padding: 12px 14px; }
+.ph-detail-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px 14px; }
+.ph-kv span { display: block; font-size: 0.66rem; font-weight: 700; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.04em; }
+.ph-kv strong { font-size: 0.86rem; color: var(--text); font-weight: 600; }
+.ph-kv.is-total strong { color: var(--red); font-weight: 800; }
+.ph-kv.is-minus strong { color: #C62828; }
+.ph-detail-actions {
+  display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: flex-end;
+  margin-top: 12px; padding-top: 10px; border-top: 1px dashed var(--border);
+}
+.ph-detail-actions .ph-status-select { margin-right: auto; }
+
+@media (max-width: 900px) {
+  .ph-detail-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 560px) {
+  .ph-worker-head { padding: 10px 12px; gap: 10px; flex-wrap: wrap; }
+  .ph-worker-main { flex-basis: calc(100% - 90px); }
+  .ph-sites { padding: 2px 10px 10px; }
+  .ph-site-head { flex-wrap: wrap; }
+  .ph-site-name { flex-basis: 100%; }
+  .ph-detail-actions { justify-content: flex-start; }
+  .ph-detail-actions .ph-status-select { margin-right: 0; width: 100%; }
+}

@@ -1,7 +1,8 @@
 import {
   Banknote, CheckCircle, Filter, Search, Users, TrendingUp, Plus, Trash2, Loader2, X,
-  FileDown, Printer, RefreshCw, Building2, Calendar, Eye, Pencil,
+  FileDown, Printer, RefreshCw, Building2, Calendar, Eye, Pencil, ChevronRight,
 } from 'lucide-react';
+import './rh/paiementHebdoCards.css';
 import { useState, useRef, useMemo, useEffect } from 'react';
 import { useWorkerPayroll } from '../hooks/useWorkerPayroll';
 import {
@@ -134,6 +135,8 @@ export default function PaiementHebdo() {
   const [editRecord, setEditRecord] = useState(null);
   const [detailId, setDetailId] = useState(null);
   const [detailChefChantier, setDetailChefChantier] = useState('');
+  const [openWorkerKey, setOpenWorkerKey] = useState('');
+  const [openLineKey, setOpenLineKey] = useState('');
   const [form, setForm] = useState(EMPTY_BATCH);
   const [editForm, setEditForm] = useState({});
   const [errors, setErrors] = useState({});
@@ -459,6 +462,40 @@ export default function PaiementHebdo() {
       count: summaryCount,
     };
   }, [enrichedGroups, summaryCount]);
+
+  /** Affichage par ouvrier : regroupe les lignes de paiement existantes (aucun recalcul, aucune fusion). */
+  const workerCards = useMemo(() => {
+    const map = new Map();
+    enrichedGroups.forEach((g) => {
+      g.lignes.forEach((p) => {
+        const wKey = String(p.workerId || p.ouvrier || '');
+        if (!map.has(wKey)) map.set(wKey, { key: wKey, ouvrier: p.ouvrier || '—', lines: [] });
+        map.get(wKey).lines.push({ line: p, chefChantier: p.chefChantier || g.chefChantier || '' });
+      });
+    });
+    return [...map.values()].map((c) => {
+      const statuts = [...new Set(c.lines.map(({ line }) => line.statut))];
+      return {
+        ...c,
+        totalNet: Math.round(c.lines.reduce((s, { line }) => s + (Number(line.total) || 0), 0) * 100) / 100,
+        statut: statuts.length === 1 ? statuts[0] : 'Mixte',
+        nbChantiers: new Set(c.lines.map(({ line }) => String(line.projectId || line.projet || ''))).size,
+      };
+    }).sort((a, b) => a.ouvrier.localeCompare(b.ouvrier, 'fr'));
+  }, [enrichedGroups]);
+
+  function lineKey(p) {
+    return String(p.key || p.id || `${p.workerId}|${p.projectId}|${p.semaineDebut}`);
+  }
+
+  function statusClass(statut) {
+    if (statut === 'Payé') return 's-paye';
+    if (statut === 'En attente') return 's-attente';
+    if (statut === 'Partiellement payé') return 's-partiel';
+    if (statut === 'Annulé') return 's-annule';
+    return 's-mixte';
+  }
+
   const allSelected = projectWorkers.length > 0 && projectWorkers.every((w) => form.selected[w.id]?.checked);
   const editPreview = editRecord ? calcWorkerPayrollTotals({
     joursPaies: editRecord.joursPaies,
@@ -593,98 +630,113 @@ export default function PaiementHebdo() {
           </button>
         </div>
       ) : (
-        enrichedGroups.map((group) => (
-          <div key={payrollGroupKey(group)} className="card rh-ext-group-card">
-            <div className="rh-ext-group-head">
-              <div className="rh-ext-group-head-inner">
-                <div>
-                  <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.05rem', marginBottom: 6 }}>
-                    <Building2 size={16} style={{ verticalAlign: -2, marginRight: 6 }} />
-                    {group.projet}
-                  </div>
-                  <div style={{ fontSize: '0.83rem', color: 'var(--text-3)' }}>
-                    {filterSemaine ? fmtWeekRange(group.semaineDebut, group.semaineFin) : 'Toutes les semaines'} · {group.lignes.length} ouvrier{group.lignes.length > 1 ? 's' : ''}
-                  </div>
-                </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div style={{ fontSize: '0.78rem', color: 'var(--text-3)' }}>Total net</div>
-                  <div style={{ fontWeight: 800, color: 'var(--red)', fontSize: '1.05rem' }}>{fmtMAD(group.totalNet)}</div>
-                </div>
-              </div>
-            </div>
+        <div className="ph-list">
+          {workerCards.map((card) => {
+            const wOpen = openWorkerKey === card.key;
+            const initials = card.ouvrier.split(/\s+/).filter(Boolean).slice(0, 2).map((s) => s[0]).join('').toUpperCase();
+            return (
+              <div key={card.key} className={`ph-worker${wOpen ? ' is-open' : ''}`}>
+                <button
+                  type="button"
+                  className="ph-worker-head"
+                  aria-expanded={wOpen}
+                  onClick={() => { setOpenWorkerKey(wOpen ? '' : card.key); setOpenLineKey(''); }}
+                >
+                  <span className="ph-avatar">{initials || '?'}</span>
+                  <span className="ph-worker-main">
+                    <span className="ph-worker-name" style={{ display: 'block' }}>{card.ouvrier}</span>
+                    <span className="ph-worker-sub" style={{ display: 'block' }}>
+                      {card.nbChantiers} chantier{card.nbChantiers > 1 ? 's' : ''}
+                      {filterSemaine ? ` · ${fmtWeekRange(filterSemaine, weekEndSunday(filterSemaine))}` : ''}
+                    </span>
+                  </span>
+                  <span className={`ph-status ${statusClass(card.statut)}`}>{card.statut}</span>
+                  <span className="ph-amount">{fmtMAD(card.totalNet)}</span>
+                  <ChevronRight size={18} className="ph-chevron" aria-hidden />
+                </button>
 
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Ouvrier</th><th>Projet / chantier</th><th>Chef chantier</th><th>Présences</th>
-                    <th>H. travaillées</th><th>Retard</th><th>Tarif/h</th><th>Net à payer</th>
-                    <th>Statut</th><th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {group.lignes.map((p) => (
-                    <tr key={p.key || p.id} className="rh-ext-compact-row rh-payroll-row">
-                      <td data-label="Ouvrier">
-                        <button
-                          type="button"
-                          onClick={() => openDetail(p, group.chefChantier)}
-                          style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontWeight: 700, color: 'var(--text)', textAlign: 'left', fontFamily: 'inherit', fontSize: 'inherit' }}
-                        >
-                          {p.ouvrier}
-                        </button>
-                      </td>
-                      <td data-label="Projet / chantier">{p.projet || group.projet || '—'}</td>
-                      <td data-label="Chef chantier">{p.chefChantier || group.chefChantier || '—'}</td>
-                      <td data-label="Présences">{p.nbPresences ?? p.presenceLignes?.length ?? p.nbJoursTravailles ?? 0}</td>
-                      <td data-label="H. travaillées">{fmtHours(p.heuresNormales)}</td>
-                      <td data-label="Retard" style={{ color: p.totalRetard > 0 ? '#E65100' : 'var(--text-3)' }}>{p.totalRetard > 0 ? fmtHours(p.totalRetard) : '—'}</td>
-                      <td data-label="Tarif/h">{fmtMAD(p.tarifHoraire)}</td>
-                      <td data-label="Net à payer" style={{ fontWeight: 800, color: 'var(--red)' }}>{fmtMAD(p.total)}</td>
-                      <td data-label="Statut">
-                        <select
-                          value={PAYROLL_UI_STATUTS.includes(p.statut) ? p.statut : ''}
-                          onChange={(e) => handleStatutChange(p, e.target.value)}
-                          disabled={saving}
-                          style={statutSelectStyle(PAYROLL_UI_STATUTS.includes(p.statut) ? p.statut : 'En attente')}
-                          aria-label={`Statut paiement ${p.ouvrier}`}
-                        >
-                          {!PAYROLL_UI_STATUTS.includes(p.statut) && (
-                            <option value="" disabled>{p.statut}</option>
-                          )}
-                          {PAYROLL_UI_STATUTS.map((s) => <option key={s} value={s}>{s}</option>)}
-                        </select>
-                      </td>
-                      <td data-label="Actions" className="payment-actions-cell">
-                        <div className="payment-row-actions">
-                          <button type="button" className="btn btn-secondary btn-sm" onClick={() => openDetail(p, group.chefChantier)}><Eye size={13} /> Détail</button>
-                          {!p.mergeAllWeeks && p.statut === 'En attente' && (
-                            <button type="button" className="btn btn-sm" style={{ background: '#E8F5E9', color: '#2E7D32', border: 'none' }} title="Payer" onClick={() => markPaid(p.id, { paymentDate: p.paymentDate || todayIso() }).then((r) => notify(r.success ? 'success' : 'error', r.success ? 'Payé.' : r.error))}><CheckCircle size={13} /> Payer</button>
-                          )}
-                          {(!p.mergeAllWeeks || p.statut === 'Payé') && (
-                            <button
-                              type="button"
-                              className="btn btn-secondary btn-sm"
-                              onClick={() => openEdit(p)}
-                              title="Ajustement ou correction (date caisse, heures sup, avances…)"
-                            >
-                              <Pencil size={13} /> {p.autoGenerated ? 'Ajuster' : 'Corriger'}
-                            </button>
-                          )}
-                          <button type="button" className="btn btn-secondary btn-sm" title="PDF" onClick={() => handleWorkerPdf(p, false)}><FileDown size={13} /></button>
-                          <button type="button" className="btn btn-secondary btn-sm" title="Imprimer" onClick={() => handleWorkerPdf(p, true)}><Printer size={13} /></button>
-                          {!p.autoGenerated && !p.mergeAllWeeks && (
-                            <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleDelete(p.id)} title="Supprimer"><Trash2 size={13} style={{ color: 'var(--red)' }} /></button>
-                          )}
+                {wOpen ? (
+                  <div className="ph-sites">
+                    <div className="ph-sites-title">Répartition par chantier</div>
+                    {card.lines.map(({ line: p, chefChantier }) => {
+                      const lk = lineKey(p);
+                      const lOpen = openLineKey === lk;
+                      return (
+                        <div key={lk} className={`ph-site${lOpen ? ' is-open' : ''}`}>
+                          <button
+                            type="button"
+                            className="ph-site-head"
+                            aria-expanded={lOpen}
+                            onClick={() => setOpenLineKey(lOpen ? '' : lk)}
+                          >
+                            <Building2 size={14} style={{ color: 'var(--text-3)', flexShrink: 0 }} />
+                            <span className="ph-site-name">{p.projet || '—'}</span>
+                            <span className="ph-site-days">{fmtDayEquiv(p.joursPaies)} j</span>
+                            <span className={`ph-status ${statusClass(p.statut)}`}>{p.statut}</span>
+                            <span className="ph-amount is-sm">{fmtMAD(p.total)}</span>
+                            <ChevronRight size={16} className="ph-chevron" aria-hidden />
+                          </button>
+
+                          {lOpen ? (
+                            <div className="ph-detail">
+                              <div className="ph-detail-grid">
+                                <div className="ph-kv"><span>Période</span><strong>{p.semaineDebut ? fmtWeekRange(p.semaineDebut, p.semaineFin) : 'Toutes les semaines'}</strong></div>
+                                <div className="ph-kv"><span>Jours comptabilisés</span><strong>{fmtDayEquiv(p.joursPaies)} j</strong></div>
+                                <div className="ph-kv"><span>Tarif journalier</span><strong>{fmtMAD(p.tarifJournalier)}</strong></div>
+                                <div className="ph-kv"><span>Tarif horaire</span><strong>{fmtMAD(p.tarifHoraire)}</strong></div>
+                                <div className="ph-kv"><span>Montant journées</span><strong>{fmtMAD(p.montantNormales)}</strong></div>
+                                <div className="ph-kv"><span>Heures sup.</span><strong>{Number(p.montantSup) > 0 ? `${fmtHours(p.heuresSup)} · ${fmtMAD(p.montantSup)}` : '—'}</strong></div>
+                                <div className={`ph-kv${Number(p.avances) > 0 ? ' is-minus' : ''}`}><span>Avances</span><strong>{Number(p.avances) > 0 ? `− ${fmtMAD(p.avances)}` : '—'}</strong></div>
+                                <div className={`ph-kv${Number(p.retenues) > 0 ? ' is-minus' : ''}`}><span>Retenues</span><strong>{Number(p.retenues) > 0 ? `− ${fmtMAD(p.retenues)}` : '—'}</strong></div>
+                                <div className="ph-kv"><span>Chef chantier</span><strong>{chefChantier || '—'}</strong></div>
+                                <div className="ph-kv"><span>Date paiement</span><strong>{p.statut === 'Payé' ? fmtDateFr(p.paymentDate || todayIso()) : 'À la validation'}</strong></div>
+                                <div className="ph-kv is-total"><span>Total chantier</span><strong>{fmtMAD(p.total)}</strong></div>
+                              </div>
+                              <div className="ph-detail-actions">
+                                <select
+                                  className="ph-status-select"
+                                  value={PAYROLL_UI_STATUTS.includes(p.statut) ? p.statut : ''}
+                                  onChange={(e) => handleStatutChange(p, e.target.value)}
+                                  disabled={saving}
+                                  style={statutSelectStyle(PAYROLL_UI_STATUTS.includes(p.statut) ? p.statut : 'En attente')}
+                                  aria-label={`Statut paiement ${p.ouvrier}`}
+                                >
+                                  {!PAYROLL_UI_STATUTS.includes(p.statut) && (
+                                    <option value="" disabled>{p.statut}</option>
+                                  )}
+                                  {PAYROLL_UI_STATUTS.map((s) => <option key={s} value={s}>{s}</option>)}
+                                </select>
+                                {!p.mergeAllWeeks && p.statut === 'En attente' && (
+                                  <button type="button" className="btn btn-sm" style={{ background: '#E8F5E9', color: '#2E7D32', border: 'none' }} title="Payer" onClick={() => markPaid(p.id, { paymentDate: p.paymentDate || todayIso() }).then((r) => notify(r.success ? 'success' : 'error', r.success ? 'Payé.' : r.error))}><CheckCircle size={13} /> Payer</button>
+                                )}
+                                {(!p.mergeAllWeeks || p.statut === 'Payé') && (
+                                  <button
+                                    type="button"
+                                    className="btn btn-secondary btn-sm"
+                                    onClick={() => openEdit(p)}
+                                    title="Ajustement ou correction (date caisse, heures sup, avances…)"
+                                  >
+                                    <Pencil size={13} /> {p.autoGenerated ? 'Ajuster' : 'Corriger'}
+                                  </button>
+                                )}
+                                <button type="button" className="btn btn-secondary btn-sm" onClick={() => openDetail(p, chefChantier)} title="Fiche complète"><Eye size={13} /> Fiche</button>
+                                <button type="button" className="btn btn-secondary btn-sm" title="PDF" onClick={() => handleWorkerPdf(p, false)}><FileDown size={13} /></button>
+                                <button type="button" className="btn btn-secondary btn-sm" title="Imprimer" onClick={() => handleWorkerPdf(p, true)}><Printer size={13} /></button>
+                                {!p.autoGenerated && !p.mergeAllWeeks && (
+                                  <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleDelete(p.id)} title="Supprimer"><Trash2 size={13} style={{ color: 'var(--red)' }} /></button>
+                                )}
+                              </div>
+                            </div>
+                          ) : null}
                         </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        ))
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
       )}
 
       {showModal && (
