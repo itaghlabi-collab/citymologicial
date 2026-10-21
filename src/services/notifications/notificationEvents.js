@@ -257,13 +257,19 @@ export async function notifyChefsChantierWorkersAssigned({
 
 /** Tentative d’enregistrement ouvrier hors tranche d’âge 18–60 → alerte RH + DG. */
 export async function notifyWorkerAgeRejected({
-  prenom, nom, cin, date_naissance, age, reason,
+  prenom, nom, cin, date_naissance, age, reason, attemptedBy,
 } = {}) {
   const name = `${prenom || ''} ${nom || ''}`.trim() || 'Ouvrier';
   const ageLabel = age != null ? `${age} ans` : 'âge inconnu';
+  const isMinor = age != null && age < 18;
+  const attemptedAt = new Date().toLocaleString('fr-FR', {
+    day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
   const payload = {
-    title: 'Alerte âge ouvrier externe',
-    message: `${reason || 'Âge hors plage autorisée (18–60 ans).'} — ${name}${cin ? ` (CIN ${cin})` : ''} · ${ageLabel}${date_naissance ? ` · né(e) le ${date_naissance}` : ''}.`,
+    title: isMinor
+      ? 'Alerte : tentative d\'enregistrement d\'un ouvrier mineur'
+      : 'Alerte âge ouvrier externe',
+    message: `${reason || 'Âge hors plage autorisée (18–60 ans).'} — ${name}${cin ? ` (CIN ${cin})` : ''} · ${ageLabel}${date_naissance ? ` · né(e) le ${date_naissance}` : ''} · Tentative le ${attemptedAt}${attemptedBy ? ` par ${attemptedBy}` : ''}.`,
     type: NOTIFICATION_TYPES.SYSTEM,
     priority: NOTIFICATION_PRIORITIES.URGENT,
     entityType: 'worker_age_rejected',

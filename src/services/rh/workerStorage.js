@@ -37,6 +37,7 @@ export function storagePathFor(kind, workerId, ext = 'jpg') {
   if (kind === 'photo') return `workers/photos/${workerId}/profile.${ext}`;
   if (kind === 'cin_recto') return `workers/cin/${workerId}/recto.${ext}`;
   if (kind === 'cin_verso') return `workers/cin/${workerId}/verso.${ext}`;
+  if (kind === 'engagement') return `workers/engagement/${workerId}/engagement.${ext}`;
   throw new Error(`Type média inconnu: ${kind}`);
 }
 

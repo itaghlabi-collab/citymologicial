@@ -26,7 +26,7 @@ import { captureCINFromVideo, prepareImportedCINImage, dataUrlToCaptureFile } fr
 import CINManualCropModal from './cin/CINManualCropModal';
 import CINGuidedCamera from './cin/CINGuidedCamera';
 import { generateWorkerPdf } from '../services/rh/workerPdf';
-import { workerTarifJournalier } from '../services/rh/workers';
+import { workerTarifJournalier, WORKER_MINOR_REJECTION_MESSAGE } from '../services/rh/workers';
 import { exportWorkersExcel } from '../services/rh/workersExcelExport';
 import { notifyWorkerAgeRejected, notifyWorkerCreatedPendingAssignment } from '../services/notifications/notificationEvents';
 import { listProjectsForWorkerLink } from '../services/projects/projects';
@@ -51,6 +51,26 @@ const STATUT_CFG = {
   archive:      { label: 'Archive',      cls: 'badge-grey'   },
 };
 
+/** Engagement : « Complet » dès que l'engagement signé est déposé dans la fiche. */
+function EngagementBadge({ worker, style }) {
+  const ok = Boolean(worker?.engagement_complet);
+  return (
+    <span className={`badge ${ok ? 'badge-green' : 'badge-red'}`} style={style}>
+      {ok ? 'Complet' : 'Manque engagement'}
+    </span>
+  );
+}
+
+async function generateEngagement(worker, onError) {
+  try {
+    const { downloadWorkerEngagement } = await import('../services/rh/workerEngagementDoc');
+    await downloadWorkerEngagement(worker);
+  } catch (err) {
+    console.error('[CITYMO] engagement ouvrier', err);
+    onError?.(err.message || 'Erreur lors de la génération de l’engagement.');
+  }
+}
+
 /** CIN marocaine ID-1 : 85.60 mm × 53.98 mm */
 const CIN_HINT = 'Placez toute la carte dans le cadre';
 const SCANNER_PLACE_HINT = 'Placez toute la carte dans le cadre';
@@ -60,7 +80,7 @@ const CIN_SCANNER_VERSION = '2026-07-29-cin-contain-frame';
 const EMPTY_FORM = {
   prenom: '', nom: '', telephone: '', cin: '', fonction: '', tarif: '', tarif_unite: 'jour',
   date_naissance: '', ville_naissance: '', adresse: '', nationalite: 'Marocaine', etat_civil: '', groupe_sanguin: '',
-  sexe: '', date_expiration: '', autorite: '',
+  sexe: '', date_expiration: '', autorite: '', engagement_signe: '',
   experience: '3', date_recrutement: '', statut: 'actif', disponibilite: 'oui',
   project_id: '', projet_nom: '', chantier: '', chantier_legacy: '',
   extra_project_ids: [],
@@ -73,6 +93,28 @@ const EMPTY_FORM = {
 function fmtTarifJour(n) { return Number(n).toLocaleString('fr-MA', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + ' MAD/j'; }
 function fmtDate(d) { if (!d) return '—'; try { return new Date(d).toLocaleDateString('fr-MA', { day: '2-digit', month: '2-digit', year: 'numeric' }); } catch { return d; } }
 function initials(w) { return ((w.prenom?.[0] || '') + (w.nom?.[0] || '')).toUpperCase() || '?'; }
+
+const WORKER_LINK_PARAM = 'ouvrier';
+
+function workerFicheUrl(id) {
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  return `${origin}/?module=ouvriers&${WORKER_LINK_PARAM}=${encodeURIComponent(id)}`;
+}
+
+/** Lit puis retire ?ouvrier=<id> de l’URL (ouverture fiche dans un nouvel onglet). */
+function consumeWorkerLinkParam() {
+  if (typeof window === 'undefined') return null;
+  try {
+    const url = new URL(window.location.href);
+    const id = url.searchParams.get(WORKER_LINK_PARAM);
+    if (!id) return null;
+    url.searchParams.delete(WORKER_LINK_PARAM);
+    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
+    return id;
+  } catch {
+    return null;
+  }
+}
 
 /** Âge civil à partir d'une date ISO YYYY-MM-DD. */
 function ageFromBirthDate(iso) {
@@ -93,7 +135,7 @@ function workerAgeRejectionReason(dateNaissance) {
   if (!dateNaissance) return 'La date de naissance est obligatoire.';
   const age = ageFromBirthDate(dateNaissance);
   if (age == null) return 'Date de naissance invalide.';
-  if (age < 18) return `Âge refusé (${age} ans) : moins de 18 ans non accepté.`;
+  if (age < 18) return WORKER_MINOR_REJECTION_MESSAGE;
   if (age > 60) return `Âge refusé (${age} ans) : plus de 60 ans non accepté.`;
   return null;
 }
@@ -1201,7 +1243,7 @@ function MobileOuvrierRow({ w, cfg, pdfLoading, onView, onEdit, onPdf, onDelete 
           <span>{w.fonction || '—'}</span>
         </div>
       </button>
-      <span className={`badge ${cfg.cls}`} style={{ fontSize: '0.65rem', flexShrink: 0, marginTop: 4 }}>{cfg.label}</span>
+      <EngagementBadge worker={w} style={{ fontSize: '0.65rem', flexShrink: 0, marginTop: 4 }} />
       <div className="rh-ext-mobile-row-actions">
         <button type="button" className="btn btn-ghost btn-sm" title="Voir fiche" aria-label="Voir fiche" onClick={onView}><Eye size={14} /></button>
         <button type="button" className="btn btn-ghost btn-sm" title="Modifier" aria-label="Modifier" onClick={onEdit}><Edit2 size={14} /></button>
@@ -1248,6 +1290,12 @@ function OuvrierDetail({ worker, onBack, onEdit, onDownloadPdf, pdfLoading }) {
                 {worker.prenom} {worker.nom}
               </h1>
               <span className={'badge ' + cfg.cls}>{cfg.label}</span>
+              <EngagementBadge worker={worker} />
+              {worker.engagement_url ? (
+                <a href={worker.engagement_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--red)' }}>
+                  Voir l’engagement signé
+                </a>
+              ) : null}
             </div>
             <div style={{ fontSize: '0.88rem', color: 'var(--text-2)', marginBottom: 8 }}>{worker.fonction || '—'}</div>
             <div style={{ display: 'flex', gap: 16, fontSize: '0.82rem', color: 'var(--text-3)', flexWrap: 'wrap' }}>
@@ -1259,6 +1307,9 @@ function OuvrierDetail({ worker, onBack, onEdit, onDownloadPdf, pdfLoading }) {
           <div className="rh-ext-detail-header-actions">
             <button className="btn btn-ghost" onClick={() => onEdit(worker)} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
               <Edit2 size={13} /> Modifier
+            </button>
+            <button className="btn btn-secondary" onClick={() => generateEngagement(worker, (msg) => window.alert(msg))} style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+              <FileText size={13} /> Générer l’engagement
             </button>
             <button className="btn btn-primary" disabled={pdfLoading} onClick={() => onDownloadPdf(worker)}
               style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
@@ -1891,8 +1942,6 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
     const ageErr = workerAgeRejectionReason(form.date_naissance);
     if (ageErr) e.date_naissance = ageErr;
     if (!String(form.contact_urgence || '').trim()) e.contact_urgence = 'Requis';
-    // Chef de chantier / non-RH : pas d’affectation à la création (RH dans Projets → Équipe)
-    if (canLinkProjects && !form.project_id) e.project_id = 'Sélectionnez un chantier';
     if (!form.tarif || isNaN(Number(form.tarif)) || Number(form.tarif) <= 0) e.tarif = 'Montant valide requis';
     return e;
   }
@@ -1904,7 +1953,7 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
       setErrors(errs);
       if (errs.prenom || errs.nom || errs.cin || errs.date_naissance || errs.telephone || errs.photo) setFormTab('identite');
       else if (errs.contact_urgence) setFormTab('securite');
-      else if (errs.project_id || errs.tarif) setFormTab('chantier');
+      else if (errs.tarif) setFormTab('chantier');
       if (errs.date_naissance) {
         try {
           await notifyWorkerAgeRejected({
@@ -1914,6 +1963,7 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
             date_naissance: form.date_naissance,
             age: ageFromBirthDate(form.date_naissance),
             reason: errs.date_naissance,
+            attemptedBy: user?.nom || user?.email || '',
           });
         } catch (err) {
           console.warn('[CITYMO] notify age ouvrier', err);
@@ -1930,17 +1980,13 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
     }
     const result = await onSave({
       ...form,
-      // Chef chantier : création sans affectation (RH affecte dans Projets → Équipe)
-      ...(!canLinkProjects && !isEdit
-        ? { project_id: '', projet_nom: '', chantier: '', extra_project_ids: [] }
-        : {}),
+      // Affectation chantier uniquement via Projets → Équipe : la fiche ne crée ni ne retire aucune affectation.
+      ...(!isEdit ? { project_id: '', projet_nom: '', chantier: '' } : {}),
       tarif: Number(form.tarif),
       tarif_unite: 'jour',
       experience: String(experienceToStars(form.experience)),
-      extra_project_ids: (!canLinkProjects && !isEdit)
-        ? []
-        : (form.extra_project_ids || []).map(String).filter(Boolean),
-      _controllable_project_ids: (projectOptions || []).map((p) => String(p.id)),
+      extra_project_ids: [],
+      _skip_project_links: true,
       _ocr_meta: lastOcrMetaRef.current,
     }, isEdit);
     if (result?.success) onClose();
@@ -2181,11 +2227,6 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
                       <input data-ocr-field="date_expiration" type="date" value={form.date_expiration} onChange={e => set('date_expiration', e.target.value)} style={IS(false, ocrFilled && form.date_expiration ? { borderColor: '#43A047', background: '#F1F8E9' } : {})} />
                       <OcrConfBadge meta={ocrFieldMeta?.date_expiration} />
                     </div>
-                    <div className="form-group">
-                      <Label>Autorité</Label>
-                      <input data-ocr-field="autorite" value={form.autorite || ''} onChange={e => set('autorite', e.target.value)} placeholder="Si présente sur la CIN" style={IS(false, ocrFilled && form.autorite ? { borderColor: '#43A047', background: '#F1F8E9' } : {})} />
-                      <OcrConfBadge meta={ocrFieldMeta?.autorite} />
-                    </div>
                     <div className="form-group" style={{ gridColumn: '1 / -1' }}>
                       <Label>Adresse</Label>
                       <input data-ocr-field="adresse" value={form.adresse} onChange={e => set('adresse', e.target.value)} style={IS(false, ocrFilled && form.adresse ? { borderColor: '#43A047', background: '#F1F8E9' } : {})} />
@@ -2198,89 +2239,6 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
               {/* ── TAB: CHANTIER ── */}
               {formTab === 'chantier' && (
                 <div className="ouv-fields-grid">
-                  {!canLinkProjects ? (
-                    <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-                      <Label>Projet lié</Label>
-                      <div style={{
-                        padding: '12px 14px', borderRadius: 8, fontSize: '0.84rem',
-                        background: '#E3F2FD', color: '#1565C0', border: '1px solid #90CAF9',
-                      }}>
-                        L&apos;affectation au chantier est réalisée par la RH dans{' '}
-                        <strong>Projets → Équipe → Affecter des ouvriers</strong>.
-                        {isEdit && (form.projet_nom || form.project_id) ? (
-                          <div style={{ marginTop: 8, color: 'var(--text)', fontWeight: 600 }}>
-                            Chantier actuel : {form.projet_nom || form.chantier || '—'}
-                          </div>
-                        ) : (
-                          <div style={{ marginTop: 8 }}>Aucun chantier à la création — notification envoyée à la RH.</div>
-                        )}
-                      </div>
-                    </div>
-                  ) : (
-                    <>
-                  <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-                    <Label required>Projet lié</Label>
-                    <select
-                      value={form.project_id || ''}
-                      onChange={(e) => setLinkedProject(e.target.value)}
-                      style={IS(errors.project_id)}
-                      disabled={projectsLoading}
-                    >
-                      <option value="">{projectsLoading ? 'Chargement…' : (projectOptions.length ? 'Choisir un chantier…' : 'Aucun chantier affecté')}</option>
-                      {projectOptions.map((p) => (
-                        <option key={p.id} value={String(p.id)}>{projectOptionLabel(p)}</option>
-                      ))}
-                    </select>
-                    {errors.project_id && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.project_id}</span>}
-                    <p style={{ margin: '6px 0 0', fontSize: '0.75rem', color: 'var(--text-3)' }}>
-                      {projectOptions.length
-                        ? 'Projet principal (fiche). Ajoutez d’autres chantiers ci-dessous pour y pointer — l’historique des jours déjà saisis n’est jamais effacé.'
-                        : 'Aucun chantier lié à votre nom dans Projets (chef de chantier / chef de projet). Vérifiez l’affectation ou le script Supabase list_projects_for_worker_link.'}
-                    </p>
-                  </div>
-                  {projectOptions.length > 1 && (
-                    <div className="form-group" style={{ gridColumn: '1 / -1' }}>
-                      <Label>Aussi présent sur</Label>
-                      <div style={{
-                        display: 'flex', flexDirection: 'column', gap: 6,
-                        maxHeight: 180, overflowY: 'auto',
-                        padding: '10px 12px',
-                        border: '1.5px solid var(--border)', borderRadius: 8,
-                        background: 'var(--surface-2, #fafafa)',
-                      }}>
-                        {projectOptions
-                          .filter((p) => String(p.id) !== String(form.project_id || ''))
-                          .map((p) => {
-                            const pid = String(p.id);
-                            const checked = (form.extra_project_ids || []).map(String).includes(pid);
-                            return (
-                              <label
-                                key={pid}
-                                style={{
-                                  display: 'flex', alignItems: 'center', gap: 8,
-                                  fontSize: '0.84rem', cursor: 'pointer',
-                                  color: 'var(--text)',
-                                }}
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={checked}
-                                  onChange={() => toggleExtraProject(pid)}
-                                  style={{ width: 15, height: 15, accentColor: 'var(--red)' }}
-                                />
-                                <span>{projectOptionLabel(p)}</span>
-                              </label>
-                            );
-                          })}
-                      </div>
-                      <p style={{ margin: '6px 0 0', fontSize: '0.75rem', color: 'var(--text-3)' }}>
-                        Cochez un autre chantier pour pouvoir y pointer aussi. Les journées déjà
-                        pointées sur un ancien chantier restent toujours visibles en Présence.
-                      </p>
-                    </div>
-                  )}
-                    </>
-                  )}
                   <div className="form-group">
                     <Label required>Fonction</Label>
                     <select value={form.fonction} onChange={e => set('fonction', e.target.value)} style={IS(false)}>
@@ -2391,6 +2349,53 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
                         Analyser quand même
                       </button>
                     )}
+                  </div>
+
+                  <div className="form-group" style={{ gridColumn: '1 / -1', borderTop: '1px solid var(--border)', paddingTop: 14, marginTop: 4 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 6 }}>
+                      <Label>Engagement de l’ouvrier</Label>
+                      <EngagementBadge worker={{ engagement_complet: Boolean(form.engagement_signe || worker?.engagement_complet) }} />
+                    </div>
+                    <p style={{ margin: '0 0 10px', fontSize: '0.78rem', color: 'var(--text-3)' }}>
+                      Générez l’engagement pré-rempli (nom, CIN, fonction), faites-le signer, puis déposez le document signé (photo, scan ou PDF).
+                    </p>
+                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        disabled={!form.prenom?.trim() || !form.nom?.trim()}
+                        onClick={() => generateEngagement(form, (msg) => flashOcrToast(msg, 'error'))}
+                      >
+                        <FileText size={14} /> Générer l’engagement
+                      </button>
+                      <label className="btn btn-ghost" style={{ cursor: 'pointer' }}>
+                        <Upload size={14} /> {form.engagement_signe || worker?.engagement_complet ? 'Remplacer l’engagement signé' : 'Déposer l’engagement signé'}
+                        <input
+                          type="file"
+                          accept="image/jpeg,image/png,image/webp,application/pdf"
+                          style={{ display: 'none' }}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            e.target.value = '';
+                            if (!file) return;
+                            if (file.size > 5 * 1024 * 1024) {
+                              flashOcrToast('Fichier trop lourd (5 Mo maximum).', 'error');
+                              return;
+                            }
+                            const reader = new FileReader();
+                            reader.onload = () => set('engagement_signe', String(reader.result || ''));
+                            reader.readAsDataURL(file);
+                          }}
+                        />
+                      </label>
+                      {form.engagement_signe ? (
+                        <span style={{ fontSize: '0.78rem', color: '#2E7D32', fontWeight: 600 }}>Document prêt — enregistré à la validation de la fiche</span>
+                      ) : worker?.engagement_url ? (
+                        <a href={worker.engagement_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: '0.78rem', fontWeight: 600, color: 'var(--red)' }}>
+                          Voir l’engagement signé
+                        </a>
+                      ) : null}
+                    </div>
                   </div>
                 </div>
               )}
@@ -2522,6 +2527,21 @@ export default function OuvriersListe({ onWorkersChange }) {
     if (fresh) setDetail(fresh);
   }, [workers, detailWorker?.id]);
 
+  const pendingWorkerLinkRef = useRef(undefined);
+  useEffect(() => {
+    if (pendingWorkerLinkRef.current === undefined) {
+      pendingWorkerLinkRef.current = consumeWorkerLinkParam();
+    }
+    const pendingId = pendingWorkerLinkRef.current;
+    if (!pendingId || loading) return;
+    pendingWorkerLinkRef.current = null;
+    const target = workers.find((w) => String(w.id) === String(pendingId));
+    if (target) {
+      setDetail(target);
+      setView('detail');
+    }
+  }, [workers, loading]);
+
   function openAdd()    { setEditWorker(null); setShowModal(true); }
   function openEdit(w)  { setEditWorker(w);    setShowModal(true); }
 
@@ -2566,7 +2586,8 @@ export default function OuvriersListe({ onWorkersChange }) {
   const filtered = workers.filter(w => {
     const q = search.toLowerCase();
     const matchSearch = !q || (w.prenom + ' ' + w.nom).toLowerCase().includes(q) || (w.cin || '').toLowerCase().includes(q) || (w.fonction || '').toLowerCase().includes(q);
-    const matchStatut  = !filterStatut   || w.statut   === filterStatut;
+    const matchStatut  = !filterStatut
+      || (filterStatut === 'complet' ? Boolean(w.engagement_complet) : !w.engagement_complet);
     const matchFonction = !filterFonction || w.fonction === filterFonction;
     return matchSearch && matchStatut && matchFonction;
   }).sort((a, b) => {
@@ -2682,8 +2703,9 @@ export default function OuvriersListe({ onWorkersChange }) {
               className="ouv-search-input" />
           </div>
           <select value={filterStatut} onChange={e => setFStatut(e.target.value)} className="ouv-filter-select">
-            <option value="">Tous statuts</option>
-            {Object.entries(STATUT_CFG).map(([k, v]) => <option key={k} value={k}>{v.label}</option>)}
+            <option value="">Tous engagements</option>
+            <option value="manque">Manque engagement</option>
+            <option value="complet">Complet</option>
           </select>
           <select value={filterFonction} onChange={e => setFFonc(e.target.value)} className="ouv-filter-select">
             <option value="">Toutes fonctions</option>
@@ -2723,7 +2745,7 @@ export default function OuvriersListe({ onWorkersChange }) {
                     { label: 'Telephone',   field: 'telephone' },
                     { label: 'Fonction',    field: 'fonction' },
                     { label: 'Tarif/j',  field: 'tarif', align: 'right' },
-                    { label: 'Statut',      field: 'statut' },
+                    { label: 'Engagement',  field: 'engagement_complet' },
                     { label: 'Actions',     field: null },
                   ].map(col => (
                     <th key={col.label} onClick={col.field ? () => toggleSort(col.field) : undefined}
@@ -2749,7 +2771,18 @@ export default function OuvriersListe({ onWorkersChange }) {
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                           <Avatar worker={w} size={34} />
                           <div>
-                            <div style={{ fontWeight: 700, color: 'var(--text)', fontSize: '0.88rem' }}>{w.prenom} {w.nom}</div>
+                            <a
+                              href={workerFicheUrl(w.id)}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                              title="Ouvrir la fiche dans un nouvel onglet"
+                              style={{ display: 'block', fontWeight: 700, color: 'var(--text)', fontSize: '0.88rem', textDecoration: 'none' }}
+                              onMouseEnter={(e) => { e.currentTarget.style.textDecoration = 'underline'; }}
+                              onMouseLeave={(e) => { e.currentTarget.style.textDecoration = 'none'; }}
+                            >
+                              {w.prenom} {w.nom}
+                            </a>
                             {w.date_naissance && (
                               <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>
                                 Né(e) le {fmtDate(w.date_naissance)}
@@ -2777,7 +2810,7 @@ export default function OuvriersListe({ onWorkersChange }) {
                       </td>
 
                       {/* Statut */}
-                      <td data-label="Statut" style={{ padding: '10px 12px' }}><span className={'badge ' + cfg.cls}>{cfg.label}</span></td>
+                      <td data-label="Engagement" style={{ padding: '10px 12px' }}><EngagementBadge worker={w} /></td>
 
                       {/* Actions */}
                       <td className="rh-ext-actions-cell" style={{ padding: '10px 10px', whiteSpace: 'nowrap' }}>

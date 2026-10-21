@@ -205,6 +205,8 @@ async function getAuthUserId() {
   return user.id;
 }
 
+export const WORKER_MINOR_REJECTION_MESSAGE = 'Enregistrement impossible : cet ouvrier est mineur (moins de 18 ans). L\'ajout d\'un ouvrier mineur n\'est pas autorisé.';
+
 /** Âge autorisé ouvriers externes : 18–60 ans inclus. */
 function assertWorkerAgeAllowed(dateNaissance) {
   if (!dateNaissance) {
@@ -226,7 +228,7 @@ function assertWorkerAgeAllowed(dateNaissance) {
   if (age < 18 || age > 60) {
     const err = new Error(
       age < 18
-        ? `Âge refusé (${age} ans) : moins de 18 ans non accepté.`
+        ? WORKER_MINOR_REJECTION_MESSAGE
         : `Âge refusé (${age} ans) : plus de 60 ans non accepté.`,
     );
     err.code = 'AGE_REJECTED';
@@ -290,6 +292,11 @@ async function syncWorkerMedia(workerId, form, existingRow = {}) {
     if (error) throw error;
   }
 
+  if (isDataUrl(form.engagement_signe)) {
+    const path = await uploadWorkerMedia(workerId, 'engagement', form.engagement_signe);
+    await upsertWorkerDocument(workerId, 'engagement', path, form.engagement_signe.match(/data:([^;]+)/)?.[1]);
+  }
+
   return mediaUpdates;
 }
 
@@ -320,16 +327,35 @@ export async function listWorkers() {
     (data || []).map(normalizeWorker),
     assignmentMap,
   );
+
+  const engagementPathByWorker = new Map();
+  try {
+    const { data: engagementDocs } = await getSupabase()
+      .from(DOCS_TABLE)
+      .select('worker_id, storage_path')
+      .eq('doc_type', 'engagement');
+    (engagementDocs || []).forEach((d) => {
+      if (d.storage_path) engagementPathByWorker.set(String(d.worker_id), d.storage_path);
+    });
+  } catch (docErr) {
+    console.warn('[CITYMO] worker engagement docs', docErr);
+  }
+
   const urls = await resolveStorageUrls(
-    normalized.flatMap((w) => [w.photo, w.cin_recto, w.cin_verso]),
+    normalized.flatMap((w) => [w.photo, w.cin_recto, w.cin_verso, engagementPathByWorker.get(String(w.id))]),
   );
   const urlFor = (v) => (v ? urls.get(v) ?? '' : '');
-  return normalized.map((w) => ({
-    ...w,
-    photo: urlFor(w.photo),
-    cin_recto: urlFor(w.cin_recto),
-    cin_verso: urlFor(w.cin_verso),
-  }));
+  return normalized.map((w) => {
+    const engagementPath = engagementPathByWorker.get(String(w.id)) || '';
+    return {
+      ...w,
+      photo: urlFor(w.photo),
+      cin_recto: urlFor(w.cin_recto),
+      cin_verso: urlFor(w.cin_verso),
+      engagement_complet: Boolean(engagementPath),
+      engagement_url: urlFor(engagementPath),
+    };
+  });
 }
 
 async function insertWorkerRow(row) {
@@ -397,7 +423,7 @@ async function reloadWorker(id) {
  * autre chantier disparaîtrait à tort. Le retrait se fait via Projets / RH.
  */
 async function syncWorkerFormProjectLinks(workerId, form) {
-  if (!workerId) return;
+  if (!workerId || form?._skip_project_links) return;
   const primary = form?.project_id ? String(form.project_id) : '';
   const extras = Array.isArray(form?.extra_project_ids)
     ? form.extra_project_ids.map(String)
