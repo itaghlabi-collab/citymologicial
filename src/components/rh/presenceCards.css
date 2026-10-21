@@ -1,0 +1,65 @@
+/* =============================================
+   Présence ouvriers — cartes projets + lignes dépliables
+   ============================================= */
+.pres-cards {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.pres-card {
+  display: flex; flex-direction: column; gap: 8px; text-align: left; width: 100%;
+  padding: 14px 16px; border-radius: 12px; border: 1.5px solid var(--border);
+  background: var(--surface, #fff); cursor: pointer; font-family: var(--font-body);
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s;
+  min-width: 0;
+}
+.pres-card:hover { border-color: var(--red); box-shadow: var(--shadow-lg); transform: translateY(-1px); }
+.pres-card.is-active { border-color: var(--red); box-shadow: 0 0 0 3px rgba(211, 47, 47, 0.12); background: #fffafa; }
+.pres-card-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.pres-card-title {
+  font-family: var(--font-head); font-weight: 800; font-size: 0.95rem; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+}
+.pres-card-ref { font-size: 0.74rem; color: var(--text-3); font-weight: 600; margin-top: 2px; }
+.pres-card-icon {
+  width: 32px; height: 32px; border-radius: 9px; flex-shrink: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--red-light); color: var(--red);
+}
+.pres-card.is-active .pres-card-icon { background: var(--red); color: #fff; }
+.pres-card-stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.pres-card-stat { background: var(--surface-2, #f7f7f8); border-radius: 8px; padding: 6px 8px; min-width: 0; }
+.pres-card-stat span { display: block; font-size: 0.66rem; color: var(--text-3); font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; }
+.pres-card-stat strong { font-size: 0.92rem; color: var(--text); white-space: nowrap; }
+.pres-card-foot { display: flex; align-items: center; justify-content: space-between; gap: 6px; font-size: 0.76rem; color: var(--text-3); }
+.pres-absence-flag {
+  display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 99px;
+  background: var(--red-light); color: var(--red); font-weight: 700; font-size: 0.72rem;
+}
+.pres-ok-flag {
+  display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 99px;
+  background: #E8F5E9; color: #2E7D32; font-weight: 700; font-size: 0.72rem;
+}
+
+.pres-row { cursor: pointer; transition: background 0.12s; }
+.pres-row:hover { background: #fafbfc; }
+.pres-row.is-open { background: #fff5f5; }
+.pres-row-name { display: inline-flex; align-items: center; gap: 6px; }
+.pres-row-chevron { color: var(--text-3); flex-shrink: 0; transition: transform 0.15s; }
+.pres-row.is-open .pres-row-chevron { color: var(--red); transform: rotate(90deg); }
+.pres-detail-row > td { padding: 0 !important; background: var(--surface-2, #f7f7f8); border-top: 1px solid var(--border); }
+.pres-detail-inner { padding: 12px 14px 14px; }
+.pres-detail-inner .table-wrap { background: #fff; border-radius: 8px; border: 1px solid var(--border); }
+.pres-total-mad { font-weight: 700; color: var(--text); white-space: nowrap; }
+
+@media (max-width: 1100px) {
+  .pres-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .pres-cards { grid-template-columns: 1fr; }
+  .pres-detail-row { display: block; }
+  .pres-detail-row > td { display: block; width: 100%; }
+  .pres-detail-row > td::before { display: none !important; content: none !important; }
+  .pres-detail-inner { padding: 10px; }
+}

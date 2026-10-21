@@ -1,13 +1,15 @@
-import { ClockIcon, Plus, X, Filter, CheckCircle, XCircle, CalendarOff, Pencil, Loader2, Search, Users, HardHat, Download, Eye, Printer, Building2, Upload } from 'lucide-react';
+import { ClockIcon, Plus, X, Filter, CheckCircle, XCircle, CalendarOff, Pencil, Loader2, Search, Users, HardHat, Download, Eye, Printer, Building2, Upload, ChevronRight, ArrowLeft, AlertTriangle } from 'lucide-react';
 import { useState, useRef, useMemo, useEffect } from 'react';
 import { useAttendance } from '../hooks/useAttendance';
 import { useAuth } from '../hooks/useAuth';
 import { isSuperAdmin } from '../services/rh/isSuperAdmin';
 import { generateAttendanceWeeklyPdf } from '../services/rh/attendanceSheetPdf';
-import { syncPayrollAfterAttendanceChange } from '../services/rh/workerPayroll';
+import { syncPayrollAfterAttendanceChange, buildWorkerPayrollLine, calcWorkerPayrollTotals } from '../services/rh/workerPayroll';
 import { computeAttendanceWorkMetrics, STANDARD_SHIFT_START, STANDARD_SHIFT_END, groupAttendanceSummariesByProjectWeek, collectAttendanceWeeks, fmtWeekRange, weekStartMonday, filterProjectOptionsForChef, personNamesMatch, extractPersonNameFromStoredLabel, collectAttendancePdfSummaries } from '../services/rh/attendance';
 import AttendanceDetailModal from './rh/AttendanceDetailModal';
 import AttendanceExcelImportWizard from './rh/AttendanceExcelImportWizard';
+import AttendanceDailyDetailTable from './rh/AttendanceDailyDetailTable';
+import './rh/presenceCards.css';
 
 function EmptyState({ icon, title, sub, action, onAction }) {
   return (
@@ -41,6 +43,10 @@ function fmtHours(n) {
 
 function fmtDayEquiv(n) {
   return Number(n || 0).toLocaleString('fr-MA', { minimumFractionDigits: 0, maximumFractionDigits: 3 });
+}
+
+function fmtMad(n) {
+  return `${Number(n || 0).toLocaleString('fr-MA', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} MAD`;
 }
 
 function Toast({ toast }) {
@@ -281,6 +287,8 @@ export default function Presence() {
   const [errors, setErrors] = useState({});
   const [toast, setToast] = useState(null);
   const [detailSummary, setDetailSummary] = useState(null);
+  const [selectedGroupKey, setSelectedGroupKey] = useState('');
+  const [expandedKey, setExpandedKey] = useState('');
   const toastRef = useRef(null);
 
   function notify(type, msg) {
@@ -564,6 +572,37 @@ export default function Presence() {
     return filterSemaine ? `${group.projectId}|${group.semaineDebut}` : String(group.projectId);
   }
 
+  const workerById = useMemo(
+    () => new Map((workers || []).map((w) => [String(w.id), w])),
+    [workers],
+  );
+
+  /** Valorisation des journées (équiv. jours × tarif journalier) — calcul Paiement hebdo, sans HS / avances / retenues. */
+  function summaryMontant(summary) {
+    const worker = workerById.get(String(summary.workerId));
+    if (!worker) return null;
+    const line = buildWorkerPayrollLine(worker, { joursPaies: summary.joursEquivalent, fromPresence: true });
+    return calcWorkerPayrollTotals({ ...line, heuresSup: 0, avances: 0, retenues: 0 }).montantNormales;
+  }
+
+  function groupStats(group) {
+    const ouvriers = group.ouvriers || [];
+    return {
+      nbOuvriers: ouvriers.length,
+      presences: ouvriers.reduce((n, s) => n + (s.nbPresences ?? s.lignes?.length ?? 0), 0),
+      heures: ouvriers.reduce((n, s) => n + (Number(s.totalHeures) || 0), 0),
+      absences: ouvriers.reduce((n, s) => n + (s.lignes || []).filter((l) => l.statut === 'Absent').length, 0),
+    };
+  }
+
+  function projectRefName(group) {
+    const project = (projects || []).find((p) => String(p.id) === String(group.projectId));
+    return {
+      ref: project?.ref || '',
+      nom: project?.nom || group.projet || resolveProjectLabel(group),
+    };
+  }
+
   function groupPdfLabel(group) {
     const n = group.ouvriers.length;
     const suffix = `${n} ouvrier${n > 1 ? 's' : ''}`;
@@ -638,8 +677,11 @@ export default function Presence() {
       openEdit(summary.lignes[0]);
       return;
     }
-    setDetailSummary(summary);
+    setExpandedKey(summary.key);
   }
+
+  const selectedGroup = summaryGroups.find((g) => groupKey(g) === selectedGroupKey)
+    || (summaryGroups.length === 1 ? summaryGroups[0] : null);
 
   return (
     <div className="animate-fade-in rh-ext-page">
@@ -657,7 +699,7 @@ export default function Presence() {
       <div className="page-header flex-between finance-page-header">
         <div>
           <h1 className="page-title">Presence ouvriers</h1>
-          <p className="page-subtitle finance-sub-hide-mobile">Une ligne par ouvrier — dates et détail journalier dans « Détail »</p>
+          <p className="page-subtitle finance-sub-hide-mobile">Choisissez un projet, puis cliquez sur un ouvrier pour afficher son détail journalier</p>
         </div>
         <div className="finance-page-actions" style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button
@@ -771,79 +813,157 @@ export default function Presence() {
           />
         </div>
       ) : (
-        summaryGroups.map((group) => (
-          <div key={groupKey(group)} className="card rh-ext-group-card">
-            <div className="rh-ext-group-head">
-              <div className="rh-ext-group-head-inner">
-                <div>
-                  <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.05rem', marginBottom: 6 }}>
-                    <Building2 size={16} style={{ verticalAlign: -2, marginRight: 6 }} />
-                    {resolveProjectLabel(group)}
+        <>
+          <div className="pres-cards">
+            {summaryGroups.map((group) => {
+              const key = groupKey(group);
+              const st = groupStats(group);
+              const { ref, nom } = projectRefName(group);
+              const active = selectedGroup && groupKey(selectedGroup) === key;
+              return (
+                <button
+                  key={key}
+                  type="button"
+                  className={`pres-card${active ? ' is-active' : ''}`}
+                  onClick={() => { setSelectedGroupKey(active ? '' : key); setExpandedKey(''); }}
+                  aria-pressed={Boolean(active)}
+                >
+                  <div className="pres-card-top">
+                    <div style={{ minWidth: 0 }}>
+                      <div className="pres-card-title">{nom}</div>
+                      <div className="pres-card-ref">
+                        {ref || '—'}
+                        {filterSemaine ? ` · ${fmtWeekRange(group.semaineDebut, group.semaineFin)}` : ''}
+                      </div>
+                    </div>
+                    <span className="pres-card-icon"><Building2 size={16} /></span>
                   </div>
-                  <div style={{ fontSize: '0.83rem', color: 'var(--text-3)' }}>
-                    {filterSemaine ? fmtWeekRange(group.semaineDebut, group.semaineFin) : 'Toutes les semaines'} · {group.ouvriers.length} ouvrier{group.ouvriers.length > 1 ? 's' : ''}
+                  <div className="pres-card-stats">
+                    <div className="pres-card-stat"><span>Ouvriers</span><strong>{st.nbOuvriers}</strong></div>
+                    <div className="pres-card-stat"><span>Présences</span><strong>{st.presences}</strong></div>
+                    <div className="pres-card-stat"><span>Heures</span><strong>{fmtHours(st.heures)}</strong></div>
                   </div>
-                </div>
-                <div className="rh-ext-group-actions">
-                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleGroupPdf(group, false)} disabled={pdfLoading}>
-                    <Download size={13} /> Télécharger PDF
-                  </button>
-                  <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleGroupPdf(group, true)} disabled={pdfLoading}>
-                    <Printer size={13} /> Imprimer
-                  </button>
+                  <div className="pres-card-foot">
+                    {st.absences > 0
+                      ? <span className="pres-absence-flag"><AlertTriangle size={12} /> {st.absences} absence{st.absences > 1 ? 's' : ''}</span>
+                      : <span className="pres-ok-flag"><CheckCircle size={12} /> Aucune absence</span>}
+                    <span>{active ? 'Sélectionné' : 'Voir les ouvriers'} <ChevronRight size={12} style={{ verticalAlign: -2 }} /></span>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
+
+          {selectedGroup ? (
+            <div className="card rh-ext-group-card">
+              <div className="rh-ext-group-head">
+                <div className="rh-ext-group-head-inner">
+                  <div>
+                    <div style={{ fontFamily: 'var(--font-head)', fontWeight: 800, fontSize: '1.05rem', marginBottom: 6 }}>
+                      <Building2 size={16} style={{ verticalAlign: -2, marginRight: 6 }} />
+                      {resolveProjectLabel(selectedGroup)}
+                    </div>
+                    <div style={{ fontSize: '0.83rem', color: 'var(--text-3)' }}>
+                      {filterSemaine ? fmtWeekRange(selectedGroup.semaineDebut, selectedGroup.semaineFin) : 'Toutes les semaines'} · {selectedGroup.ouvriers.length} ouvrier{selectedGroup.ouvriers.length > 1 ? 's' : ''}
+                    </div>
+                  </div>
+                  <div className="rh-ext-group-actions">
+                    {summaryGroups.length > 1 ? (
+                      <button type="button" className="btn btn-ghost btn-sm" onClick={() => { setSelectedGroupKey(''); setExpandedKey(''); }}>
+                        <ArrowLeft size={13} /> Tous les projets
+                      </button>
+                    ) : null}
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleGroupPdf(selectedGroup, false)} disabled={pdfLoading}>
+                      <Download size={13} /> Télécharger PDF
+                    </button>
+                    <button type="button" className="btn btn-secondary btn-sm" onClick={() => handleGroupPdf(selectedGroup, true)} disabled={pdfLoading}>
+                      <Printer size={13} /> Imprimer
+                    </button>
+                  </div>
                 </div>
               </div>
-            </div>
-            <div className="table-wrap">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Ouvrier</th><th>Projet / chantier</th><th>Chef chantier</th>
-                    <th>Présences</th><th>H. travaillées</th><th>Retard</th><th>Équiv. jours</th><th>Statut</th><th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {group.ouvriers.map((s) => (
-                    <tr key={s.key} className="rh-ext-compact-row">
-                      <td data-label="Ouvrier">
-                        <button
-                          type="button"
-                          onClick={() => setDetailSummary(s)}
-                          style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontWeight: 700, color: 'var(--text)', textAlign: 'left', fontFamily: 'inherit', fontSize: 'inherit' }}
-                        >
-                          {s.ouvrier}
-                        </button>
-                      </td>
-                      <td data-label="Projet / chantier">{s.projet || '—'}</td>
-                      <td data-label="Chef chantier">{s.chefChantier || '—'}</td>
-                      <td data-label="Présences">{s.nbPresences ?? s.lignes?.length ?? 0}</td>
-                      <td data-label="H. travaillées">{fmtHours(s.totalHeures)}</td>
-                      <td data-label="Retard" style={{ color: s.totalRetard > 0 ? '#E65100' : 'var(--text-3)' }}>{s.totalRetard > 0 ? fmtHours(s.totalRetard) : '—'}</td>
-                      <td data-label="Équiv. jours" style={{ fontWeight: 600 }}>{fmtDayEquiv(s.joursEquivalent)}</td>
-                      <td data-label="Statut"><span className={'badge ' + (STATUS_BADGE[s.statutGlobal] || 'badge-grey')}>{s.statutGlobal}</span></td>
-                      <td data-label="Actions" className="payment-actions-cell">
-                        <div className="payment-row-actions">
-                          <button type="button" className="btn btn-secondary btn-sm" title="Détail" onClick={() => setDetailSummary(s)}>
-                            <Eye size={13} /> Détail
-                          </button>
-                          <button type="button" className="btn btn-secondary btn-sm" title="Modifier" onClick={() => handleModifySummary(s)}>
-                            <Pencil size={13} /> Modifier
-                          </button>
-                          <button type="button" className="btn btn-secondary btn-sm" title="Télécharger PDF" onClick={() => handleSummaryPdf(s, false)} disabled={pdfLoading}>
-                            <Download size={13} /> Télécharger
-                          </button>
-                          <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleSummaryPdf(s, true)} disabled={pdfLoading} title="Imprimer">
-                            <Printer size={13} />
-                          </button>
-                        </div>
-                      </td>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Ouvrier</th><th>Projet / chantier</th><th>Chef chantier</th>
+                      <th>Présences</th><th>H. travaillées</th><th>Retard</th><th>Total (MAD)</th><th>Statut</th><th>Actions</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {selectedGroup.ouvriers.map((s) => {
+                      const open = expandedKey === s.key;
+                      const montant = summaryMontant(s);
+                      const toggle = () => setExpandedKey(open ? '' : s.key);
+                      return [
+                        <tr key={s.key} className={`rh-ext-compact-row pres-row${open ? ' is-open' : ''}`} onClick={toggle}>
+                          <td data-label="Ouvrier">
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); toggle(); }}
+                              aria-expanded={open}
+                              className="pres-row-name"
+                              style={{ background: 'none', border: 'none', padding: 0, cursor: 'pointer', fontWeight: 700, color: 'var(--text)', textAlign: 'left', fontFamily: 'inherit', fontSize: 'inherit' }}
+                            >
+                              {s.ouvrier}
+                              <ChevronRight size={14} className="pres-row-chevron" aria-hidden />
+                            </button>
+                          </td>
+                          <td data-label="Projet / chantier">{s.projet || '—'}</td>
+                          <td data-label="Chef chantier">{s.chefChantier || '—'}</td>
+                          <td data-label="Présences">{s.nbPresences ?? s.lignes?.length ?? 0}</td>
+                          <td data-label="H. travaillées">{fmtHours(s.totalHeures)}</td>
+                          <td data-label="Retard" style={{ color: s.totalRetard > 0 ? '#E65100' : 'var(--text-3)' }}>{s.totalRetard > 0 ? fmtHours(s.totalRetard) : '—'}</td>
+                          <td data-label="Total (MAD)" className="pres-total-mad" title={`${fmtDayEquiv(s.joursEquivalent)} j équiv. × tarif journalier`}>
+                            {montant == null ? '—' : fmtMad(montant)}
+                          </td>
+                          <td data-label="Statut"><span className={'badge ' + (STATUS_BADGE[s.statutGlobal] || 'badge-grey')}>{s.statutGlobal}</span></td>
+                          <td data-label="Actions" className="payment-actions-cell" onClick={(e) => e.stopPropagation()}>
+                            <div className="payment-row-actions">
+                              <button type="button" className="btn btn-secondary btn-sm" title="Détail" onClick={toggle}>
+                                <Eye size={13} /> Détail
+                              </button>
+                              <button type="button" className="btn btn-secondary btn-sm" title="Modifier" onClick={() => handleModifySummary(s)}>
+                                <Pencil size={13} /> Modifier
+                              </button>
+                              <button type="button" className="btn btn-secondary btn-sm" title="Télécharger PDF" onClick={() => handleSummaryPdf(s, false)} disabled={pdfLoading}>
+                                <Download size={13} /> Télécharger
+                              </button>
+                              <button type="button" className="btn btn-ghost btn-sm" onClick={() => handleSummaryPdf(s, true)} disabled={pdfLoading} title="Imprimer">
+                                <Printer size={13} />
+                              </button>
+                            </div>
+                          </td>
+                        </tr>,
+                        open ? (
+                          <tr key={`${s.key}-detail`} className="pres-detail-row">
+                            <td colSpan={9}>
+                              <div className="pres-detail-inner">
+                                <AttendanceDailyDetailTable
+                                  lignes={s.lignes || []}
+                                  showActions
+                                  showJour
+                                  striped
+                                  compact
+                                  onEdit={(r) => openEdit(r)}
+                                  onDelete={(id) => handleDelete(id)}
+                                />
+                              </div>
+                            </td>
+                          </tr>
+                        ) : null,
+                      ];
+                    })}
+                  </tbody>
+                </table>
+              </div>
             </div>
-          </div>
-        ))
+          ) : (
+            <div className="card" style={{ padding: '18px 20px', textAlign: 'center', color: 'var(--text-3)', fontSize: '0.86rem' }}>
+              Sélectionnez un projet pour afficher ses ouvriers et leurs présences.
+            </div>
+          )}
+        </>
       )}
 
       {detailSummary && (
