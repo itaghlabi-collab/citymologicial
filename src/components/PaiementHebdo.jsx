@@ -618,8 +618,8 @@ export default function PaiementHebdo() {
                 <thead>
                   <tr>
                     <th>Ouvrier</th><th>Projet / chantier</th><th>Chef chantier</th><th>Présences</th>
-                    <th>H. travaillées</th><th>Retard</th><th>Équiv. jours</th><th>Tarif/h</th><th>Net à payer</th>
-                    <th>Date paiement</th><th>Statut</th><th>Actions</th>
+                    <th>H. travaillées</th><th>Retard</th><th>Tarif/h</th><th>Net à payer</th>
+                    <th>Statut</th><th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -639,16 +639,8 @@ export default function PaiementHebdo() {
                       <td data-label="Présences">{p.nbPresences ?? p.presenceLignes?.length ?? p.nbJoursTravailles ?? 0}</td>
                       <td data-label="H. travaillées">{fmtHours(p.heuresNormales)}</td>
                       <td data-label="Retard" style={{ color: p.totalRetard > 0 ? '#E65100' : 'var(--text-3)' }}>{p.totalRetard > 0 ? fmtHours(p.totalRetard) : '—'}</td>
-                      <td data-label="Équiv. jours" style={{ fontWeight: 600 }}>{fmtDayEquiv(p.joursPaies)}</td>
                       <td data-label="Tarif/h">{fmtMAD(p.tarifHoraire)}</td>
                       <td data-label="Net à payer" style={{ fontWeight: 800, color: 'var(--red)' }}>{fmtMAD(p.total)}</td>
-                      <td data-label="Date paiement">
-                        {p.statut === 'Payé' ? (
-                          <span style={{ fontSize: '0.82rem', fontWeight: 600 }}>{fmtDateFr(p.paymentDate || todayIso())}</span>
-                        ) : (
-                          <span style={{ color: 'var(--text-3)', fontSize: '0.78rem' }} title="Date fixée au paiement (aujourd'hui par défaut)">À la validation</span>
-                        )}
-                      </td>
                       <td data-label="Statut">
                         <select
                           value={PAYROLL_UI_STATUTS.includes(p.statut) ? p.statut : ''}
