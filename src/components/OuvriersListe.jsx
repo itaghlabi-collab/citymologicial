@@ -1443,11 +1443,11 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
   const lastOcrMetaRef = useRef(null);
 
   const formTabs = [
-    { id: 'identite',    label: 'Identite' },
+    { id: 'identite',    label: 'Identité' },
     { id: 'chantier',    label: 'Métier' },
-    { id: 'securite',    label: 'Securite' },
+    { id: 'securite',    label: 'Sécurité' },
     { id: 'documents',   label: 'Documents' },
-    { id: 'equipements', label: 'Equipements' },
+    { id: 'equipements', label: 'Équipements' },
     { id: 'engagement',  label: 'Engagement' },
   ];
 
@@ -2134,7 +2134,7 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
 
                   <div className="ouv-fields-grid">
                     <div className="form-group">
-                      <Label required>Prenom</Label>
+                      <Label required>Prénom</Label>
                       <input data-ocr-field="prenom" value={form.prenom} onChange={e => set('prenom', e.target.value)} style={IS(errors.prenom, ocrFilled && form.prenom ? { borderColor: '#43A047', background: '#F1F8E9' } : {})} />
                       <OcrConfBadge meta={ocrFieldMeta?.prenom} />
                       {errors.prenom && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.prenom}</span>}
@@ -2161,7 +2161,7 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
                       {errors.cin && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.cin}</span>}
                     </div>
                     <div className="form-group">
-                      <Label required>Telephone</Label>
+                      <Label required>Téléphone</Label>
                       <input
                         value={form.telephone}
                         onChange={(e) => {
@@ -2244,11 +2244,11 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
                 <div className="ouv-fields-grid">
                   <div className="form-group" style={{ gridColumn: '1 / -1' }}>
                     <Label required>Nom contact urgence</Label>
-                    <input value={form.contact_urgence} onChange={e => set('contact_urgence', e.target.value)} placeholder="Prenom Nom..." style={IS(errors.contact_urgence)} />
+                    <input value={form.contact_urgence} onChange={e => set('contact_urgence', e.target.value)} placeholder="Prénom Nom..." style={IS(errors.contact_urgence)} />
                     {errors.contact_urgence && <span style={{ color: 'var(--red)', fontSize: '0.75rem' }}>{errors.contact_urgence}</span>}
                   </div>
                   <div className="form-group">
-                    <Label>Telephone urgence</Label>
+                    <Label>Téléphone urgence</Label>
                     <input value={form.tel_urgence} onChange={e => set('tel_urgence', e.target.value)} placeholder="+212 600..." style={IS(false)} />
                   </div>
                   <div className="form-group">
@@ -2257,7 +2257,7 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
                       <option value="">Choisir...</option>
                       <option value="conjoint">Conjoint(e)</option>
                       <option value="parent">Parent</option>
-                      <option value="frere_soeur">Frere / Soeur</option>
+                      <option value="frere_soeur">Frère / Sœur</option>
                       <option value="ami">Ami(e)</option>
                       <option value="autre">Autre</option>
                     </select>
@@ -2395,7 +2395,7 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
                     </select>
                   </div>
                   <div className="form-group">
-                    <Label>Taille vetement</Label>
+                    <Label>Taille vêtement</Label>
                     <select value={form.taille_vetement} onChange={e => set('taille_vetement', e.target.value)} style={IS(false)}>
                       <option value="">Choisir...</option>
                       {TAILLES_VET.map(t => <option key={t} value={t}>{t}</option>)}
