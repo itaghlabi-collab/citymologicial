@@ -27,7 +27,7 @@ import CINManualCropModal from './cin/CINManualCropModal';
 import CINGuidedCamera from './cin/CINGuidedCamera';
 import { generateWorkerPdf, openWorkerPdfInTab } from '../services/rh/workerPdf';
 import { downloadWorkerEngagement } from '../services/rh/workerEngagementDoc';
-import { workerTarifJournalier, WORKER_MINOR_REJECTION_MESSAGE } from '../services/rh/workers';
+import { workerTarifJournalier, WORKER_MINOR_REJECTION_MESSAGE, saveWorkerEngagement } from '../services/rh/workers';
 import { exportWorkersExcel } from '../services/rh/workersExcelExport';
 import { notifyWorkerAgeRejected, notifyWorkerCreatedPendingAssignment } from '../services/notifications/notificationEvents';
 import { listProjectsForWorkerLink } from '../services/projects/projects';
@@ -1237,14 +1237,38 @@ function MobileOuvrierRow({ w, cfg, pdfLoading, onView, onEdit, onPdf, onDelete 
 /* ══════════════════════════════════════════════════════
    OUVRIER DETAIL PAGE
    ══════════════════════════════════════════════════════ */
-function OuvrierDetail({ worker, onBack, onEdit, onDownloadPdf, pdfLoading }) {
+function OuvrierDetail({ worker, onBack, onEdit, onDownloadPdf, pdfLoading, onUploadEngagement }) {
   const [tab, setTab] = useState('infos');
+  const [engagementUploading, setEngagementUploading] = useState(false);
+  const [engagementError, setEngagementError] = useState('');
   const tabs = [
     { id: 'infos',      label: 'Informations' },
     { id: 'documents',  label: 'Documents' },
     { id: 'securite',   label: 'Securite' },
     { id: 'equipements', label: 'Equipements' },
+    { id: 'engagement', label: 'Engagement' },
   ];
+
+  function handleEngagementFile(file) {
+    setEngagementError('');
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      setEngagementError('Fichier trop lourd (5 Mo maximum).');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = async () => {
+      setEngagementUploading(true);
+      try {
+        await onUploadEngagement?.(worker, String(reader.result || ''));
+      } catch (err) {
+        setEngagementError(err?.message || 'Erreur lors du dépôt de l’engagement.');
+      } finally {
+        setEngagementUploading(false);
+      }
+    };
+    reader.readAsDataURL(file);
+  }
   const cfg = STATUT_CFG[worker.statut] || STATUT_CFG.actif;
 
   return (
@@ -1394,6 +1418,48 @@ function OuvrierDetail({ worker, onBack, onEdit, onDownloadPdf, pdfLoading }) {
               <span style={{ fontWeight: 600 }}>{v || '—'}</span>
             </div>
           ))}
+        </div>
+      )}
+
+      {tab === 'engagement' && (
+        <div className="card" style={{ padding: '20px 22px', maxWidth: 640 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 8 }}>
+            <STitle><FileText size={14} /> Engagement de l’ouvrier</STitle>
+            <EngagementBadge worker={worker} />
+          </div>
+          <p style={{ margin: '0 0 14px', fontSize: '0.82rem', color: 'var(--text-3)' }}>
+            1. Générez l’engagement pré-rempli (nom, CIN, fonction). 2. Faites-le signer. 3. Déposez le document signé (photo, scan ou PDF) : le statut passe automatiquement à « Complet ».
+          </p>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', alignItems: 'center' }}>
+            <button type="button" className="btn btn-secondary" onClick={() => generateEngagement(worker, (msg) => setEngagementError(msg))}>
+              <FileText size={14} /> Générer l’engagement
+            </button>
+            <label className="btn btn-primary" style={{ cursor: engagementUploading ? 'wait' : 'pointer', opacity: engagementUploading ? 0.7 : 1 }}>
+              {engagementUploading ? <Loader size={14} style={{ animation: 'spin 0.8s linear infinite' }} /> : <Upload size={14} />}
+              {engagementUploading
+                ? ' Dépôt en cours…'
+                : (worker.engagement_complet ? ' Remplacer l’engagement signé' : ' Déposer l’engagement signé')}
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp,application/pdf"
+                style={{ display: 'none' }}
+                disabled={engagementUploading}
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = '';
+                  handleEngagementFile(file);
+                }}
+              />
+            </label>
+            {worker.engagement_url ? (
+              <a href={worker.engagement_url} target="_blank" rel="noopener noreferrer" style={{ fontSize: '0.82rem', fontWeight: 600, color: 'var(--red)' }}>
+                Voir l’engagement signé
+              </a>
+            ) : null}
+          </div>
+          {engagementError ? (
+            <div style={{ marginTop: 10, color: 'var(--red)', fontSize: '0.8rem' }}>{engagementError}</div>
+          ) : null}
         </div>
       )}
 
@@ -2442,6 +2508,7 @@ export default function OuvriersListe({ onWorkersChange }) {
     loading,
     saving,
     error,
+    load,
     create,
     update,
     remove,
@@ -2510,6 +2577,12 @@ export default function OuvriersListe({ onWorkersChange }) {
     const fresh = workers.find((w) => w.id === detailWorker.id);
     if (fresh) setDetail(fresh);
   }, [workers, detailWorker?.id]);
+
+  async function handleUploadEngagement(worker, dataUrl) {
+    await saveWorkerEngagement(worker.id, dataUrl);
+    await load();
+    notify('success', `Engagement signé déposé — ${worker.prenom} ${worker.nom} : Complet`);
+  }
 
   function openPdfInNewTab(worker) {
     const tab = window.open('', '_blank');
@@ -2599,6 +2672,7 @@ export default function OuvriersListe({ onWorkersChange }) {
           onEdit={w => { setEditWorker(w); setShowModal(true); }}
           onDownloadPdf={handleDownloadPdf}
           pdfLoading={pdfLoadingId === detailWorker.id}
+          onUploadEngagement={handleUploadEngagement}
         />
         {showModal && (
           <OuvrierModal

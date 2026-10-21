@@ -300,6 +300,14 @@ async function syncWorkerMedia(workerId, form, existingRow = {}) {
   return mediaUpdates;
 }
 
+/** Dépôt direct de l'engagement signé depuis la fiche (image ou PDF en data URL). */
+export async function saveWorkerEngagement(workerId, dataUrl) {
+  await getAuthUserId();
+  if (!workerId || !isDataUrl(dataUrl)) throw new Error('Document d’engagement invalide.');
+  const path = await uploadWorkerMedia(workerId, 'engagement', dataUrl);
+  await upsertWorkerDocument(workerId, 'engagement', path, dataUrl.match(/data:([^;]+)/)?.[1]);
+}
+
 export async function listWorkers() {
   let { data, error } = await getSupabase()
     .from(TABLE)
