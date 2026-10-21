@@ -25,7 +25,8 @@ import {
 import { captureCINFromVideo, prepareImportedCINImage, dataUrlToCaptureFile } from '../services/cinCapture';
 import CINManualCropModal from './cin/CINManualCropModal';
 import CINGuidedCamera from './cin/CINGuidedCamera';
-import { generateWorkerPdf } from '../services/rh/workerPdf';
+import { generateWorkerPdf, openWorkerPdfInTab } from '../services/rh/workerPdf';
+import { downloadWorkerEngagement } from '../services/rh/workerEngagementDoc';
 import { workerTarifJournalier, WORKER_MINOR_REJECTION_MESSAGE } from '../services/rh/workers';
 import { exportWorkersExcel } from '../services/rh/workersExcelExport';
 import { notifyWorkerAgeRejected, notifyWorkerCreatedPendingAssignment } from '../services/notifications/notificationEvents';
@@ -63,7 +64,6 @@ function EngagementBadge({ worker, style }) {
 
 async function generateEngagement(worker, onError) {
   try {
-    const { downloadWorkerEngagement } = await import('../services/rh/workerEngagementDoc');
     await downloadWorkerEngagement(worker);
   } catch (err) {
     console.error('[CITYMO] engagement ouvrier', err);
@@ -93,28 +93,6 @@ const EMPTY_FORM = {
 function fmtTarifJour(n) { return Number(n).toLocaleString('fr-MA', { minimumFractionDigits: 0, maximumFractionDigits: 2 }) + ' MAD/j'; }
 function fmtDate(d) { if (!d) return '—'; try { return new Date(d).toLocaleDateString('fr-MA', { day: '2-digit', month: '2-digit', year: 'numeric' }); } catch { return d; } }
 function initials(w) { return ((w.prenom?.[0] || '') + (w.nom?.[0] || '')).toUpperCase() || '?'; }
-
-const WORKER_LINK_PARAM = 'ouvrier';
-
-function workerFicheUrl(id) {
-  const origin = typeof window !== 'undefined' ? window.location.origin : '';
-  return `${origin}/?module=ouvriers&${WORKER_LINK_PARAM}=${encodeURIComponent(id)}`;
-}
-
-/** Lit puis retire ?ouvrier=<id> de l’URL (ouverture fiche dans un nouvel onglet). */
-function consumeWorkerLinkParam() {
-  if (typeof window === 'undefined') return null;
-  try {
-    const url = new URL(window.location.href);
-    const id = url.searchParams.get(WORKER_LINK_PARAM);
-    if (!id) return null;
-    url.searchParams.delete(WORKER_LINK_PARAM);
-    window.history.replaceState(window.history.state, '', `${url.pathname}${url.search}${url.hash}`);
-    return id;
-  } catch {
-    return null;
-  }
-}
 
 /** Âge civil à partir d'une date ISO YYYY-MM-DD. */
 function ageFromBirthDate(iso) {
@@ -2527,20 +2505,17 @@ export default function OuvriersListe({ onWorkersChange }) {
     if (fresh) setDetail(fresh);
   }, [workers, detailWorker?.id]);
 
-  const pendingWorkerLinkRef = useRef(undefined);
-  useEffect(() => {
-    if (pendingWorkerLinkRef.current === undefined) {
-      pendingWorkerLinkRef.current = consumeWorkerLinkParam();
+  function openPdfInNewTab(worker) {
+    const tab = window.open('', '_blank');
+    if (tab) {
+      tab.document.title = `Fiche ${worker.prenom} ${worker.nom}`;
+      tab.document.body.innerHTML = '<p style="font-family:sans-serif;padding:24px;color:#555">Génération de la fiche PDF…</p>';
     }
-    const pendingId = pendingWorkerLinkRef.current;
-    if (!pendingId || loading) return;
-    pendingWorkerLinkRef.current = null;
-    const target = workers.find((w) => String(w.id) === String(pendingId));
-    if (target) {
-      setDetail(target);
-      setView('detail');
-    }
-  }, [workers, loading]);
+    openWorkerPdfInTab(worker, tab).catch((err) => {
+      console.error('[CITYMO] PDF ouvrier (onglet)', err);
+      notify('error', 'Erreur lors de la génération PDF.');
+    });
+  }
 
   function openAdd()    { setEditWorker(null); setShowModal(true); }
   function openEdit(w)  { setEditWorker(w);    setShowModal(true); }
@@ -2771,18 +2746,16 @@ export default function OuvriersListe({ onWorkersChange }) {
                         <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
                           <Avatar worker={w} size={34} />
                           <div>
-                            <a
-                              href={workerFicheUrl(w.id)}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              onClick={(e) => e.stopPropagation()}
-                              title="Ouvrir la fiche dans un nouvel onglet"
-                              style={{ display: 'block', fontWeight: 700, color: 'var(--text)', fontSize: '0.88rem', textDecoration: 'none' }}
+                            <button
+                              type="button"
+                              onClick={(e) => { e.stopPropagation(); openPdfInNewTab(w); }}
+                              title="Ouvrir la fiche PDF dans un nouvel onglet"
+                              style={{ display: 'block', padding: 0, border: 'none', background: 'none', cursor: 'pointer', textAlign: 'left', fontFamily: 'inherit', fontWeight: 700, color: 'var(--text)', fontSize: '0.88rem' }}
                               onMouseEnter={(e) => { e.currentTarget.style.textDecoration = 'underline'; }}
                               onMouseLeave={(e) => { e.currentTarget.style.textDecoration = 'none'; }}
                             >
                               {w.prenom} {w.nom}
-                            </a>
+                            </button>
                             {w.date_naissance && (
                               <div style={{ fontSize: '0.72rem', color: 'var(--text-3)' }}>
                                 Né(e) le {fmtDate(w.date_naissance)}

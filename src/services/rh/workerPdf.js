@@ -495,6 +495,31 @@ function drawHeader(doc, w, logoData, logoRatio, photoData) {
  * Génère et télécharge la fiche PDF ouvrier (1 page A4).
  */
 export async function generateWorkerPdf(worker) {
+  const { blob, filename } = await buildWorkerPdf(worker);
+  downloadPdfBlob(blob, filename);
+}
+
+/**
+ * Ouvre la fiche PDF dans un onglet déjà ouvert par le clic (évite le blocage des pop-ups).
+ * Sans onglet disponible : téléchargement classique.
+ */
+export async function openWorkerPdfInTab(worker, targetWindow) {
+  try {
+    const { blob, filename } = await buildWorkerPdf(worker);
+    if (!targetWindow || targetWindow.closed) {
+      downloadPdfBlob(blob, filename);
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    targetWindow.location.href = url;
+    setTimeout(() => URL.revokeObjectURL(url), 120_000);
+  } catch (err) {
+    if (targetWindow && !targetWindow.closed) targetWindow.close();
+    throw err;
+  }
+}
+
+async function buildWorkerPdf(worker) {
   const w = await enrichWorkerMedia(worker);
   const doc = new jsPDF({ unit: 'mm', format: 'a4', orientation: 'portrait' });
 
@@ -600,7 +625,7 @@ export async function generateWorkerPdf(worker) {
   drawFooter(doc);
 
   const safeName = `${w.nom || 'ouvrier'}_${w.prenom || ''}`.replace(/[^\w\-]+/g, '_');
-  downloadPdfBlob(doc.output('blob'), `Fiche_Ouvrier_${safeName}.pdf`);
+  return { blob: doc.output('blob'), filename: `Fiche_Ouvrier_${safeName}.pdf` };
 }
 
 function downloadPdfBlob(blob, filename) {
