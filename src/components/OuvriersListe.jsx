@@ -1448,6 +1448,7 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
     { id: 'securite',    label: 'Securite' },
     { id: 'documents',   label: 'Documents' },
     { id: 'equipements', label: 'Equipements' },
+    { id: 'engagement',  label: 'Engagement' },
   ];
 
   useEffect(() => {
@@ -2328,8 +2329,13 @@ function OuvrierModal({ worker, onClose, onSave, saving, workers = [], onOpenExi
                       </button>
                     )}
                   </div>
+                </div>
+              )}
 
-                  <div className="form-group" style={{ gridColumn: '1 / -1', borderTop: '1px solid var(--border)', paddingTop: 14, marginTop: 4 }}>
+              {/* ── TAB: ENGAGEMENT ── */}
+              {formTab === 'engagement' && (
+                <div className="ouv-fields-grid">
+                  <div className="form-group" style={{ gridColumn: '1 / -1' }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 6 }}>
                       <Label>Engagement de l’ouvrier</Label>
                       <EngagementBadge worker={{ engagement_complet: Boolean(form.engagement_signe || worker?.engagement_complet) }} />
